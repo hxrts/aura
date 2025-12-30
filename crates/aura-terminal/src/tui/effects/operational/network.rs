@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
@@ -26,7 +26,7 @@ pub async fn handle_network(
             };
 
             if let Err(e) =
-                aura_app::workflows::network::update_connection_status(app_core, count).await
+                aura_app::ui::workflows::network::update_connection_status(app_core, count).await
             {
                 tracing::debug!("Failed to update connection status: {}", e);
             }
@@ -43,7 +43,7 @@ pub async fn handle_network(
             };
 
             if let Err(e) =
-                aura_app::workflows::network::update_connection_status(app_core, count).await
+                aura_app::ui::workflows::network::update_connection_status(app_core, count).await
             {
                 tracing::debug!("Failed to update connection status: {}", e);
             }
@@ -54,7 +54,7 @@ pub async fn handle_network(
 
         EffectCommand::ListPeers => {
             let now_ms = super::time::current_time_ms(app_core).await;
-            match aura_app::workflows::network::list_peers(app_core, now_ms).await {
+            match aura_app::ui::workflows::network::list_peers(app_core, now_ms).await {
                 Ok(peer_list) => {
                     tracing::info!("Listed {} peers", peer_list.len());
                     Some(Ok(OpResponse::List(peer_list)))
@@ -65,7 +65,7 @@ pub async fn handle_network(
 
         EffectCommand::DiscoverPeers => {
             let now_ms = super::time::current_time_ms(app_core).await;
-            match aura_app::workflows::network::discover_peers(app_core, now_ms).await {
+            match aura_app::ui::workflows::network::discover_peers(app_core, now_ms).await {
                 Ok(discovered) => {
                     tracing::info!("Peer discovery triggered");
                     Some(Ok(OpResponse::Data(format!(
@@ -78,7 +78,7 @@ pub async fn handle_network(
 
         EffectCommand::ListLanPeers => {
             let now_ms = super::time::current_time_ms(app_core).await;
-            match aura_app::workflows::network::list_lan_peers(app_core, now_ms).await {
+            match aura_app::ui::workflows::network::list_lan_peers(app_core, now_ms).await {
                 Ok(peer_list) => {
                     tracing::info!("Found {} LAN peers", peer_list.len());
                     Some(Ok(OpResponse::List(peer_list)))

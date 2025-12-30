@@ -8,7 +8,7 @@
 //! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
 //!
-//! Uses `aura_app::signal_defs::CONTACTS_SIGNAL` with `ReactiveEffects::subscribe()`.
+//! Uses `aura_app::ui::signals::CONTACTS_SIGNAL` with `ReactiveEffects::subscribe()`.
 //!
 //! ## Invitation Flows
 //!
@@ -25,7 +25,7 @@
 
 use iocraft::prelude::*;
 
-use aura_app::signal_defs::{CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL};
+use aura_app::ui::signals::{CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL};
 
 use crate::tui::callbacks::{ImportInvitationCallback, StartChatCallback, UpdateNicknameCallback};
 use crate::tui::components::{
@@ -282,8 +282,9 @@ pub fn ContactsScreen(
                     .peers
                     .iter()
                     .map(|p| {
-                        DiscoveredPeerInfo::new(&p.authority_id, &p.address)
-                            .with_method(&p.method)
+                        let authority_id = p.authority_id.to_string();
+                        DiscoveredPeerInfo::new(&authority_id, &p.address)
+                            .with_method(p.method.to_string())
                             .with_status(if p.invited {
                                 crate::tui::components::PeerInvitationStatus::Pending
                             } else {

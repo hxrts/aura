@@ -60,6 +60,71 @@ pub async fn start_device_removal_ceremony(
         .map_err(|e| AuraError::agent(format!("Failed to start device removal: {}", e)))
 }
 
+/// Polling policy for ceremonies.
+#[derive(Debug, Clone)]
+pub struct CeremonyPollPolicy {
+    /// Delay between polls.
+    pub interval: Duration,
+    /// Max number of poll attempts.
+    pub max_attempts: u32,
+    /// Whether to attempt rollback on failure (key rotation only).
+    pub rollback_on_failure: bool,
+    /// Whether to refresh settings after completion.
+    pub refresh_settings_on_complete: bool,
+}
+
+impl CeremonyPollPolicy {
+    pub fn with_interval(interval: Duration) -> Self {
+        Self {
+            interval,
+            ..Default::default()
+        }
+    }
+}
+
+impl Default for CeremonyPollPolicy {
+    fn default() -> Self {
+        Self {
+            interval: Duration::from_secs(1),
+            max_attempts: 60,
+            rollback_on_failure: true,
+            refresh_settings_on_complete: true,
+        }
+    }
+}
+
+/// Lifecycle outcome for a ceremony monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CeremonyLifecycleState {
+    Completed,
+    Failed,
+    TimedOut,
+}
+
+/// Lifecycle result for a ceremony monitor.
+#[derive(Debug, Clone)]
+pub struct CeremonyLifecycle<T> {
+    pub state: CeremonyLifecycleState,
+    pub status: T,
+    pub attempts: u32,
+}
+
+/// Common interface for ceremony status values.
+pub trait CeremonyStatusLike {
+    fn is_complete(&self) -> bool;
+    fn has_failed(&self) -> bool;
+}
+
+impl CeremonyStatusLike for KeyRotationCeremonyStatus {
+    fn is_complete(&self) -> bool {
+        self.is_complete
+    }
+
+    fn has_failed(&self) -> bool {
+        self.has_failed
+    }
+}
+
 /// Get status of a key rotation ceremony (generic form).
 pub async fn get_key_rotation_ceremony_status(
     app_core: &Arc<RwLock<AppCore>>,
@@ -82,6 +147,73 @@ pub async fn cancel_key_rotation_ceremony(
         .map_err(|e| AuraError::agent(format!("Failed to cancel ceremony: {}", e)))
 }
 
+/// Poll a key rotation ceremony until completion or failure using a policy.
+///
+/// This is a portable (frontend-agnostic) helper for driving ceremony progress UIs.
+/// Callers provide an `on_update` hook to receive intermediate statuses.
+pub async fn monitor_key_rotation_ceremony_with_policy<SleepFn, SleepFut>(
+    app_core: &Arc<RwLock<AppCore>>,
+    ceremony_id: String,
+    policy: CeremonyPollPolicy,
+    mut on_update: impl FnMut(&KeyRotationCeremonyStatus) + Send,
+    mut sleep_fn: SleepFn,
+) -> Result<CeremonyLifecycle<KeyRotationCeremonyStatus>, AuraError>
+where
+    SleepFn: FnMut(Duration) -> SleepFut + Send,
+    SleepFut: Future<Output = ()> + Send,
+{
+    // Bounded polling to avoid infinite loops; UIs can re-invoke if desired.
+    for attempt in 1..=policy.max_attempts {
+        sleep_fn(policy.interval).await;
+
+        let status = get_key_rotation_ceremony_status(app_core, &ceremony_id).await?;
+        on_update(&status);
+
+        if status.has_failed {
+            // Best-effort rollback for rotations (until runtime owns this fully).
+            if policy.rollback_on_failure {
+                if let Some(epoch) = status.pending_epoch {
+                    if matches!(
+                        status.kind,
+                        crate::runtime_bridge::CeremonyKind::GuardianRotation
+                            | crate::runtime_bridge::CeremonyKind::DeviceRotation
+                    ) {
+                        let core = app_core.read().await;
+                        if let Err(e) = core.rollback_guardian_key_rotation(epoch).await {
+                            let _ = e;
+                        }
+                    }
+                }
+            }
+            return Ok(CeremonyLifecycle {
+                state: CeremonyLifecycleState::Failed,
+                status,
+                attempts: attempt,
+            });
+        }
+
+        if status.is_complete {
+            // Best-effort: refresh settings so device list / counts update after a commit.
+            if policy.refresh_settings_on_complete {
+                let _ = crate::workflows::settings::refresh_settings_from_runtime(app_core).await;
+            }
+            return Ok(CeremonyLifecycle {
+                state: CeremonyLifecycleState::Completed,
+                status,
+                attempts: attempt,
+            });
+        }
+    }
+
+    // Timed out; return the latest status we can fetch.
+    let status = get_key_rotation_ceremony_status(app_core, &ceremony_id).await?;
+    Ok(CeremonyLifecycle {
+        state: CeremonyLifecycleState::TimedOut,
+        status,
+        attempts: policy.max_attempts,
+    })
+}
+
 /// Poll a key rotation ceremony until completion or failure.
 ///
 /// This is a portable (frontend-agnostic) helper for driving ceremony progress UIs.
@@ -97,37 +229,15 @@ where
     SleepFn: FnMut(Duration) -> SleepFut + Send,
     SleepFut: Future<Output = ()> + Send,
 {
-    // Bounded polling to avoid infinite loops; UIs can re-invoke if desired.
-    for _ in 0..60 {
-        sleep_fn(poll_interval).await;
+    let policy = CeremonyPollPolicy::with_interval(poll_interval);
+    let lifecycle = monitor_key_rotation_ceremony_with_policy(
+        app_core,
+        ceremony_id,
+        policy,
+        &mut on_update,
+        &mut sleep_fn,
+    )
+    .await?;
 
-        let status = get_key_rotation_ceremony_status(app_core, &ceremony_id).await?;
-        on_update(&status);
-
-        if status.has_failed {
-            // Best-effort rollback for rotations (until runtime owns this fully).
-            if let Some(epoch) = status.pending_epoch {
-                if matches!(
-                    status.kind,
-                    crate::runtime_bridge::CeremonyKind::GuardianRotation
-                        | crate::runtime_bridge::CeremonyKind::DeviceRotation
-                ) {
-                    let core = app_core.read().await;
-                    if let Err(e) = core.rollback_guardian_key_rotation(epoch).await {
-                        let _ = e;
-                    }
-                }
-            }
-            return Ok(status);
-        }
-
-        if status.is_complete {
-            // Best-effort: refresh settings so device list / counts update after a commit.
-            let _ = crate::workflows::settings::refresh_settings_from_runtime(app_core).await;
-            return Ok(status);
-        }
-    }
-
-    // Timed out; return the latest status we can fetch.
-    get_key_rotation_ceremony_status(app_core, &ceremony_id).await
+    Ok(lifecycle.status)
 }

@@ -23,7 +23,7 @@ use aura_app::views::{
 };
 use aura_app::ReactiveHandler;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
 use tokio::sync::Mutex;
@@ -517,12 +517,12 @@ impl HomeSignalView {
 
     fn home_for_context<'a>(
         homes: &'a mut HomesState,
-        context_id: &str,
+        context_id: &ContextId,
     ) -> Option<&'a mut HomeState> {
         homes
             .homes
             .values_mut()
-            .find(|home_state| home_state.context_id == context_id)
+            .find(|home_state| &home_state.context_id == context_id)
     }
 }
 
@@ -549,8 +549,7 @@ impl ReactiveView for HomeSignalView {
                 continue;
             };
 
-            let context_key = context_id.to_string();
-            let Some(home_state) = Self::home_for_context(&mut homes, &context_key) else {
+            let Some(home_state) = Self::home_for_context(&mut homes, context_id) else {
                 continue;
             };
 
@@ -911,7 +910,7 @@ mod tests {
             Some("test-home".to_string()),
             AuthorityId::default(),
             0,
-            context.to_string(),
+            context,
         );
 
         let mut homes = HomesState::new();

@@ -3,7 +3,7 @@
 
 use aura_core::AuraError;
 // Import app types from aura-app (pure layer)
-use aura_app::{AppConfig, AppCore};
+use aura_app::ui::prelude::*;
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::{AgentBuilder, EffectContext};
@@ -112,7 +112,6 @@ async fn main() -> Result<(), AuraError> {
         Commands::Status(status) => {
             let config_path =
                 resolve_config_path(status.config.as_ref(), args.config.as_ref(), &cli_handler)
-                    .await
                     .map_err(|e| AuraError::agent(format!("{e}")))?;
             cli_handler
                 .handle_status(&config_path)
@@ -122,7 +121,6 @@ async fn main() -> Result<(), AuraError> {
         Commands::Node(node) => {
             let config_path =
                 resolve_config_path(node.config.as_ref(), args.config.as_ref(), &cli_handler)
-                    .await
                     .map_err(|e| AuraError::agent(format!("{e}")))?;
             cli_handler
                 .handle_node(node.port.unwrap_or(58835), node.daemon, &config_path)
@@ -207,7 +205,7 @@ async fn main() -> Result<(), AuraError> {
 }
 
 /// Resolve the configuration file path from command line arguments
-async fn resolve_config_path(
+fn resolve_config_path(
     cmd_config: Option<&PathBuf>,
     global_config: Option<&PathBuf>,
     _cli_handler: &CliHandler,

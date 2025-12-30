@@ -1,6 +1,12 @@
 //! Modal keyboard handlers
 //!
 //! All queue-based modal key event handlers.
+//!
+//! Note: Modal state types are passed by value from the dispatcher's match arms.
+//! This is intentional for the queue-based modal system where states are moved
+//! out of the enum for handling.
+
+#![allow(clippy::needless_pass_by_value)]
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent};
 

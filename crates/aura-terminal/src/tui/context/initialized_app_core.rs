@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 use aura_core::AuraError;
 
 /// A TUI-local wrapper that guarantees `AppCore::init_signals()` has been called.
@@ -16,12 +16,9 @@ pub struct InitializedAppCore {
 
 impl InitializedAppCore {
     pub async fn new(app_core: Arc<RwLock<AppCore>>) -> Result<Self, AuraError> {
-        {
-            let mut core = app_core.write().await;
-            core.init_signals()
-                .await
-                .map_err(|e| AuraError::internal(format!("Failed to init signals: {e}")))?;
-        }
+        AppCore::init_signals_with_hooks(&app_core)
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to init signals: {e}")))?;
 
         Ok(Self { app_core })
     }

@@ -2,21 +2,21 @@
 //!
 //! Handlers for invitation import/export and runtime-backed accept/decline.
 //!
-//! This module delegates to portable workflows in aura_app::workflows::invitation
+//! This module delegates to portable workflows in aura_app::ui::workflows::invitation
 //! and adds terminal-specific response formatting.
 
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::runtime_bridge::InvitationBridgeType;
-use aura_app::AppCore;
+use aura_app::ui::types::InvitationBridgeType;
+use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::invitation::{
+pub use aura_app::ui::workflows::invitation::{
     accept_invitation, cancel_invitation, create_channel_invitation, create_contact_invitation,
     create_guardian_invitation, decline_invitation, export_invitation, import_invitation_details,
 };
@@ -106,7 +106,7 @@ pub async fn handle_invitations(
                         // Best effort: use the currently-selected home/channel from the reactive view.
                         let core = app_core.read().await;
                         let homes_state = core
-                            .read(&*aura_app::signal_defs::HOMES_SIGNAL)
+                            .read(&*aura_app::ui::signals::HOMES_SIGNAL)
                             .await
                             .unwrap_or_default();
                         homes_state
@@ -173,7 +173,7 @@ pub async fn handle_invitations(
 
                 let core = app_core.read().await;
 
-                if let Ok(homes) = core.read(&*aura_app::signal_defs::HOMES_SIGNAL).await {
+                if let Ok(homes) = core.read(&*aura_app::ui::signals::HOMES_SIGNAL).await {
                     homes
                         .current_home_id
                         .as_ref()

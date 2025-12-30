@@ -104,7 +104,7 @@ pub use handlers::CliHandler;
 
 // Action types are defined in this module and automatically available
 // Import app types from aura-app (pure layer)
-use aura_app::{AppConfig, AppCore};
+use aura_app::ui::prelude::*;
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::{AgentBuilder, EffectContext};

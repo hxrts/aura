@@ -4,8 +4,8 @@
 
 use iocraft::prelude::*;
 
-use aura_app::signal_defs::{INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
-use aura_app::views::invitations::{InvitationDirection, InvitationStatus, InvitationType};
+use aura_app::ui::signals::{INVITATIONS_SIGNAL, RECOVERY_SIGNAL};
+use aura_app::ui::types::invitations::{InvitationDirection, InvitationStatus, InvitationType};
 
 use crate::tui::components::{DetailPanel, KeyValue, ListPanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};

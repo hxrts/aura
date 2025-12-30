@@ -7,7 +7,7 @@ use crate::tui::theme::Theme;
 use iocraft::prelude::Color;
 
 // Re-export source types for adapters
-use aura_app::views::{
+use aura_app::ui::types::{
     chat::{Channel as AppChannel, Message as AppMessage},
     contacts::Contact as AppContact,
     invitations::{
@@ -1202,8 +1202,8 @@ impl Resident {
     }
 }
 
-impl From<&aura_app::views::home::Resident> for Resident {
-    fn from(r: &aura_app::views::home::Resident) -> Self {
+impl From<&aura_app::ui::types::home::Resident> for Resident {
+    fn from(r: &aura_app::ui::types::home::Resident) -> Self {
         Self {
             id: r.id.to_string(),
             name: r.name.clone(),
@@ -1232,13 +1232,13 @@ impl HomeBudget {
     }
 }
 
-impl From<&aura_app::HomeFlowBudget> for HomeBudget {
-    fn from(budget: &aura_app::HomeFlowBudget) -> Self {
+impl From<&aura_app::ui::types::HomeFlowBudget> for HomeBudget {
+    fn from(budget: &aura_app::ui::types::HomeFlowBudget) -> Self {
         Self {
             total: budget.total_allocation(),
             used: budget.total_used(),
             resident_count: budget.resident_count,
-            max_residents: aura_app::MAX_RESIDENTS,
+            max_residents: aura_app::ui::types::MAX_RESIDENTS,
         }
     }
 }

@@ -2,19 +2,19 @@
 //!
 //! Handlers for Ping, Shutdown, RefreshAccount.
 //!
-//! This module delegates to portable workflows in aura_app::workflows::system
+//! This module delegates to portable workflows in aura_app::ui::workflows::system
 //! and adds terminal-specific response formatting.
 
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::system::{ping, refresh_account};
+pub use aura_app::ui::workflows::system::{ping, refresh_account};
 
 /// Handle system commands
 pub async fn handle_system(

@@ -16,6 +16,7 @@ use std::path::Path;
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
+#[allow(clippy::unused_async)]
 pub async fn handle_context(
     ctx: &HandlerContext<'_>,
     action: &ContextAction,
@@ -24,16 +25,16 @@ pub async fn handle_context(
         ContextAction::Inspect {
             context,
             state_file,
-        } => inspect_context(ctx, context, state_file).await,
+        } => inspect_context(ctx, context, state_file),
         ContextAction::Receipts {
             context,
             state_file,
             detailed,
-        } => show_receipts(ctx, context, state_file, *detailed).await,
+        } => show_receipts(ctx, context, state_file, *detailed),
     }
 }
 
-async fn inspect_context(
+fn inspect_context(
     _ctx: &HandlerContext<'_>,
     context: &str,
     state_file: &Path,
@@ -89,7 +90,7 @@ async fn inspect_context(
     Ok(output)
 }
 
-async fn show_receipts(
+fn show_receipts(
     _ctx: &HandlerContext<'_>,
     context: &str,
     state_file: &Path,

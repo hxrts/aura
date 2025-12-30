@@ -9,27 +9,12 @@
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::{
-    identifiers::{AuthorityId, ChannelId, ContextId},
+    identifiers::{ChannelId, ContextId},
     AuraError,
 };
 use std::sync::Arc;
-
-fn parse_authority(target: &str) -> Result<AuthorityId, AuraError> {
-    target
-        .parse::<AuthorityId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {}", target)))
-}
-
-fn parse_context_id(context_id: &str) -> Result<ContextId, AuraError> {
-    let trimmed = context_id.trim();
-    if trimmed.is_empty() {
-        return Err(AuraError::not_found("Home context not available"));
-    }
-
-    trimmed
-        .parse::<ContextId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid context ID: {}", trimmed)))
-}
+use crate::workflows::runtime::require_runtime;
+use crate::workflows::parse::parse_authority_id;
 
 async fn current_home_context(
     app_core: &Arc<RwLock<AppCore>>,
@@ -40,8 +25,7 @@ async fn current_home_context(
         .current_home()
         .ok_or_else(|| AuraError::not_found("No current home selected"))?;
 
-    let context_id = parse_context_id(&home_state.context_id)?;
-    Ok((context_id, home_state.id, home_state.is_admin()))
+    Ok((home_state.context_id, home_state.id, home_state.is_admin()))
 }
 
 /// Kick a user from the current home.
@@ -59,13 +43,10 @@ pub async fn kick_user(
     }
 
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let target_id = parse_authority(target)?;
+    let target_id = parse_authority_id(target)?;
     runtime
         .moderation_kick(
             context_id,
@@ -94,13 +75,10 @@ pub async fn ban_user(
     }
 
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let target_id = parse_authority(target)?;
+    let target_id = parse_authority_id(target)?;
     runtime
         .moderation_ban(
             context_id,
@@ -124,13 +102,10 @@ pub async fn unban_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result
     }
 
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let target_id = parse_authority(target)?;
+    let target_id = parse_authority_id(target)?;
     runtime
         .moderation_unban(context_id, channel_id, target_id)
         .await
@@ -154,13 +129,10 @@ pub async fn mute_user(
     }
 
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let target_id = parse_authority(target)?;
+    let target_id = parse_authority_id(target)?;
     runtime
         .moderation_mute(context_id, channel_id, target_id, duration_secs)
         .await
@@ -179,13 +151,10 @@ pub async fn unmute_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Resul
     }
 
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let target_id = parse_authority(target)?;
+    let target_id = parse_authority_id(target)?;
     runtime
         .moderation_unmute(context_id, channel_id, target_id)
         .await
@@ -207,10 +176,7 @@ pub async fn pin_message(
     }
 
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
     runtime
@@ -234,10 +200,7 @@ pub async fn unpin_message(
     }
 
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
     runtime

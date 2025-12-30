@@ -8,21 +8,26 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::{effects::reactive::ReactiveEffects, AuraError};
+use aura_core::AuraError;
+use crate::workflows::runtime::require_runtime;
+use crate::workflows::signals::{emit_signal, read_signal};
 use std::sync::Arc;
 
-async fn refresh_settings_signal_from_runtime(core: &AppCore) -> Result<(), AuraError> {
-    let Some(runtime) = core.runtime() else {
+async fn refresh_settings_signal_from_runtime(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let runtime = {
+        let core = app_core.read().await;
+        core.runtime().cloned()
+    };
+    let Some(runtime) = runtime else {
         // No runtime bridge: keep default settings state.
         return Ok(());
     };
 
     let settings = runtime.get_settings().await;
     let devices = runtime.list_devices().await;
-    let mut state = core
-        .read(&*SETTINGS_SIGNAL)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to read settings signal: {}", e)))?;
+    let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, "SETTINGS_SIGNAL").await?;
     state.display_name = settings.display_name;
     state.mfa_policy = settings.mfa_policy;
     state.threshold_k = settings.threshold_k as u8;
@@ -38,9 +43,7 @@ async fn refresh_settings_signal_from_runtime(core: &AppCore) -> Result<(), Aura
         })
         .collect();
 
-    core.emit(&*SETTINGS_SIGNAL, state)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit settings signal: {}", e)))
+    emit_signal(app_core, &*SETTINGS_SIGNAL, state, "SETTINGS_SIGNAL").await
 }
 
 /// Refresh SETTINGS_SIGNAL from the current RuntimeBridge settings.
@@ -49,8 +52,7 @@ async fn refresh_settings_signal_from_runtime(core: &AppCore) -> Result<(), Aura
 pub async fn refresh_settings_from_runtime(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let core = app_core.read().await;
-    refresh_settings_signal_from_runtime(&core).await
+    refresh_settings_signal_from_runtime(app_core).await
 }
 
 /// Update MFA policy
@@ -62,12 +64,7 @@ pub async fn update_mfa_policy(
     app_core: &Arc<RwLock<AppCore>>,
     require_mfa: bool,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     let policy = if require_mfa {
         "AlwaysRequired"
@@ -93,12 +90,7 @@ pub async fn update_nickname(
     app_core: &Arc<RwLock<AppCore>>,
     name: String,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     runtime
         .set_display_name(&name)
@@ -133,11 +125,8 @@ pub async fn set_channel_mode(
 /// **Returns**: Current settings state
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> Result<SettingsState, AuraError> {
-    let core = app_core.read().await;
-
-    core.read(&*SETTINGS_SIGNAL)
+    read_signal(app_core, &SETTINGS_SIGNAL, "settings")
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to read settings signal: {}", e)))
 }
 
 #[cfg(test)]
@@ -151,7 +140,7 @@ mod tests {
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
         // Workflows assume reactive signals are initialized.
-        app_core.write().await.init_signals().await.unwrap();
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let settings = get_settings(&app_core).await.unwrap();
         assert_eq!(settings.threshold_k, 0);

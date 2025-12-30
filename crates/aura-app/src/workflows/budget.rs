@@ -39,6 +39,7 @@
 //! ```
 
 use crate::{AppCore, BUDGET_SIGNAL};
+use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use async_lock::RwLock;
 use aura_core::{effects::reactive::ReactiveEffects, AuraError};
 use serde::{Deserialize, Serialize};
@@ -385,7 +386,8 @@ pub async fn get_current_budget(app_core: &Arc<RwLock<AppCore>>) -> HomeFlowBudg
     let core = app_core.read().await;
 
     // Try to read from BUDGET_SIGNAL, fallback to default
-    core.read(&*BUDGET_SIGNAL).await.unwrap_or_default()
+    drop(core);
+    read_signal_or_default(app_core, &*BUDGET_SIGNAL).await
 }
 
 /// Get a budget breakdown with computed allocation values
@@ -460,11 +462,7 @@ pub async fn update_budget(
     app_core: &Arc<RwLock<AppCore>>,
     budget: HomeFlowBudget,
 ) -> Result<(), AuraError> {
-    let core = app_core.read().await;
-    core.emit(&*BUDGET_SIGNAL, budget)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit budget signal: {}", e)))?;
-    Ok(())
+    emit_signal(app_core, &*BUDGET_SIGNAL, budget, "BUDGET_SIGNAL").await
 }
 
 // =============================================================================

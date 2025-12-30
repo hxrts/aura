@@ -11,7 +11,7 @@ use crate::handlers::{CliOutput, HandlerContext};
 /// Returns `CliOutput` instead of printing directly.
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-pub async fn handle_version(_ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
+pub fn handle_version(_ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     // Display version information through console effects

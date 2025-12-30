@@ -13,8 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 use aura_core::{
-    crypto::hash::hash,
-    identifiers::{AuthorityId, ChannelId},
+    identifiers::{AuthorityId, ChannelId, ContextId},
     query::{
         DatalogBindings, DatalogFact, DatalogProgram, DatalogRule, DatalogValue, FactPredicate,
         Query, QueryCapability, QueryParseError,
@@ -46,39 +45,90 @@ fn get_optional_string(row: &aura_core::query::DatalogRow, key: &str) -> Option<
     }
 }
 
-/// Helper to extract an AuthorityId from a DatalogRow, parsing or hashing the string
-fn get_authority_id(row: &aura_core::query::DatalogRow, key: &str) -> AuthorityId {
-    let s = get_string(row, key);
-    s.parse::<AuthorityId>().unwrap_or_default()
-}
-
-/// Helper to extract an optional AuthorityId from a DatalogRow
-fn get_optional_authority_id(row: &aura_core::query::DatalogRow, key: &str) -> Option<AuthorityId> {
+/// Helper to extract an AuthorityId from a DatalogRow.
+fn get_authority_id(
+    row: &aura_core::query::DatalogRow,
+    key: &str,
+) -> Result<AuthorityId, QueryParseError> {
     let s = get_string(row, key);
     if s.is_empty() {
-        None
+        return Err(QueryParseError::MissingField {
+            field: key.to_string(),
+        });
+    }
+    s.parse::<AuthorityId>().map_err(|e| QueryParseError::InvalidValue {
+        field: key.to_string(),
+        reason: format!("{e}"),
+    })
+}
+
+/// Helper to extract an optional AuthorityId from a DatalogRow.
+fn get_optional_authority_id(
+    row: &aura_core::query::DatalogRow,
+    key: &str,
+) -> Result<Option<AuthorityId>, QueryParseError> {
+    let s = get_string(row, key);
+    if s.is_empty() {
+        Ok(None)
     } else {
-        Some(s.parse::<AuthorityId>().unwrap_or_default())
+        s.parse::<AuthorityId>()
+            .map(Some)
+            .map_err(|e| QueryParseError::InvalidValue {
+                field: key.to_string(),
+                reason: format!("{e}"),
+            })
     }
 }
 
-/// Helper to extract a ChannelId from a DatalogRow, parsing or hashing the string
-fn get_channel_id(row: &aura_core::query::DatalogRow, key: &str) -> ChannelId {
-    let s = get_string(row, key);
-    s.parse::<ChannelId>()
-        .unwrap_or_else(|_| ChannelId::from_bytes(hash(s.as_bytes())))
-}
-
-/// Helper to extract an optional ChannelId from a DatalogRow
-fn get_optional_channel_id(row: &aura_core::query::DatalogRow, key: &str) -> Option<ChannelId> {
+/// Helper to extract a ChannelId from a DatalogRow.
+fn get_channel_id(
+    row: &aura_core::query::DatalogRow,
+    key: &str,
+) -> Result<ChannelId, QueryParseError> {
     let s = get_string(row, key);
     if s.is_empty() {
-        None
+        return Err(QueryParseError::MissingField {
+            field: key.to_string(),
+        });
+    }
+    s.parse::<ChannelId>().map_err(|e| QueryParseError::InvalidValue {
+        field: key.to_string(),
+        reason: format!("{e}"),
+    })
+}
+
+/// Helper to extract a ContextId from a DatalogRow.
+fn get_context_id(
+    row: &aura_core::query::DatalogRow,
+    key: &str,
+) -> Result<ContextId, QueryParseError> {
+    let s = get_string(row, key);
+    if s.is_empty() {
+        return Err(QueryParseError::MissingField {
+            field: key.to_string(),
+        });
+    }
+    s.parse::<ContextId>().map_err(|e| QueryParseError::InvalidValue {
+        field: key.to_string(),
+        reason: format!("{e}"),
+    })
+}
+
+/// Helper to extract an optional ChannelId from a DatalogRow.
+fn get_optional_channel_id(
+    row: &aura_core::query::DatalogRow,
+    key: &str,
+) -> Result<Option<ChannelId>, QueryParseError> {
+    let s = get_string(row, key);
+    if s.is_empty() {
+        Ok(None)
     } else {
-        Some(
-            s.parse::<ChannelId>()
-                .unwrap_or_else(|_| ChannelId::from_bytes(hash(s.as_bytes()))),
-        )
+        s.parse::<ChannelId>()
+            .map(Some)
+            .map_err(|e| QueryParseError::InvalidValue {
+                field: key.to_string(),
+                reason: format!("{e}"),
+            })
     }
 }
 
@@ -113,7 +163,7 @@ fn get_bool(row: &aura_core::query::DatalogRow, key: &str) -> bool {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ChannelsQuery {
     /// Filter by channel type
-    pub channel_type: Option<String>,
+    pub channel_type: Option<crate::views::chat::ChannelType>,
     /// Include archived channels
     pub include_archived: bool,
 }
@@ -122,6 +172,8 @@ impl Query for ChannelsQuery {
     type Result = Vec<crate::views::chat::Channel>;
 
     fn to_datalog(&self) -> DatalogProgram {
+        use crate::views::chat::ChannelType;
+
         let mut body = vec![DatalogFact::new(
             "channel",
             vec![
@@ -134,14 +186,22 @@ impl Query for ChannelsQuery {
         )];
 
         // Add channel_type filter if specified
-        if let Some(ref channel_type) = self.channel_type {
-            body.push(DatalogFact::new(
-                "eq",
-                vec![
-                    DatalogValue::var("type"),
-                    DatalogValue::String(channel_type.clone()),
-                ],
-            ));
+        if let Some(channel_type) = self.channel_type {
+            let channel_type = match channel_type {
+                ChannelType::DirectMessage => Some("DirectMessage"),
+                ChannelType::Guardian => Some("Guardian"),
+                ChannelType::Home => Some("Home"),
+                ChannelType::All => None,
+            };
+            if let Some(channel_type) = channel_type {
+                body.push(DatalogFact::new(
+                    "eq",
+                    vec![
+                        DatalogValue::var("type"),
+                        DatalogValue::String(channel_type.to_string()),
+                    ],
+                ));
+            }
         }
 
         // Filter out archived unless include_archived is true
@@ -188,8 +248,8 @@ impl Query for ChannelsQuery {
                     _ => ChannelType::Home,
                 };
 
-                Channel {
-                    id: get_channel_id(&row, "id"),
+                Ok(Channel {
+                    id: get_channel_id(&row, "id")?,
                     name: get_string(&row, "name"),
                     topic: get_optional_string(&row, "topic"),
                     channel_type,
@@ -206,9 +266,9 @@ impl Query for ChannelsQuery {
                         }
                     },
                     last_activity: get_int(&row, "last_activity") as u64,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, QueryParseError>>()?;
 
         Ok(channels)
     }
@@ -295,18 +355,20 @@ impl Query for MessagesQuery {
         let messages = bindings
             .rows
             .into_iter()
-            .map(|row| Message {
-                id: get_string(&row, "id"),
-                channel_id: get_channel_id(&row, "channel"),
-                sender_id: get_authority_id(&row, "sender"),
-                sender_name: get_string(&row, "sender_name"),
-                content: get_string(&row, "content"),
-                timestamp: get_int(&row, "timestamp") as u64,
-                reply_to: get_optional_string(&row, "reply_to"),
-                is_own: false, // Determined at render time
-                is_read: get_bool(&row, "is_read"),
+            .map(|row| {
+                Ok(Message {
+                    id: get_string(&row, "id"),
+                    channel_id: get_channel_id(&row, "channel")?,
+                    sender_id: get_authority_id(&row, "sender")?,
+                    sender_name: get_string(&row, "sender_name"),
+                    content: get_string(&row, "content"),
+                    timestamp: get_int(&row, "timestamp") as u64,
+                    reply_to: get_optional_string(&row, "reply_to"),
+                    is_own: false, // Determined at render time
+                    is_read: get_bool(&row, "is_read"),
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, QueryParseError>>()?;
 
         Ok(messages)
     }
@@ -402,15 +464,15 @@ impl Query for GuardiansQuery {
                     }
                 };
 
-                Guardian {
-                    id: get_authority_id(&row, "id"),
+                Ok(Guardian {
+                    id: get_authority_id(&row, "id")?,
                     name: get_string(&row, "name"),
                     status,
                     added_at: get_int(&row, "added_at") as u64,
                     last_seen,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, QueryParseError>>()?;
 
         Ok(guardians)
     }
@@ -540,23 +602,23 @@ impl Query for InvitationsQuery {
                     }
                 };
 
-                Invitation {
+                Ok(Invitation {
                     id: get_string(&row, "id"),
                     invitation_type: inv_type,
                     status,
                     direction,
-                    from_id: get_authority_id(&row, "from_id"),
+                    from_id: get_authority_id(&row, "from_id")?,
                     from_name: get_string(&row, "from"),
-                    to_id: get_optional_authority_id(&row, "to_id"),
+                    to_id: get_optional_authority_id(&row, "to_id")?,
                     to_name: get_optional_string(&row, "to"),
                     created_at: get_int(&row, "created_at") as u64,
                     expires_at,
                     message: get_optional_string(&row, "message"),
-                    home_id: get_optional_channel_id(&row, "home_id"),
+                    home_id: get_optional_channel_id(&row, "home_id")?,
                     home_name: get_optional_string(&row, "home_name"),
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, QueryParseError>>()?;
 
         // Partition invitations by status and direction
         let pending: Vec<Invitation> = invitations
@@ -683,17 +745,17 @@ impl Query for ContactsQuery {
                     }
                 };
 
-                Contact {
-                    id: get_authority_id(&row, "id"),
+                Ok(Contact {
+                    id: get_authority_id(&row, "id")?,
                     nickname: get_string(&row, "nickname"),
                     suggested_name: get_optional_string(&row, "suggested_name"),
                     is_guardian: get_bool(&row, "is_guardian"),
                     is_resident: get_bool(&row, "is_resident"),
                     last_interaction,
                     is_online: get_bool(&row, "is_online"),
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, QueryParseError>>()?;
 
         Ok(ContactsState {
             contacts,
@@ -899,7 +961,7 @@ impl Query for RecoveryQuery {
                 guardian_count = get_int(row, "guardian_count") as u32;
             }
 
-            let guardian_id = get_authority_id(row, "contact_id");
+            let guardian_id = get_authority_id(row, "contact_id")?;
             let nickname = get_string(row, "contact_nickname");
             let suggested = get_string(row, "contact_suggested");
             let guardian_name = if !nickname.is_empty() {
@@ -910,9 +972,6 @@ impl Query for RecoveryQuery {
                 guardian_id.to_string()
             };
 
-            if guardian_id == AuthorityId::default() && guardian_name.is_empty() {
-                continue;
-            }
             let status = GuardianStatus::Active;
 
             guardians_by_id.entry(guardian_id).or_insert(Guardian {
@@ -1039,8 +1098,8 @@ impl Query for HomesQuery {
                     _ => ResidentRole::Resident,
                 };
 
-                HomeState {
-                    id: get_channel_id(&row, "id"),
+                Ok(HomeState {
+                    id: get_channel_id(&row, "id")?,
                     name: get_string(&row, "name"),
                     residents: Vec::new(), // Populated by separate query
                     my_role,
@@ -1056,10 +1115,10 @@ impl Query for HomesQuery {
                     mute_list: Default::default(),
                     kick_log: Vec::new(),
                     created_at: get_int(&row, "created_at") as u64,
-                    context_id: get_string(&row, "context_id"),
-                }
+                    context_id: get_context_id(&row, "context_id")?,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, QueryParseError>>()?;
 
         // Convert to HashMap and find current home
         let mut homes: HashMap<ChannelId, HomeState> = HashMap::new();
@@ -1148,8 +1207,8 @@ impl Query for NeighborhoodQuery {
                     _ => AdjacencyType::Distant,
                 };
 
-                NeighborHome {
-                    id: get_channel_id(&row, "id"),
+                Ok(NeighborHome {
+                    id: get_channel_id(&row, "id")?,
                     name: get_string(&row, "name"),
                     adjacency,
                     shared_contacts: get_int(&row, "shared_contacts") as u32,
@@ -1162,9 +1221,9 @@ impl Query for NeighborhoodQuery {
                         }
                     },
                     can_traverse: get_bool(&row, "can_traverse"),
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, QueryParseError>>()?;
 
         Ok(NeighborhoodState {
             home_home_id: ChannelId::default(), // Set by caller
@@ -1241,8 +1300,8 @@ impl Query for ChatQuery {
                     _ => ChannelType::Home,
                 };
 
-                Channel {
-                    id: get_channel_id(&row, "id"),
+                Ok(Channel {
+                    id: get_channel_id(&row, "id")?,
                     name: get_string(&row, "name"),
                     topic: get_optional_string(&row, "topic"),
                     channel_type,
@@ -1252,9 +1311,9 @@ impl Query for ChatQuery {
                     last_message: None,
                     last_message_time: None,
                     last_activity: 0,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, QueryParseError>>()?;
 
         Ok(ChatState {
             channels,

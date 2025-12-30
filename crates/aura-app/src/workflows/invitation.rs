@@ -7,8 +7,13 @@ use crate::runtime_bridge::{InvitationBridgeType, InvitationInfo};
 use crate::{views::invitations::InvitationsState, AppCore, INVITATIONS_SIGNAL};
 use async_lock::RwLock;
 use aura_core::identifiers::AuthorityId;
-use aura_core::{effects::reactive::ReactiveEffects, AuraError};
+#[cfg(feature = "signals")]
+use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::AuraError;
 use std::sync::Arc;
+use crate::workflows::runtime::require_runtime;
+use crate::workflows::signals::read_signal;
+use crate::workflows::signals::read_signal_or_default;
 
 #[cfg(feature = "signals")]
 async fn yield_once() {
@@ -51,12 +56,7 @@ pub async fn create_contact_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     runtime
         .create_contact_invitation(receiver, nickname, message, ttl_ms)
@@ -76,12 +76,7 @@ pub async fn create_guardian_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     runtime
         .create_guardian_invitation(receiver, subject, message, ttl_ms)
@@ -101,12 +96,7 @@ pub async fn create_channel_invitation(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     runtime
         .create_channel_invitation(receiver, home_id, message, ttl_ms)
@@ -144,12 +134,7 @@ pub async fn import_invitation_details(
     app_core: &Arc<RwLock<AppCore>>,
     code: &str,
 ) -> Result<InvitationInfo, AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     runtime
         .import_invitation(code)
@@ -172,12 +157,7 @@ pub async fn export_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<String, AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     runtime
         .export_invitation(invitation_id)
@@ -191,9 +171,7 @@ pub async fn export_invitation(
 /// **Returns**: Current invitations (sent and received)
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn list_invitations(app_core: &Arc<RwLock<AppCore>>) -> InvitationsState {
-    let core = app_core.read().await;
-
-    core.read(&*INVITATIONS_SIGNAL).await.unwrap_or_default()
+    read_signal_or_default(app_core, &*INVITATIONS_SIGNAL).await
 }
 
 // ============================================================================
@@ -209,17 +187,11 @@ pub async fn accept_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     #[cfg(feature = "signals")]
     let initial_contact_count = {
-        let core = app_core.read().await;
-        core.read(&*crate::signal_defs::CONTACTS_SIGNAL)
+        read_signal(app_core, &*crate::signal_defs::CONTACTS_SIGNAL, "CONTACTS_SIGNAL")
             .await
             .unwrap_or_default()
             .contacts
@@ -249,14 +221,15 @@ pub async fn accept_invitation(
                 }
             } else {
                 // Fallback: check current state (covers missed emissions).
-                let contacts_len = {
-                    let core = app_core.read().await;
-                    core.read(&*crate::signal_defs::CONTACTS_SIGNAL)
-                        .await
-                        .unwrap_or_default()
-                        .contacts
-                        .len()
-                };
+                let contacts_len = read_signal(
+                    app_core,
+                    &*crate::signal_defs::CONTACTS_SIGNAL,
+                    "CONTACTS_SIGNAL",
+                )
+                .await
+                .unwrap_or_default()
+                .contacts
+                .len();
 
                 if contacts_len > initial_contact_count {
                     break;
@@ -282,12 +255,7 @@ pub async fn decline_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     runtime
         .decline_invitation(invitation_id)
@@ -304,12 +272,7 @@ pub async fn cancel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     invitation_id: &str,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     runtime
         .cancel_invitation(invitation_id)
@@ -328,12 +291,7 @@ pub async fn import_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     code: &str,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     runtime
         .import_invitation(code)
@@ -353,12 +311,7 @@ pub async fn import_invitation(
 pub async fn accept_pending_home_invitation(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<String, AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     // Get pending invitations
     let pending = runtime.list_pending_invitations().await;

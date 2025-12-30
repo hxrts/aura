@@ -1,11 +1,11 @@
 //! Sync command handlers - TUI Operational Layer
 //!
 //! This module provides TUI-specific sync operation handling.
-//! Business logic has been moved to `aura_app::workflows::sync`.
+//! Business logic has been moved to `aura_app::ui::workflows::sync`.
 //!
 //! ## Architecture
 //!
-//! - **Business Logic**: `aura_app::workflows::sync` (portable)
+//! - **Business Logic**: `aura_app::ui::workflows::sync` (portable)
 //! - **TUI Integration**: This module (operational layer)
 //!
 //! Handlers for ForceSync, RequestState.
@@ -13,18 +13,18 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflow functions for convenience
-pub use aura_app::workflows::sync::{force_sync, request_state};
+pub use aura_app::ui::workflows::sync::{force_sync, request_state};
 
 /// Handle sync commands
 ///
 /// This is now a thin wrapper around workflow functions.
-/// Business logic lives in aura_app::workflows::sync.
+/// Business logic lives in aura_app::ui::workflows::sync.
 pub async fn handle_sync(
     command: &EffectCommand,
     app_core: &Arc<RwLock<AppCore>>,

@@ -107,7 +107,7 @@ impl MockRuntimeBridge {
             id_counter: AtomicU64::new(1),
             current_time_ms: AtomicU64::new(1700000000000), // Fixed starting time
             devices: Arc::new(RwLock::new(vec![BridgeDeviceInfo {
-                id: device_id.to_string(),
+                id: device_id,
                 name: "MockDevice".to_string(),
                 is_current: true,
                 last_seen: Some(1700000000000),

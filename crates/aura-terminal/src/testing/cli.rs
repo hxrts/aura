@@ -43,7 +43,7 @@ use crate::{ids, ContextAction, RecoveryAction};
 
 use async_lock::RwLock;
 use aura_agent::AgentBuilder;
-use aura_app::{AppConfig, AppCore};
+use aura_app::ui::prelude::*;
 use aura_core::effects::ExecutionMode;
 use aura_core::identifiers::DeviceId;
 use std::path::Path;

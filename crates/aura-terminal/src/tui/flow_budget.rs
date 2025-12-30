@@ -8,7 +8,7 @@
 //!
 //! For shared CLI + TUI logic, see `crate::handlers::budget`.
 
-use aura_app::{BudgetBreakdown, HomeFlowBudget, HOME_TOTAL_SIZE};
+use aura_app::ui::prelude::*;
 
 /// Flow budget view state for TUI rendering
 ///
@@ -68,7 +68,7 @@ impl FlowBudgetView {
 ///
 /// Returns a vec of (neighborhood_count, budget) pairs for documentation/testing.
 pub fn example_budget_table() -> Vec<(u8, HomeFlowBudget)> {
-    use aura_app::MAX_NEIGHBORHOODS;
+    use aura_app::ui::types::MAX_NEIGHBORHOODS;
 
     let mut table = Vec::new();
 
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn test_example_budget_table() {
         let table = example_budget_table();
-        assert_eq!(table.len(), aura_app::MAX_NEIGHBORHOODS as usize);
+        assert_eq!(table.len(), aura_app::ui::types::MAX_NEIGHBORHOODS as usize);
 
         // Verify each row has correct neighborhood count
         for (neighborhoods, budget) in table {

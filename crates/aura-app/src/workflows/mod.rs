@@ -27,7 +27,7 @@
 //! - ReactiveEffects signals update automatically via signal forwarding
 //!
 //! **3. Error Handling**
-//! - Return `Result<T, AppError>` (not terminal-specific errors)
+//! - Return `Result<T, AuraError>` (not terminal-specific errors)
 //! - Errors propagate to handlers for display formatting
 //!
 //! ## Example
@@ -38,7 +38,7 @@
 //!     app_core: &Arc<RwLock<AppCore>>,
 //!     receiver: AuthorityId,
 //!     role: Role,
-//! ) -> Result<Invitation, AppError> {
+//! ) -> Result<Invitation, AuraError> {
 //!     // Business logic - portable across all frontends
 //!     let invitation = /* ... */;
 //!
@@ -64,72 +64,26 @@
 //! ```
 
 pub mod budget;
+pub mod admin;
+pub mod amp;
 pub mod ceremonies;
 pub mod contacts;
 pub mod context;
 pub mod invitation;
+pub(crate) mod journal;
 #[cfg(feature = "signals")]
 pub mod messaging;
 pub mod moderation;
 pub mod network;
+pub(crate) mod parse;
 pub mod query;
 #[cfg(feature = "signals")]
 pub mod recovery;
+pub mod recovery_cli;
+pub(crate) mod runtime;
+pub(crate) mod signals;
 pub mod settings;
+pub mod snapshot;
 pub mod steward;
 pub mod sync;
 pub mod system;
-
-// Re-export budget types and workflow functions
-pub use budget::{
-    // Workflow functions
-    can_add_resident,
-    can_join_neighborhood,
-    can_pin_content,
-    get_budget_breakdown,
-    get_current_budget,
-    update_budget,
-    BudgetBreakdown,
-    BudgetError,
-    // Types
-    HomeFlowBudget,
-    BYTE,
-    // Constants
-    HOME_TOTAL_SIZE,
-    KB,
-    MAX_NEIGHBORHOODS,
-    MAX_RESIDENTS,
-    MB,
-    NEIGHBORHOOD_DONATION,
-    RESIDENT_ALLOCATION,
-};
-pub use ceremonies::{
-    cancel_key_rotation_ceremony, get_key_rotation_ceremony_status, monitor_key_rotation_ceremony,
-    start_device_threshold_ceremony, start_guardian_ceremony,
-};
-pub use contacts::update_contact_nickname;
-pub use context::{get_current_position, get_neighborhood_state, move_position, set_context};
-pub use invitation::{
-    accept_invitation, accept_pending_home_invitation, cancel_invitation,
-    create_channel_invitation, create_contact_invitation, create_guardian_invitation,
-    decline_invitation, export_invitation, import_invitation, import_invitation_details,
-    list_invitations, list_pending_invitations,
-};
-#[cfg(feature = "signals")]
-pub use messaging::{
-    create_channel, get_chat_state, invite_user_to_channel, send_action, send_direct_message,
-    send_message, start_direct_chat,
-};
-pub use moderation::{
-    ban_user, kick_user, mute_user, pin_message, unban_user, unmute_user, unpin_message,
-};
-pub use network::{
-    discover_peers, get_discovered_peers, list_lan_peers, list_peers, update_connection_status,
-};
-pub use query::{get_user_info, list_contacts, list_participants};
-#[cfg(feature = "signals")]
-pub use recovery::{approve_recovery, dispute_recovery, get_recovery_status, start_recovery};
-pub use settings::{get_settings, set_channel_mode, update_mfa_policy, update_nickname};
-pub use steward::{grant_steward, is_admin, revoke_steward};
-pub use sync::{force_sync, get_sync_status, request_state};
-pub use system::{is_available, ping, refresh_account};

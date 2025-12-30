@@ -8,7 +8,7 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::{identifiers::ChannelId, AuraError};
+use aura_core::{identifiers::ChannelId, identifiers::ContextId, AuraError, EffectContext};
 use std::sync::Arc;
 
 /// Set active context for navigation and command targeting
@@ -115,6 +115,25 @@ pub async fn move_position(
 pub async fn get_neighborhood_state(app_core: &Arc<RwLock<AppCore>>) -> NeighborhoodState {
     let core = app_core.read().await;
     core.views().get_neighborhood().clone()
+}
+
+/// Get current home context id with a deterministic fallback.
+pub async fn current_home_context_or_fallback(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<ContextId, AuraError> {
+    let core = app_core.read().await;
+    let homes = core.views().get_homes();
+    if let Some(home_state) = homes.current_home() {
+        return Ok(home_state.context_id);
+    }
+
+    // Fallback: when no home is selected yet (common in demos/tests), use a
+    // deterministic per-authority context id so messaging can still function.
+    if let Some(runtime) = core.runtime() {
+        return Ok(EffectContext::with_authority(runtime.authority_id()).context_id());
+    }
+
+    Err(AuraError::not_found("No current home selected"))
 }
 
 /// Get current traversal position

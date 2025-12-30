@@ -30,6 +30,7 @@ pub use auth_service::AuthService;
 
 // Re-export chat types for public API
 pub use chat_service::ChatService;
+pub use aura_chat::{ChatGroupId, ChatMessageId};
 
 // Re-export invitation types for public API
 pub use invitation::{
@@ -51,3 +52,23 @@ pub use rendezvous_service::RendezvousServiceApi;
 
 // Re-export OTA types for public API
 pub use ota::{OtaHandler, UpdateInfo, UpdateResult, UpdateStatus};
+
+// Re-export sync/maintenance types for CLI/tooling usage
+pub use aura_sync::maintenance::UpgradeProposal;
+pub use aura_sync::protocols::ota::UpgradeKind;
+pub use aura_sync::services::HealthStatus;
+
+// Re-export authentication types for CLI/tooling usage
+pub use aura_authentication::{DkdConfig, DkdProtocol, RecoveryContext, RecoveryOperationType};
+
+// Re-export recovery types for CLI/tooling usage
+pub use aura_recovery::guardian_setup::GuardianSetupCoordinator;
+pub use aura_recovery::guardian_key_recovery::GuardianKeyApproval;
+pub use aura_recovery::recovery_protocol::{
+    RecoveryOperation as ProtocolRecoveryOperation, RecoveryProtocol, RecoveryProtocolHandler,
+    RecoveryRequest as ProtocolRecoveryRequest,
+};
+pub use aura_recovery::types::{
+    GuardianProfile, GuardianSet, RecoveryDispute, RecoveryEvidence, RecoveryShare,
+};
+pub use aura_recovery::RecoveryResponse;

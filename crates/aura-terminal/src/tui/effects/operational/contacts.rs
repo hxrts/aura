@@ -2,17 +2,17 @@
 //!
 //! Handlers for contact-management commands (nickname updates, etc.).
 //!
-//! Business logic lives in `aura_app::workflows::contacts`.
+//! Business logic lives in `aura_app::ui::workflows::contacts`.
 
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
-pub use aura_app::workflows::contacts::{remove_contact, update_contact_nickname};
+pub use aura_app::ui::workflows::contacts::{remove_contact, update_contact_nickname};
 
 /// Handle contact commands
 pub async fn handle_contacts(

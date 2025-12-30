@@ -1,5 +1,6 @@
 //! Guardian setup modal state
 
+use aura_app::ui::prelude::*;
 use super::KeyRotationCeremonyUiState;
 
 /// Step in the guardian setup wizard
@@ -91,7 +92,7 @@ impl GuardianSetupModalState {
         }
         // Default threshold: majority (n/2 + 1), minimum 2 for FROST
         let n = selected_indices.len() as u8;
-        let threshold_k = if n >= 2 { (n / 2) + 1 } else { 2 };
+        let threshold_k = default_guardian_threshold(n);
 
         Self {
             step: GuardianSetupStep::SelectContacts,
@@ -130,11 +131,7 @@ impl GuardianSetupModalState {
         }
         // Adjust threshold_k if it exceeds new n, but keep minimum 2 for FROST
         let n = self.threshold_n();
-        if self.threshold_k > n && n >= 2 {
-            self.threshold_k = n;
-        } else if self.threshold_k < 2 {
-            self.threshold_k = 2;
-        }
+        self.threshold_k = normalize_guardian_threshold(self.threshold_k, n);
     }
 
     /// Check if a contact index is selected
@@ -145,16 +142,15 @@ impl GuardianSetupModalState {
     /// Increment threshold k (up to n)
     pub fn increment_k(&mut self) {
         let n = self.threshold_n();
-        if self.threshold_k < n {
-            self.threshold_k += 1;
-        }
+        let next = self.threshold_k.saturating_add(1);
+        self.threshold_k = normalize_guardian_threshold(next, n);
     }
 
     /// Decrement threshold k (down to 2 - FROST minimum)
     pub fn decrement_k(&mut self) {
-        if self.threshold_k > 2 {
-            self.threshold_k -= 1;
-        }
+        let n = self.threshold_n();
+        let next = self.threshold_k.saturating_sub(1);
+        self.threshold_k = normalize_guardian_threshold(next, n);
     }
 
     /// Check if can proceed from contact selection to threshold step

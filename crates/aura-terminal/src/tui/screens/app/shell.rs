@@ -23,13 +23,13 @@ use super::modal_overlays::{
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use aura_app::signal_defs::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
-use aura_app::workflows::settings::refresh_settings_from_runtime;
-use aura_app::workflows::{
+use aura_app::ui::prelude::*;
+use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::ui::workflows::ceremonies::{
     cancel_key_rotation_ceremony, monitor_key_rotation_ceremony, start_device_threshold_ceremony,
     start_guardian_ceremony,
 };
-use aura_app::AppError;
+use aura_app::ui::workflows::settings::refresh_settings_from_runtime;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::FrostThreshold;
 
@@ -681,16 +681,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 dismiss_modal = true;
                                                 toast = Some((
                                                     match kind {
-                                                        aura_app::runtime_bridge::CeremonyKind::GuardianRotation => format!(
+                                                        aura_app::ui::types::CeremonyKind::GuardianRotation => format!(
                                                             "Guardian ceremony complete! {threshold}-of-{total_count} committed"
                                                         ),
-                                                        aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment => {
+                                                        aura_app::ui::types::CeremonyKind::DeviceEnrollment => {
                                                             "Device enrollment complete".to_string()
                                                         }
-                                                        aura_app::runtime_bridge::CeremonyKind::DeviceRemoval => {
+                                                        aura_app::ui::types::CeremonyKind::DeviceRemoval => {
                                                             "Device removal complete".to_string()
                                                         }
-                                                        aura_app::runtime_bridge::CeremonyKind::DeviceRotation => {
+                                                        aura_app::ui::types::CeremonyKind::DeviceRotation => {
                                                             format!(
                                                                 "Device threshold ceremony complete ({threshold}-of-{total_count})"
                                                             )
@@ -701,9 +701,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 dismiss_ceremony_started_toast = true;
                                                 if matches!(
                                                     kind,
-                                                    aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment
-                                                        | aura_app::runtime_bridge::CeremonyKind::DeviceRemoval
-                                                        | aura_app::runtime_bridge::CeremonyKind::DeviceRotation
+                                                    aura_app::ui::types::CeremonyKind::DeviceEnrollment
+                                                        | aura_app::ui::types::CeremonyKind::DeviceRemoval
+                                                        | aura_app::ui::types::CeremonyKind::DeviceRotation
                                                 ) {
                                                     let app_core = app_core.raw().clone();
                                                     let tasks = tasks_for_updates.clone();
@@ -787,7 +787,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             });
 
                             if !handled_device_enrollment_modal
-                                && matches!(kind, aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment)
+                                && matches!(kind, aura_app::ui::types::CeremonyKind::DeviceEnrollment)
                                 && (is_complete || has_failed)
                             {
                                 let app_core = app_core.raw().clone();
@@ -1442,6 +1442,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                 // Execute commands using callbacks registry
                 if let Some(ref cb) = callbacks {
+                    if new_state.chat.selected_channel != current.chat.selected_channel {
+                        let idx = new_state.chat.selected_channel;
+                        if let Ok(guard) = shared_channels_for_dispatch.read() {
+                            if let Some(channel) = guard.get(idx) {
+                                (cb.chat.on_channel_select)(channel.id.clone());
+                            }
+                        }
+                    }
                     for cmd in commands {
                         match cmd {
                             TuiCommand::Exit => {
@@ -1837,7 +1845,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                         let selected: Vec<usize> = (0..candidates.len()).collect();
                                         let n = selected.len() as u8;
-                                        let threshold_k = if n >= 2 { (n / 2) + 1 } else { 2 };
+                                        let threshold_k = aura_app::ui::types::default_guardian_threshold(n);
 
                                         let mut modal_state =
                                             crate::tui::state_machine::GuardianSetupModalState::default();
@@ -1915,7 +1923,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         // available immediately for UI cancel.
                                                         let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
                                                             ceremony_id: ceremony_id.clone(),
-                                                            kind: aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
+                                                            kind: aura_app::ui::types::CeremonyKind::GuardianRotation,
                                                             accepted_count: 0,
                                                             total_count: n,
                                                             threshold: k,
@@ -2044,7 +2052,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     if let Some(tx) = update_tx.clone() {
                                                         let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
                                                             ceremony_id: ceremony_id.clone(),
-                                                            kind: aura_app::runtime_bridge::CeremonyKind::DeviceRotation,
+                                                            kind: aura_app::ui::types::CeremonyKind::DeviceRotation,
                                                             accepted_count: 0,
                                                             total_count: n,
                                                             threshold: k,

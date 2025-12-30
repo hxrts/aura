@@ -29,7 +29,7 @@ pub enum CodeDisplayStatus {
 }
 
 impl CodeDisplayStatus {
-    fn icon(&self) -> &'static str {
+    fn icon(self) -> &'static str {
         match self {
             Self::Success => Icons::CHECK,
             Self::Pending => Icons::PENDING,
@@ -37,7 +37,7 @@ impl CodeDisplayStatus {
         }
     }
 
-    fn color(&self) -> Color {
+    fn color(self) -> Color {
         match self {
             Self::Success => Theme::SUCCESS,
             Self::Pending => Theme::WARNING,
@@ -45,7 +45,7 @@ impl CodeDisplayStatus {
         }
     }
 
-    fn border_color(&self) -> Color {
+    fn border_color(self) -> Color {
         match self {
             Self::Success => Theme::SUCCESS,
             Self::Pending => Theme::PRIMARY,

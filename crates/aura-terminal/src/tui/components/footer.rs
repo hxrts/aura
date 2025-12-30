@@ -8,7 +8,7 @@
 //! The 6-column grid uses the same column width (13 chars) and padding as the
 //! nav bar, ensuring perfect vertical alignment between nav tabs and footer hints.
 
-use aura_app::signal_defs::NetworkStatus;
+use aura_app::ui::signals::NetworkStatus;
 
 use crate::tui::layout::dim;
 use crate::tui::theme::Theme;

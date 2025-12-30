@@ -3,13 +3,13 @@
 //! Keep shell.rs focused on wiring and rendering by extracting the
 //! signal-subscription use_future homes here.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use iocraft::prelude::*;
 
-use aura_app::signal_defs::{
+use aura_app::ui::signals::{
     ConnectionStatus, NetworkStatus, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
     INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL,
     SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
@@ -146,18 +146,11 @@ pub fn use_contacts_subscription(
     // Create the shared contacts holder - use_ref ensures it persists across renders.
     let shared_contacts_ref = hooks.use_ref(SharedContacts::new);
     let shared_contacts: SharedContacts = shared_contacts_ref.read().clone();
-    let tasks = app_ctx.tasks();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
-        let tasks = tasks;
         async move {
-            // CONNECTION_STATUS_SIGNAL depends on the current contacts list (peer count = online contacts).
-            // Ensure the footer updates when CONTACTS_SIGNAL changes by refreshing the derived status.
-            let refresh_in_flight = Arc::new(AtomicBool::new(false));
-            let app_core_for_refresh = app_core.clone();
-
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
                     contacts_state.contacts.iter().map(Contact::from).collect();
@@ -171,20 +164,6 @@ pub fn use_contacts_subscription(
                 if let Some(ref tx) = update_tx {
                     let _ = tx.try_send(UiUpdate::ContactCountChanged(new_count));
                 }
-
-                // Avoid spawning an unbounded number of refresh tasks if contacts update rapidly.
-                if refresh_in_flight.swap(true, Ordering::SeqCst) {
-                    return;
-                }
-
-                let app_core_for_refresh = app_core_for_refresh.clone();
-                let refresh_in_flight = refresh_in_flight.clone();
-                tasks.spawn(async move {
-                    let _ =
-                        aura_app::workflows::system::refresh_account(app_core_for_refresh.raw())
-                            .await;
-                    refresh_in_flight.store(false, Ordering::SeqCst);
-                });
             })
             .await;
         }
@@ -225,7 +204,7 @@ pub fn use_devices_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> 
                     .devices
                     .iter()
                     .map(|d| Device {
-                        id: d.id.clone(),
+                        id: d.id.to_string(),
                         name: d.name.clone(),
                         is_current: d.is_current,
                         last_seen: d.last_seen,
@@ -296,20 +275,12 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
-        let update_tx = update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let selected_index = chat_state
                     .selected_channel_id
                     .as_ref()
                     .and_then(|id| chat_state.channels.iter().position(|c| c.id == *id));
-
-                // Ensure a channel is always selected when channels exist.
-                if selected_index.is_none() && !chat_state.channels.is_empty() {
-                    if let Ok(core) = app_core.raw().try_read() {
-                        core.select_channel(Some(chat_state.channels[0].id));
-                    }
-                }
 
                 let channel_list: Vec<Channel> =
                     chat_state.channels.iter().map(Channel::from).collect();
@@ -321,13 +292,8 @@ pub fn use_channels_subscription(
                     let _ = tx.try_send(UiUpdate::ChatStateUpdated {
                         channel_count: chat_state.channels.len(),
                         message_count: chat_state.messages.len(),
-                        selected_index: selected_index.or_else(|| {
-                            if chat_state.channels.is_empty() {
-                                None
-                            } else {
-                                Some(0)
-                            }
-                        }),
+                        selected_index: selected_index
+                            .or((!chat_state.channels.is_empty()).then_some(0)),
                     });
                 }
             })
@@ -481,9 +447,6 @@ pub fn use_notifications_subscription(
     // Recovery requests
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let invite_count = invite_count;
-        let recovery_count = recovery_count;
-        let update_tx = update_tx;
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |state| {
                 recovery_count.store(state.pending_requests.len(), Ordering::Relaxed);

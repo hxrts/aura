@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 // Import app types from aura-app (pure layer)
-use aura_app::{AppConfig, AppCore};
+use aura_app::ui::prelude::*;
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
@@ -703,7 +703,7 @@ async fn handle_tui_launch(
     let app_core = InitializedAppCore::new(app_core).await?;
 
     if let Err(e) =
-        aura_app::workflows::settings::refresh_settings_from_runtime(app_core.raw()).await
+        aura_app::ui::workflows::settings::refresh_settings_from_runtime(app_core.raw()).await
     {
         stdio.eprintln(format_args!("Warning: Failed to refresh settings: {e}"));
     }
@@ -727,7 +727,7 @@ async fn handle_tui_launch(
             std::env::set_var("AURA_DEMO_DEVICE_ID", sim.mobile_device_id().to_string());
 
             // Refresh UI-facing signals from the runtime, including connection status.
-            if let Err(e) = aura_app::workflows::system::refresh_account(app_core.raw()).await {
+            if let Err(e) = aura_app::ui::workflows::system::refresh_account(app_core.raw()).await {
                 tracing::warn!("Demo: Failed to refresh account state: {}", e);
             }
 
@@ -761,7 +761,7 @@ async fn handle_tui_launch(
             let alice_agent = sim.alice_agent();
             let carol_agent = sim.carol_agent();
             tokio::spawn(async move {
-                use aura_app::signal_defs::CHAT_SIGNAL;
+                use aura_app::ui::signals::{CHAT_SIGNAL, HOMES_SIGNAL};
                 use aura_core::effects::amp::ChannelSendParams;
                 use aura_core::identifiers::ContextId;
                 use aura_core::EffectContext;
@@ -790,10 +790,10 @@ async fn handle_tui_launch(
 
                         let context_id = {
                             let core = app_core_for_replies.read().await;
-                            let homes = core.views().get_homes();
+                            let homes = core.read(&*HOMES_SIGNAL).await.unwrap_or_default();
                             homes
                                 .home_state(&msg.channel_id)
-                                .and_then(|home| home.context_id.parse::<ContextId>().ok())
+                                .map(|home| home.context_id)
                                 .unwrap_or_else(|| {
                                     EffectContext::with_authority(bob_authority).context_id()
                                 })
@@ -948,6 +948,7 @@ impl io::Write for StorageLogWriter {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)] // TuiMode is small and matched on
 fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
     // Allow forcing stdio tracing for debugging.
     if std::env::var("AURA_TUI_ALLOW_STDIO").ok().as_deref() == Some("1") {

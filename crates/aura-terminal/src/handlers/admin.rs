@@ -3,13 +3,8 @@
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_core::effects::JournalEffects;
 use aura_core::identifiers::{AccountId, AuthorityId};
-use aura_core::types::Epoch;
-use aura_core::{FactValue, Journal};
-use aura_journal::fact::FactContent;
-use aura_journal::DomainFact;
-use aura_maintenance::{AdminReplacement, MaintenanceFact};
+use aura_app::ui::workflows::admin;
 
 use crate::AdminAction;
 
@@ -53,40 +48,15 @@ async fn replace_admin(
     // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
     let authority_id = AuthorityId(ctx.device_id().0);
 
-    let replacement = MaintenanceFact::AdminReplacement(AdminReplacement::new(
+    admin::replace_admin(
+        ctx.effects(),
         authority_id,
-        authority_id,
+        account_id,
         new_admin_id,
-        Epoch::new(activation_epoch),
-    ));
-
-    let fact_content = FactContent::Relational(replacement.to_generic());
-
-    let fact_value = serde_json::to_vec(&fact_content)
-        .map(FactValue::Bytes)
-        .map_err(|e| {
-            TerminalError::Operation(format!("Failed to encode admin replacement fact: {e}"))
-        })?;
-
-    let mut delta = Journal::new();
-    let fact_key = format!("admin_replace:{account_id}");
-    delta.facts.insert(fact_key.clone(), fact_value);
-
-    let current = ctx
-        .effects()
-        .get_journal()
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to load journal: {e}")))?;
-    let merged = ctx
-        .effects()
-        .merge_facts(&current, &delta)
-        .await
-        .map_err(|e| {
-            TerminalError::Operation(format!("Failed to merge admin replacement fact: {e}"))
-        })?;
-    ctx.effects().persist_journal(&merged).await.map_err(|e| {
-        TerminalError::Operation(format!("Failed to persist admin replacement fact: {e}"))
-    })?;
+        activation_epoch,
+    )
+    .await
+    .map_err(|e| TerminalError::Operation(format!("Failed to replace admin: {e}")))?;
 
     output.println(format!(
         "Admin replacement recorded; new admin {new_admin_id} activates at epoch {activation_epoch}"

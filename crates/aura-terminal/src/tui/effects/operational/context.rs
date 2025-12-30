@@ -2,20 +2,20 @@
 //!
 //! Handlers for SetContext, MovePosition, AcceptPendingHomeInvitation.
 //!
-//! This module delegates to portable workflows in aura_app::workflows::context
+//! This module delegates to portable workflows in aura_app::ui::workflows::context
 //! and adds terminal-specific response formatting.
 
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::context::{move_position, set_context};
-pub use aura_app::workflows::invitation::accept_pending_home_invitation;
+pub use aura_app::ui::workflows::context::{move_position, set_context};
+pub use aura_app::ui::workflows::invitation::accept_pending_home_invitation;
 
 /// Handle context commands
 pub async fn handle_context(

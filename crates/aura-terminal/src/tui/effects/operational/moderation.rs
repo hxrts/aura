@@ -2,17 +2,17 @@
 //!
 //! Handlers for KickUser, BanUser, UnbanUser, MuteUser, UnmuteUser, PinMessage, UnpinMessage.
 //!
-//! This module delegates to portable workflows in `aura_app::workflows::moderation`.
+//! This module delegates to portable workflows in `aura_app::ui::workflows::moderation`.
 
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
-pub use aura_app::workflows::moderation::{
+pub use aura_app::ui::workflows::moderation::{
     ban_user, kick_user, mute_user, pin_message, unban_user, unmute_user, unpin_message,
 };
 

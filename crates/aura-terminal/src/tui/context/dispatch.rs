@@ -295,7 +295,6 @@ impl DispatchHelper {
     /// immediate UX feedback and avoids attempting admin ops outside a home.
     fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
         use crate::tui::effects::CommandAuthorizationLevel;
-        use aura_app::views::home::ResidentRole;
 
         let level = command.authorization_level();
         match level {
@@ -304,18 +303,8 @@ impl DispatchHelper {
             | CommandAuthorizationLevel::Sensitive => Ok(()),
             CommandAuthorizationLevel::Admin => {
                 let snapshot = self.snapshots.try_state_snapshot();
-                let role = snapshot.and_then(|s| s.homes.current_home().map(|h| h.my_role));
-                match role {
-                    Some(ResidentRole::Admin | ResidentRole::Owner) => Ok(()),
-                    Some(ResidentRole::Resident) => Err(format!(
-                        "Permission denied: {} requires administrator privileges",
-                        command_name(command)
-                    )),
-                    None => Err(format!(
-                        "Permission denied: {} requires a home context",
-                        command_name(command)
-                    )),
-                }
+                aura_app::ui::authorization::require_admin(snapshot.as_ref(), command_name(command))
+                    .map_err(|e| e.to_string())
             }
         }
     }
@@ -355,14 +344,15 @@ mod tests {
     use std::sync::Arc;
 
     use async_lock::RwLock;
-    use aura_app::{signal_defs::ERROR_SIGNAL, AppConfig, AppCore};
+    use aura_app::ui::prelude::*;
+    use aura_app::ui::signals::ERROR_SIGNAL;
     use aura_core::effects::reactive::ReactiveEffects;
 
     use crate::handlers::tui::TuiMode;
     use crate::tui::context::{InitializedAppCore, IoContext};
     use crate::tui::effects::EffectCommand;
 
-    async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> aura_app::AppError {
+    async fn wait_for_error(app_core: &Arc<RwLock<AppCore>>) -> AppError {
         tokio::time::timeout(std::time::Duration::from_millis(500), async {
             loop {
                 {

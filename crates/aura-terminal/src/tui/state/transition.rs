@@ -49,7 +49,7 @@ pub fn transition(state: &TuiState, event: TerminalEvent) -> (TuiState, Vec<TuiC
             new_state.window_focused = false;
         }
         TerminalEvent::Paste(text) => {
-            handle_paste_event(&mut new_state, &mut commands, text);
+            handle_paste_event(&mut new_state, &mut commands, &text);
         }
     }
 

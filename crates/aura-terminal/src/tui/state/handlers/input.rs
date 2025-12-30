@@ -1,4 +1,9 @@
 //! Input handlers for mouse, paste, and insert mode events
+//!
+//! Event types (KeyEvent, MouseEvent) are passed by value following standard
+//! event handler conventions.
+
+#![allow(clippy::needless_pass_by_value)]
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
@@ -90,7 +95,7 @@ pub fn handle_mouse_event(
 /// Handle a paste event
 ///
 /// Inserts pasted text into the current input buffer if in insert mode.
-pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>, text: String) {
+pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>, text: &str) {
     // Only handle paste if we're in insert mode
     if !state.is_insert_mode() {
         return;
@@ -101,7 +106,7 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
         match modal {
             // Invitation import modal (Contacts workflow)
             QueuedModal::ContactsImport(modal_state) => {
-                modal_state.code.push_str(&text);
+                modal_state.code.push_str(text);
                 return;
             }
 
@@ -109,33 +114,33 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             QueuedModal::ChatCreate(modal_state) => {
                 // Paste into active field (name or topic)
                 if modal_state.active_field == 0 {
-                    modal_state.name.push_str(&text);
+                    modal_state.name.push_str(text);
                 } else {
-                    modal_state.topic.push_str(&text);
+                    modal_state.topic.push_str(text);
                 }
                 return;
             }
             QueuedModal::ChatTopic(modal_state) => {
-                modal_state.value.push_str(&text);
+                modal_state.value.push_str(text);
                 return;
             }
 
             // Contact nickname modal
             QueuedModal::ContactsNickname(modal_state) => {
-                modal_state.value.push_str(&text);
+                modal_state.value.push_str(text);
                 return;
             }
 
             // Settings display name modal
             QueuedModal::SettingsDisplayName(modal_state) => {
-                modal_state.value.push_str(&text);
+                modal_state.value.push_str(text);
                 return;
             }
             QueuedModal::NeighborhoodHomeCreate(modal_state) => {
                 if modal_state.active_field == 0 {
-                    modal_state.name.push_str(&text);
+                    modal_state.name.push_str(text);
                 } else {
-                    modal_state.description.push_str(&text);
+                    modal_state.description.push_str(text);
                 }
                 return;
             }
@@ -164,14 +169,14 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
     match state.screen() {
         Screen::Chat => {
             if state.chat.focus == ChatFocus::Input {
-                state.chat.input_buffer.push_str(&text);
+                state.chat.input_buffer.push_str(text);
             }
         }
         Screen::Neighborhood => {
             if state.neighborhood.mode == NeighborhoodMode::Detail
                 && state.neighborhood.detail_focus == DetailFocus::Input
             {
-                state.neighborhood.input_buffer.push_str(&text);
+                state.neighborhood.input_buffer.push_str(text);
             }
         }
         _ => {}

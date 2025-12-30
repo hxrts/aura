@@ -16,12 +16,11 @@ use crate::tui::effects::EffectCommand;
 use crate::tui::effects::{CapabilityPolicy, CommandDispatcher};
 use crate::tui::types::{MfaPolicy, TraversalDepth};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
-use aura_app::signal_defs::CHAT_SIGNAL;
-use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::ChannelId;
 
 use super::types::*;
 
+#[allow(clippy::needless_pass_by_value)] // Arc clone pattern for task spawning
 fn spawn_ctx<F>(ctx: Arc<IoContext>, fut: F)
 where
     F: Future<Output = ()> + Send + 'static,
@@ -50,7 +49,7 @@ impl ChatCallbacks {
     pub fn new(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
-        app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
+        app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
     ) -> Self {
         Self {
             on_send: Self::make_send(ctx.clone(), tx.clone()),
@@ -99,7 +98,7 @@ impl ChatCallbacks {
 
                             match effect {
                                 EffectCommand::ListParticipants { channel } => {
-                                    match aura_app::workflows::query::list_participants(
+                                    match aura_app::ui::workflows::query::list_participants(
                                         ctx.app_core_raw(),
                                         &channel,
                                     )
@@ -123,7 +122,7 @@ impl ChatCallbacks {
                                     }
                                 }
                                 EffectCommand::GetUserInfo { target } => {
-                                    match aura_app::workflows::query::get_user_info(
+                                    match aura_app::ui::workflows::query::get_user_info(
                                         ctx.app_core_raw(),
                                         &target,
                                     )
@@ -214,7 +213,7 @@ impl ChatCallbacks {
 
     fn make_channel_select(
         ctx: Arc<IoContext>,
-        app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
+        app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
         tx: UiUpdateSender,
     ) -> ChannelSelectCallback {
         Arc::new(move |channel_id: String| {
@@ -225,14 +224,14 @@ impl ChatCallbacks {
             spawn_ctx(ctx, async move {
                 // Parse channel_id string to ChannelId
                 let channel_id_typed = channel_id.parse::<ChannelId>().ok();
-                let core = app_core.read().await;
-                core.views().select_channel(channel_id_typed);
-                let reactive = core.reactive().clone();
-                drop(core);
-
-                if let Ok(mut chat_state) = reactive.read(&*CHAT_SIGNAL).await {
-                    chat_state.select_channel(channel_id_typed);
-                    let _ = reactive.emit(&*CHAT_SIGNAL, chat_state).await;
+                if let Err(err) =
+                    aura_app::ui::workflows::messaging::select_channel(&app_core, channel_id_typed)
+                        .await
+                {
+                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                        "channel",
+                        err.to_string(),
+                    )));
                 }
                 let _ = tx.try_send(UiUpdate::ChannelSelected(channel_id_clone));
             });
@@ -245,7 +244,7 @@ impl ChatCallbacks {
             let tx = tx.clone();
             let channel_id_clone = channel_id;
             spawn_ctx(ctx.clone(), async move {
-                match aura_app::workflows::query::list_participants(
+                match aura_app::ui::workflows::query::list_participants(
                     ctx.app_core_raw(),
                     &channel_id_clone,
                 )
@@ -775,7 +774,7 @@ impl SettingsCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let name_clone = name.clone();
-            let cmd = EffectCommand::UpdateNickname { name: name };
+            let cmd = EffectCommand::UpdateNickname { name };
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
@@ -836,7 +835,7 @@ impl SettingsCallbacks {
 
                 // Prime status quickly (best-effort) so the modal has counters immediately.
                 if let Ok(status) =
-                    aura_app::workflows::ceremonies::get_key_rotation_ceremony_status(
+                    aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
                         ctx.app_core_raw(),
                         &start.ceremony_id,
                     )
@@ -862,7 +861,7 @@ impl SettingsCallbacks {
                 let tx_monitor = tx.clone();
                 let ceremony_id = start.ceremony_id.clone();
                 spawn_ctx(ctx.clone(), async move {
-                    let _ = aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
+                    let _ = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
                         &app,
                         ceremony_id,
                         tokio::time::Duration::from_millis(500),
@@ -914,7 +913,7 @@ impl SettingsCallbacks {
                 let app = ctx.app_core_raw().clone();
                 let tx_monitor = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
-                    match aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
+                    match aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
                         &app,
                         ceremony_id,
                         tokio::time::Duration::from_millis(250),
@@ -1007,25 +1006,15 @@ impl HomeCallbacks {
             let tx = tx.clone();
             let content_clone = content;
             spawn_ctx(ctx.clone(), async move {
-                let home_id = {
-                    use aura_app::signal_defs::HOMES_SIGNAL;
-                    use aura_core::effects::reactive::ReactiveEffects;
-
-                    let core = ctx.app_core_raw().read().await;
-
-                    if let Ok(homes) = core.read(&*HOMES_SIGNAL).await {
-                        homes
-                            .current_home_id
-                            .as_ref()
-                            .map(|id| id.to_string())
-                            .unwrap_or_else(|| "home".to_string())
-                    } else {
-                        "home".to_string()
-                    }
+                let channel = match aura_app::ui::workflows::messaging::current_home_channel_id(
+                    ctx.app_core_raw(),
+                )
+                .await
+                {
+                    Ok(channel) => channel,
+                    Err(_) => "home:home".to_string(),
                 };
-
-                let channel = format!("home:{home_id}");
-                let home_id_clone = home_id.clone();
+                let home_id_clone = channel.strip_prefix("home:").unwrap_or("home").to_string();
 
                 let trimmed = content_clone.trim_start();
                 if trimmed.starts_with("/") {
@@ -1055,7 +1044,7 @@ impl HomeCallbacks {
 
                             match effect {
                                 EffectCommand::ListParticipants { channel } => {
-                                    match aura_app::workflows::query::list_participants(
+                                    match aura_app::ui::workflows::query::list_participants(
                                         ctx.app_core_raw(),
                                         &channel,
                                     )
@@ -1079,7 +1068,7 @@ impl HomeCallbacks {
                                     }
                                 }
                                 EffectCommand::GetUserInfo { target } => {
-                                    match aura_app::workflows::query::get_user_info(
+                                    match aura_app::ui::workflows::query::get_user_info(
                                         ctx.app_core_raw(),
                                         &target,
                                     )
@@ -1328,7 +1317,7 @@ impl CallbackRegistry {
     pub fn new(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
-        app_core: Arc<async_lock::RwLock<aura_app::AppCore>>,
+        app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
     ) -> Self {
         Self {
             chat: ChatCallbacks::new(ctx.clone(), tx.clone(), app_core),

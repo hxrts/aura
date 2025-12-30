@@ -3,19 +3,19 @@
 //! Handlers for recovery operations including starting recovery ceremonies
 //! and approving recovery requests as a guardian.
 //!
-//! This module delegates to portable workflows in aura_app::workflows::recovery
+//! This module delegates to portable workflows in aura_app::ui::workflows::recovery
 //! and adds terminal-specific response formatting.
 
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::recovery::{approve_recovery, get_recovery_status};
+pub use aura_app::ui::workflows::recovery::{approve_recovery, get_recovery_status, start_recovery_from_state};
 
 /// Handle recovery commands
 pub async fn handle_recovery(
@@ -24,67 +24,13 @@ pub async fn handle_recovery(
 ) -> Option<OpResult> {
     match command {
         EffectCommand::StartRecovery => {
-            // StartRecovery initiates the recovery ceremony flow.
-            // In the full implementation, this would:
-            // 1. Read current guardians from RECOVERY_SIGNAL
-            // 2. Use the existing guardian set and threshold
-            // 3. Start the ceremony via RuntimeBridge
-            //
-            // For now, we check if runtime is available and report status.
-            let runtime = {
-                let core = app_core.read().await;
-                core.runtime().cloned()
-            };
-
-            match runtime {
-                Some(rt) => {
-                    // Get current recovery state to check guardians
-                    match get_recovery_status(app_core).await {
-                        Ok(state) => {
-                            if state.guardians.is_empty() {
-                                Some(Err(OpError::Failed(
-                                    "No guardians configured. Add guardians in Threshold settings first."
-                                        .to_string(),
-                                )))
-                            } else if state.active_recovery.is_some() {
-                                Some(Err(OpError::Failed(
-                                    "Recovery already in progress".to_string(),
-                                )))
-                            } else {
-                                // Initiate guardian ceremony with existing guardians
-                                let guardian_ids: Vec<String> =
-                                    state.guardians.iter().map(|g| g.id.to_string()).collect();
-                                let threshold =
-                                    aura_core::types::FrostThreshold::new(state.threshold as u16)
-                                        .unwrap_or_else(|_| {
-                                            aura_core::types::FrostThreshold::new(2).unwrap()
-                                        });
-
-                                match rt
-                                    .initiate_guardian_ceremony(
-                                        threshold,
-                                        guardian_ids.len() as u16,
-                                        &guardian_ids,
-                                    )
-                                    .await
-                                {
-                                    Ok(ceremony_id) => Some(Ok(OpResponse::Data(format!(
-                                        "Recovery started: {ceremony_id}"
-                                    )))),
-                                    Err(e) => Some(Err(OpError::Failed(format!(
-                                        "Failed to start recovery: {e}"
-                                    )))),
-                                }
-                            }
-                        }
-                        Err(e) => Some(Err(OpError::Failed(format!(
-                            "Failed to get recovery status: {e}"
-                        )))),
-                    }
-                }
-                None => Some(Err(OpError::Failed(
-                    "Runtime bridge not available".to_string(),
-                ))),
+            match start_recovery_from_state(app_core).await {
+                Ok(ceremony_id) => Some(Ok(OpResponse::Data(format!(
+                    "Recovery started: {ceremony_id}"
+                )))),
+                Err(e) => Some(Err(OpError::Failed(format!(
+                    "Failed to start recovery: {e}"
+                )))),
             }
         }
 

@@ -2,19 +2,19 @@
 //!
 //! Handlers for ListParticipants, GetUserInfo.
 //!
-//! This module delegates to portable workflows in aura_app::workflows::query
+//! This module delegates to portable workflows in aura_app::ui::workflows::query
 //! and adds terminal-specific response formatting.
 
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::workflows::query::{get_user_info, list_participants};
+pub use aura_app::ui::workflows::query::{get_user_info, list_participants};
 
 /// Handle query commands
 pub async fn handle_query(

@@ -41,6 +41,7 @@
 
 use aura_core::effects::query::QuerySignalEffects;
 use aura_core::effects::reactive::Signal;
+use aura_core::identifiers::{AuthorityId, DeviceId};
 use std::sync::LazyLock;
 
 use crate::errors::AppError;
@@ -227,13 +228,35 @@ pub enum NetworkStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredPeer {
     /// Authority ID of the peer
-    pub authority_id: String,
+    pub authority_id: AuthorityId,
     /// Network address (empty for rendezvous, IP:port for LAN)
     pub address: String,
-    /// Discovery method ("rendezvous" or "LAN")
-    pub method: String,
+    /// Discovery method
+    pub method: DiscoveredPeerMethod,
     /// Whether this peer has been invited already
     pub invited: bool,
+}
+
+/// Discovery method for peers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscoveredPeerMethod {
+    Rendezvous,
+    Lan,
+}
+
+impl DiscoveredPeerMethod {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Rendezvous => "rendezvous",
+            Self::Lan => "LAN",
+        }
+    }
+}
+
+impl std::fmt::Display for DiscoveredPeerMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
 /// State of discovered peers for the signal
@@ -249,7 +272,7 @@ pub struct DiscoveredPeersState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceInfo {
     /// Device ID
-    pub id: String,
+    pub id: DeviceId,
     /// Device name/label
     pub name: String,
     /// Whether this is the current device

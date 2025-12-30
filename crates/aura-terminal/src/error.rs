@@ -41,8 +41,8 @@ impl From<aura_agent::AgentError> for TerminalError {
     }
 }
 
-impl From<aura_app::IntentError> for TerminalError {
-    fn from(err: aura_app::IntentError) -> Self {
+impl From<aura_app::ui::types::IntentError> for TerminalError {
+    fn from(err: aura_app::ui::types::IntentError) -> Self {
         TerminalError::Operation(err.to_string())
     }
 }

@@ -52,11 +52,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::signal_defs::{
-    ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, ERROR_SIGNAL, SYNC_STATUS_SIGNAL,
-};
-use aura_app::AppCore;
-use aura_app::{AppError, AuthFailure, NetworkErrorCode};
+use aura_app::ui::signals::{ConnectionStatus, SyncStatus, ERROR_SIGNAL};
+use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::ReactiveEffects;
 
 pub use types::{OpError, OpResponse, OpResult};
@@ -171,16 +168,12 @@ impl OperationalHandler {
 
     /// Update connection status signal
     pub async fn set_connection_status(&self, status: ConnectionStatus) {
-        if let Some(core) = self.app_core.try_read() {
-            let _ = core.emit(&*CONNECTION_STATUS_SIGNAL, status).await;
-        }
+        let _ = aura_app::ui::workflows::network::set_connection_status(&self.app_core, status).await;
     }
 
     /// Update sync status signal
     pub async fn set_sync_status(&self, status: SyncStatus) {
-        if let Some(core) = self.app_core.try_read() {
-            let _ = core.emit(&*SYNC_STATUS_SIGNAL, status).await;
-        }
+        let _ = aura_app::ui::workflows::sync::set_sync_status(&self.app_core, status).await;
     }
 
     /// Emit an error to the error signal
@@ -256,7 +249,7 @@ fn map_terminal_error(err: &TerminalError) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_app::AppConfig;
+    use aura_app::ui::types::AppConfig;
 
     async fn test_app_core() -> Arc<RwLock<AppCore>> {
         let mut core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");

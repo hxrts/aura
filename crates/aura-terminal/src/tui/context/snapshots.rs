@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use crate::tui::hooks::{
     ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot, HomeSnapshot,
@@ -35,7 +35,7 @@ impl SnapshotHelper {
     }
 
     /// Get a best-effort `StateSnapshot` (returns `None` if lock is contended).
-    pub fn try_state_snapshot(&self) -> Option<aura_app::StateSnapshot> {
+    pub fn try_state_snapshot(&self) -> Option<aura_app::ui::types::StateSnapshot> {
         self.app_core.try_read().map(|core| core.snapshot())
     }
 }
@@ -86,7 +86,7 @@ impl SnapshotHelper {
                         r.progress,
                         !matches!(
                             r.status,
-                            aura_app::views::recovery::RecoveryProcessStatus::Idle
+                            aura_app::ui::types::recovery::RecoveryProcessStatus::Idle
                         ),
                     )
                 })
@@ -123,7 +123,7 @@ impl SnapshotHelper {
     }
 
     pub fn snapshot_home(&self) -> HomeSnapshot {
-        use aura_app::views::home::ResidentRole;
+        use aura_app::ui::types::home::ResidentRole;
 
         if let Some(snapshot) = self.try_state_snapshot() {
             let home_state = snapshot.homes.current_home().cloned();
@@ -153,7 +153,7 @@ impl SnapshotHelper {
             let home_id = snapshot.neighborhood.home_home_id.clone();
             let home_name = snapshot.neighborhood.home_name.clone();
             let position = snapshot.neighborhood.position.unwrap_or_else(|| {
-                aura_app::views::neighborhood::TraversalPosition {
+                aura_app::ui::types::neighborhood::TraversalPosition {
                     current_home_id: home_id.clone(),
                     current_home_name: home_name.clone(),
                     depth: 0,
@@ -189,7 +189,7 @@ impl Default for SnapshotHelper {
     fn default() -> Self {
         // Default is only used in tests that construct helpers directly; it is
         // not valid for production.
-        let core = aura_app::AppCore::new(aura_app::AppConfig::default())
+        let core = aura_app::ui::types::AppCore::new(aura_app::ui::types::AppConfig::default())
             .expect("Failed to create default AppCore for SnapshotHelper");
         Self::new(Arc::new(RwLock::new(core)), "default-device")
     }

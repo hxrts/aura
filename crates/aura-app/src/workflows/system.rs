@@ -12,7 +12,9 @@ use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuraError;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use crate::workflows::signals::{emit_signal, read_signal};
 
 /// Compute the unified network status from transport and sync state.
 ///
@@ -95,6 +97,16 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     // Refresh discovered peers
     let _ = super::network::get_discovered_peers(app_core).await;
 
+    // Refresh connection and network status derived from contacts.
+    let _ = refresh_connection_status_from_contacts(app_core).await;
+
+    Ok(())
+}
+
+/// Refresh connection + network status derived from CONTACTS_SIGNAL.
+pub async fn refresh_connection_status_from_contacts(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
     // Refresh connection status + settings from runtime.
     //
     // ConnectionStatus is intended to represent "how many of my contacts are online",
@@ -102,12 +114,12 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
     let (runtime, mut contacts_state) = {
         let core = app_core.read().await;
         let runtime = core.runtime().cloned();
-        let contacts_state = match core.read(&*CONTACTS_SIGNAL).await {
-            Ok(state) => state,
-            Err(_) => core.snapshot().contacts.clone(),
-        };
-        (runtime, contacts_state)
+        let fallback = core.snapshot().contacts.clone();
+        (runtime, fallback)
     };
+    if let Ok(state) = read_signal(app_core, &*CONTACTS_SIGNAL, "CONTACTS_SIGNAL").await {
+        contacts_state = state;
+    }
 
     if let Some(runtime) = runtime {
         let mut online_contacts = 0usize;
@@ -141,21 +153,110 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
         };
         let network_status = compute_network_status(true, online_contacts, &sync_status);
 
-        let core = app_core.read().await;
-        let _ = core.emit(&*CONTACTS_SIGNAL, contacts_state).await;
-        let _ = core.emit(&*CONNECTION_STATUS_SIGNAL, connection).await;
-        let _ = core.emit(&*NETWORK_STATUS_SIGNAL, network_status).await;
-        let _ = core
-            .emit(&*TRANSPORT_PEERS_SIGNAL, sync_status.connected_peers)
-            .await;
+        let _ = emit_signal(
+            app_core,
+            &*CONTACTS_SIGNAL,
+            contacts_state,
+            "CONTACTS_SIGNAL",
+        )
+        .await;
+        let _ = emit_signal(
+            app_core,
+            &*CONNECTION_STATUS_SIGNAL,
+            connection,
+            "CONNECTION_STATUS_SIGNAL",
+        )
+        .await;
+        let _ = emit_signal(
+            app_core,
+            &*NETWORK_STATUS_SIGNAL,
+            network_status,
+            "NETWORK_STATUS_SIGNAL",
+        )
+        .await;
+        let _ = emit_signal(
+            app_core,
+            &*TRANSPORT_PEERS_SIGNAL,
+            sync_status.connected_peers,
+            "TRANSPORT_PEERS_SIGNAL",
+        )
+        .await;
     } else {
         // No runtime - emit disconnected status
-        let core = app_core.read().await;
-        let _ = core
-            .emit(&*NETWORK_STATUS_SIGNAL, NetworkStatus::Disconnected)
-            .await;
-        let _ = core.emit(&*TRANSPORT_PEERS_SIGNAL, 0usize).await;
+        let _ = emit_signal(
+            app_core,
+            &*NETWORK_STATUS_SIGNAL,
+            NetworkStatus::Disconnected,
+            "NETWORK_STATUS_SIGNAL",
+        )
+        .await;
+        let _ =
+            emit_signal(app_core, &*TRANSPORT_PEERS_SIGNAL, 0usize, "TRANSPORT_PEERS_SIGNAL").await;
     }
+
+    Ok(())
+}
+
+/// Install a background hook that refreshes derived account state when contacts change.
+///
+/// Frontends should not manage the "contacts → refresh account" coupling themselves.
+/// This hook centralizes the derivation so UI layers can stay thin.
+pub async fn install_contacts_refresh_hook(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<(), AuraError> {
+    let (reactive, spawner, should_install) = {
+        let mut core = app_core.write().await;
+        let should_install = core.mark_contacts_refresh_hook_installed();
+        let reactive = core.reactive().clone();
+        let spawner = core.runtime().and_then(|runtime| runtime.task_spawner());
+        (reactive, spawner, should_install)
+    };
+
+    if !should_install {
+        return Ok(());
+    }
+
+    let Some(spawner) = spawner else {
+        return Ok(());
+    };
+
+    let app_core = Arc::clone(app_core);
+    let refresh_in_flight = Arc::new(AtomicBool::new(false));
+    let refresh_pending = Arc::new(AtomicBool::new(false));
+    let refresh_spawner = spawner.clone();
+
+    spawner.spawn_cancellable(
+        Box::pin(async move {
+            let mut stream = reactive.subscribe(&*CONTACTS_SIGNAL);
+            loop {
+                let Ok(_) = stream.recv().await else {
+                    break;
+                };
+
+                if refresh_in_flight.swap(true, Ordering::SeqCst) {
+                    refresh_pending.store(true, Ordering::SeqCst);
+                    continue;
+                }
+
+                let refresh_app_core = app_core.clone();
+                let refresh_in_flight = refresh_in_flight.clone();
+                let refresh_pending = refresh_pending.clone();
+                refresh_spawner.spawn(Box::pin(async move {
+                    loop {
+                        let _ = refresh_connection_status_from_contacts(&refresh_app_core).await;
+
+                        if refresh_pending.swap(false, Ordering::SeqCst) {
+                            continue;
+                        }
+
+                        refresh_in_flight.store(false, Ordering::SeqCst);
+                        break;
+                    }
+                }));
+            }
+        }),
+        spawner.cancellation_token(),
+    );
 
     Ok(())
 }

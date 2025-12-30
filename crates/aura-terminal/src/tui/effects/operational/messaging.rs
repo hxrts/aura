@@ -1,11 +1,11 @@
 //! Messaging command handlers - TUI Operational Layer
 //!
 //! This module provides TUI-specific messaging operation handling.
-//! Business logic has been moved to `aura_app::workflows::messaging`.
+//! Business logic has been moved to `aura_app::ui::workflows::messaging`.
 //!
 //! ## Architecture
 //!
-//! - **Business Logic**: `aura_app::workflows::messaging` (portable)
+//! - **Business Logic**: `aura_app::ui::workflows::messaging` (portable)
 //! - **TUI Integration**: This module (operational layer)
 //!
 //! Handlers for SendMessage, CreateChannel, SendDirectMessage, StartDirectChat, SendAction, InviteUser.
@@ -13,13 +13,13 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflow functions for convenience
-pub use aura_app::workflows::messaging::{
+pub use aura_app::ui::workflows::messaging::{
     close_channel, create_channel, invite_user_to_channel, join_channel, leave_channel,
     send_action, send_direct_message, send_message, set_topic, start_direct_chat,
 };
@@ -27,7 +27,7 @@ pub use aura_app::workflows::messaging::{
 /// Handle messaging commands
 ///
 /// This is now a thin wrapper around workflow functions.
-/// Business logic lives in aura_app::workflows::messaging.
+/// Business logic lives in aura_app::ui::workflows::messaging.
 pub async fn handle_messaging(
     command: &EffectCommand,
     app_core: &Arc<RwLock<AppCore>>,

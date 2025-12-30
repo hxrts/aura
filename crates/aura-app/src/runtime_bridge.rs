@@ -286,7 +286,7 @@ pub struct SettingsBridgeState {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BridgeDeviceInfo {
     /// Stable device identifier
-    pub id: String,
+    pub id: DeviceId,
     /// Human-friendly label (best effort)
     pub name: String,
     /// Whether this is the current device

@@ -8,7 +8,7 @@
 //! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
 //!
-//! Uses `aura_app::signal_defs::RECOVERY_SIGNAL` with `ReactiveEffects::subscribe()`.
+//! Uses `aura_app::ui::signals::RECOVERY_SIGNAL` with `ReactiveEffects::subscribe()`.
 //!
 //! ## Pure View Component
 //!
@@ -17,7 +17,7 @@
 
 use iocraft::prelude::*;
 
-use aura_app::signal_defs::RECOVERY_SIGNAL;
+use aura_app::ui::signals::RECOVERY_SIGNAL;
 
 use crate::tui::callbacks::{ApprovalCallback, RecoveryCallback};
 use crate::tui::components::{EmptyState, KeyValue, TabBar, TabItem};
@@ -418,41 +418,41 @@ pub struct RecoveryScreenProps {
 }
 
 /// Convert aura-app guardian status to TUI guardian status
-fn convert_guardian_status(status: aura_app::views::GuardianStatus) -> GuardianStatus {
+fn convert_guardian_status(status: aura_app::ui::types::GuardianStatus) -> GuardianStatus {
     match status {
-        aura_app::views::GuardianStatus::Active => GuardianStatus::Active,
-        aura_app::views::GuardianStatus::Pending => GuardianStatus::Pending,
-        aura_app::views::GuardianStatus::Revoked => GuardianStatus::Removed,
-        aura_app::views::GuardianStatus::Offline => GuardianStatus::Offline,
+        aura_app::ui::types::GuardianStatus::Active => GuardianStatus::Active,
+        aura_app::ui::types::GuardianStatus::Pending => GuardianStatus::Pending,
+        aura_app::ui::types::GuardianStatus::Revoked => GuardianStatus::Removed,
+        aura_app::ui::types::GuardianStatus::Offline => GuardianStatus::Offline,
     }
 }
 
 /// Convert aura-app guardian to TUI guardian
-fn convert_guardian(g: &aura_app::views::Guardian) -> Guardian {
+fn convert_guardian(g: &aura_app::ui::types::Guardian) -> Guardian {
     Guardian {
         id: g.id.to_string(),
         name: g.name.clone(),
         status: convert_guardian_status(g.status),
-        has_share: g.status == aura_app::views::GuardianStatus::Active,
+        has_share: g.status == aura_app::ui::types::GuardianStatus::Active,
     }
 }
 
 /// Convert aura-app recovery process status to TUI recovery state
-fn convert_recovery_state(status: aura_app::views::RecoveryProcessStatus) -> RecoveryState {
+fn convert_recovery_state(status: aura_app::ui::types::RecoveryProcessStatus) -> RecoveryState {
     match status {
-        aura_app::views::RecoveryProcessStatus::Idle => RecoveryState::None,
-        aura_app::views::RecoveryProcessStatus::Initiated => RecoveryState::Initiated,
-        aura_app::views::RecoveryProcessStatus::WaitingForApprovals => RecoveryState::InProgress,
-        aura_app::views::RecoveryProcessStatus::Approved => RecoveryState::ThresholdMet,
-        aura_app::views::RecoveryProcessStatus::Completed => RecoveryState::Completed,
-        aura_app::views::RecoveryProcessStatus::Failed => RecoveryState::Failed,
+        aura_app::ui::types::RecoveryProcessStatus::Idle => RecoveryState::None,
+        aura_app::ui::types::RecoveryProcessStatus::Initiated => RecoveryState::Initiated,
+        aura_app::ui::types::RecoveryProcessStatus::WaitingForApprovals => RecoveryState::InProgress,
+        aura_app::ui::types::RecoveryProcessStatus::Approved => RecoveryState::ThresholdMet,
+        aura_app::ui::types::RecoveryProcessStatus::Completed => RecoveryState::Completed,
+        aura_app::ui::types::RecoveryProcessStatus::Failed => RecoveryState::Failed,
     }
 }
 
 /// Convert aura-app recovery state to TUI recovery status
 fn convert_recovery_status(
-    state: &aura_app::views::RecoveryState,
-    guardians: &[aura_app::views::Guardian],
+    state: &aura_app::ui::types::RecoveryState,
+    guardians: &[aura_app::ui::types::Guardian],
 ) -> RecoveryStatus {
     match &state.active_recovery {
         Some(process) => {
@@ -521,7 +521,7 @@ pub fn RecoveryScreen(
         let app_core = app_ctx.app_core.clone();
         async move {
             // Helper closure to convert RecoveryState to TUI types
-            let convert_state = |recovery_state: &aura_app::views::RecoveryState| {
+            let convert_state = |recovery_state: &aura_app::ui::types::RecoveryState| {
                 let guardians: Vec<Guardian> = recovery_state
                     .guardians
                     .iter()

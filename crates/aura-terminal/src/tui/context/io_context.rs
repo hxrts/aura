@@ -29,11 +29,11 @@ cfg_if! {
         use aura_agent::AuraAgent;
     }
 }
-use aura_app::signal_defs::{
+use aura_app::ui::signals::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
 
@@ -383,7 +383,7 @@ impl IoContext {
         }
 
         let app_core =
-            AppCore::new(aura_app::AppConfig::default()).expect("Failed to create default AppCore");
+            AppCore::new(aura_app::ui::types::AppConfig::default()).expect("Failed to create default AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
         let app_core = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -407,7 +407,7 @@ impl IoContext {
     #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
     pub async fn with_defaults_async() -> Self {
         let app_core =
-            AppCore::new(aura_app::AppConfig::default()).expect("Failed to create default AppCore");
+            AppCore::new(aura_app::ui::types::AppConfig::default()).expect("Failed to create default AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
         let app_core = InitializedAppCore::new(app_core)
             .await
@@ -857,7 +857,7 @@ impl IoContext {
             return state
                 .peers
                 .iter()
-                .map(|p| (p.authority_id.clone(), p.address.clone()))
+                .map(|p| (p.authority_id.to_string(), p.address.clone()))
                 .collect();
         }
         vec![]
@@ -992,7 +992,7 @@ impl IoContext {
     // Capability checking (best-effort, snapshot-based)
     // =========================================================================
 
-    pub fn get_current_role(&self) -> Option<aura_app::views::home::ResidentRole> {
+    pub fn get_current_role(&self) -> Option<aura_app::ui::types::home::ResidentRole> {
         let snapshot = self.snapshots.try_state_snapshot()?;
         let home_state = snapshot.homes.current_home()?;
         Some(home_state.my_role)
@@ -1000,20 +1000,17 @@ impl IoContext {
 
     pub fn has_capability(&self, capability: &crate::tui::commands::CommandCapability) -> bool {
         use crate::tui::commands::CommandCapability;
-        use aura_app::views::home::ResidentRole;
+        use aura_app::ui::types::home::ResidentRole;
 
         if matches!(capability, CommandCapability::None) {
             return true;
         }
 
-        let role = match self.get_current_role() {
-            Some(r) => r,
-            None => {
-                return matches!(
-                    capability,
-                    CommandCapability::SendDm | CommandCapability::UpdateContact
-                );
-            }
+        let Some(role) = self.get_current_role() else {
+            return matches!(
+                capability,
+                CommandCapability::SendDm | CommandCapability::UpdateContact
+            );
         };
 
         match capability {
@@ -1042,7 +1039,7 @@ impl IoContext {
     /// remains the source of truth.
     pub fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
         use crate::tui::effects::CommandAuthorizationLevel;
-        use aura_app::views::home::ResidentRole;
+        use aura_app::ui::types::home::ResidentRole;
 
         let level = command.authorization_level();
         match level {

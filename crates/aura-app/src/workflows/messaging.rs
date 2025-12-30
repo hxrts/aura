@@ -4,7 +4,8 @@
 //! Uses typed reactive signals for state reads/writes.
 
 use crate::{
-    signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL},
+    signal_defs::HOMES_SIGNAL,
+    thresholds::{default_channel_threshold, normalize_channel_threshold},
     views::chat::{Channel, ChannelType, ChatState, Message},
     AppCore,
 };
@@ -12,18 +13,44 @@ use async_lock::RwLock;
 use aura_chat::ChatFact;
 use aura_core::{
     crypto::hash::hash,
-    effects::{
-        amp::{
-            ChannelCloseParams, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
-            ChannelSendParams,
-        },
-        reactive::ReactiveEffects,
+    effects::amp::{
+        ChannelCloseParams, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
+        ChannelSendParams,
     },
     identifiers::{AuthorityId, ChannelId, ContextId},
-    AuraError, EffectContext,
+    AuraError,
 };
 use aura_journal::DomainFact;
+use crate::workflows::runtime::require_runtime;
+use crate::workflows::context::current_home_context_or_fallback;
+use crate::workflows::signals::read_signal;
 use std::sync::Arc;
+
+/// Reference to a channel identifier or name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelRef {
+    /// Canonical channel id.
+    Id(ChannelId),
+    /// Human-friendly name (hashed deterministically).
+    Name(String),
+}
+
+impl ChannelRef {
+    pub fn parse(input: &str) -> Self {
+        let normalized = normalize_channel_str(input);
+        match normalized.parse::<ChannelId>() {
+            Ok(id) => ChannelRef::Id(id),
+            Err(_) => ChannelRef::Name(normalized.to_string()),
+        }
+    }
+
+    pub fn to_channel_id(&self) -> ChannelId {
+        match self {
+            ChannelRef::Id(id) => *id,
+            ChannelRef::Name(name) => ChannelId::from_bytes(hash(name.to_lowercase().as_bytes())),
+        }
+    }
+}
 
 /// Create a deterministic ChannelId from a DM channel descriptor string
 fn dm_channel_id(target: &str) -> ChannelId {
@@ -35,43 +62,25 @@ fn normalize_channel_str(channel: &str) -> &str {
     channel.strip_prefix("home:").unwrap_or(channel)
 }
 
-/// Parse a channel string into a ChannelId.
-///
-/// Accepts either:
-/// - `channel:<hex>` (canonical `ChannelId` display format)
-/// - a human-friendly name (hashed deterministically, case-insensitive)
-fn parse_channel_id(channel: &str) -> ChannelId {
-    let channel = normalize_channel_str(channel);
-    channel
-        .parse::<ChannelId>()
-        .unwrap_or_else(|_| ChannelId::from_bytes(hash(channel.to_lowercase().as_bytes())))
+/// Parse a channel string into a ChannelRef.
+fn parse_channel_ref(channel: &str) -> ChannelRef {
+    ChannelRef::parse(channel)
 }
 
-fn parse_context_id(context_id: &str) -> Result<ContextId, AuraError> {
-    let trimmed = context_id.trim();
-    if trimmed.is_empty() {
-        return Err(AuraError::not_found("Home context not available"));
-    }
-
-    trimmed
-        .parse::<ContextId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid context ID: {}", trimmed)))
+fn channel_id_from_input(channel: &str) -> ChannelId {
+    parse_channel_ref(channel).to_channel_id()
 }
 
-async fn current_home_context_id(app_core: &Arc<RwLock<AppCore>>) -> Result<ContextId, AuraError> {
-    let core = app_core.read().await;
-    let homes = core.views().get_homes();
-    if let Some(home_state) = homes.current_home() {
-        return parse_context_id(&home_state.context_id);
-    }
+/// Get current home channel id (e.g., "home:<id>") with fallback.
+pub async fn current_home_channel_id(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<String, AuraError> {
+    let homes = read_signal(app_core, &*HOMES_SIGNAL, "HOMES_SIGNAL").await.ok();
+    let home_id = homes
+        .and_then(|homes| homes.current_home_id.as_ref().map(|id| id.to_string()))
+        .unwrap_or_else(|| "home".to_string());
 
-    // Fallback: when no home is selected yet (common in demos/tests), use a
-    // deterministic per-authority context id so messaging can still function.
-    if let Some(runtime) = core.runtime() {
-        return Ok(EffectContext::with_authority(runtime.authority_id()).context_id());
-    }
-
-    Err(AuraError::not_found("No current home selected"))
+    Ok(format!("home:{home_id}"))
 }
 
 async fn context_id_for_channel(
@@ -82,14 +91,14 @@ async fn context_id_for_channel(
         let core = app_core.read().await;
         let homes = core.views().get_homes();
         if let Some(home_state) = homes.home_state(&channel_id) {
-            return parse_context_id(&home_state.context_id);
+            return Ok(home_state.context_id);
         }
     }
 
     // Not all channels correspond to a "home" entry in the homes view yet
     // (e.g. AMP-created channels in demos/tests). Fall back to the currently
     // selected home context (or per-authority demo context).
-    current_home_context_id(app_core).await
+    current_home_context_or_fallback(app_core).await
 }
 
 /// Send a direct message to a contact
@@ -119,11 +128,10 @@ pub async fn send_direct_message(
 ) -> Result<String, AuraError> {
     let channel_id = dm_channel_id(target);
 
-    let core = app_core.read().await;
-    let mut chat_state = core
-        .read(&*CHAT_SIGNAL)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+    let mut chat_state = {
+        let core = app_core.read().await;
+        core.snapshot().chat
+    };
 
     let now = timestamp_ms;
 
@@ -164,9 +172,10 @@ pub async fn send_direct_message(
     // Apply message to state
     chat_state.apply_message(channel_id, message);
 
-    core.emit(&*CHAT_SIGNAL, chat_state)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
+    {
+        let mut core = app_core.write().await;
+        core.views_mut().set_chat(chat_state);
+    }
 
     Ok(channel_id.to_string())
 }
@@ -188,14 +197,11 @@ pub async fn create_channel(
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let context_id = current_home_context_id(app_core).await?;
-    let channel_hint = (!name.trim().is_empty()).then(|| parse_channel_id(name));
+    let context_id = current_home_context_or_fallback(app_core).await?;
+    let channel_hint = (!name.trim().is_empty()).then(|| channel_id_from_input(name));
     let params = ChannelCreateParams {
         context: context_id,
         channel: channel_hint,
@@ -245,11 +251,10 @@ pub async fn create_channel(
     }
 
     // Update UI state for responsiveness; reactive reductions may also update this later.
-    let core = app_core.read().await;
-    let mut chat_state = core
-        .read(&*CHAT_SIGNAL)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+    let mut chat_state = {
+        let core = app_core.read().await;
+        core.snapshot().chat
+    };
 
     let channel = Channel {
         id: channel_id,
@@ -267,21 +272,19 @@ pub async fn create_channel(
     chat_state.add_channel(channel);
     chat_state.selected_channel_id = Some(channel_id);
 
-    core.emit(&*CHAT_SIGNAL, chat_state)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
+    {
+        let mut core = app_core.write().await;
+        core.views_mut().set_chat(chat_state);
+    }
 
     // Create channel invitations for selected members (if any).
     let mut invitation_ids = Vec::new();
     let total_n = (members.len() + 1) as u8;
-    let f = total_n.saturating_sub(1) / 3;
-    let default_k = (2 * f) + 1;
     let threshold_k = if threshold_k == 0 {
-        default_k
+        default_channel_threshold(total_n)
     } else {
-        threshold_k
+        normalize_channel_threshold(threshold_k, total_n)
     };
-    let threshold_k = threshold_k.clamp(1, total_n.max(1));
     let invitation_message = Some(format!(
         "Group threshold: {}-of-{} (keys rotate after everyone accepts)",
         threshold_k, total_n
@@ -315,14 +318,11 @@ pub async fn create_channel(
 /// Join an existing channel.
 pub async fn join_channel(app_core: &Arc<RwLock<AppCore>>, channel: &str) -> Result<(), AuraError> {
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let channel_id = parse_channel_id(channel);
-    let context_id = current_home_context_id(app_core).await?;
+    let channel_id = channel_id_from_input(channel);
+    let context_id = current_home_context_or_fallback(app_core).await?;
 
     runtime
         .amp_join_channel(ChannelJoinParams {
@@ -342,14 +342,11 @@ pub async fn leave_channel(
     channel: &str,
 ) -> Result<(), AuraError> {
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let channel_id = parse_channel_id(channel);
-    let context_id = current_home_context_id(app_core).await?;
+    let channel_id = channel_id_from_input(channel);
+    let context_id = current_home_context_or_fallback(app_core).await?;
 
     runtime
         .amp_leave_channel(ChannelLeaveParams {
@@ -373,13 +370,10 @@ pub async fn close_channel(
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let channel_id = parse_channel_id(channel);
+    let channel_id = channel_id_from_input(channel);
     let context_id = context_id_for_channel(app_core, channel_id).await?;
 
     runtime
@@ -413,13 +407,10 @@ pub async fn set_topic(
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
     let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
+        require_runtime(app_core).await?
     };
 
-    let channel_id = parse_channel_id(channel);
+    let channel_id = channel_id_from_input(channel);
     let context_id = context_id_for_channel(app_core, channel_id).await?;
 
     runtime
@@ -444,14 +435,24 @@ pub async fn send_message(
     content: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let channel_ref = parse_channel_ref(channel);
+    send_message_ref(app_core, channel_ref, content, timestamp_ms).await
+}
 
-    let channel_id = parse_channel_id(channel);
+/// Send a message to a channel by reference.
+pub async fn send_message_ref(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel: ChannelRef,
+    content: &str,
+    timestamp_ms: u64,
+) -> Result<String, AuraError> {
+    let runtime = require_runtime(app_core).await?;
+
+    let channel_id = channel.to_channel_id();
+    let channel_label = match &channel {
+        ChannelRef::Id(id) => id.to_string(),
+        ChannelRef::Name(name) => name.clone(),
+    };
     let context_id = context_id_for_channel(app_core, channel_id).await?;
 
     let cipher = runtime
@@ -484,16 +485,15 @@ pub async fn send_message(
         .map_err(|e| AuraError::agent(format!("Failed to persist message: {}", e)))?;
 
     // Update UI state for responsiveness.
-    let core = app_core.read().await;
-    let mut chat_state = core
-        .read(&*CHAT_SIGNAL)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+    let mut chat_state = {
+        let core = app_core.read().await;
+        core.snapshot().chat
+    };
 
     if !chat_state.channels.iter().any(|c| c.id == channel_id) {
         chat_state.add_channel(Channel {
             id: channel_id,
-            name: channel.to_string(),
+            name: channel_label,
             topic: None,
             channel_type: ChannelType::Home,
             unread_count: 0,
@@ -521,9 +521,10 @@ pub async fn send_message(
         },
     );
 
-    core.emit(&*CHAT_SIGNAL, chat_state)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
+    {
+        let mut core = app_core.write().await;
+        core.views_mut().set_chat(chat_state);
+    }
 
     Ok(message_id)
 }
@@ -556,11 +557,10 @@ pub async fn start_direct_chat(
         .parse::<AuthorityId>()
         .unwrap_or_else(|_| AuthorityId::default());
 
-    let core = app_core.read().await;
-    let contacts = core
-        .read(&*CONTACTS_SIGNAL)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to read CONTACTS_SIGNAL: {}", e)))?;
+    let contacts = {
+        let core = app_core.read().await;
+        core.snapshot().contacts
+    };
 
     // Get contact name from ViewState for the channel name
     let contact_name = contacts
@@ -586,10 +586,10 @@ pub async fn start_direct_chat(
         last_activity: now,
     };
 
-    let mut chat_state = core
-        .read(&*CHAT_SIGNAL)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))?;
+    let mut chat_state = {
+        let core = app_core.read().await;
+        core.snapshot().chat
+    };
 
     // Add the DM channel (add_channel avoids duplicates)
     chat_state.add_channel(dm_channel);
@@ -597,9 +597,10 @@ pub async fn start_direct_chat(
     // Select this channel (don't clear messages - retain history)
     chat_state.selected_channel_id = Some(channel_id);
 
-    core.emit(&*CHAT_SIGNAL, chat_state)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit CHAT_SIGNAL: {}", e)))?;
+    {
+        let mut core = app_core.write().await;
+        core.views_mut().set_chat(chat_state);
+    }
 
     Ok(channel_id.to_string())
 }
@@ -611,10 +612,21 @@ pub async fn start_direct_chat(
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> Result<ChatState, AuraError> {
     let core = app_core.read().await;
+    Ok(core.snapshot().chat)
+}
 
-    core.read(&*CHAT_SIGNAL)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to read CHAT_SIGNAL: {}", e)))
+/// Select a channel in chat state and emit CHAT_SIGNAL.
+///
+/// **What it does**: Updates selected channel and clears/loads messages in state.
+/// **Signal pattern**: Updates `CHAT_SIGNAL` directly
+pub async fn select_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: Option<ChannelId>,
+) -> Result<(), AuraError> {
+    let mut core = app_core.write().await;
+    core.views_mut().select_channel(channel_id);
+
+    Ok(())
 }
 
 /// Send an action/emote message to a channel
@@ -703,9 +715,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_chat_state_default() {
         let config = AppConfig::default();
-        let mut core = AppCore::new(config).unwrap();
-        core.init_signals().await.unwrap();
+        let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let state = get_chat_state(&app_core).await.unwrap();
         assert!(state.channels.is_empty());

@@ -1,4 +1,9 @@
 //! Screen-specific keyboard handlers
+//!
+//! Event types (KeyEvent) are passed by value following standard
+//! event handler conventions.
+
+#![allow(clippy::needless_pass_by_value)]
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent};
 

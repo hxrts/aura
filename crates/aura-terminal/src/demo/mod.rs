@@ -36,7 +36,7 @@ use crate::error::TerminalResult;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
-use aura_recovery::guardian_setup::GuardianAcceptance;
+use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
@@ -80,6 +80,15 @@ pub enum AgentCapability {
         /// The context this agent witnesses for
         context_id: ContextId,
     },
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GuardianAcceptance {
+    guardian_id: AuthorityId,
+    setup_id: String,
+    accepted: bool,
+    public_key: Vec<u8>,
+    timestamp: TimeStamp,
 }
 
 /// Events that flow between agents and the demo system
@@ -1058,11 +1067,11 @@ impl SimulatedBridge {
                         topic: topic.clone(),
                     };
                     if let Ok(channel_id) = amp.create_channel(params).await {
-                        let channel = aura_app::views::chat::Channel {
+                        let channel = aura_app::ui::types::chat::Channel {
                             id: channel_id,
                             name: name.clone(),
                             topic: topic.clone(),
-                            channel_type: aura_app::ChannelType::Home,
+                            channel_type: aura_app::ui::types::ChannelType::Home,
                             unread_count: 0,
                             is_dm: members.len() == 1,
                             member_count: (members.len() as u32).saturating_add(1),

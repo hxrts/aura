@@ -5,7 +5,8 @@
 
 use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
-use aura_core::{identifiers::AuthorityId, AuraError};
+use aura_core::AuraError;
+use crate::workflows::parse::parse_authority_id;
 use std::sync::Arc;
 
 /// List participants in a channel
@@ -32,7 +33,7 @@ pub async fn list_participants(
     // For DM channels (format: "dm:<contact_id>"), include just that contact
     if channel.starts_with("dm:") {
         let contact_id_str = channel.strip_prefix("dm:").unwrap_or("");
-        if let Ok(contact_id) = contact_id_str.parse::<AuthorityId>() {
+        if let Ok(contact_id) = parse_authority_id(contact_id_str) {
             if let Some(contact) = contacts.contact(&contact_id) {
                 participants.push(get_display_name(contact));
             } else {
@@ -70,7 +71,7 @@ pub async fn get_user_info(
     let contacts = &snapshot.contacts;
 
     // Look up contact by ID (if parseable as AuthorityId)
-    if let Ok(authority_id) = target.parse::<AuthorityId>() {
+    if let Ok(authority_id) = parse_authority_id(target) {
         if let Some(contact) = contacts.contact(&authority_id) {
             return Ok(contact.clone());
         }

@@ -5,14 +5,16 @@
 
 use crate::{
     signal_defs::{
-        ConnectionStatus, DiscoveredPeer, DiscoveredPeersState, CONNECTION_STATUS_SIGNAL,
-        DISCOVERED_PEERS_SIGNAL,
+        ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, DiscoveredPeersState,
+        CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL,
     },
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::{effects::reactive::ReactiveEffects, AuraError};
+use aura_core::{identifiers::AuthorityId, AuraError};
 use std::{collections::HashSet, sync::Arc};
+use crate::workflows::signals::emit_signal;
+use crate::workflows::signals::read_signal_or_default;
 
 /// List all known peers (sync and discovered)
 ///
@@ -27,9 +29,8 @@ pub async fn list_peers(
     app_core: &Arc<RwLock<AppCore>>,
     timestamp_ms: u64,
 ) -> Result<Vec<String>, AuraError> {
-    let app_core_guard = app_core.read().await;
-
     // Get sync peers (DeviceIds)
+    let app_core_guard = app_core.read().await;
     let sync_peers = app_core_guard
         .sync_peers()
         .await
@@ -47,7 +48,7 @@ pub async fn list_peers(
     peer_list.extend(discovered_peers.iter().map(|a| format!("discovered:{}", a)));
 
     // Emit discovered peers signal
-    emit_discovered_peers_signal(&app_core_guard, timestamp_ms).await?;
+    emit_discovered_peers_signal(app_core, timestamp_ms).await?;
 
     Ok(peer_list)
 }
@@ -73,7 +74,7 @@ pub async fn discover_peers(
         .unwrap_or(0);
 
     // Emit discovered peers signal
-    emit_discovered_peers_signal(&app_core_guard, timestamp_ms).await?;
+    emit_discovered_peers_signal(app_core, timestamp_ms).await?;
 
     Ok(discovered_count)
 }
@@ -100,9 +101,26 @@ pub async fn list_lan_peers(
         .collect();
 
     // Emit discovered peers signal
-    emit_discovered_peers_signal(&app_core_guard, timestamp_ms).await?;
+    emit_discovered_peers_signal(app_core, timestamp_ms).await?;
 
     Ok(peer_list)
+}
+
+/// Set connection status directly.
+///
+/// **What it does**: Emits CONNECTION_STATUS_SIGNAL with provided status
+/// **Signal pattern**: Emits CONNECTION_STATUS_SIGNAL
+pub async fn set_connection_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    status: ConnectionStatus,
+) -> Result<(), AuraError> {
+    emit_signal(
+        app_core,
+        &*CONNECTION_STATUS_SIGNAL,
+        status,
+        "CONNECTION_STATUS_SIGNAL",
+    )
+    .await
 }
 
 /// Update connection status with peer count
@@ -120,10 +138,13 @@ pub async fn update_connection_status(
         ConnectionStatus::Online { peer_count }
     };
 
-    let core = app_core.read().await;
-    core.emit(&*CONNECTION_STATUS_SIGNAL, status)
-        .await
-        .map_err(|e| AuraError::internal(format!("Failed to emit connection status: {}", e)))?;
+    emit_signal(
+        app_core,
+        &*CONNECTION_STATUS_SIGNAL,
+        status,
+        "CONNECTION_STATUS_SIGNAL",
+    )
+    .await?;
 
     Ok(())
 }
@@ -134,15 +155,7 @@ pub async fn update_connection_status(
 /// **Returns**: Current discovered peers state
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn get_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> DiscoveredPeersState {
-    let core = app_core.read().await;
-
-    match core.read(&*DISCOVERED_PEERS_SIGNAL).await {
-        Ok(state) => state,
-        Err(_) => DiscoveredPeersState {
-            peers: Vec::new(),
-            last_updated_ms: 0,
-        },
-    }
+    read_signal_or_default(app_core, &*DISCOVERED_PEERS_SIGNAL).await
 }
 
 /// Emit discovered peers signal with current state
@@ -157,16 +170,22 @@ pub async fn get_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> Discovered
 /// * `app_core` - The application core
 /// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
 async fn emit_discovered_peers_signal(
-    app_core: &AppCore,
+    app_core: &Arc<RwLock<AppCore>>,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
+    let app_core_guard = app_core.read().await;
     // Get both rendezvous and LAN peers
-    let rendezvous_peers = app_core.discover_peers().await.unwrap_or_default();
-    let lan_peers = app_core.get_lan_peers().await;
+    let rendezvous_peers = app_core_guard.discover_peers().await.unwrap_or_default();
+    let lan_peers = app_core_guard.get_lan_peers().await;
 
     // Get invited peer IDs to mark peers as invited
-    let invited_ids: HashSet<String> = if let Some(runtime) = app_core.runtime() {
-        runtime.get_invited_peer_ids().await.into_iter().collect()
+    let invited_ids: HashSet<AuthorityId> = if let Some(runtime) = app_core_guard.runtime() {
+        runtime
+            .get_invited_peer_ids()
+            .await
+            .into_iter()
+            .filter_map(|id| id.parse::<AuthorityId>().ok())
+            .collect()
     } else {
         HashSet::new()
     };
@@ -176,24 +195,22 @@ async fn emit_discovered_peers_signal(
 
     // Add rendezvous peers
     for peer in rendezvous_peers {
-        let peer_str = peer.to_string();
         peers.push(DiscoveredPeer {
-            authority_id: peer_str.clone(),
+            authority_id: peer,
             address: String::new(),
-            method: "rendezvous".to_string(),
-            invited: invited_ids.contains(&peer_str),
+            method: DiscoveredPeerMethod::Rendezvous,
+            invited: invited_ids.contains(&peer),
         });
     }
 
     // Add LAN peers (avoiding duplicates)
     for peer in lan_peers {
-        let peer_str = peer.authority_id.to_string();
-        if !peers.iter().any(|p| p.authority_id == peer_str) {
+        if !peers.iter().any(|p| p.authority_id == peer.authority_id) {
             peers.push(DiscoveredPeer {
-                authority_id: peer_str.clone(),
+                authority_id: peer.authority_id,
                 address: peer.address,
-                method: "LAN".to_string(),
-                invited: invited_ids.contains(&peer_str),
+                method: DiscoveredPeerMethod::Lan,
+                invited: invited_ids.contains(&peer.authority_id),
             });
         }
     }
@@ -204,12 +221,13 @@ async fn emit_discovered_peers_signal(
     };
 
     // Emit the signal
-    app_core
-        .emit(&*DISCOVERED_PEERS_SIGNAL, state)
-        .await
-        .map_err(|e| {
-            AuraError::internal(format!("Failed to emit discovered peers signal: {}", e))
-        })?;
+    emit_signal(
+        app_core,
+        &*DISCOVERED_PEERS_SIGNAL,
+        state,
+        "DISCOVERED_PEERS_SIGNAL",
+    )
+    .await?;
 
     Ok(())
 }

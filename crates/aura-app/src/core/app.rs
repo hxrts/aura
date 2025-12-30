@@ -21,6 +21,7 @@ use async_trait::async_trait;
 use aura_core::effects::reactive::{
     ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
 };
+use aura_core::hash;
 use aura_core::identifiers::AuthorityId;
 #[cfg(feature = "signals")]
 use aura_core::identifiers::ChannelId;
@@ -29,6 +30,7 @@ use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::AccountId;
 use serde::{Deserialize, Serialize};
+use async_lock::RwLock;
 use std::sync::Arc;
 
 /// Configuration for creating an AppCore instance
@@ -126,13 +128,21 @@ pub struct AppCore {
     /// Observer registry for callback-based subscriptions (UniFFI/mobile)
     #[cfg(feature = "callbacks")]
     observer_registry: crate::bridge::callback::ObserverRegistry,
+
+    /// Whether the contacts refresh hook has been installed.
+    contacts_refresh_hook_installed: bool,
 }
 
 impl AppCore {
     /// Create a new AppCore instance with the given configuration
     pub fn new(config: AppConfig) -> Result<Self, IntentError> {
-        // Generate a deterministic account ID for reproducibility
-        let account_id = AccountId::new_from_entropy([0u8; 32]);
+        // Derive a deterministic account ID from the local config to avoid collisions.
+        let config_seed = format!(
+            "{}:{}",
+            config.data_dir,
+            config.journal_path.clone().unwrap_or_default()
+        );
+        let account_id = AccountId::from_bytes(hash::hash(config_seed.as_bytes()));
 
         // Create reactive handler for FRP-style state management
         let reactive = ReactiveHandler::new();
@@ -147,6 +157,7 @@ impl AppCore {
             reactive,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
+            contacts_refresh_hook_installed: false,
         })
     }
 
@@ -176,7 +187,11 @@ impl AppCore {
         let mut app = Self::new(config)?;
 
         // Set authority from runtime
-        app.authority = Some(runtime.authority_id());
+        let authority_id = runtime.authority_id();
+        app.authority = Some(authority_id);
+
+        // Align account_id with the runtime authority to avoid constant IDs.
+        app.account_id = AccountId::from_bytes(hash::hash(&authority_id.to_bytes()));
 
         // Share the runtime-owned reactive signal graph so scheduler-driven updates
         // are visible to the frontend via AppCore::read/subscribe.
@@ -205,12 +220,22 @@ impl AppCore {
             reactive,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
+            contacts_refresh_hook_installed: false,
         })
     }
 
     /// Get the account ID
     pub fn account_id(&self) -> AccountId {
         self.account_id
+    }
+
+    pub(crate) fn mark_contacts_refresh_hook_installed(&mut self) -> bool {
+        if self.contacts_refresh_hook_installed {
+            false
+        } else {
+            self.contacts_refresh_hook_installed = true;
+            true
+        }
     }
 
     /// Set the authority (user identity) for this AppCore
@@ -294,6 +319,22 @@ impl AppCore {
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to initialize signals: {}", e))
             })?;
+
+        Ok(())
+    }
+
+    /// Initialize signals and install runtime-backed hooks.
+    pub async fn init_signals_with_hooks(
+        app_core: &Arc<RwLock<AppCore>>,
+    ) -> Result<(), IntentError> {
+        {
+            let mut core = app_core.write().await;
+            core.init_signals().await?;
+        }
+
+        crate::workflows::system::install_contacts_refresh_hook(app_core)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to install hooks: {e}")))?;
 
         Ok(())
     }
@@ -408,6 +449,7 @@ impl AppCore {
     ///
     /// Biscuit authorization is available when integrating with aura-agent runtime
     /// (see docs/109_authorization.md for details).
+    #[cfg(any(feature = "app-internals", test))]
     pub fn dispatch(&mut self, intent: Intent) -> Result<String, IntentError> {
         self.validate_intent(&intent)?;
         Err(IntentError::service_error(
@@ -416,6 +458,7 @@ impl AppCore {
     }
 
     /// Validate an intent before dispatch
+    #[allow(dead_code)]
     fn validate_intent(&self, intent: &Intent) -> Result<(), IntentError> {
         match intent {
             Intent::SendMessage { content, .. } => {
@@ -440,7 +483,7 @@ impl AppCore {
                 }
             }
             Intent::GrantSteward { home_id, target_id } => {
-                use aura_core::identifiers::{AuthorityId, ContextId};
+                use aura_core::identifiers::AuthorityId;
 
                 let snapshot = self.snapshot();
                 let target = target_id.parse::<AuthorityId>().map_err(|_| {
@@ -451,12 +494,7 @@ impl AppCore {
                     .homes
                     .homes
                     .values()
-                    .find(|b| {
-                        b.context_id
-                            .parse::<ContextId>()
-                            .ok()
-                            .is_some_and(|id| id == *home_id)
-                    })
+                    .find(|b| b.context_id == *home_id)
                     .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
 
                 if !home.is_admin() {
@@ -477,7 +515,7 @@ impl AppCore {
                 }
             }
             Intent::RevokeSteward { home_id, target_id } => {
-                use aura_core::identifiers::{AuthorityId, ContextId};
+                use aura_core::identifiers::AuthorityId;
 
                 let snapshot = self.snapshot();
                 let target = target_id.parse::<AuthorityId>().map_err(|_| {
@@ -488,12 +526,7 @@ impl AppCore {
                     .homes
                     .homes
                     .values()
-                    .find(|b| {
-                        b.context_id
-                            .parse::<ContextId>()
-                            .ok()
-                            .is_some_and(|id| id == *home_id)
-                    })
+                    .find(|b| b.context_id == *home_id)
                     .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
 
                 if !home.is_admin() {
@@ -531,7 +564,13 @@ impl AppCore {
     }
 
     /// Get access to the view state for reactive subscriptions
+    #[cfg(feature = "app-internals")]
     pub fn views(&self) -> &ViewState {
+        &self.views
+    }
+
+    #[cfg(not(feature = "app-internals"))]
+    pub(crate) fn views(&self) -> &ViewState {
         &self.views
     }
 

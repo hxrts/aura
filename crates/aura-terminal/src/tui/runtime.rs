@@ -130,7 +130,7 @@ impl<T: TerminalEffects> TuiRuntime<T> {
     ///
     /// Some commands are handled internally (like Render),
     /// others are delegated to callbacks (like Dispatch).
-    pub async fn execute_command(&mut self, command: TuiCommand) -> Result<(), TerminalError> {
+    pub fn execute_command(&mut self, command: TuiCommand) -> Result<(), TerminalError> {
         match command {
             TuiCommand::Exit => {
                 // Exit is handled by the run loop checking should_exit
@@ -179,7 +179,7 @@ impl<T: TerminalEffects> TuiRuntime<T> {
 
         // Execute commands
         for command in commands {
-            self.execute_command(command).await?;
+            self.execute_command(command)?;
         }
 
         // Check if we should exit

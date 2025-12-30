@@ -155,6 +155,7 @@ impl Router {
     }
 
     /// Navigate using an action
+    #[allow(clippy::needless_pass_by_value)] // NavAction is small and matched on
     pub fn navigate(&mut self, action: NavAction) {
         match action {
             NavAction::GoTo(screen) => self.go_to(screen),

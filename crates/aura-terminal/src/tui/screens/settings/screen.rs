@@ -8,7 +8,7 @@
 //! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
 //!
-//! Uses `aura_app::signal_defs::SETTINGS_SIGNAL` with `ReactiveEffects::subscribe()`.
+//! Uses `aura_app::ui::signals::SETTINGS_SIGNAL` with `ReactiveEffects::subscribe()`.
 //!
 //! ## Pure View Component
 //!
@@ -18,7 +18,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use aura_app::signal_defs::{RECOVERY_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::ui::signals::{RECOVERY_SIGNAL, SETTINGS_SIGNAL};
 
 use crate::tui::callbacks::{
     AddDeviceCallback, RemoveDeviceCallback, UpdateDisplayNameCallback, UpdateThresholdCallback,
@@ -111,7 +111,7 @@ pub fn SettingsScreen(
                     .devices
                     .iter()
                     .map(|d| Device {
-                        id: d.id.clone(),
+                        id: d.id.to_string(),
                         name: d.name.clone(),
                         is_current: d.is_current,
                         last_seen: d.last_seen,

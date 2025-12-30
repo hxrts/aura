@@ -3,14 +3,28 @@
 //! This module contains sync operations that are portable across all frontends.
 //! It follows the reactive signal pattern and uses RuntimeBridge for runtime operations.
 
-use crate::{
-    core::IntentError,
-    signal_defs::{SyncStatus, SYNC_STATUS_SIGNAL},
-    AppCore,
-};
+use crate::{signal_defs::{SyncStatus, SYNC_STATUS_SIGNAL}, AppCore};
 use async_lock::RwLock;
-use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::AuraError;
 use std::sync::Arc;
+use crate::workflows::signals::{emit_signal, read_signal_or_default};
+
+/// Set sync status directly.
+///
+/// **What it does**: Emits SYNC_STATUS_SIGNAL with provided status
+/// **Signal pattern**: Emits SYNC_STATUS_SIGNAL
+pub async fn set_sync_status(
+    app_core: &Arc<RwLock<AppCore>>,
+    status: SyncStatus,
+) -> Result<(), AuraError> {
+    emit_signal(
+        app_core,
+        &*SYNC_STATUS_SIGNAL,
+        status,
+        "SYNC_STATUS_SIGNAL",
+    )
+    .await
+}
 
 /// Force synchronization with peers
 ///
@@ -22,41 +36,45 @@ use std::sync::Arc;
 /// 1. Emits SYNC_STATUS_SIGNAL with Syncing state
 /// 2. Triggers sync via RuntimeBridge.trigger_sync()
 /// 3. Emits SYNC_STATUS_SIGNAL with Synced or Failed state
-pub async fn force_sync(app_core: &Arc<RwLock<AppCore>>) -> Result<(), IntentError> {
+pub async fn force_sync(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
     // Update sync status signal to show syncing
-    {
-        let core = app_core.read().await;
-        core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Syncing { progress: 0 })
-            .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to emit sync status: {}", e))
-            })?;
-    }
+    emit_signal(
+        app_core,
+        &*SYNC_STATUS_SIGNAL,
+        SyncStatus::Syncing { progress: 0 },
+        "SYNC_STATUS_SIGNAL",
+    )
+    .await?;
 
     // Trigger sync through RuntimeBridge
     let result = {
         let core = app_core.read().await;
-        core.trigger_sync().await
+        core.trigger_sync()
+            .await
+            .map_err(|e| AuraError::agent(format!("Failed to trigger sync: {e}")))
     };
 
     // Update status based on result
     {
-        let core = app_core.read().await;
         match &result {
             Ok(()) => {
-                core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Synced)
-                    .await
-                    .map_err(|e| {
-                        IntentError::internal_error(format!("Failed to emit sync status: {}", e))
-                    })?;
+                emit_signal(
+                    app_core,
+                    &*SYNC_STATUS_SIGNAL,
+                    SyncStatus::Synced,
+                    "SYNC_STATUS_SIGNAL",
+                )
+                .await?;
             }
             Err(_e) => {
                 // In demo/offline mode, show as synced (local-only)
-                core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Synced)
-                    .await
-                    .map_err(|e| {
-                        IntentError::internal_error(format!("Failed to emit sync status: {}", e))
-                    })?;
+                emit_signal(
+                    app_core,
+                    &*SYNC_STATUS_SIGNAL,
+                    SyncStatus::Synced,
+                    "SYNC_STATUS_SIGNAL",
+                )
+                .await?;
             }
         }
     }
@@ -77,46 +95,45 @@ pub async fn force_sync(app_core: &Arc<RwLock<AppCore>>) -> Result<(), IntentErr
 pub async fn request_state(
     app_core: &Arc<RwLock<AppCore>>,
     peer_id: &str,
-) -> Result<(), IntentError> {
+) -> Result<(), AuraError> {
     // Update sync status signal to show syncing
-    {
-        let core = app_core.read().await;
-        core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Syncing { progress: 0 })
-            .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to emit sync status: {}", e))
-            })?;
-    }
+    emit_signal(
+        app_core,
+        &*SYNC_STATUS_SIGNAL,
+        SyncStatus::Syncing { progress: 0 },
+        "SYNC_STATUS_SIGNAL",
+    )
+    .await?;
 
     // Trigger peer-targeted sync through RuntimeBridge
     let result = {
         let core = app_core.read().await;
-        core.sync_with_peer(peer_id).await
+        core.sync_with_peer(peer_id)
+            .await
+            .map_err(|e| AuraError::agent(format!("Failed to sync with peer: {e}")))
     };
 
     // Update status based on result
-    {
-        let core = app_core.read().await;
-        match &result {
-            Ok(_) => {
-                core.emit(&*SYNC_STATUS_SIGNAL, SyncStatus::Synced)
-                    .await
-                    .map_err(|e| {
-                        IntentError::internal_error(format!("Failed to emit sync status: {}", e))
-                    })?;
-            }
-            Err(e) => {
-                core.emit(
-                    &*SYNC_STATUS_SIGNAL,
-                    SyncStatus::Failed {
-                        message: e.to_string(),
-                    },
-                )
-                .await
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Failed to emit sync status: {}", e))
-                })?;
-            }
+    match &result {
+        Ok(_) => {
+            emit_signal(
+                app_core,
+                &*SYNC_STATUS_SIGNAL,
+                SyncStatus::Synced,
+                "SYNC_STATUS_SIGNAL",
+            )
+            .await?;
+        }
+        Err(e) => {
+            emit_signal(
+                app_core,
+                &*SYNC_STATUS_SIGNAL,
+                SyncStatus::Failed {
+                    message: e.to_string(),
+                },
+                "SYNC_STATUS_SIGNAL",
+            )
+            .await?;
         }
     }
 
@@ -129,12 +146,7 @@ pub async fn request_state(
 /// **Returns**: Current sync status
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn get_sync_status(app_core: &Arc<RwLock<AppCore>>) -> SyncStatus {
-    let core = app_core.read().await;
-
-    match core.read(&*SYNC_STATUS_SIGNAL).await {
-        Ok(status) => status,
-        Err(_) => SyncStatus::Idle,
-    }
+    read_signal_or_default(app_core, &*SYNC_STATUS_SIGNAL).await
 }
 
 #[cfg(test)]

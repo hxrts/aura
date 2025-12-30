@@ -4,6 +4,8 @@
 
 use iocraft::prelude::*;
 
+use aura_app::ui::types::normalize_recovery_threshold;
+
 use crate::tui::components::{modal_header, status_message, ModalHeaderProps, ModalStatus};
 use crate::tui::layout::dim;
 use crate::tui::theme::{Borders, Spacing, Theme};
@@ -51,18 +53,16 @@ impl ThresholdState {
 
     /// Increment threshold k (up to n)
     pub fn increment(&mut self) {
-        if self.threshold_k < self.threshold_n {
-            self.threshold_k += 1;
-            self.error = None;
-        }
+        let next = self.threshold_k.saturating_add(1);
+        self.threshold_k = normalize_recovery_threshold(next, self.threshold_n);
+        self.error = None;
     }
 
     /// Decrement threshold k (down to 1)
     pub fn decrement(&mut self) {
-        if self.threshold_k > 1 {
-            self.threshold_k -= 1;
-            self.error = None;
-        }
+        let next = self.threshold_k.saturating_sub(1);
+        self.threshold_k = normalize_recovery_threshold(next, self.threshold_n);
+        self.error = None;
     }
 
     /// Check if value has changed from original
@@ -73,8 +73,7 @@ impl ThresholdState {
     /// Check if can submit (value changed and valid)
     pub fn can_submit(&self) -> bool {
         self.has_changed()
-            && self.threshold_k >= 1
-            && self.threshold_k <= self.threshold_n
+            && self.threshold_k == normalize_recovery_threshold(self.threshold_k, self.threshold_n)
             && !self.submitting
     }
 

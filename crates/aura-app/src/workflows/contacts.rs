@@ -10,6 +10,7 @@ use aura_core::AuraError;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
 use std::sync::Arc;
+use crate::workflows::runtime::require_runtime;
 
 /// Update (or clear) a contact's nickname.
 ///
@@ -21,12 +22,7 @@ pub async fn update_contact_nickname(
     nickname: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     let target = contact_id
         .parse::<AuthorityId>()
@@ -64,12 +60,7 @@ pub async fn remove_contact(
     contact_id: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        let core = app_core.read().await;
-        core.runtime()
-            .ok_or_else(|| AuraError::agent("Runtime bridge not available"))?
-            .clone()
-    };
+    let runtime = require_runtime(app_core).await?;
 
     let target = contact_id
         .parse::<AuthorityId>()

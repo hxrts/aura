@@ -276,12 +276,9 @@ pub fn ToastContainer(props: &ToastContainerProps) -> impl Into<AnyElement<'stat
     let toasts = props.toasts.clone();
 
     // Show only the most recent toast
-    let toast = match toasts.last() {
-        Some(t) => t,
-        None => {
-            // Return empty element - no toasts to show
-            return element! { View {} }.into_any();
-        }
+    let Some(toast) = toasts.last() else {
+        // Return empty element - no toasts to show
+        return element! { View {} }.into_any();
     };
     let icon = toast.level.icon().to_string();
     let color = toast.level.color();

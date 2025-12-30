@@ -8,10 +8,7 @@
 //! 3. CompleteRecovery - Checks threshold and finalizes
 //! 4. CancelRecovery - Cleans up session state
 
-use std::sync::Arc;
-
-use aura_core::AuthorityId;
-use aura_relational::RelationalContext;
+use aura_core::{AuthorityId, ContextId};
 
 /// Active recovery session
 ///
@@ -32,7 +29,7 @@ pub struct RecoverySession {
     pub threshold: usize,
 
     /// Relational context for recovery state storage
-    pub recovery_context: Arc<RelationalContext>,
+    pub recovery_context: ContextId,
 
     /// Collected guardian approvals
     pub approvals: Vec<GuardianApproval>,
@@ -94,7 +91,7 @@ impl RecoverySession {
         account_authority: AuthorityId,
         guardian_authorities: Vec<AuthorityId>,
         threshold: usize,
-        recovery_context: Arc<RelationalContext>,
+        recovery_context: ContextId,
         started_at: u64,
     ) -> Self {
         Self {
@@ -188,6 +185,8 @@ impl RecoverySession {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::ids;
 

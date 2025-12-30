@@ -3,15 +3,8 @@
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_core::effects::JournalEffects;
+use aura_app::ui::workflows::snapshot;
 use aura_core::identifiers::AuthorityId;
-use aura_core::types::Epoch;
-use aura_core::{FactValue, Journal};
-use aura_journal::fact::FactContent;
-use aura_journal::DomainFact;
-use aura_maintenance::{MaintenanceFact, SnapshotProposed};
-use aura_protocol::effects::TreeEffects;
-use uuid::Uuid;
 
 use crate::SnapshotAction;
 
@@ -37,55 +30,10 @@ async fn propose_snapshot(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput>
     // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
     let authority_id = AuthorityId(ctx.device_id().0);
 
-    let current_epoch = ctx
-        .effects()
-        .get_current_epoch()
+    // Use the aura-app workflow for snapshot proposal
+    let fact_key = snapshot::propose_snapshot(ctx.effects(), authority_id)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to load epoch: {e}")))?;
-
-    let state_digest = ctx
-        .effects()
-        .get_current_commitment()
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to load commitment: {e}")))?;
-
-    let mut id_bytes = [0u8; 16];
-    id_bytes.copy_from_slice(&state_digest.0[..16]);
-    let proposal_id = Uuid::from_bytes(id_bytes);
-
-    let proposal = MaintenanceFact::SnapshotProposed(SnapshotProposed::new(
-        authority_id,
-        proposal_id,
-        Epoch::new(current_epoch),
-        state_digest,
-    ));
-
-    let fact_content = FactContent::Relational(proposal.to_generic());
-
-    let fact_value = serde_json::to_vec(&fact_content)
-        .map(FactValue::Bytes)
-        .map_err(|e| {
-            TerminalError::Operation(format!("Failed to encode snapshot proposal fact: {e}"))
-        })?;
-
-    let mut delta = Journal::new();
-    let fact_key = format!("snapshot_proposed:{proposal_id}");
-    delta.facts.insert(fact_key.clone(), fact_value);
-
-    let current = ctx
-        .effects()
-        .get_journal()
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to load journal: {e}")))?;
-    let merged = ctx
-        .effects()
-        .merge_facts(&current, &delta)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to merge snapshot fact: {e}")))?;
-    ctx.effects()
-        .persist_journal(&merged)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to persist snapshot fact: {e}")))?;
+        .map_err(|e| TerminalError::Operation(format!("{e}")))?;
 
     output.kv("Snapshot proposal recorded with key", fact_key);
 

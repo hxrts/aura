@@ -127,7 +127,7 @@ async fn demo_device_enrollment_flow_commits_and_updates_settings() {
     let env = setup_test_env().await;
 
     // Seed SETTINGS_SIGNAL from runtime so device list starts populated.
-    aura_app::workflows::settings::refresh_settings_from_runtime(env.ctx_a.app_core_raw())
+    aura_app::ui::workflows::settings::refresh_settings_from_runtime(env.ctx_a.app_core_raw())
         .await
         .expect("refresh_settings_from_runtime should succeed with runtime");
 
@@ -177,7 +177,7 @@ async fn demo_device_enrollment_flow_commits_and_updates_settings() {
         .expect("accept device enrollment invitation should succeed");
 
     // Wait for the initiator to observe completion.
-    let status = aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
+    let status = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
         start.ceremony_id.clone(),
         Duration::from_millis(50),

@@ -6,11 +6,7 @@ use crate::cli::amp::AmpAction;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use aura_core::identifiers::{ChannelId, ContextId};
-use aura_core::{hash, Hash32};
-use aura_journal::fact::{
-    ChannelBumpReason, ChannelCheckpoint, ProposedChannelEpochBump, RelationalFact,
-};
-use aura_protocol::amp::{get_channel_state, AmpJournalEffects};
+use aura_app::ui::workflows::amp;
 use std::str::FromStr;
 
 /// Handle AMP commands with effect system integration.
@@ -45,9 +41,9 @@ async fn handle_amp_inspect(
     let channel = ChannelId::from_str(channel_str)
         .map_err(|e| TerminalError::Input(format!("Invalid channel id: {e}")))?;
 
-    let state = get_channel_state(ctx.effects(), context, channel)
+    let state = amp::inspect_channel(ctx.effects(), context, channel)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {e}")))?;
+        .map_err(|e| TerminalError::Operation(format!("{e}")))?;
 
     output.section(format!("Channel State for {context_str}:{channel_str}"));
     output.kv("Current Epoch", state.chan_epoch.to_string());
@@ -82,31 +78,9 @@ async fn handle_amp_bump(
     let channel = ChannelId::from_str(channel_str)
         .map_err(|e| TerminalError::Input(format!("Invalid channel id: {e}")))?;
 
-    let state = get_channel_state(ctx.effects(), context, channel)
+    let proposal = amp::propose_bump(ctx.effects(), context, channel)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {e}")))?;
-
-    if state.pending_bump.is_some() {
-        output.eprintln("Error: Channel already has a pending bump");
-        return Ok(output);
-    }
-
-    let proposal = ProposedChannelEpochBump {
-        context,
-        channel,
-        parent_epoch: state.chan_epoch,
-        new_epoch: state.chan_epoch + 1,
-        reason: ChannelBumpReason::Routine,
-        bump_id: Hash32::new(hash::hash(
-            format!("amp-bump:{context}:{channel}").as_bytes(),
-        )),
-    };
-
-    ctx.effects()
-        .insert_relational_fact(RelationalFact::Protocol(
-            aura_journal::ProtocolRelationalFact::AmpProposedChannelEpochBump(proposal.clone()),
-        ))
-        .await?;
+        .map_err(|e| TerminalError::Operation(format!("{e}")))?;
 
     output.println(format!(
         "Proposed epoch bump: {} -> {} (reason: {})",
@@ -131,30 +105,9 @@ async fn handle_amp_checkpoint(
     let channel = ChannelId::from_str(channel_str)
         .map_err(|e| TerminalError::Input(format!("Invalid channel id: {e}")))?;
 
-    let state = get_channel_state(ctx.effects(), context, channel)
+    let checkpoint = amp::create_checkpoint(ctx.effects(), context, channel)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {e}")))?;
-
-    let checkpoint = ChannelCheckpoint {
-        context,
-        channel,
-        chan_epoch: state.chan_epoch,
-        base_gen: state.current_gen,
-        window: 32, // Standard window size
-        ck_commitment: Hash32::new(aura_core::hash::hash(
-            serde_json::to_vec(&(state.chan_epoch, state.current_gen))
-                .unwrap_or_default()
-                .as_slice(),
-        )),
-        skip_window_override: None,
-    };
-
-    ctx.effects()
-        .insert_relational_fact(RelationalFact::Protocol(
-            aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint.clone()),
-        ))
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to create checkpoint: {e}")))?;
+        .map_err(|e| TerminalError::Operation(format!("{e}")))?;
 
     output.section(format!(
         "Checkpoint created for {context_str}:{channel_str}"

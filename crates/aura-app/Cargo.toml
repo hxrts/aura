@@ -50,6 +50,13 @@ signals = ["dep:futures-signals", "dep:futures"]
 callbacks = []
 
 # =============================================================================
+# Internal API Surface
+# =============================================================================
+
+# Enable low-level mutation/dispatch APIs intended for non-UI callers.
+app-internals = []
+
+# =============================================================================
 # FFI Features
 # =============================================================================
 
@@ -91,6 +98,9 @@ aura-effects = { path = "../aura-effects" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
 aura-chat = { path = "../aura-chat" }
+aura-maintenance = { path = "../aura-maintenance" }
+aura-protocol = { path = "../aura-protocol" }
+aura-recovery = { path = "../aura-recovery" }
 
 # Always required
 serde = { version = "1", features = ["derive"] }

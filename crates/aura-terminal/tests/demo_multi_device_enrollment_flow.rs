@@ -133,7 +133,7 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
     let env = setup_test_env().await;
 
     // Seed SETTINGS_SIGNAL from runtime so device list starts populated.
-    aura_app::workflows::settings::refresh_settings_from_runtime(env.ctx_a.app_core_raw())
+    aura_app::ui::workflows::settings::refresh_settings_from_runtime(env.ctx_a.app_core_raw())
         .await
         .expect("refresh_settings_from_runtime should succeed with runtime");
 
@@ -180,7 +180,7 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         .await
         .expect("accept device enrollment invitation should succeed");
 
-    let status_b = aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
+    let status_b = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
         start_b.ceremony_id.clone(),
         Duration::from_millis(50),
@@ -252,7 +252,7 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         })
     };
 
-    let status_c = aura_app::workflows::ceremonies::monitor_key_rotation_ceremony(
+    let status_c = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
         env.ctx_a.app_core_raw(),
         start_c.ceremony_id.clone(),
         Duration::from_millis(50),

@@ -70,7 +70,7 @@ use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
 use crate::{DemoCommands, ScenarioAction};
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 use aura_core::identifiers::DeviceId;
 use std::path::Path;
 use std::sync::Arc;
@@ -270,11 +270,12 @@ impl CliHandler {
     /// Handle version command through effects
     ///
     /// Returns structured output that is rendered to stdout/stderr
+    #[allow(clippy::unused_async)]
     pub async fn handle_version(&self) -> TerminalResult<()> {
         let effects_arc = self.agent.runtime().effects();
         let effects = &*effects_arc;
         let ctx = self.make_ctx(effects, false);
-        let output = version::handle_version(&ctx).await?;
+        let output = version::handle_version(&ctx)?;
         output.render();
         Ok(())
     }
@@ -412,12 +413,14 @@ impl CliHandler {
     }
 
     /// Log error message through effects
-    pub async fn log_error(&self, message: &str) {
+    #[allow(dead_code)]
+    pub fn log_error(&self, message: &str) {
         eprintln!("ERROR: {message}");
     }
 
     /// Log info message through effects
-    pub async fn log_info(&self, message: &str) {
+    #[allow(dead_code)]
+    pub fn log_info(&self, message: &str) {
         println!("INFO: {message}");
     }
 }

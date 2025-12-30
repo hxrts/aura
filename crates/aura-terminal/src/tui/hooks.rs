@@ -17,7 +17,7 @@
 //!
 //! ```ignore
 //! use iocraft::prelude::*;
-//! use aura_app::signal_defs::CHAT_SIGNAL;
+//! use aura_app::ui::signals::CHAT_SIGNAL;
 //! use aura_core::effects::reactive::ReactiveEffects;
 //!
 //! #[component]
@@ -60,10 +60,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aura_app::signal_defs::ERROR_SIGNAL;
-use aura_app::AppError;
-use aura_app::ReactiveHandler;
-use aura_app::{ReactiveState, ReactiveVec};
+use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::{ReactiveEffects, ReactiveError, Signal};
 
 use crate::tui::context::{InitializedAppCore, IoContext};
@@ -83,7 +80,7 @@ use crate::tui::tasks::UiTaskRegistry;
 ///
 /// ```ignore
 /// use crate::tui::hooks::AppCoreContext;
-/// use aura_app::signal_defs::CHAT_SIGNAL;
+/// use aura_app::ui::signals::CHAT_SIGNAL;
 /// use aura_core::effects::reactive::ReactiveEffects;
 ///
 /// #[component]
@@ -132,7 +129,7 @@ impl AppCoreContext {
     /// Get a snapshot of the current state
     ///
     /// This is useful for initializing iocraft State<T> values.
-    pub fn snapshot(&self) -> aura_app::StateSnapshot {
+    pub fn snapshot(&self) -> aura_app::ui::types::StateSnapshot {
         // Use try_read to avoid blocking in sync context
         // Fall back to default if lock is held
         self.app_core
@@ -366,11 +363,11 @@ pub trait HasReactiveData {
 #[derive(Debug, Clone)]
 pub struct ChatSnapshot {
     /// Current channels list
-    pub channels: Vec<aura_app::views::chat::Channel>,
+    pub channels: Vec<aura_app::ui::types::chat::Channel>,
     /// Currently selected channel ID
     pub selected_channel: Option<String>,
     /// Messages for the selected channel
-    pub messages: Vec<aura_app::views::chat::Message>,
+    pub messages: Vec<aura_app::ui::types::chat::Message>,
 }
 
 impl Default for ChatSnapshot {
@@ -387,7 +384,7 @@ impl Default for ChatSnapshot {
 #[derive(Debug, Clone)]
 pub struct GuardiansSnapshot {
     /// Guardian list
-    pub guardians: Vec<aura_app::views::recovery::Guardian>,
+    pub guardians: Vec<aura_app::ui::types::recovery::Guardian>,
     /// Threshold configuration
     pub threshold: Option<aura_core::threshold::ThresholdConfig>,
 }
@@ -405,7 +402,7 @@ impl Default for GuardiansSnapshot {
 #[derive(Debug, Clone)]
 pub struct RecoverySnapshot {
     /// Recovery state
-    pub status: aura_app::views::recovery::RecoveryState,
+    pub status: aura_app::ui::types::recovery::RecoveryState,
     /// Progress percentage (0-100)
     pub progress_percent: u32,
     /// Whether recovery is in progress
@@ -415,7 +412,7 @@ pub struct RecoverySnapshot {
 impl Default for RecoverySnapshot {
     fn default() -> Self {
         Self {
-            status: aura_app::views::recovery::RecoveryState::default(),
+            status: aura_app::ui::types::recovery::RecoveryState::default(),
             progress_percent: 0,
             is_in_progress: false,
         }
@@ -426,7 +423,7 @@ impl Default for RecoverySnapshot {
 #[derive(Debug, Clone)]
 pub struct InvitationsSnapshot {
     /// All invitations
-    pub invitations: Vec<aura_app::views::invitations::Invitation>,
+    pub invitations: Vec<aura_app::ui::types::invitations::Invitation>,
     /// Count of pending invitations
     pub pending_count: usize,
 }
@@ -444,7 +441,7 @@ impl Default for InvitationsSnapshot {
 #[derive(Debug, Clone)]
 pub struct HomeSnapshot {
     /// Home state (contains id, name, residents, storage, etc.)
-    pub home_state: Option<aura_app::views::home::HomeState>,
+    pub home_state: Option<aura_app::ui::types::home::HomeState>,
     /// Whether user is a resident
     pub is_resident: bool,
     /// Whether user is a steward
@@ -463,7 +460,7 @@ impl Default for HomeSnapshot {
 
 impl HomeSnapshot {
     /// Get residents list from home state
-    pub fn residents(&self) -> &[aura_app::views::home::Resident] {
+    pub fn residents(&self) -> &[aura_app::ui::types::home::Resident] {
         self.home_state
             .as_ref()
             .map(|b| b.residents.as_slice())
@@ -471,7 +468,7 @@ impl HomeSnapshot {
     }
 
     /// Get storage info from home state
-    pub fn storage(&self) -> aura_app::HomeFlowBudget {
+    pub fn storage(&self) -> aura_app::ui::types::HomeFlowBudget {
         self.home_state
             .as_ref()
             .map(|b| b.storage.clone())
@@ -483,7 +480,7 @@ impl HomeSnapshot {
 #[derive(Debug, Clone)]
 pub struct ContactsSnapshot {
     /// Contacts list
-    pub contacts: Vec<aura_app::views::contacts::Contact>,
+    pub contacts: Vec<aura_app::ui::types::contacts::Contact>,
 }
 
 impl Default for ContactsSnapshot {
@@ -502,9 +499,9 @@ pub struct NeighborhoodSnapshot {
     /// Neighborhood name
     pub neighborhood_name: Option<String>,
     /// Homes in neighborhood
-    pub homes: Vec<aura_app::views::neighborhood::NeighborHome>,
+    pub homes: Vec<aura_app::ui::types::neighborhood::NeighborHome>,
     /// Current traversal position
-    pub position: aura_app::views::neighborhood::TraversalPosition,
+    pub position: aura_app::ui::types::neighborhood::TraversalPosition,
 }
 
 impl Default for NeighborhoodSnapshot {
@@ -513,7 +510,7 @@ impl Default for NeighborhoodSnapshot {
             neighborhood_id: None,
             neighborhood_name: None,
             homes: Vec::new(),
-            position: aura_app::views::neighborhood::TraversalPosition::default(),
+            position: aura_app::ui::types::neighborhood::TraversalPosition::default(),
         }
     }
 }

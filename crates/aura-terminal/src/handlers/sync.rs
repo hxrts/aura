@@ -13,7 +13,7 @@ use crate::ids;
 use aura_agent::{SyncManagerConfig, SyncServiceManager};
 use aura_core::identifiers::DeviceId;
 use aura_effects::time::PhysicalTimeHandler;
-use aura_sync::services::HealthStatus;
+use aura_agent::handlers::HealthStatus;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
@@ -37,11 +37,11 @@ pub async fn handle_sync(
 
         SyncAction::Once { peers, config: _ } => handle_once_mode(ctx, peers).await,
 
-        SyncAction::Status => handle_status(ctx).await,
+        SyncAction::Status => handle_status(ctx),
 
-        SyncAction::AddPeer { peer } => handle_add_peer(ctx, peer).await,
+        SyncAction::AddPeer { peer } => handle_add_peer(ctx, peer),
 
-        SyncAction::RemovePeer { peer } => handle_remove_peer(ctx, peer).await,
+        SyncAction::RemovePeer { peer } => handle_remove_peer(ctx, peer),
     }
 }
 
@@ -227,7 +227,7 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Terminal
 }
 
 /// Show sync status and metrics
-async fn handle_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
+fn handle_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     output.section("Sync Service Status");
@@ -247,7 +247,7 @@ async fn handle_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
 }
 
 /// Add a peer to the sync list
-async fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
+fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     let peer_id = ids::device_id(peer_str);
@@ -259,7 +259,7 @@ async fn handle_add_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalRe
 }
 
 /// Remove a peer from the sync list
-async fn handle_remove_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
+fn handle_remove_peer(ctx: &HandlerContext<'_>, peer_str: &str) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
     let peer_id = ids::device_id(peer_str);

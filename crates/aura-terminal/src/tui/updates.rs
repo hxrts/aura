@@ -101,7 +101,7 @@ pub enum UiUpdate {
     /// Generic key-rotation ceremony status update (device enrollment, guardian rotation, etc.).
     KeyRotationCeremonyStatus {
         ceremony_id: String,
-        kind: aura_app::runtime_bridge::CeremonyKind,
+        kind: aura_app::ui::types::CeremonyKind,
         accepted_count: u16,
         total_count: u16,
         threshold: u16,

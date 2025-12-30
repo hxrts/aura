@@ -2,7 +2,7 @@
 
 use iocraft::prelude::*;
 
-use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL};
+use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL};
 
 use crate::tui::components::{MessageInput, MessagePanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -276,14 +276,14 @@ fn short_id(id: &str, len: usize) -> String {
     }
 }
 
-fn is_steward_role(role: aura_app::views::home::ResidentRole) -> bool {
+fn is_steward_role(role: aura_app::ui::types::home::ResidentRole) -> bool {
     matches!(
         role,
-        aura_app::views::home::ResidentRole::Admin | aura_app::views::home::ResidentRole::Owner
+        aura_app::ui::types::home::ResidentRole::Admin | aura_app::ui::types::home::ResidentRole::Owner
     )
 }
 
-fn convert_resident(r: &aura_app::views::home::Resident) -> Resident {
+fn convert_resident(r: &aura_app::ui::types::home::Resident) -> Resident {
     Resident {
         id: r.id.to_string(),
         name: r.name.clone(),
@@ -292,12 +292,12 @@ fn convert_resident(r: &aura_app::views::home::Resident) -> Resident {
     }
 }
 
-fn convert_budget(storage: &aura_app::HomeFlowBudget, resident_count: u32) -> HomeBudget {
+fn convert_budget(storage: &aura_app::ui::types::HomeFlowBudget, resident_count: u32) -> HomeBudget {
     HomeBudget {
         total: storage.total_allocation(),
         used: storage.total_used(),
         resident_count: resident_count as u8,
-        max_residents: aura_app::MAX_RESIDENTS,
+        max_residents: aura_app::ui::types::MAX_RESIDENTS,
     }
 }
 
@@ -315,8 +315,9 @@ fn format_contact_name(authority_id: &str, contacts: &[Contact]) -> String {
     short_id(authority_id, 8)
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)] // ChannelId is at the 32-byte limit boundary
 fn convert_neighbor_home(
-    n: &aura_app::views::NeighborHome,
+    n: &aura_app::ui::types::NeighborHome,
     home_home_id: &aura_core::identifiers::ChannelId,
 ) -> HomeSummary {
     HomeSummary {
@@ -425,7 +426,7 @@ pub fn NeighborhoodScreenV2(
                         total: 0,
                         used: 0,
                         resident_count: 0,
-                        max_residents: aura_app::MAX_RESIDENTS,
+                        max_residents: aura_app::ui::types::MAX_RESIDENTS,
                     });
                 }
             })

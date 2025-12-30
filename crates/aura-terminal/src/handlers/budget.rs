@@ -1,11 +1,11 @@
 //! # Budget Handlers - Terminal-Specific Formatting
 //!
 //! This module provides terminal-specific budget formatting for CLI and TUI.
-//! Business logic has been moved to `aura_app::workflows::budget`.
+//! Business logic has been moved to `aura_app::ui::workflows::budget`.
 //!
 //! ## Architecture
 //!
-//! - **Business Logic**: `aura_app::workflows::budget` (portable)
+//! - **Business Logic**: `aura_app::ui::workflows::budget` (portable)
 //! - **Formatting**: This module (terminal-specific)
 //!
 //! ## Usage
@@ -13,7 +13,7 @@
 //! ### CLI Commands
 //!
 //! ```rust,ignore
-//! use aura_app::workflows::budget;
+//! use aura_app::ui::workflows::budget;
 //! use crate::handlers::budget::format_budget_status;
 //!
 //! pub async fn show_budget_status(app_core: &Arc<RwLock<AppCore>>) {
@@ -26,7 +26,7 @@
 //! ### TUI Screens
 //!
 //! ```rust,ignore
-//! use aura_app::workflows::budget;
+//! use aura_app::ui::workflows::budget;
 //!
 //! // Get budget data from workflow
 //! let budget = budget::get_current_budget(&app_core).await;
@@ -35,11 +35,11 @@
 //! let view = FlowBudgetView::from_budget(budget);
 //! ```
 
-use aura_app::{BudgetBreakdown, HomeFlowBudget};
+use aura_app::ui::prelude::*;
 
 // Re-export workflow functions for backward compatibility
-// Business logic is now in aura_app::workflows::budget
-pub use aura_app::workflows::budget::{
+// Business logic is now in aura_app::ui::workflows::budget
+pub use aura_app::ui::workflows::budget::{
     can_add_resident, can_join_neighborhood, can_pin_content, get_budget_breakdown,
     get_current_budget, update_budget,
 };
@@ -66,7 +66,7 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
     output.push_str(&format!(
         "  {} residents ({} max)\n",
         budget.resident_count,
-        aura_app::MAX_RESIDENTS
+        aura_app::ui::types::MAX_RESIDENTS
     ));
     output.push_str(&format!(
         "  {} / {} used\n",
@@ -78,7 +78,7 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
     output.push_str(&format!(
         "  {} neighborhoods ({} max)\n",
         budget.neighborhood_count,
-        aura_app::MAX_NEIGHBORHOODS
+        aura_app::ui::types::MAX_NEIGHBORHOODS
     ));
     output.push_str(&format!(
         "  {} donated\n",
@@ -131,7 +131,7 @@ pub fn check_can_add_resident(budget: &HomeFlowBudget) -> Result<(), String> {
         Err(format!(
             "Cannot add resident: home at capacity ({}/{})",
             budget.resident_count,
-            aura_app::MAX_RESIDENTS
+            aura_app::ui::types::MAX_RESIDENTS
         ))
     }
 }
@@ -147,7 +147,7 @@ pub fn check_can_join_neighborhood(budget: &HomeFlowBudget) -> Result<(), String
         Err(format!(
             "Cannot join neighborhood: home at capacity ({}/{})",
             budget.neighborhood_count,
-            aura_app::MAX_NEIGHBORHOODS
+            aura_app::ui::types::MAX_NEIGHBORHOODS
         ))
     }
 }
@@ -204,7 +204,7 @@ mod tests {
         assert!(check_can_add_resident(&budget).is_ok());
 
         // Fill up residents
-        for _ in 0..aura_app::MAX_RESIDENTS {
+        for _ in 0..aura_app::ui::types::MAX_RESIDENTS {
             budget.add_resident().unwrap();
         }
 

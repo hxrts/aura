@@ -28,12 +28,16 @@ required-features = ["testing"]
 name = "demo_peer_count"
 required-features = ["development"]
 
+[[test]]
+name = "e2e_terminal_state"
+required-features = ["testing"]
+
 [features]
 default = ["terminal"]
 terminal = []
 
 # Testing utilities for deterministic TUI/CLI testing
-testing = ["terminal"]
+testing = ["terminal", "aura-app/app-internals"]
 
 # Development mode with simulator, testkit, and debugging
 development = [
@@ -43,6 +47,7 @@ development = [
     "aura-app/instrumented",
     "dep:aura-simulator",
     "dep:aura-testkit",
+    "aura-app/app-internals",
 ]
 
 # Property-based tests for the TUI state machine

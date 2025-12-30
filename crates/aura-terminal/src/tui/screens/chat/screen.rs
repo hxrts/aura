@@ -8,7 +8,7 @@
 //! changes via the unified `ReactiveEffects` system. Updates are pushed to the
 //! component automatically, triggering re-renders when data changes.
 //!
-//! Uses `aura_app::signal_defs::CHAT_SIGNAL` with `ReactiveEffects::subscribe()`.
+//! Uses `aura_app::ui::signals::CHAT_SIGNAL` with `ReactiveEffects::subscribe()`.
 //!
 //! ## Pure View Component
 //!
@@ -17,7 +17,7 @@
 
 use iocraft::prelude::*;
 
-use aura_app::signal_defs::CHAT_SIGNAL;
+use aura_app::ui::signals::CHAT_SIGNAL;
 
 use crate::tui::callbacks::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
@@ -182,7 +182,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         let app_core = app_ctx.app_core.clone();
         async move {
             // Helper closure to convert ChatState to TUI types
-            let convert_chat_state = |chat_state: &aura_app::views::ChatState| {
+            let convert_chat_state = |chat_state: &aura_app::ui::types::ChatState| {
                 let channels: Vec<Channel> = chat_state
                     .channels
                     .iter()

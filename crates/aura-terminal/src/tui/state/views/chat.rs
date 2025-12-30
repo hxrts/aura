@@ -1,6 +1,7 @@
 //! Chat screen view state
 
 /// Chat screen focus
+use aura_app::ui::prelude::*;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ChatFocus {
     /// Channel list has focus
@@ -120,12 +121,7 @@ impl CreateChannelModalState {
     }
 
     pub fn default_threshold(total_n: u8) -> u8 {
-        if total_n <= 1 {
-            return 1;
-        }
-        let f = total_n.saturating_sub(1) / 3;
-        let k = (2 * f) + 1;
-        k.clamp(1, total_n)
+        default_channel_threshold(total_n)
     }
 
     pub fn ensure_threshold(&mut self) {
@@ -133,7 +129,7 @@ impl CreateChannelModalState {
         if !self.threshold_custom {
             self.threshold_k = Self::default_threshold(total_n);
         } else {
-            self.threshold_k = self.threshold_k.clamp(1, total_n.max(1));
+            self.threshold_k = normalize_channel_threshold(self.threshold_k, total_n);
         }
     }
 

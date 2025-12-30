@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 /// Get current time in milliseconds since Unix epoch.
 ///

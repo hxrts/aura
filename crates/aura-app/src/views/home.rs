@@ -4,7 +4,7 @@
 //! (bans, mutes, kicks) that were previously in TUI-only demo code.
 
 use crate::workflows::budget::HomeFlowBudget;
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -166,7 +166,7 @@ pub struct HomeState {
     pub created_at: u64,
     /// Relational context identifier for journal integration
     #[serde(default)]
-    pub context_id: String,
+    pub context_id: ContextId,
 }
 
 impl HomeState {
@@ -183,7 +183,7 @@ impl HomeState {
         name: Option<String>,
         creator_id: AuthorityId,
         created_at: u64,
-        context_id: String,
+        context_id: ContextId,
     ) -> Self {
         let steward = Resident {
             id: creator_id,

@@ -8,9 +8,10 @@ use std::time::Instant;
 
 use crate::error::{TerminalError, TerminalResult};
 use aura_agent::AgentConfig;
-use aura_authentication::{RecoveryContext, RecoveryOperationType};
-use aura_recovery::guardian_setup::GuardianSetupCoordinator;
-use aura_recovery::types::{GuardianProfile, GuardianSet, RecoveryRequest};
+use aura_agent::handlers::{
+    GuardianProfile, GuardianSet, GuardianSetupCoordinator, RecoveryContext,
+    RecoveryOperationType, RecoveryRequest,
+};
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 
 use crate::handlers::HandlerContext;

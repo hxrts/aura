@@ -1694,7 +1694,7 @@ async fn test_steward_role_flow() {
             Some("Test Home".to_string()),
             owner_id.clone(),
             0,
-            home_context_id.to_string(),
+            home_context_id,
         );
 
         // Add some residents
@@ -2358,7 +2358,7 @@ async fn test_channel_mode_operations() {
             Some("Test Home".to_string()),
             owner_id.clone(),
             0,
-            home_context_id.to_string(),
+            home_context_id,
         );
         home.my_role = ResidentRole::Owner;
         core.views().add_home(home);
@@ -3316,13 +3316,13 @@ async fn test_snapshot_data_accuracy() {
     // Create a home with a specific created_at timestamp
     let test_created_at = 1702000000000u64; // A specific timestamp
     let home_id = "test-home-1".parse::<ChannelId>().unwrap_or_default();
-    let _home_context_id = ContextId::new_from_entropy([9u8; 32]);
+    let home_context_id = ContextId::new_from_entropy([9u8; 32]);
     let home_state = HomeState::new(
         home_id,
         Some("Test Home".to_string()),
         authority_id.clone(),
         test_created_at,
-        "ctx-1".to_string(),
+        home_context_id,
     );
 
     // Emit home state via signal

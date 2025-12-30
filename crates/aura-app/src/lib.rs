@@ -128,8 +128,11 @@ pub mod errors;
 pub mod queries;
 pub mod runtime_bridge;
 pub mod signal_defs;
+pub mod ui;
 pub mod views;
-pub mod workflows;
+pub(crate) mod workflows;
+pub mod authorization;
+pub mod thresholds;
 
 #[cfg(feature = "signals")]
 pub mod reactive_state;
@@ -161,12 +164,6 @@ pub use crate::bridge::callback::StateObserver;
 
 #[cfg(feature = "signals")]
 pub use crate::reactive_state::{ReactiveState, ReactiveVec};
-
-// Re-export budget types (from workflows module)
-pub use crate::workflows::budget::{
-    BudgetBreakdown, BudgetError, HomeFlowBudget, HOME_TOTAL_SIZE, KB, MAX_NEIGHBORHOODS,
-    MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION, RESIDENT_ALLOCATION,
-};
 
 // Re-export error types
 pub use crate::errors::{AppError, AuthFailure, NetworkErrorCode, SyncStage, ToastSeverity};

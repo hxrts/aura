@@ -6,7 +6,7 @@
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::config::load_config_utf8;
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_authentication::{DkdConfig, DkdProtocol};
+use aura_agent::handlers::{DkdConfig, DkdProtocol};
 use aura_core::DeviceId;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -201,15 +201,12 @@ async fn execute_threshold_verification(
     let authority_id = ctx.effect_context().authority_id();
 
     // Get the public key package for this authority
-    let public_key_package = match ctx.effects().public_key_package(&authority_id).await {
-        Some(pkg) => pkg,
-        None => {
-            output.println(format!(
-                "No public key package found for authority: {authority_id}"
-            ));
-            output.println("Run key generation first with: aura threshold --mode keygen");
-            return Ok(());
-        }
+    let Some(public_key_package) = ctx.effects().public_key_package(&authority_id).await else {
+        output.println(format!(
+            "No public key package found for authority: {authority_id}"
+        ));
+        output.println("Run key generation first with: aura threshold --mode keygen");
+        return Ok(());
     };
 
     output.kv("Verifying with authority", authority_id.to_string());

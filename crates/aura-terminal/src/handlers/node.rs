@@ -6,8 +6,7 @@
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::config::load_config_utf8;
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_core::effects::PhysicalTimeEffects;
-use aura_protocol::effects::EffectApiEffects;
+use aura_core::effects::{PhysicalTimeEffects, TimeEffects};
 use std::path::Path;
 
 /// Handle node operations through effects
@@ -66,7 +65,7 @@ async fn run_daemon_mode(
     output.println("Initializing daemon mode...");
 
     // Simulate daemon initialization
-    let start_time = ctx.effects().current_epoch().await.unwrap_or(0);
+    let start_time = ctx.effects().current_epoch().await;
     output.kv("Node started at epoch", start_time.to_string());
 
     // Simulate some startup delay and health checks
@@ -80,7 +79,7 @@ async fn run_daemon_mode(
             .sleep_ms(200)
             .await
             .map_err(|e| TerminalError::Operation(format!("daemon heartbeat sleep failed: {e}")))?;
-        let epoch = ctx.effects().current_epoch().await.unwrap_or(0);
+        let epoch = ctx.effects().current_epoch().await;
         output.println(format!("Daemon heartbeat {} at epoch {}", idx + 1, epoch));
     }
 
@@ -97,7 +96,7 @@ async fn run_interactive_mode(
         "Node started in interactive mode on port {port}. Press Ctrl+C to stop."
     ));
 
-    let start_time = ctx.effects().current_epoch().await.unwrap_or(0);
+    let start_time = ctx.effects().current_epoch().await;
     output.kv("Started at epoch", start_time.to_string());
 
     // Simulate interactive mode - in real implementation would handle signals
@@ -113,12 +112,12 @@ async fn simulate_startup_delay(
     ctx: &HandlerContext<'_>,
     output: &mut CliOutput,
 ) -> TerminalResult<()> {
-    let delay_start = ctx.effects().current_epoch().await.unwrap_or(0);
+    let delay_start = ctx.effects().current_epoch().await;
 
     // Simulate 1 second startup time
     let mut elapsed = 0u64;
     while elapsed < 1000 {
-        let current = ctx.effects().current_epoch().await.unwrap_or(0);
+        let current = ctx.effects().current_epoch().await;
         elapsed = current.saturating_sub(delay_start);
 
         // Yield control using effect-driven sleep
@@ -139,7 +138,7 @@ async fn simulate_interactive_session(
     output: &mut CliOutput,
 ) -> TerminalResult<()> {
     for i in 1..=3 {
-        let current = ctx.effects().current_epoch().await.unwrap_or(0);
+        let current = ctx.effects().current_epoch().await;
         output.println(format!("Interactive tick {i} at epoch {current}"));
 
         // Simulate some work

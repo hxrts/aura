@@ -2,7 +2,7 @@
 //! Demo-mode peer count regression test.
 //!
 //! The TUI footer peer count is driven by `CONNECTION_STATUS_SIGNAL`, which is refreshed
-//! by `aura_app::workflows::system::refresh_account()`.
+//! by `aura_app::ui::workflows::system::refresh_account()`.
 //!
 //! Peer count should represent **how many of your contacts are online**.
 //! In demo mode, once Bob has Alice + Carol as contacts and their demo agents are running,
@@ -147,7 +147,7 @@ async fn demo_refresh_account_reports_two_online_contacts() {
     wait_for_contacts(initialized.raw(), &[alice_id, carol_id]).await;
 
     // Run the same refresh path the TUI uses; it should emit Online{2}.
-    aura_app::workflows::system::refresh_account(initialized.raw())
+    aura_app::ui::workflows::system::refresh_account(initialized.raw())
         .await
         .expect("refresh_account should succeed");
 
@@ -234,11 +234,11 @@ async fn demo_accepting_contact_invites_updates_peer_count() {
 
     for code in [&hints.alice_invite_code, &hints.carol_invite_code] {
         let invitation =
-            aura_app::workflows::invitation::import_invitation_details(initialized.raw(), code)
+            aura_app::ui::workflows::invitation::import_invitation_details(initialized.raw(), code)
                 .await
                 .expect("import_invitation_details should succeed");
 
-        aura_app::workflows::invitation::accept_invitation(
+        aura_app::ui::workflows::invitation::accept_invitation(
             initialized.raw(),
             &invitation.invitation_id,
         )

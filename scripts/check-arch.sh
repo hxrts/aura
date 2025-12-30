@@ -22,6 +22,8 @@ Options (run all when none given):
   --crypto         Crypto library usage boundaries (ed25519_dalek, OsRng, getrandom)
   --concurrency    Concurrency hygiene (block_in_place, unbounded channels)
   --reactive       TUI reactive data model (signals as source of truth, no domain data in props)
+  --ui             UI boundary checks (aura-terminal uses aura_app::ui facade only)
+  --workflows      aura-app workflow hygiene (runtime access, parsing helpers, signal access)
   --serialization  Serialization format enforcement (DAG-CBOR canonical, no bincode)
   --style          Rust style guide rules (usize in wire formats, bounded collections, etc.)
   --layer N[,M...] Filter output to specific layer numbers (1-8); repeatable
@@ -42,6 +44,8 @@ RUN_REG=false
 RUN_CRYPTO=false
 RUN_CONCURRENCY=false
 RUN_REACTIVE=false
+RUN_UI=false
+RUN_WORKFLOWS=false
 RUN_SERIALIZATION=false
 RUN_STYLE=false
 RUN_QUICK=false
@@ -60,6 +64,8 @@ while [[ $# -gt 0 ]]; do
     --crypto) RUN_ALL=false; RUN_CRYPTO=true ;;
     --concurrency) RUN_ALL=false; RUN_CONCURRENCY=true ;;
     --reactive) RUN_ALL=false; RUN_REACTIVE=true ;;
+    --ui) RUN_ALL=false; RUN_UI=true ;;
+    --workflows) RUN_ALL=false; RUN_WORKFLOWS=true ;;
     --serialization) RUN_ALL=false; RUN_SERIALIZATION=true ;;
     --style) RUN_ALL=false; RUN_STYLE=true ;;
     --layer)
@@ -93,6 +99,7 @@ if [ "$RUN_QUICK" = true ] && [ "$RUN_ALL" = true ]; then
   RUN_REACTIVE=true
   RUN_SERIALIZATION=true
   RUN_STYLE=true
+  RUN_WORKFLOWS=true
   RUN_TODOS=false  # Skip todos in quick mode
   RUN_ALL=false
 fi
@@ -275,6 +282,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_LAYERS" = true ]; then
       fi
     fi
   done
+
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_DEPS" = true ]; then
@@ -893,6 +901,51 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_REACTIVE" = true ]; then
 
   verbose "Reactive pattern: Props should only contain view state (focus, selection), callbacks, and configuration"
   verbose "Domain data (contacts, messages, guardians, etc.) should come from signal subscriptions"
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_UI" = true ]; then
+  section "UI boundary — aura-terminal uses aura_app::ui facade; no direct protocol/journal access"
+
+  direct_app_modules=$(rg --no-heading "aura_app::(workflows|signal_defs|views|runtime_bridge|authorization)" crates/aura-terminal/src -g "*.rs" || true)
+  filtered_app_modules=$(echo "$direct_app_modules" | grep -v "///" | grep -v "//" || true)
+  emit_hits "Direct aura_app module access in aura-terminal (use aura_app::ui::* facade)" "$filtered_app_modules"
+
+  view_access_hits=$(rg --no-heading "\\.views\\(" crates/aura-terminal/src -g "*.rs" || true)
+  emit_hits "Direct ViewState access in aura-terminal (use signals)" "$view_access_hits"
+
+  journal_hits=$(rg --no-heading "FactRegistry|FactReducer|RelationalFact|JournalEffects|commit_.*facts|RuntimeBridge::commit" crates/aura-terminal/src -g "*.rs" || true)
+  emit_hits "Direct journal/protocol mutation in aura-terminal (use workflows)" "$journal_hits"
+
+  forbidden_crate_hits=$(rg --no-heading "aura_(journal|protocol|consensus|guards|amp|anti_entropy|transport|recovery|sync|invitation|authentication|relational|chat)::" crates/aura-terminal/src -g "*.rs" || true)
+  emit_hits "Direct protocol/domain crate usage in aura-terminal (use aura_app::ui facade)" "$forbidden_crate_hits"
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_WORKFLOWS" = true ]; then
+  section "Workflow hygiene — use helpers for runtime access, parsing, and signals"
+
+  runtime_string_hits=$(rg --no-heading "Runtime bridge not available" crates/aura-app/src/workflows -g "*.rs" || true)
+  filtered_runtime_string_hits=$(echo "$runtime_string_hits" \
+    | grep -v "crates/aura-app/src/workflows/runtime.rs" \
+    | grep -v "contains\\(\"Runtime bridge not available\"\\)" || true)
+  emit_hits "Direct runtime error strings in workflows (use require_runtime)" "$filtered_runtime_string_hits"
+
+  parse_authority_hits=$(rg --no-heading "parse::<AuthorityId>" crates/aura-app/src/workflows -g "*.rs" || true)
+  filtered_parse_authority_hits=$(echo "$parse_authority_hits" | grep -v "crates/aura-app/src/workflows/parse.rs" || true)
+  emit_hits "Direct AuthorityId parsing in workflows (use parse_authority_id)" "$filtered_parse_authority_hits"
+
+  parse_context_hits=$(rg --no-heading "parse::<ContextId>" crates/aura-app/src/workflows -g "*.rs" || true)
+  filtered_parse_context_hits=$(echo "$parse_context_hits" | grep -v "crates/aura-app/src/workflows/parse.rs" || true)
+  emit_hits "Direct ContextId parsing in workflows (use parse_context_id)" "$filtered_parse_context_hits"
+
+  signal_access_hits=$(rg --no-heading "\\.(read|emit)\\(&\\*.*_SIGNAL" crates/aura-app/src/workflows -g "*.rs" || true)
+  filtered_signal_access_hits=$(echo "$signal_access_hits" | grep -v "crates/aura-app/src/workflows/signals.rs" || true)
+  emit_hits "Direct signal access in workflows (use workflows::signals helpers)" "$filtered_signal_access_hits"
+
+  init_signals_hits=$(rg --no-heading "init_signals\\(" crates/aura-app/src -g "*.rs" || true)
+  filtered_init_signals_hits=$(echo "$init_signals_hits" \
+    | grep -v "crates/aura-app/src/core/app.rs" \
+    | grep -v "init_signals_with_hooks" || true)
+  emit_hits "Direct init_signals calls (use init_signals_with_hooks)" "$filtered_init_signals_hits"
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_SERIALIZATION" = true ]; then

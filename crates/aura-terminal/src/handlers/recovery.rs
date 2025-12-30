@@ -7,16 +7,15 @@
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_authentication::{RecoveryContext, RecoveryOperationType};
-use aura_core::effects::{JournalEffects, StorageCoreEffects};
+use aura_app::ui::workflows::recovery_cli;
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash;
-use aura_core::identifiers::ContextId;
 use aura_core::time::TimeStamp;
-use aura_core::{AuthorityId, FactValue, Hash32};
-use aura_journal::fact::{FactContent, RelationalFact};
-use aura_protocol::effects::EffectApiEffects;
-use aura_recovery::types::{GuardianProfile, GuardianSet, RecoveryDispute};
-use aura_recovery::{RecoveryRequest, RecoveryResponse};
+use aura_core::{AuthorityId, Hash32};
+use aura_agent::handlers::{
+    GuardianProfile, GuardianSet, RecoveryDispute, RecoveryOperation, RecoveryRequest, RecoveryResponse,
+};
+use aura_effects::StorageCoreEffects;
 use std::path::Path;
 
 use crate::handlers::recovery_status;
@@ -74,24 +73,6 @@ pub async fn handle_recovery(
     }
 }
 
-fn encode_recovery_fact<T: serde::Serialize>(
-    context_id: ContextId,
-    kind: &str,
-    payload: &T,
-) -> TerminalResult<FactValue> {
-    let content = FactContent::Relational(RelationalFact::Generic {
-        context_id,
-        binding_type: kind.to_string(),
-        binding_data: serde_json::to_vec(payload).map_err(|e| {
-            TerminalError::Operation(format!("Failed to serialize recovery payload: {e}"))
-        })?,
-    });
-
-    serde_json::to_vec(&content)
-        .map(FactValue::Bytes)
-        .map_err(|e| TerminalError::Operation(format!("Failed to encode fact content: {e}")))
-}
-
 async fn start_recovery(
     ctx: &HandlerContext<'_>,
     account: &str,
@@ -142,26 +123,28 @@ async fn start_recovery(
         )));
     }
 
-    // Create recovery context
-    let context = RecoveryContext {
-        operation_type: RecoveryOperationType::DeviceKeyRecovery,
-        justification: justification
-            .unwrap_or("CLI recovery operation")
-            .to_string(),
-        is_emergency: priority == "emergency",
-        timestamp: ctx.effects().current_timestamp().await.unwrap_or(0),
-    };
+    // Get current timestamp
+    let physical_time = ctx.effects().physical_time().await.map_err(|e| {
+        TerminalError::Operation(format!("Failed to get physical time: {e}"))
+    })?;
+    let current_time = physical_time.ts_ms;
 
-    // Get initiator authority from context
-    let initiator_id = ctx.effect_context().authority_id();
+    // Create guardian authorities list
+    let guardian_authorities: Vec<AuthorityId> =
+        guardian_set.iter().map(|g| g.authority_id).collect();
 
     // Create recovery request using authority model
     let recovery_request = RecoveryRequest {
-        initiator_id,
-        account_id: account_authority,
-        context,
-        threshold: threshold_u16,
-        guardians: guardian_set.clone(),
+        recovery_id: format!("recovery-{account_authority}"),
+        account_authority,
+        operation: RecoveryOperation::ReplaceTree {
+            new_public_key: hash::hash(format!("recovery-new-key:{account_authority}").as_bytes()).to_vec(),
+        },
+        justification: justification.unwrap_or("CLI recovery operation").to_string(),
+        guardians: guardian_authorities.clone(),
+        threshold,
+        requested_at: current_time,
+        expires_at: None,
     };
 
     output.println("Executing recovery protocol via proper coordinator...");
@@ -173,46 +156,23 @@ async fn start_recovery(
     let new_public_key =
         hash::hash(format!("recovery-new-key:{account_authority}").as_bytes()).to_vec();
 
-    let recovery_request_new = aura_recovery::recovery_protocol::RecoveryRequest {
-        recovery_id: account_authority.to_string(),
+    let recovery_request_new = recovery_cli::build_protocol_request(
         account_authority,
-        new_tree_commitment: commitment,
-        operation: aura_recovery::recovery_protocol::RecoveryOperation::ReplaceTree {
-            new_public_key,
-        },
-        justification: justification
+        commitment,
+        new_public_key,
+        justification
             .unwrap_or("CLI recovery operation")
             .to_string(),
-    };
+    );
 
-    // Create recovery protocol handler
-    use aura_recovery::recovery_protocol::{RecoveryProtocol, RecoveryProtocolHandler};
-    use aura_relational::RelationalContext;
-    use std::sync::Arc;
-
-    let guardian_authorities: Vec<AuthorityId> =
-        guardian_set.iter().map(|g| g.authority_id).collect();
-
-    // Create a mock relational context for demo
-    let recovery_context = Arc::new(RelationalContext::new(guardian_authorities.clone()));
-
-    let recovery_protocol = RecoveryProtocol::new(
-        recovery_context,
+    // Initiate recovery using the proper protocol
+    recovery_cli::initiate_recovery_protocol(
+        ctx.effects(),
         account_authority,
         guardian_authorities,
         threshold,
-    );
-
-    let protocol_handler = RecoveryProtocolHandler::new(Arc::new(recovery_protocol));
-
-    // Initiate recovery using the proper protocol
-    protocol_handler
-        .handle_recovery_initiation(
-            recovery_request_new,
-            ctx.effects(),
-            ctx.effects(),
-            ctx.effects(),
-        )
+        recovery_request_new,
+    )
         .await
         .map_err(|e| {
             TerminalError::Operation(format!("Failed to initiate recovery protocol: {e}"))
@@ -241,28 +201,15 @@ async fn start_recovery(
 
     // Update journal with recovery initiation using proper effects
     let recovery_fact_key = format!("recovery_initiated.{account_authority}");
-    let recovery_fact_value =
-        encode_recovery_fact(ctx.context_id(), "recovery_initiated", &recovery_request)?;
-
-    let mut journal_delta = aura_core::Journal::new();
-    journal_delta
-        .facts
-        .insert(recovery_fact_key.clone(), recovery_fact_value);
-
-    let current_journal = ctx
-        .effects()
-        .get_journal()
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get journal: {e}")))?;
-    let updated_journal = ctx
-        .effects()
-        .merge_facts(&current_journal, &journal_delta)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to merge journal facts: {e}")))?;
-    ctx.effects()
-        .persist_journal(&updated_journal)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to persist journal: {e}")))?;
+    recovery_cli::record_recovery_fact(
+        ctx.effects(),
+        ctx.context_id(),
+        recovery_fact_key.clone(),
+        "recovery_initiated",
+        &recovery_request,
+    )
+    .await
+    .map_err(|e| TerminalError::Operation(format!("Failed to record recovery fact: {e}")))?;
 
     output.blank();
     output.println("Recovery initiated successfully via protocol coordinator.");
@@ -302,12 +249,11 @@ async fn approve_recovery(
     let recovery_request: RecoveryRequest = serde_json::from_str(&request_content)
         .map_err(|e| TerminalError::Config(format!("Failed to parse recovery request: {e}")))?;
 
-    output.kv("Account", recovery_request.account_id.to_string());
-    output.kv("Initiator", recovery_request.initiator_id.to_string());
+    output.kv("Account", recovery_request.account_authority.to_string());
     output.kv("Required threshold", recovery_request.threshold.to_string());
 
     // Check if justification exists
-    let justification_text = &recovery_request.context.justification;
+    let justification_text = &recovery_request.justification;
     if !justification_text.is_empty() {
         output.kv("Justification", justification_text);
     }
@@ -316,14 +262,21 @@ async fn approve_recovery(
     let guardian_authority = ctx.effect_context().authority_id();
 
     // Find this authority in the guardian set
-    let guardian_profile = recovery_request
+    let guardian_index = recovery_request
         .guardians
-        .by_authority(&guardian_authority)
+        .iter()
+        .position(|g| *g == guardian_authority)
         .ok_or_else(|| {
             TerminalError::Input(format!(
                 "Current authority {guardian_authority} is not a guardian for this recovery"
             ))
         })?;
+
+    // Build a GuardianProfile from the authority
+    let guardian_profile = GuardianProfile::with_label(
+        guardian_authority,
+        format!("Guardian {}", guardian_index + 1),
+    );
 
     let label = guardian_profile.label.as_deref().unwrap_or("Guardian");
     output.kv(
@@ -336,7 +289,7 @@ async fn approve_recovery(
 
     // Generate real guardian approval using FROST threshold signing
     let approval_result =
-        generate_guardian_approval(ctx, &recovery_request, guardian_profile).await?;
+        generate_guardian_approval(ctx, &recovery_request, &guardian_profile).await?;
 
     output.println("Guardian approval completed successfully!");
     output.kv(
@@ -349,7 +302,7 @@ async fn approve_recovery(
     );
 
     // Build recovery share and evidence for downstream aggregation
-    let share = aura_recovery::types::RecoveryShare {
+    let share = aura_agent::handlers::RecoveryShare {
         guardian_id: guardian_profile.authority_id,
         guardian_label: guardian_profile.label.clone(),
         share: approval_result.key_share.clone(),
@@ -357,9 +310,9 @@ async fn approve_recovery(
         issued_at_ms: timestamp_ms(&approval_result.timestamp),
     };
 
-    let evidence = aura_recovery::types::RecoveryEvidence {
+    let evidence = aura_agent::handlers::RecoveryEvidence {
         context_id: ctx.context_id(),
-        account_id: recovery_request.account_id,
+        account_id: recovery_request.account_authority,
         approving_guardians: vec![guardian_profile.authority_id],
         completed_at_ms: timestamp_ms(&approval_result.timestamp),
         dispute_window_ends_at_ms: timestamp_ms(&approval_result.timestamp) + 48 * 3600 * 1000,
@@ -389,7 +342,7 @@ async fn approve_recovery(
 
     let response_key = format!(
         "recovery_response:{}:{}",
-        recovery_request.account_id, guardian_profile.authority_id
+        recovery_request.account_authority, guardian_profile.authority_id
     );
     ctx.effects()
         .store(&response_key, response_json.clone())
@@ -402,7 +355,7 @@ async fn approve_recovery(
 
     let response_path = format!(
         "recovery_response_{}_{}.json",
-        recovery_request.account_id, guardian_profile.authority_id
+        recovery_request.account_authority, guardian_profile.authority_id
     );
 
     ctx.effects()
@@ -430,26 +383,13 @@ async fn get_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     output.section("Recovery Status");
     output.println("Querying Journal for active recovery sessions...");
 
-    // Query Journal for recovery-related facts using proper JournalEffects
-    let current_journal =
-        ctx.effects().get_journal().await.map_err(|e| {
-            TerminalError::Operation(format!("Failed to get journal via effects: {e}"))
-        })?;
-
-    let recovery_facts: Vec<_> = current_journal
-        .facts
-        .keys()
-        .filter(|key| key.contains("recovery") || key == "emergency_recovery_initiated")
-        .collect();
-
-    let completed_facts: Vec<_> = current_journal
-        .facts
-        .keys()
-        .filter(|key| key == "emergency_recovery_completed")
-        .collect();
+    let (recovery_facts, completed_facts) =
+        recovery_cli::list_recovery_fact_keys(ctx.effects())
+            .await
+            .map_err(|e| TerminalError::Operation(format!("Failed to list recovery facts: {e}")))?;
 
     // Find active recoveries (initiated but not completed)
-    let active_recoveries: Vec<_> = recovery_facts
+    let active_recoveries: Vec<String> = recovery_facts
         .into_iter()
         .filter(|key| {
             !completed_facts.iter().any(|completed_key| {
@@ -496,45 +436,11 @@ async fn dispute_recovery(
     output.kv("Filing as guardian", guardian_authority.to_string());
     output.println("Validating dispute window and guardian eligibility...");
 
-    // Get current journal state via proper JournalEffects
-    let dispute_journal =
-        ctx.effects().get_journal().await.map_err(|e| {
-            TerminalError::Operation(format!("Failed to get journal via effects: {e}"))
-        })?;
-
-    // Look up recovery evidence by ID in Journal
-    let evidence_key = format!("recovery_evidence.{evidence}");
-    if let Some(value) = dispute_journal.facts.get(&evidence_key) {
-        let evidence_json: serde_json::Value = match value {
-            FactValue::String(data) => serde_json::from_str(data),
-            FactValue::Bytes(bytes) => serde_json::from_slice(bytes),
-            _ => Ok(serde_json::Value::Null),
-        }
-        .map_err(|e| TerminalError::Config(format!("Failed to parse evidence JSON: {e}")))?;
-
-        if let Some(dispute_window_ends) = evidence_json
-            .get("dispute_window_ends_at_ms")
-            .and_then(|v| v.as_u64())
-        {
-            let current_time = ctx.effects().current_timestamp().await.unwrap_or(0);
-            if current_time > dispute_window_ends {
-                return Err(TerminalError::Input(format!(
-                    "Dispute window has closed for evidence {evidence}"
-                )));
-            }
-        }
-    }
-
-    // Check if this guardian has already filed a dispute
-    let existing_dispute_key = format!("recovery_dispute.{evidence}.{guardian_authority}");
-    if dispute_journal.facts.contains_key(&existing_dispute_key) {
-        return Err(TerminalError::Input(format!(
-            "Guardian {guardian_authority} has already filed a dispute for evidence {evidence}"
-        )));
-    }
-
     // Create dispute record
-    let current_timestamp = ctx.effects().current_timestamp().await.unwrap_or(0);
+    let physical_time = ctx.effects().physical_time().await.map_err(|e| {
+        TerminalError::Operation(format!("Failed to get physical time: {e}"))
+    })?;
+    let current_timestamp = physical_time.ts_ms;
 
     let dispute = RecoveryDispute {
         guardian_id: guardian_authority,
@@ -544,34 +450,16 @@ async fn dispute_recovery(
 
     output.kv("Dispute timestamp", dispute.filed_at_ms.to_string());
 
-    // Store dispute in Journal using proper JournalEffects API
-    let dispute_key = format!("recovery_dispute.{}.{}", evidence, dispute.guardian_id);
-    let dispute_value = encode_recovery_fact(ctx.context_id(), "recovery_dispute", &dispute)?;
-
-    // Create a journal delta with the new dispute fact
-    let mut journal_delta = aura_core::Journal::new();
-    journal_delta
-        .facts
-        .insert(dispute_key.clone(), dispute_value);
-
-    // Get current journal and merge the delta
-    let current_journal = ctx
-        .effects()
-        .get_journal()
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get current journal: {e}")))?;
-
-    let updated_journal = ctx
-        .effects()
-        .merge_facts(&current_journal, &journal_delta)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to merge journal facts: {e}")))?;
-
-    // Persist the updated journal
-    ctx.effects()
-        .persist_journal(&updated_journal)
-        .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to persist journal: {e}")))?;
+    // Store dispute in journal via app workflow
+    let dispute_key = recovery_cli::record_recovery_dispute(
+        ctx.effects(),
+        ctx.context_id(),
+        evidence,
+        guardian_authority,
+        &dispute,
+    )
+    .await
+    .map_err(|e| TerminalError::Operation(format!("Failed to record dispute: {e}")))?;
 
     output.kv("Dispute recorded with key", &dispute_key);
     output.blank();
@@ -585,11 +473,14 @@ async fn generate_guardian_approval(
     ctx: &HandlerContext<'_>,
     request: &RecoveryRequest,
     guardian: &GuardianProfile,
-) -> TerminalResult<aura_recovery::guardian_key_recovery::GuardianKeyApproval> {
-    use aura_recovery::guardian_key_recovery::GuardianKeyApproval;
+) -> TerminalResult<aura_agent::handlers::GuardianKeyApproval> {
+    use aura_agent::handlers::GuardianKeyApproval;
 
     // Get current timestamp
-    let timestamp_ms = ctx.effects().current_timestamp().await.unwrap_or(0);
+    let physical_time = ctx.effects().physical_time().await.map_err(|e| {
+        TerminalError::Operation(format!("Failed to get physical time: {e}"))
+    })?;
+    let timestamp_ms = physical_time.ts_ms;
 
     // Create recovery message to sign
     let recovery_message = serde_json::to_vec(&request).map_err(|e| {
@@ -602,7 +493,7 @@ async fn generate_guardian_approval(
     let key_share_bytes = hash::hash(
         format!(
             "guardian-key-share:{}:{}",
-            guardian.authority_id, request.account_id
+            guardian.authority_id, request.account_authority
         )
         .as_bytes(),
     );

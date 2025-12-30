@@ -12,7 +12,7 @@
 //! Commands are organized by functional area (Recovery, Account, Chat, etc.) and
 //! classified by the authorization level required to execute them.
 
-use aura_app::views::chat::Channel;
+use aura_app::ui::types::chat::Channel;
 use tokio::sync::broadcast;
 
 /// Authorization level required for a command

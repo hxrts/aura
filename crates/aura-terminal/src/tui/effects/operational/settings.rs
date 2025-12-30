@@ -2,22 +2,22 @@
 //!
 //! Handlers for UpdateMfaPolicy, UpdateNickname, SetChannelMode.
 //!
-//! This module delegates to portable workflows in aura_app::workflows::settings
+//! This module delegates to portable workflows in aura_app::ui::workflows::settings
 //! and adds terminal-specific response formatting.
 
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::AppCore;
+use aura_app::ui::prelude::*;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-use aura_app::workflows::ceremonies::{
+use aura_app::ui::workflows::ceremonies::{
     start_device_enrollment_ceremony, start_device_removal_ceremony,
 };
-pub use aura_app::workflows::settings::{set_channel_mode, update_mfa_policy, update_nickname};
+pub use aura_app::ui::workflows::settings::{set_channel_mode, update_mfa_policy, update_nickname};
 
 /// Handle settings commands
 pub async fn handle_settings(

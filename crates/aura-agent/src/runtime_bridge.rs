@@ -2514,8 +2514,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             Err(e) => {
                 tracing::warn!("Failed to read commitment tree state for devices: {e}");
                 // Return at least the current device on error
-                let id = current_device.to_string();
-                let short = id.chars().take(8).collect::<String>();
+                let id = current_device;
+                let short = id.to_string();
+                let short = short.chars().take(8).collect::<String>();
                 return vec![BridgeDeviceInfo {
                     id,
                     name: format!("Device {short} (local)"),
@@ -2530,8 +2531,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .values()
             .filter(|leaf| leaf.role == LeafRole::Device)
             .map(|leaf| {
-                let id = leaf.device_id.to_string();
-                let short = id.chars().take(8).collect::<String>();
+                let id = leaf.device_id;
+                let short = id.to_string();
+                let short = short.chars().take(8).collect::<String>();
                 BridgeDeviceInfo {
                     id: id.clone(),
                     name: format!("Device {short}"),
@@ -2545,8 +2547,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         // This handles fresh accounts where no device enrollment ceremony has occurred yet.
         let current_in_tree = devices.iter().any(|d| d.is_current);
         if !current_in_tree {
-            let id = current_device.to_string();
-            let short = id.chars().take(8).collect::<String>();
+            let id = current_device;
+            let short = id.to_string();
+            let short = short.chars().take(8).collect::<String>();
             devices.insert(
                 0,
                 BridgeDeviceInfo {

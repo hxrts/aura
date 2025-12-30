@@ -12,7 +12,7 @@
 //! ## Single Source of Truth
 //!
 //! Demo mode uses the same fact-based pipeline as production (per work/002.md C2.5):
-//! - Facts are committed via `RuntimeBridge.commit_relational_facts()`
+//! - Facts are committed via the runtime bridge
 //! - The `ReactiveScheduler` processes facts and updates signals
 //! - UI components subscribe to signals
 //!
@@ -23,15 +23,14 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::signal_defs::{CHAT_SIGNAL, RECOVERY_SIGNAL};
-use aura_app::views::chat::Message as ChatMessage;
-use aura_app::views::recovery::{Guardian, GuardianStatus, RecoveryProcessStatus};
-use aura_app::views::{ChatState, RecoveryState};
-use aura_app::AppCore;
+use aura_app::ui::signals::{CHAT_SIGNAL, RECOVERY_SIGNAL};
+use aura_app::ui::types::chat::Message as ChatMessage;
+use aura_app::ui::types::recovery::{Guardian, GuardianStatus, RecoveryProcessStatus};
+use aura_app::ui::types::{ChatState, RecoveryState};
+use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuthorityId;
 use aura_core::Hash32;
-use aura_journal::fact::RelationalFact;
 use tokio::sync::mpsc;
 
 use super::{AgentEvent, AgentResponse, SimulatedBridge};
@@ -303,16 +302,15 @@ impl DemoSignalCoordinator {
 
                 // Commit a GuardianBinding fact through the runtime.
                 // This flows through the scheduler to update CONTACTS_SIGNAL.
-                if let Some(runtime) = core.runtime() {
-                    let binding_fact = RelationalFact::Protocol(
-                        aura_journal::ProtocolRelationalFact::GuardianBinding {
-                            account_id: self.bob_authority,
-                            guardian_id: authority_id.clone(),
-                            binding_hash: Hash32::default(), // Demo uses empty hash
-                        },
-                    );
-
-                    match runtime.commit_relational_facts(&[binding_fact]).await {
+                if core.runtime().is_some() {
+                    match aura_app::ui::workflows::recovery::commit_guardian_binding(
+                        self.app_core.raw(),
+                        self.bob_authority,
+                        authority_id.clone(),
+                        Hash32::default(), // Demo uses empty hash
+                    )
+                    .await
+                    {
                         Ok(()) => {
                             tracing::info!(
                                 "Demo: Committed GuardianBinding fact for {}",

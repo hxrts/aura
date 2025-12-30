@@ -111,12 +111,33 @@ impl ChatState {
             .unwrap_or(0)
     }
 
+    /// Ensure a valid selection when channels exist.
+    pub fn ensure_selection(&mut self) {
+        if self.channels.is_empty() {
+            self.selected_channel_id = None;
+            self.messages.clear();
+            return;
+        }
+
+        let has_selected = self
+            .selected_channel_id
+            .as_ref()
+            .map(|id| self.channel(id).is_some())
+            .unwrap_or(false);
+
+        if !has_selected {
+            let first_id = self.channels[0].id;
+            self.select_channel(Some(first_id));
+        }
+    }
+
     /// Add a new channel
     pub fn add_channel(&mut self, channel: Channel) {
         // Avoid duplicates
         if self.channel(&channel.id).is_none() {
             self.channels.push(channel);
         }
+        self.ensure_selection();
     }
 
     /// Remove a channel by ID
@@ -127,6 +148,8 @@ impl ChatState {
             self.selected_channel_id = None;
             self.messages.clear();
         }
+
+        self.ensure_selection();
     }
 
     /// Mark a channel as joined (increment member count)
@@ -188,13 +211,24 @@ impl ChatState {
 
     /// Select a channel and load its messages
     pub fn select_channel(&mut self, channel_id: Option<ChannelId>) {
-        if self.selected_channel_id != channel_id {
+        let mut next = channel_id;
+        if next.is_none() && !self.channels.is_empty() {
+            next = Some(self.channels[0].id);
+        }
+
+        if let Some(id) = &next {
+            if self.channel(id).is_none() && !self.channels.is_empty() {
+                next = Some(self.channels[0].id);
+            }
+        }
+
+        if self.selected_channel_id != next {
             // Clear old messages
             self.messages.clear();
-            self.selected_channel_id = channel_id;
+            self.selected_channel_id = next;
 
             // Mark as read - first get the unread count, then update both fields
-            if let Some(id) = &channel_id {
+            if let Some(id) = &next {
                 // Get the unread count first (immutable borrow)
                 let unread_to_subtract = self.channel(id).map(|c| c.unread_count).unwrap_or(0);
 

@@ -1,11 +1,11 @@
 //! Invitation CLI handlers - Terminal-Specific Formatting
 //!
 //! This module provides terminal-specific invitation formatting for CLI and TUI.
-//! Business logic has been moved to `aura_app::workflows::invitation`.
+//! Business logic has been moved to `aura_app::ui::workflows::invitation`.
 //!
 //! ## Architecture
 //!
-//! - **Business Logic**: `aura_app::workflows::invitation` (portable)
+//! - **Business Logic**: `aura_app::ui::workflows::invitation` (portable)
 //! - **Formatting**: This module (terminal-specific)
 //!
 //! Returns structured `CliOutput` for testability.
@@ -17,7 +17,7 @@ use aura_core::identifiers::AuthorityId;
 use std::str::FromStr;
 
 // CLI handlers use direct agent service access (more efficient for CLI context)
-// TUI handlers should use aura_app::workflows::invitation for portability
+// TUI handlers should use aura_app::ui::workflows::invitation for portability
 use aura_agent::handlers::ShareableInvitation;
 use aura_agent::{AuraAgent, InvitationService};
 

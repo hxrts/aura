@@ -148,6 +148,8 @@ cfg_if! {
 
             /// Update chat state
             pub fn set_chat(&self, state: ChatState) {
+                let mut state = state;
+                state.ensure_selection();
                 self.chat.set(state);
             }
 
@@ -253,6 +255,8 @@ cfg_if! {
 
             /// Update chat state
             pub fn set_chat(&mut self, state: ChatState) {
+                let mut state = state;
+                state.ensure_selection();
                 self.chat = state;
             }
 

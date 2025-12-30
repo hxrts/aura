@@ -20,11 +20,20 @@ use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_effects::time::PhysicalTimeHandler;
-use aura_recovery::guardian_setup::GuardianAcceptance;
+use serde::Serialize;
 use std::str::FromStr;
 
 use crate::error::TerminalResult;
 use crate::ids;
+
+#[derive(Debug, Clone, Serialize)]
+struct GuardianAcceptance {
+    guardian_id: AuthorityId,
+    setup_id: String,
+    accepted: bool,
+    public_key: Vec<u8>,
+    timestamp: TimeStamp,
+}
 
 /// Demo simulator that manages Alice, Carol, and Mobile peer runtimes.
 pub struct DemoSimulator {
