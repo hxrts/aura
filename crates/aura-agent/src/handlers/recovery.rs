@@ -371,9 +371,8 @@ impl RecoveryHandler {
     ) -> AgentResult<RecoveryResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        let policy = aura_core::threshold::policy_for(
-            aura_core::threshold::CeremonyFlow::RecoveryExecution,
-        );
+        let policy =
+            aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::RecoveryExecution);
         if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized)
             && !effects.is_testing()
         {

@@ -14,8 +14,8 @@ use crate::tui::props::{
     ChatViewProps, ContactsViewProps, NeighborhoodViewProps, SettingsViewProps,
 };
 use crate::tui::screens::{
-    HomeCreateModal, ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal,
-    GuardianCandidateProps, GuardianSetupKind, GuardianSetupModal, InvitationCodeModal,
+    ChannelInfoModal, ChatCreateModal, DeviceEnrollmentModal, GuardianCandidateProps,
+    GuardianSetupKind, GuardianSetupModal, HomeCreateModal, InvitationCodeModal,
     InvitationCreateModal, InvitationImportModal,
 };
 use crate::tui::types::{Contact, InvitationType};

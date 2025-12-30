@@ -120,8 +120,7 @@ impl QueryFacts {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Policy for capability enforcement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CapabilityPolicy {
     /// Allow all queries regardless of granted capabilities.
     AllowAll,
@@ -129,7 +128,6 @@ pub enum CapabilityPolicy {
     #[default]
     DenyUnlessGranted,
 }
-
 
 /// Capability checker for query authorization.
 ///

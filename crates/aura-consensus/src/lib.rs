@@ -67,7 +67,6 @@ pub mod relational;
 // Prelude
 pub mod prelude;
 
-
 // Re-export core types
 pub use messages::{
     ConsensusError, ConsensusMessage, ConsensusPhase, ConsensusRequest, ConsensusResponse,

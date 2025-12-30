@@ -281,7 +281,6 @@ mod guardian_recovery_tests {
     }
 }
 
-
 // ═══════════════════════════════════════════════════════════════════════════
 // 8.7.3: Consensus with Threshold Signatures
 // ═══════════════════════════════════════════════════════════════════════════
@@ -552,7 +551,10 @@ mod real_frost_tests {
                 3,
             )
             .await;
-        assert!(result.is_ok(), "Threshold 2-of-3 key generation should succeed");
+        assert!(
+            result.is_ok(),
+            "Threshold 2-of-3 key generation should succeed"
+        );
 
         let keys = result.unwrap();
         assert_eq!(keys.key_packages.len(), 3, "Should have 3 key packages");

@@ -35,7 +35,7 @@
 //! let view = FlowBudgetView::from_budget(budget);
 //! ```
 
-use aura_app::{HomeFlowBudget, BudgetBreakdown};
+use aura_app::{BudgetBreakdown, HomeFlowBudget};
 
 // Re-export workflow functions for backward compatibility
 // Business logic is now in aura_app::workflows::budget

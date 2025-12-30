@@ -110,9 +110,7 @@ impl ResourceScope {
                 )
             }
             ResourceScope::Storage { authority_id, path } => {
-                format!(
-                    "resource(\"/storage/{authority_id}/{path}\"), resource_type(\"storage\")"
-                )
+                format!("resource(\"/storage/{authority_id}/{path}\"), resource_type(\"storage\")")
             }
         }
     }

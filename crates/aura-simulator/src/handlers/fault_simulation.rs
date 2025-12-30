@@ -283,9 +283,7 @@ impl ChaosEffects for SimulationFaultHandler {
         let fault_id = self.next_fault_id("resource");
         self.track_fault(
             fault_id,
-            format!(
-                "ResourceExhaustion({resource_type:?}, {constraint_level:.2})"
-            ),
+            format!("ResourceExhaustion({resource_type:?}, {constraint_level:.2})"),
             None,
         );
 
@@ -315,9 +313,7 @@ impl ChaosEffects for SimulationFaultHandler {
         let fault_id = self.next_fault_id("timing");
         self.track_fault(
             fault_id,
-            format!(
-                "TimingFaults(skew: {time_skew:?}, drift: {clock_drift_rate:.2})"
-            ),
+            format!("TimingFaults(skew: {time_skew:?}, drift: {clock_drift_rate:.2})"),
             None,
         );
 

@@ -39,13 +39,13 @@ pub mod scheduler;
 
 // Re-export main types for convenience
 pub use app_signal_views::{
-    HomeSignalView, ChatSignalView, ContactsSignalView, InvitationsSignalView, RecoverySignalView,
+    ChatSignalView, ContactsSignalView, HomeSignalView, InvitationsSignalView, RecoverySignalView,
 };
 pub use frp::Dynamic;
 pub use pipeline::ReactivePipeline;
 pub use scheduler::{
-    topological_sort_dag, AnyView, HomeDelta, HomeReduction, ChatReduction, FactSource,
-    GuardianDelta, GuardianReduction, InvitationReduction, ReactiveScheduler, ReactiveView,
+    topological_sort_dag, AnyView, ChatReduction, FactSource, GuardianDelta, GuardianReduction,
+    HomeDelta, HomeReduction, InvitationReduction, ReactiveScheduler, ReactiveView,
     RecoveryReduction, SchedulerConfig, ViewAdapter, ViewNode, ViewReduction, ViewUpdate,
 };
 

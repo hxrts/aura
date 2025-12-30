@@ -251,8 +251,7 @@ impl FlowTraceReplayer {
         state.invitation_flow_phase =
             Self::extract_string(vars.get("invitationFlowPhase")).unwrap_or_default();
         state.chat_flow_phase = Self::extract_string(vars.get("chatFlowPhase")).unwrap_or_default();
-        state.home_flow_phase =
-            Self::extract_string(vars.get("homeFlowPhase")).unwrap_or_default();
+        state.home_flow_phase = Self::extract_string(vars.get("homeFlowPhase")).unwrap_or_default();
         state.neighborhood_flow_phase =
             Self::extract_string(vars.get("neighborhoodFlowPhase")).unwrap_or_default();
         state.social_graph_flow_phase =
@@ -565,8 +564,10 @@ impl FlowTraceReplayer {
 
         // Invariant 3: Stewards must be residents
         for (home_id, home_state) in &state.homes {
-            let all_stewards_are_residents =
-                home_state.stewards.iter().all(|s| home_state.residents.contains(s));
+            let all_stewards_are_residents = home_state
+                .stewards
+                .iter()
+                .all(|s| home_state.residents.contains(s));
 
             if all_stewards_are_residents {
                 results.passed_count += 1;

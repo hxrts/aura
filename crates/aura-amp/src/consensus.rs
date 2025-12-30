@@ -11,8 +11,8 @@ use aura_consensus::protocol::run_consensus;
 use aura_consensus::types::CommitFact;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::RandomEffects;
-use aura_core::types::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
+use aura_core::types::Epoch;
 use aura_core::{AuthorityId, Hash32, Prestate, Result};
 use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};
 use std::collections::HashMap;
@@ -130,13 +130,9 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects + AmpEvidenceEf
 
     // Insert AMP committed bump fact
     journal
-        .insert_relational_fact(
-            aura_journal::fact::RelationalFact::Protocol(
-                aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(
-                    committed.clone(),
-                ),
-            ),
-        )
+        .insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpCommittedChannelEpochBump(committed.clone()),
+        ))
         .await?;
 
     // Insert consensus evidence for observability/audit

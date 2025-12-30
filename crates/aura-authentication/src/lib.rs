@@ -113,7 +113,6 @@ pub use aura_signature::{
 pub use aura_authorization::{BiscuitTokenManager, ResourceScope, TokenAuthority};
 pub use aura_guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
 
-
 // Re-export DKD types
 pub use dkd::{
     create_test_config, execute_simple_dkd, DkdConfig, DkdError, DkdProtocol, DkdResult,

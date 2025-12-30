@@ -235,8 +235,7 @@ pub fn create_neighborhood_topology(
     // Add our home to the neighborhood
     let timestamp = test_timestamp();
     neighborhood.member_homes.push(home.home_id);
-    let member_fact =
-        HomeMemberFact::new(home.home_id, neighborhood.neighborhood_id, timestamp);
+    let member_fact = HomeMemberFact::new(home.home_id, neighborhood.neighborhood_id, timestamp);
     let _ = member_fact; // Use fact in production code
 
     let topology = SocialTopology::new(steward, Some(home.clone()), vec![neighborhood.clone()]);
@@ -297,8 +296,7 @@ impl SocialTopologyBuilder {
 
     /// Build the topology.
     pub fn build(self) -> SocialTopology {
-        let mut topology =
-            SocialTopology::new(self.local_authority, self.home, self.neighborhoods);
+        let mut topology = SocialTopology::new(self.local_authority, self.home, self.neighborhoods);
 
         for (peer, relationship) in self.additional_peers {
             topology.add_peer(peer, relationship);

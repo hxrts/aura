@@ -191,8 +191,7 @@ impl IoContextBuilder {
         let has_existing_account = Arc::new(std::sync::atomic::AtomicBool::new(
             self.has_existing_account,
         ));
-        let account_files =
-            AccountFilesHelper::new(base_path, device_id, has_existing_account);
+        let account_files = AccountFilesHelper::new(base_path, device_id, has_existing_account);
 
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
         let current_context = Arc::new(RwLock::new(None));

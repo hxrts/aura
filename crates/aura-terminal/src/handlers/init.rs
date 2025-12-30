@@ -132,9 +132,8 @@ async fn create_effect_api(
     let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
 
     // Create a simple CBOR-like structure
-    let effect_api_data = format!(
-        "effect_api:threshold={threshold},devices={num_devices},created={timestamp}"
-    );
+    let effect_api_data =
+        format!("effect_api:threshold={threshold},devices={num_devices},created={timestamp}");
 
     output.println("Created effect API metadata");
 

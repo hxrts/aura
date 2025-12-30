@@ -67,9 +67,7 @@ pub async fn handle_invitation(
             if result.success {
                 output.println(format!("Invitation {invitation_id} declined"));
             } else if let Some(err) = result.error {
-                output.eprintln(format!(
-                    "Invitation {invitation_id} decline failed: {err}"
-                ));
+                output.eprintln(format!("Invitation {invitation_id} decline failed: {err}"));
             }
             Ok(output)
         }
@@ -80,9 +78,7 @@ pub async fn handle_invitation(
             if result.success {
                 output.println(format!("Invitation {invitation_id} canceled"));
             } else if let Some(err) = result.error {
-                output.eprintln(format!(
-                    "Invitation {invitation_id} cancel failed: {err}"
-                ));
+                output.eprintln(format!("Invitation {invitation_id} cancel failed: {err}"));
             }
             Ok(output)
         }

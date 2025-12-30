@@ -19,9 +19,7 @@
 
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
-use aura_core::threshold::{
-    policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity,
-};
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity};
 use aura_core::DeviceId;
 use std::collections::HashMap;
 use std::sync::Arc;

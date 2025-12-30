@@ -235,11 +235,7 @@ pub async fn create_channel(
 
     // Rotate into a finalized AMP epoch when policy allows.
     if let Err(e) = runtime
-        .bump_channel_epoch(
-            context_id,
-            channel_id,
-            "amp-bootstrap-finalize".to_string(),
-        )
+        .bump_channel_epoch(context_id, channel_id, "amp-bootstrap-finalize".to_string())
         .await
     {
         #[cfg(feature = "instrumented")]

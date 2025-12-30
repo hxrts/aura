@@ -36,7 +36,8 @@ impl RealSecureStorageHandler {
     /// Create a handler for testing with an ephemeral temp directory.
     #[cfg(test)]
     pub fn for_testing() -> Self {
-        let temp_dir = std::env::temp_dir().join(format!("aura-secure-test-{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("aura-secure-test-{}", std::process::id()));
         Self::with_base_path(temp_dir)
     }
 

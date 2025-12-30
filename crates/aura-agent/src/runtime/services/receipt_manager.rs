@@ -36,7 +36,7 @@ impl Default for ReceiptManagerConfig {
     fn default() -> Self {
         Self {
             auto_cleanup_enabled: true,
-            cleanup_interval: Duration::from_secs(300),    // 5 minutes
+            cleanup_interval: Duration::from_secs(300), // 5 minutes
             retention_period: Duration::from_secs(604800), // 7 days
         }
     }

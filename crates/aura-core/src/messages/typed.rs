@@ -124,10 +124,7 @@ impl fmt::Display for AuthTag {
                 threshold_config,
                 ..
             } => {
-                write!(
-                    f,
-                    "ThresholdSig({participant_count}/{threshold_config})"
-                )
+                write!(f, "ThresholdSig({participant_count}/{threshold_config})")
             }
             AuthTag::Mac { algorithm, .. } => {
                 write!(f, "MAC({algorithm})")

@@ -17,7 +17,6 @@
 //!                         ✓ TEST
 //! ```
 
-use aura_core::threshold::AgreementMode;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::screens::ChatFocus as ScreenChatFocus;
 use crate::tui::state::{
@@ -25,6 +24,7 @@ use crate::tui::state::{
     NeighborhoodMode, QueuedModal, TuiState,
 };
 use crate::tui::types::TraversalDepth;
+use aura_core::threshold::AgreementMode;
 use tracing::warn;
 
 // ============================================================================

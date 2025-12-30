@@ -4,6 +4,7 @@
 //! a representative, and neighborhood-level data is replicated across all
 //! representatives.
 
+use crate::facts::{HomeId, NeighborhoodId};
 use crate::neighborhood::Neighborhood;
 use async_trait::async_trait;
 use aura_core::{
@@ -15,7 +16,6 @@ use aura_core::{
     },
     identifiers::AuthorityId,
 };
-use crate::facts::{HomeId, NeighborhoodId};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -250,12 +250,12 @@ struct RetrieveResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::facts::{HomeMemberFact, NeighborhoodFact};
     use aura_core::effects::{
         network::NetworkError, storage::StorageError, NetworkCoreEffects, NetworkExtendedEffects,
         StorageCoreEffects, StorageExtendedEffects,
     };
     use aura_core::time::{PhysicalTime, TimeStamp};
-    use crate::facts::{HomeMemberFact, NeighborhoodFact};
 
     fn test_timestamp() -> TimeStamp {
         TimeStamp::PhysicalClock(PhysicalTime {

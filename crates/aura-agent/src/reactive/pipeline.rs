@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 
 use super::ViewUpdate;
 use super::{
-    HomeSignalView, ChatSignalView, ContactsSignalView, InvitationsSignalView, RecoverySignalView,
+    ChatSignalView, ContactsSignalView, HomeSignalView, InvitationsSignalView, RecoverySignalView,
 };
 use super::{FactSource, ReactiveScheduler, SchedulerConfig};
 

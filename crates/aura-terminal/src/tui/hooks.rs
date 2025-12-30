@@ -299,9 +299,7 @@ fn format_reactive_error(err: &ReactiveError) -> String {
             id,
             expected,
             actual,
-        } => format!(
-            "type mismatch ({id}): expected {expected}, got {actual}"
-        ),
+        } => format!("type mismatch ({id}): expected {expected}, got {actual}"),
         ReactiveError::SubscriptionClosed { id } => format!("subscription closed: {id}"),
         ReactiveError::EmissionFailed { id, reason } => {
             format!("emission failed ({id}): {reason}")

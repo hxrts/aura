@@ -332,9 +332,7 @@ impl RecoveryService {
                 .has_dkg_transcript_commit(authority_id, context_id, new_epoch)
                 .await
                 .map_err(|e| {
-                    AgentError::internal(format!(
-                        "Failed to verify DKG transcript commit: {e}"
-                    ))
+                    AgentError::internal(format!("Failed to verify DKG transcript commit: {e}"))
                 })?;
             if !has_commit {
                 return Err(AgentError::invalid(

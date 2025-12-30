@@ -21,6 +21,8 @@
 
 use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
+use aura_consensus::dkg::recovery::recover_share_from_transcript;
+use aura_consensus::dkg::{DkgTranscript, DkgTranscriptStore, StorageTranscriptStore};
 use aura_core::crypto::single_signer::SigningMode;
 use aura_core::effects::{
     crypto::KeyGenerationMethod, CryptoExtendedEffects, SecureStorageCapability,
@@ -36,8 +38,6 @@ use aura_core::{
     threshold::{ConvergenceCert, ReversionFact},
     AuraError, ContextId, Hash32,
 };
-use aura_consensus::dkg::recovery::recover_share_from_transcript;
-use aura_consensus::dkg::{DkgTranscript, DkgTranscriptStore, StorageTranscriptStore};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -221,9 +221,9 @@ impl ThresholdSigningService {
         window: u64,
     ) -> Result<ConvergenceCert, AuraError> {
         let leases = self.leases.read().await;
-        let lease = leases.get(coordinator).ok_or_else(|| {
-            AuraError::invalid("Coordinator lease missing for convergence cert")
-        })?;
+        let lease = leases
+            .get(coordinator)
+            .ok_or_else(|| AuraError::invalid("Coordinator lease missing for convergence cert"))?;
 
         Ok(ConvergenceCert {
             context,
@@ -244,9 +244,9 @@ impl ThresholdSigningService {
         winner_op_id: Hash32,
     ) -> Result<ReversionFact, AuraError> {
         let leases = self.leases.read().await;
-        let lease = leases.get(coordinator).ok_or_else(|| {
-            AuraError::invalid("Coordinator lease missing for reversion fact")
-        })?;
+        let lease = leases
+            .get(coordinator)
+            .ok_or_else(|| AuraError::invalid("Coordinator lease missing for reversion fact"))?;
 
         Ok(ReversionFact {
             context,
@@ -351,7 +351,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         let location = SecureStorageLocation::with_sub_key(
             "signing_keys",
             format!("{}/{}", authority, epoch),
-            "1",                        // signer index 1
+            "1", // signer index 1
         );
 
         self.effects
@@ -382,7 +382,9 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 ],
             )
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to store participant share: {}", e)))?;
+            .map_err(|e| {
+                AuraError::internal(format!("Failed to store participant share: {}", e))
+            })?;
 
         // Persist public key package for consensus helpers.
         let pubkey_location = SecureStorageLocation::with_sub_key(
@@ -903,10 +905,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         if config_metadata.agreement_mode != AgreementMode::ConsensusFinalized {
             config_metadata.agreement_mode = AgreementMode::ConsensusFinalized;
             let updated_bytes = serde_json::to_vec(&config_metadata).map_err(|e| {
-                AuraError::internal(format!(
-                    "Failed to serialize threshold config: {}",
-                    e
-                ))
+                AuraError::internal(format!("Failed to serialize threshold config: {}", e))
             })?;
             self.effects
                 .secure_store(

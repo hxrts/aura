@@ -39,7 +39,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use aura_app::signal_defs::{
-    HOMES_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
+    CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
     RECOVERY_SIGNAL,
 };
 use aura_app::{AppConfig, AppCore};
@@ -755,10 +755,7 @@ async fn test_social_graph_flow() {
     }
 
     let bob_home = env.get_agent("bob").read_home().await;
-    println!(
-        "  Home state: id={}, name={}",
-        bob_home.id, bob_home.name
-    );
+    println!("  Home state: id={}, name={}", bob_home.id, bob_home.name);
 
     // Phase 5: Invite contact to home (SendHomeInvitation)
     println!("\nPhase 5: Inviting contact to home...");

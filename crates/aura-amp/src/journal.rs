@@ -146,7 +146,9 @@ pub async fn get_channel_state<A: AmpJournalEffects>(
 /// Extract the context ID from a relational fact.
 pub(crate) fn fact_context(fact: &RelationalFact) -> Result<ContextId> {
     match fact {
-        RelationalFact::Protocol(ProtocolRelationalFact::AmpChannelCheckpoint(cp)) => Ok(cp.context),
+        RelationalFact::Protocol(ProtocolRelationalFact::AmpChannelCheckpoint(cp)) => {
+            Ok(cp.context)
+        }
         RelationalFact::Protocol(ProtocolRelationalFact::AmpProposedChannelEpochBump(b)) => {
             Ok(b.context)
         }

@@ -3,8 +3,8 @@
 //! This module provides an API for journal operations
 //! that hides CRDT implementation details.
 
-use crate::fact::{Fact, FactContent, Journal as FactJournal, JournalNamespace};
 use crate::algebra::{AccountState, OpLog};
+use crate::fact::{Fact, FactContent, Journal as FactJournal, JournalNamespace};
 
 use aura_core::effects::time::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
 use aura_core::hash::hash;

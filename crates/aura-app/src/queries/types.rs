@@ -1168,7 +1168,7 @@ impl Query for NeighborhoodQuery {
 
         Ok(NeighborhoodState {
             home_home_id: ChannelId::default(), // Set by caller
-            home_name: String::new(),      // Set by caller
+            home_name: String::new(),           // Set by caller
             position: None,
             neighbors,
             max_depth: 3,

@@ -237,7 +237,9 @@ impl ReplicationCoordinator {
                     .collect();
 
                 let required_replicas = match &self.strategy {
-                    ReplicationStrategy::SimpleReplication { replica_count } => *replica_count as usize,
+                    ReplicationStrategy::SimpleReplication { replica_count } => {
+                        *replica_count as usize
+                    }
                     ReplicationStrategy::ErasureCoding { config } => config.min_chunks() as usize,
                     ReplicationStrategy::Hybrid {
                         critical_replicas, ..

@@ -473,11 +473,7 @@ fn extract_leakage_facts(journal: &Journal, context_id: ContextId) -> Vec<Leakag
         .filter_map(|content| match content {
             FactContent::Relational(RelationalFact::Protocol(
                 aura_journal::ProtocolRelationalFact::LeakageEvent(event),
-            ))
-                if event.context_id == context_id =>
-            {
-                Some(event)
-            }
+            )) if event.context_id == context_id => Some(event),
             _ => None,
         })
         .collect()

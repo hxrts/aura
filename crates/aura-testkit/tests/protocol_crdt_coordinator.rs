@@ -6,10 +6,10 @@ use aura_core::{
     time::VectorClock,
     AuraResult, AuthorityId, DeviceId, SessionId,
 };
+use aura_journal::crdt::CvHandler;
 use aura_journal::CausalContext;
 use aura_protocol::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 use aura_protocol::effects::crdt::CrdtCoordinator;
-use aura_journal::crdt::CvHandler;
 use aura_testkit::TestFixture;
 use serde::{Deserialize, Serialize};
 

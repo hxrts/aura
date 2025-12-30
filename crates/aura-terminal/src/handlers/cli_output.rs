@@ -54,8 +54,7 @@ impl CliOutput {
     /// Add a section header (e.g., "=== Title ===")
     pub fn section(&mut self, title: impl Into<String>) -> &mut Self {
         let title = title.into();
-        self.lines
-            .push(OutputLine::Out(format!("=== {title} ===")));
+        self.lines.push(OutputLine::Out(format!("=== {title} ===")));
         self
     }
 

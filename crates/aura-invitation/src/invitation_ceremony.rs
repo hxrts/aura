@@ -735,7 +735,10 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         let before = self.ceremonies.len();
         self.ceremonies.retain(|_, ceremony| {
             let timed_out = now_ms > ceremony.started_at_ms.saturating_add(ceremony.timeout_ms);
-            let terminal = matches!(ceremony.status, CeremonyStatus::Committed | CeremonyStatus::Aborted { .. });
+            let terminal = matches!(
+                ceremony.status,
+                CeremonyStatus::Committed | CeremonyStatus::Aborted { .. }
+            );
             !(timed_out || terminal)
         });
         before.saturating_sub(self.ceremonies.len())

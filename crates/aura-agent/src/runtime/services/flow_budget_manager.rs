@@ -181,7 +181,12 @@ impl FlowBudgetManager {
         budgets.retain(|_, budget| budget.epoch >= min_epoch);
         let removed = before - budgets.len();
         if removed > 0 {
-            tracing::debug!(removed, current_epoch, min_epoch, "Cleaned up stale flow budgets");
+            tracing::debug!(
+                removed,
+                current_epoch,
+                min_epoch,
+                "Cleaned up stale flow budgets"
+            );
         }
         removed
     }

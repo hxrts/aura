@@ -8,8 +8,8 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
-use aura_core::types::Epoch;
 use aura_core::types::facts::{FactDelta, FactDeltaReducer};
+use aura_core::types::Epoch;
 use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use serde::{Deserialize, Serialize};
 

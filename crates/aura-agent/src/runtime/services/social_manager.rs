@@ -5,7 +5,7 @@
 
 use aura_core::effects::relay::{RelayCandidate, RelayContext, RelaySelector};
 use aura_core::identifiers::AuthorityId;
-use aura_social::{Home, DiscoveryLayer, Neighborhood, SocialTopology};
+use aura_social::{DiscoveryLayer, Home, Neighborhood, SocialTopology};
 use aura_transport::relay::DeterministicRandomSelector;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -281,7 +281,9 @@ mod tests {
         let mut home_state = Home::new_empty(home_id);
         home_state.residents = vec![local, peer];
 
-        manager.initialize_with_social(Some(home_state), vec![]).await;
+        manager
+            .initialize_with_social(Some(home_state), vec![])
+            .await;
 
         assert!(manager.is_ready().await);
         assert!(manager.has_social_presence().await);

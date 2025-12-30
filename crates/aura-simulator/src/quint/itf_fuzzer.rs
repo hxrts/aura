@@ -393,9 +393,7 @@ impl ITFBasedFuzzer {
             .quint_cli
             .generate_traces(spec_file, count, self.config.max_bound)
             .await
-            .map_err(|e| {
-                ITFFuzzError::QuintCliError(format!("Failed to generate traces: {e}"))
-            })?;
+            .map_err(|e| ITFFuzzError::QuintCliError(format!("Failed to generate traces: {e}")))?;
 
         let mut itf_traces = Vec::new();
         for trace_json in traces {
@@ -520,9 +518,7 @@ impl ITFBasedFuzzer {
             .itf_converter
             .serialize_itf_to_json(&internal_itf, pretty)
             .map_err(|e| {
-                ITFFuzzError::TraceConversionError(format!(
-                    "Failed to serialize ITF to JSON: {e}"
-                ))
+                ITFFuzzError::TraceConversionError(format!("Failed to serialize ITF to JSON: {e}"))
             })?;
         Ok(result)
     }
@@ -618,9 +614,10 @@ impl ITFBasedFuzzer {
 
         let simulator = GenerativeSimulator::new(registry, config);
 
-        let result = simulator.explore(initial_state, seed).await.map_err(|e| {
-            ITFFuzzError::TraceConversionError(format!("Exploration failed: {e}"))
-        })?;
+        let result = simulator
+            .explore(initial_state, seed)
+            .await
+            .map_err(|e| ITFFuzzError::TraceConversionError(format!("Exploration failed: {e}")))?;
 
         Ok(GenerativeSimulationResult {
             steps: result.steps,
@@ -759,8 +756,8 @@ impl ITFBasedFuzzer {
         let mut final_bound = deepening.initial_bound;
 
         // Iterative deepening: gradually increase bounds until max or violations found
-        for bound in
-            (deepening.initial_bound..=deepening.max_bound).step_by(deepening.bound_increment as usize)
+        for bound in (deepening.initial_bound..=deepening.max_bound)
+            .step_by(deepening.bound_increment as usize)
         {
             final_bound = bound;
 
@@ -808,8 +805,7 @@ impl ITFBasedFuzzer {
     ) -> Result<PropertyCheckResult, ITFFuzzError> {
         // Create ephemeral output file for counterexample
         let temp_dir = std::env::temp_dir();
-        let counterexample_file =
-            temp_dir.join(format!("counterexample_{property}_{bound}.itf"));
+        let counterexample_file = temp_dir.join(format!("counterexample_{property}_{bound}.itf"));
 
         // Run `quint verify` with the specific bound
         let output = std::process::Command::new(&self.config.quint_executable)
@@ -1485,7 +1481,9 @@ impl ITFBasedFuzzer {
                             "Precondition violation detected: {precondition}"
                         ),
                         violation_state: ITFState {
-                            meta: ITFStateMeta { index: step_idx as u64 },
+                            meta: ITFStateMeta {
+                                index: step_idx as u64,
+                            },
                             variables: action.state_variables.clone(),
                             action_taken: action.action_name.clone(),
                             nondet_picks: action.nondet_picks.clone(),

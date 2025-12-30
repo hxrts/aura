@@ -14,7 +14,7 @@ use aura_social::facts::{
     NeighborhoodId, ResidentFact, StewardFact,
 };
 use aura_social::{
-    Home, DiscoveryLayer, Neighborhood, ReachabilityChecker, RelayCandidateBuilder, SocialTopology,
+    DiscoveryLayer, Home, Neighborhood, ReachabilityChecker, RelayCandidateBuilder, SocialTopology,
 };
 
 // ============================================================================
@@ -497,8 +497,7 @@ fn test_multi_home_neighborhood_topology() {
     let (home3, _, _) = create_home(3, 3);
 
     // Create neighborhood with all homes
-    let neighborhood =
-        create_neighborhood(1, vec![home1.home_id, home2.home_id, home3.home_id]);
+    let neighborhood = create_neighborhood(1, vec![home1.home_id, home2.home_id, home3.home_id]);
 
     // Create topology for steward1 in home1
     let topology = SocialTopology::new(steward1, Some(home1.clone()), vec![neighborhood.clone()]);

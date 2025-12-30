@@ -215,8 +215,7 @@ fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
     //
     // The "placeholder" status is tracked separately via `has_existing_account`.
     // Keeping the identity stable avoids needing to rebuild the runtime after account creation.
-    let authority_entropy =
-        aura_core::hash::hash(format!("authority:{device_id_str}").as_bytes());
+    let authority_entropy = aura_core::hash::hash(format!("authority:{device_id_str}").as_bytes());
     let context_entropy = aura_core::hash::hash(format!("context:{device_id_str}").as_bytes());
 
     (
@@ -270,8 +269,7 @@ pub async fn create_account(
 
     // Create new account with deterministic IDs based on device_id
     // This ensures the same device_id always creates the same account
-    let authority_entropy =
-        aura_core::hash::hash(format!("authority:{device_id_str}").as_bytes());
+    let authority_entropy = aura_core::hash::hash(format!("authority:{device_id_str}").as_bytes());
     let context_entropy = aura_core::hash::hash(format!("context:{device_id_str}").as_bytes());
 
     let authority_id = AuthorityId::new_from_entropy(authority_entropy);
@@ -585,20 +583,20 @@ async fn handle_tui_launch(
     // Try to load existing account, or use placeholders if no account exists
     let (authority_id, context_id, has_existing_account) =
         match try_load_account(storage.as_ref()).await? {
-        AccountLoadResult::Loaded { authority, context } => {
-            stdio.println(format_args!("Authority: {authority}"));
-            stdio.println(format_args!("Context: {context}"));
-            (authority, context, true)
-        }
-        AccountLoadResult::NotFound => {
-            // Use placeholder IDs - the TUI will show account setup modal
-            let (authority, context) = create_placeholder_ids(device_id_for_account);
-            stdio.println(format_args!("No existing account - will show setup modal"));
-            stdio.println(format_args!("Placeholder Authority: {authority}"));
-            stdio.println(format_args!("Placeholder Context: {context}"));
-            (authority, context, false)
-        }
-    };
+            AccountLoadResult::Loaded { authority, context } => {
+                stdio.println(format_args!("Authority: {authority}"));
+                stdio.println(format_args!("Context: {context}"));
+                (authority, context, true)
+            }
+            AccountLoadResult::NotFound => {
+                // Use placeholder IDs - the TUI will show account setup modal
+                let (authority, context) = create_placeholder_ids(device_id_for_account);
+                stdio.println(format_args!("No existing account - will show setup modal"));
+                stdio.println(format_args!("Placeholder Authority: {authority}"));
+                stdio.println(format_args!("Placeholder Context: {context}"));
+                (authority, context, false)
+            }
+        };
 
     // Create agent configuration
     let agent_config = AgentConfig {
@@ -765,8 +763,8 @@ async fn handle_tui_launch(
             tokio::spawn(async move {
                 use aura_app::signal_defs::CHAT_SIGNAL;
                 use aura_core::effects::amp::ChannelSendParams;
-                use aura_core::EffectContext;
                 use aura_core::identifiers::ContextId;
+                use aura_core::EffectContext;
                 use std::collections::HashSet;
 
                 let mut chat_stream = {

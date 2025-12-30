@@ -27,11 +27,11 @@
 //! - `JournalEffects` for persistent state and audit logs
 //! - `PhysicalTimeEffects` for replay protection and timeouts
 
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::{
     effects::{CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects},
     hash, AuraError, AuraResult, DeviceId, Hash32,
 };
-use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
@@ -1095,10 +1095,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            result.agreement_mode,
-            AgreementMode::CoordinatorSoftSafe
-        );
+        assert_eq!(result.agreement_mode, AgreementMode::CoordinatorSoftSafe);
         assert!(result.reversion_risk);
     }
 }

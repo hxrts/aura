@@ -210,9 +210,11 @@ async fn wait_for_message(
         let core = app_core.read().await;
         if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
             if let Some(channel) = chat_state.channels.iter().find(|c| c.name == channel_name) {
-                if chat_state.messages.iter().any(|m| {
-                    m.channel_id == channel.id && m.content.contains(content_snippet)
-                }) {
+                if chat_state
+                    .messages
+                    .iter()
+                    .any(|m| m.channel_id == channel.id && m.content.contains(content_snippet))
+                {
                     return;
                 }
             }
@@ -485,12 +487,7 @@ async fn test_complete_demo_invitation_flow() {
     println!("\nPhase 5: Verify state via signals");
 
     wait_for_channel_members(&env.app_core, "Guardians", 0).await;
-    wait_for_message(
-        &env.app_core,
-        "Guardians",
-        "Hello Alice and Carol!",
-    )
-    .await;
+    wait_for_message(&env.app_core, "Guardians", "Hello Alice and Carol!").await;
 
     let core = env.app_core.read().await;
 

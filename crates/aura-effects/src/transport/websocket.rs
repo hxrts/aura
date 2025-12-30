@@ -49,9 +49,7 @@ impl WebSocketTransportHandler {
         )
         .await
         .map_err(|_| TransportError::Timeout("WebSocket connect timeout".to_string()))?
-        .map_err(|e| {
-            TransportError::ConnectionFailed(format!("WebSocket connect failed: {e}"))
-        })?;
+        .map_err(|e| TransportError::ConnectionFailed(format!("WebSocket connect failed: {e}")))?;
 
         let local_addr = ws_stream.get_ref().local_addr()?.to_string();
         let remote_addr = ws_stream.get_ref().peer_addr()?.to_string();
@@ -121,9 +119,7 @@ impl WebSocketTransportHandler {
         timeout(self.config.write_timeout, ws_stream.send(message))
             .await
             .map_err(|_| TransportError::Timeout("WebSocket send timeout".to_string()))?
-            .map_err(|e| {
-                TransportError::ConnectionFailed(format!("WebSocket send failed: {e}"))
-            })?;
+            .map_err(|e| TransportError::ConnectionFailed(format!("WebSocket send failed: {e}")))?;
 
         Ok(())
     }

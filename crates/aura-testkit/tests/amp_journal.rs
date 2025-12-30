@@ -342,9 +342,9 @@ fn test_channel_checkpoint_serialization() {
     let recovered: RelationalFact =
         serde_json::from_str(&json).expect("deserialization should succeed");
 
-    if let RelationalFact::Protocol(
-        aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(cp),
-    ) = recovered
+    if let RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(
+        cp,
+    )) = recovered
     {
         assert_eq!(cp.chan_epoch, 42);
         assert_eq!(cp.base_gen, 100);
@@ -363,9 +363,9 @@ fn test_channel_policy_serialization() {
         skip_window: Some(2048),
     };
 
-    let fact = RelationalFact::Protocol(
-        aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
-    );
+    let fact = RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelPolicy(
+        policy,
+    ));
 
     // Serialize to JSON
     let json = serde_json::to_string(&fact).expect("serialization should succeed");
@@ -392,9 +392,9 @@ fn test_channel_policy_none_skip_window() {
         skip_window: None,
     };
 
-    let fact = RelationalFact::Protocol(
-        aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
-    );
+    let fact = RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelPolicy(
+        policy,
+    ));
 
     let json = serde_json::to_string(&fact).expect("serialization should succeed");
     let recovered: RelationalFact =

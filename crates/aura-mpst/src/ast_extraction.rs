@@ -113,17 +113,13 @@ pub fn generate_aura_choreography_code(
                 code.push_str(&format!("    // Flow cost {cost} for role {role}\n"));
             }
             AuraEffect::JournalFacts { facts, role } => {
-                code.push_str(&format!(
-                    "    // Journal facts '{facts}' for role {role}\n"
-                ));
+                code.push_str(&format!("    // Journal facts '{facts}' for role {role}\n"));
             }
             AuraEffect::JournalMerge { role } => {
                 code.push_str(&format!("    // Journal merge for role {role}\n"));
             }
             AuraEffect::AuditLog { action, role } => {
-                code.push_str(&format!(
-                    "    // Audit log '{action}' for role {role}\n"
-                ));
+                code.push_str(&format!("    // Audit log '{action}' for role {role}\n"));
             }
             AuraEffect::Leakage { observers, role } => {
                 code.push_str(&format!(

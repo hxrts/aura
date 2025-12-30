@@ -4,8 +4,8 @@
 //! deduplication laws in operation-based CRDTs. The handler buffers operations
 //! until causal dependencies are satisfied, then applies them idempotently.
 
-use aura_core::semilattice::{CausalOp, CmApply, Dedup, OpWithCtx};
 use crate::{CausalContext, OperationId, VectorClock, VectorClockExt};
+use aura_core::semilattice::{CausalOp, CmApply, Dedup, OpWithCtx};
 use std::collections::{HashMap, VecDeque};
 
 use super::handler_trait::{CrdtHandler, CrdtSemantics, HandlerDiagnostics, HandlerMetrics};

@@ -116,9 +116,7 @@ fn validate_acyclicity(state: &TreeState) -> ApplicationResult<()> {
             if visiting.contains(&current) {
                 // Found a cycle
                 return Err(ApplicationError::InvariantViolation {
-                    reason: format!(
-                        "Cycle detected in tree structure involving node {current:?}"
-                    ),
+                    reason: format!("Cycle detected in tree structure involving node {current:?}"),
                 });
             }
 

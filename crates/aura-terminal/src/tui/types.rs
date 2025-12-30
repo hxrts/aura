@@ -1590,9 +1590,7 @@ impl ConfirmationStatus {
                 confirmed_count,
                 declined_count,
             } => {
-                format!(
-                    "Partial ({confirmed_count} confirmed, {declined_count} declined)"
-                )
+                format!("Partial ({confirmed_count} confirmed, {declined_count} declined)")
             }
             Self::Unconfirmed { reason } => format!("Unconfirmed: {reason}"),
             Self::RolledBack { .. } => "Rolled back".to_string(),

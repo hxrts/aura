@@ -34,7 +34,12 @@ pub enum RendezvousPayload {
 
 impl RendezvousEnvelope {
     /// Create a new rendezvous message
-    pub fn new(sender: AuthorityId, sequence: u64, timestamp: u64, payload: RendezvousPayload) -> Self {
+    pub fn new(
+        sender: AuthorityId,
+        sequence: u64,
+        timestamp: u64,
+        payload: RendezvousPayload,
+    ) -> Self {
         Self {
             sender,
             sequence,

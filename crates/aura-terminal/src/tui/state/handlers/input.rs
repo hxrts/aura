@@ -242,35 +242,33 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
             }
             _ => {}
         },
-        KeyCode::Enter => {
-            match screen {
-                Screen::Chat => {
-                    if !state.chat.input_buffer.is_empty() {
-                        let content = state.chat.input_buffer.clone();
-                        state.chat.input_buffer.clear();
-                        commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
-                            content,
-                        }));
-                        state.chat.insert_mode = false;
-                        state.chat.insert_mode_entry_char = None;
-                        state.chat.focus = ChatFocus::Input;
-                    }
+        KeyCode::Enter => match screen {
+            Screen::Chat => {
+                if !state.chat.input_buffer.is_empty() {
+                    let content = state.chat.input_buffer.clone();
+                    state.chat.input_buffer.clear();
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
+                        content,
+                    }));
+                    state.chat.insert_mode = false;
+                    state.chat.insert_mode_entry_char = None;
+                    state.chat.focus = ChatFocus::Input;
                 }
-                Screen::Neighborhood => {
-                    if !state.neighborhood.input_buffer.is_empty() {
-                        let content = state.neighborhood.input_buffer.clone();
-                        state.neighborhood.input_buffer.clear();
-                        commands.push(TuiCommand::Dispatch(DispatchCommand::SendHomeMessage {
-                            content,
-                        }));
-                        state.neighborhood.insert_mode = false;
-                        state.neighborhood.insert_mode_entry_char = None;
-                        state.neighborhood.detail_focus = DetailFocus::Input;
-                    }
-                }
-                _ => {}
             }
-        }
+            Screen::Neighborhood => {
+                if !state.neighborhood.input_buffer.is_empty() {
+                    let content = state.neighborhood.input_buffer.clone();
+                    state.neighborhood.input_buffer.clear();
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::SendHomeMessage {
+                        content,
+                    }));
+                    state.neighborhood.insert_mode = false;
+                    state.neighborhood.insert_mode_entry_char = None;
+                    state.neighborhood.detail_focus = DetailFocus::Input;
+                }
+            }
+            _ => {}
+        },
         _ => {}
     }
 }

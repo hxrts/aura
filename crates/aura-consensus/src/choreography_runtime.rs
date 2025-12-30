@@ -104,10 +104,10 @@ pub async fn run_witness<E: ChoreographicEffects>(
 mod tests {
     use super::*;
     use crate::types::{CommitFact, ConsensusId};
+    use async_lock::Mutex;
     use aura_core::effects::{ChoreographyEvent, ChoreographyMetrics};
     use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature};
     use aura_core::time::{PhysicalTime, ProvenancedTime, TimeStamp};
-    use async_lock::Mutex;
     use aura_core::{AuthorityId, Hash32};
     use std::collections::HashMap;
     use std::sync::Arc;

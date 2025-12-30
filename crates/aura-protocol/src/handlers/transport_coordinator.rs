@@ -205,9 +205,10 @@ where
             .await?;
 
         // Store connection state using injected time effects
-        let current_time = self.effects.physical_time().await.map_err(|e| {
-            TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
-        })?;
+        let current_time =
+            self.effects.physical_time().await.map_err(|e| {
+                TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
+            })?;
         let now_ms = current_time.ts_ms;
 
         let connection_state = ConnectionState {
@@ -228,9 +229,10 @@ where
 
     /// Send data to connected peer - NO choreography
     pub async fn send_data(&self, connection_id: &str, data: Vec<u8>) -> CoordinationResult<()> {
-        let current_time = self.effects.physical_time().await.map_err(|e| {
-            TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
-        })?;
+        let current_time =
+            self.effects.physical_time().await.map_err(|e| {
+                TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
+            })?;
         let now_ms = current_time.ts_ms;
 
         {
@@ -248,9 +250,7 @@ where
         self.transport_manager
             .send_data(&self.effects, connection_id, data)
             .await
-            .map_err(|e| {
-                TransportCoordinationError::ProtocolFailed(format!("Send failed: {e}"))
-            })?;
+            .map_err(|e| TransportCoordinationError::ProtocolFailed(format!("Send failed: {e}")))?;
 
         Ok(())
     }
@@ -291,9 +291,10 @@ where
         &self,
         max_idle: std::time::Duration,
     ) -> CoordinationResult<usize> {
-        let current_time = self.effects.physical_time().await.map_err(|e| {
-            TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
-        })?;
+        let current_time =
+            self.effects.physical_time().await.map_err(|e| {
+                TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
+            })?;
         let now_ms = current_time.ts_ms;
         let max_idle_ms = max_idle.as_millis() as u64;
         let mut to_remove = Vec::new();

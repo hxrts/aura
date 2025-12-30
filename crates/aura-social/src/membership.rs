@@ -2,9 +2,9 @@
 //!
 //! Provides validation for membership operations on blocks and neighborhoods.
 
+use crate::facts::{HomeId, NeighborhoodId};
 use crate::{error::SocialError, home::Home, Neighborhood};
 use aura_core::identifiers::AuthorityId;
-use crate::facts::{HomeId, NeighborhoodId};
 
 /// Validates membership operations for blocks and neighborhoods.
 pub struct MembershipValidator;
@@ -61,8 +61,7 @@ impl MembershipValidator {
         // Check neighborhood peer relationships
         if let Some(target_home_id) = target_block {
             for neighborhood in neighborhoods {
-                if neighborhood.is_member(home.home_id) && neighborhood.is_member(target_home_id)
-                {
+                if neighborhood.is_member(home.home_id) && neighborhood.is_member(target_home_id) {
                     // Both blocks are in the same neighborhood
                     return true;
                 }
@@ -127,10 +126,14 @@ mod tests {
         let neighborhood = Neighborhood::new_empty(NeighborhoodId::from_bytes([1u8; 32]));
 
         // Can join with 0 current memberships
-        assert!(MembershipValidator::validate_neighborhood_join(&home_instance, &neighborhood, 0).is_ok());
+        assert!(
+            MembershipValidator::validate_neighborhood_join(&home_instance, &neighborhood, 0)
+                .is_ok()
+        );
 
         // Cannot join at limit (4 for v1)
-        let result = MembershipValidator::validate_neighborhood_join(&home_instance, &neighborhood, 4);
+        let result =
+            MembershipValidator::validate_neighborhood_join(&home_instance, &neighborhood, 4);
         assert!(matches!(
             result,
             Err(SocialError::NeighborhoodLimitReached { .. })

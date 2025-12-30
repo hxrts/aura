@@ -1,11 +1,7 @@
 //! Transcript accumulation and finalization (BFT-DKG).
 
 use super::types::{DealerPackage, DkgConfig, DkgTranscript};
-use aura_core::{
-    hash,
-    util::serialization::to_vec,
-    AuraError, ContextId, Hash32, Result,
-};
+use aura_core::{hash, util::serialization::to_vec, AuraError, ContextId, Hash32, Result};
 use aura_journal::fact::DkgTranscriptCommit;
 
 #[derive(serde::Serialize)]
@@ -19,10 +15,7 @@ struct TranscriptDigest<'a> {
     packages: &'a [DealerPackage],
 }
 
-pub fn compute_transcript_hash(
-    config: &DkgConfig,
-    packages: &[DealerPackage],
-) -> Result<Hash32> {
+pub fn compute_transcript_hash(config: &DkgConfig, packages: &[DealerPackage]) -> Result<Hash32> {
     let digest = TranscriptDigest {
         epoch: config.epoch,
         membership_hash: config.membership_hash,
@@ -32,15 +25,17 @@ pub fn compute_transcript_hash(
         participants: &config.participants,
         packages,
     };
-    let encoded =
-        to_vec(&digest).map_err(|e| AuraError::serialization(e.to_string()))?;
+    let encoded = to_vec(&digest).map_err(|e| AuraError::serialization(e.to_string()))?;
     let mut hasher = hash::hasher();
     hasher.update(b"AURA_DKG_TRANSCRIPT");
     hasher.update(&encoded);
     Ok(Hash32(hasher.finalize()))
 }
 
-pub fn finalize_transcript(config: &DkgConfig, packages: Vec<DealerPackage>) -> Result<DkgTranscript> {
+pub fn finalize_transcript(
+    config: &DkgConfig,
+    packages: Vec<DealerPackage>,
+) -> Result<DkgTranscript> {
     let transcript_hash = compute_transcript_hash(config, &packages)?;
     Ok(DkgTranscript {
         epoch: config.epoch,
@@ -54,9 +49,7 @@ pub fn finalize_transcript(config: &DkgConfig, packages: Vec<DealerPackage>) -> 
     })
 }
 
-pub fn compute_transcript_hash_from_transcript(
-    transcript: &DkgTranscript,
-) -> Result<Hash32> {
+pub fn compute_transcript_hash_from_transcript(transcript: &DkgTranscript) -> Result<Hash32> {
     let digest = TranscriptDigest {
         epoch: transcript.epoch,
         membership_hash: transcript.membership_hash,
@@ -66,8 +59,7 @@ pub fn compute_transcript_hash_from_transcript(
         participants: &transcript.participants,
         packages: &transcript.packages,
     };
-    let encoded =
-        to_vec(&digest).map_err(|e| AuraError::serialization(e.to_string()))?;
+    let encoded = to_vec(&digest).map_err(|e| AuraError::serialization(e.to_string()))?;
     let mut hasher = hash::hasher();
     hasher.update(b"AURA_DKG_TRANSCRIPT");
     hasher.update(&encoded);

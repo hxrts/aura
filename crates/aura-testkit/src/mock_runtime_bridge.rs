@@ -512,7 +512,10 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
-    async fn rollback_guardian_key_rotation(&self, _failed_epoch: Epoch) -> Result<(), IntentError> {
+    async fn rollback_guardian_key_rotation(
+        &self,
+        _failed_epoch: Epoch,
+    ) -> Result<(), IntentError> {
         Ok(())
     }
 
@@ -892,7 +895,9 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError> {
         // Parse aura:v1:<base64> format
         if !code.starts_with("aura:v1:") {
-            return Err(IntentError::internal_error("Invalid invitation code format: must start with aura:v1:".to_string()));
+            return Err(IntentError::internal_error(
+                "Invalid invitation code format: must start with aura:v1:".to_string(),
+            ));
         }
 
         let b64_part = code.strip_prefix("aura:v1:").unwrap();

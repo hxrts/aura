@@ -5,13 +5,13 @@
 
 use crate::facts::{RecoveryFact, RecoveryFactEmitter};
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
-use aura_core::types::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
 use aura_core::identifiers::ContextId;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::types::Epoch;
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_journal::DomainFact;
@@ -206,8 +206,7 @@ impl RecoveryProtocol {
             .add_recovery_grant(self.account_authority, grant.clone())?;
 
         // Persist consensus evidence alongside the recovery grant.
-        self
-            .recovery_context
+        self.recovery_context
             .add_fact(commit_fact.to_relational_fact())?;
 
         let result = RecoveryOutcome {

@@ -42,11 +42,7 @@ impl<A: ChoreographicAdapter> MpstExecutor<A> {
     /// Register a runner for a protocol name.
     pub fn register_runner<F, Fut>(&mut self, protocol: impl Into<String>, runner: F)
     where
-        F: for<'a> Fn(
-                &'a mut A,
-                &'a mut <A as ChoreographicAdapter>::Endpoint,
-                &'a [u8],
-            ) -> Fut
+        F: for<'a> Fn(&'a mut A, &'a mut <A as ChoreographicAdapter>::Endpoint, &'a [u8]) -> Fut
             + Send
             + Sync
             + 'static,

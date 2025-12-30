@@ -45,11 +45,11 @@ use std::sync::LazyLock;
 
 use crate::errors::AppError;
 use crate::queries::{
-    HomesQuery, BoundSignal, ChatQuery, ContactsQuery, GuardiansQuery, InvitationsQuery,
+    BoundSignal, ChatQuery, ContactsQuery, GuardiansQuery, HomesQuery, InvitationsQuery,
     NeighborhoodQuery, RecoveryQuery,
 };
 use crate::views::{
-    HomesState, ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
+    ChatState, ContactsState, HomesState, InvitationsState, NeighborhoodState, RecoveryState,
 };
 use crate::workflows::budget::HomeFlowBudget;
 
@@ -73,8 +73,7 @@ pub static CONTACTS_SIGNAL: LazyLock<Signal<ContactsState>> =
     LazyLock::new(|| Signal::new("app:contacts"));
 
 /// Signal for multi-home state (all homes the user has created/joined)
-pub static HOMES_SIGNAL: LazyLock<Signal<HomesState>> =
-    LazyLock::new(|| Signal::new("app:homes"));
+pub static HOMES_SIGNAL: LazyLock<Signal<HomesState>> = LazyLock::new(|| Signal::new("app:homes"));
 
 /// Signal for neighborhood state (nearby peers, relay info)
 pub static NEIGHBORHOOD_SIGNAL: LazyLock<Signal<NeighborhoodState>> =
@@ -360,7 +359,7 @@ pub async fn register_app_signals_with_queries<R: QuerySignalEffects>(
     handler: &R,
 ) -> Result<(), ReactiveError> {
     use crate::queries::{
-        HomesQuery, ChatQuery, ContactsQuery, InvitationsQuery, NeighborhoodQuery, RecoveryQuery,
+        ChatQuery, ContactsQuery, HomesQuery, InvitationsQuery, NeighborhoodQuery, RecoveryQuery,
     };
 
     // Register domain signals bound to queries

@@ -119,8 +119,8 @@ impl RelayCandidateBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{effects::relay::RelayRelationship, identifiers::ContextId};
     use crate::facts::HomeId;
+    use aura_core::{effects::relay::RelayRelationship, identifiers::ContextId};
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])

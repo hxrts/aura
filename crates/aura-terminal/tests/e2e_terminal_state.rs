@@ -1748,9 +1748,7 @@ async fn test_steward_role_flow() {
         let core = app_core.read().await;
         let homes = core.views().get_homes();
         let home = homes.current_home().expect("Home should exist");
-        let resident = home
-            .resident(&resident1_id)
-            .expect("Resident should exist");
+        let resident = home.resident(&resident1_id).expect("Resident should exist");
         assert!(
             matches!(resident.role, ResidentRole::Admin),
             "Resident should now be Admin"
@@ -1775,9 +1773,7 @@ async fn test_steward_role_flow() {
         let core = app_core.read().await;
         let homes = core.views().get_homes();
         let home = homes.current_home().expect("Home should exist");
-        let resident = home
-            .resident(&resident1_id)
-            .expect("Resident should exist");
+        let resident = home.resident(&resident1_id).expect("Resident should exist");
         assert!(
             matches!(resident.role, ResidentRole::Resident),
             "Resident should now be back to Resident role"
@@ -2035,7 +2031,7 @@ async fn test_neighborhood_navigation_flow() {
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
             home_id: "current".to_string(), // Stay on current home
-            depth: "Street".to_string(),     // But change to street depth
+            depth: "Street".to_string(),    // But change to street depth
         })
         .await;
 
@@ -3271,8 +3267,8 @@ async fn test_device_management() {
 async fn test_snapshot_data_accuracy() {
     use async_lock::RwLock;
     use aura_app::signal_defs::HOMES_SIGNAL;
-    use aura_app::views::home::HomeState;
     use aura_app::views::contacts::{Contact, ContactsState};
+    use aura_app::views::home::HomeState;
     use aura_app::AppCore;
     use aura_core::effects::reactive::ReactiveEffects;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};

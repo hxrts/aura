@@ -23,8 +23,8 @@
 
 mod context;
 mod lifecycle;
-mod policy;
 mod participant;
+mod policy;
 mod signature;
 mod types;
 
@@ -33,8 +33,8 @@ pub use lifecycle::{
     ConsensusLifecycle, CoordinatorLifecycle, ProvisionalLifecycle, RotationLifecycle,
     ThresholdLifecycle,
 };
-pub use policy::{policy_for, CeremonyFlow, CeremonyLifecyclePolicy, KeyGenerationPolicy};
 pub use participant::{ParticipantEndpoint, ParticipantIdentity, SigningParticipant};
+pub use policy::{policy_for, CeremonyFlow, CeremonyLifecyclePolicy, KeyGenerationPolicy};
 pub use signature::ThresholdSignature;
 pub use types::{AgreementMode, ConvergenceCert, ReversionFact, RotateFact};
 

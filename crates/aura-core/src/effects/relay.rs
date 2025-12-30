@@ -103,7 +103,7 @@ impl RelayRelationship {
     /// Lower values are higher priority (selected first).
     pub fn priority(&self) -> u8 {
         match self {
-            Self::HomePeer { .. } => 0,        // Highest priority
+            Self::HomePeer { .. } => 0,         // Highest priority
             Self::NeighborhoodPeer { .. } => 1, // Medium priority
             Self::Guardian => 2,                // Fallback
         }
@@ -158,11 +158,7 @@ impl RelayCandidate {
 
     /// Create a reachable home peer candidate.
     pub fn block_peer(authority_id: AuthorityId, home_id: [u8; 32]) -> Self {
-        Self::new(
-            authority_id,
-            RelayRelationship::HomePeer { home_id },
-            true,
-        )
+        Self::new(authority_id, RelayRelationship::HomePeer { home_id }, true)
     }
 
     /// Create a reachable neighborhood peer candidate.
@@ -303,9 +299,7 @@ mod tests {
 
     #[test]
     fn test_relay_relationship_priority() {
-        let home_rel = RelayRelationship::HomePeer {
-            home_id: [1u8; 32],
-        };
+        let home_rel = RelayRelationship::HomePeer { home_id: [1u8; 32] };
         let neighborhood = RelayRelationship::NeighborhoodPeer {
             neighborhood_id: [2u8; 32],
         };
@@ -317,9 +311,7 @@ mod tests {
 
     #[test]
     fn test_relay_relationship_checks() {
-        let home_rel = RelayRelationship::HomePeer {
-            home_id: [1u8; 32],
-        };
+        let home_rel = RelayRelationship::HomePeer { home_id: [1u8; 32] };
         assert!(home_rel.is_home_peer());
         assert!(!home_rel.is_neighborhood_peer());
         assert!(!home_rel.is_guardian());

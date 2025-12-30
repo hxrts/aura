@@ -3,12 +3,12 @@
 //! Provides a unified view of the social topology for use in relay selection
 //! and peer discovery.
 
+use crate::facts::HomeId;
 use crate::{Home, Neighborhood};
 use aura_core::{
     effects::relay::{RelayCandidate, RelayRelationship},
     identifiers::AuthorityId,
 };
-use crate::facts::HomeId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

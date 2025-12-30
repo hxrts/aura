@@ -2,7 +2,7 @@
 
 use iocraft::prelude::*;
 
-use aura_app::signal_defs::{HOMES_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL};
+use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL};
 
 use crate::tui::components::{MessageInput, MessagePanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -11,7 +11,7 @@ use crate::tui::props::NeighborhoodViewProps;
 use crate::tui::state_machine::{DetailFocus, NeighborhoodMode};
 use crate::tui::theme::Theme;
 use crate::tui::types::TraversalDepth;
-use crate::tui::types::{format_timestamp, HomeBudget, HomeSummary, Contact, Message, Resident};
+use crate::tui::types::{format_timestamp, Contact, HomeBudget, HomeSummary, Message, Resident};
 
 pub async fn run_neighborhood_screen_v2() -> std::io::Result<()> {
     element! {
@@ -416,8 +416,7 @@ pub fn NeighborhoodScreenV2(
                         .iter()
                         .map(convert_resident)
                         .collect();
-                    let budget =
-                        convert_budget(&current_home.storage, current_home.resident_count);
+                    let budget = convert_budget(&current_home.storage, current_home.resident_count);
                     reactive_residents.set(residents);
                     reactive_budget.set(budget);
                 } else {

@@ -91,9 +91,8 @@ async fn show_authority(
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to read authority: {e}")))?
     {
-        let record: AuthorityRecord = serde_json::from_slice(&bytes).map_err(|e| {
-            TerminalError::Config(format!("Failed to parse authority record: {e}"))
-        })?;
+        let record: AuthorityRecord = serde_json::from_slice(&bytes)
+            .map_err(|e| TerminalError::Config(format!("Failed to parse authority record: {e}")))?;
         output.kv("Authority", record.authority_id.to_string());
         output.kv("Threshold", record.threshold.to_string());
         output.kv(
@@ -147,9 +146,8 @@ async fn add_device(
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to read authority: {e}")))?
     {
-        serde_json::from_slice(&bytes).map_err(|e| {
-            TerminalError::Config(format!("Failed to parse authority record: {e}"))
-        })?
+        serde_json::from_slice(&bytes)
+            .map_err(|e| TerminalError::Config(format!("Failed to parse authority record: {e}")))?
     } else {
         return Err(TerminalError::NotFound(format!(
             "Authority {authority_id} not found; create it first"
@@ -167,9 +165,7 @@ async fn add_device(
         )
         .await
         .map_err(|e| {
-            TerminalError::Operation(format!(
-                "Failed to update authority {authority_id}: {e}"
-            ))
+            TerminalError::Operation(format!("Failed to update authority {authority_id}: {e}"))
         })?;
 
     output.kv("Added device to authority", authority_id.to_string());

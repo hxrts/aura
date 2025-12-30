@@ -18,8 +18,8 @@ use aura_core::{
     tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, Snapshot, TreeOp, TreeOpKind},
     DeviceId, Hash32, JoinSemilattice,
 };
-use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
 use aura_journal::algebra::OpLog;
+use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
 use aura_protocol::state::PeerView;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};

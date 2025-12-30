@@ -114,12 +114,7 @@ where
             ));
         }
 
-        let bump_nonce = self
-            .effects
-            .random_uuid()
-            .await
-            .as_bytes()
-            .to_vec();
+        let bump_nonce = self.effects.random_uuid().await.as_bytes().to_vec();
         let bump_id = aura_core::Hash32(hash(&bump_nonce));
         let proposal = ProposedChannelEpochBump {
             context: params.context,

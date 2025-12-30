@@ -431,9 +431,10 @@ async fn get_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     output.println("Querying Journal for active recovery sessions...");
 
     // Query Journal for recovery-related facts using proper JournalEffects
-    let current_journal = ctx.effects().get_journal().await.map_err(|e| {
-        TerminalError::Operation(format!("Failed to get journal via effects: {e}"))
-    })?;
+    let current_journal =
+        ctx.effects().get_journal().await.map_err(|e| {
+            TerminalError::Operation(format!("Failed to get journal via effects: {e}"))
+        })?;
 
     let recovery_facts: Vec<_> = current_journal
         .facts
@@ -496,9 +497,10 @@ async fn dispute_recovery(
     output.println("Validating dispute window and guardian eligibility...");
 
     // Get current journal state via proper JournalEffects
-    let dispute_journal = ctx.effects().get_journal().await.map_err(|e| {
-        TerminalError::Operation(format!("Failed to get journal via effects: {e}"))
-    })?;
+    let dispute_journal =
+        ctx.effects().get_journal().await.map_err(|e| {
+            TerminalError::Operation(format!("Failed to get journal via effects: {e}"))
+        })?;
 
     // Look up recovery evidence by ID in Journal
     let evidence_key = format!("recovery_evidence.{evidence}");
@@ -553,10 +555,11 @@ async fn dispute_recovery(
         .insert(dispute_key.clone(), dispute_value);
 
     // Get current journal and merge the delta
-    let current_journal =
-        ctx.effects().get_journal().await.map_err(|e| {
-            TerminalError::Operation(format!("Failed to get current journal: {e}"))
-        })?;
+    let current_journal = ctx
+        .effects()
+        .get_journal()
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to get current journal: {e}")))?;
 
     let updated_journal = ctx
         .effects()

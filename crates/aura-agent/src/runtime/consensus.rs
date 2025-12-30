@@ -1,7 +1,9 @@
 //! Consensus helpers for building params and loading key material.
 
 use aura_consensus::protocol::ConsensusParams;
-use aura_core::crypto::tree_signing::{public_key_package_from_bytes, share_from_key_package_bytes};
+use aura_core::crypto::tree_signing::{
+    public_key_package_from_bytes, share_from_key_package_bytes,
+};
 use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
 };
@@ -70,9 +72,8 @@ pub(crate) async fn load_consensus_key_material(
         })?,
     };
 
-    let group_public_key = public_key_package_from_bytes(&public_key_bytes).map_err(|e| {
-        AuraError::internal(format!("Failed to parse public key package: {e}"))
-    })?;
+    let group_public_key = public_key_package_from_bytes(&public_key_bytes)
+        .map_err(|e| AuraError::internal(format!("Failed to parse public key package: {e}")))?;
 
     let mut key_packages = HashMap::new();
     for participant in participants {
@@ -82,12 +83,15 @@ pub(crate) async fn load_consensus_key_material(
             format!("{}/{}", authority_id, epoch),
             participant.storage_key(),
         );
-        let bytes = effects.secure_retrieve(&location, caps).await.map_err(|e| {
-            AuraError::internal(format!(
-                "Failed to load key package for {}: {e}",
-                participant.display_name()
-            ))
-        })?;
+        let bytes = effects
+            .secure_retrieve(&location, caps)
+            .await
+            .map_err(|e| {
+                AuraError::internal(format!(
+                    "Failed to load key package for {}: {e}",
+                    participant.display_name()
+                ))
+            })?;
         let share = share_from_key_package_bytes(&bytes).map_err(|e| {
             AuraError::internal(format!(
                 "Failed to parse key package for {}: {e}",
@@ -190,9 +194,10 @@ async fn load_threshold_state_from_storage(
         .await
     {
         Ok(bytes) => {
-            let metadata: ThresholdConfigMetadata = serde_json::from_slice(&bytes).map_err(|e| {
-                AuraError::internal(format!("Failed to deserialize threshold config: {}", e))
-            })?;
+            let metadata: ThresholdConfigMetadata =
+                serde_json::from_slice(&bytes).map_err(|e| {
+                    AuraError::internal(format!("Failed to deserialize threshold config: {}", e))
+                })?;
             ThresholdState {
                 epoch,
                 threshold: metadata.threshold_k,
@@ -221,12 +226,9 @@ async fn load_threshold_state_from_storage(
                         "Consensus requires an existing threshold configuration".to_string(),
                     )
                 })?;
-            let metadata: ThresholdMetadataFallback =
-                serde_json::from_slice(&legacy_bytes).map_err(|e| {
-                    AuraError::internal(format!(
-                        "Failed to deserialize threshold metadata: {}",
-                        e
-                    ))
+            let metadata: ThresholdMetadataFallback = serde_json::from_slice(&legacy_bytes)
+                .map_err(|e| {
+                    AuraError::internal(format!("Failed to deserialize threshold metadata: {}", e))
                 })?;
             ThresholdState {
                 epoch,

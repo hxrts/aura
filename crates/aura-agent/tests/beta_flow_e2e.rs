@@ -12,14 +12,17 @@
 
 use aura_agent::handlers::{InvitationService, InvitationType, ShareableInvitation};
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
-use aura_protocol::amp::AmpJournalEffects;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::threshold::ParticipantIdentity;
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::ProtocolRelationalFact;
-use aura_rendezvous::{EffectCommand as RendezvousEffectCommand, GuardOutcome as RendezvousGuardOutcome, RendezvousFact};
+use aura_protocol::amp::AmpJournalEffects;
+use aura_rendezvous::{
+    EffectCommand as RendezvousEffectCommand, GuardOutcome as RendezvousGuardOutcome,
+    RendezvousFact,
+};
 use std::sync::Arc;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
@@ -234,9 +237,9 @@ async fn test_rendezvous_channel_established_finalized() -> TestResult {
         epoch: 1,
     };
     let context_id = fact.context_id_for_fact();
-    let outcome = RendezvousGuardOutcome::allowed(vec![
-        RendezvousEffectCommand::JournalAppend { fact: fact.clone() },
-    ]);
+    let outcome = RendezvousGuardOutcome::allowed(vec![RendezvousEffectCommand::JournalAppend {
+        fact: fact.clone(),
+    }]);
 
     aura_agent::handlers::rendezvous_bridge::execute_guard_outcome(
         outcome,
@@ -252,17 +255,15 @@ async fn test_rendezvous_channel_established_finalized() -> TestResult {
         let FactContent::Relational(RelationalFact::Protocol(protocol_fact)) = &fact.content else {
             continue;
         };
-        if matches!(
-            protocol_fact,
-            ProtocolRelationalFact::Consensus { .. }
-        ) {
+        if matches!(protocol_fact, ProtocolRelationalFact::Consensus { .. }) {
             saw_consensus = true;
             break;
         }
     }
 
-    let policy =
-        aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::RendezvousSecureChannel);
+    let policy = aura_core::threshold::policy_for(
+        aura_core::threshold::CeremonyFlow::RendezvousSecureChannel,
+    );
     if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized)
         && !effects.is_testing()
     {

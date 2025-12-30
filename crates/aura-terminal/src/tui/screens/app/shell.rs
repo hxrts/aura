@@ -11,13 +11,13 @@
 #![allow(clippy::manual_map)]
 
 use super::modal_overlays::{
-    render_account_setup_modal, render_add_device_modal, render_home_create_modal,
-    render_channel_info_modal, render_chat_create_modal, render_confirm_modal,
-    render_contact_modal, render_contacts_code_modal, render_contacts_create_modal,
-    render_contacts_import_modal, render_device_enrollment_modal, render_device_import_modal,
-    render_display_name_modal, render_guardian_modal, render_guardian_setup_modal,
-    render_help_modal, render_mfa_setup_modal, render_nickname_modal, render_remove_device_modal,
-    render_topic_modal, GlobalModalProps,
+    render_account_setup_modal, render_add_device_modal, render_channel_info_modal,
+    render_chat_create_modal, render_confirm_modal, render_contact_modal,
+    render_contacts_code_modal, render_contacts_create_modal, render_contacts_import_modal,
+    render_device_enrollment_modal, render_device_import_modal, render_display_name_modal,
+    render_guardian_modal, render_guardian_setup_modal, render_help_modal,
+    render_home_create_modal, render_mfa_setup_modal, render_nickname_modal,
+    render_remove_device_modal, render_topic_modal, GlobalModalProps,
 };
 
 use iocraft::prelude::*;
@@ -50,7 +50,7 @@ use crate::tui::screens::{
     ChatScreen, ContactsScreen, NeighborhoodScreenV2, NotificationsScreen, SettingsScreen,
 };
 use crate::tui::types::{
-    HomeSummary, Channel, Contact, Device, Guardian, Invitation, KeyHint, Message, MfaPolicy,
+    Channel, Contact, Device, Guardian, HomeSummary, Invitation, KeyHint, Message, MfaPolicy,
     TraversalDepth,
 };
 

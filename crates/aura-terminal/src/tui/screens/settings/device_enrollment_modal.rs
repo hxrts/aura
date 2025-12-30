@@ -5,8 +5,8 @@
 
 use iocraft::prelude::*;
 
-use aura_core::threshold::AgreementMode;
 use crate::tui::components::{CodeDisplayModal, CodeDisplayStatus};
+use aura_core::threshold::AgreementMode;
 
 #[derive(Default, Props)]
 pub struct DeviceEnrollmentModalProps {

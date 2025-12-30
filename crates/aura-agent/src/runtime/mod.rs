@@ -33,8 +33,8 @@ pub mod contextual;
 pub mod propagation;
 
 // Runtime services
-pub mod services;
 pub mod consensus;
+pub mod services;
 
 // Effect system implementation
 pub mod effects;

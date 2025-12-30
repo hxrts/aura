@@ -22,9 +22,7 @@ use aura_app::ReactiveHandler;
 use aura_authorization::BiscuitAuthorizationBridge;
 use aura_composition::{CompositeHandlerAdapter, RegisterAllOptions};
 use aura_core::crypto::single_signer::SigningMode;
-use aura_core::effects::crypto::{
-    FrostSigningPackage, KeyGenerationMethod, SigningKeyGenResult,
-};
+use aura_core::effects::crypto::{FrostSigningPackage, KeyGenerationMethod, SigningKeyGenResult};
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::transport::{TransportEnvelope, TransportReceipt, TransportStats};
@@ -2597,7 +2595,8 @@ impl AmpChannelEffects for AuraEffectSystem {
             .await
             .map_err(map_amp_err)?;
 
-        let policy = aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::AmpEpochBump);
+        let policy =
+            aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::AmpEpochBump);
         if policy.allows_mode(aura_core::threshold::AgreementMode::ConsensusFinalized) {
             let tree_state = self.get_current_state().await.map_err(map_amp_err)?;
             let journal = self
@@ -2651,8 +2650,8 @@ impl AmpChannelEffects for AuraEffectSystem {
         self.insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
             aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
         ))
-            .await
-            .map_err(map_amp_err)?;
+        .await
+        .map_err(map_amp_err)?;
 
         Ok(())
     }

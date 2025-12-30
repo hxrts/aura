@@ -3,10 +3,8 @@
 //! Provides traversal rules and capability checks for moving through
 //! the social topology.
 
+use crate::facts::{HomeId, TraversalAllowedFact, TraversalDepth, TraversalPosition};
 use crate::{error::SocialError, Home, Neighborhood};
-use crate::facts::{
-    HomeId, TraversalAllowedFact, TraversalDepth, TraversalPosition,
-};
 use std::collections::HashMap;
 
 /// Service for checking traversal permissions.
@@ -113,13 +111,13 @@ pub fn determine_depth(
     }
 
     // If authority.s home shares a neighborhood, they have frontage access
-        if let Some(auth_block) = authority_home {
-            for neighborhood in neighborhoods {
-                if neighborhood.is_member(home.home_id) && neighborhood.is_member(auth_block) {
-                    return TraversalDepth::Frontage;
-                }
+    if let Some(auth_block) = authority_home {
+        for neighborhood in neighborhoods {
+            if neighborhood.is_member(home.home_id) && neighborhood.is_member(auth_block) {
+                return TraversalDepth::Frontage;
             }
         }
+    }
 
     // Otherwise, only street-level access
     TraversalDepth::Street
@@ -162,9 +160,7 @@ mod tests {
         let caps = vec!["neighbor_access".to_string()];
 
         assert!(service.can_traverse(&position, home_b, &caps));
-        assert!(service
-            .validate_traversal(&position, home_b, &caps)
-            .is_ok());
+        assert!(service.validate_traversal(&position, home_b, &caps).is_ok());
     }
 
     #[test]

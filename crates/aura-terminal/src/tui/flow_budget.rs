@@ -8,7 +8,7 @@
 //!
 //! For shared CLI + TUI logic, see `crate::handlers::budget`.
 
-use aura_app::{HomeFlowBudget, BudgetBreakdown, HOME_TOTAL_SIZE};
+use aura_app::{BudgetBreakdown, HomeFlowBudget, HOME_TOTAL_SIZE};
 
 /// Flow budget view state for TUI rendering
 ///

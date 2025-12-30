@@ -7,6 +7,7 @@
 //! integration (capability checks, flow budget charging, fact emission).
 
 use crate::core::{AgentError, AgentResult};
+use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::AuraEffectSystem;
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
 use aura_chat::types::{ChatMember, ChatRole};
@@ -20,19 +21,18 @@ use aura_core::effects::amp::{
 use aura_core::effects::{PhysicalTimeEffects, RandomExtendedEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
-use aura_core::{Hash32, Prestate};
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::{Hash32, Prestate};
 use aura_guards::GuardContextProvider;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
-use aura_journal::FactJournal;
 use aura_journal::DomainFact;
+use aura_journal::FactJournal;
 use aura_protocol::amp::{
     commit_bump_with_consensus, emit_proposed_bump, get_channel_state, AmpChannelCoordinator,
     AmpJournalEffects,
 };
 use aura_protocol::effects::TreeEffects;
-use crate::runtime::consensus::build_consensus_params;
-use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use uuid::Uuid;
 
 /// Chat service for the agent layer.
@@ -122,12 +122,7 @@ impl ChatService {
         let state = get_channel_state(self.effects.as_ref(), context_id, channel_id)
             .await
             .map_err(|e| AgentError::effects(format!("AMP state lookup failed: {e}")))?;
-        let bump_nonce = self
-            .effects
-            .random_uuid()
-            .await
-            .as_bytes()
-            .to_vec();
+        let bump_nonce = self.effects.random_uuid().await.as_bytes().to_vec();
         let bump_id = Hash32(hash(&bump_nonce));
         let proposal = ProposedChannelEpochBump {
             context: context_id,
@@ -147,8 +142,8 @@ impl ChatService {
             let prestate = self.build_amp_prestate(authority_id, context_id).await?;
             let params =
                 build_consensus_params(self.effects.as_ref(), authority_id, self.effects.as_ref())
-            .await
-            .map_err(|e| AgentError::effects(format!("Consensus params failed: {e}")))?;
+                    .await
+                    .map_err(|e| AgentError::effects(format!("Consensus params failed: {e}")))?;
 
             let transcript_ref = self
                 .effects
@@ -312,9 +307,8 @@ impl ChatService {
         creator_id: AuthorityId,
         initial_members: Vec<AuthorityId>,
     ) -> AgentResult<ChatGroup> {
-        let policy = aura_core::threshold::policy_for(
-            aura_core::threshold::CeremonyFlow::GroupHomeCreation,
-        );
+        let policy =
+            aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::GroupHomeCreation);
         if !policy.allows_mode(aura_core::threshold::AgreementMode::Provisional) {
             return Err(AgentError::invalid(
                 "group creation policy does not allow provisional AMP channel",

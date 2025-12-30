@@ -8,8 +8,8 @@
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use aura_core::effects::StorageCoreEffects;
-use aura_core::{hash, AccountId, Hash32, SemanticVersion};
 use aura_core::types::Epoch;
+use aura_core::{hash, AccountId, Hash32, SemanticVersion};
 use aura_maintenance::IdentityEpochFence;
 use aura_sync::maintenance::UpgradeProposal;
 use aura_sync::protocols::ota::UpgradeKind;
@@ -97,9 +97,7 @@ async fn propose_upgrade(
     let artifact_hash = compute_artifact_hash(download_url)?;
 
     let proposal = UpgradeProposal {
-        package_id: ids::uuid(&format!(
-            "ota:{major}:{minor}:{patch}:{download_url}"
-        )),
+        package_id: ids::uuid(&format!("ota:{major}:{minor}:{patch}:{download_url}")),
         version,
         artifact_hash,
         artifact_uri: Some(download_url.to_string()),

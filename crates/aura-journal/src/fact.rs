@@ -9,14 +9,14 @@
 //! the graph-based KeyNode/KeyEdge approach. The journal is a semilattice
 //! CRDT using set union for convergence.
 
+use crate::protocol_facts::ProtocolRelationalFact;
+pub use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
 use aura_core::{
     identifiers::{AuthorityId, ChannelId, ContextId},
     semilattice::JoinSemilattice,
     time::{OrderTime, TimeStamp},
     Hash32, Result,
 };
-pub use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
-use crate::protocol_facts::ProtocolRelationalFact;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -328,7 +328,6 @@ pub struct DkgTranscriptCommit {
     /// Optional blob reference for transcript payload
     pub blob_ref: Option<Hash32>,
 }
-
 
 /// Channel-level policy controls (governable)
 ///

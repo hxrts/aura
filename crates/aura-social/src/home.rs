@@ -4,11 +4,11 @@
 //! plus validation logic for home membership operations.
 
 use crate::error::SocialError;
-use aura_core::identifiers::AuthorityId;
 use crate::facts::{
     HomeConfigFact, HomeFact, HomeId, HomeStorageBudget, ResidentFact, StewardCapabilities,
     StewardFact,
 };
+use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 /// Materialized view of a home, aggregated from journal facts.

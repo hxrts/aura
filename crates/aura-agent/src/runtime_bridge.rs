@@ -6,6 +6,9 @@
 
 use crate::core::AuraAgent;
 use crate::handlers::InvitationService;
+use crate::runtime::consensus::{
+    build_consensus_params, membership_hash_from_participants, participant_identity_to_authority_id,
+};
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     BridgeDeviceInfo, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo,
@@ -35,9 +38,9 @@ use aura_core::threshold::{
 };
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
+use aura_core::AuraError;
 use aura_core::DeviceId;
 use aura_core::EffectContext;
-use aura_core::AuraError;
 use aura_core::Hash32;
 use aura_core::Prestate;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump, RelationalFact};
@@ -49,10 +52,6 @@ use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
 use serde::{Deserialize, Serialize};
-use crate::runtime::consensus::{
-    build_consensus_params, membership_hash_from_participants,
-    participant_identity_to_authority_id,
-};
 use std::sync::Arc;
 
 /// Wrapper to implement RuntimeBridge for AuraAgent
@@ -103,9 +102,8 @@ async fn persist_consensus_dkg_transcript(
 ) -> Result<Option<Hash32>, IntentError> {
     let mut participant_ids = Vec::with_capacity(participants.len());
     for participant in participants {
-        participant_ids.push(
-            participant_identity_to_authority_id(participant).map_err(map_consensus_error)?,
-        );
+        participant_ids
+            .push(participant_identity_to_authority_id(participant).map_err(map_consensus_error)?);
     }
 
     let membership_hash = membership_hash_from_participants(&participant_ids);
@@ -321,20 +319,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::internal_error(format!("AMP proposal failed: {e}")))?;
 
-        let policy = aura_core::threshold::policy_for(
-            aura_core::threshold::CeremonyFlow::AmpEpochBump,
-        );
+        let policy =
+            aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::AmpEpochBump);
         if policy.allows_mode(AgreementMode::ConsensusFinalized) {
-            let tree_state = effects
-                .get_current_state()
-                .await
-                .map_err(|e| IntentError::internal_error(format!("Tree state lookup failed: {e}")))?;
-            let journal = effects
-                .fetch_context_journal(context)
-                .await
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Context journal lookup failed: {e}"))
-                })?;
+            let tree_state = effects.get_current_state().await.map_err(|e| {
+                IntentError::internal_error(format!("Tree state lookup failed: {e}"))
+            })?;
+            let journal = effects.fetch_context_journal(context).await.map_err(|e| {
+                IntentError::internal_error(format!("Context journal lookup failed: {e}"))
+            })?;
             let context_commitment = context_commitment_from_journal(context, &journal)?;
             let prestate = Prestate::new(
                 vec![(authority_id, Hash32(tree_state.root_commitment))],
@@ -924,9 +917,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         signing_service
             .rotate_keys(&authority, threshold_k.value(), total_n, &participants)
             .await
-            .map(|(epoch, key_packages, public_key)| {
-                (Epoch::new(epoch), key_packages, public_key)
-            })
+            .map(|(epoch, key_packages, public_key)| (Epoch::new(epoch), key_packages, public_key))
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to rotate guardian keys: {}", e))
             })
@@ -1194,7 +1185,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ThresholdSigningEffects,
         };
         use aura_core::hash::hash;
-        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity};
+        use aura_core::threshold::{
+            policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity,
+        };
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
@@ -1330,7 +1323,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             total_n,
             &parsed_devices,
         ))
-                .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
+        .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
@@ -1470,7 +1463,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ThresholdSigningEffects,
         };
         use aura_core::hash::hash;
-        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity};
+        use aura_core::threshold::{
+            policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity,
+        };
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
@@ -1857,9 +1852,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             remaining_devices.push(current_device_id);
         }
 
-        let policy = aura_core::threshold::policy_for(
-            aura_core::threshold::CeremonyFlow::DeviceRemoval,
-        );
+        let policy =
+            aura_core::threshold::policy_for(aura_core::threshold::CeremonyFlow::DeviceRemoval);
 
         let mut other_device_ids: Vec<aura_core::DeviceId> = remaining_devices
             .iter()
@@ -1979,7 +1973,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             threshold_k,
             total_n,
         ))
-            .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
+        .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
@@ -2106,8 +2100,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
-            let context_id =
-                ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+            let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
             let has_commit = effects
                 .has_dkg_transcript_commit(authority_id, context_id, pending_epoch.value())
                 .await

@@ -292,8 +292,7 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                     };
 
                     if let InvitationType::Channel { home_id } = invitation.invitation_type {
-                        if let Err(err) =
-                            invitation_service.accept(&invitation.invitation_id).await
+                        if let Err(err) = invitation_service.accept(&invitation.invitation_id).await
                         {
                             tracing::warn!(
                                 "{name} failed to accept channel invitation {}: {err}",

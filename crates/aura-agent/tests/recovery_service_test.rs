@@ -2,12 +2,12 @@
 //!
 //! Tests for the RecoveryService public API exposed through AuraAgent.
 
+use aura_agent::core::{AgentConfig, AuthorityContext};
+use aura_agent::handlers::RecoveryHandler;
 use aura_agent::{
     AgentBuilder, AuraEffectSystem, AuthorityId, EffectContext, ExecutionMode, GuardianApproval,
     RecoveryState,
 };
-use aura_agent::core::{AgentConfig, AuthorityContext};
-use aura_agent::handlers::RecoveryHandler;
 use aura_core::hash::hash;
 use aura_core::identifiers::ContextId;
 
@@ -311,8 +311,8 @@ async fn test_recovery_execution_requires_consensus_in_production(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([120u8; 32]);
     let mut config = AgentConfig::default();
-    config.storage.base_path = std::env::temp_dir()
-        .join(format!("aura-test-recovery-{}", authority_id));
+    config.storage.base_path =
+        std::env::temp_dir().join(format!("aura-test-recovery-{}", authority_id));
     config.storage.encryption_enabled = false;
 
     let effects = AuraEffectSystem::production_for_authority(config, authority_id)?;

@@ -293,13 +293,10 @@ impl ReceiptVerificationProtocol {
             / 1000;
 
         // Generate an Ed25519 key pair for signing using injected CryptoEffects
-        let (public_key, private_key) =
-            crypto_effects
-                .ed25519_generate_keypair()
-                .await
-                .map_err(|e| {
-                    sync_session_error(format!("Failed to generate Ed25519 keypair: {e}"))
-                })?;
+        let (public_key, private_key) = crypto_effects
+            .ed25519_generate_keypair()
+            .await
+            .map_err(|e| sync_session_error(format!("Failed to generate Ed25519 keypair: {e}")))?;
 
         // Prepare the signed data (message hash + timestamp for replay protection)
         let mut signed_data = Vec::with_capacity(32 + 8);
@@ -310,9 +307,7 @@ impl ReceiptVerificationProtocol {
         let signature = crypto_effects
             .ed25519_sign(&signed_data, &private_key)
             .await
-            .map_err(|e| {
-                sync_session_error(format!("Failed to create Ed25519 signature: {e}"))
-            })?;
+            .map_err(|e| sync_session_error(format!("Failed to create Ed25519 signature: {e}")))?;
 
         tracing::debug!(
             "Created receipt for device {} over message {:?} at timestamp {}",

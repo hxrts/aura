@@ -303,9 +303,9 @@ impl NamespacedSync {
         authorizer
             .allow()
             .map_err(|e| AuraError::invalid(format!("Biscuit allow rule failed: {e}")))?;
-        authorizer.authorize().map_err(|e| {
-            AuraError::permission_denied(format!("Biscuit evaluation failed: {e}"))
-        })?;
+        authorizer
+            .authorize()
+            .map_err(|e| AuraError::permission_denied(format!("Biscuit evaluation failed: {e}")))?;
         tracing::debug!(
             "Validated Biscuit token for {} on scope {} (root verified)",
             operation,
@@ -532,9 +532,7 @@ impl NamespacedAntiEntropy {
                 .send_to_peer(peer_uuid, request_data)
                 .await
                 .map_err(|e| {
-                    sync_network_error(format!(
-                        "Failed to send sync request to peer {peer}: {e}"
-                    ))
+                    sync_network_error(format!("Failed to send sync request to peer {peer}: {e}"))
                 })?;
 
             // Receive response from the peer
@@ -555,9 +553,7 @@ impl NamespacedAntiEntropy {
             let response: SyncResponse = serde_json::from_slice(&response_data).map_err(|e| {
                 sync_serialization_error(
                     "SyncResponse",
-                    format!(
-                        "Failed to deserialize sync response from peer {peer}: {e}"
-                    ),
+                    format!("Failed to deserialize sync response from peer {peer}: {e}"),
                 )
             })?;
 

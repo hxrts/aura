@@ -16,8 +16,8 @@ use crate::tui::components::{
 use crate::tui::layout::dim;
 use crate::tui::state_machine::{GuardianCeremonyResponse, GuardianSetupStep};
 use crate::tui::theme::{Borders, Icons, Spacing, Theme};
-use aura_core::threshold::AgreementMode;
 use crate::tui::types::KeyHint;
+use aura_core::threshold::AgreementMode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GuardianSetupKind {

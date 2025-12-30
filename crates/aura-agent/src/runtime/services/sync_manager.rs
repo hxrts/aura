@@ -263,7 +263,10 @@ impl SyncServiceManager {
             let time_effects = time_effects.clone();
             async move {
                 let state = manager.state.read().await;
-                if matches!(*state, SyncManagerState::Stopped | SyncManagerState::Stopping) {
+                if matches!(
+                    *state,
+                    SyncManagerState::Stopped | SyncManagerState::Stopping
+                ) {
                     return true;
                 }
 

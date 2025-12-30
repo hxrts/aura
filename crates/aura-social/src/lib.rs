@@ -46,9 +46,9 @@
 //! ```
 
 pub mod availability;
-pub mod home;
 pub mod error;
 pub mod facts;
+pub mod home;
 pub mod membership;
 pub mod moderation;
 pub mod neighborhood;
@@ -79,9 +79,9 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 
 // Re-export primary types
 pub use availability::{HomeAvailability, NeighborhoodAvailability};
-pub use home::Home;
 pub use error::SocialError;
 pub use facts::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
+pub use home::Home;
 pub use moderation::{
     is_user_banned, is_user_muted, query_current_bans, query_current_mutes, query_kick_history,
     register_moderation_facts, BanStatus, HomeBanFact, HomeGrantStewardFact, HomeKickFact,

@@ -301,7 +301,6 @@ where
         info!("All simulation faults cleared");
         Ok(())
     }
-
 }
 
 /// Result of executing a simulation tick
@@ -321,7 +320,6 @@ pub struct ScenarioSummary {
     pub state: ScenarioState,
     pub description: String,
 }
-
 
 #[cfg(test)]
 mod tests {

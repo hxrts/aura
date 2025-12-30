@@ -193,8 +193,7 @@ impl FactReducer for HomeUnpinFactReducer {
 /// Register moderation domain facts with the journal registry.
 pub fn register_moderation_facts(registry: &mut FactRegistry) {
     registry.register::<HomeMuteFact>(HOME_MUTE_FACT_TYPE_ID, Box::new(HomeMuteFactReducer));
-    registry
-        .register::<HomeUnmuteFact>(HOME_UNMUTE_FACT_TYPE_ID, Box::new(HomeUnmuteFactReducer));
+    registry.register::<HomeUnmuteFact>(HOME_UNMUTE_FACT_TYPE_ID, Box::new(HomeUnmuteFactReducer));
     registry.register::<HomeBanFact>(HOME_BAN_FACT_TYPE_ID, Box::new(HomeBanFactReducer));
     registry.register::<HomeUnbanFact>(HOME_UNBAN_FACT_TYPE_ID, Box::new(HomeUnbanFactReducer));
     registry.register::<HomeKickFact>(HOME_KICK_FACT_TYPE_ID, Box::new(HomeKickFactReducer));

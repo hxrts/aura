@@ -7,8 +7,8 @@
 //! authority-centric model where authorities hide internal device structure.
 
 use aura_core::time::PhysicalTime;
-use aura_core::types::Epoch;
 use aura_core::types::facts::{FactDelta, FactDeltaReducer};
+use aura_core::types::Epoch;
 use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use aura_core::AuthorityId;
 use aura_core::{AccountId, Cap};

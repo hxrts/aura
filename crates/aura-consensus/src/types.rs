@@ -136,9 +136,7 @@ impl CommitFact {
             &self.operation_bytes,
             &self.threshold_signature.signature,
         )
-        .map_err(|e| {
-            AuraError::crypto(format!("Threshold signature verification failed: {e}"))
-        })?;
+        .map_err(|e| AuraError::crypto(format!("Threshold signature verification failed: {e}")))?;
 
         Ok(())
     }

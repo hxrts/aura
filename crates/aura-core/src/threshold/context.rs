@@ -200,9 +200,7 @@ impl SigningContext {
             // OTA activation is an elevated operation - it's a hard fork commitment
             approval_context: ApprovalContext::ElevatedOperation {
                 operation_type: "ota_activation".to_string(),
-                value_context: Some(format!(
-                    "Hard fork activation at epoch {activation_epoch}"
-                )),
+                value_context: Some(format!("Hard fork activation at epoch {activation_epoch}")),
             },
         }
     }

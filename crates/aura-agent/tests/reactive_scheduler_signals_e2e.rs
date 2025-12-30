@@ -119,13 +119,11 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
         added_at: t(1),
     };
 
-    let binding = RelationalFact::Protocol(
-        aura_journal::ProtocolRelationalFact::GuardianBinding {
-            account_id: own_authority,
-            guardian_id: guardian,
-            binding_hash: Hash32::default(),
-        },
-    );
+    let binding = RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::GuardianBinding {
+        account_id: own_authority,
+        guardian_id: guardian,
+        binding_hash: Hash32::default(),
+    });
 
     let mut updates = pipeline.subscribe();
     pipeline

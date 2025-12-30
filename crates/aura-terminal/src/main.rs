@@ -97,9 +97,7 @@ async fn main() -> Result<(), AuraError> {
     // Initialize logging through effects
     let log_level = if args.verbose { "debug" } else { "info" };
     CliOutput::new()
-        .println(format!(
-            "Initializing Aura CLI with log level: {log_level}"
-        ))
+        .println(format!("Initializing Aura CLI with log level: {log_level}"))
         .render();
 
     // Create CLI handler with agent and AppCore

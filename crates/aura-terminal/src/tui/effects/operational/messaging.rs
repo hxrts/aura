@@ -62,9 +62,7 @@ pub async fn handle_messaging(
         EffectCommand::SendMessage { channel, content } => {
             let timestamp = super::time::current_time_ms(app_core).await;
             match send_message(app_core, channel, content, timestamp).await {
-                Ok(message_id) => Some(Ok(OpResponse::Data(format!(
-                    "Message sent: {message_id}"
-                )))),
+                Ok(message_id) => Some(Ok(OpResponse::Data(format!("Message sent: {message_id}")))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to send message: {e}"
                 )))),
@@ -117,9 +115,7 @@ pub async fn handle_messaging(
             // IRC-style /me action - use workflow
             let timestamp = super::time::current_time_ms(app_core).await;
             match send_action(app_core, channel, action, timestamp).await {
-                Ok(message_id) => {
-                    Some(Ok(OpResponse::Data(format!("Action sent: {message_id}"))))
-                }
+                Ok(message_id) => Some(Ok(OpResponse::Data(format!("Action sent: {message_id}")))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to send action: {e}"
                 )))),

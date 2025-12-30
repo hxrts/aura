@@ -19,7 +19,7 @@
 use crate::core::IntentError;
 use crate::errors::AppError;
 use crate::views::{
-    HomesState, ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
+    ChatState, ContactsState, HomesState, InvitationsState, NeighborhoodState, RecoveryState,
 };
 use std::sync::Arc;
 

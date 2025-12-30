@@ -6,7 +6,7 @@
 
 use super::{
     core::{self, ConsensusPhase as CorePhase, ConsensusState as CoreState},
-    dkg::{self, DkgConfig, DkgTranscriptStore, DealerPackage},
+    dkg::{self, DealerPackage, DkgConfig, DkgTranscriptStore},
     frost::FrostConsensusOrchestrator,
     messages::{ConsensusMessage, ConsensusPhase, ConsensusRequest, ConsensusResponse},
     types::{CommitFact, ConsensusConfig, ConsensusId},
@@ -149,10 +149,7 @@ enum ProtocolRole {
 
 impl ConsensusProtocol {
     /// Evict stale protocol instances that have exceeded the configured timeout.
-    pub async fn cleanup_stale_instances(
-        &self,
-        now_ms: u64,
-    ) -> usize {
+    pub async fn cleanup_stale_instances(&self, now_ms: u64) -> usize {
         let timeout_ms = self.config.timeout_ms;
         let mut removed = 0usize;
         let mut instances = self.instances.write().await;
@@ -415,12 +412,9 @@ impl ConsensusProtocol {
             let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
             let commitment = NonceCommitment {
                 signer: share.identifier,
-                commitment: nonces
-                    .commitments()
-                    .serialize()
-                    .map_err(|e| {
-                        AuraError::crypto(format!("Failed to serialize commitments: {e}"))
-                    })?,
+                commitment: nonces.commitments().serialize().map_err(|e| {
+                    AuraError::crypto(format!("Failed to serialize commitments: {e}"))
+                })?,
             };
             instance.tracker.add_nonce(self.authority_id, commitment);
             NonceToken::from(nonces)

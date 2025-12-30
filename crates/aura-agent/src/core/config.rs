@@ -32,8 +32,7 @@ pub fn default_storage_path() -> PathBuf {
 }
 
 /// Agent configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentConfig {
     /// Device ID for this agent
     #[serde(with = "device_id_serde")]
@@ -59,7 +58,6 @@ pub struct AgentConfig {
     #[serde(default, skip)]
     pub lan_discovery: LanDiscoveryConfig,
 }
-
 
 /// Storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

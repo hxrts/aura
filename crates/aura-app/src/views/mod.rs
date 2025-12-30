@@ -9,9 +9,9 @@
 
 mod state;
 
-pub mod home;
 pub mod chat;
 pub mod contacts;
+pub mod home;
 pub mod invitations;
 pub mod neighborhood;
 pub mod recovery;
@@ -19,11 +19,9 @@ pub mod recovery;
 pub use state::ViewState;
 
 // Re-export state types for convenience
-pub use home::{
-    BanRecord, HomeState, HomesState, KickRecord, MuteRecord, Resident, ResidentRole,
-};
 pub use chat::{Channel, ChannelType, ChatState, Message};
 pub use contacts::{Contact, ContactsState, MySuggestion, SuggestionPolicy};
+pub use home::{BanRecord, HomeState, HomesState, KickRecord, MuteRecord, Resident, ResidentRole};
 pub use invitations::{
     Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
 };

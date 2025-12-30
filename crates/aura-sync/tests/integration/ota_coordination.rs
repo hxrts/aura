@@ -5,9 +5,9 @@
 
 use super::test_time;
 use super::test_utils::*;
-use aura_core::{AuthorityId, AuraError, AuraResult, Hash32};
-use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
 use aura_core::types::Epoch;
+use aura_core::{AuraError, AuraResult, AuthorityId, Hash32};
+use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
 use aura_testkit::simulation::network::NetworkCondition;
 use std::time::Duration;
 use tokio::time::timeout;

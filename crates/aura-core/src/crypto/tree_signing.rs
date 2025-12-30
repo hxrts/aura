@@ -95,8 +95,7 @@ impl Share {
 
     /// Get FROST identifier
     pub fn frost_identifier(&self) -> Result<frost::Identifier, String> {
-        frost::Identifier::try_from(self.identifier)
-            .map_err(|e| format!("Invalid identifier: {e}"))
+        frost::Identifier::try_from(self.identifier).map_err(|e| format!("Invalid identifier: {e}"))
     }
 }
 
@@ -197,10 +196,7 @@ impl NonceCommitment {
         let id_bytes = identifier.serialize();
         Self {
             signer: u16::from_be_bytes([0, id_bytes[0]]),
-            commitment: commitments
-                .serialize()
-                .unwrap_or_else(|_| Vec::new()) // Handle serialization error gracefully
-                ,
+            commitment: commitments.serialize().unwrap_or_else(|_| Vec::new()), // Handle serialization error gracefully
         }
     }
 
@@ -807,9 +803,7 @@ impl TryFrom<PublicKeyPackage> for frost_ed25519::keys::PublicKeyPackage {
             key_array.copy_from_slice(key_bytes);
             let verifying_share = frost_ed25519::keys::VerifyingShare::deserialize(key_array)
                 .map_err(|e| {
-                    format!(
-                        "Failed to deserialize signer {signer_id} verifying share: {e}"
-                    )
+                    format!("Failed to deserialize signer {signer_id} verifying share: {e}")
                 })?;
 
             signer_verifying_keys.insert(frost_id, verifying_share);
@@ -825,18 +819,15 @@ impl TryFrom<PublicKeyPackage> for frost_ed25519::keys::PublicKeyPackage {
 
 /// Deserialize a FROST public key package from bytes.
 pub fn public_key_package_from_bytes(bytes: &[u8]) -> Result<PublicKeyPackage, String> {
-    let frost_pkg =
-        frost_ed25519::keys::PublicKeyPackage::deserialize(bytes).map_err(|e| {
-            format!("Failed to deserialize public key package: {e}")
-        })?;
+    let frost_pkg = frost_ed25519::keys::PublicKeyPackage::deserialize(bytes)
+        .map_err(|e| format!("Failed to deserialize public key package: {e}"))?;
     Ok(PublicKeyPackage::from(frost_pkg))
 }
 
 /// Deserialize a FROST key package from bytes and convert to an Aura signing share.
 pub fn share_from_key_package_bytes(bytes: &[u8]) -> Result<Share, String> {
-    let frost_pkg = frost_ed25519::keys::KeyPackage::deserialize(bytes).map_err(|e| {
-        format!("Failed to deserialize key package: {e}")
-    })?;
+    let frost_pkg = frost_ed25519::keys::KeyPackage::deserialize(bytes)
+        .map_err(|e| format!("Failed to deserialize key package: {e}"))?;
     Ok(Share::from(frost_pkg))
 }
 

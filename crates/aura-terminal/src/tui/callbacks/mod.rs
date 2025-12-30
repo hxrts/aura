@@ -27,6 +27,6 @@ pub use types::*;
 
 // Re-export factories
 pub use factories::{
-    AppCallbacks, HomeCallbacks, CallbackRegistry, ChatCallbacks, ContactsCallbacks,
+    AppCallbacks, CallbackRegistry, ChatCallbacks, ContactsCallbacks, HomeCallbacks,
     InvitationsCallbacks, NeighborhoodCallbacks, RecoveryCallbacks, SettingsCallbacks,
 };

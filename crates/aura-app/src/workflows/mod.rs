@@ -89,13 +89,13 @@ pub use budget::{
     get_budget_breakdown,
     get_current_budget,
     update_budget,
-    // Types
-    HomeFlowBudget,
     BudgetBreakdown,
     BudgetError,
+    // Types
+    HomeFlowBudget,
+    BYTE,
     // Constants
     HOME_TOTAL_SIZE,
-    BYTE,
     KB,
     MAX_NEIGHBORHOODS,
     MAX_RESIDENTS,

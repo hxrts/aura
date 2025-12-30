@@ -61,6 +61,7 @@
 
 #[cfg(test)]
 use aura_core::relational::GuardianParameters;
+use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
 use aura_core::{
     hash::hash,
     identifiers::{AuthorityId, ContextId},
@@ -68,7 +69,6 @@ use aura_core::{
     time::{OrderTime, TimeStamp},
     Hash32, Result,
 };
-use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
 use aura_journal::fact::{
     DkgTranscriptCommit, Fact, FactContent, Journal, JournalNamespace, RelationalFact,
 };

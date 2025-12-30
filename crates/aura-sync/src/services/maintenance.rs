@@ -49,8 +49,8 @@ use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
-use aura_core::{tree::Snapshot, AccountId, AuraError, AuthorityId, Hash32, SemanticVersion};
 use aura_core::types::Epoch;
+use aura_core::{tree::Snapshot, AccountId, AuraError, AuthorityId, Hash32, SemanticVersion};
 use aura_maintenance::{
     CacheInvalidated, CacheKey, IdentityEpochFence, SnapshotCompleted, SnapshotProposed,
     UpgradeActivated, UpgradeProposalMetadata,

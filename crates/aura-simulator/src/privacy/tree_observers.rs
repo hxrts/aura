@@ -183,8 +183,8 @@ impl PrivacyLeakage {
             return;
         }
 
-        let mean: f64 = self.size_observations.iter().sum::<u64>() as f64
-            / self.size_observations.len() as f64;
+        let mean: f64 =
+            self.size_observations.iter().sum::<u64>() as f64 / self.size_observations.len() as f64;
 
         let variance: f64 = self
             .size_observations
@@ -470,7 +470,8 @@ impl InGroupObserver {
         };
 
         // Record participant count per phase
-        self.ceremony_participants.insert(phase, participant_count as usize);
+        self.ceremony_participants
+            .insert(phase, participant_count as usize);
 
         self.observations.push(event);
     }

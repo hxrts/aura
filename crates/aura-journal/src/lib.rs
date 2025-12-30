@@ -34,9 +34,9 @@ mod types;
 pub mod effects;
 
 // Domain modules moved from aura-core
-pub mod effect_api;
 pub mod algebra;
 pub mod crdt;
+pub mod effect_api;
 
 // CRDT causal context module moved from aura-core
 pub mod causal_context;

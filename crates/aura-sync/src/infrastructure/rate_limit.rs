@@ -43,8 +43,7 @@ use std::time::{Duration, Instant};
 
 // Re-export unified rate limiting types from aura-core
 pub use aura_core::{
-    AdaptiveMode, RateLimit, RateLimitConfig, RateLimitResult, RateLimiter,
-    RateLimiterStatistics,
+    AdaptiveMode, RateLimit, RateLimitConfig, RateLimitResult, RateLimiter, RateLimiterStatistics,
 };
 
 use crate::core::{sync_resource_exhausted, SyncResult};

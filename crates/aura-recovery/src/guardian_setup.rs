@@ -367,9 +367,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                 num_guardians,
             )
             .await
-            .map_err(|e| {
-                crate::RecoveryError::internal(format!("Key generation failed: {e}"))
-            })?;
+            .map_err(|e| crate::RecoveryError::internal(format!("Key generation failed: {e}")))?;
 
         // Encrypt each guardian's key share
         let mut encrypted_shares = Vec::with_capacity(acceptances.len());
@@ -385,9 +383,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                 .ed25519_generate_keypair()
                 .await
                 .map_err(|e| {
-                    crate::RecoveryError::internal(format!(
-                        "Ephemeral key generation failed: {e}"
-                    ))
+                    crate::RecoveryError::internal(format!("Ephemeral key generation failed: {e}"))
                 })?;
 
             // Derive symmetric key using HKDF from shared secret
@@ -667,9 +663,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                 &encrypted_share.nonce,
             )
             .await
-            .map_err(|e| {
-                crate::RecoveryError::internal(format!("Share decryption failed: {e}"))
-            })?;
+            .map_err(|e| crate::RecoveryError::internal(format!("Share decryption failed: {e}")))?;
 
         tracing::info!(
             account = %account_id,

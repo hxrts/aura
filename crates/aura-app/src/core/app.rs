@@ -277,10 +277,7 @@ impl AppCore {
         if let Some(runtime) = self.runtime.as_ref() {
             if runtime.get_threshold_config().await.is_none() {
                 let _ = runtime.bootstrap_signing_keys().await.map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to bootstrap signing keys: {}",
-                        e
-                    ))
+                    IntentError::internal_error(format!("Failed to bootstrap signing keys: {}", e))
                 })?;
             }
         }
@@ -442,10 +439,7 @@ impl AppCore {
                     return Err(IntentError::validation_failed("Home name is empty"));
                 }
             }
-            Intent::GrantSteward {
-                home_id,
-                target_id,
-            } => {
+            Intent::GrantSteward { home_id, target_id } => {
                 use aura_core::identifiers::{AuthorityId, ContextId};
 
                 let snapshot = self.snapshot();
@@ -482,10 +476,7 @@ impl AppCore {
                     return Err(IntentError::validation_failed("Cannot modify Owner role"));
                 }
             }
-            Intent::RevokeSteward {
-                home_id,
-                target_id,
-            } => {
+            Intent::RevokeSteward { home_id, target_id } => {
                 use aura_core::identifiers::{AuthorityId, ContextId};
 
                 let snapshot = self.snapshot();

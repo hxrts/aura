@@ -975,9 +975,7 @@ mod tests {
                 order: OrderTime([9u8; 32]),
                 timestamp: TimeStamp::OrderClock(OrderTime([9u8; 32])),
                 content: FactContent::Relational(RelationalFact::Protocol(
-                    crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(
-                        checkpoint,
-                    ),
+                    crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
                 )),
             })
             .unwrap();
@@ -1030,9 +1028,7 @@ mod tests {
                 order: OrderTime([11u8; 32]),
                 timestamp: TimeStamp::OrderClock(OrderTime([11u8; 32])),
                 content: FactContent::Relational(RelationalFact::Protocol(
-                    crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(
-                        checkpoint,
-                    ),
+                    crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
                 )),
             })
             .unwrap();

@@ -4,10 +4,10 @@ use async_trait::async_trait;
 use aura_core::effects::NetworkEffects;
 use aura_core::identifiers::ContextId;
 use aura_core::{tree::AttestedOp, Hash32};
+use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use uuid::Uuid;
-use std::collections::VecDeque;
 
 /// Configuration for broadcast behavior
 #[derive(Debug, Clone)]

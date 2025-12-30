@@ -11,9 +11,9 @@
 
 use aura_core::effects::intent::{AuthorizationLevel, IntentMetadata};
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::types::Epoch;
 #[cfg(any())]
 use aura_core::time::TimeStamp;
+use aura_core::types::Epoch;
 #[cfg(any())]
 use aura_journal::JournalFact;
 use serde::{Deserialize, Serialize};
@@ -922,10 +922,7 @@ impl Intent {
                     home_id, target_id, reason
                 )
             }
-            Self::UnbanUser {
-                home_id,
-                target_id,
-            } => {
+            Self::UnbanUser { home_id, target_id } => {
                 format!("UnbanUser::home_id={}&target_id={}", home_id, target_id)
             }
             Self::MuteUser {
@@ -941,10 +938,7 @@ impl Intent {
                     home_id, target_id, duration
                 )
             }
-            Self::UnmuteUser {
-                home_id,
-                target_id,
-            } => {
+            Self::UnmuteUser { home_id, target_id } => {
                 format!("UnmuteUser::home_id={}&target_id={}", home_id, target_id)
             }
             Self::KickUser {
@@ -961,10 +955,7 @@ impl Intent {
                 home_id,
                 message_id,
             } => {
-                format!(
-                    "PinMessage::home_id={}&message_id={}",
-                    home_id, message_id
-                )
+                format!("PinMessage::home_id={}&message_id={}", home_id, message_id)
             }
             Self::UnpinMessage {
                 home_id,
@@ -975,23 +966,11 @@ impl Intent {
                     home_id, message_id
                 )
             }
-            Self::GrantSteward {
-                home_id,
-                target_id,
-            } => {
-                format!(
-                    "GrantSteward::home_id={}&target_id={}",
-                    home_id, target_id
-                )
+            Self::GrantSteward { home_id, target_id } => {
+                format!("GrantSteward::home_id={}&target_id={}", home_id, target_id)
             }
-            Self::RevokeSteward {
-                home_id,
-                target_id,
-            } => {
-                format!(
-                    "RevokeSteward::home_id={}&target_id={}",
-                    home_id, target_id
-                )
+            Self::RevokeSteward { home_id, target_id } => {
+                format!("RevokeSteward::home_id={}&target_id={}", home_id, target_id)
             }
 
             // Navigation intents (typically not journaled, but included for completeness)

@@ -19,7 +19,9 @@ fn biscuit_bridge_authorizes_basic_token() {
         operation: AuthorityOp::UpdateTree,
     };
 
-    let result = bridge.authorize(&token, AuthorizationOp::Read, &scope).unwrap();
+    let result = bridge
+        .authorize(&token, AuthorizationOp::Read, &scope)
+        .unwrap();
     assert!(result.authorized);
 }
 

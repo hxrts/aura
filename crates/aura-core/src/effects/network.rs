@@ -191,17 +191,10 @@ pub trait UdpEndpointEffects: Send + Sync {
     async fn set_broadcast(&self, enabled: bool) -> Result<(), NetworkError>;
 
     /// Send a datagram to the destination address.
-    async fn send_to(
-        &self,
-        payload: &[u8],
-        addr: &UdpEndpoint,
-    ) -> Result<usize, NetworkError>;
+    async fn send_to(&self, payload: &[u8], addr: &UdpEndpoint) -> Result<usize, NetworkError>;
 
     /// Receive a datagram into the provided buffer.
-    async fn recv_from(
-        &self,
-        buffer: &mut [u8],
-    ) -> Result<(usize, UdpEndpoint), NetworkError>;
+    async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, UdpEndpoint), NetworkError>;
 }
 
 /// UDP effect surface for binding sockets.
@@ -230,18 +223,11 @@ impl<T: UdpEndpointEffects + ?Sized> UdpEndpointEffects for Arc<T> {
         (**self).set_broadcast(enabled).await
     }
 
-    async fn send_to(
-        &self,
-        payload: &[u8],
-        addr: &UdpEndpoint,
-    ) -> Result<usize, NetworkError> {
+    async fn send_to(&self, payload: &[u8], addr: &UdpEndpoint) -> Result<usize, NetworkError> {
         (**self).send_to(payload, addr).await
     }
 
-    async fn recv_from(
-        &self,
-        buffer: &mut [u8],
-    ) -> Result<(usize, UdpEndpoint), NetworkError> {
+    async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, UdpEndpoint), NetworkError> {
         (**self).recv_from(buffer).await
     }
 }

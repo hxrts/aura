@@ -114,7 +114,8 @@ impl LanDiscoveryService {
             .broadcast_addr
             .parse()
             .unwrap_or(Ipv4Addr::BROADCAST);
-        let broadcast_addr = UdpEndpoint::new(SocketAddrV4::new(broadcast_ip, self.config.port).to_string());
+        let broadcast_addr =
+            UdpEndpoint::new(SocketAddrV4::new(broadcast_ip, self.config.port).to_string());
         let mut shutdown_rx = self.shutdown_rx.clone();
 
         tokio::spawn(async move {

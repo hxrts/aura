@@ -452,9 +452,7 @@ impl GenerativeSimulator {
                     }
 
                     // Check for property violations
-                    if let Some(violation) =
-                        self.check_step_properties(step_index, &post_state)
-                    {
+                    if let Some(violation) = self.check_step_properties(step_index, &post_state) {
                         property_violations.push(violation);
                     }
 
@@ -657,11 +655,7 @@ impl GenerativeSimulator {
     }
 
     /// Check for property violations after a step
-    fn check_step_properties(
-        &self,
-        _step_index: u32,
-        _state: &Value,
-    ) -> Option<PropertyViolation> {
+    fn check_step_properties(&self, _step_index: u32, _state: &Value) -> Option<PropertyViolation> {
         // Placeholder - full implementation would evaluate properties
         None
     }

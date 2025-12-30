@@ -9,9 +9,8 @@ pub use crate::consensus::{
 pub use crate::{
     amp_recv, amp_recv_with_receipt, amp_send, commit_bump_with_consensus, emit_proposed_bump,
     emit_soft_safe_bump, prepare_send, validate_header, AmpChannelCoordinator, AmpDelivery,
-    AmpEvidenceEffects,
-    AmpJournalEffects, AmpMessage, AmpReceipt, AmpTelemetry, ChannelMembershipFact,
-    ChannelParticipantEvent,
+    AmpEvidenceEffects, AmpJournalEffects, AmpMessage, AmpReceipt, AmpTelemetry,
+    ChannelMembershipFact, ChannelParticipantEvent,
 };
 
 /// Composite effect requirements for AMP orchestration (excludes StorageEffects by default).

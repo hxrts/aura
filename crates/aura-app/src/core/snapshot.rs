@@ -5,7 +5,7 @@
 //! that prefer polling over reactive updates.
 
 use crate::views::{
-    HomesState, ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
+    ChatState, ContactsState, HomesState, InvitationsState, NeighborhoodState, RecoveryState,
 };
 use serde::{Deserialize, Serialize};
 

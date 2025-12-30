@@ -903,9 +903,7 @@ impl CapabilitySoundnessVerifier {
             .collect();
 
         if !failed_properties.is_empty() {
-            recommendations.push(format!(
-                "Address failed properties: {failed_properties:?}"
-            ));
+            recommendations.push(format!("Address failed properties: {failed_properties:?}"));
         }
 
         // Check for low confidence

@@ -3,8 +3,8 @@
 use aura_core::hash::hash;
 use aura_core::time::ProvenancedTime;
 use aura_core::types::facts::{FactDelta, FactDeltaReducer};
-use aura_core::{AccountId, AuthorityId, ContextId, Hash32, SemanticVersion};
 use aura_core::types::Epoch;
+use aura_core::{AccountId, AuthorityId, ContextId, Hash32, SemanticVersion};
 use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
 use aura_journal::{DomainFact, FactReducer};
 use aura_macros::DomainFact;
@@ -219,11 +219,7 @@ impl AdminReplacement {
 
 /// Maintenance facts stored in authority journals.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
-#[domain_fact(
-    type_id = "maintenance",
-    schema_version = 1,
-    context_fn = "context_id"
-)]
+#[domain_fact(type_id = "maintenance", schema_version = 1, context_fn = "context_id")]
 pub enum MaintenanceFact {
     /// Snapshot proposal fact.
     SnapshotProposed(SnapshotProposed),
@@ -271,13 +267,11 @@ impl MaintenanceFact {
         let (sub_type, data) = match self {
             MaintenanceFact::SnapshotProposed(fact) => (
                 "snapshot-proposed",
-                aura_core::util::serialization::to_vec(&fact.proposal_id)
-                    .unwrap_or_default(),
+                aura_core::util::serialization::to_vec(&fact.proposal_id).unwrap_or_default(),
             ),
             MaintenanceFact::SnapshotCompleted(fact) => (
                 "snapshot-completed",
-                aura_core::util::serialization::to_vec(&fact.proposal_id)
-                    .unwrap_or_default(),
+                aura_core::util::serialization::to_vec(&fact.proposal_id).unwrap_or_default(),
             ),
             MaintenanceFact::CacheInvalidated(_) => ("cache-invalidated", Vec::new()),
             MaintenanceFact::UpgradeActivated(fact) => (
@@ -289,10 +283,7 @@ impl MaintenanceFact {
                 aura_core::util::serialization::to_vec(&fact.new_admin).unwrap_or_default(),
             ),
         };
-        MaintenanceFactKey {
-            sub_type,
-            data,
-        }
+        MaintenanceFactKey { sub_type, data }
     }
 }
 
@@ -394,8 +385,7 @@ impl MaintenanceFact {
             ),
             MaintenanceFact::CacheInvalidated(fact) => format!(
                 "cache_invalidated:{}:{}",
-                fact.authority_id,
-                fact.epoch_floor
+                fact.authority_id, fact.epoch_floor
             ),
             MaintenanceFact::UpgradeActivated(fact) => format!(
                 "upgrade_activated:{}:{}",

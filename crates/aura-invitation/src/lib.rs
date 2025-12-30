@@ -203,7 +203,6 @@ pub use aura_core::{
 pub use aura_authorization::{BiscuitError, BiscuitTokenManager, TokenAuthority};
 pub use biscuit_auth::Biscuit as BiscuitToken;
 
-
 // Re-export auth types
 pub use aura_authentication::{
     AuthenticationError, AuthenticationResult, IdentityProof, VerifiedIdentity,

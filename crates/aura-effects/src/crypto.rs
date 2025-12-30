@@ -623,9 +623,7 @@ impl CryptoExtendedEffects for RealCryptoHandler {
 
         // Deserialize the key package using FROST's native deserialize method
         let key_pkg: frost::keys::KeyPackage = frost::keys::KeyPackage::deserialize(key_package)
-            .map_err(|e| {
-                CryptoError::invalid(format!("Failed to deserialize key package: {e}"))
-            })?;
+            .map_err(|e| CryptoError::invalid(format!("Failed to deserialize key package: {e}")))?;
 
         // Extract the signing share from the key package
         let signing_share = key_pkg.signing_share();
@@ -757,9 +755,8 @@ impl CryptoExtendedEffects for RealCryptoHandler {
                 .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {e}")))?;
 
         let signing_nonces: frost::round1::SigningNonces =
-            frost::round1::SigningNonces::deserialize(&signing_nonces_bytes).map_err(|e| {
-                CryptoError::invalid(format!("Invalid signing nonces format: {e}"))
-            })?;
+            frost::round1::SigningNonces::deserialize(&signing_nonces_bytes)
+                .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces format: {e}")))?;
 
         // Create signature share
         let signature_share = frost::round2::sign(&signing_package, &signing_nonces, &key_package)
@@ -870,9 +867,9 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         let cipher = ChaCha20Poly1305::new(key.into());
         let nonce = Nonce::from_slice(nonce);
 
-        cipher.encrypt(nonce, plaintext).map_err(|e| {
-            CryptoError::invalid(format!("ChaCha20-Poly1305 encryption failed: {e}"))
-        })
+        cipher
+            .encrypt(nonce, plaintext)
+            .map_err(|e| CryptoError::invalid(format!("ChaCha20-Poly1305 encryption failed: {e}")))
     }
 
     async fn chacha20_decrypt(
@@ -887,9 +884,9 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         let cipher = ChaCha20Poly1305::new(key.into());
         let nonce = Nonce::from_slice(nonce);
 
-        cipher.decrypt(nonce, ciphertext).map_err(|e| {
-            CryptoError::invalid(format!("ChaCha20-Poly1305 decryption failed: {e}"))
-        })
+        cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|e| CryptoError::invalid(format!("ChaCha20-Poly1305 decryption failed: {e}")))
     }
 
     async fn aes_gcm_encrypt(

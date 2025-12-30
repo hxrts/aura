@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 /// Agreement mode for threshold operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AgreementMode {
     /// A1: Provisional (usable immediately, not final).
     Provisional,
@@ -16,7 +15,6 @@ pub enum AgreementMode {
     #[default]
     ConsensusFinalized,
 }
-
 
 /// Coordinator convergence certificate for soft-safe operations.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

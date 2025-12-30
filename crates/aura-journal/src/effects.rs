@@ -3,9 +3,9 @@ use crate::extensibility::FactRegistry;
 use async_trait::async_trait;
 use aura_core::effects::BiscuitAuthorizationEffects;
 use aura_core::effects::{CryptoEffects, JournalEffects, StorageEffects};
-use aura_core::types::Epoch;
 use aura_core::flow::FlowBudget;
 use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
+use aura_core::types::Epoch;
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::{
     hash::hash,
@@ -407,8 +407,8 @@ where
 mod tests {
     use aura_core::domain::content::Hash32;
     use aura_core::identifiers::{AuthorityId, ContextId};
-    use aura_core::types::Epoch;
     use aura_core::types::flow::{FlowBudget, Receipt};
+    use aura_core::types::Epoch;
 
     #[test]
     fn flow_budget_charge_uses_cost_not_nonce() {

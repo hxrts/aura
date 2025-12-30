@@ -122,19 +122,13 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
         let core = app_core.read().await;
         let threshold = FrostThreshold::new(2).expect("valid threshold");
         match core
-            .initiate_guardian_ceremony(
-                threshold,
-                2,
-                &[alice_id.to_string(), carol_id.to_string()],
-            )
+            .initiate_guardian_ceremony(threshold, 2, &[alice_id.to_string(), carol_id.to_string()])
             .await
         {
             Ok(id) => id,
             Err(e) => {
                 let error_signal = read_error_signal(&app_core).await;
-                panic!(
-                    "initiate_guardian_ceremony failed: {e}. error_signal={error_signal:?}"
-                );
+                panic!("initiate_guardian_ceremony failed: {e}. error_signal={error_signal:?}");
             }
         }
     };

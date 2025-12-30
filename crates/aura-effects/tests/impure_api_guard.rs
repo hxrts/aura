@@ -68,8 +68,13 @@ fn test_no_impure_api_usage_outside_handlers() {
     }
 
     if !violations.is_empty() {
-        panic!("Impure API usage detected:
-{}", violations.join("
-"));
+        panic!(
+            "Impure API usage detected:
+{}",
+            violations.join(
+                "
+"
+            )
+        );
     }
 }

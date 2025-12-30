@@ -21,9 +21,7 @@ impl IdentityValidator {
         // Verify signature
         let valid = aura_core::ed25519_verify(event_hash, signature, authority_public_key)
             .map_err(|e| AuthenticationError::InvalidAuthoritySignature {
-                details: format!(
-                    "Authority signature verification failed for {authority_id}: {e}"
-                ),
+                details: format!("Authority signature verification failed for {authority_id}: {e}"),
             })?;
 
         if !valid {

@@ -19,7 +19,9 @@ use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::{AuraError, Result};
 use aura_guards::traits::GuardContextProvider;
 use aura_guards::{GuardEffects, GuardOperation, GuardOperationId};
-use aura_journal::fact::{DkgTranscriptCommit, FactContent, ProposedChannelEpochBump, RelationalFact};
+use aura_journal::fact::{
+    DkgTranscriptCommit, FactContent, ProposedChannelEpochBump, RelationalFact,
+};
 use aura_transport::amp::{
     derive_for_recv, derive_for_send, AmpError, AmpHeader as TransportAmpHeader, RatchetDerivation,
 };
@@ -174,11 +176,9 @@ pub async fn emit_proposed_bump<E: AmpJournalEffects>(
         ));
     }
     effects
-        .insert_relational_fact(
-            aura_journal::fact::RelationalFact::Protocol(
-                aura_journal::ProtocolRelationalFact::AmpProposedChannelEpochBump(proposal),
-            ),
-        )
+        .insert_relational_fact(aura_journal::fact::RelationalFact::Protocol(
+            aura_journal::ProtocolRelationalFact::AmpProposedChannelEpochBump(proposal),
+        ))
         .await
 }
 

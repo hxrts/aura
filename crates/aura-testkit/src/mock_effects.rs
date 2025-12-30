@@ -41,11 +41,11 @@ use aura_core::effects::{
     JournalEffects, NetworkCoreEffects, NetworkExtendedEffects, RandomCoreEffects,
     StorageCoreEffects, StorageExtendedEffects,
 };
-use aura_core::types::Epoch;
 use aura_core::flow::{FlowBudget, Receipt};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::scope::{AuthorizationOp, ResourceScope};
 use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
+use aura_core::types::Epoch;
 use aura_core::{AuraError, ChannelId, Hash32, Journal};
 use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
 use std::collections::HashMap;
@@ -843,18 +843,11 @@ impl UdpEndpointEffects for MockUdpSocket {
         Err(NetworkError::NotImplemented)
     }
 
-    async fn send_to(
-        &self,
-        _payload: &[u8],
-        _addr: &UdpEndpoint,
-    ) -> Result<usize, NetworkError> {
+    async fn send_to(&self, _payload: &[u8], _addr: &UdpEndpoint) -> Result<usize, NetworkError> {
         Err(NetworkError::NotImplemented)
     }
 
-    async fn recv_from(
-        &self,
-        _buffer: &mut [u8],
-    ) -> Result<(usize, UdpEndpoint), NetworkError> {
+    async fn recv_from(&self, _buffer: &mut [u8]) -> Result<(usize, UdpEndpoint), NetworkError> {
         Err(NetworkError::NotImplemented)
     }
 }

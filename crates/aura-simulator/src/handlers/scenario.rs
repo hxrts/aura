@@ -1396,9 +1396,7 @@ impl SimulationScenarioHandler {
         if !group.members.contains(&sender.to_string()) {
             return Err(TestingError::EventRecordingError {
                 event_type: "chat_message".to_string(),
-                reason: format!(
-                    "Sender '{sender}' is not a member of group '{group_id}'"
-                ),
+                reason: format!("Sender '{sender}' is not a member of group '{group_id}'"),
             });
         }
 

@@ -990,26 +990,29 @@ impl AuraAgent {
                     }
 
                     let (flow, requires_dkg) = match ceremony_state.kind {
-                        aura_app::runtime_bridge::CeremonyKind::DeviceRotation => (
-                            aura_core::threshold::CeremonyFlow::DeviceMfaRotation,
-                            true,
-                        ),
-                        aura_app::runtime_bridge::CeremonyKind::DeviceRemoval => (
-                            aura_core::threshold::CeremonyFlow::DeviceRemoval,
-                            true,
-                        ),
+                        aura_app::runtime_bridge::CeremonyKind::DeviceRotation => {
+                            (aura_core::threshold::CeremonyFlow::DeviceMfaRotation, true)
+                        }
+                        aura_app::runtime_bridge::CeremonyKind::DeviceRemoval => {
+                            (aura_core::threshold::CeremonyFlow::DeviceRemoval, true)
+                        }
                         _ => (aura_core::threshold::CeremonyFlow::DeviceEnrollment, false),
                     };
 
                     let policy = aura_core::threshold::policy_for(flow);
                     if requires_dkg
-                        && policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
+                        && policy.keygen
+                            == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
                     {
                         let context_id = aura_core::identifiers::ContextId::new_from_entropy(
                             aura_core::hash::hash(&authority_id.to_bytes()),
                         );
                         let has_commit = effects
-                            .has_dkg_transcript_commit(authority_id, context_id, ceremony_state.new_epoch)
+                            .has_dkg_transcript_commit(
+                                authority_id,
+                                context_id,
+                                ceremony_state.new_epoch,
+                            )
                             .await
                             .map_err(|e| {
                                 AgentError::effects(format!(
@@ -1065,15 +1068,16 @@ impl AuraAgent {
                             }
                         };
 
-                        let leaf_to_remove = tree_state.leaves.iter().find_map(|(leaf_id, leaf)| {
-                            if leaf.role == aura_core::tree::LeafRole::Device
-                                && leaf.device_id == target_device_id
-                            {
-                                Some(*leaf_id)
-                            } else {
-                                None
-                            }
-                        });
+                        let leaf_to_remove =
+                            tree_state.leaves.iter().find_map(|(leaf_id, leaf)| {
+                                if leaf.role == aura_core::tree::LeafRole::Device
+                                    && leaf.device_id == target_device_id
+                                {
+                                    Some(*leaf_id)
+                                } else {
+                                    None
+                                }
+                            });
 
                         let Some(leaf_to_remove) = leaf_to_remove else {
                             tracing::error!(

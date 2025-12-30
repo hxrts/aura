@@ -121,15 +121,12 @@ async fn execute_notify_peer(
         return Ok(());
     }
 
-    let invitation = InvitationHandler::load_created_invitation(
-        effects,
-        authority.authority_id,
-        &invitation_id,
-    )
-    .await
-    .ok_or_else(|| {
-        AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
-    })?;
+    let invitation =
+        InvitationHandler::load_created_invitation(effects, authority.authority_id, &invitation_id)
+            .await
+            .ok_or_else(|| {
+                AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
+            })?;
 
     let code = InvitationService::export_invitation(&invitation);
     let mut metadata = HashMap::new();
@@ -152,9 +149,10 @@ async fn execute_notify_peer(
         receipt: None,
     };
 
-    effects.send_envelope(envelope).await.map_err(|e| {
-        AgentError::effects(format!("Failed to notify peer with invitation: {e}"))
-    })?;
+    effects
+        .send_envelope(envelope)
+        .await
+        .map_err(|e| AgentError::effects(format!("Failed to notify peer with invitation: {e}")))?;
 
     Ok(())
 }

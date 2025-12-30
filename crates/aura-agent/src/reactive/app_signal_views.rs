@@ -10,12 +10,12 @@
 
 use aura_app::errors::AppError;
 use aura_app::signal_defs::{
-    HOMES_SIGNAL, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
+    CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
 };
 use aura_app::views::{
-    home::{BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
     chat::{Channel, ChannelType, ChatState, Message},
     contacts::{Contact, ContactsState},
+    home::{BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
     invitations::{
         Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
     },
@@ -38,9 +38,9 @@ use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
 use aura_social::moderation::{
-    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
-    HOME_BAN_FACT_TYPE_ID, HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID,
-    HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
+    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID,
+    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
+    HOME_UNMUTE_FACT_TYPE_ID,
 };
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
@@ -457,9 +457,7 @@ impl ReactiveView for RecoverySignalView {
                             ..
                         } => {
                             // Replace guardian set with the ceremony-completed list.
-                            state
-                                .guardians
-                                .retain(|g| guardian_ids.contains(&g.id));
+                            state.guardians.retain(|g| guardian_ids.contains(&g.id));
                             for guardian_id in guardian_ids {
                                 Self::ensure_guardian(&mut state, guardian_id);
                             }
@@ -918,10 +916,7 @@ mod tests {
 
         let mut homes = HomesState::new();
         homes.add_home(home_state);
-        reactive
-            .emit(&*HOMES_SIGNAL, homes.clone())
-            .await
-            .unwrap();
+        reactive.emit(&*HOMES_SIGNAL, homes.clone()).await.unwrap();
         homes
     }
 

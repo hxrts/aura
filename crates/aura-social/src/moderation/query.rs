@@ -3,8 +3,8 @@
 //! Query functions for deriving moderation state from journal facts
 
 use super::facts::{
-    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
-    HOME_BAN_FACT_TYPE_ID, HOME_KICK_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
+    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID,
+    HOME_KICK_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
 };
 use super::types::{BanStatus, KickRecord, MuteStatus};
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};

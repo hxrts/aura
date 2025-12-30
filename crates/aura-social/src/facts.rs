@@ -1208,8 +1208,8 @@ mod tests {
     #[test]
     fn test_home_id_display() {
         let id = HomeId::from_bytes([
-            0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0,
+            0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0,
         ]);
         assert_eq!(format!("{}", id), "deadbeef...");
     }

@@ -3,9 +3,7 @@
 //! Provides a materialized view of a neighborhood aggregated from journal facts.
 
 use crate::error::SocialError;
-use crate::facts::{
-    AdjacencyFact, HomeId, HomeMemberFact, NeighborhoodFact, NeighborhoodId,
-};
+use crate::facts::{AdjacencyFact, HomeId, HomeMemberFact, NeighborhoodFact, NeighborhoodId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -107,11 +105,7 @@ impl Neighborhood {
     /// Validate that an adjacency can be created.
     ///
     /// Both blocks must be members and not already adjacent.
-    pub fn validate_adjacency(
-        &self,
-        home_a: HomeId,
-        home_b: HomeId,
-    ) -> Result<(), SocialError> {
+    pub fn validate_adjacency(&self, home_a: HomeId, home_b: HomeId) -> Result<(), SocialError> {
         if !self.is_member(home_a) {
             return Err(SocialError::HomeNotFound(home_a));
         }

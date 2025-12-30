@@ -179,9 +179,7 @@ pub fn SettingsScreen(
                 // Threshold scheme is configured
                 vec![
                     (
-                        format!(
-                            "Current Threshold: {threshold_k} of {threshold_n} guardians"
-                        ),
+                        format!("Current Threshold: {threshold_k} of {threshold_n} guardians"),
                         Theme::SECONDARY,
                     ),
                     (String::new(), Theme::TEXT),

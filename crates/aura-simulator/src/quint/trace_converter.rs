@@ -260,9 +260,7 @@ impl ItfTraceConverter {
         for state in &trace.states {
             for var in &trace.vars {
                 if !state.variables.contains_key(var) {
-                    return Err(AuraError::invalid(format!(
-                        "State missing variable: {var}"
-                    )));
+                    return Err(AuraError::invalid(format!("State missing variable: {var}")));
                 }
             }
         }
@@ -620,7 +618,8 @@ impl TraceConverter {
             quint_trace,
             conversion_metrics: ConversionPerformanceMetrics {
                 conversion_time_ms: conversion_time,
-                memory_usage_bytes: (states_to_process.len() * 1000 + quint_events.len() * 500) as u64, // Simple estimation
+                memory_usage_bytes: (states_to_process.len() * 1000 + quint_events.len() * 500)
+                    as u64, // Simple estimation
                 compression_ratio: 1.0,
                 states_processed: states_to_process.len() as u64,
                 events_processed: quint_events.len() as u64,

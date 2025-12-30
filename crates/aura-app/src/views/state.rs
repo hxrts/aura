@@ -3,7 +3,7 @@
 //! This module contains the aggregate view state that holds all view states.
 
 use super::{
-    HomeState, HomesState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
+    ChatState, ContactsState, HomeState, HomesState, InvitationsState, NeighborhoodState,
     RecoveryState,
 };
 use crate::core::StateSnapshot;

@@ -53,8 +53,8 @@ use crate::infrastructure::RetryPolicy;
 use aura_authorization::BiscuitTokenManager;
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::scope::ResourceScope;
-use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, Journal};
 use aura_core::types::Epoch;
+use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, Journal};
 use aura_guards::{BiscuitGuardEvaluator, GuardError};
 
 // =============================================================================

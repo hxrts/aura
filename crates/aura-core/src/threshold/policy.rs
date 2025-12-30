@@ -45,8 +45,10 @@ pub struct CeremonyLifecyclePolicy {
 }
 
 const A3_ONLY: [AgreementMode; 1] = [AgreementMode::ConsensusFinalized];
-const A2_A3: [AgreementMode; 2] =
-    [AgreementMode::CoordinatorSoftSafe, AgreementMode::ConsensusFinalized];
+const A2_A3: [AgreementMode; 2] = [
+    AgreementMode::CoordinatorSoftSafe,
+    AgreementMode::ConsensusFinalized,
+];
 const A1_A2_A3: [AgreementMode; 3] = [
     AgreementMode::Provisional,
     AgreementMode::CoordinatorSoftSafe,
@@ -54,8 +56,10 @@ const A1_A2_A3: [AgreementMode; 3] = [
 ];
 const FALLBACK_NONE: [AgreementMode; 0] = [];
 const FALLBACK_A2: [AgreementMode; 1] = [AgreementMode::CoordinatorSoftSafe];
-const FALLBACK_A1_A2: [AgreementMode; 2] =
-    [AgreementMode::Provisional, AgreementMode::CoordinatorSoftSafe];
+const FALLBACK_A1_A2: [AgreementMode; 2] = [
+    AgreementMode::Provisional,
+    AgreementMode::CoordinatorSoftSafe,
+];
 
 /// Return the policy for a given ceremony flow.
 pub fn policy_for(flow: CeremonyFlow) -> CeremonyLifecyclePolicy {

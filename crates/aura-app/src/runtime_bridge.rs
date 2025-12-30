@@ -1112,7 +1112,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         ))
     }
 
-    async fn rollback_guardian_key_rotation(&self, _failed_epoch: Epoch) -> Result<(), IntentError> {
+    async fn rollback_guardian_key_rotation(
+        &self,
+        _failed_epoch: Epoch,
+    ) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
             "Key rotation not available in offline mode",
         ))

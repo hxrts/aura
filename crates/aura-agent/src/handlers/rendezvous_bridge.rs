@@ -99,20 +99,27 @@ async fn execute_journal_append(
         let tree_state = effects.get_current_state().await.map_err(|e| {
             AgentError::effects(format!("Failed to read tree state for rendezvous: {e}"))
         })?;
-        let journal = effects.fetch_context_journal(context_id).await.map_err(|e| {
-            AgentError::effects(format!("Failed to load rendezvous context journal: {e}"))
-        })?;
+        let journal = effects
+            .fetch_context_journal(context_id)
+            .await
+            .map_err(|e| {
+                AgentError::effects(format!("Failed to load rendezvous context journal: {e}"))
+            })?;
         let context_commitment = context_commitment_from_journal(context_id, &journal)?;
         let prestate = Prestate::new(
             vec![(authority.authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
         );
-        let params = build_consensus_params(effects, authority.authority_id, effects).await.map_err(
-            |e| AgentError::effects(format!("Failed to build rendezvous consensus params: {e}")),
-        )?;
-        let commit = run_consensus(&prestate, &fact, params, effects, effects).await.map_err(
-            |e| AgentError::effects(format!("Rendezvous consensus finalization failed: {e}")),
-        )?;
+        let params = build_consensus_params(effects, authority.authority_id, effects)
+            .await
+            .map_err(|e| {
+                AgentError::effects(format!("Failed to build rendezvous consensus params: {e}"))
+            })?;
+        let commit = run_consensus(&prestate, &fact, params, effects, effects)
+            .await
+            .map_err(|e| {
+                AgentError::effects(format!("Rendezvous consensus finalization failed: {e}"))
+            })?;
 
         effects
             .commit_relational_facts(vec![commit.to_relational_fact()])

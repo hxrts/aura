@@ -3,6 +3,7 @@
 //! Implements data availability for blocks. All residents replicate all
 //! home-level shared data.
 
+use crate::facts::HomeId;
 use crate::home::Home;
 use crate::storage::StorageService;
 use async_trait::async_trait;
@@ -15,7 +16,6 @@ use aura_core::{
     },
     identifiers::AuthorityId,
 };
-use crate::facts::HomeId;
 use std::sync::Arc;
 
 /// Home-level data availability.
@@ -223,12 +223,12 @@ struct RetrieveResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::facts::{HomeFact, ResidentFact, StewardFact};
     use aura_core::effects::{
         network::NetworkError, storage::StorageError, NetworkCoreEffects, NetworkExtendedEffects,
         StorageCoreEffects, StorageExtendedEffects,
     };
     use aura_core::time::{PhysicalTime, TimeStamp};
-    use crate::facts::{HomeFact, ResidentFact, StewardFact};
     use std::collections::HashMap;
 
     fn test_timestamp() -> TimeStamp {
@@ -355,8 +355,12 @@ mod tests {
         let home_instance = test_home();
         let local = AuthorityId::new_from_entropy([1u8; 32]);
 
-        let da =
-            HomeAvailability::new(home_instance, local, Arc::new(DummyStorage), Arc::new(DummyNetwork));
+        let da = HomeAvailability::new(
+            home_instance,
+            local,
+            Arc::new(DummyStorage),
+            Arc::new(DummyNetwork),
+        );
 
         let peers = da.replication_peers(HomeId::from_bytes([1u8; 32]));
         assert_eq!(peers.len(), 2); // 3 residents - 1 self = 2 peers

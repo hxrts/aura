@@ -206,9 +206,7 @@ impl PropertyExtractor {
         result.sort_by(|a, b| b.priority.cmp(&a.priority));
 
         // Apply max properties limit
-        if self.config.max_properties > 0
-            && (result.len() as u32) > self.config.max_properties
-        {
+        if self.config.max_properties > 0 && (result.len() as u32) > self.config.max_properties {
             result.truncate(self.config.max_properties as usize);
         }
 

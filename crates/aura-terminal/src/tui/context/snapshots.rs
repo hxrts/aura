@@ -12,7 +12,7 @@ use async_lock::RwLock;
 use aura_app::AppCore;
 
 use crate::tui::hooks::{
-    HomeSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
+    ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot, HomeSnapshot,
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
 

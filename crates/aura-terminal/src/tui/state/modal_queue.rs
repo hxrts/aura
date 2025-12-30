@@ -7,9 +7,9 @@ use std::collections::VecDeque;
 use crate::tui::screens::Screen;
 
 use super::views::{
-    AccountSetupModalState, AddDeviceModalState, HomeCreateModalState, ChannelInfoModalState,
-    ConfirmRemoveModalState, CreateChannelModalState, CreateInvitationModalState,
-    DeviceEnrollmentCeremonyModalState, DisplayNameModalState, GuardianSetupModalState,
+    AccountSetupModalState, AddDeviceModalState, ChannelInfoModalState, ConfirmRemoveModalState,
+    CreateChannelModalState, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
+    DisplayNameModalState, GuardianSetupModalState, HomeCreateModalState,
     ImportInvitationModalState, InvitationCodeModalState, NicknameModalState, TopicModalState,
 };
 

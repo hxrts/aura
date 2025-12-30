@@ -777,9 +777,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         self.effects
             .commit_key_rotation(authority_id, new_epoch)
             .await
-            .map_err(|e| {
-                RecoveryError::internal(format!("Failed to commit key rotation: {e}"))
-            })?;
+            .map_err(|e| RecoveryError::internal(format!("Failed to commit key rotation: {e}")))?;
 
         if let Some(threshold_state) = self.effects.threshold_state(authority_id).await {
             if threshold_state.agreement_mode != AgreementMode::ConsensusFinalized {

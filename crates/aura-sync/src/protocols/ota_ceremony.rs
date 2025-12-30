@@ -43,8 +43,8 @@ use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEf
 use aura_core::threshold::{
     policy_for, AgreementMode, CeremonyFlow, SigningContext, ThresholdSignature,
 };
-use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Hash32, SemanticVersion};
 use aura_core::types::Epoch;
+use aura_core::{AuraError, AuraResult, AuthorityId, DeviceId, Hash32, SemanticVersion};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -1038,10 +1038,10 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
+    use aura_core::threshold::{ParticipantIdentity, ThresholdConfig, ThresholdState};
     use aura_core::time::PhysicalTime;
     use aura_core::types::epochs::Epoch;
     use aura_core::{AuraError, ContextId, FlowBudget, Journal};
-    use aura_core::threshold::{ParticipantIdentity, ThresholdConfig, ThresholdState};
     use std::sync::{Arc, Mutex};
 
     fn test_prestate() -> Hash32 {
@@ -1081,7 +1081,11 @@ mod tests {
 
     #[async_trait]
     impl JournalEffects for TestEffects {
-        async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
+        async fn merge_facts(
+            &self,
+            target: &Journal,
+            delta: &Journal,
+        ) -> Result<Journal, AuraError> {
             let mut merged = Journal::new();
             merged.facts = target.facts.clone();
             merged.caps = target.caps.clone();
@@ -1089,7 +1093,11 @@ mod tests {
             Ok(merged)
         }
 
-        async fn refine_caps(&self, target: &Journal, refinement: &Journal) -> Result<Journal, AuraError> {
+        async fn refine_caps(
+            &self,
+            target: &Journal,
+            refinement: &Journal,
+        ) -> Result<Journal, AuraError> {
             let mut refined = Journal::new();
             refined.facts = target.facts.clone();
             refined.caps = target.caps.clone();
@@ -1148,10 +1156,7 @@ mod tests {
             })
         }
 
-        async fn sleep_ms(
-            &self,
-            _ms: u64,
-        ) -> Result<(), aura_core::effects::time::TimeError> {
+        async fn sleep_ms(&self, _ms: u64) -> Result<(), aura_core::effects::time::TimeError> {
             Ok(())
         }
     }
@@ -1165,10 +1170,7 @@ mod tests {
             Ok(vec![0u8; 32])
         }
 
-        async fn sign(
-            &self,
-            _context: SigningContext,
-        ) -> Result<ThresholdSignature, AuraError> {
+        async fn sign(&self, _context: SigningContext) -> Result<ThresholdSignature, AuraError> {
             Ok(ThresholdSignature::single_signer(
                 vec![0u8; 64],
                 vec![0u8; 32],

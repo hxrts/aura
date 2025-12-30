@@ -34,11 +34,7 @@ impl UdpEndpointEffects for RealUdpSocket {
         Ok(())
     }
 
-    async fn send_to(
-        &self,
-        payload: &[u8],
-        addr: &UdpEndpoint,
-    ) -> Result<usize, NetworkError> {
+    async fn send_to(&self, payload: &[u8], addr: &UdpEndpoint) -> Result<usize, NetworkError> {
         let addr: SocketAddr = addr.as_str().parse().map_err(|e| {
             NetworkError::ConnectionFailed(format!("Invalid UDP address '{addr}': {e}"))
         })?;
@@ -51,10 +47,7 @@ impl UdpEndpointEffects for RealUdpSocket {
             })
     }
 
-    async fn recv_from(
-        &self,
-        buffer: &mut [u8],
-    ) -> Result<(usize, UdpEndpoint), NetworkError> {
+    async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, UdpEndpoint), NetworkError> {
         self.socket
             .recv_from(buffer)
             .await

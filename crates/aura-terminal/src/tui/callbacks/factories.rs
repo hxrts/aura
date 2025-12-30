@@ -16,9 +16,9 @@ use crate::tui::effects::EffectCommand;
 use crate::tui::effects::{CapabilityPolicy, CommandDispatcher};
 use crate::tui::types::{MfaPolicy, TraversalDepth};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
-use aura_core::identifiers::ChannelId;
-use aura_core::effects::reactive::ReactiveEffects;
 use aura_app::signal_defs::CHAT_SIGNAL;
+use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::ChannelId;
 
 use super::types::*;
 

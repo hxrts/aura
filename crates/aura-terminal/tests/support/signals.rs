@@ -89,10 +89,7 @@ pub async fn read_error_signal(app_core: &Arc<RwLock<AppCore>>) -> Option<AppErr
 }
 
 /// Wait for an error signal to become Some(AppError) within timeout.
-pub async fn wait_for_error_signal(
-    app_core: &Arc<RwLock<AppCore>>,
-    timeout: Duration,
-) -> AppError {
+pub async fn wait_for_error_signal(app_core: &Arc<RwLock<AppCore>>, timeout: Duration) -> AppError {
     wait_for_signal(
         app_core,
         &*ERROR_SIGNAL,

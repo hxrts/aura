@@ -14,7 +14,7 @@ use aura_social::facts::{
     ResidentFact, StewardFact,
 };
 use aura_social::{
-    Home, DiscoveryLayer, Neighborhood, ReachabilityChecker, RelayCandidateBuilder, SocialTopology,
+    DiscoveryLayer, Home, Neighborhood, ReachabilityChecker, RelayCandidateBuilder, SocialTopology,
 };
 
 // ============================================================================
@@ -199,8 +199,7 @@ fn test_multi_neighborhood_simulation() {
     let neighborhood1 = create_neighborhood(1, vec![home1.home_id, home2.home_id]);
 
     // Neighborhood 2: homes 1, 3, 4
-    let neighborhood2 =
-        create_neighborhood(2, vec![home1.home_id, home3.home_id, home4.home_id]);
+    let neighborhood2 = create_neighborhood(2, vec![home1.home_id, home3.home_id, home4.home_id]);
 
     // Store home1_id before moving home1
     let home1_id = home1.home_id;
@@ -378,10 +377,7 @@ fn test_progressive_social_presence_loss() {
 
     // Discovery layers should reflect this
     let target = test_authority(99);
-    assert_eq!(
-        topology_full.discovery_layer(&target),
-        DiscoveryLayer::Home
-    );
+    assert_eq!(topology_full.discovery_layer(&target), DiscoveryLayer::Home);
     assert_eq!(
         topology_empty.discovery_layer(&target),
         DiscoveryLayer::Rendezvous
@@ -407,10 +403,7 @@ fn test_deterministic_topology_construction() {
     let topology_a = SocialTopology::new(steward1a, Some(home1a), vec![]);
     let topology_b = SocialTopology::new(steward1b, Some(home1b), vec![]);
 
-    assert_eq!(
-        topology_a.home_peers().len(),
-        topology_b.home_peers().len()
-    );
+    assert_eq!(topology_a.home_peers().len(), topology_b.home_peers().len());
 
     // Home peers should be the same
     let peers_a: std::collections::HashSet<_> = topology_a.home_peers().into_iter().collect();
@@ -483,8 +476,7 @@ fn test_cross_neighborhood_routing() {
     let neighborhood2 = create_neighborhood(2, vec![home2.home_id, home3.home_id]);
 
     // Topology for home1 - only in neighborhood1
-    let topology1 =
-        SocialTopology::new(steward1, Some(home1.clone()), vec![neighborhood1.clone()]);
+    let topology1 = SocialTopology::new(steward1, Some(home1.clone()), vec![neighborhood1.clone()]);
 
     // Topology for home2 - bridge between neighborhoods
     let topology2 = SocialTopology::new(
@@ -613,9 +605,8 @@ fn test_many_peers_performance() {
 fn test_large_neighborhood_mesh() {
     // Create a large mesh topology
     let home_count = 8;
-    let homes: Vec<(Home, AuthorityId, Vec<AuthorityId>)> = (1..=home_count)
-        .map(|i| create_home(i as u8, 4))
-        .collect();
+    let homes: Vec<(Home, AuthorityId, Vec<AuthorityId>)> =
+        (1..=home_count).map(|i| create_home(i as u8, 4)).collect();
 
     let home_ids: Vec<HomeId> = homes.iter().map(|(b, _, _)| b.home_id).collect();
     let neighborhood = create_fully_connected_neighborhood(1, home_ids.clone());

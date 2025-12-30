@@ -489,12 +489,10 @@ impl JournalSyncProtocol {
             let mut by_time: Vec<(DeviceId, u64)> = self
                 .peer_states
                 .iter()
-                .filter_map(|(id, state)| {
-                    match state {
-                        SyncState::Synced { last_sync, .. } => Some((*id, last_sync.ts_ms)),
-                        SyncState::Failed { failed_at, .. } => Some((*id, failed_at.ts_ms)),
-                        _ => None,
-                    }
+                .filter_map(|(id, state)| match state {
+                    SyncState::Synced { last_sync, .. } => Some((*id, last_sync.ts_ms)),
+                    SyncState::Failed { failed_at, .. } => Some((*id, failed_at.ts_ms)),
+                    _ => None,
                 })
                 .collect();
             by_time.sort_by_key(|(_, ts)| *ts);

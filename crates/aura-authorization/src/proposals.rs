@@ -524,8 +524,7 @@ impl ProposalState {
             ApprovalThreshold::Percentage { percent } => {
                 // Without knowing total eligible, we use approvals as proxy
                 // For strict evaluation, use is_met() at completion time
-                let required =
-                    (approval_count as f64 * *percent as f64 / 100.0).ceil() as u32;
+                let required = (approval_count as f64 * *percent as f64 / 100.0).ceil() as u32;
                 (approval_count as u32) >= required
             }
         }

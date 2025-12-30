@@ -94,8 +94,8 @@ impl StorageService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::time::{PhysicalTime, TimeStamp};
     use crate::facts::{HomeId, NeighborhoodId};
+    use aura_core::time::{PhysicalTime, TimeStamp};
 
     fn test_timestamp() -> TimeStamp {
         TimeStamp::PhysicalClock(PhysicalTime {

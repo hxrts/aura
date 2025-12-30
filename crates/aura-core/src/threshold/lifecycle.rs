@@ -15,11 +15,7 @@ pub trait ThresholdLifecycle: Send + Sync {
 
     async fn generate_keys(&self) -> Result<Self::KeyMaterial, AuraError>;
     async fn sign(&self, message: &[u8]) -> Result<Self::SignatureOutput, AuraError>;
-    async fn verify(
-        &self,
-        message: &[u8],
-        sig: &Self::SignatureOutput,
-    ) -> Result<bool, AuraError>;
+    async fn verify(&self, message: &[u8], sig: &Self::SignatureOutput) -> Result<bool, AuraError>;
 }
 
 /// Provisional fast-path (A1).

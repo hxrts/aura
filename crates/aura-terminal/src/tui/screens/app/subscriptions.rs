@@ -299,12 +299,10 @@ pub fn use_channels_subscription(
         let update_tx = update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let selected_index = chat_state.selected_channel_id.as_ref().and_then(|id| {
-                    chat_state
-                        .channels
-                        .iter()
-                        .position(|c| c.id == *id)
-                });
+                let selected_index = chat_state
+                    .selected_channel_id
+                    .as_ref()
+                    .and_then(|id| chat_state.channels.iter().position(|c| c.id == *id));
 
                 // Ensure a channel is always selected when channels exist.
                 if selected_index.is_none() && !chat_state.channels.is_empty() {

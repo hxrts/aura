@@ -59,9 +59,7 @@ pub fn validate_share(
     // Quint: share.dataBinding.bindCid == cid
     // Note: In pure core, we use string comparison on data_binding field
     // Production would verify cryptographic binding
-    let expected_binding = format!(
-        "{expected_cid}:{expected_rid}:{expected_prestate_hash}"
-    );
+    let expected_binding = format!("{expected_cid}:{expected_rid}:{expected_prestate_hash}");
 
     // Quint: share.shareValue != ""
     if share.share_value.is_empty() {

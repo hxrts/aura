@@ -1447,9 +1447,7 @@ mod tests {
 
         let deltas = reduction.reduce(&facts, None);
         assert_eq!(deltas.len(), 3);
-        assert!(
-            matches!(&deltas[0], HomeDelta::HomeCreated { name, .. } if name == "Test Home")
-        );
+        assert!(matches!(&deltas[0], HomeDelta::HomeCreated { name, .. } if name == "Test Home"));
         assert!(matches!(&deltas[1], HomeDelta::ResidentAdded { name, .. } if name == "Alice"));
         assert!(
             matches!(&deltas[2], HomeDelta::StorageUpdated { used_bytes, total_bytes, .. }

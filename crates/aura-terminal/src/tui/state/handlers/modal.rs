@@ -88,16 +88,16 @@ pub fn handle_queued_modal_key(
                 }
                 KeyCode::Char('c') => {
                     // Copy code to clipboard (c or Cmd+C)
-                    if !modal_state.code.is_empty()
-                        && copy_to_clipboard(&modal_state.code).is_ok() {
-                            // Update state to show "copied" feedback
-                            state.modal_queue.update_active(|m| {
-                                if let QueuedModal::ContactsCode(s) = m {
-                                    s.set_copied();
-                                }
-                            });
-                            state.toast_success("Copied to clipboard");
-                        }
+                    if !modal_state.code.is_empty() && copy_to_clipboard(&modal_state.code).is_ok()
+                    {
+                        // Update state to show "copied" feedback
+                        state.modal_queue.update_active(|m| {
+                            if let QueuedModal::ContactsCode(s) = m {
+                                s.set_copied();
+                            }
+                        });
+                        state.toast_success("Copied to clipboard");
+                    }
                 }
                 _ => {}
             }
@@ -1398,15 +1398,16 @@ fn handle_device_enrollment_key_queue(
         KeyCode::Char('c') => {
             // Copy enrollment code to clipboard (c or Cmd+C)
             if !modal_state.enrollment_code.is_empty()
-                && copy_to_clipboard(&modal_state.enrollment_code).is_ok() {
-                    // Update state to show "copied" feedback
-                    state.modal_queue.update_active(|m| {
-                        if let QueuedModal::SettingsDeviceEnrollment(s) = m {
-                            s.set_copied();
-                        }
-                    });
-                    state.toast_success("Copied to clipboard");
-                }
+                && copy_to_clipboard(&modal_state.enrollment_code).is_ok()
+            {
+                // Update state to show "copied" feedback
+                state.modal_queue.update_active(|m| {
+                    if let QueuedModal::SettingsDeviceEnrollment(s) = m {
+                        s.set_copied();
+                    }
+                });
+                state.toast_success("Copied to clipboard");
+            }
         }
         _ => {}
     }

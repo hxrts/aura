@@ -3,11 +3,11 @@
 use aura_core::threshold::{ConvergenceCert, ReversionFact};
 use aura_core::time::{OrderTime, TimeStamp};
 use aura_core::Hash32;
-use aura_core::{ContextId, AuthorityId};
+use aura_core::{AuthorityId, ContextId};
 use aura_journal::fact::RelationalFact;
-use aura_journal::{reduce_context, Fact, FactContent, FactJournal as Journal, JournalNamespace};
-use aura_journal::ProtocolRelationalFact;
 use aura_journal::reduction::RelationalBindingType;
+use aura_journal::ProtocolRelationalFact;
+use aura_journal::{reduce_context, Fact, FactContent, FactJournal as Journal, JournalNamespace};
 use std::collections::BTreeSet;
 
 #[test]
@@ -59,13 +59,15 @@ fn reduce_context_emits_convergence_and_reversion_bindings() {
         matches!(
             binding.binding_type,
             RelationalBindingType::Generic(ref name) if name == "convergence_cert"
-        ) && binding.context_id == ctx && binding.data == op_id.0.to_vec()
+        ) && binding.context_id == ctx
+            && binding.data == op_id.0.to_vec()
     }));
 
     assert!(state.bindings.iter().any(|binding| {
         matches!(
             binding.binding_type,
             RelationalBindingType::Generic(ref name) if name == "reversion_fact"
-        ) && binding.context_id == ctx && binding.data == op_id.0.to_vec()
+        ) && binding.context_id == ctx
+            && binding.data == op_id.0.to_vec()
     }));
 }
