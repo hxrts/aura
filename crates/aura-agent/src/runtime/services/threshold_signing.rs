@@ -121,8 +121,8 @@ pub struct ThresholdSigningService {
     effects: Arc<AuraEffectSystem>,
 
     /// Known signing contexts (keyed by authority)
-    contexts: RwLock<HashMap<AuthorityId, SigningContextState>>,
-    leases: RwLock<HashMap<AuthorityId, CoordinatorLease>>,
+    contexts: Arc<RwLock<HashMap<AuthorityId, SigningContextState>>>,
+    leases: Arc<RwLock<HashMap<AuthorityId, CoordinatorLease>>>,
 }
 
 impl std::fmt::Debug for ThresholdSigningService {
@@ -133,13 +133,23 @@ impl std::fmt::Debug for ThresholdSigningService {
     }
 }
 
+impl Clone for ThresholdSigningService {
+    fn clone(&self) -> Self {
+        Self {
+            effects: self.effects.clone(),
+            contexts: self.contexts.clone(),
+            leases: self.leases.clone(),
+        }
+    }
+}
+
 impl ThresholdSigningService {
     /// Create a new threshold signing service
     pub fn new(effects: Arc<AuraEffectSystem>) -> Self {
         Self {
             effects,
-            contexts: RwLock::new(HashMap::new()),
-            leases: RwLock::new(HashMap::new()),
+            contexts: Arc::new(RwLock::new(HashMap::new())),
+            leases: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -319,6 +329,10 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             "Bootstrapping authority with 1-of-1 Ed25519 keys"
         );
 
+        let epoch = 0u64;
+        let participant = ParticipantIdentity::guardian(*authority);
+        let participants = vec![participant.clone()];
+
         // Generate 1-of-1 signing keys (will use Ed25519 single-signer mode)
         let key_result = self
             .effects
@@ -336,7 +350,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         // Location: signing_keys/<authority>/<epoch>/1
         let location = SecureStorageLocation::with_sub_key(
             "signing_keys",
-            format!("{}/0", authority), // epoch 0
+            format!("{}/{}", authority, epoch),
             "1",                        // signer index 1
         );
 
@@ -352,17 +366,94 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to store key package: {}", e)))?;
 
+        // Store participant share for consensus/DKG helpers.
+        let participant_location = SecureStorageLocation::with_sub_key(
+            "participant_shares",
+            format!("{}/{}", authority, epoch),
+            participant.storage_key(),
+        );
+        self.effects
+            .secure_store(
+                &participant_location,
+                &key_result.key_packages[0],
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to store participant share: {}", e)))?;
+
+        // Persist public key package for consensus helpers.
+        let pubkey_location = SecureStorageLocation::with_sub_key(
+            "threshold_pubkey",
+            format!("{}", authority),
+            format!("{}", epoch),
+        );
+        self.effects
+            .secure_store(
+                &pubkey_location,
+                &key_result.public_key_package,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                AuraError::internal(format!("Failed to store public key package: {}", e))
+            })?;
+
+        // Persist epoch + threshold config metadata for consensus helpers.
+        let config_metadata = ThresholdConfigMetadata {
+            threshold_k: 1,
+            total_n: 1,
+            participants,
+            mode: SigningMode::SingleSigner,
+            agreement_mode: AgreementMode::Provisional,
+        };
+        let config_bytes = serde_json::to_vec(&config_metadata).map_err(|e| {
+            AuraError::internal(format!("Failed to serialize threshold config: {}", e))
+        })?;
+        let config_location = SecureStorageLocation::with_sub_key(
+            "threshold_config",
+            format!("{}", authority),
+            format!("{}", epoch),
+        );
+        self.effects
+            .secure_store(
+                &config_location,
+                &config_bytes,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to store threshold config: {}", e)))?;
+
+        let epoch_location = SecureStorageLocation::new("epoch_state", format!("{}", authority));
+        self.effects
+            .secure_store(
+                &epoch_location,
+                &epoch.to_le_bytes(),
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to store epoch state: {}", e)))?;
+
         // Create context state
         let config = ThresholdConfig::new(1, 1)?;
         let state = SigningContextState {
             config,
             my_signer_index: Some(1),
-            epoch: 0,
+            epoch,
             public_key_package: key_result.public_key_package.clone(),
             mode: key_result.mode,
-            // For 1-of-1 bootstrap, the participant set is implicit (local signer).
-            // Ceremonies will overwrite this when rotating into multi-party configs.
-            participants: Vec::new(),
+            participants: vec![participant],
             agreement_mode: AgreementMode::Provisional,
         };
 

@@ -73,7 +73,7 @@ async fn demo_refresh_account_reports_two_online_contacts() {
     let test_dir = support::unique_test_dir("aura-demo-peer-count");
 
     // Start demo peers (Alice + Carol) as real runtimes and share their transport with Bob.
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone())
+    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), authority_id, context_id)
         .await
         .expect("Failed to create demo simulator");
     simulator
@@ -183,7 +183,7 @@ async fn demo_accepting_contact_invites_updates_peer_count() {
         .expect("create_account should succeed");
 
     // Start demo peers (Alice + Carol) as real runtimes and share their transport with Bob.
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone())
+    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), authority_id, context_id)
         .await
         .expect("Failed to create demo simulator");
     simulator

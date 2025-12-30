@@ -111,6 +111,7 @@ mod tests {
     use aura_core::{AuthorityId, Hash32};
     use std::collections::HashMap;
     use std::sync::Arc;
+    use tokio::task::yield_now;
     use uuid::Uuid;
 
     struct SharedBus {
@@ -163,7 +164,7 @@ mod tests {
                         }
                     }
                 }
-                futures::future::yield_now().await;
+                yield_now().await;
             }
             Err(ChoreographyError::CommunicationTimeout {
                 role,

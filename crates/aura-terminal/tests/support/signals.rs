@@ -21,13 +21,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aura_app::signal_defs::{
-    SettingsState, CHAT_SIGNAL, CONTACTS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL,
-    RECOVERY_SIGNAL, SETTINGS_SIGNAL,
+    SettingsState, CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, INVITATIONS_SIGNAL,
+    NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
 };
 use aura_app::views::{
     ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
 };
-use aura_app::AppCore;
+use aura_app::{AppCore, AppError};
 use aura_core::effects::reactive::{ReactiveEffects, Signal};
 use aura_core::identifiers::AuthorityId;
 
@@ -76,6 +76,32 @@ where
 
         tokio::time::sleep(POLL_INTERVAL).await;
     }
+}
+
+// ============================================================================
+// Error Signal Helpers
+// ============================================================================
+
+/// Read the current error signal (if any).
+pub async fn read_error_signal(app_core: &Arc<RwLock<AppCore>>) -> Option<AppError> {
+    let core = app_core.read().await;
+    core.read(&*ERROR_SIGNAL).await.ok().flatten()
+}
+
+/// Wait for an error signal to become Some(AppError) within timeout.
+pub async fn wait_for_error_signal(
+    app_core: &Arc<RwLock<AppCore>>,
+    timeout: Duration,
+) -> AppError {
+    wait_for_signal(
+        app_core,
+        &*ERROR_SIGNAL,
+        |state| state.is_some(),
+        timeout,
+        "error signal",
+    )
+    .await
+    .expect("Error signal should be Some(AppError)")
 }
 
 // ============================================================================

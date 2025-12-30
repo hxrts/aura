@@ -120,11 +120,12 @@ build:
     cargo build --workspace --verbose
 
 # Build Aura terminal in development mode (release profile with dev features)
-# Creates ./bin/aura symlink for easy access
+# Creates ./bin/aura wrapper for easy access
 build-dev:
     cargo build -p aura-terminal --bin aura --features development --release
     mkdir -p bin
-    ln -sf ../target/release/aura bin/aura
+    cp scripts/aura-wrapper.sh bin/aura
+    chmod +x bin/aura
     @echo "Binary available at: ./bin/aura"
 
 build-app-host:
@@ -133,7 +134,8 @@ build-app-host:
 build-terminal-release:
     cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal
     mkdir -p bin
-    ln -sf ../target/release/aura bin/aura
+    cp scripts/aura-wrapper.sh bin/aura
+    chmod +x bin/aura
     @echo "Binary available at: ./bin/aura"
 
 # Build in release mode

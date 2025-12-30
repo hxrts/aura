@@ -188,7 +188,7 @@ impl ITFTraceReplayer {
             Self::parse_modal(vars.get("currentModal").ok_or("Missing currentModal")?)?;
 
         let neighborhood_insert_mode = vars
-            .get("blockInsertMode")
+            .get("homeInsertMode")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 

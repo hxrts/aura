@@ -173,12 +173,6 @@ async fn load_threshold_state_from_storage(
         0
     };
 
-    if epoch == 0 {
-        return Err(AuraError::invalid(
-            "Consensus requires an existing threshold configuration".to_string(),
-        ));
-    }
-
     let config_location = SecureStorageLocation::with_sub_key(
         "threshold_config",
         format!("{}", authority_id),

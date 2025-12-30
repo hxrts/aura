@@ -23,8 +23,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_lock::RwLock;
-#[cfg(feature = "development")]
-use aura_agent::AuraAgent;
+use cfg_if::cfg_if;
+cfg_if! {
+    if #[cfg(feature = "development")] {
+        use aura_agent::AuraAgent;
+    }
+}
 use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
@@ -43,7 +47,7 @@ use crate::tui::tasks::UiTaskRegistry;
 use crate::tui::types::ChannelMode;
 
 use crate::tui::hooks::{
-    HomeSnapshot, ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot,
+    ChatSnapshot, ContactsSnapshot, DevicesSnapshot, GuardiansSnapshot, HomeSnapshot,
     InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
 };
 
@@ -89,6 +93,7 @@ pub struct IoContextBuilder {
     device_id: Option<String>,
     mode: Option<TuiMode>,
     has_existing_account: bool,
+    #[cfg_attr(feature = "development", doc = "Demo configuration fields")]
     #[cfg(feature = "development")]
     demo_hints: Option<crate::demo::DemoHints>,
     #[cfg(feature = "development")]
@@ -135,32 +140,32 @@ impl IoContextBuilder {
         self
     }
 
-    /// Set demo hints for development mode.
-    #[cfg(feature = "development")]
-    pub fn with_demo_hints(mut self, hints: crate::demo::DemoHints) -> Self {
-        self.demo_hints = Some(hints);
-        self
-    }
+    cfg_if! {
+        if #[cfg(feature = "development")] {
+            /// Set demo hints for development mode.
+            pub fn with_demo_hints(mut self, hints: crate::demo::DemoHints) -> Self {
+                self.demo_hints = Some(hints);
+                self
+            }
 
-    /// Set the demo bridge for routing commands to simulated agents.
-    #[cfg(feature = "development")]
-    pub fn with_demo_bridge(mut self, bridge: Arc<crate::demo::SimulatedBridge>) -> Self {
-        self.demo_bridge = Some(bridge);
-        self
-    }
+            /// Set the demo bridge for routing commands to simulated agents.
+            pub fn with_demo_bridge(mut self, bridge: Arc<crate::demo::SimulatedBridge>) -> Self {
+                self.demo_bridge = Some(bridge);
+                self
+            }
 
-    /// Set the demo Mobile agent for device enrollment flows.
-    #[cfg(feature = "development")]
-    pub fn with_demo_mobile_agent(mut self, agent: Arc<AuraAgent>) -> Self {
-        self.demo_mobile_agent = Some(agent);
-        self
-    }
+            /// Set the demo Mobile agent for device enrollment flows.
+            pub fn with_demo_mobile_agent(mut self, agent: Arc<AuraAgent>) -> Self {
+                self.demo_mobile_agent = Some(agent);
+                self
+            }
 
-    /// Set the demo Mobile device id for MFA shortcuts.
-    #[cfg(feature = "development")]
-    pub fn with_demo_mobile_device_id(mut self, device_id: String) -> Self {
-        self.demo_mobile_device_id = Some(device_id);
-        self
+            /// Set the demo Mobile device id for MFA shortcuts.
+            pub fn with_demo_mobile_device_id(mut self, device_id: String) -> Self {
+                self.demo_mobile_device_id = Some(device_id);
+                self
+            }
+        }
     }
 
     /// Build the IoContext, returning an error if required fields are missing.
@@ -335,33 +340,36 @@ impl IoContext {
         }
     }
 
-    /// Create a new IoContext with demo hints for development mode.
-    ///
-    /// # Deprecated
-    ///
-    /// Use `IoContext::builder()` instead for more flexible construction.
-    #[doc(hidden)]
-    #[cfg(feature = "development")]
-    #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
-    pub fn with_demo_hints(
-        app_core: InitializedAppCore,
-        hints: crate::demo::DemoHints,
-        has_existing_account: bool,
-        base_path: PathBuf,
-        device_id_str: String,
-        mode: TuiMode,
-    ) -> Self {
-        match IoContext::builder()
-            .with_app_core(app_core)
-            .with_base_path(base_path)
-            .with_device_id(device_id_str)
-            .with_mode(mode)
-            .with_existing_account(has_existing_account)
-            .with_demo_hints(hints)
-            .build()
-        {
-            Ok(ctx) => ctx,
-            Err(err) => panic!("IoContext::with_demo_hints: {err}"),
+    cfg_if! {
+        if #[cfg(feature = "development")] {
+            /// Create a new IoContext with demo hints for development mode.
+            ///
+            /// # Deprecated
+            ///
+            /// Use `IoContext::builder()` instead for more flexible construction.
+            #[doc(hidden)]
+            #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
+            pub fn with_demo_hints(
+                app_core: InitializedAppCore,
+                hints: crate::demo::DemoHints,
+                has_existing_account: bool,
+                base_path: PathBuf,
+                device_id_str: String,
+                mode: TuiMode,
+            ) -> Self {
+                match IoContext::builder()
+                    .with_app_core(app_core)
+                    .with_base_path(base_path)
+                    .with_device_id(device_id_str)
+                    .with_mode(mode)
+                    .with_existing_account(has_existing_account)
+                    .with_demo_hints(hints)
+                    .build()
+                {
+                    Ok(ctx) => ctx,
+                    Err(err) => panic!("IoContext::with_demo_hints: {err}"),
+                }
+            }
         }
     }
 
@@ -442,92 +450,84 @@ impl IoContext {
     // Demo helpers
     // =========================================================================
 
-    #[cfg(feature = "development")]
-    pub fn demo_hints(&self) -> Option<&crate::demo::DemoHints> {
-        self.demo_hints.as_ref()
-    }
+    cfg_if! {
+        if #[cfg(feature = "development")] {
+            pub fn demo_hints(&self) -> Option<&crate::demo::DemoHints> {
+                self.demo_hints.as_ref()
+            }
 
-    #[cfg(feature = "development")]
-    pub fn is_demo_mode(&self) -> bool {
-        self.demo_hints.is_some()
-    }
+            pub fn is_demo_mode(&self) -> bool {
+                self.demo_hints.is_some()
+            }
 
-    #[cfg(not(feature = "development"))]
-    pub fn is_demo_mode(&self) -> bool {
-        false
-    }
+            pub fn demo_alice_code(&self) -> String {
+                self.demo_hints
+                    .as_ref()
+                    .map(|h| h.alice_invite_code.clone())
+                    .unwrap_or_default()
+            }
 
-    #[cfg(feature = "development")]
-    pub fn demo_alice_code(&self) -> String {
-        self.demo_hints
-            .as_ref()
-            .map(|h| h.alice_invite_code.clone())
-            .unwrap_or_default()
-    }
+            pub fn demo_carol_code(&self) -> String {
+                self.demo_hints
+                    .as_ref()
+                    .map(|h| h.carol_invite_code.clone())
+                    .unwrap_or_default()
+            }
 
-    #[cfg(feature = "development")]
-    pub fn demo_carol_code(&self) -> String {
-        self.demo_hints
-            .as_ref()
-            .map(|h| h.carol_invite_code.clone())
-            .unwrap_or_default()
-    }
+            pub fn demo_mobile_device_id(&self) -> String {
+                self.demo_mobile_device_id.clone().unwrap_or_default()
+            }
 
-    #[cfg(feature = "development")]
-    pub fn demo_mobile_device_id(&self) -> String {
-        self.demo_mobile_device_id.clone().unwrap_or_default()
-    }
+            /// Set the demo bridge for routing commands to simulated agents.
+            ///
+            /// When set, commands dispatched through this context will also be routed
+            /// to the SimulatedBridge, allowing demo agents (Alice/Carol) to respond
+            /// to guardian invitations and other interactions.
+            pub fn set_demo_bridge(&mut self, bridge: Arc<crate::demo::SimulatedBridge>) {
+                self.demo_bridge = Some(bridge);
+            }
 
-    #[cfg(not(feature = "development"))]
-    pub fn demo_alice_code(&self) -> String {
-        String::new()
-    }
+            /// Get the demo bridge if set.
+            pub fn demo_bridge(&self) -> Option<&Arc<crate::demo::SimulatedBridge>> {
+                self.demo_bridge.as_ref()
+            }
 
-    #[cfg(not(feature = "development"))]
-    pub fn demo_carol_code(&self) -> String {
-        String::new()
-    }
+            /// Import an invitation code on the demo Mobile device and accept it.
+            pub async fn import_invitation_on_mobile(&self, code: &str) -> Result<(), String> {
+                let agent = self
+                    .demo_mobile_agent
+                    .as_ref()
+                    .ok_or_else(|| "Demo Mobile agent unavailable".to_string())?;
+                let invitations = agent
+                    .invitations()
+                    .map_err(|e| format!("Invitation service unavailable: {e}"))?;
+                let invitation = invitations
+                    .import_and_cache(code)
+                    .await
+                    .map_err(|e| format!("Failed to import invitation: {e}"))?;
+                invitations
+                    .accept(&invitation.invitation_id)
+                    .await
+                    .map_err(|e| format!("Failed to accept invitation: {e}"))?;
+                Ok(())
+            }
+        } else {
+            pub fn is_demo_mode(&self) -> bool {
+                false
+            }
 
-    #[cfg(not(feature = "development"))]
-    pub fn demo_mobile_device_id(&self) -> String {
-        String::new()
-    }
+            pub fn demo_alice_code(&self) -> String {
+                String::new()
+            }
 
-    /// Set the demo bridge for routing commands to simulated agents.
-    ///
-    /// When set, commands dispatched through this context will also be routed
-    /// to the SimulatedBridge, allowing demo agents (Alice/Carol) to respond
-    /// to guardian invitations and other interactions.
-    #[cfg(feature = "development")]
-    pub fn set_demo_bridge(&mut self, bridge: Arc<crate::demo::SimulatedBridge>) {
-        self.demo_bridge = Some(bridge);
-    }
+            pub fn demo_carol_code(&self) -> String {
+                String::new()
+            }
 
-    /// Get the demo bridge if set.
-    #[cfg(feature = "development")]
-    pub fn demo_bridge(&self) -> Option<&Arc<crate::demo::SimulatedBridge>> {
-        self.demo_bridge.as_ref()
-    }
-
-    /// Import an invitation code on the demo Mobile device and accept it.
-    #[cfg(feature = "development")]
-    pub async fn import_invitation_on_mobile(&self, code: &str) -> Result<(), String> {
-        let agent = self
-            .demo_mobile_agent
-            .as_ref()
-            .ok_or_else(|| "Demo Mobile agent unavailable".to_string())?;
-        let invitations = agent
-            .invitations()
-            .map_err(|e| format!("Invitation service unavailable: {e}"))?;
-        let invitation = invitations
-            .import_and_cache(code)
-            .await
-            .map_err(|e| format!("Failed to import invitation: {e}"))?;
-        invitations
-            .accept(&invitation.invitation_id)
-            .await
-            .map_err(|e| format!("Failed to accept invitation: {e}"))?;
-        Ok(())
+            pub fn demo_mobile_device_id(&self) -> String {
+                String::new()
+            }
+        }
     }
 
     // =========================================================================
@@ -540,6 +540,15 @@ impl IoContext {
         {
             let mut core = self.app_core_raw().write().await;
             core.set_authority(authority_id);
+        }
+
+        {
+            let core = self.app_core_raw().read().await;
+            if core.has_runtime() {
+                core.bootstrap_signing_keys()
+                    .await
+                    .map_err(|e| format!("Failed to bootstrap signing keys: {e}"))?;
+            }
         }
 
         Ok(())
@@ -606,9 +615,12 @@ impl IoContext {
     pub async fn dispatch(&self, command: EffectCommand) -> Result<(), String> {
         // In demo mode, also route commands through the SimulatedBridge
         // so that simulated agents (Alice/Carol) can respond to them
-        #[cfg(feature = "development")]
-        if let Some(bridge) = &self.demo_bridge {
-            bridge.route_command(&command).await;
+        cfg_if! {
+            if #[cfg(feature = "development")] {
+                if let Some(bridge) = &self.demo_bridge {
+                    bridge.route_command(&command).await;
+                }
+            }
         }
 
         self.dispatch.dispatch(command).await
@@ -616,9 +628,12 @@ impl IoContext {
 
     pub async fn dispatch_and_wait(&self, command: EffectCommand) -> Result<(), String> {
         // In demo mode, also route commands through the SimulatedBridge
-        #[cfg(feature = "development")]
-        if let Some(bridge) = &self.demo_bridge {
-            bridge.route_command(&command).await;
+        cfg_if! {
+            if #[cfg(feature = "development")] {
+                if let Some(bridge) = &self.demo_bridge {
+                    bridge.route_command(&command).await;
+                }
+            }
         }
 
         self.dispatch.dispatch_and_wait(command).await

@@ -28,6 +28,7 @@ use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
 mod support;
+use support::read_error_signal;
 
 #[tokio::test]
 async fn demo_guardian_ceremony_completes_with_demo_peers() {
@@ -36,19 +37,19 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
     // Unique data dir so this test is hermetic.
     let test_dir = support::unique_test_dir("aura-guardian-e2e");
 
-    // Start demo peers (Alice + Carol) as real runtimes and share their transport with Bob.
-    let mut simulator = DemoSimulator::new(seed, test_dir.clone())
-        .await
-        .expect("create demo simulator");
-    simulator.start().await.expect("start demo simulator");
-    let shared_transport = simulator.shared_transport();
-
     // Match the demo-mode authority/context derivation used by the TUI handler.
     let bob_device_id_str = "demo:bob";
     let bob_authority_entropy = hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
     let bob_authority = AuthorityId::new_from_entropy(bob_authority_entropy);
     let bob_context_entropy = hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
     let bob_context = ContextId::new_from_entropy(bob_context_entropy);
+
+    // Start demo peers (Alice + Carol) as real runtimes and share their transport with Bob.
+    let mut simulator = DemoSimulator::new(seed, test_dir.clone(), bob_authority, bob_context)
+        .await
+        .expect("create demo simulator");
+    simulator.start().await.expect("start demo simulator");
+    let shared_transport = simulator.shared_transport();
 
     let agent_config = AgentConfig {
         device_id: ids::device_id(bob_device_id_str),
@@ -120,9 +121,22 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
     let ceremony_id = {
         let core = app_core.read().await;
         let threshold = FrostThreshold::new(2).expect("valid threshold");
-        core.initiate_guardian_ceremony(threshold, 2, &[alice_id.to_string(), carol_id.to_string()])
+        match core
+            .initiate_guardian_ceremony(
+                threshold,
+                2,
+                &[alice_id.to_string(), carol_id.to_string()],
+            )
             .await
-            .expect("initiate_guardian_ceremony")
+        {
+            Ok(id) => id,
+            Err(e) => {
+                let error_signal = read_error_signal(&app_core).await;
+                panic!(
+                    "initiate_guardian_ceremony failed: {e}. error_signal={error_signal:?}"
+                );
+            }
+        }
     };
 
     // Mirror the TUI background task that polls for acceptances.
@@ -148,7 +162,11 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
         };
 
         if status.has_failed {
-            panic!("Ceremony failed: {:?}", status.error_message);
+            let error_signal = read_error_signal(&app_core).await;
+            panic!(
+                "Ceremony failed: status_error={:?}, error_signal={error_signal:?}",
+                status.error_message
+            );
         }
 
         if status.is_complete {

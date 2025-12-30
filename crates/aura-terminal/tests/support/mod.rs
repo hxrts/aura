@@ -54,7 +54,7 @@ pub use state_machine::TestTui;
 pub use signals::{
     wait_for_chat, wait_for_contact, wait_for_contacts, wait_for_device, wait_for_devices,
     wait_for_invitations, wait_for_neighborhood, wait_for_recovery, wait_for_settings,
-    wait_for_signal, DEFAULT_TIMEOUT, EXTENDED_TIMEOUT,
+    wait_for_signal, read_error_signal, wait_for_error_signal, DEFAULT_TIMEOUT, EXTENDED_TIMEOUT,
 };
 
 // Demo helpers

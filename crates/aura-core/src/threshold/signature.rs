@@ -35,6 +35,21 @@ pub struct ThresholdSignature {
 }
 
 impl ThresholdSignature {
+    fn validate_sizes(signature: &[u8], public_key_package: &[u8]) {
+        debug_assert!(
+            signature.len() <= MAX_THRESHOLD_SIGNATURE_BYTES,
+            "signature length {} exceeds MAX_THRESHOLD_SIGNATURE_BYTES {}",
+            signature.len(),
+            MAX_THRESHOLD_SIGNATURE_BYTES
+        );
+        debug_assert!(
+            public_key_package.len() <= MAX_THRESHOLD_PUBLIC_KEY_PACKAGE_BYTES,
+            "public key package length {} exceeds MAX_THRESHOLD_PUBLIC_KEY_PACKAGE_BYTES {}",
+            public_key_package.len(),
+            MAX_THRESHOLD_PUBLIC_KEY_PACKAGE_BYTES
+        );
+    }
+
     /// Create a new threshold signature
     pub fn new(
         signature: Vec<u8>,
@@ -43,6 +58,7 @@ impl ThresholdSignature {
         public_key_package: Vec<u8>,
         epoch: u64,
     ) -> Self {
+        Self::validate_sizes(&signature, &public_key_package);
         Self {
             signature,
             signer_count,
@@ -56,6 +72,7 @@ impl ThresholdSignature {
     ///
     /// Used for bootstrap scenarios and single-device accounts.
     pub fn single_signer(signature: Vec<u8>, public_key_package: Vec<u8>, epoch: u64) -> Self {
+        Self::validate_sizes(&signature, &public_key_package);
         Self {
             signature,
             signer_count: 1,

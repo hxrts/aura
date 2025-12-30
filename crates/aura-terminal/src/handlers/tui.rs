@@ -758,6 +758,73 @@ async fn handle_tui_launch(
             });
             stdio.println(format_args!("Ceremony acceptance processor started"));
 
+            // Auto-respond to Bob's AMP messages from demo peers.
+            let app_core_for_replies = app_core.raw().clone();
+            let bob_authority = authority_id;
+            let alice_agent = sim.alice_agent();
+            let carol_agent = sim.carol_agent();
+            tokio::spawn(async move {
+                use aura_app::signal_defs::CHAT_SIGNAL;
+                use aura_core::effects::amp::ChannelSendParams;
+                use aura_core::EffectContext;
+                use aura_core::identifiers::ContextId;
+                use std::collections::HashSet;
+
+                let mut chat_stream = {
+                    let core = app_core_for_replies.read().await;
+                    core.subscribe(&*CHAT_SIGNAL)
+                };
+
+                let mut seen_messages: HashSet<String> = HashSet::new();
+
+                loop {
+                    let chat_state = match chat_stream.recv().await {
+                        Ok(state) => state,
+                        Err(_) => break,
+                    };
+
+                    for msg in &chat_state.messages {
+                        if msg.sender_id != bob_authority {
+                            continue;
+                        }
+                        if !seen_messages.insert(msg.id.clone()) {
+                            continue;
+                        }
+
+                        let context_id = {
+                            let core = app_core_for_replies.read().await;
+                            let homes = core.views().get_homes();
+                            homes
+                                .home_state(&msg.channel_id)
+                                .and_then(|home| home.context_id.parse::<ContextId>().ok())
+                                .unwrap_or_else(|| {
+                                    EffectContext::with_authority(bob_authority).context_id()
+                                })
+                        };
+
+                        let reply = format!("received: {}", msg.content);
+                        for agent in [&alice_agent, &carol_agent] {
+                            let params = ChannelSendParams {
+                                context: context_id,
+                                channel: msg.channel_id,
+                                sender: agent.authority_id(),
+                                plaintext: reply.as_bytes().to_vec(),
+                                reply_to: None,
+                            };
+
+                            if let Err(err) = agent.runtime().effects().send_message(params).await {
+                                tracing::warn!(
+                                    agent = %agent.authority_id(),
+                                    error = %err,
+                                    "Demo auto-reply send failed"
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+            stdio.println(format_args!("Demo auto-reply loop started"));
+
             Some(sim)
         }
         TuiMode::Production => None,

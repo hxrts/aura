@@ -6,13 +6,16 @@
 
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
+use aura_core::effects::TransportEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::ContextId;
 use aura_invitation::guards::{EffectCommand, GuardOutcome};
 use aura_invitation::InvitationFact;
 use aura_journal::DomainFact;
+use std::collections::HashMap;
 
 use super::shared::HandlerUtilities;
+use super::{invitation::InvitationHandler, InvitationService};
 
 /// Execute a guard outcome's effect commands
 ///
@@ -66,7 +69,7 @@ async fn execute_effect_command(
         EffectCommand::NotifyPeer {
             peer,
             invitation_id,
-        } => execute_notify_peer(peer, invitation_id, effects).await,
+        } => execute_notify_peer(peer, invitation_id, authority, effects).await,
         EffectCommand::RecordReceipt { operation, peer } => {
             execute_record_receipt(operation, peer, effects).await
         }
@@ -110,6 +113,7 @@ async fn execute_charge_flow_budget(cost: u32, effects: &AuraEffectSystem) -> Ag
 async fn execute_notify_peer(
     peer: aura_core::identifiers::AuthorityId,
     invitation_id: String,
+    authority: &AuthorityContext,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
     // In testing mode, skip actual notification
@@ -117,13 +121,41 @@ async fn execute_notify_peer(
         return Ok(());
     }
 
-    // Peer notification will use NetworkEffects/TransportEffects when integrated.
-    // Currently logs the notification request for debugging.
-    tracing::debug!(
-        peer = %peer,
-        invitation_id = %invitation_id,
-        "Peer notification requested"
+    let invitation = InvitationHandler::load_created_invitation(
+        effects,
+        authority.authority_id,
+        &invitation_id,
+    )
+    .await
+    .ok_or_else(|| {
+        AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
+    })?;
+
+    let code = InvitationService::export_invitation(&invitation);
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "content-type".to_string(),
+        "application/aura-invitation".to_string(),
     );
+    metadata.insert("invitation-id".to_string(), invitation_id.clone());
+    metadata.insert(
+        "invitation-context".to_string(),
+        invitation.context_id.to_string(),
+    );
+
+    let envelope = aura_core::effects::TransportEnvelope {
+        destination: peer,
+        source: authority.authority_id,
+        context: invitation.context_id,
+        payload: code.into_bytes(),
+        metadata,
+        receipt: None,
+    };
+
+    effects.send_envelope(envelope).await.map_err(|e| {
+        AgentError::effects(format!("Failed to notify peer with invitation: {e}"))
+    })?;
+
     Ok(())
 }
 

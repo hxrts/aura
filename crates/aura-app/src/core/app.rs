@@ -272,6 +272,19 @@ impl AppCore {
     /// let chat = app.read(&CHAT_SIGNAL).await?;
     /// ```
     pub async fn init_signals(&mut self) -> Result<(), IntentError> {
+        // Ensure the runtime has an initial threshold configuration if available,
+        // even if signals were already registered by a shared runtime handler.
+        if let Some(runtime) = self.runtime.as_ref() {
+            if runtime.get_threshold_config().await.is_none() {
+                let _ = runtime.bootstrap_signing_keys().await.map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to bootstrap signing keys: {}",
+                        e
+                    ))
+                })?;
+            }
+        }
+
         // Idempotent init: if signals are already registered, don't re-register.
         let chat_id = (*crate::signal_defs::CHAT_SIGNAL).id();
         if self.reactive.is_registered(chat_id) {

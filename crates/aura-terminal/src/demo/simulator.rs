@@ -15,11 +15,13 @@ use tokio::time::{interval, Duration};
 use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::handlers::InvitationType;
 use aura_agent::{AuraAgent, EffectContext, SharedTransport};
-use aura_core::effects::{ExecutionMode, TransportEffects};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::effects::{AmpChannelEffects, ChannelJoinParams, ExecutionMode, TransportEffects};
+use aura_core::hash::hash;
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_effects::time::PhysicalTimeHandler;
 use aura_recovery::guardian_setup::GuardianAcceptance;
+use std::str::FromStr;
 
 use crate::error::TerminalResult;
 use crate::ids;
@@ -129,6 +131,14 @@ impl DemoSimulator {
         self.mobile.clone()
     }
 
+    pub fn alice_agent(&self) -> Arc<AuraAgent> {
+        self.alice.clone()
+    }
+
+    pub fn carol_agent(&self) -> Arc<AuraAgent> {
+        self.carol.clone()
+    }
+
     pub fn mobile_device_id(&self) -> aura_core::DeviceId {
         self.mobile.runtime().device_id()
     }
@@ -212,50 +222,104 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
             }
         };
 
-        if envelope
-            .metadata
-            .get("content-type")
-            .is_some_and(|v| v == "application/aura-guardian-proposal")
-        {
-            if let Some(ceremony_id) = envelope.metadata.get("ceremony-id").cloned() {
-                let mut response_metadata = std::collections::HashMap::new();
-                response_metadata.insert(
-                    "content-type".to_string(),
-                    "application/aura-guardian-acceptance".to_string(),
-                );
-                response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
-                response_metadata
-                    .insert("guardian-id".to_string(), agent.authority_id().to_string());
-                if let Ok(bob_device_id) = std::env::var("AURA_DEMO_BOB_DEVICE_ID") {
-                    response_metadata
-                        .insert("aura-destination-device-id".to_string(), bob_device_id);
+        if let Some(content_type) = envelope.metadata.get("content-type").cloned() {
+            match content_type.as_str() {
+                "application/aura-guardian-proposal" => {
+                    if let Some(ceremony_id) = envelope.metadata.get("ceremony-id").cloned() {
+                        let mut response_metadata = std::collections::HashMap::new();
+                        response_metadata.insert(
+                            "content-type".to_string(),
+                            "application/aura-guardian-acceptance".to_string(),
+                        );
+                        response_metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+                        response_metadata
+                            .insert("guardian-id".to_string(), agent.authority_id().to_string());
+                        if let Ok(bob_device_id) = std::env::var("AURA_DEMO_BOB_DEVICE_ID") {
+                            response_metadata
+                                .insert("aura-destination-device-id".to_string(), bob_device_id);
+                        }
+
+                        let acceptance = GuardianAcceptance {
+                            guardian_id: agent.authority_id(),
+                            setup_id: ceremony_id,
+                            accepted: true,
+                            public_key: agent.authority_id().to_bytes().to_vec(),
+                            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                                ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
+                                uncertainty: None,
+                            }),
+                        };
+
+                        let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
+
+                        let response = aura_core::effects::TransportEnvelope {
+                            destination: envelope.source,
+                            source: agent.authority_id(),
+                            context: envelope.context,
+                            payload,
+                            metadata: response_metadata,
+                            receipt: None,
+                        };
+
+                        if let Err(e) = effects.send_envelope(response).await {
+                            tracing::warn!("{name} failed to send guardian acceptance: {e}");
+                        }
+                    }
                 }
+                "application/aura-invitation" => {
+                    let code = match String::from_utf8(envelope.payload) {
+                        Ok(code) => code,
+                        Err(err) => {
+                            tracing::warn!("{name} received invalid invitation payload: {err}");
+                            continue;
+                        }
+                    };
 
-                let acceptance = GuardianAcceptance {
-                    guardian_id: agent.authority_id(),
-                    setup_id: ceremony_id,
-                    accepted: true,
-                    public_key: agent.authority_id().to_bytes().to_vec(),
-                    timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                        ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
-                        uncertainty: None,
-                    }),
-                };
+                    let invitation_service = match agent.invitations() {
+                        Ok(service) => service,
+                        Err(err) => {
+                            tracing::warn!("{name} failed to load invitation service: {err}");
+                            continue;
+                        }
+                    };
 
-                let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
+                    let invitation = match invitation_service.import_and_cache(&code).await {
+                        Ok(invitation) => invitation,
+                        Err(err) => {
+                            tracing::warn!("{name} failed to import invitation: {err}");
+                            continue;
+                        }
+                    };
 
-                let response = aura_core::effects::TransportEnvelope {
-                    destination: envelope.source,
-                    source: agent.authority_id(),
-                    context: envelope.context,
-                    payload,
-                    metadata: response_metadata,
-                    receipt: None,
-                };
+                    if let InvitationType::Channel { home_id } = invitation.invitation_type {
+                        if let Err(err) =
+                            invitation_service.accept(&invitation.invitation_id).await
+                        {
+                            tracing::warn!(
+                                "{name} failed to accept channel invitation {}: {err}",
+                                invitation.invitation_id
+                            );
+                            continue;
+                        }
 
-                if let Err(e) = effects.send_envelope(response).await {
-                    tracing::warn!("{name} failed to send guardian acceptance: {e}");
+                        let channel_id = ChannelId::from_str(&home_id)
+                            .unwrap_or_else(|_| ChannelId::from_bytes(hash(home_id.as_bytes())));
+
+                        let params = ChannelJoinParams {
+                            context: envelope.context,
+                            channel: channel_id,
+                            participant: agent.authority_id(),
+                        };
+
+                        if let Err(err) = effects.join_channel(params).await {
+                            tracing::warn!(
+                                "{name} failed to join channel {} after accepting invite: {err}",
+                                home_id
+                            );
+                        }
+                    }
                 }
+                _ => {}
             }
         }
     }

@@ -939,7 +939,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
             aura_core::threshold::CeremonyFlow::GuardianSetupRotation,
         );
 
-        if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
+        let consensus_required = signing_service
+            .threshold_state(&authority)
+            .await
+            .map(|state| state.threshold > 1 || state.total_participants > 1)
+            .unwrap_or(true);
+
+        if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
+            && consensus_required
+        {
             let effects = self.agent.runtime().effects();
             let context_id = ContextId::new_from_entropy(hash(&authority.to_bytes()));
             let has_commit = effects
@@ -955,6 +963,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     "Missing consensus DKG transcript".to_string(),
                 ));
             }
+        } else if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg
+            && !consensus_required
+        {
+            tracing::info!(
+                ceremony = "guardian_rotation",
+                "Skipping consensus transcript check (single-signer authority)"
+            );
         }
 
         signing_service
@@ -1064,7 +1079,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
         let operation_hash = operation.compute_hash();
 
-        if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
+        let consensus_required = signing_service
+            .threshold_state(&authority_id)
+            .await
+            .map(|state| state.threshold > 1 || state.total_participants > 1)
+            .unwrap_or(true);
+
+        if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg && consensus_required {
             let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
                 .await
                 .map_err(map_consensus_error)?;
@@ -1080,6 +1101,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 operation_hash,
             )
             .await?;
+        } else if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg && !consensus_required {
+            tracing::info!(
+                ceremony = "guardian_rotation",
+                "Skipping consensus DKG transcript (single-signer authority)"
+            );
         }
 
         // Use a monotonic nonce for uniqueness within this process.
@@ -1523,6 +1549,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         if threshold_k == 0 || threshold_k > total_n {
             threshold_k = total_n;
         }
+        if total_n > 1 && threshold_k < 2 {
+            threshold_k = 2.min(total_n);
+        }
 
         let (pending_epoch, key_packages, _public_key) = effects
             .rotate_keys(&authority_id, threshold_k, total_n, &participants)
@@ -1856,6 +1885,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
         if threshold_k == 0 || threshold_k > total_n {
             threshold_k = total_n;
+        }
+        if total_n > 1 && threshold_k < 2 {
+            threshold_k = 2.min(total_n);
         }
 
         let (pending_epoch, key_packages, _public_key) = effects

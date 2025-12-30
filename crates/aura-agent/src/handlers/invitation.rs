@@ -110,7 +110,7 @@ impl InvitationHandler {
         Ok(())
     }
 
-    async fn load_created_invitation(
+    pub(crate) async fn load_created_invitation(
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
         invitation_id: &str,

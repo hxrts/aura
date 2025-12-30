@@ -109,7 +109,7 @@ impl AuraAgent {
     ///
     /// Returns a new lightweight service instance (services are stateless wrappers).
     pub fn threshold_signing(&self) -> ThresholdSigningService {
-        ThresholdSigningService::new(self.runtime.effects())
+        self.runtime.threshold_signing()
     }
 
     /// Get the ceremony tracker for guardian ceremony coordination
@@ -235,7 +235,13 @@ impl AuraAgent {
 
                     let new_epoch = ceremony_state.new_epoch;
                     let policy = policy_for(CeremonyFlow::GuardianSetupRotation);
-                    if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
+                    let consensus_required = signing_service
+                        .threshold_state(&authority_id)
+                        .await
+                        .map(|state| state.threshold > 1 || state.total_participants > 1)
+                        .unwrap_or(true);
+
+                    if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg && consensus_required {
                         let context_id =
                             ContextId::new_from_entropy(hash::hash(&authority_id.to_bytes()));
                         match effects
@@ -267,6 +273,13 @@ impl AuraAgent {
                                 continue;
                             }
                         }
+                    } else if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg
+                        && !consensus_required
+                    {
+                        tracing::info!(
+                            ceremony_id = %ceremony_id,
+                            "Skipping consensus transcript check (single-signer authority)"
+                        );
                     }
                     if let Err(e) = effects.commit_key_rotation(&authority_id, new_epoch).await {
                         tracing::error!(

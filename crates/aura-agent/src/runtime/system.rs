@@ -4,7 +4,7 @@
 
 use super::services::{
     CeremonyTracker, ContextManager, FlowBudgetManager, ReceiptManager, RendezvousManager,
-    RuntimeTaskRegistry, SocialManager, SyncServiceManager,
+    RuntimeTaskRegistry, SocialManager, SyncServiceManager, ThresholdSigningService,
 };
 use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
@@ -55,6 +55,9 @@ pub struct RuntimeSystem {
     /// Ceremony tracker (for guardian ceremony coordination)
     ceremony_tracker: CeremonyTracker,
 
+    /// Threshold signing service (shared state across runtime operations)
+    threshold_signing: ThresholdSigningService,
+
     /// Runtime task registry for background work
     runtime_tasks: Arc<RuntimeTaskRegistry>,
 
@@ -86,6 +89,7 @@ impl RuntimeSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Self {
+        let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         Self {
             effect_executor,
             effect_system,
@@ -98,6 +102,7 @@ impl RuntimeSystem {
             rendezvous_manager: None,
             social_manager: None,
             ceremony_tracker: CeremonyTracker::new(),
+            threshold_signing,
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
@@ -120,6 +125,7 @@ impl RuntimeSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Self {
+        let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         Self {
             effect_executor,
             effect_system,
@@ -132,6 +138,7 @@ impl RuntimeSystem {
             rendezvous_manager: None,
             social_manager: None,
             ceremony_tracker: CeremonyTracker::new(),
+            threshold_signing,
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
@@ -154,6 +161,7 @@ impl RuntimeSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Self {
+        let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         Self {
             effect_executor,
             effect_system,
@@ -166,6 +174,7 @@ impl RuntimeSystem {
             rendezvous_manager: Some(rendezvous_manager),
             social_manager: None,
             ceremony_tracker: CeremonyTracker::new(),
+            threshold_signing,
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
@@ -189,6 +198,7 @@ impl RuntimeSystem {
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Self {
+        let threshold_signing = ThresholdSigningService::new(effect_system.clone());
         Self {
             effect_executor,
             effect_system,
@@ -201,6 +211,7 @@ impl RuntimeSystem {
             rendezvous_manager,
             social_manager,
             ceremony_tracker: CeremonyTracker::new(),
+            threshold_signing,
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
@@ -211,6 +222,11 @@ impl RuntimeSystem {
     /// Get the ceremony tracker
     pub fn ceremony_tracker(&self) -> &CeremonyTracker {
         &self.ceremony_tracker
+    }
+
+    /// Get the shared threshold signing service.
+    pub fn threshold_signing(&self) -> ThresholdSigningService {
+        self.threshold_signing.clone()
     }
 
     /// Get the runtime task registry.
