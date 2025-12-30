@@ -36,7 +36,7 @@ use uuid::Uuid;
 /// assert_eq!(device1, device2);
 /// ```
 pub fn test_device_id(seed: u64) -> DeviceId {
-    let hash_input = format!("device-{}", seed);
+    let hash_input = format!("device-{seed}");
     let hash_bytes = hash(hash_input.as_bytes());
     let uuid_bytes: [u8; 16] = hash_bytes[..16]
         .try_into()
@@ -57,7 +57,7 @@ pub fn test_device_id(seed: u64) -> DeviceId {
 /// assert_eq!(authority1, authority2);
 /// ```
 pub fn test_authority_id(seed: u64) -> AuthorityId {
-    let hash_input = format!("authority-{}", seed);
+    let hash_input = format!("authority-{seed}");
     let hash_bytes = hash(hash_input.as_bytes());
     let uuid_bytes: [u8; 16] = hash_bytes[..16]
         .try_into()
@@ -78,7 +78,7 @@ pub fn test_authority_id(seed: u64) -> AuthorityId {
 /// assert_eq!(account1, account2);
 /// ```
 pub fn test_account_id(seed: u64) -> AccountId {
-    let hash_input = format!("account-{}", seed);
+    let hash_input = format!("account-{seed}");
     let hash_bytes = hash(hash_input.as_bytes());
     let uuid_bytes: [u8; 16] = hash_bytes[..16]
         .try_into()
@@ -99,7 +99,7 @@ pub fn test_account_id(seed: u64) -> AccountId {
 /// assert_eq!(session1, session2);
 /// ```
 pub fn test_session_id(seed: u64) -> SessionId {
-    let hash_input = format!("session-{}", seed);
+    let hash_input = format!("session-{seed}");
     let hash_bytes = hash(hash_input.as_bytes());
     let uuid_bytes: [u8; 16] = hash_bytes[..16]
         .try_into()

@@ -97,7 +97,7 @@ impl MockRuntimeBridge {
         let device_id = DeviceId::new();
         Self {
             authority_id,
-            device_id: device_id.clone(),
+            device_id: device_id,
             reactive_handler: ReactiveHandler::new(),
             facts: Arc::new(RwLock::new(Vec::new())),
             invitations: Arc::new(RwLock::new(HashMap::new())),
@@ -232,7 +232,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     // =========================================================================
 
     fn authority_id(&self) -> AuthorityId {
-        self.authority_id.clone()
+        self.authority_id
     }
 
     fn reactive_handler(&self) -> ReactiveHandler {
@@ -567,7 +567,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     ) -> Result<DeviceEnrollmentStart, IntentError> {
         Ok(DeviceEnrollmentStart {
             ceremony_id: self.next_id(),
-            enrollment_code: format!("aura-enroll:mock:{}", device_name),
+            enrollment_code: format!("aura-enroll:mock:{device_name}"),
             pending_epoch: Epoch::new(1),
             device_id: DeviceId::new(),
         })
@@ -683,9 +683,9 @@ impl RuntimeBridge for MockRuntimeBridge {
             });
 
             let json_str = serde_json::to_string(&invitation_data)
-                .map_err(|e| IntentError::internal_error(format!("JSON error: {}", e)))?;
+                .map_err(|e| IntentError::internal_error(format!("JSON error: {e}")))?;
             let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-            return Ok(format!("aura:v1:{}", b64));
+            return Ok(format!("aura:v1:{b64}"));
         }
 
         // For IDs not in our map, generate a synthetic invitation code
@@ -705,9 +705,9 @@ impl RuntimeBridge for MockRuntimeBridge {
         });
 
         let json_str = serde_json::to_string(&invitation_data)
-            .map_err(|e| IntentError::internal_error(format!("JSON error: {}", e)))?;
+            .map_err(|e| IntentError::internal_error(format!("JSON error: {e}")))?;
         let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-        Ok(format!("aura:v1:{}", b64))
+        Ok(format!("aura:v1:{b64}"))
     }
 
     async fn create_contact_invitation(
@@ -723,7 +723,7 @@ impl RuntimeBridge for MockRuntimeBridge {
 
         let info = InvitationInfo {
             invitation_id: invitation_id.clone(),
-            sender_id: self.authority_id.clone(),
+            sender_id: self.authority_id,
             receiver_id: receiver,
             invitation_type: InvitationBridgeType::Contact { nickname: None },
             status: InvitationBridgeStatus::Pending,
@@ -751,7 +751,7 @@ impl RuntimeBridge for MockRuntimeBridge {
 
         let info = InvitationInfo {
             invitation_id: invitation_id.clone(),
-            sender_id: self.authority_id.clone(),
+            sender_id: self.authority_id,
             receiver_id: receiver,
             invitation_type: InvitationBridgeType::Guardian {
                 subject_authority: subject,
@@ -781,7 +781,7 @@ impl RuntimeBridge for MockRuntimeBridge {
 
         let info = InvitationInfo {
             invitation_id: invitation_id.clone(),
-            sender_id: self.authority_id.clone(),
+            sender_id: self.authority_id,
             receiver_id: receiver,
             invitation_type: InvitationBridgeType::Channel { home_id },
             status: InvitationBridgeStatus::Pending,
@@ -809,7 +809,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         };
 
         let invitation = invitation.ok_or_else(|| {
-            IntentError::internal_error(format!("Invitation not found: {}", invitation_id))
+            IntentError::internal_error(format!("Invitation not found: {invitation_id}"))
         })?;
 
         // For contact invitations, add the sender as a contact
@@ -832,7 +832,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             );
 
             let new_contact = Contact {
-                id: invitation.sender_id.clone(),
+                id: invitation.sender_id,
                 nickname,
                 suggested_name: invitation.message.clone(),
                 is_guardian,
@@ -863,8 +863,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             Ok(())
         } else {
             Err(IntentError::internal_error(format!(
-                "Invitation not found: {}",
-                invitation_id
+                "Invitation not found: {invitation_id}"
             )))
         }
     }
@@ -876,8 +875,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             Ok(())
         } else {
             Err(IntentError::internal_error(format!(
-                "Invitation not found: {}",
-                invitation_id
+                "Invitation not found: {invitation_id}"
             )))
         }
     }
@@ -894,9 +892,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError> {
         // Parse aura:v1:<base64> format
         if !code.starts_with("aura:v1:") {
-            return Err(IntentError::internal_error(format!(
-                "Invalid invitation code format: must start with aura:v1:"
-            )));
+            return Err(IntentError::internal_error("Invalid invitation code format: must start with aura:v1:".to_string()));
         }
 
         let b64_part = code.strip_prefix("aura:v1:").unwrap();
@@ -904,14 +900,14 @@ impl RuntimeBridge for MockRuntimeBridge {
         // Decode base64
         let json_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(b64_part)
-            .map_err(|e| IntentError::internal_error(format!("Invalid base64: {}", e)))?;
+            .map_err(|e| IntentError::internal_error(format!("Invalid base64: {e}")))?;
 
         let json_str = String::from_utf8(json_bytes)
-            .map_err(|e| IntentError::internal_error(format!("Invalid UTF-8: {}", e)))?;
+            .map_err(|e| IntentError::internal_error(format!("Invalid UTF-8: {e}")))?;
 
         // Parse JSON
         let data: serde_json::Value = serde_json::from_str(&json_str)
-            .map_err(|e| IntentError::internal_error(format!("Invalid JSON: {}", e)))?;
+            .map_err(|e| IntentError::internal_error(format!("Invalid JSON: {e}")))?;
 
         // Extract fields
         let invitation_id = data
@@ -972,7 +968,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         let info = InvitationInfo {
             invitation_id: invitation_id.clone(),
             sender_id,
-            receiver_id: self.authority_id.clone(),
+            receiver_id: self.authority_id,
             invitation_type,
             status: InvitationBridgeStatus::Pending,
             created_at_ms: now,

@@ -221,8 +221,7 @@ impl ContentManifest {
             if let Some(expected_id) = layout.get_chunk(i) {
                 if &manifest.chunk_id != expected_id {
                     return Err(AuraError::invalid(format!(
-                        "Chunk ID mismatch at index {}",
-                        i
+                        "Chunk ID mismatch at index {i}"
                     )));
                 }
             }

@@ -411,7 +411,7 @@ impl MaintenanceService {
             .activation_fence
             .unwrap_or_else(|| IdentityEpochFence::new(account_id, Epoch::new(0)));
 
-        let version = proposal.version.clone();
+        let version = proposal.version;
         Ok(UpgradeActivated::new(
             authority_id,
             proposal.package_id,
@@ -548,7 +548,7 @@ impl Service for MaintenanceService {
         let checked_at = time_effects
             .physical_time()
             .await
-            .map_err(|e| crate::core::errors::sync_validation_error(format!("Time error: {}", e)))?
+            .map_err(|e| crate::core::errors::sync_validation_error(format!("Time error: {e}")))?
             .ts_ms
             / 1000;
 

@@ -45,7 +45,7 @@ impl Journal {
         let (_, public_key_bytes) = crypto
             .ed25519_generate_keypair()
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to generate keypair: {}", e)))?;
+            .map_err(|e| AuraError::internal(format!("Failed to generate keypair: {e}")))?;
 
         let group_key = Ed25519VerifyingKey(public_key_bytes);
 
@@ -319,7 +319,7 @@ impl Journal {
                             crate::protocol_facts::ProtocolRelationalFact::RotateFact(..),
                         ) => "RotateFact".to_string(),
                         crate::fact::RelationalFact::Generic { binding_type, .. } => {
-                            format!("Generic:{}", binding_type)
+                            format!("Generic:{binding_type}")
                         }
                     },
                     FactContent::Snapshot(_) => "Snapshot".to_string(),
@@ -335,7 +335,7 @@ impl Journal {
                             String::from_utf8(binding_data.clone())
                                 .unwrap_or_else(|_| format!("{} bytes", binding_data.len()))
                         }
-                        _ => format!("{:?}", rel),
+                        _ => format!("{rel:?}"),
                     },
                     FactContent::Snapshot(snap) => {
                         format!(
@@ -425,13 +425,13 @@ impl Journal {
         };
 
         let serialized = aura_core::util::serialization::to_vec(&journal_state)
-            .map_err(|e| AuraError::internal(format!("Failed to serialize journal: {}", e)))?;
+            .map_err(|e| AuraError::internal(format!("Failed to serialize journal: {e}")))?;
 
         // Persist to storage
         storage
             .store(&storage_key, serialized)
             .await
-            .map_err(|e| AuraError::storage(format!("Failed to persist journal: {}", e)))?;
+            .map_err(|e| AuraError::storage(format!("Failed to persist journal: {e}")))?;
 
         tracing::debug!(
             account_id = ?self.account_state.account_id,
@@ -462,7 +462,7 @@ impl Journal {
             Ok(Some(data)) => {
                 let state: JournalPersistState = aura_core::util::serialization::from_slice(&data)
                     .map_err(|e| {
-                        AuraError::internal(format!("Failed to deserialize journal: {}", e))
+                        AuraError::internal(format!("Failed to deserialize journal: {e}"))
                     })?;
 
                 Ok(Some(Self {
@@ -472,7 +472,7 @@ impl Journal {
                 }))
             }
             Ok(None) => Ok(None),
-            Err(e) => Err(AuraError::storage(format!("Failed to load journal: {}", e))),
+            Err(e) => Err(AuraError::storage(format!("Failed to load journal: {e}"))),
         }
     }
 }

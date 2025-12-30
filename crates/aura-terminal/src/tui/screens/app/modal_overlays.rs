@@ -185,7 +185,7 @@ pub fn render_nickname_modal(contacts: &ContactsViewProps) -> Option<AnyElement<
         let hint = contacts
             .nickname_modal_suggested_name
             .as_ref()
-            .map(|s| format!("Suggestion: {}", s))
+            .map(|s| format!("Suggestion: {s}"))
             .unwrap_or_default();
 
         Some(

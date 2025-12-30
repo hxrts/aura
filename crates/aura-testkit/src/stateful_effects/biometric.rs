@@ -164,7 +164,7 @@ impl MockBiometricHandler {
     /// Generate a mock template ID
     fn generate_template_id(&self, biometric_type: &BiometricType, user_data: &[u8]) -> String {
         let mut hasher = hash::hasher();
-        hasher.update(format!("{:?}", biometric_type).as_bytes());
+        hasher.update(format!("{biometric_type:?}").as_bytes());
         hasher.update(user_data);
         hasher.update(&self.get_current_time().to_le_bytes());
 
@@ -184,7 +184,7 @@ impl MockBiometricHandler {
     ) -> Vec<u8> {
         let mut hasher = hash::hasher();
         hasher.update(b"TEMPLATE_DATA");
-        hasher.update(format!("{:?}", biometric_type).as_bytes());
+        hasher.update(format!("{biometric_type:?}").as_bytes());
         hasher.update(&quality_score.to_le_bytes());
         hasher.update(&self.get_current_time().to_le_bytes());
 
@@ -541,7 +541,7 @@ impl BiometricEffects for MockBiometricHandler {
 // Add hex crate for template ID generation (would be added to Cargo.toml dependencies)
 mod hex {
     pub fn encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 }
 

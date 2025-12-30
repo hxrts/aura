@@ -131,8 +131,7 @@ impl FlowBudgetHandler {
 
         if let Err(e) = budget.record_charge(cost as u64) {
             return Err(AuraError::budget_exceeded(format!(
-                "insufficient flow budget: {}",
-                e
+                "insufficient flow budget: {e}"
             )));
         }
 

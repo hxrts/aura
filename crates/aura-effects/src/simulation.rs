@@ -63,7 +63,7 @@ where
         _description: String,
         _parameters: HashMap<String, serde_json::Value>,
     ) -> Result<ScenarioId> {
-        Ok(ScenarioId(format!("scenario-{}", name)))
+        Ok(ScenarioId(format!("scenario-{name}")))
     }
 
     async fn start_scenario(&self, _scenario_id: &ScenarioId) -> Result<()> {
@@ -110,7 +110,7 @@ where
     }
 
     async fn create_checkpoint(&self, name: String) -> Result<CheckpointId> {
-        Ok(CheckpointId(format!("checkpoint-{}", name)))
+        Ok(CheckpointId(format!("checkpoint-{name}")))
     }
 
     async fn restore_checkpoint(&self, _checkpoint_id: &CheckpointId) -> Result<()> {

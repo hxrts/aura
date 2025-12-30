@@ -366,7 +366,7 @@ impl FrostConsensusOrchestrator {
         // Verify the commit fact
         commit_fact
             .verify()
-            .map_err(|e| AuraError::internal(format!("CommitFact verification failed: {}", e)))?;
+            .map_err(|e| AuraError::internal(format!("CommitFact verification failed: {e}")))?;
 
         // Clean up instance
         self.instances.write().await.remove(&consensus_id);
@@ -388,7 +388,7 @@ impl FrostConsensusOrchestrator {
             .try_into()
             .map_err(|_| AuraError::crypto("Invalid share length, expected 32 bytes"))?;
         let signing_share = frost_ed25519::keys::SigningShare::deserialize(share_bytes)
-            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))?;
 
         // Generate nonces with randomness
         let seed = random.random_bytes_32().await;
@@ -401,8 +401,7 @@ impl FrostConsensusOrchestrator {
             commitment: nonces
                 .commitments()
                 .serialize()
-                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {}", e)))?
-                .to_vec(),
+                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {e}")))?,
         };
 
         let token = NonceToken::from(nonces);
@@ -421,7 +420,7 @@ impl FrostConsensusOrchestrator {
         // Reconstruct FROST signing share and identifier
         let signing_share = share
             .to_frost()
-            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))?;
         let identifier = frost_ed25519::Identifier::try_from(share.identifier).map_err(|e| {
             AuraError::crypto(format!(
                 "Invalid signer identifier {}: {}",
@@ -435,7 +434,7 @@ impl FrostConsensusOrchestrator {
             .clone()
             .try_into()
             .map_err(|e: String| {
-                AuraError::crypto(format!("Invalid group public key package: {}", e))
+                AuraError::crypto(format!("Invalid group public key package: {e}"))
             })?;
 
         // Get verifying share for this signer
@@ -467,7 +466,7 @@ impl FrostConsensusOrchestrator {
             })?;
             let frost_commit = commitment
                 .to_frost()
-                .map_err(|e| AuraError::crypto(format!("Invalid commitment: {}", e)))?;
+                .map_err(|e| AuraError::crypto(format!("Invalid commitment: {e}")))?;
             frost_commitments.insert(frost_id, frost_commit);
         }
 
@@ -477,7 +476,7 @@ impl FrostConsensusOrchestrator {
         // Perform FROST signing with the provided nonces
         let nonces = token.clone().into_frost();
         let sig_share = frost_ed25519::round2::sign(&signing_package, &nonces, &key_package)
-            .map_err(|e| AuraError::crypto(format!("FROST signing failed: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("FROST signing failed: {e}")))?;
 
         Ok(PartialSignature::from_frost(identifier, sig_share))
     }
@@ -494,7 +493,7 @@ impl FrostConsensusOrchestrator {
             .clone()
             .try_into()
             .map_err(|e: String| {
-                AuraError::crypto(format!("Invalid group public key package: {}", e))
+                AuraError::crypto(format!("Invalid group public key package: {e}"))
             })?;
 
         // Build commitment map for aggregation
@@ -507,7 +506,7 @@ impl FrostConsensusOrchestrator {
         let signers = partials.iter().map(|s| s.signer).collect();
 
         let signature = frost_aggregate(&partials, message, &commitments, &frost_group_pkg)
-            .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {e}")))?;
 
         Ok(ThresholdSignature { signature, signers })
     }
@@ -565,12 +564,12 @@ pub fn verify_threshold_signature(
     let frost_pkg: frost_ed25519::keys::PublicKeyPackage = group_public_key
         .clone()
         .try_into()
-        .map_err(|e| AuraError::crypto(format!("Invalid group public key: {}", e)))?;
+        .map_err(|e| AuraError::crypto(format!("Invalid group public key: {e}")))?;
 
     let verifying_key = frost_pkg.verifying_key();
 
     frost_verify_aggregate(verifying_key, message, &signature.signature)
-        .map_err(|e| AuraError::crypto(format!("Threshold verify failed: {}", e)))
+        .map_err(|e| AuraError::crypto(format!("Threshold verify failed: {e}")))
 }
 
 #[cfg(test)]

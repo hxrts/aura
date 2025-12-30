@@ -98,7 +98,7 @@ impl DkdSessionId {
             "dkd_session_{}",
             hash::hash(seed.as_bytes())
                 .iter()
-                .map(|b| format!("{:02x}", b))
+                .map(|b| format!("{b:02x}"))
                 .take(8)
                 .collect::<String>()
         ))
@@ -197,7 +197,7 @@ pub enum DkdError {
 
 impl From<DkdError> for AuraError {
     fn from(err: DkdError) -> Self {
-        AuraError::internal(format!("DKD protocol error: {}", err))
+        AuraError::internal(format!("DKD protocol error: {err}"))
     }
 }
 
@@ -712,7 +712,7 @@ impl DkdProtocol {
             )
             .await
             .map_err(|e| DkdError::CryptographicFailure {
-                reason: format!("HKDF verification failed: {}", e),
+                reason: format!("HKDF verification failed: {e}"),
             })?;
 
         tracing::debug!(
@@ -786,7 +786,7 @@ impl DkdProtocol {
                 .sign(signing_context)
                 .await
                 .map_err(|e| DkdError::CryptographicFailure {
-                    reason: format!("Threshold signing failed: {}", e),
+                    reason: format!("Threshold signing failed: {e}"),
                 })?;
 
         tracing::info!(

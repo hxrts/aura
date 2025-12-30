@@ -332,7 +332,7 @@ pub trait SecureStorageEffects: Send + Sync {
 impl SecureStorageLocation {
     /// Create a location for storing FROST nonces
     pub fn frost_nonce(session_id: &str, participant_id: u16) -> Self {
-        Self::new("frost_nonces", format!("{}_{}", session_id, participant_id))
+        Self::new("frost_nonces", format!("{session_id}_{participant_id}"))
     }
 
     /// Create a location for storing signing shares
@@ -340,7 +340,7 @@ impl SecureStorageLocation {
         Self::with_sub_key(
             "signing_shares",
             account_id,
-            format!("{}_{}", epoch, participant_id),
+            format!("{epoch}_{participant_id}"),
         )
     }
 

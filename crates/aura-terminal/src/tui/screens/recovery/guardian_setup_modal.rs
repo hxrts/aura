@@ -214,7 +214,7 @@ fn render_select_contacts(props: &GuardianSetupModalProps) -> AnyElement<'static
     let selector = ContactMultiSelectProps {
         prompt: copy.select_prompt.to_string(),
         items,
-        selected: selected.clone(),
+        selected: selected,
         focused,
         min_selected: Some(2),
         footer_hint: Some("↑↓/jk Navigate  Space Select  Enter Confirm  Esc Cancel".to_string()),

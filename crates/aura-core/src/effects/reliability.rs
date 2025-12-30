@@ -787,7 +787,7 @@ impl RateLimiter {
 
             return RateLimitResult::Denied {
                 retry_after,
-                reason: format!("Peer rate limit exceeded for {:?}", peer_id),
+                reason: format!("Peer rate limit exceeded for {peer_id:?}"),
             };
         }
 

@@ -55,7 +55,7 @@ impl CliOutput {
     pub fn section(&mut self, title: impl Into<String>) -> &mut Self {
         let title = title.into();
         self.lines
-            .push(OutputLine::Out(format!("=== {} ===", title)));
+            .push(OutputLine::Out(format!("=== {title} ===")));
         self
     }
 
@@ -155,8 +155,8 @@ impl CliOutput {
     pub fn render(&self) {
         for line in &self.lines {
             match line {
-                OutputLine::Out(s) => println!("{}", s),
-                OutputLine::Err(s) => eprintln!("{}", s),
+                OutputLine::Out(s) => println!("{s}"),
+                OutputLine::Err(s) => eprintln!("{s}"),
             }
         }
     }

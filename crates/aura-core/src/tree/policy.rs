@@ -216,7 +216,7 @@ impl fmt::Display for Policy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Policy::Any => write!(f, "Any"),
-            Policy::Threshold { m, n } => write!(f, "{}-of-{}", m, n),
+            Policy::Threshold { m, n } => write!(f, "{m}-of-{n}"),
             Policy::All => write!(f, "All"),
         }
     }

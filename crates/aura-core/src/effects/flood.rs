@@ -226,11 +226,11 @@ impl std::fmt::Display for FloodError {
             Self::OriginateBudgetExhausted => write!(f, "originate budget exhausted"),
             Self::ForwardBudgetExhausted => write!(f, "forward budget exhausted"),
             Self::PacketTooLarge { size, max_size } => {
-                write!(f, "packet too large: {} bytes (max {})", size, max_size)
+                write!(f, "packet too large: {size} bytes (max {max_size})")
             }
-            Self::EncryptionError(msg) => write!(f, "encryption error: {}", msg),
+            Self::EncryptionError(msg) => write!(f, "encryption error: {msg}"),
             Self::NoTargets => write!(f, "no flood targets available"),
-            Self::NetworkError(msg) => write!(f, "network error: {}", msg),
+            Self::NetworkError(msg) => write!(f, "network error: {msg}"),
         }
     }
 }
@@ -499,7 +499,7 @@ impl<T: RendezvousFlooder + ?Sized> RendezvousFlooder for std::sync::Arc<T> {
     }
 
     async fn update_budget(&self, budget: FloodBudget) {
-        (**self).update_budget(budget).await
+        (**self).update_budget(budget).await;
     }
 }
 

@@ -60,8 +60,7 @@ pub fn validate_share(
     // Note: In pure core, we use string comparison on data_binding field
     // Production would verify cryptographic binding
     let expected_binding = format!(
-        "{}:{}:{}",
-        expected_cid, expected_rid, expected_prestate_hash
+        "{expected_cid}:{expected_rid}:{expected_prestate_hash}"
     );
 
     // Quint: share.shareValue != ""
@@ -180,25 +179,22 @@ pub fn check_invariants(state: &ConsensusState) -> Result<(), ValidationError> {
     for equivocator in &state.equivocators {
         if !state.witnesses.contains(equivocator) {
             return Err(ValidationError::MalformedInstance {
-                reason: format!("equivocator not in witness set: {}", equivocator),
+                reason: format!("equivocator not in witness set: {equivocator}"),
             });
         }
     }
 
     // Phase-specific invariants
-    match state.phase {
-        ConsensusPhase::Committed => {
-            // Quint: isCommitted implies hasCommit
-            if state.commit_fact.is_none() {
-                return Err(ValidationError::MalformedInstance {
-                    reason: "committed phase but no commit fact".to_string(),
-                });
-            }
-
-            // Quint: equivocators excluded from attestation
-            // (would check commit_fact.attesters here in full model)
+    if state.phase == ConsensusPhase::Committed {
+        // Quint: isCommitted implies hasCommit
+        if state.commit_fact.is_none() {
+            return Err(ValidationError::MalformedInstance {
+                reason: "committed phase but no commit fact".to_string(),
+            });
         }
-        _ => {}
+
+        // Quint: equivocators excluded from attestation
+        // (would check commit_fact.attesters here in full model)
     }
 
     Ok(())

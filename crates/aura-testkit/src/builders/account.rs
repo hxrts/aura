@@ -27,7 +27,7 @@ pub fn test_account_with_seed_sync(seed: u64) -> Journal {
     let (_, group_public_key) = crate::test_key_pair(seed);
 
     // Generate deterministic account ID
-    let hash_input = format!("account-{}", seed);
+    let hash_input = format!("account-{seed}");
     let hash_bytes = hash(hash_input.as_bytes());
     let account_id = AccountId(Uuid::from_bytes(hash_bytes[..16].try_into().unwrap()));
 
@@ -63,7 +63,7 @@ pub async fn test_account_with_threshold(seed: u64, _threshold: u16, _total: u16
     let (_, group_public_key) = crate::test_key_pair(seed);
 
     // Generate deterministic account ID
-    let hash_input = format!("threshold-account-{}", seed);
+    let hash_input = format!("threshold-account-{seed}");
     let hash_bytes = hash(hash_input.as_bytes());
     let account_id = AccountId(Uuid::from_bytes(hash_bytes[..16].try_into().unwrap()));
 
@@ -92,7 +92,7 @@ pub async fn test_account_with_id(account_id: AccountId, seed: u64) -> Journal {
 /// * `seed` - Seed for other deterministic generation
 pub async fn test_account_with_group_key(group_public_key: VerifyingKey, seed: u64) -> Journal {
     // Generate deterministic account ID
-    let hash_input = format!("custom-group-{}", seed);
+    let hash_input = format!("custom-group-{seed}");
     let hash_bytes = hash(hash_input.as_bytes());
     let account_id = AccountId(Uuid::from_bytes(hash_bytes[..16].try_into().unwrap()));
 

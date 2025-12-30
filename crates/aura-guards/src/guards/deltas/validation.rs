@@ -12,15 +12,13 @@ pub fn validate_delta_facts(facts: &[JsonValue]) -> AuraResult<&[JsonValue]> {
     for (index, fact) in facts.iter().enumerate() {
         if !is_valid_fact_format(fact) {
             return Err(AuraError::invalid(format!(
-                "Invalid fact format at index {}: {}",
-                index, fact
+                "Invalid fact format at index {index}: {fact}"
             )));
         }
 
         if !preserves_monotonicity(fact) {
             return Err(AuraError::invalid(format!(
-                "Fact at index {} violates monotonicity: {}",
-                index, fact
+                "Fact at index {index} violates monotonicity: {fact}"
             )));
         }
     }

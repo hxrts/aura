@@ -505,10 +505,10 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
                 let ceremony_prefix = key.trim_end_matches(":initiated");
                 let has_commit = journal
                     .facts
-                    .contains_key(&format!("{}:committed", ceremony_prefix));
+                    .contains_key(&format!("{ceremony_prefix}:committed"));
                 let has_abort = journal
                     .facts
-                    .contains_key(&format!("{}:aborted", ceremony_prefix));
+                    .contains_key(&format!("{ceremony_prefix}:aborted"));
 
                 if !has_commit && !has_abort {
                     return Ok(true); // Found a pending ceremony
@@ -534,8 +534,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         // Validate inputs
         if new_threshold_k > total_n {
             return Err(RecoveryError::invalid(format!(
-                "Threshold {} cannot exceed total guardians {}",
-                new_threshold_k, total_n
+                "Threshold {new_threshold_k} cannot exceed total guardians {total_n}"
             )));
         }
 
@@ -591,7 +590,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
             .effects
             .rotate_keys(&authority_id, new_threshold_k, total_n, &participants)
             .await
-            .map_err(|e| RecoveryError::internal(format!("Key rotation failed: {}", e)))?;
+            .map_err(|e| RecoveryError::internal(format!("Key rotation failed: {e}")))?;
 
         // Initialize response tracking
         let mut responses = HashMap::new();
@@ -648,8 +647,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         // Verify guardian is part of this ceremony
         if !state.responses.contains_key(&guardian_id) {
             return Err(RecoveryError::invalid(format!(
-                "Guardian {} is not part of this ceremony",
-                guardian_id
+                "Guardian {guardian_id} is not part of this ceremony"
             )));
         }
 
@@ -780,7 +778,7 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
             .commit_key_rotation(authority_id, new_epoch)
             .await
             .map_err(|e| {
-                RecoveryError::internal(format!("Failed to commit key rotation: {}", e))
+                RecoveryError::internal(format!("Failed to commit key rotation: {e}"))
             })?;
 
         if let Some(threshold_state) = self.effects.threshold_state(authority_id).await {

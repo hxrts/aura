@@ -120,7 +120,7 @@ impl fmt::Display for RelationshipType {
             RelationshipType::Delegation => write!(f, "delegation"),
             RelationshipType::CapabilityGrant => write!(f, "capability-grant"),
             RelationshipType::CommunicationChannel => write!(f, "communication-channel"),
-            RelationshipType::Custom(custom) => write!(f, "custom:{}", custom),
+            RelationshipType::Custom(custom) => write!(f, "custom:{custom}"),
         }
     }
 }

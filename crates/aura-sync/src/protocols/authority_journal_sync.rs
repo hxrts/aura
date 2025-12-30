@@ -123,7 +123,7 @@ impl AuthorityJournalSyncProtocol {
                 }
                 Err(e) => {
                     // Log error but continue with other peers
-                    eprintln!("Failed to sync with authority {:?}: {}", peer_id, e);
+                    eprintln!("Failed to sync with authority {peer_id:?}: {e}");
                 }
             }
         }
@@ -205,11 +205,11 @@ impl AuthorityJournalSyncProtocol {
         let maybe_bytes = effects
             .retrieve(&key)
             .await
-            .map_err(|e| aura_core::AuraError::storage(format!("load journal: {}", e)))?;
+            .map_err(|e| aura_core::AuraError::storage(format!("load journal: {e}")))?;
 
         if let Some(bytes) = maybe_bytes {
             aura_core::util::serialization::from_slice::<Journal>(&bytes)
-                .map_err(|e| aura_core::AuraError::serialization(format!("decode journal: {}", e)))
+                .map_err(|e| aura_core::AuraError::serialization(format!("decode journal: {e}")))
         } else {
             Ok(Journal::new(JournalNamespace::Authority(authority_id)))
         }
@@ -350,15 +350,15 @@ impl AuthorityJournalSyncProtocol {
     ) -> SyncResult<()> {
         let key = Self::storage_key(authority_id);
         let bytes = aura_core::util::serialization::to_vec(journal)
-            .map_err(|e| aura_core::AuraError::serialization(format!("encode journal: {}", e)))?;
+            .map_err(|e| aura_core::AuraError::serialization(format!("encode journal: {e}")))?;
         effects
             .store(&key, bytes)
             .await
-            .map_err(|e| aura_core::AuraError::storage(format!("persist journal: {}", e)))
+            .map_err(|e| aura_core::AuraError::storage(format!("persist journal: {e}")))
     }
 
     fn storage_key(authority_id: AuthorityId) -> String {
-        format!("authority_journal/{}", authority_id)
+        format!("authority_journal/{authority_id}")
     }
 }
 

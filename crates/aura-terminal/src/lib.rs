@@ -118,20 +118,20 @@ pub use error::{TerminalError, TerminalResult};
 ///
 /// Uses AppCore as the unified backend for all operations.
 pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
-    let authority_id = ids::authority_id(&format!("cli:authority:{}", device_id));
-    let context_id = ids::context_id(&format!("cli:context:{}", device_id));
+    let authority_id = ids::authority_id(&format!("cli:authority:{device_id}"));
+    let context_id = ids::context_id(&format!("cli:context:{device_id}"));
 
     // Build agent
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing()
-        .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Agent build failed: {e}")))?;
     let agent = Arc::new(agent);
 
     // Create AppCore with the runtime bridge (dependency inversion)
     let config = AppConfig::default();
     let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())
-        .map_err(|e| AuraError::agent(format!("AppCore creation failed: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("AppCore creation failed: {e}")))?;
     let app_core = Arc::new(RwLock::new(app_core));
 
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
@@ -145,20 +145,20 @@ pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> 
 
 /// Create a test CLI handler for the given device ID
 pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
-    let authority_id = ids::authority_id(&format!("cli:test-authority:{}", device_id));
-    let context_id = ids::context_id(&format!("cli:test-context:{}", device_id));
+    let authority_id = ids::authority_id(&format!("cli:test-authority:{device_id}"));
+    let context_id = ids::context_id(&format!("cli:test-context:{device_id}"));
 
     // Build agent
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing()
-        .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Agent build failed: {e}")))?;
     let agent = Arc::new(agent);
 
     // Create AppCore with the runtime bridge (dependency inversion)
     let config = AppConfig::default();
     let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())
-        .map_err(|e| AuraError::agent(format!("AppCore creation failed: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("AppCore creation failed: {e}")))?;
     let app_core = Arc::new(RwLock::new(app_core));
 
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);

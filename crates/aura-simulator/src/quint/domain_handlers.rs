@@ -122,7 +122,7 @@ impl ActionHandler for InitContextHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("context '{}' already exists", ctx)),
+                error: Some(format!("context '{ctx}' already exists")),
             });
         }
 
@@ -235,7 +235,7 @@ impl ActionHandler for InitAuthorityHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("invalid capability level: {}", cap)),
+                error: Some(format!("invalid capability level: {cap}")),
             });
         }
 
@@ -255,7 +255,7 @@ impl ActionHandler for InitAuthorityHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("authority '{}' already exists", auth)),
+                error: Some(format!("authority '{auth}' already exists")),
             });
         }
 
@@ -374,7 +374,7 @@ impl ActionHandler for CompleteTransportOpHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("context '{}' not found", ctx)),
+                error: Some(format!("context '{ctx}' not found")),
             });
         }
 
@@ -386,7 +386,7 @@ impl ActionHandler for CompleteTransportOpHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("source authority '{}' not found", src)),
+                error: Some(format!("source authority '{src}' not found")),
             });
         }
 
@@ -401,7 +401,7 @@ impl ActionHandler for CompleteTransportOpHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("source authority '{}' has no capability", src)),
+                error: Some(format!("source authority '{src}' has no capability")),
             });
         }
 
@@ -413,7 +413,7 @@ impl ActionHandler for CompleteTransportOpHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("budget for context '{}' not found", ctx)),
+                error: Some(format!("budget for context '{ctx}' not found")),
             });
         }
 
@@ -428,8 +428,7 @@ impl ActionHandler for CompleteTransportOpHandler {
                 resulting_state: state.clone(),
                 effects_produced: vec![],
                 error: Some(format!(
-                    "budget exceeded: spent={} + cost={} > limit={}",
-                    spent, cost, limit
+                    "budget exceeded: spent={spent} + cost={cost} > limit={limit}"
                 )),
             });
         }
@@ -561,7 +560,7 @@ impl ActionHandler for AttenuateTokenHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("authority '{}' not found", auth)),
+                error: Some(format!("authority '{auth}' not found")),
             });
         }
 
@@ -572,7 +571,7 @@ impl ActionHandler for AttenuateTokenHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("authority '{}' not found", auth)),
+                error: Some(format!("authority '{auth}' not found")),
             });
         }
 
@@ -590,8 +589,7 @@ impl ActionHandler for AttenuateTokenHandler {
                 resulting_state: state.clone(),
                 effects_produced: vec![],
                 error: Some(format!(
-                    "cannot widen capability: {} > {}",
-                    new_cap, current_cap
+                    "cannot widen capability: {new_cap} > {current_cap}"
                 )),
             });
         }
@@ -602,7 +600,7 @@ impl ActionHandler for AttenuateTokenHandler {
                 success: false,
                 resulting_state: state.clone(),
                 effects_produced: vec![],
-                error: Some(format!("invalid capability level: {}", new_cap)),
+                error: Some(format!("invalid capability level: {new_cap}")),
             });
         }
 

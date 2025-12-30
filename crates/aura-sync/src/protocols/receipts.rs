@@ -160,7 +160,7 @@ impl ReceiptVerificationProtocol {
         let is_valid = crypto_effects
             .ed25519_verify(&signed_data, &receipt.signature, &receipt.public_key)
             .await
-            .map_err(|e| sync_session_error(format!("Ed25519 verification failed: {}", e)))?;
+            .map_err(|e| sync_session_error(format!("Ed25519 verification failed: {e}")))?;
 
         if !is_valid {
             tracing::warn!(
@@ -288,7 +288,7 @@ impl ReceiptVerificationProtocol {
         let timestamp = time_effects
             .physical_time()
             .await
-            .map_err(|e| sync_session_error(format!("Failed to get timestamp: {}", e)))?
+            .map_err(|e| sync_session_error(format!("Failed to get timestamp: {e}")))?
             .ts_ms
             / 1000;
 
@@ -298,7 +298,7 @@ impl ReceiptVerificationProtocol {
                 .ed25519_generate_keypair()
                 .await
                 .map_err(|e| {
-                    sync_session_error(format!("Failed to generate Ed25519 keypair: {}", e))
+                    sync_session_error(format!("Failed to generate Ed25519 keypair: {e}"))
                 })?;
 
         // Prepare the signed data (message hash + timestamp for replay protection)
@@ -311,7 +311,7 @@ impl ReceiptVerificationProtocol {
             .ed25519_sign(&signed_data, &private_key)
             .await
             .map_err(|e| {
-                sync_session_error(format!("Failed to create Ed25519 signature: {}", e))
+                sync_session_error(format!("Failed to create Ed25519 signature: {e}"))
             })?;
 
         tracing::debug!(

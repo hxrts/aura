@@ -29,6 +29,7 @@ pub struct Channel {
     pub topic: Option<String>,
     pub unread_count: usize,
     pub is_selected: bool,
+    pub member_count: u32,
 }
 
 impl From<&AppChannel> for Channel {
@@ -39,6 +40,7 @@ impl From<&AppChannel> for Channel {
             topic: ch.topic.clone(),
             unread_count: ch.unread_count as usize,
             is_selected: false,
+            member_count: ch.member_count,
         }
     }
 }
@@ -52,6 +54,7 @@ impl Channel {
             topic: ch.topic.clone(),
             unread_count: ch.unread_count as usize,
             is_selected,
+            member_count: ch.member_count,
         }
     }
 }
@@ -64,6 +67,7 @@ impl Channel {
             topic: None,
             unread_count: 0,
             is_selected: false,
+            member_count: 0,
         }
     }
 
@@ -188,10 +192,10 @@ impl SyncStatus {
                 peers_synced,
                 peers_total,
             } => {
-                format!("Syncing ({}/{})", peers_synced, peers_total)
+                format!("Syncing ({peers_synced}/{peers_total})")
             }
             SyncStatus::Synced => "Synced".to_string(),
-            SyncStatus::SyncFailed { error } => format!("Sync failed: {}", error),
+            SyncStatus::SyncFailed { error } => format!("Sync failed: {error}"),
         }
     }
 
@@ -555,7 +559,7 @@ impl From<&AppInvitation> for Invitation {
 pub fn format_timestamp(ts: u64) -> String {
     let hours = (ts / 3600000) % 24;
     let minutes = (ts / 60000) % 60;
-    format!("{:02}:{:02}", hours, minutes)
+    format!("{hours:02}:{minutes:02}")
 }
 
 /// Settings section
@@ -826,7 +830,7 @@ impl std::fmt::Display for ChannelMode {
         if flags.len() == 1 {
             write!(f, "")
         } else {
-            write!(f, "{}", flags)
+            write!(f, "{flags}")
         }
     }
 }
@@ -1579,7 +1583,7 @@ impl ConfirmationStatus {
                 confirmed_count,
                 required_count,
             } => {
-                format!("Confirming ({}/{})", confirmed_count, required_count)
+                format!("Confirming ({confirmed_count}/{required_count})")
             }
             Self::Confirmed => "Confirmed".to_string(),
             Self::PartiallyConfirmed {
@@ -1587,11 +1591,10 @@ impl ConfirmationStatus {
                 declined_count,
             } => {
                 format!(
-                    "Partial ({} confirmed, {} declined)",
-                    confirmed_count, declined_count
+                    "Partial ({confirmed_count} confirmed, {declined_count} declined)"
                 )
             }
-            Self::Unconfirmed { reason } => format!("Unconfirmed: {}", reason),
+            Self::Unconfirmed { reason } => format!("Unconfirmed: {reason}"),
             Self::RolledBack { .. } => "Rolled back".to_string(),
         }
     }

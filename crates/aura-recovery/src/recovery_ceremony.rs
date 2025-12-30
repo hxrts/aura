@@ -396,7 +396,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         // Create ceremony ID
@@ -437,7 +437,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         // Track if quorum was reached
@@ -621,7 +621,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         // Create signature (placeholder)
@@ -666,7 +666,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
         let fact = RecoveryCeremonyFact::CeremonyInitiated {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
@@ -701,7 +701,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
         let fact = RecoveryCeremonyFact::ApprovalReceived {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),
@@ -731,7 +731,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         let (approved_count, approved_guardians) = {
@@ -778,7 +778,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         // Create evidence hash from ceremony + guardians
@@ -820,7 +820,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
         let fact = RecoveryCeremonyFact::CeremonyAborted {
             ceremony_id: hex::encode(ceremony_id.0.as_bytes()),

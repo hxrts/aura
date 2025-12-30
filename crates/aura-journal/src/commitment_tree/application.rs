@@ -117,8 +117,7 @@ fn validate_acyclicity(state: &TreeState) -> ApplicationResult<()> {
                 // Found a cycle
                 return Err(ApplicationError::InvariantViolation {
                     reason: format!(
-                        "Cycle detected in tree structure involving node {:?}",
-                        current
+                        "Cycle detected in tree structure involving node {current:?}"
                     ),
                 });
             }
@@ -236,8 +235,7 @@ async fn verify_aggregate_signature(
 
     let witness = state.signing_witness(&signing_node).ok_or_else(|| {
         ApplicationError::verification_failed(format!(
-            "missing signing key for node {:?}",
-            signing_node
+            "missing signing key for node {signing_node:?}"
         ))
     })?;
 
@@ -333,7 +331,7 @@ async fn verify_threshold_signature(
         .frost_verify(message, signature, public_key)
         .await
         .map_err(|e| {
-            ApplicationError::verification_failed(format!("threshold verification error: {}", e))
+            ApplicationError::verification_failed(format!("threshold verification error: {e}"))
         })?;
 
     if !is_valid {
@@ -668,7 +666,7 @@ pub fn validate_invariants(state: &TreeState) -> ApplicationResult<()> {
     for (i, &node) in branch_indices.iter().enumerate() {
         if branch_indices[i + 1..].contains(&node) {
             return Err(ApplicationError::InvariantViolation {
-                reason: format!("Duplicate node index: {:?}", node),
+                reason: format!("Duplicate node index: {node:?}"),
             });
         }
     }

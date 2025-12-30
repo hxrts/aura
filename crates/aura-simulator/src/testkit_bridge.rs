@@ -54,8 +54,7 @@ impl TestkitSimulatorBridge {
                 .await
                 .map_err(|e| {
                     SimulatorError::OperationFailed(format!(
-                        "Effect system creation failed for device {}: {}",
-                        device_id, e
+                        "Effect system creation failed for device {device_id}: {e}"
                     ))
                 })?;
 
@@ -129,7 +128,7 @@ impl TestkitSimulatorBridge {
             .create_simulation_environment(sim_config)
             .await
             .map_err(|e| {
-                SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
+                SimulatorError::OperationFailed(format!("Effect system creation failed: {e}"))
             })
     }
 }

@@ -227,7 +227,7 @@ pub use context::{
 // Convert AuraHandlerError to AuraError for ? operator
 impl From<AuraHandlerError> for aura_core::AuraError {
     fn from(err: AuraHandlerError) -> Self {
-        aura_core::AuraError::internal(format!("Handler error: {}", err))
+        aura_core::AuraError::internal(format!("Handler error: {err}"))
     }
 }
 

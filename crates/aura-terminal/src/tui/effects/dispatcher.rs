@@ -89,12 +89,12 @@ impl std::fmt::Display for DispatchError {
                     required.as_str()
                 )
             }
-            Self::NotFound { resource } => write!(f, "Not found: {}", resource),
+            Self::NotFound { resource } => write!(f, "Not found: {resource}"),
             Self::InvalidParameter { param, reason } => {
-                write!(f, "Invalid parameter '{}': {}", param, reason)
+                write!(f, "Invalid parameter '{param}': {reason}")
             }
             Self::NotImplemented { command } => {
-                write!(f, "Command '{}' not yet implemented", command)
+                write!(f, "Command '{command}' not yet implemented")
             }
         }
     }

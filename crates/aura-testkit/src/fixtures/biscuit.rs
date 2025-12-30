@@ -129,7 +129,7 @@ impl BiscuitTestFixture {
                     operation,
                 } => {
                     let authority_str = authority_id.to_string();
-                    let op_str = format!("{:?}", operation);
+                    let op_str = format!("{operation:?}");
                     current_token.append(block!(
                         r#"
                         check if authority({authority_str});
@@ -145,7 +145,7 @@ impl BiscuitTestFixture {
                     operation,
                 } => {
                     let context_str = context_id.to_string();
-                    let op_str = format!("{:?}", operation);
+                    let op_str = format!("{operation:?}");
                     current_token.append(block!(
                         r#"
                         check if context({context_str});

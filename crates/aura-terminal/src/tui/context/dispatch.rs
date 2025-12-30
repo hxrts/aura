@@ -72,7 +72,7 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to create account: {}", e);
-                Err(format!("Failed to create account: {}", e))
+                Err(format!("Failed to create account: {e}"))
             }
         }
     }
@@ -95,7 +95,7 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to restore recovered account: {}", e);
-                Err(format!("Failed to restore recovered account: {}", e))
+                Err(format!("Failed to restore recovered account: {e}"))
             }
         }
     }
@@ -107,7 +107,7 @@ impl AccountFilesHelper {
 
         crate::handlers::tui::export_account_backup(&self.base_path, Some(&self.device_id_str))
             .await
-            .map_err(|e| format!("Failed to export backup: {}", e))
+            .map_err(|e| format!("Failed to export backup: {e}"))
     }
 
     pub async fn import_account_backup(&self, backup_code: &str) -> Result<(), String> {
@@ -119,7 +119,7 @@ impl AccountFilesHelper {
             }
             Err(e) => {
                 tracing::error!("Failed to import backup: {}", e);
-                Err(format!("Failed to import backup: {}", e))
+                Err(format!("Failed to import backup: {e}"))
             }
         }
     }
@@ -177,7 +177,7 @@ impl DispatchHelper {
                 match self.account_files.export_account_backup().await {
                     Ok(code) => {
                         self.toasts
-                            .success("account-backup", format!("Backup code: {}", code))
+                            .success("account-backup", format!("Backup code: {code}"))
                             .await;
                         return Ok(());
                     }
@@ -218,7 +218,7 @@ impl DispatchHelper {
         } else {
             // Unknown command.
             tracing::warn!("Unknown command not handled by Operational: {:?}", command);
-            let msg = format!("Unknown command: {:?}", command);
+            let msg = format!("Unknown command: {command:?}");
             self.operational
                 .emit_error(TerminalError::Operation(msg.clone()))
                 .await;
@@ -260,7 +260,7 @@ impl DispatchHelper {
             }
             OpResponse::InvitationCode { id: _, code } => {
                 self.toasts
-                    .success("invitation-code", format!("Invitation code: {}", code))
+                    .success("invitation-code", format!("Invitation code: {code}"))
                     .await;
                 Ok(())
             }
@@ -273,7 +273,7 @@ impl DispatchHelper {
                 self.toasts
                     .success(
                         "device-enrollment",
-                        format!("Device enrollment code: {}", enrollment_code),
+                        format!("Device enrollment code: {enrollment_code}"),
                     )
                     .await;
                 Ok(())

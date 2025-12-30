@@ -69,8 +69,7 @@ pub async fn handle_network(
                 Ok(discovered) => {
                     tracing::info!("Peer discovery triggered");
                     Some(Ok(OpResponse::Data(format!(
-                        "Discovery active, {} peers known",
-                        discovered
+                        "Discovery active, {discovered} peers known"
                     ))))
                 }
                 Err(e) => Some(Err(OpError::Failed(e.to_string()))),
@@ -132,8 +131,7 @@ pub async fn handle_network(
                     // (LAN invites would work when runtime is present)
                     tracing::debug!("Could not export invitation (no runtime): {}", e);
                     Some(Ok(OpResponse::Data(format!(
-                        "LAN invitation queued for {} at {} (requires runtime)",
-                        authority_id, address
+                        "LAN invitation queued for {authority_id} at {address} (requires runtime)"
                     ))))
                 }
             }

@@ -47,8 +47,7 @@ pub async fn handle_chat(
                 ConsoleEffects::log_warn(
                     ctx.effects(),
                     &format!(
-                        "Group descriptions are not yet fact-backed; ignoring provided description: {}",
-                        desc
+                        "Group descriptions are not yet fact-backed; ignoring provided description: {desc}"
                     ),
                 )
                 .await?;
@@ -136,7 +135,7 @@ pub async fn handle_chat(
             let group = chat
                 .get_group(&group_id)
                 .await?
-                .ok_or_else(|| TerminalError::NotFound(format!("Group not found: {}", group_id)))?;
+                .ok_or_else(|| TerminalError::NotFound(format!("Group not found: {group_id}")))?;
 
             ConsoleEffects::log_info(ctx.effects(), &format!("=== {} ===", group.name)).await?;
             ConsoleEffects::log_info(ctx.effects(), &format!("ID: {}", group.id)).await?;
@@ -162,7 +161,7 @@ pub async fn handle_chat(
             if *show_metadata && !group.metadata.is_empty() {
                 ConsoleEffects::log_info(ctx.effects(), "\nMetadata:").await?;
                 for (k, v) in &group.metadata {
-                    ConsoleEffects::log_info(ctx.effects(), &format!("  {}: {}", k, v)).await?;
+                    ConsoleEffects::log_info(ctx.effects(), &format!("  {k}: {v}")).await?;
                 }
             }
         }
@@ -178,7 +177,7 @@ pub async fn handle_chat(
 
             ConsoleEffects::log_info(
                 ctx.effects(),
-                &format!("Added {} to group {}", member_to_add, group_id),
+                &format!("Added {member_to_add} to group {group_id}"),
             )
             .await?;
         }
@@ -188,7 +187,7 @@ pub async fn handle_chat(
             chat.remove_member(&group_id, authority_id, authority_id)
                 .await?;
 
-            ConsoleEffects::log_info(ctx.effects(), &format!("Left group {}", group_id)).await?;
+            ConsoleEffects::log_info(ctx.effects(), &format!("Left group {group_id}")).await?;
         }
 
         ChatCommands::Remove {
@@ -202,7 +201,7 @@ pub async fn handle_chat(
 
             ConsoleEffects::log_info(
                 ctx.effects(),
-                &format!("Removed {} from group {}", member_id, group_id),
+                &format!("Removed {member_id} from group {group_id}"),
             )
             .await?;
         }
@@ -323,8 +322,7 @@ pub async fn handle_chat(
             ConsoleEffects::log_info(
                 ctx.effects(),
                 &format!(
-                    "Export functionality for group {} to {} not yet implemented",
-                    group_id, output
+                    "Export functionality for group {group_id} to {output} not yet implemented"
                 ),
             )
             .await?;

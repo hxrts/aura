@@ -58,7 +58,7 @@ impl<S: StorageEffects> ProductionLeakageHandler<S> {
 
     /// Get the storage key for a context's leakage events
     fn storage_key(context_id: ContextId) -> String {
-        format!("leakage/{}", context_id)
+        format!("leakage/{context_id}")
     }
 
     /// Load events from storage for a context
@@ -103,9 +103,9 @@ impl<S: StorageEffects> ProductionLeakageHandler<S> {
 
         // Append new line
         let updated = if existing.is_empty() {
-            format!("{}\n", line)
+            format!("{line}\n")
         } else {
-            format!("{}{}\n", existing, line)
+            format!("{existing}{line}\n")
         };
 
         // Write back

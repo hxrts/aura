@@ -52,8 +52,8 @@ impl FieldDiff {
     ) -> Self {
         Self {
             field: field.into(),
-            expected: format!("{:?}", expected),
-            actual: format!("{:?}", actual),
+            expected: format!("{expected:?}"),
+            actual: format!("{actual:?}"),
         }
     }
 
@@ -138,8 +138,8 @@ impl StateDiff {
         if expected.threshold != actual.threshold {
             diff.add(FieldDiff::new(
                 "threshold",
-                &expected.threshold,
-                &actual.threshold,
+                expected.threshold,
+                actual.threshold,
             ));
         }
 
@@ -152,14 +152,14 @@ impl StateDiff {
         }
 
         if expected.phase != actual.phase {
-            diff.add(FieldDiff::new("phase", &expected.phase, &actual.phase));
+            diff.add(FieldDiff::new("phase", expected.phase, actual.phase));
         }
 
         if expected.fallback_timer_active != actual.fallback_timer_active {
             diff.add(FieldDiff::new(
                 "fallback_timer_active",
-                &expected.fallback_timer_active,
-                &actual.fallback_timer_active,
+                expected.fallback_timer_active,
+                actual.fallback_timer_active,
             ));
         }
 
@@ -213,7 +213,7 @@ impl StateDiff {
             (Some(e), None) => {
                 diff.add(FieldDiff::from_strings(
                     "commit_fact",
-                    format!("Some({:?})", e),
+                    format!("Some({e:?})"),
                     "None".to_string(),
                 ));
             }
@@ -221,7 +221,7 @@ impl StateDiff {
                 diff.add(FieldDiff::from_strings(
                     "commit_fact",
                     "None".to_string(),
-                    format!("Some({:?})", a),
+                    format!("Some({a:?})"),
                 ));
             }
             (None, None) => {}
@@ -238,7 +238,7 @@ impl StateDiff {
         if !missing.is_empty() {
             diffs.push(FieldDiff::from_strings(
                 "  missing",
-                format!("{:?}", missing),
+                format!("{missing:?}"),
                 "<not present>",
             ));
         }
@@ -248,7 +248,7 @@ impl StateDiff {
             diffs.push(FieldDiff::from_strings(
                 "  extra",
                 "<not expected>",
-                format!("{:?}", extra),
+                format!("{extra:?}"),
             ));
         }
 
@@ -283,7 +283,7 @@ impl StateDiff {
         for (witness, prop) in &expected_by_witness {
             if !actual_by_witness.contains_key(witness) {
                 diffs.push(FieldDiff::from_strings(
-                    format!("proposals[{}]", witness),
+                    format!("proposals[{witness}]"),
                     format!("result_id={}", prop.result_id),
                     "<missing>",
                 ));
@@ -294,7 +294,7 @@ impl StateDiff {
         for (witness, prop) in &actual_by_witness {
             if !expected_by_witness.contains_key(witness) {
                 diffs.push(FieldDiff::from_strings(
-                    format!("proposals[{}]", witness),
+                    format!("proposals[{witness}]"),
                     "<not expected>",
                     format!("result_id={}", prop.result_id),
                 ));
@@ -306,7 +306,7 @@ impl StateDiff {
             if let Some(actual_prop) = actual_by_witness.get(witness) {
                 if expected_prop.result_id != actual_prop.result_id {
                     diffs.push(FieldDiff::from_strings(
-                        format!("proposals[{}].result_id", witness),
+                        format!("proposals[{witness}].result_id"),
                         &expected_prop.result_id,
                         &actual_prop.result_id,
                     ));
@@ -314,7 +314,7 @@ impl StateDiff {
 
                 if expected_prop.share != actual_prop.share {
                     diffs.push(FieldDiff::from_strings(
-                        format!("proposals[{}].share", witness),
+                        format!("proposals[{witness}].share"),
                         format!("{:?}", expected_prop.share),
                         format!("{:?}", actual_prop.share),
                     ));
@@ -401,8 +401,7 @@ impl<'a> DivergenceReport<'a> {
             "\n╔══════════════════════════════════════════════════════════════════════╗\n",
         );
         report.push_str(&format!(
-            "║ DIVERGENCE DETECTED at step {:<40} ║\n",
-            step_index
+            "║ DIVERGENCE DETECTED at step {step_index:<40} ║\n"
         ));
         report
             .push_str("╠══════════════════════════════════════════════════════════════════════╣\n");
@@ -436,8 +435,7 @@ impl<'a> DivergenceReport<'a> {
             };
 
             report.push_str(&format!(
-                "║ {:<14} │ {:<21} │ {:<27} ║\n",
-                field, expected, actual
+                "║ {field:<14} │ {expected:<21} │ {actual:<27} ║\n"
             ));
         }
 
@@ -463,7 +461,7 @@ impl<'a> fmt::Display for DivergenceReport<'a> {
             } else {
                 action.clone()
             };
-            writeln!(f, "║ Action: {:<62} ║", action_display)?;
+            writeln!(f, "║ Action: {action_display:<62} ║")?;
         }
 
         writeln!(
@@ -532,7 +530,7 @@ impl<'a> fmt::Display for DivergenceReport<'a> {
                     fd.actual.clone()
                 };
 
-                writeln!(f, "║ {:<14} │ {:<21} │ {:<27} ║", field, expected, actual)?;
+                writeln!(f, "║ {field:<14} │ {expected:<21} │ {actual:<27} ║")?;
             }
         }
 

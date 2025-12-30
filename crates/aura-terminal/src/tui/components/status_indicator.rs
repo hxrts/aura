@@ -209,7 +209,7 @@ pub fn SyncStatusIndicator(props: &SyncStatusIndicatorProps) -> impl Into<AnyEle
     // Build progress text if provided
     let progress_text = props
         .progress
-        .map(|(current, total)| format!("{}/{}", current, total));
+        .map(|(current, total)| format!("{current}/{total}"));
 
     element! {
         View(flex_direction: FlexDirection::Row, align_items: AlignItems::Center, gap: Spacing::XS) {

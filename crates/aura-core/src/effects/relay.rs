@@ -212,13 +212,13 @@ impl std::fmt::Display for RelayError {
         match self {
             Self::NoCandidates => write!(f, "no relay candidates available"),
             Self::AllRelaysFailed { relays_tried } => {
-                write!(f, "all {} relays failed", relays_tried)
+                write!(f, "all {relays_tried} relays failed")
             }
             Self::RelayRejected { relay, reason } => {
-                write!(f, "relay {} rejected: {}", relay, reason)
+                write!(f, "relay {relay} rejected: {reason}")
             }
             Self::BudgetExhausted => write!(f, "relay budget exhausted"),
-            Self::NetworkError(msg) => write!(f, "network error: {}", msg),
+            Self::NetworkError(msg) => write!(f, "network error: {msg}"),
         }
     }
 }

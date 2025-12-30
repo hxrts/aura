@@ -41,7 +41,7 @@ pub fn ChannelInfoModal(props: &ChannelInfoModalProps) -> impl Into<AnyElement<'
     let participant_count = participants.len();
 
     // Header props
-    let header_props = ModalHeaderProps::new(format!("Channel: #{}", channel_name));
+    let header_props = ModalHeaderProps::new(format!("Channel: #{channel_name}"));
 
     // Footer props
     let footer_props = ModalFooterProps::new(vec![

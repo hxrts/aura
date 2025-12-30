@@ -103,8 +103,7 @@ impl FramingHandler {
             3 => FrameType::Error,
             other => {
                 return Err(TransportError::Protocol(format!(
-                    "Invalid frame type: {}",
-                    other
+                    "Invalid frame type: {other}"
                 )))
             }
         };

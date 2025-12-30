@@ -88,7 +88,7 @@ impl MiddlewareContext {
         value: &T,
     ) -> Result<Self, AuraHandlerError> {
         let serialized = aura_core::util::serialization::to_vec(value).map_err(|e| {
-            AuraHandlerError::context_error(format!("Failed to serialize custom data: {}", e))
+            AuraHandlerError::context_error(format!("Failed to serialize custom data: {e}"))
         })?;
 
         let mut new_data = (*self.custom_data).clone();
@@ -111,8 +111,7 @@ impl MiddlewareContext {
             Some(data) => {
                 let value = aura_core::util::serialization::from_slice(data).map_err(|e| {
                     AuraHandlerError::context_error(format!(
-                        "Failed to deserialize custom data: {}",
-                        e
+                        "Failed to deserialize custom data: {e}"
                     ))
                 })?;
                 Ok(Some(value))

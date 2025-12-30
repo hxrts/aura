@@ -242,7 +242,7 @@ impl ConnectionInfo {
                 ts_ms: 0,
                 uncertainty: None,
             }),
-        )
+        );
     }
 
     /// Mark connection as established with specific timestamp
@@ -319,7 +319,7 @@ impl ConnectionMetrics {
         self.record_sent_with_timestamp(
             bytes,
             TimeStamp::OrderClock(order_from_bytes(&bytes.to_le_bytes())),
-        )
+        );
     }
 
     /// Record sent message with specific timestamp
@@ -334,7 +334,7 @@ impl ConnectionMetrics {
         self.record_received_with_timestamp(
             bytes,
             TimeStamp::OrderClock(order_from_bytes(&bytes.to_le_bytes())),
-        )
+        );
     }
 
     /// Record received message with specific timestamp

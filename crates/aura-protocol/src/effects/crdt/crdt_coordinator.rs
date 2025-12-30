@@ -88,7 +88,7 @@ pub enum CrdtCoordinatorError {
 
 impl From<CrdtCoordinatorError> for AuraError {
     fn from(err: CrdtCoordinatorError) -> Self {
-        AuraError::internal(format!("CRDT coordinator error: {}", err))
+        AuraError::internal(format!("CRDT coordinator error: {err}"))
     }
 }
 
@@ -303,8 +303,7 @@ where
                         let bytes = &state_bytes;
                         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
                             CrdtCoordinatorError::Deserialization(format!(
-                                "Failed to deserialize state: {}",
-                                e
+                                "Failed to deserialize state: {e}"
                             ))
                         })?
                     };
@@ -324,16 +323,14 @@ where
                             aura_core::util::serialization::from_slice(&crdt_op.operation_data)
                                 .map_err(|e| {
                                     CrdtCoordinatorError::Deserialization(format!(
-                                        "Failed to deserialize operation: {}",
-                                        e
+                                        "Failed to deserialize operation: {e}"
                                     ))
                                 })?;
                         let ctx: CausalContext =
                             aura_core::util::serialization::from_slice(&crdt_op.causal_context)
                                 .map_err(|e| {
                                     CrdtCoordinatorError::Deserialization(format!(
-                                        "Failed to deserialize causal context: {}",
-                                        e
+                                        "Failed to deserialize causal context: {e}"
                                     ))
                                 })?;
                         ops_with_ctx.push(OpWithCtx::new(op, ctx));
@@ -359,8 +356,7 @@ where
                         )
                         .map_err(|e| {
                             CrdtCoordinatorError::Deserialization(format!(
-                                "Failed to deserialize delta: {}",
-                                e
+                                "Failed to deserialize delta: {e}"
                             ))
                         })?;
                         deltas.push(delta);
@@ -384,8 +380,7 @@ where
                         let bytes = &constraint_bytes;
                         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
                             CrdtCoordinatorError::Deserialization(format!(
-                                "Failed to deserialize state: {}",
-                                e
+                                "Failed to deserialize state: {e}"
                             ))
                         })?
                     };
@@ -470,7 +465,7 @@ where
 
     fn serialize_state<T: Serialize>(&self, state: &T) -> Result<Vec<u8>, CrdtCoordinatorError> {
         aura_core::util::serialization::to_vec(state).map_err(|e| {
-            CrdtCoordinatorError::Serialization(format!("Failed to serialize state: {}", e))
+            CrdtCoordinatorError::Serialization(format!("Failed to serialize state: {e}"))
         })
     }
 
@@ -480,21 +475,20 @@ where
         bytes: &[u8],
     ) -> Result<T, CrdtCoordinatorError> {
         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
-            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize state: {}", e))
+            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize state: {e}"))
         })
     }
 
     fn serialize_vector_clock(&self, clock: &VectorClock) -> Result<Vec<u8>, CrdtCoordinatorError> {
         aura_core::util::serialization::to_vec(clock).map_err(|e| {
-            CrdtCoordinatorError::Serialization(format!("Failed to serialize vector clock: {}", e))
+            CrdtCoordinatorError::Serialization(format!("Failed to serialize vector clock: {e}"))
         })
     }
 
     fn deserialize_vector_clock(&self, bytes: &[u8]) -> Result<VectorClock, CrdtCoordinatorError> {
         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
             CrdtCoordinatorError::Deserialization(format!(
-                "Failed to deserialize vector clock: {}",
-                e
+                "Failed to deserialize vector clock: {e}"
             ))
         })
     }
@@ -502,7 +496,7 @@ where
     #[allow(dead_code)]
     fn deserialize_operation(&self, bytes: &[u8]) -> Result<Op, CrdtCoordinatorError> {
         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
-            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize operation: {}", e))
+            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize operation: {e}"))
         })
     }
 
@@ -513,8 +507,7 @@ where
     ) -> Result<CausalContext, CrdtCoordinatorError> {
         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
             CrdtCoordinatorError::Deserialization(format!(
-                "Failed to deserialize causal context: {}",
-                e
+                "Failed to deserialize causal context: {e}"
             ))
         })
     }
@@ -522,7 +515,7 @@ where
     #[allow(dead_code)]
     fn deserialize_delta(&self, bytes: &[u8]) -> Result<DeltaS::Delta, CrdtCoordinatorError> {
         aura_core::util::serialization::from_slice(bytes).map_err(|e| {
-            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize delta: {}", e))
+            CrdtCoordinatorError::Deserialization(format!("Failed to deserialize delta: {e}"))
         })
     }
 
@@ -554,7 +547,7 @@ where
     /// ```ignore
     /// let coordinator = CrdtCoordinator::with_delta_threshold(authority_id, 100);
     /// ```
-    pub fn with_delta_threshold(authority_id: AuthorityId, threshold: usize) -> Self
+    pub fn with_delta_threshold(authority_id: AuthorityId, threshold: u32) -> Self
     where
         DeltaS: Bottom,
     {

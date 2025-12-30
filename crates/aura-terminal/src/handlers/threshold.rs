@@ -38,16 +38,16 @@ pub async fn handle_threshold(
         let path = PathBuf::from(config_path);
         let key = format!("device_config:{}", path.display());
         let config_string = load_config_utf8(ctx, &key).await.map_err(|e| {
-            output.eprintln(format!("Failed to read config {}: {}", config_path, e));
+            output.eprintln(format!("Failed to read config {config_path}: {e}"));
             e
         })?;
 
         let config = parse_config_data(config_string.as_bytes()).map_err(|e| {
-            output.eprintln(format!("Invalid config {}: {}", config_path, e));
+            output.eprintln(format!("Invalid config {config_path}: {e}"));
             e
         })?;
 
-        output.println(format!("Loaded config: {}", config_path));
+        output.println(format!("Loaded config: {config_path}"));
         valid_configs.push((path, config));
     }
 
@@ -58,15 +58,14 @@ pub async fn handle_threshold(
     match mode {
         "sign" => execute_threshold_signing(ctx, &valid_configs, threshold, &mut output).await?,
         "verify" => {
-            execute_threshold_verification(ctx, &valid_configs, threshold, &mut output).await?
+            execute_threshold_verification(ctx, &valid_configs, threshold, &mut output).await?;
         }
         "keygen" => execute_threshold_keygen(ctx, &valid_configs, threshold, &mut output).await?,
         "dkd" => execute_dkd_protocol(ctx, &valid_configs, threshold, &mut output).await?,
         _ => {
-            output.eprintln(format!("Unknown threshold mode: {}", mode));
+            output.eprintln(format!("Unknown threshold mode: {mode}"));
             return Err(TerminalError::Input(format!(
-                "Unknown threshold mode: {}",
-                mode
+                "Unknown threshold mode: {mode}"
             )));
         }
     }
@@ -77,7 +76,7 @@ pub async fn handle_threshold(
 /// Parse configuration data
 fn parse_config_data(data: &[u8]) -> Result<ThresholdConfig, TerminalError> {
     let config_str = String::from_utf8(data.to_vec())
-        .map_err(|e| TerminalError::Config(format!("Invalid UTF-8: {}", e)))?;
+        .map_err(|e| TerminalError::Config(format!("Invalid UTF-8: {e}")))?;
 
     let config: ThresholdConfig =
         toml::from_str(&config_str).map_err(|e| TerminalError::Config(e.to_string()))?;
@@ -100,12 +99,10 @@ fn validate_threshold_params(
 
     if threshold > num_devices {
         output.eprintln(format!(
-            "Threshold ({}) cannot be greater than number of devices ({})",
-            threshold, num_devices
+            "Threshold ({threshold}) cannot be greater than number of devices ({num_devices})"
         ));
         return Err(TerminalError::Input(format!(
-            "Invalid threshold: {} > {}",
-            threshold, num_devices
+            "Invalid threshold: {threshold} > {num_devices}"
         )));
     }
 
@@ -179,10 +176,9 @@ async fn execute_threshold_signing(
             output.kv("Signature bytes", signature.signature.len().to_string());
         }
         Err(e) => {
-            output.println(format!("Threshold signing failed: {}", e));
+            output.println(format!("Threshold signing failed: {e}"));
             output.println(format!(
-                "  This may require {} signers to be online",
-                threshold
+                "  This may require {threshold} signers to be online"
             ));
         }
     }
@@ -209,8 +205,7 @@ async fn execute_threshold_verification(
         Some(pkg) => pkg,
         None => {
             output.println(format!(
-                "No public key package found for authority: {}",
-                authority_id
+                "No public key package found for authority: {authority_id}"
             ));
             output.println("Run key generation first with: aura threshold --mode keygen");
             return Ok(());
@@ -253,8 +248,7 @@ async fn execute_threshold_verification(
         }
         Err(e) => {
             output.println(format!(
-                "Verification failed: {} (expected for placeholder signature)",
-                e
+                "Verification failed: {e} (expected for placeholder signature)"
             ));
         }
     }
@@ -305,7 +299,7 @@ async fn execute_threshold_keygen(
             output.println("Keys stored in secure storage. You can now sign operations.");
         }
         Err(e) => {
-            output.println(format!("Key generation failed: {}", e));
+            output.println(format!("Key generation failed: {e}"));
             output.println("  This may occur if keys already exist for this authority.");
         }
     }
@@ -349,7 +343,7 @@ async fn execute_dkd_protocol(
         threshold: threshold as u16,
         total_participants,
         app_id: "aura-terminal".to_string(),
-        context: format!("threshold-mode:{}", threshold),
+        context: format!("threshold-mode:{threshold}"),
         ..Default::default()
     };
 
@@ -357,12 +351,12 @@ async fn execute_dkd_protocol(
     let session_id = protocol
         .initiate_session(ctx.effects(), participants.clone(), None)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to initiate DKD session: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to initiate DKD session: {e}")))?;
 
     let result = protocol
         .execute_protocol(ctx.effects(), &session_id, participants[0])
         .await
-        .map_err(|e| TerminalError::Operation(format!("DKD protocol execution failed: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("DKD protocol execution failed: {e}")))?;
 
     output.blank();
     output.println("DKD protocol completed successfully!");
@@ -389,8 +383,7 @@ pub async fn handle_dkd_test(
     let mut output = CliOutput::new();
 
     output.println(format!(
-        "Starting DKD test: app_id={}, context={}, threshold={}, total={}",
-        app_id, context, threshold, total
+        "Starting DKD test: app_id={app_id}, context={context}, threshold={threshold}, total={total}"
     ));
 
     // Create test participants
@@ -404,8 +397,7 @@ pub async fn handle_dkd_test(
 
     if participants.is_empty() || threshold == 0 || threshold > total {
         return Err(TerminalError::Input(format!(
-            "Invalid DKD parameters: threshold={}, total={}",
-            threshold, total
+            "Invalid DKD parameters: threshold={threshold}, total={total}"
         )));
     }
 
@@ -421,12 +413,12 @@ pub async fn handle_dkd_test(
     let session_id = protocol
         .initiate_session(ctx.effects(), participants.clone(), None)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to initiate DKD session: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to initiate DKD session: {e}")))?;
 
     let result = protocol
         .execute_protocol(ctx.effects(), &session_id, participants[0])
         .await
-        .map_err(|e| TerminalError::Operation(format!("DKD protocol execution failed: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("DKD protocol execution failed: {e}")))?;
 
     output.blank();
     output.println("DKD test completed successfully!");

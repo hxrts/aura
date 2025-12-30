@@ -137,8 +137,7 @@ pub mod assertions {
         match timeout(duration, future).await {
             Ok(res) => res,
             Err(_) => Err(AuraError::invalid(format!(
-                "Operation did not complete within {:?}",
-                duration
+                "Operation did not complete within {duration:?}"
             ))),
         }
     }
@@ -154,8 +153,7 @@ pub mod assertions {
 
         if elapsed < duration {
             return Err(AuraError::invalid(format!(
-                "Operation completed too quickly: {:?} < {:?}",
-                elapsed, duration
+                "Operation completed too quickly: {elapsed:?} < {duration:?}"
             )));
         }
 
@@ -184,7 +182,7 @@ pub mod assertions {
 
         let output = handle
             .join()
-            .map_err(|e| AuraError::invalid(format!("Test panicked: {:?}", e)))?;
+            .map_err(|e| AuraError::invalid(format!("Test panicked: {e:?}")))?;
 
         reset_time();
 

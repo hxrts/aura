@@ -311,7 +311,7 @@ impl ChaosGenerator {
         let template = self
             .templates
             .get(&chaos_type)
-            .ok_or_else(|| ChaosGeneratorError::TemplateNotFound(format!("{:?}", chaos_type)))?;
+            .ok_or_else(|| ChaosGeneratorError::TemplateNotFound(format!("{chaos_type:?}")))?;
 
         let mut scenarios = Vec::new();
 
@@ -372,7 +372,7 @@ impl ChaosGenerator {
         if byzantine_count > 0 {
             scenario.byzantine_conditions = Some(ByzantineConditions {
                 strategies: vec![crate::scenario::types::LegacyByzantineStrategy {
-                    name: format!("Chaos testing strategy for {:?}", chaos_type),
+                    name: format!("Chaos testing strategy for {chaos_type:?}"),
                     parameters: std::collections::HashMap::new(),
                 }],
             });
@@ -390,7 +390,7 @@ impl ChaosGenerator {
 
         let generation_metadata = GenerationMetadata {
             source_property: property.id.clone(),
-            template_name: format!("{:?}", chaos_type),
+            template_name: format!("{chaos_type:?}"),
             generated_at: "2022-01-01T00:00:00Z".to_string(), // Fixed timestamp for deterministic testing
             generation_params: vec![
                 ("network_size".to_string(), network_size.to_string()),

@@ -269,7 +269,7 @@ impl CryptoCoreEffects for CompositeTestHandler {
     }
 
     fn secure_zero(&self, data: &mut [u8]) {
-        self.crypto.secure_zero(data)
+        self.crypto.secure_zero(data);
     }
 }
 

@@ -88,7 +88,7 @@ impl AmpMessage {
 // ============================================================================
 
 fn map_amp_error(err: AmpError) -> AuraError {
-    AuraError::invalid(format!("AMP ratchet error: {}", err))
+    AuraError::invalid(format!("AMP ratchet error: {err}"))
 }
 
 /// Build guard chain for AMP send operations.
@@ -278,7 +278,7 @@ where
         .aes_gcm_encrypt(&payload, &key, &nonce)
         .await
         .map_err(|e| {
-            let err = AuraError::crypto(format!("AMP seal failed: {}", e));
+            let err = AuraError::crypto(format!("AMP seal failed: {e}"));
             AMP_TELEMETRY.log_send_failure(context, channel, &err);
             err
         })?;
@@ -386,7 +386,7 @@ where
         .aes_gcm_decrypt(&wire.payload, &key, &nonce)
         .await
         .map_err(|e| {
-            let err = AuraError::crypto(format!("AMP open failed: {}", e));
+            let err = AuraError::crypto(format!("AMP open failed: {e}"));
             AMP_TELEMETRY.log_receive_failure(
                 context,
                 Some(&transport_header),

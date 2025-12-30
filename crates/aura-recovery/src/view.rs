@@ -298,7 +298,7 @@ impl ViewDeltaReducer for RecoveryViewReducer {
                         format!("Remove guardian {}", format_authority_id(&guardian_id))
                     }
                     crate::facts::MembershipChangeType::UpdateThreshold { new_threshold } => {
-                        format!("Update threshold to {}", new_threshold)
+                        format!("Update threshold to {new_threshold}")
                     }
                 };
                 Some(RecoveryDelta::MembershipProposalCreated {

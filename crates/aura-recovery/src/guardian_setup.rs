@@ -283,7 +283,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             initiator_id: request.initiator_id,
             trace_id: Some(setup_id.clone()),
             guardian_ids: guardian_ids.clone(),
-            threshold: request.threshold as u16,
+            threshold: request.threshold,
             initiated_at: PhysicalTime {
                 ts_ms: now_ms,
                 uncertainty: None,
@@ -311,7 +311,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             setup_id: setup_id.clone(),
             account_id: request.account_id,
             target_guardians: guardian_ids.clone(),
-            threshold: request.threshold as u16,
+            threshold: request.threshold,
             timestamp: TimeStamp::PhysicalClock(PhysicalTime {
                 ts_ms: now_ms,
                 uncertainty: None,
@@ -351,7 +351,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
 
         // Generate threshold keys for the recovery authority
         let num_guardians = acceptances.len() as u16;
-        let threshold = request.threshold as u16;
+        let threshold = request.threshold;
 
         tracing::info!(
             threshold = %threshold,
@@ -368,7 +368,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             )
             .await
             .map_err(|e| {
-                crate::RecoveryError::internal(format!("Key generation failed: {}", e))
+                crate::RecoveryError::internal(format!("Key generation failed: {e}"))
             })?;
 
         // Encrypt each guardian's key share
@@ -386,8 +386,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                 .await
                 .map_err(|e| {
                     crate::RecoveryError::internal(format!(
-                        "Ephemeral key generation failed: {}",
-                        e
+                        "Ephemeral key generation failed: {e}"
                     ))
                 })?;
 
@@ -408,7 +407,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                 )
                 .await
                 .map_err(|e| {
-                    crate::RecoveryError::internal(format!("Key derivation failed: {}", e))
+                    crate::RecoveryError::internal(format!("Key derivation failed: {e}"))
                 })?;
 
             // Generate random nonce for encryption
@@ -424,7 +423,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                 .chacha20_encrypt(key_package, &key_array, &nonce)
                 .await
                 .map_err(|e| {
-                    crate::RecoveryError::internal(format!("Share encryption failed: {}", e))
+                    crate::RecoveryError::internal(format!("Share encryption failed: {e}"))
                 })?;
 
             tracing::debug!(
@@ -464,7 +463,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             context_id,
             guardian_ids: shares.iter().map(|s| s.guardian_id).collect(),
             trace_id: Some(setup_id.clone()),
-            threshold: request.threshold as u16,
+            threshold: request.threshold,
             completed_at: self
                 .effect_system()
                 .physical_time()
@@ -514,7 +513,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             .effect_system()
             .ed25519_generate_keypair()
             .await
-            .map_err(|e| crate::RecoveryError::internal(format!("Key generation failed: {}", e)))?;
+            .map_err(|e| crate::RecoveryError::internal(format!("Key generation failed: {e}")))?;
 
         tracing::debug!(
             guardian = %guardian_id,
@@ -534,8 +533,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             .await
             .map_err(|e| {
                 crate::RecoveryError::internal(format!(
-                    "Failed to store acceptance private key: {}",
-                    e
+                    "Failed to store acceptance private key: {e}"
                 ))
             })?;
 
@@ -571,7 +569,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             .effect_system()
             .physical_time()
             .await
-            .map_err(|e| aura_core::AuraError::internal(format!("Time error: {}", e)))?;
+            .map_err(|e| aura_core::AuraError::internal(format!("Time error: {e}")))?;
 
         // Generate real acceptances with cryptographic keys
         let mut acceptances = Vec::new();
@@ -582,7 +580,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                 .ed25519_generate_keypair()
                 .await
                 .map_err(|e| {
-                crate::RecoveryError::internal(format!("Guardian key generation failed: {}", e))
+                crate::RecoveryError::internal(format!("Guardian key generation failed: {e}"))
             })?;
 
             // Store the private key for later share decryption
@@ -591,12 +589,11 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                 invitation.setup_id, guardian_id
             );
             self.effect_system()
-                .store(&storage_key, private_key.to_vec())
+                .store(&storage_key, private_key.clone())
                 .await
                 .map_err(|e| {
                     crate::RecoveryError::internal(format!(
-                        "Failed to store acceptance private key: {}",
-                        e
+                        "Failed to store acceptance private key: {e}"
                     ))
                 })?;
 
@@ -630,13 +627,13 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         encrypted_share: &EncryptedKeyShare,
     ) -> RecoveryResult<()> {
         // Retrieve the private key we stored during acceptance
-        let storage_key = format!("guardian_acceptance_keys/{}/{}", setup_id, guardian_id);
+        let storage_key = format!("guardian_acceptance_keys/{setup_id}/{guardian_id}");
         let private_key = self
             .effect_system()
             .retrieve(&storage_key)
             .await
             .map_err(|e| {
-                crate::RecoveryError::internal(format!("Failed to retrieve private key: {}", e))
+                crate::RecoveryError::internal(format!("Failed to retrieve private key: {e}"))
             })?
             .ok_or_else(|| {
                 crate::RecoveryError::internal("No acceptance private key found".to_string())
@@ -653,11 +650,11 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             .hkdf_derive(
                 &shared_secret_input,
                 b"aura-guardian-share-v1",
-                format!("guardian:{}", guardian_id).as_bytes(),
+                format!("guardian:{guardian_id}").as_bytes(),
                 32,
             )
             .await
-            .map_err(|e| crate::RecoveryError::internal(format!("Key derivation failed: {}", e)))?;
+            .map_err(|e| crate::RecoveryError::internal(format!("Key derivation failed: {e}")))?;
 
         // Decrypt the FROST share
         let mut key_array = [0u8; 32];
@@ -671,7 +668,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             )
             .await
             .map_err(|e| {
-                crate::RecoveryError::internal(format!("Share decryption failed: {}", e))
+                crate::RecoveryError::internal(format!("Share decryption failed: {e}"))
             })?;
 
         tracing::info!(
@@ -692,7 +689,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             )
             .await
             .map_err(|e| {
-                crate::RecoveryError::internal(format!("Failed to store guardian share: {}", e))
+                crate::RecoveryError::internal(format!("Failed to store guardian share: {e}"))
             })?;
 
         // Delete the ephemeral acceptance key now that the share is stored

@@ -110,7 +110,7 @@ impl JournalEffects for MockJournalHandler {
         // Add a mock entry representing this journal persistence
         our_journal
             .entries
-            .push(format!("persist_journal_{}", counter));
+            .push(format!("persist_journal_{counter}"));
 
         Ok(())
     }

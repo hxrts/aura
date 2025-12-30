@@ -44,7 +44,7 @@ fn format_timestamp(ts_ms: u64) -> String {
         let total_secs = duration.as_secs();
         let hours = (total_secs / 3600) % 24;
         let minutes = (total_secs / 60) % 60;
-        format!("{:02}:{:02}", hours, minutes)
+        format!("{hours:02}:{minutes:02}")
     } else {
         String::new()
     }
@@ -220,6 +220,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let channels = reactive_channels.read().clone();
     let messages = reactive_messages.read().clone();
 
+    let empty_message = if channels.is_empty() {
+        "Select a channel to view messages.".to_string()
+    } else {
+        "No messages yet.".to_string()
+    };
+
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_channel_idx = props.view.selected_channel;
     let display_input_text = props.view.input_buffer.clone();
@@ -252,7 +258,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 MessagePanel(
                     messages: messages,
                     title: Some("Messages".to_string()),
-                    empty_message: Some("Select a channel to view messages".to_string()),
+                    empty_message: Some(empty_message),
                 )
             }
 

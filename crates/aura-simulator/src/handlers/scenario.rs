@@ -356,7 +356,7 @@ impl SimulationScenarioHandler {
     /// Register a scenario for potential injection
     pub fn register_scenario(&self, scenario: ScenarioDefinition) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         state.scenarios.insert(scenario.id.clone(), scenario);
@@ -366,7 +366,7 @@ impl SimulationScenarioHandler {
     /// Enable or disable random scenario injection
     pub fn set_randomization(&self, enable: bool, probability: f64) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         state.enable_randomization = enable;
@@ -377,7 +377,7 @@ impl SimulationScenarioHandler {
     /// Manually trigger a specific scenario
     pub fn trigger_scenario(&self, scenario_id: &str) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         if state.active_injections.len() >= state.max_concurrent_injections {
@@ -393,7 +393,7 @@ impl SimulationScenarioHandler {
                 .get(scenario_id)
                 .ok_or_else(|| TestingError::EventRecordingError {
                     event_type: "scenario_trigger".to_string(),
-                    reason: format!("Scenario '{}' not found", scenario_id),
+                    reason: format!("Scenario '{scenario_id}' not found"),
                 })?;
 
         let injection = ActiveInjection {
@@ -412,7 +412,7 @@ impl SimulationScenarioHandler {
     /// Advance simulated time by ticks
     pub fn wait_ticks(&self, ticks: u64) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         state.current_tick = state.current_tick.saturating_add(ticks);
@@ -442,7 +442,7 @@ impl SimulationScenarioHandler {
         duration_ticks: u64,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let expires_at_tick = state.current_tick.saturating_add(duration_ticks);
@@ -458,7 +458,7 @@ impl SimulationScenarioHandler {
             timestamp: current_tick,
             data: HashMap::from([
                 ("condition".to_string(), condition.to_string()),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
                 ("duration_ticks".to_string(), duration_ticks.to_string()),
             ]),
         });
@@ -480,7 +480,7 @@ impl SimulationScenarioHandler {
     /// Create a lightweight checkpoint of simulation state
     pub fn create_checkpoint(&self, label: &str) -> Result<String, TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let checkpoint_id = format!("ckpt_{}_{}", label, state.checkpoints.len());
@@ -528,7 +528,7 @@ impl SimulationScenarioHandler {
             "setup_choreography",
             HashMap::from([
                 ("protocol".to_string(), protocol.to_string()),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
             ]),
         )
     }
@@ -550,7 +550,7 @@ impl SimulationScenarioHandler {
     ) -> Result<(), TestingError> {
         let mut data = HashMap::from([
             ("choreography".to_string(), name.to_string()),
-            ("participants".to_string(), format!("{:?}", participants)),
+            ("participants".to_string(), format!("{participants:?}")),
         ]);
         data.extend(params);
         self.record_simple_event("run_choreography", data)
@@ -641,7 +641,7 @@ impl SimulationScenarioHandler {
                     "guardian_share_distribution".to_string(),
                 ),
                 ("status".to_string(), "ok".to_string()),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
                 ("threshold".to_string(), threshold.to_string()),
                 ("target".to_string(), target),
             ]),
@@ -670,7 +670,7 @@ impl SimulationScenarioHandler {
                     "guardian_attestation".to_string(),
                 ),
                 ("status".to_string(), "ok".to_string()),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
                 ("target".to_string(), target),
                 ("attestation".to_string(), attestation),
             ]),
@@ -696,7 +696,7 @@ impl SimulationScenarioHandler {
             HashMap::from([
                 ("choreography".to_string(), "guardian_recovery".to_string()),
                 ("status".to_string(), "ok".to_string()),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
                 ("target".to_string(), target),
                 ("validation_steps".to_string(), validation_steps),
             ]),
@@ -898,7 +898,7 @@ impl SimulationScenarioHandler {
                 HashMap::from([
                     ("choreography".to_string(), "frost_signing".to_string()),
                     ("status".to_string(), "ok".to_string()),
-                    ("partial_sigs".to_string(), format!("{}", count)),
+                    ("partial_sigs".to_string(), format!("{count}")),
                 ]),
             ),
             Err(e) => self.record_simple_event(
@@ -1123,7 +1123,7 @@ impl SimulationScenarioHandler {
             HashMap::from([
                 ("choreography".to_string(), "dkd_handshake".to_string()),
                 ("status".to_string(), "ok".to_string()),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
                 ("target".to_string(), target),
             ]),
         )
@@ -1145,7 +1145,7 @@ impl SimulationScenarioHandler {
                 ("choreography".to_string(), "context_agreement".to_string()),
                 ("status".to_string(), "ok".to_string()),
                 ("context".to_string(), context),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
             ]),
         )
     }
@@ -1166,7 +1166,7 @@ impl SimulationScenarioHandler {
                 ("choreography".to_string(), "p2p_dkd".to_string()),
                 ("status".to_string(), "ok".to_string()),
                 ("label".to_string(), label),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
             ]),
         )
     }
@@ -1223,7 +1223,7 @@ impl SimulationScenarioHandler {
             HashMap::from([
                 ("choreography".to_string(), "guardian_setup".to_string()),
                 ("status".to_string(), "ok".to_string()),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
                 ("threshold".to_string(), threshold.to_string()),
             ]),
         )
@@ -1239,7 +1239,7 @@ impl SimulationScenarioHandler {
             HashMap::from([
                 ("choreography".to_string(), "gossip_sync".to_string()),
                 ("status".to_string(), "ok".to_string()),
-                ("participants".to_string(), format!("{:?}", participants)),
+                ("participants".to_string(), format!("{participants:?}")),
             ]),
         )
     }
@@ -1260,7 +1260,7 @@ impl SimulationScenarioHandler {
     /// Get statistics about scenario injections
     pub fn get_injection_stats(&self) -> Result<HashMap<String, String>, TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let mut stats = HashMap::new();
@@ -1291,7 +1291,7 @@ impl SimulationScenarioHandler {
     /// Clean up expired injections
     fn cleanup_expired_injections(&self) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let now_tick = state.current_tick;
@@ -1315,7 +1315,7 @@ impl SimulationScenarioHandler {
     /// Check if scenario should be randomly triggered
     fn should_trigger_random_scenario(&self) -> Result<bool, TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         if !state.enable_randomization {
@@ -1342,7 +1342,7 @@ impl SimulationScenarioHandler {
         initial_members: Vec<String>,
     ) -> Result<String, TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         use std::collections::hash_map::DefaultHasher;
@@ -1380,7 +1380,7 @@ impl SimulationScenarioHandler {
         message: &str,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         // Verify group exists and sender is a member
@@ -1390,15 +1390,14 @@ impl SimulationScenarioHandler {
                 .get(group_id)
                 .ok_or_else(|| TestingError::EventRecordingError {
                     event_type: "chat_message".to_string(),
-                    reason: format!("Chat group '{}' not found", group_id),
+                    reason: format!("Chat group '{group_id}' not found"),
                 })?;
 
         if !group.members.contains(&sender.to_string()) {
             return Err(TestingError::EventRecordingError {
                 event_type: "chat_message".to_string(),
                 reason: format!(
-                    "Sender '{}' is not a member of group '{}'",
-                    sender, group_id
+                    "Sender '{sender}' is not a member of group '{group_id}'"
                 ),
             });
         }
@@ -1428,7 +1427,7 @@ impl SimulationScenarioHandler {
         recovery_required: bool,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         // Count messages participant had access to before loss
@@ -1472,7 +1471,7 @@ impl SimulationScenarioHandler {
         include_pre_recovery: bool,
     ) -> Result<bool, TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let actual_count: usize = state
@@ -1513,7 +1512,7 @@ impl SimulationScenarioHandler {
         threshold: usize,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         if guardians.len() < threshold {
@@ -1550,7 +1549,7 @@ impl SimulationScenarioHandler {
         validation_steps: Vec<String>,
     ) -> Result<bool, TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         if let Some(recovery_info) = state.recovery_state.get_mut(target) {
@@ -1564,7 +1563,7 @@ impl SimulationScenarioHandler {
         } else {
             Err(TestingError::EventRecordingError {
                 event_type: "recovery_verification".to_string(),
-                reason: format!("No recovery process found for target '{}'", target),
+                reason: format!("No recovery process found for target '{target}'"),
             })
         }
     }
@@ -1572,7 +1571,7 @@ impl SimulationScenarioHandler {
     /// Get chat group statistics
     pub fn get_chat_stats(&self) -> Result<HashMap<String, String>, TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let mut stats = HashMap::new();
@@ -1621,7 +1620,7 @@ impl TestingEffects for SimulationScenarioHandler {
         label: &str,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let checkpoint = ScenarioCheckpoint {
@@ -1658,7 +1657,7 @@ impl TestingEffects for SimulationScenarioHandler {
 
     async fn restore_checkpoint(&self, checkpoint_id: &str) -> Result<(), TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let checkpoint = state
@@ -1677,8 +1676,7 @@ impl TestingEffects for SimulationScenarioHandler {
             if let Ok(tick) = tick_str.parse::<u64>() {
                 let mut state_mut = self.state.lock().map_err(|e| {
                     TestingError::SystemError(aura_core::AuraError::internal(format!(
-                        "Lock error: {}",
-                        e
+                        "Lock error: {e}"
                     )))
                 })?;
                 state_mut.current_tick = tick;
@@ -1694,7 +1692,7 @@ impl TestingEffects for SimulationScenarioHandler {
         path: &str,
     ) -> Result<Box<dyn Any + Send>, TestingError> {
         let state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         match component {
@@ -1795,7 +1793,7 @@ impl TestingEffects for SimulationScenarioHandler {
         unit: &str,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let metric = MetricValue {
@@ -1816,7 +1814,7 @@ impl SimulationScenarioHandler {
         event_data: HashMap<String, String>,
     ) -> Result<(), TestingError> {
         let mut state = self.state.lock().map_err(|e| {
-            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
         })?;
 
         let event = SimulationEvent {

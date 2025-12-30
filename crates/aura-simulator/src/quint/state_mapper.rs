@@ -413,13 +413,13 @@ impl SimulationStateMapper {
         // Try to get from combined state first
         if let Some(combined) = self.inner.variables.get("simulation_state") {
             state.update_from_quint(combined).map_err(|e| {
-                aura_core::AuraError::invalid(format!("failed to update from quint: {}", e))
+                aura_core::AuraError::invalid(format!("failed to update from quint: {e}"))
             })?;
         } else {
             // Build from individual variables
             let quint_state = self.inner.to_quint();
             state.update_from_quint(&quint_state).map_err(|e| {
-                aura_core::AuraError::invalid(format!("failed to update from quint: {}", e))
+                aura_core::AuraError::invalid(format!("failed to update from quint: {e}"))
             })?;
         }
 

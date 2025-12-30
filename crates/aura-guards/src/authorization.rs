@@ -273,7 +273,7 @@ impl BiscuitAuthorizationBridge {
 
         // Add basic verification metadata
         facts.push(format!("authority(\"{}\")", self.authority_id));
-        facts.push(format!("extracted_at({})", current_time_seconds));
+        facts.push(format!("extracted_at({current_time_seconds})"));
         facts.push("extracted_from_token".to_string());
 
         // Try to extract facts from token using an authorizer
@@ -282,19 +282,19 @@ impl BiscuitAuthorizationBridge {
             let (world_facts, world_rules, _world_checks, _world_policies) = authorizer.dump();
             // Parse facts from the world dump
             for fact in world_facts {
-                facts.push(format!("{}", fact));
+                facts.push(format!("{fact}"));
             }
 
             // Include any rules as well for debugging
             for rule in world_rules {
-                facts.push(format!("rule: {}", rule));
+                facts.push(format!("rule: {rule}"));
             }
         }
 
         // If we couldn't extract detailed facts, provide basic token info
         if facts.len() <= 2 {
             let count = token.block_count();
-            facts.push(format!("block_count({})", count));
+            facts.push(format!("block_count({count})"));
 
             // Add standard capabilities that are typically in device tokens
             facts.push("capability(\"read\")".to_string());

@@ -380,7 +380,7 @@ impl ConnectionPool {
                 self.stats.connection_limit_hits += 1;
                 return Err(sync_resource_exhausted(
                     "connections",
-                    format!("Per-peer connection limit reached for {:?}", peer_id),
+                    format!("Per-peer connection limit reached for {peer_id:?}"),
                 ));
             }
         } // Drop mutable borrow
@@ -563,7 +563,7 @@ impl ConnectionPool {
         Ok(TransportConnectionInfo {
             connection_id,
             protocol: "quic".to_string(), // Default to QUIC
-            remote_address: format!("peer_{}.local:8080", peer_id),
+            remote_address: format!("peer_{peer_id}.local:8080"),
             public_key: hash::hash(peer_id.to_string().as_bytes()).to_vec(),
             established_at: next_sequence(),
         })

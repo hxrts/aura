@@ -22,14 +22,13 @@ impl IdentityValidator {
         let valid = aura_core::ed25519_verify(event_hash, signature, authority_public_key)
             .map_err(|e| AuthenticationError::InvalidAuthoritySignature {
                 details: format!(
-                    "Authority signature verification failed for {}: {}",
-                    authority_id, e
+                    "Authority signature verification failed for {authority_id}: {e}"
                 ),
             })?;
 
         if !valid {
             return Err(AuthenticationError::InvalidAuthoritySignature {
-                details: format!("Authority signature invalid for {}", authority_id),
+                details: format!("Authority signature invalid for {authority_id}"),
             });
         }
 
@@ -48,15 +47,14 @@ impl IdentityValidator {
             aura_core::ed25519_verify(message, signature, guardian_public_key).map_err(|e| {
                 AuthenticationError::InvalidGuardianSignature {
                     details: format!(
-                        "Guardian signature verification failed for {:?}: {}",
-                        guardian_id, e
+                        "Guardian signature verification failed for {guardian_id:?}: {e}"
                     ),
                 }
             })?;
 
         if !valid {
             return Err(AuthenticationError::InvalidGuardianSignature {
-                details: format!("Guardian signature invalid for {:?}", guardian_id),
+                details: format!("Guardian signature invalid for {guardian_id:?}"),
             });
         }
 
@@ -113,7 +111,7 @@ impl IdentityValidator {
         // FROST signatures are compatible with standard Ed25519 verification
         let valid = aura_core::ed25519_verify(message, &threshold_sig.signature, group_public_key)
             .map_err(|e| AuthenticationError::InvalidThresholdSignature {
-                details: format!("FROST threshold signature verification failed: {}", e),
+                details: format!("FROST threshold signature verification failed: {e}"),
             })?;
 
         if !valid {

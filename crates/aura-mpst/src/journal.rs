@@ -207,7 +207,7 @@ pub trait JournalCoupling {
         for (name, annotation) in self.journal_annotations() {
             tracing::debug!("Applying journal annotation: {}", name);
             current = annotation.apply(effects, &current).await.map_err(|e| {
-                AuraError::internal(format!("Journal annotation '{}' failed: {}", name, e))
+                AuraError::internal(format!("Journal annotation '{name}' failed: {e}"))
             })?;
         }
 
@@ -229,8 +229,7 @@ pub trait JournalCoupling {
                 JournalOpType::Custom(desc) => {
                     if desc.trim().is_empty() {
                         return Err(AuraError::invalid(format!(
-                            "Journal annotation '{}' has an empty custom description",
-                            name
+                            "Journal annotation '{name}' has an empty custom description"
                         )));
                     }
                 }
@@ -239,8 +238,7 @@ pub trait JournalCoupling {
             if let Some(desc) = &annotation.description {
                 if desc.trim().is_empty() {
                     return Err(AuraError::invalid(format!(
-                        "Journal annotation '{}' must have a non-empty description",
-                        name
+                        "Journal annotation '{name}' must have a non-empty description"
                     )));
                 }
             }
@@ -295,7 +293,7 @@ impl JournalCouplingParser {
                 .strip_prefix("Δ")
                 .unwrap_or("") // safe due to starts_with check above
                 .trim();
-            Ok(JournalAnnotation::add_facts(format!("Delta: {}", desc)))
+            Ok(JournalAnnotation::add_facts(format!("Delta: {desc}")))
         } else {
             Ok(JournalAnnotation::merge(inner.to_string()))
         }

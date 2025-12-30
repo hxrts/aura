@@ -164,7 +164,7 @@ impl KeyMaterial {
     ) -> Result<&Ed25519VerifyingKey> {
         self.authority_keys.get(authority_id).ok_or_else(|| {
             AuthenticationError::InvalidAuthoritySignature {
-                details: format!("Unknown authority: {}", authority_id),
+                details: format!("Unknown authority: {authority_id}"),
             }
         })
     }
@@ -185,7 +185,7 @@ impl KeyMaterial {
     ) -> Result<&Ed25519VerifyingKey> {
         self.guardian_keys.get(guardian_id).ok_or_else(|| {
             AuthenticationError::InvalidGuardianSignature {
-                details: format!("Unknown guardian: {}", guardian_id),
+                details: format!("Unknown guardian: {guardian_id}"),
             }
         })
     }
@@ -206,7 +206,7 @@ impl KeyMaterial {
     ) -> Result<&Ed25519VerifyingKey> {
         self.group_keys.get(account_id).ok_or_else(|| {
             AuthenticationError::InvalidThresholdSignature {
-                details: format!("No group key for account: {}", account_id),
+                details: format!("No group key for account: {account_id}"),
             }
         })
     }

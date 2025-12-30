@@ -66,7 +66,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
     };
 
     // Header props
-    let header_props = ModalHeaderProps::new(title.clone());
+    let header_props = ModalHeaderProps::new(title);
 
     // Footer props - conditionally include "Space" hint for multi-select
     let mut footer_hints = vec![
@@ -84,7 +84,7 @@ pub fn ContactSelectModal(props: &ContactSelectModalProps) -> impl Into<AnyEleme
 
     // Error status
     let error_status = if !error.is_empty() {
-        ModalStatus::Error(error.clone())
+        ModalStatus::Error(error)
     } else {
         ModalStatus::Idle
     };

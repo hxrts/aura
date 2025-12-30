@@ -339,7 +339,7 @@ impl InvitationService {
             EffectCommand::JournalAppend { fact },
             EffectCommand::NotifyPeer {
                 peer: receiver_id,
-                invitation_id: invitation_id.clone(),
+                invitation_id: invitation_id,
             },
             EffectCommand::RecordReceipt {
                 operation: "send_invitation".to_string(),

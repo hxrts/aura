@@ -156,10 +156,10 @@ impl ParticipantIdentity {
     /// Get a display name for this participant
     pub fn display_name(&self) -> String {
         match self {
-            Self::Device(id) => format!("Device:{}", id),
-            Self::Guardian(id) => format!("Guardian:{}", id),
+            Self::Device(id) => format!("Device:{id}"),
+            Self::Guardian(id) => format!("Guardian:{id}"),
             Self::GroupMember { group, member } => {
-                format!("GroupMember:{}:{}", group, member)
+                format!("GroupMember:{group}:{member}")
             }
         }
     }
@@ -170,10 +170,10 @@ impl ParticipantIdentity {
     /// so it avoids characters that tend to be awkward in filesystem-like keys.
     pub fn storage_key(&self) -> String {
         match self {
-            Self::Device(id) => format!("device_{}", id),
-            Self::Guardian(id) => format!("guardian_{}", id),
+            Self::Device(id) => format!("device_{id}"),
+            Self::Guardian(id) => format!("guardian_{id}"),
             Self::GroupMember { group, member } => {
-                format!("group_{}_member_{}", group, member)
+                format!("group_{group}_member_{member}")
             }
         }
     }

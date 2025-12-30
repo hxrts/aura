@@ -131,8 +131,7 @@ impl AuraHandlerFactory {
         // Production handler assembly is owned by aura-agent.
         let _ = device_id;
         Err(AuraHandlerError::HandlerCreationFailed {
-            source: Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            source: Box::new(std::io::Error::other(
                 "Production handler assembly is owned by aura-agent",
             )),
         })

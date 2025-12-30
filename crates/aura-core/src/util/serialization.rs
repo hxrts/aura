@@ -31,7 +31,7 @@ pub type Result<T> = std::result::Result<T, SerializationError>;
 /// Serialize any serde-compatible type to DAG-CBOR bytes
 pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     serde_ipld_dagcbor::to_vec(value).map_err(|e| {
-        SerializationError::InvalidFormat(format!("Failed to serialize to DAG-CBOR: {}", e))
+        SerializationError::InvalidFormat(format!("Failed to serialize to DAG-CBOR: {e}"))
     })
 }
 

@@ -283,10 +283,7 @@ impl MockTerminalHandler {
         if let Some(frame) = self.frame_at(index) {
             assert!(
                 frame.contains(text),
-                "Expected frame {} to contain '{}', but it was not found.\nFrame content:\n{}",
-                index,
-                text,
-                frame
+                "Expected frame {index} to contain '{text}', but it was not found.\nFrame content:\n{frame}"
             );
         } else {
             panic!(
@@ -302,8 +299,7 @@ impl MockTerminalHandler {
         let actual = self.frame_count();
         assert_eq!(
             actual, expected,
-            "Expected {} frames, but got {}",
-            expected, actual
+            "Expected {expected} frames, but got {actual}"
         );
     }
 
@@ -315,8 +311,7 @@ impl MockTerminalHandler {
         if let Some(frame) = self.last_frame() {
             assert!(
                 predicate(&frame),
-                "Frame assertion failed.\nFrame content:\n{}",
-                frame
+                "Frame assertion failed.\nFrame content:\n{frame}"
             );
         } else {
             panic!("No frames captured");

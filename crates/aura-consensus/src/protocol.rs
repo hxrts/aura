@@ -257,17 +257,17 @@ impl ConsensusProtocol {
                 // Initialize pure core state for invariant validation
                 // Quint: startConsensus action / Lean: Consensus.Agreement
                 let core_state = CoreState {
-                    cid: format!("{}", consensus_id),
+                    cid: format!("{consensus_id}"),
                     operation: String::new(), // Set from operation_bytes if needed
-                    prestate_hash: format!("{:?}", prestate_hash),
+                    prestate_hash: format!("{prestate_hash:?}"),
                     threshold: self.config.threshold as usize,
                     witnesses: self
                         .config
                         .witness_set
                         .iter()
-                        .map(|w| format!("{}", w))
+                        .map(|w| format!("{w}"))
                         .collect(),
-                    initiator: format!("{}", coordinator),
+                    initiator: format!("{coordinator}"),
                     phase: CorePhase::FastPathActive,
                     proposals: Vec::new(),
                     commit_fact: None,
@@ -329,7 +329,7 @@ impl ConsensusProtocol {
             ConsensusMessage::ConsensusResult { commit_fact } => {
                 // Verify and store result
                 commit_fact.verify().map_err(|e| {
-                    AuraError::internal(format!("CommitFact verification failed: {}", e))
+                    AuraError::internal(format!("CommitFact verification failed: {e}"))
                 })?;
                 self.instances
                     .write()
@@ -361,7 +361,7 @@ impl ConsensusProtocol {
                 .try_into()
                 .map_err(|_| AuraError::crypto("Invalid signing share length"))?,
         )
-        .map_err(|e| AuraError::crypto(format!("Invalid signing share: {}", e)))?;
+        .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))?;
 
         let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
         let commitment = NonceCommitment {
@@ -369,8 +369,7 @@ impl ConsensusProtocol {
             commitment: nonces
                 .commitments()
                 .serialize()
-                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {}", e)))?
-                .to_vec(),
+                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {e}")))?,
         };
 
         // Cache nonce token for signing when SignRequest arrives
@@ -412,7 +411,7 @@ impl ConsensusProtocol {
                     .try_into()
                     .map_err(|_| AuraError::crypto("Invalid signing share length"))?,
             )
-            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {e}")))?;
             let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
             let commitment = NonceCommitment {
                 signer: share.identifier,
@@ -420,9 +419,8 @@ impl ConsensusProtocol {
                     .commitments()
                     .serialize()
                     .map_err(|e| {
-                        AuraError::crypto(format!("Failed to serialize commitments: {}", e))
-                    })?
-                    .to_vec(),
+                        AuraError::crypto(format!("Failed to serialize commitments: {e}"))
+                    })?,
             };
             instance.tracker.add_nonce(self.authority_id, commitment);
             NonceToken::from(nonces)
@@ -536,7 +534,7 @@ impl ConsensusProtocol {
             .clone()
             .try_into()
             .map_err(|e: String| {
-                AuraError::crypto(format!("Invalid group public key package: {}", e))
+                AuraError::crypto(format!("Invalid group public key package: {e}"))
             })?;
 
         let mut commitments = BTreeMap::new();
@@ -551,7 +549,7 @@ impl ConsensusProtocol {
             &commitments,
             &frost_group_pkg,
         )
-        .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {}", e)))?;
+        .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {e}")))?;
 
         let threshold_signature = aura_core::frost::ThresholdSignature {
             signature: aggregated_sig,

@@ -180,13 +180,13 @@ pub struct HandlerDiagnostics {
 #[derive(Debug, Clone, Default)]
 pub struct HandlerMetrics {
     /// For CmHandler: number of applied operations
-    pub applied_operations: Option<usize>,
+    pub applied_operations: Option<u32>,
     /// For MvHandler: number of constraints applied
-    pub constraints_applied: Option<usize>,
+    pub constraints_applied: Option<u32>,
     /// For DeltaHandler: fold threshold
-    pub fold_threshold: Option<usize>,
+    pub fold_threshold: Option<u32>,
     /// For MvHandler: number of consistency proofs received
-    pub consistency_proofs: Option<usize>,
+    pub consistency_proofs: Option<u32>,
 }
 
 #[cfg(test)]

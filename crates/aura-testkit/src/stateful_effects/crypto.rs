@@ -122,7 +122,7 @@ impl CryptoCoreEffects for MockCryptoHandler {
         context: &KeyDerivationContext,
     ) -> Result<Vec<u8>, CryptoError> {
         // Mock implementation - deterministic key based on context
-        let key_bytes = format!("{:?}", context).as_bytes().to_vec();
+        let key_bytes = format!("{context:?}").as_bytes().to_vec();
         Ok(key_bytes)
     }
 
@@ -328,14 +328,12 @@ impl CryptoExtendedEffects for MockCryptoHandler {
             Ok(SigningKeyGenResult {
                 key_packages: vec![key_package.to_bytes().map_err(|e| {
                     aura_core::effects::crypto::CryptoError::invalid(format!(
-                        "key package serialization: {}",
-                        e
+                        "key package serialization: {e}"
                     ))
                 })?],
                 public_key_package: public_package.to_bytes().map_err(|e| {
                     aura_core::effects::crypto::CryptoError::invalid(format!(
-                        "public package serialization: {}",
-                        e
+                        "public package serialization: {e}"
                     ))
                 })?,
                 mode: SigningMode::SingleSigner,
@@ -349,9 +347,8 @@ impl CryptoExtendedEffects for MockCryptoHandler {
             })
         } else {
             Err(CryptoError::invalid(format!(
-                "Invalid signing configuration: threshold={}, max_signers={}. \
-                 Use 1-of-1 for single-signer or threshold>=2 for multi-party.",
-                threshold, max_signers
+                "Invalid signing configuration: threshold={threshold}, max_signers={max_signers}. \
+                 Use 1-of-1 for single-signer or threshold>=2 for multi-party."
             )))
         }
     }
@@ -365,7 +362,7 @@ impl CryptoExtendedEffects for MockCryptoHandler {
         match mode {
             SigningMode::SingleSigner => {
                 let package = SingleSignerKeyPackage::from_bytes(key_package).map_err(|e| {
-                    CryptoError::invalid(format!("Invalid single-signer key package: {}", e))
+                    CryptoError::invalid(format!("Invalid single-signer key package: {e}"))
                 })?;
                 self.ed25519_sign(message, package.signing_key()).await
             }
@@ -387,8 +384,7 @@ impl CryptoExtendedEffects for MockCryptoHandler {
                 let package = SingleSignerPublicKeyPackage::from_bytes(public_key_package)
                     .map_err(|e| {
                         CryptoError::invalid(format!(
-                            "Invalid single-signer public key package: {}",
-                            e
+                            "Invalid single-signer public key package: {e}"
                         ))
                     })?;
                 self.ed25519_verify(message, signature, package.verifying_key())

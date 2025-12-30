@@ -917,7 +917,7 @@ impl Service for SyncService {
                 self.time_effects
                     .physical_time()
                     .await
-                    .map_err(|e| aura_core::AuraError::internal(format!("Time error: {}", e)))?
+                    .map_err(|e| aura_core::AuraError::internal(format!("Time error: {e}")))?
                     .ts_ms
                     / 1000
             },

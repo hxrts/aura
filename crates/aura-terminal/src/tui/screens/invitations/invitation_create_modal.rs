@@ -107,7 +107,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
         } else if message.len() > 11 {
             format!("{}...│", &message[..8])
         } else {
-            format!("{}│", message)
+            format!("{message}│")
         }
     } else if message.is_empty() {
         "(optional)".to_string()
@@ -130,7 +130,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
         let base = if ttl_hours == 1 {
             "1 hour".to_string()
         } else if ttl_hours < 24 {
-            format!("{} hours", ttl_hours)
+            format!("{ttl_hours} hours")
         } else if ttl_hours == 24 {
             "1 day".to_string()
         } else if ttl_hours == 168 {
@@ -139,7 +139,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
             format!("{} days", ttl_hours / 24)
         };
         if ttl_focused {
-            format!("◀ {} ▶", base)
+            format!("◀ {base} ▶")
         } else {
             base
         }
@@ -147,7 +147,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
 
     // Type display with arrows when focused (no icon)
     let type_display = if type_focused {
-        format!("◀ {} ▶", type_label)
+        format!("◀ {type_label} ▶")
     } else {
         type_label.to_string()
     };
@@ -158,7 +158,7 @@ pub fn InvitationCreateModal(props: &InvitationCreateModalProps) -> impl Into<An
 
     // Status for error
     let status = if has_error {
-        ModalStatus::Error(error.clone())
+        ModalStatus::Error(error)
     } else {
         ModalStatus::Idle
     };

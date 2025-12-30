@@ -31,7 +31,7 @@ pub(crate) fn participant_identity_to_authority_id(
 
 pub(crate) fn membership_hash_from_participants(participants: &[AuthorityId]) -> Hash32 {
     let mut sorted = participants.to_vec();
-    sorted.sort_by(|a, b| a.to_bytes().cmp(&b.to_bytes()));
+    sorted.sort_by_key(|a| a.to_bytes());
     let mut bytes = Vec::with_capacity(sorted.len() * 16);
     for id in sorted {
         bytes.extend_from_slice(&id.to_bytes());

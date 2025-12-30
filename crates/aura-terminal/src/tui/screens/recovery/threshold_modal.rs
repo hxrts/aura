@@ -135,13 +135,13 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
 
     // Status for error display
     let status = if !error.is_empty() {
-        ModalStatus::Error(error.clone())
+        ModalStatus::Error(error)
     } else {
         ModalStatus::Idle
     };
 
     // Build threshold display text
-    let threshold_text = format!("{} of {} guardians required", k, n);
+    let threshold_text = format!("{k} of {n} guardians required");
 
     // Security level hint based on threshold
     let security_hint = if n == 0 {

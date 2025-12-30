@@ -197,10 +197,10 @@ impl SystemEffects for MonitoringSystemHandler {
     ) -> Result<(), SystemError> {
         let context_str = context
             .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
+            .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let full_message = format!("{} [{}]", message, context_str);
+        let full_message = format!("{message} [{context_str}]");
         self.log(level, component, &full_message).await
     }
 

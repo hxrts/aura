@@ -103,8 +103,7 @@ impl CapabilityGuard {
             Ok(_result) => Ok(true),
             Err(super::GuardError::AuthorizationFailed(_)) => Ok(false),
             Err(e) => Err(AuraError::permission_denied(format!(
-                "Guard error: {:?}",
-                e
+                "Guard error: {e:?}"
             ))),
         }
     }
@@ -164,8 +163,7 @@ impl CapabilityGuard {
                 },
             )),
             Err(e) => Err(AuraError::permission_denied(format!(
-                "Guard error: {:?}",
-                e
+                "Guard error: {e:?}"
             ))),
         }
     }
@@ -204,8 +202,7 @@ impl CapabilityGuard {
             Ok(_result) => Ok(true),
             Err(super::GuardError::AuthorizationFailed(_)) => Ok(false),
             Err(e) => Err(AuraError::permission_denied(format!(
-                "Guard error: {:?}",
-                e
+                "Guard error: {e:?}"
             ))),
         }
     }

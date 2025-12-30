@@ -19,14 +19,14 @@ impl DeviceTestFixture {
     /// Create a new device test fixture with a specific index
     pub fn new(index: usize) -> Self {
         // Deterministic UUID based on index
-        let hash_input = format!("device-fixture-{}", index);
+        let hash_input = format!("device-fixture-{index}");
         let hash_bytes = hash(hash_input.as_bytes());
         let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         let device_id = DeviceId(uuid);
         Self {
             device_id,
             index,
-            label: format!("device_{}", index),
+            label: format!("device_{index}"),
         }
     }
 
@@ -36,14 +36,14 @@ impl DeviceTestFixture {
         Self {
             device_id,
             index,
-            label: format!("device_{}", index),
+            label: format!("device_{index}"),
         }
     }
 
     /// Create a device fixture with a custom label
     pub fn with_label(index: usize, label: String) -> Self {
         // Deterministic UUID based on index
-        let hash_input = format!("device-fixture-{}", index);
+        let hash_input = format!("device-fixture-{index}");
         let hash_bytes = hash(hash_input.as_bytes());
         let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         let device_id = DeviceId(uuid);
@@ -121,17 +121,17 @@ impl DeviceSetBuilder {
                     .labels
                     .as_ref()
                     .and_then(|l| l.get(i).cloned())
-                    .unwrap_or_else(|| format!("device_{}", i));
+                    .unwrap_or_else(|| format!("device_{i}"));
 
                 let device_id = if let Some(seed) = self.base_seed {
                     // Deterministic generation from seed
-                    let hash_input = format!("{}-{}", seed, i);
+                    let hash_input = format!("{seed}-{i}");
                     let hash_bytes = hash(hash_input.as_bytes());
                     let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
                     DeviceId(Uuid::from_bytes(uuid_bytes))
                 } else {
                     // Deterministic generation based on index
-                    let hash_input = format!("device-set-{}", i);
+                    let hash_input = format!("device-set-{i}");
                     let hash_bytes = hash(hash_input.as_bytes());
                     let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
                     DeviceId(Uuid::from_bytes(uuid_bytes))

@@ -203,14 +203,14 @@ where
 
         let mut key_bytes = if self.secure.secure_exists(&location).await.map_err(|e| {
             StorageError::ConfigurationError {
-                reason: format!("Failed to check secure storage: {}", e),
+                reason: format!("Failed to check secure storage: {e}"),
             }
         })? {
             self.secure
                 .secure_retrieve(&location, &read_caps)
                 .await
                 .map_err(|e| StorageError::ConfigurationError {
-                    reason: format!("Failed to retrieve master key: {}", e),
+                    reason: format!("Failed to retrieve master key: {e}"),
                 })?
         } else {
             let key_bytes = self.crypto.random_bytes(32).await;
@@ -224,7 +224,7 @@ where
                 .secure_store(&location, &key_bytes, &write_caps)
                 .await
                 .map_err(|e| StorageError::ConfigurationError {
-                    reason: format!("Failed to store master key: {}", e),
+                    reason: format!("Failed to store master key: {e}"),
                 })?;
 
             key_bytes
@@ -246,7 +246,7 @@ where
                 .secure_store(&location, &regenerated, &write_caps)
                 .await
                 .map_err(|e| StorageError::ConfigurationError {
-                    reason: format!("Failed to store master key: {}", e),
+                    reason: format!("Failed to store master key: {e}"),
                 })?;
             key_bytes = regenerated;
         }
@@ -275,7 +275,7 @@ where
             )
             .await
             .map_err(|e| StorageError::EncryptionFailed {
-                reason: format!("Opaque key derivation failed: {}", e),
+                reason: format!("Opaque key derivation failed: {e}"),
             })?;
 
         // Encode as hex for filesystem-safe name
@@ -310,7 +310,7 @@ where
             )
             .await
             .map_err(|e| StorageError::EncryptionFailed {
-                reason: format!("Key derivation failed: {}", e),
+                reason: format!("Key derivation failed: {e}"),
             })?;
 
         let mut key = [0u8; 32];
@@ -369,7 +369,7 @@ where
         let version = blob[0];
         if version != BLOB_VERSION {
             return Err(StorageError::DecryptionFailed {
-                reason: format!("Unknown blob version: {}", version),
+                reason: format!("Unknown blob version: {version}"),
             });
         }
 

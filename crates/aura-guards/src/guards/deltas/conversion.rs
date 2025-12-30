@@ -136,8 +136,7 @@ pub fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOpera
             })
         }
         _ => Err(AuraError::invalid(format!(
-            "Unknown fact type: {}",
-            fact_type
+            "Unknown fact type: {fact_type}"
         ))),
     }
 }

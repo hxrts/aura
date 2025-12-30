@@ -280,7 +280,7 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     match Clipboard::new() {
         Ok(mut clipboard) => clipboard
             .set_text(text)
-            .map_err(|e| format!("Failed to copy: {}", e)),
+            .map_err(|e| format!("Failed to copy: {e}")),
         Err(e) => {
             // Log but don't fail - clipboard may not be available in all environments
             tracing::debug!("Clipboard unavailable: {}", e);

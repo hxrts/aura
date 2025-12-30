@@ -588,7 +588,7 @@ impl AntiEntropyProtocol {
         let local_journal = effects
             .get_journal()
             .await
-            .map_err(|e| sync_session_error(format!("Failed to get local journal: {}", e)))?;
+            .map_err(|e| sync_session_error(format!("Failed to get local journal: {e}")))?;
 
         // Currently uses empty operations list; transport-level sync fills in ops
         // this would come from the journal's operation log
@@ -675,7 +675,7 @@ impl AntiEntropyProtocol {
     {
         // Serialize local digest
         let digest_data = serde_json::to_vec(local_digest).map_err(|e| {
-            sync_serialization_error("digest", format!("Failed to serialize digest: {}", e))
+            sync_serialization_error("digest", format!("Failed to serialize digest: {e}"))
         })?;
 
         // Send digest to peer and wait for response
@@ -691,19 +691,18 @@ impl AntiEntropyProtocol {
             effects
                 .send_to_peer(peer.0, digest_data)
                 .await
-                .map_err(|e| sync_network_error(format!("Failed to send digest: {}", e)))?;
+                .map_err(|e| sync_network_error(format!("Failed to send digest: {e}")))?;
 
             // Receive peer's digest
             let (sender_id, remote_digest_data) = effects
                 .receive()
                 .await
-                .map_err(|e| sync_network_error(format!("Failed to receive digest: {}", e)))?;
+                .map_err(|e| sync_network_error(format!("Failed to receive digest: {e}")))?;
 
             // Verify sender
             if sender_id != peer.0 {
                 return Err(sync_session_error(format!(
-                    "Received digest from unexpected peer: expected {}, got {}",
-                    peer, sender_id
+                    "Received digest from unexpected peer: expected {peer}, got {sender_id}"
                 )));
             }
 
@@ -712,7 +711,7 @@ impl AntiEntropyProtocol {
                 .map_err(|e| {
                     sync_serialization_error(
                         "digest",
-                        format!("Failed to deserialize remote digest: {}", e),
+                        format!("Failed to deserialize remote digest: {e}"),
                     )
                 })?;
 
@@ -754,7 +753,7 @@ impl AntiEntropyProtocol {
 
         // Send request to peer
         let request_data = serde_json::to_vec(&request).map_err(|e| {
-            sync_serialization_error("request", format!("Failed to serialize request: {}", e))
+            sync_serialization_error("request", format!("Failed to serialize request: {e}"))
         })?;
 
         let pull_future = async {
@@ -762,19 +761,18 @@ impl AntiEntropyProtocol {
                 .send_to_peer(peer.0, request_data)
                 .await
                 .map_err(|e| {
-                    sync_network_error(format!("Failed to send operation request: {}", e))
+                    sync_network_error(format!("Failed to send operation request: {e}"))
                 })?;
 
             // Receive operations
             let (sender_id, ops_data) = effects
                 .receive()
                 .await
-                .map_err(|e| sync_network_error(format!("Failed to receive operations: {}", e)))?;
+                .map_err(|e| sync_network_error(format!("Failed to receive operations: {e}")))?;
 
             if sender_id != peer.0 {
                 return Err(sync_session_error(format!(
-                    "Received operations from unexpected peer: expected {}, got {}",
-                    peer, sender_id
+                    "Received operations from unexpected peer: expected {peer}, got {sender_id}"
                 )));
             }
 
@@ -782,7 +780,7 @@ impl AntiEntropyProtocol {
             let remote_ops: Vec<AttestedOp> = serde_json::from_slice(&ops_data).map_err(|e| {
                 sync_serialization_error(
                     "operations",
-                    format!("Failed to deserialize operations: {}", e),
+                    format!("Failed to deserialize operations: {e}"),
                 )
             })?;
 
@@ -825,7 +823,7 @@ impl AntiEntropyProtocol {
                                     tracing::error!("Failed to persist journal after sync: {}", e);
                                     return Err(crate::core::errors::sync_protocol_with_peer(
                                         "anti_entropy",
-                                        format!("Journal persistence failure: {}", e),
+                                        format!("Journal persistence failure: {e}"),
                                         peer,
                                     ));
                                 }
@@ -840,7 +838,7 @@ impl AntiEntropyProtocol {
                                 tracing::error!("Failed to merge journal facts: {}", e);
                                 return Err(crate::core::errors::sync_protocol_with_peer(
                                     "anti_entropy",
-                                    format!("Journal merge failed: {}", e),
+                                    format!("Journal merge failed: {e}"),
                                     peer,
                                 ));
                             }
@@ -850,7 +848,7 @@ impl AntiEntropyProtocol {
                         tracing::error!("Failed to convert operations to journal delta: {}", e);
                         return Err(crate::core::errors::sync_protocol_with_peer(
                             "anti_entropy",
-                            format!("Delta conversion failed: {}", e),
+                            format!("Delta conversion failed: {e}"),
                             peer,
                         ));
                     }
@@ -887,13 +885,13 @@ impl AntiEntropyProtocol {
             let fp = fingerprint(op).map_err(|e| {
                 sync_serialization_error(
                     "op_fingerprint",
-                    format!("Failed to fingerprint applied op: {}", e),
+                    format!("Failed to fingerprint applied op: {e}"),
                 )
             })?;
             let serialized = aura_core::util::serialization::to_vec(op).map_err(|e| {
                 sync_serialization_error(
                     "op_serialize",
-                    format!("Failed to serialize applied op: {}", e),
+                    format!("Failed to serialize applied op: {e}"),
                 )
             })?;
 
@@ -948,7 +946,7 @@ impl AntiEntropyProtocol {
             let ops_data = serde_json::to_vec(ops_to_send).map_err(|e| {
                 sync_serialization_error(
                     "operations",
-                    format!("Failed to serialize operations: {}", e),
+                    format!("Failed to serialize operations: {e}"),
                 )
             })?;
 
@@ -956,7 +954,7 @@ impl AntiEntropyProtocol {
             effects
                 .send_to_peer(peer.0, ops_data)
                 .await
-                .map_err(|e| sync_network_error(format!("Failed to push operations: {}", e)))?;
+                .map_err(|e| sync_network_error(format!("Failed to push operations: {e}")))?;
 
             tracing::info!("Pushed {} operations to peer {}", ops_to_send.len(), peer);
         }
@@ -1000,7 +998,7 @@ impl AntiEntropyProtocol {
         Ok(AntiEntropyResult {
             applied: pull_result.applied,
             duplicates: pull_result.duplicates,
-            applied_ops: pull_result.applied_ops.clone(),
+            applied_ops: pull_result.applied_ops,
             final_status: Some(DigestStatus::Diverged),
             rounds: 1,
         })
@@ -1013,17 +1011,17 @@ impl AntiEntropyProtocol {
         operations: &[AttestedOp],
     ) -> SyncResult<JournalDigest> {
         let fact_hash = hash_serialized(&journal.facts)
-            .map_err(|e| sync_session_error(format!("Failed to hash facts: {}", e)))?;
+            .map_err(|e| sync_session_error(format!("Failed to hash facts: {e}")))?;
 
         let caps_hash = hash_serialized(&journal.caps)
-            .map_err(|e| sync_session_error(format!("Failed to hash caps: {}", e)))?;
+            .map_err(|e| sync_session_error(format!("Failed to hash caps: {e}")))?;
 
         let mut h = hash::hasher();
         let mut last_epoch: Option<u64> = None;
 
         for op in operations {
             let fp = fingerprint(op)
-                .map_err(|e| sync_session_error(format!("Failed to fingerprint op: {}", e)))?;
+                .map_err(|e| sync_session_error(format!("Failed to fingerprint op: {e}")))?;
             h.update(&fp);
 
             let epoch = op.op.parent_epoch;
@@ -1094,7 +1092,7 @@ impl AntiEntropyProtocol {
         let mut seen = HashSet::with_capacity(local_ops.len());
         for op in local_ops.iter() {
             let fp = fingerprint(op)
-                .map_err(|e| sync_session_error(format!("Failed to fingerprint: {}", e)))?;
+                .map_err(|e| sync_session_error(format!("Failed to fingerprint: {e}")))?;
             seen.insert(fp);
         }
 
@@ -1104,7 +1102,7 @@ impl AntiEntropyProtocol {
 
         for op in incoming {
             let fp = fingerprint(&op)
-                .map_err(|e| sync_session_error(format!("Failed to fingerprint: {}", e)))?;
+                .map_err(|e| sync_session_error(format!("Failed to fingerprint: {e}")))?;
             if seen.insert(fp) {
                 applied_ops.push(op.clone());
                 local_ops.push(op);

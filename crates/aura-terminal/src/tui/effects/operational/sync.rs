@@ -36,7 +36,7 @@ pub async fn handle_sync(
 
             match result {
                 Ok(_) => Some(Ok(OpResponse::Ok)),
-                Err(e) => Some(Err(OpError::Failed(format!("Sync failed: {}", e)))),
+                Err(e) => Some(Err(OpError::Failed(format!("Sync failed: {e}")))),
             }
         }
 
@@ -46,12 +46,10 @@ pub async fn handle_sync(
 
             match result {
                 Ok(_) => Some(Ok(OpResponse::Data(format!(
-                    "Sync requested from peer: {}",
-                    peer_id
+                    "Sync requested from peer: {peer_id}"
                 )))),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to sync from peer {}: {}",
-                    peer_id, e
+                    "Failed to sync from peer {peer_id}: {e}"
                 )))),
             }
         }

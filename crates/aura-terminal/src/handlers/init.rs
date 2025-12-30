@@ -28,8 +28,7 @@ pub async fn handle_init(
 
     // Log initialization start
     output.println(format!(
-        "Initializing {}-of-{} threshold account",
-        threshold, num_devices
+        "Initializing {threshold}-of-{num_devices} threshold account"
     ));
     output.kv("Output directory", output_dir.display().to_string());
 
@@ -37,8 +36,7 @@ pub async fn handle_init(
     if threshold > num_devices {
         output.eprintln("Threshold cannot be greater than number of devices");
         return Err(TerminalError::Input(format!(
-            "Invalid parameters: threshold ({}) > num_devices ({})",
-            threshold, num_devices
+            "Invalid parameters: threshold ({threshold}) > num_devices ({num_devices})"
         )));
     }
 
@@ -59,12 +57,12 @@ pub async fn handle_init(
     ctx.effects()
         .store(&effect_api_path.display().to_string(), effect_api_data)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to create effect_api: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to create effect_api: {e}")))?;
 
     // Create device config files through storage effects
     for i in 1..=num_devices {
         let config_content = create_device_config(i, threshold, num_devices);
-        let config_path = configs_dir.join(format!("device_{}.toml", i));
+        let config_path = configs_dir.join(format!("device_{i}.toml"));
 
         // Create device config via StorageEffects
         let config_key = format!("device_config:{}", config_path.display());
@@ -73,12 +71,11 @@ pub async fn handle_init(
             .await
             .map_err(|e| {
                 TerminalError::Operation(format!(
-                    "Failed to create device config {} via storage effects: {}",
-                    i, e
+                    "Failed to create device config {i} via storage effects: {e}"
                 ))
             })?;
 
-        output.println(format!("Created device_{}.toml", i));
+        output.println(format!("Created device_{i}.toml"));
     }
 
     // Success message
@@ -98,22 +95,21 @@ async fn create_directory_through_effects(
         .effects()
         .physical_time()
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get physical time: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to get physical time: {e}")))?;
 
     let timestamp = TimeStamp::PhysicalClock(physical_time);
 
     // Create directory marker via StorageEffects with proper TimeStamp serialization
     let dir_marker_key = format!("directory_marker:{}", path.display());
     let timestamp_bytes = serde_json::to_vec(&timestamp)
-        .map_err(|e| TerminalError::Operation(format!("Failed to serialize timestamp: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to serialize timestamp: {e}")))?;
 
     ctx.effects()
         .store(&dir_marker_key, timestamp_bytes)
         .await
         .map_err(|e| {
             TerminalError::Operation(format!(
-                "Failed to create directory marker via storage effects: {}",
-                e
+                "Failed to create directory marker via storage effects: {e}"
             ))
         })?;
 
@@ -132,13 +128,12 @@ async fn create_effect_api(
         .effects()
         .physical_time()
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get physical time: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to get physical time: {e}")))?;
     let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
 
     // Create a simple CBOR-like structure
     let effect_api_data = format!(
-        "effect_api:threshold={},devices={},created={}",
-        threshold, num_devices, timestamp
+        "effect_api:threshold={threshold},devices={num_devices},created={timestamp}"
     );
 
     output.println("Created effect API metadata");

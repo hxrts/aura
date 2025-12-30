@@ -88,8 +88,8 @@ pub fn handle_queued_modal_key(
                 }
                 KeyCode::Char('c') => {
                     // Copy code to clipboard (c or Cmd+C)
-                    if !modal_state.code.is_empty() {
-                        if copy_to_clipboard(&modal_state.code).is_ok() {
+                    if !modal_state.code.is_empty()
+                        && copy_to_clipboard(&modal_state.code).is_ok() {
                             // Update state to show "copied" feedback
                             state.modal_queue.update_active(|m| {
                                 if let QueuedModal::ContactsCode(s) = m {
@@ -98,7 +98,6 @@ pub fn handle_queued_modal_key(
                             });
                             state.toast_success("Copied to clipboard");
                         }
-                    }
                 }
                 _ => {}
             }
@@ -236,7 +235,7 @@ fn handle_account_setup_key_queue(
         }
         KeyCode::Enter => {
             if current_state.can_submit() {
-                let name = current_state.display_name.clone();
+                let name = current_state.display_name;
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::AccountSetup(ref mut s) = modal {
                         s.start_creating();
@@ -549,7 +548,7 @@ fn handle_chat_create_key_queue(
                             if member_count == 1 { "" } else { "s" }
                         )
                     } else {
-                        format!("Created '{}'.", channel_name)
+                        format!("Created '{channel_name}'.")
                     };
                     state.toast_queue.enqueue(QueuedToast::new(
                         state.next_toast_id,
@@ -605,7 +604,7 @@ fn handle_chat_member_select_key_queue(
         }
         KeyCode::Enter => {
             let mut draft = modal_state.draft;
-            draft.member_ids = modal_state.picker.selected_ids.clone();
+            draft.member_ids = modal_state.picker.selected_ids;
             state.modal_queue.update_active(|modal| {
                 *modal = QueuedModal::ChatCreate(draft);
             });
@@ -628,7 +627,7 @@ fn handle_chat_topic_key_queue(
         KeyCode::Enter => {
             commands.push(TuiCommand::Dispatch(DispatchCommand::SetChannelTopic {
                 channel_id: modal_state.channel_id.clone(),
-                topic: modal_state.value.clone(),
+                topic: modal_state.value,
             }));
             state.modal_queue.dismiss();
         }
@@ -665,7 +664,7 @@ fn handle_nickname_key_queue(
             if modal_state.can_submit() {
                 let nickname = modal_state.value.trim().to_string();
                 commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateNickname {
-                    contact_id: modal_state.contact_id.clone(),
+                    contact_id: modal_state.contact_id,
                     nickname,
                 }));
                 state.modal_queue.dismiss();
@@ -736,7 +735,7 @@ fn handle_import_invitation_key_queue(
         KeyCode::Enter => {
             if modal_state.can_submit() {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::ImportInvitation {
-                    code: modal_state.code.clone(),
+                    code: modal_state.code,
                 }));
                 state.modal_queue.dismiss();
             }
@@ -805,7 +804,7 @@ fn handle_device_import_key_queue(
             if modal_state.can_submit() {
                 commands.push(TuiCommand::Dispatch(
                     DispatchCommand::ImportDeviceEnrollmentOnMobile {
-                        code: modal_state.code.clone(),
+                        code: modal_state.code,
                     },
                 ));
                 state.modal_queue.dismiss();
@@ -1058,18 +1057,19 @@ fn handle_guardian_setup_key_queue(
         GuardianSetupStep::CeremonyInProgress => {
             // During ceremony, allow escape to cancel once the ceremony has started.
             if key.code == KeyCode::Esc {
-                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id.clone() {
+                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id {
                     commands.push(TuiCommand::Dispatch(
                         DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
                     ));
                     state.modal_queue.dismiss();
                 } else {
-                    // Ceremony is still starting; keep the modal open and show a hint.
-                    state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::GuardianSetup(ref mut s) = modal {
-                            s.error = Some("Starting guardian ceremony…".to_string());
-                        }
-                    });
+                    state.modal_queue.dismiss();
+                    state.next_toast_id += 1;
+                    state.toast_queue.enqueue(QueuedToast::new(
+                        state.next_toast_id,
+                        "Guardian ceremony is still starting.",
+                        ToastLevel::Info,
+                    ));
                 }
             }
         }
@@ -1202,17 +1202,19 @@ fn handle_mfa_setup_key_queue(
         },
         GuardianSetupStep::CeremonyInProgress => {
             if key.code == KeyCode::Esc {
-                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id.clone() {
+                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id {
                     commands.push(TuiCommand::Dispatch(
                         DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
                     ));
                     state.modal_queue.dismiss();
                 } else {
-                    state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::MfaSetup(ref mut s) = modal {
-                            s.error = Some("Starting multifactor ceremony…".to_string());
-                        }
-                    });
+                    state.modal_queue.dismiss();
+                    state.next_toast_id += 1;
+                    state.toast_queue.enqueue(QueuedToast::new(
+                        state.next_toast_id,
+                        "Multifactor ceremony is still starting.",
+                        ToastLevel::Info,
+                    ));
                 }
             }
         }
@@ -1233,7 +1235,7 @@ fn handle_settings_display_name_key_queue(
         KeyCode::Enter => {
             if modal_state.can_submit() {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateDisplayName {
-                    display_name: modal_state.value.clone(),
+                    display_name: modal_state.value,
                 }));
                 state.modal_queue.dismiss();
             }
@@ -1270,7 +1272,7 @@ fn handle_settings_add_device_key_queue(
         KeyCode::Enter => {
             if modal_state.can_submit() {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
-                    name: modal_state.name.clone(),
+                    name: modal_state.name,
                 }));
                 state.modal_queue.dismiss();
             }
@@ -1314,14 +1316,14 @@ fn handle_settings_remove_device_key_queue(
         KeyCode::Enter => {
             if modal_state.confirm_focused {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
-                    device_id: modal_state.device_id.clone(),
+                    device_id: modal_state.device_id,
                 }));
             }
             state.modal_queue.dismiss();
         }
         KeyCode::Char('y') | KeyCode::Char('Y') => {
             commands.push(TuiCommand::Dispatch(DispatchCommand::RemoveDevice {
-                device_id: modal_state.device_id.clone(),
+                device_id: modal_state.device_id,
             }));
             state.modal_queue.dismiss();
         }
@@ -1385,7 +1387,7 @@ fn handle_device_enrollment_key_queue(
         KeyCode::Esc => {
             // If still in progress, Esc cancels the ceremony; otherwise, it just closes.
             if !modal_state.ceremony.is_complete && !modal_state.ceremony.has_failed {
-                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id.clone() {
+                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id {
                     commands.push(TuiCommand::Dispatch(
                         DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
                     ));
@@ -1395,8 +1397,8 @@ fn handle_device_enrollment_key_queue(
         }
         KeyCode::Char('c') => {
             // Copy enrollment code to clipboard (c or Cmd+C)
-            if !modal_state.enrollment_code.is_empty() {
-                if copy_to_clipboard(&modal_state.enrollment_code).is_ok() {
+            if !modal_state.enrollment_code.is_empty()
+                && copy_to_clipboard(&modal_state.enrollment_code).is_ok() {
                     // Update state to show "copied" feedback
                     state.modal_queue.update_active(|m| {
                         if let QueuedModal::SettingsDeviceEnrollment(s) = m {
@@ -1405,7 +1407,6 @@ fn handle_device_enrollment_key_queue(
                     });
                     state.toast_success("Copied to clipboard");
                 }
-            }
         }
         _ => {}
     }

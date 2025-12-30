@@ -127,6 +127,7 @@ impl HandlerContext {
 
 /// Options for bulk registering default handlers.
 #[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub struct RegisterAllOptions {
     /// Allow registering impure handlers that touch OS resources.
     ///
@@ -142,13 +143,6 @@ impl RegisterAllOptions {
     }
 }
 
-impl Default for RegisterAllOptions {
-    fn default() -> Self {
-        Self {
-            allow_impure: false,
-        }
-    }
-}
 
 /// Error type for handler operations
 #[derive(Debug, Error)]

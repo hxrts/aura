@@ -110,7 +110,7 @@ impl PersistentTreeHandler {
         let index_bytes = storage
             .retrieve(tree_storage::TREE_OPS_INDEX_KEY)
             .await
-            .map_err(|e| AuraError::storage(format!("Failed to load tree ops index: {}", e)))?;
+            .map_err(|e| AuraError::storage(format!("Failed to load tree ops index: {e}")))?;
 
         let op_hashes: Vec<[u8; 32]> = match index_bytes {
             Some(bytes) => tree_storage::deserialize_op_index(&bytes)?,
@@ -124,8 +124,8 @@ impl PersistentTreeHandler {
             let op_bytes = storage
                 .retrieve(&key)
                 .await
-                .map_err(|e| AuraError::storage(format!("Failed to load tree op {}: {}", key, e)))?
-                .ok_or_else(|| AuraError::storage(format!("Missing tree op: {}", key)))?;
+                .map_err(|e| AuraError::storage(format!("Failed to load tree op {key}: {e}")))?
+                .ok_or_else(|| AuraError::storage(format!("Missing tree op: {key}")))?;
 
             let op: AttestedOp = tree_storage::deserialize_op(&op_bytes)?;
             ops.push(op);
@@ -144,7 +144,7 @@ impl PersistentTreeHandler {
         self.storage
             .store(&key, op_bytes)
             .await
-            .map_err(|e| AuraError::storage(format!("Failed to store tree op: {}", e)))?;
+            .map_err(|e| AuraError::storage(format!("Failed to store tree op: {e}")))?;
 
         // Update the index
         let hashes: Vec<[u8; 32]> = {
@@ -164,7 +164,7 @@ impl PersistentTreeHandler {
         self.storage
             .store(tree_storage::TREE_OPS_INDEX_KEY, index_bytes)
             .await
-            .map_err(|e| AuraError::storage(format!("Failed to store ops index: {}", e)))?;
+            .map_err(|e| AuraError::storage(format!("Failed to store ops index: {e}")))?;
 
         Ok(())
     }
@@ -341,7 +341,7 @@ impl TreeEffects for PersistentTreeHandler {
             .storage
             .list_keys(Some(tree_storage::TREE_OPS_PREFIX))
             .await
-            .map_err(|e| AuraError::storage(format!("Failed to list tree ops: {}", e)))?;
+            .map_err(|e| AuraError::storage(format!("Failed to list tree ops: {e}")))?;
 
         for key in keys {
             let _ = self.storage.remove(&key).await;

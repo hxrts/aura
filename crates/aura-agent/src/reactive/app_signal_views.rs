@@ -459,7 +459,7 @@ impl ReactiveView for RecoverySignalView {
                             // Replace guardian set with the ceremony-completed list.
                             state
                                 .guardians
-                                .retain(|g| guardian_ids.iter().any(|id| *id == g.id));
+                                .retain(|g| guardian_ids.contains(&g.id));
                             for guardian_id in guardian_ids {
                                 Self::ensure_guardian(&mut state, guardian_id);
                             }

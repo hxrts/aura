@@ -17,8 +17,7 @@ pub type MessageResult<T> = Result<T, AuraError>;
 /// Create an unsupported version error (maps to Invalid).
 pub fn unsupported_version_error(found: u16, max_supported: u16) -> AuraError {
     AuraError::invalid(format!(
-        "Unsupported wire format version: {}, max supported: {}",
-        found, max_supported
+        "Unsupported wire format version: {found}, max supported: {max_supported}"
     ))
 }
 
@@ -40,8 +39,7 @@ pub fn invalid_message_format_error(error: impl Into<String>) -> AuraError {
 /// Create an invalid envelope size error (maps to Invalid).
 pub fn invalid_envelope_size_error(expected: usize, actual: usize) -> AuraError {
     AuraError::invalid(format!(
-        "Invalid envelope size: expected {}, got {}",
-        expected, actual
+        "Invalid envelope size: expected {expected}, got {actual}"
     ))
 }
 
@@ -57,7 +55,6 @@ pub fn cid_mismatch_error(expected: impl Into<String>, computed: impl Into<Strin
 /// Create a message too large error (maps to Invalid).
 pub fn message_too_large_error(size: usize, limit: usize) -> AuraError {
     AuraError::invalid(format!(
-        "Message too large: {} bytes exceeds limit of {} bytes",
-        size, limit
+        "Message too large: {size} bytes exceeds limit of {limit} bytes"
     ))
 }

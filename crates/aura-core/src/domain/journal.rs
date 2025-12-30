@@ -168,7 +168,7 @@ impl Fact {
     ) {
         let key = key.into();
         let actor_id = actor_id.into();
-        let op_id = op_id.unwrap_or_else(|| format!("{}:{}:{}", actor_id, timestamp, key));
+        let op_id = op_id.unwrap_or_else(|| format!("{actor_id}:{timestamp}:{key}"));
 
         // Create add operation for OR-Set
         let add_op = FactOperation::Add {
@@ -176,7 +176,7 @@ impl Fact {
             value: value.clone(),
             timestamp,
             actor_id: actor_id.clone(),
-            op_id: op_id.clone(),
+            op_id,
         };
 
         self.entries.operation_set.insert(add_op);
@@ -224,7 +224,7 @@ impl Fact {
     ) {
         let key = key.into();
         let actor_id = actor_id.into();
-        let op_id = op_id.unwrap_or_else(|| format!("{}:{}:remove:{}", actor_id, timestamp, key));
+        let op_id = op_id.unwrap_or_else(|| format!("{actor_id}:{timestamp}:remove:{key}"));
 
         // Find all add operations for this key to remove them
         let add_ops_to_remove: Vec<_> = self
@@ -245,7 +245,7 @@ impl Fact {
                 key: key.clone(),
                 timestamp,
                 actor_id: actor_id.clone(),
-                op_id: format!("{}:{}", op_id, removed_op_id),
+                op_id: format!("{op_id}:{removed_op_id}"),
                 removed_op_id,
             };
             self.entries.operation_set.insert(remove_op);

@@ -21,7 +21,7 @@ impl TimeHandlerAdapter {
             physical: handler,
             #[allow(deprecated)]
             logical: aura_effects::time::LogicalClockHandler::new(),
-            order: aura_effects::time::OrderClockHandler::default(),
+            order: aura_effects::time::OrderClockHandler,
         }
     }
 }

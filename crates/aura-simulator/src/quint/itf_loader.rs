@@ -19,14 +19,14 @@ impl ITFLoader {
     /// Load an ITF trace from a JSON file
     pub fn load_from_file(path: impl AsRef<Path>) -> Result<ITFTrace> {
         let content = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| AuraError::invalid(format!("Failed to read ITF file: {}", e)))?;
+            .map_err(|e| AuraError::invalid(format!("Failed to read ITF file: {e}")))?;
         Self::parse_json(&content)
     }
 
     /// Parse ITF trace from JSON string
     pub fn parse_json(json: &str) -> Result<ITFTrace> {
         serde_json::from_str(json)
-            .map_err(|e| AuraError::invalid(format!("Failed to parse ITF JSON: {}", e)))
+            .map_err(|e| AuraError::invalid(format!("Failed to parse ITF JSON: {e}")))
     }
 
     /// Extract state sequence from ITF trace for state-diff based replay

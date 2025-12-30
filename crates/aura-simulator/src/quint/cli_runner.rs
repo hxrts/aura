@@ -149,7 +149,7 @@ impl QuintCliRunner {
         let output = Command::new(&quint_path)
             .arg("--version")
             .output()
-            .map_err(|e| QuintCliError::CliNotFound(format!("Cannot execute quint: {}", e)))?;
+            .map_err(|e| QuintCliError::CliNotFound(format!("Cannot execute quint: {e}")))?;
 
         if !output.status.success() {
             return Err(QuintCliError::CliNotFound(
@@ -177,14 +177,13 @@ impl QuintCliRunner {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(QuintCliError::ExecutionFailed(format!(
-                "Quint parse failed: {}",
-                stderr
+                "Quint parse failed: {stderr}"
             )));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let parse_result: QuintParseOutput = serde_json::from_str(&stdout).map_err(|e| {
-            QuintCliError::ParseFailed(format!("Failed to parse Quint JSON output: {}", e))
+            QuintCliError::ParseFailed(format!("Failed to parse Quint JSON output: {e}"))
         })?;
 
         Ok(parse_result)
@@ -200,7 +199,7 @@ impl QuintCliRunner {
         cmd.arg("verify").arg("--out=json").arg(spec_file);
 
         if let Some(steps) = max_steps {
-            cmd.arg(format!("--max-steps={}", steps));
+            cmd.arg(format!("--max-steps={steps}"));
         }
 
         let output = cmd.current_dir(&self.working_dir).output().await?;
@@ -208,8 +207,7 @@ impl QuintCliRunner {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(QuintCliError::ExecutionFailed(format!(
-                "Quint verify failed: {}",
-                stderr
+                "Quint verify failed: {stderr}"
             )));
         }
 
@@ -217,8 +215,7 @@ impl QuintCliRunner {
         let verify_result: QuintVerificationResult =
             serde_json::from_str(&stdout).map_err(|e| {
                 QuintCliError::ParseFailed(format!(
-                    "Failed to parse Quint verification output: {}",
-                    e
+                    "Failed to parse Quint verification output: {e}"
                 ))
             })?;
 
@@ -235,7 +232,7 @@ impl QuintCliRunner {
             .arg("run")
             .arg("--out=json")
             .arg("--init=true")
-            .arg(format!("--invariant={}", property_name))
+            .arg(format!("--invariant={property_name}"))
             .arg(spec_file)
             .current_dir(&self.working_dir)
             .output()
@@ -244,8 +241,7 @@ impl QuintCliRunner {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(QuintCliError::ExecutionFailed(format!(
-                "Quint property check failed: {}",
-                stderr
+                "Quint property check failed: {stderr}"
             )));
         }
 
@@ -273,8 +269,8 @@ impl QuintCliRunner {
         let output = AsyncCommand::new(&self.quint_path)
             .arg("run")
             .arg("--out=json")
-            .arg(format!("--max-samples={}", count))
-            .arg(format!("--max-steps={}", max_steps))
+            .arg(format!("--max-samples={count}"))
+            .arg(format!("--max-steps={max_steps}"))
             .arg("--trace")
             .arg(spec_file)
             .current_dir(&self.working_dir)
@@ -284,8 +280,7 @@ impl QuintCliRunner {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(QuintCliError::ExecutionFailed(format!(
-                "Quint trace generation failed: {}",
-                stderr
+                "Quint trace generation failed: {stderr}"
             )));
         }
 
@@ -319,7 +314,7 @@ impl QuintCliRunner {
                         if name.starts_with("inv_") || name.contains("invariant") {
                             invariants.push(QuintInvariant {
                                 name: name.clone(),
-                                description: format!("Invariant: {}", name),
+                                description: format!("Invariant: {name}"),
                                 expression: expr,
                                 source_location: "cli_runner".to_string(),
                                 enabled: true,
@@ -332,7 +327,7 @@ impl QuintCliRunner {
                             name.unwrap_or_else(|| "unnamed_assumption".to_string());
                         invariants.push(QuintInvariant {
                             name: assumption_name.clone(),
-                            description: format!("Assumption: {}", assumption_name),
+                            description: format!("Assumption: {assumption_name}"),
                             expression: expr,
                             source_location: "cli_runner".to_string(),
                             enabled: true,

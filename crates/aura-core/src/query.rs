@@ -493,7 +493,7 @@ impl fmt::Display for DatalogRule {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "{}", fact)?;
+                write!(f, "{fact}")?;
             }
         }
         Ok(())
@@ -526,7 +526,7 @@ impl fmt::Display for DatalogFact {
             if i > 0 {
                 write!(f, ", ")?;
             }
-            write!(f, "{}", arg)?;
+            write!(f, "{arg}")?;
         }
         write!(f, ")")
     }
@@ -565,10 +565,10 @@ impl fmt::Display for DatalogValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::String(s) => write!(f, "\"{}\"", s.replace('"', "\\\"")),
-            Self::Integer(n) => write!(f, "{}", n),
-            Self::Boolean(b) => write!(f, "{}", b),
-            Self::Variable(v) => write!(f, "${}", v),
-            Self::Symbol(s) => write!(f, "{}", s),
+            Self::Integer(n) => write!(f, "{n}"),
+            Self::Boolean(b) => write!(f, "{b}"),
+            Self::Variable(v) => write!(f, "${v}"),
+            Self::Symbol(s) => write!(f, "{s}"),
             Self::Null => write!(f, "null"),
         }
     }
@@ -697,7 +697,7 @@ impl FactPredicate {
         for (arg_name, arg_value) in args {
             predicate
                 .arg_patterns
-                .push(Some(format!("{}={}", arg_name, arg_value)));
+                .push(Some(format!("{arg_name}={arg_value}")));
         }
         predicate
     }
@@ -815,7 +815,7 @@ impl QueryCapability {
     pub fn to_biscuit_check(&self) -> String {
         let mut check = format!("check if right(\"{}\", \"{}\")", self.resource, self.action);
         for (key, value) in &self.constraints {
-            check.push_str(&format!(", {} == \"{}\"", key, value));
+            check.push_str(&format!(", {key} == \"{value}\""));
         }
         check
     }

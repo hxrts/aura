@@ -212,7 +212,7 @@ impl AmpChannelEffects for MockEffects {
         chan.gen += 1;
         Ok(AmpCiphertext {
             header,
-            ciphertext: params.plaintext.clone(),
+            ciphertext: params.plaintext,
         })
     }
 }
@@ -465,14 +465,12 @@ impl CryptoExtendedEffects for MockEffects {
             Ok(SigningKeyGenResult {
                 key_packages: vec![key_package.to_bytes().map_err(|e| {
                     aura_core::effects::crypto::CryptoError::invalid(format!(
-                        "key package serialization: {}",
-                        e
+                        "key package serialization: {e}"
                     ))
                 })?],
                 public_key_package: public_package.to_bytes().map_err(|e| {
                     aura_core::effects::crypto::CryptoError::invalid(format!(
-                        "public package serialization: {}",
-                        e
+                        "public package serialization: {e}"
                     ))
                 })?,
                 mode: SigningMode::SingleSigner,
@@ -486,9 +484,8 @@ impl CryptoExtendedEffects for MockEffects {
             })
         } else {
             Err(aura_core::AuraError::invalid(format!(
-                "Invalid signing configuration: threshold={}, max_signers={}. \
-                 Use 1-of-1 for single-signer or threshold>=2 for multi-party.",
-                threshold, max_signers
+                "Invalid signing configuration: threshold={threshold}, max_signers={max_signers}. \
+                 Use 1-of-1 for single-signer or threshold>=2 for multi-party."
             )))
         }
     }
@@ -503,8 +500,7 @@ impl CryptoExtendedEffects for MockEffects {
             SigningMode::SingleSigner => {
                 let package = SingleSignerKeyPackage::from_bytes(key_package).map_err(|e| {
                     aura_core::AuraError::invalid(format!(
-                        "Invalid single-signer key package: {}",
-                        e
+                        "Invalid single-signer key package: {e}"
                     ))
                 })?;
                 self.ed25519_sign(message, package.signing_key()).await
@@ -527,8 +523,7 @@ impl CryptoExtendedEffects for MockEffects {
                 let package = SingleSignerPublicKeyPackage::from_bytes(public_key_package)
                     .map_err(|e| {
                         aura_core::AuraError::invalid(format!(
-                            "Invalid single-signer public key package: {}",
-                            e
+                            "Invalid single-signer public key package: {e}"
                         ))
                     })?;
                 self.ed25519_verify(message, signature, package.verifying_key())
@@ -870,7 +865,7 @@ impl UdpEffects for MockEffects {
         &self,
         _addr: UdpEndpoint,
     ) -> Result<std::sync::Arc<dyn UdpEndpointEffects>, NetworkError> {
-        Ok(std::sync::Arc::new(MockUdpSocket::default()))
+        Ok(std::sync::Arc::new(MockUdpSocket))
     }
 }
 
@@ -917,7 +912,7 @@ impl aura_core::effects::ThresholdSigningEffects for MockEffects {
             threshold: 1,
             total_participants: 1,
             participants: vec![aura_core::threshold::ParticipantIdentity::guardian(
-                authority.clone(),
+                *authority,
             )],
             agreement_mode: aura_core::threshold::AgreementMode::Provisional,
         })
@@ -1003,7 +998,7 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
             .storage
             .get(&key)
             .cloned()
-            .ok_or_else(|| AuraError::storage(format!("Secure key not found: {}", key)))
+            .ok_or_else(|| AuraError::storage(format!("Secure key not found: {key}")))
     }
 
     async fn secure_delete(
@@ -1031,7 +1026,7 @@ impl aura_core::effects::SecureStorageEffects for MockEffects {
         namespace: &str,
         _required_capabilities: &[aura_core::effects::SecureStorageCapability],
     ) -> Result<Vec<String>, AuraError> {
-        let prefix = format!("secure_{}/", namespace);
+        let prefix = format!("secure_{namespace}/");
         let state = self.state.lock().unwrap();
         let keys: Vec<String> = state
             .storage

@@ -27,8 +27,7 @@ impl ThresholdConfig {
     pub fn new(threshold: u16, total_participants: u16) -> Result<Self, AuraError> {
         if threshold == 0 || threshold > total_participants {
             return Err(AuraError::coordination_failed(format!(
-                "Invalid threshold: {} must be between 1 and {}",
-                threshold, total_participants
+                "Invalid threshold: {threshold} must be between 1 and {total_participants}"
             )));
         }
         Ok(ThresholdConfig {
@@ -112,7 +111,7 @@ impl FrostParticipantId {
     /// Use `try_from()` for fallible conversion in production code.
     pub fn from_u16_unchecked(id: u16) -> Self {
         Self::try_from(id)
-            .unwrap_or_else(|_| panic!("FrostParticipantId must be non-zero, got {}", id))
+            .unwrap_or_else(|_| panic!("FrostParticipantId must be non-zero, got {id}"))
     }
 }
 

@@ -259,8 +259,7 @@ impl EffectInterpreter for SimulationEffectInterpreter {
                 let current_budget = state.get_budget(&authority);
                 if current_budget < amount {
                     return Err(AuraError::invalid(format!(
-                        "Insufficient budget: has {}, needs {}",
-                        current_budget, amount
+                        "Insufficient budget: has {current_budget}, needs {amount}"
                     )));
                 }
 

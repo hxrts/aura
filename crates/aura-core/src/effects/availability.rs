@@ -82,7 +82,7 @@ impl std::fmt::Display for AvailabilityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotFound { hash } => {
-                write!(f, "content not found: {}", hash)
+                write!(f, "content not found: {hash}")
             }
             Self::CapacityExceeded {
                 used,
@@ -91,16 +91,15 @@ impl std::fmt::Display for AvailabilityError {
             } => {
                 write!(
                     f,
-                    "capacity exceeded: {}/{} bytes used, {} bytes requested",
-                    used, limit, requested
+                    "capacity exceeded: {used}/{limit} bytes used, {requested} bytes requested"
                 )
             }
             Self::NoReachablePeers { peers_tried } => {
-                write!(f, "no reachable peers (tried {})", peers_tried)
+                write!(f, "no reachable peers (tried {peers_tried})")
             }
-            Self::NetworkError(msg) => write!(f, "network error: {}", msg),
-            Self::InvalidUnit(msg) => write!(f, "invalid unit: {}", msg),
-            Self::StorageError(msg) => write!(f, "storage error: {}", msg),
+            Self::NetworkError(msg) => write!(f, "network error: {msg}"),
+            Self::InvalidUnit(msg) => write!(f, "invalid unit: {msg}"),
+            Self::StorageError(msg) => write!(f, "storage error: {msg}"),
         }
     }
 }

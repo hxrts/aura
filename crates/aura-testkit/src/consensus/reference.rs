@@ -316,9 +316,9 @@ pub fn apply_share_ref(state: &ConsensusState, proposal: ShareProposal) -> Trans
         .any(|p| p.witness == proposal.witness && p.result_id != proposal.result_id);
 
     if is_equivocating {
-        new_state.equivocators.insert(proposal.witness.clone());
+        new_state.equivocators.insert(proposal.witness);
     } else {
-        new_state.proposals.push(proposal.clone());
+        new_state.proposals.push(proposal);
     }
 
     // Check if threshold is met after adding proposal
@@ -424,7 +424,7 @@ pub fn check_invariants_ref(state: &ConsensusState) -> Option<String> {
     // Invariant 4: equivocators subset of witnesses
     for eq in &state.equivocators {
         if !state.witnesses.contains(eq) {
-            return Some(format!("equivocator not in witness set: {}", eq));
+            return Some(format!("equivocator not in witness set: {eq}"));
         }
     }
 

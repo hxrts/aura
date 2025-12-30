@@ -904,8 +904,7 @@ impl CapabilitySoundnessVerifier {
 
         if !failed_properties.is_empty() {
             recommendations.push(format!(
-                "Address failed properties: {:?}",
-                failed_properties
+                "Address failed properties: {failed_properties:?}"
             ));
         }
 
@@ -919,8 +918,7 @@ impl CapabilitySoundnessVerifier {
 
         if !low_confidence_properties.is_empty() {
             recommendations.push(format!(
-                "Increase verification coverage for low-confidence properties: {:?}",
-                low_confidence_properties
+                "Increase verification coverage for low-confidence properties: {low_confidence_properties:?}"
             ));
         }
 

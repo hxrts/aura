@@ -184,7 +184,7 @@ impl ReplicationCoordinator {
         // Compute chunk layout from size without allocating content bytes
         use aura_store::plan_chunk_layout_from_size;
         plan_chunk_layout_from_size(content_size, config).map_err(|e| {
-            aura_core::AuraError::internal(format!("Failed to plan chunk layout: {}", e))
+            aura_core::AuraError::internal(format!("Failed to plan chunk layout: {e}"))
         })
     }
 

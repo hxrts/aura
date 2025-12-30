@@ -336,9 +336,9 @@ impl ConsensusSimulation {
             witness: witness.to_string(),
             result_id: result_id.to_string(),
             share: ShareData {
-                share_value: format!("share_{}", witness),
-                nonce_binding: format!("nonce_{}", witness),
-                data_binding: format!("binding_{}_{}", witness, result_id),
+                share_value: format!("share_{witness}"),
+                nonce_binding: format!("nonce_{witness}"),
+                data_binding: format!("binding_{witness}_{result_id}"),
             },
         };
 
@@ -349,7 +349,7 @@ impl ConsensusSimulation {
                     ByzantineBehavior::Equivocate => {
                         // Send conflicting proposal to half the witnesses
                         let mut alt_proposal = proposal.clone();
-                        alt_proposal.result_id = format!("{}_alt", result_id);
+                        alt_proposal.result_id = format!("{result_id}_alt");
 
                         let witnesses: Vec<_> = self.states.keys().cloned().collect();
                         for (i, to) in witnesses.iter().enumerate() {

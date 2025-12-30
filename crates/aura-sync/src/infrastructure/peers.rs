@@ -587,7 +587,7 @@ impl PeerManager {
         // Generated via: openssl rand -hex 32
         let dev_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
         let dev_key_bytes = hex::decode(dev_key_hex).map_err(|e| {
-            sync_peer_error("key_loading", format!("Failed to decode dev key: {}", e))
+            sync_peer_error("key_loading", format!("Failed to decode dev key: {e}"))
         })?;
 
         if dev_key_bytes.len() != 32 {
@@ -603,7 +603,7 @@ impl PeerManager {
         biscuit_auth::PublicKey::from_bytes(&key_array).map_err(|e| {
             sync_peer_error(
                 "key_loading",
-                format!("Failed to load root public key: {}", e),
+                format!("Failed to load root public key: {e}"),
             )
         })
     }

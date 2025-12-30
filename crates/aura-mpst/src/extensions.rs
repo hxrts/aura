@@ -254,8 +254,8 @@ impl ExtensionEffect for CompositeExtension {
         }
 
         // Deduplicate roles (basic approach)
-        all_roles.sort_by_key(|r| format!("{:?}", r));
-        all_roles.dedup_by_key(|r| format!("{:?}", r));
+        all_roles.sort_by_key(|r| format!("{r:?}"));
+        all_roles.dedup_by_key(|r| format!("{r:?}"));
 
         all_roles
     }

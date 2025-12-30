@@ -411,18 +411,18 @@ where
                     .effects
                     .get_journal()
                     .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to get journal: {}", e)))?;
+                    .map_err(|e| AuraError::invalid(format!("Failed to get journal: {e}")))?;
                 // Build a delta journal containing the new fact
                 let delta = Journal::with_facts(entry.fact.clone());
                 let merged = self
                     .effects
                     .merge_facts(&current, &delta)
                     .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {}", e)))?;
+                    .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {e}")))?;
                 self.effects
                     .persist_journal(&merged)
                     .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to persist journal: {}", e)))?;
+                    .map_err(|e| AuraError::invalid(format!("Failed to persist journal: {e}")))?;
                 Ok(EffectResult::Success)
             }
             EffectCommand::RecordLeakage { bits } => {
@@ -439,7 +439,7 @@ where
                 self.effects
                     .record_leakage(event)
                     .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to record leakage: {}", e)))?;
+                    .map_err(|e| AuraError::invalid(format!("Failed to record leakage: {e}")))?;
                 Ok(EffectResult::Success)
             }
             EffectCommand::StoreMetadata { key, value } => {
@@ -447,7 +447,7 @@ where
                 self.effects
                     .store(&key, value.into_bytes())
                     .await
-                    .map_err(|e| AuraError::internal(format!("store failed: {}", e)))?;
+                    .map_err(|e| AuraError::internal(format!("store failed: {e}")))?;
                 Ok(EffectResult::Success)
             }
             EffectCommand::SendEnvelope { .. } => Ok(EffectResult::Failure(
@@ -492,17 +492,17 @@ where
                     .effects
                     .get_journal()
                     .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to get journal: {}", e)))?;
+                    .map_err(|e| AuraError::invalid(format!("Failed to get journal: {e}")))?;
                 let delta = Journal::with_facts(entry.fact.clone());
                 let merged = self
                     .effects
                     .merge_facts(&current, &delta)
                     .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {}", e)))?;
+                    .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {e}")))?;
                 self.effects
                     .persist_journal(&merged)
                     .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to persist journal: {}", e)))?;
+                    .map_err(|e| AuraError::invalid(format!("Failed to persist journal: {e}")))?;
                 Ok(EffectResult::Success)
             }
             EffectCommand::RecordLeakage { bits } => {
@@ -519,14 +519,14 @@ where
                 self.effects
                     .record_leakage(event)
                     .await
-                    .map_err(|e| AuraError::invalid(format!("Failed to record leakage: {}", e)))?;
+                    .map_err(|e| AuraError::invalid(format!("Failed to record leakage: {e}")))?;
                 Ok(EffectResult::Success)
             }
             EffectCommand::StoreMetadata { key, value } => {
                 self.effects
                     .store(&key, value.into_bytes())
                     .await
-                    .map_err(|e| AuraError::internal(format!("store failed: {}", e)))?;
+                    .map_err(|e| AuraError::internal(format!("store failed: {e}")))?;
                 Ok(EffectResult::Success)
             }
             EffectCommand::SendEnvelope { .. } => Ok(EffectResult::Failure(

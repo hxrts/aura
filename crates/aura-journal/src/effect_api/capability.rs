@@ -58,21 +58,21 @@ impl ResourceRef {
     /// Create a recovery resource reference
     pub fn recovery(leaf_index: usize, epoch: u64) -> Self {
         Self {
-            uri: format!("journal://recovery/{}#{}", leaf_index, epoch),
+            uri: format!("journal://recovery/{leaf_index}#{epoch}"),
         }
     }
 
     /// Create a storage resource reference
     pub fn storage(path: &str) -> Self {
         Self {
-            uri: format!("storage://{}", path),
+            uri: format!("storage://{path}"),
         }
     }
 
     /// Create a relay resource reference
     pub fn relay(session_id: &str) -> Self {
         Self {
-            uri: format!("relay://{}", session_id),
+            uri: format!("relay://{session_id}"),
         }
     }
 

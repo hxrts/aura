@@ -54,7 +54,7 @@ pub struct ITFState {
 /// Load an ITF trace from a file
 pub fn load_itf_trace(path: &Path) -> Result<ITFTrace, AuraError> {
     let content = std::fs::read_to_string(path)
-        .map_err(|e| AuraError::invalid(format!("failed to read ITF file: {}", e)))?;
+        .map_err(|e| AuraError::invalid(format!("failed to read ITF file: {e}")))?;
 
     parse_itf_trace(&content)
 }
@@ -62,7 +62,7 @@ pub fn load_itf_trace(path: &Path) -> Result<ITFTrace, AuraError> {
 /// Parse an ITF trace from JSON string
 pub fn parse_itf_trace(json: &str) -> Result<ITFTrace, AuraError> {
     let value: Value = serde_json::from_str(json)
-        .map_err(|e| AuraError::invalid(format!("failed to parse ITF JSON: {}", e)))?;
+        .map_err(|e| AuraError::invalid(format!("failed to parse ITF JSON: {e}")))?;
 
     let meta = parse_meta(&value)?;
     let vars = parse_vars(&value)?;
@@ -306,7 +306,7 @@ fn parse_phase(value: Option<&Value>) -> Result<ConsensusPhase, AuraError> {
         "FallbackActive" => Ok(ConsensusPhase::FallbackActive),
         "ConsensusCommitted" => Ok(ConsensusPhase::Committed),
         "ConsensusFailed" => Ok(ConsensusPhase::Failed),
-        _ => Err(AuraError::invalid(format!("unknown phase: {}", tag))),
+        _ => Err(AuraError::invalid(format!("unknown phase: {tag}"))),
     }
 }
 

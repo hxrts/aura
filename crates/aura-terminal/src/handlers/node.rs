@@ -24,8 +24,7 @@ pub async fn handle_node(
     let mut output = CliOutput::new();
 
     output.println(format!(
-        "Starting node on port {} (daemon: {})",
-        port, daemon
+        "Starting node on port {port} (daemon: {daemon})"
     ));
     output.kv("Config", config_path.display().to_string());
 
@@ -75,12 +74,12 @@ async fn run_daemon_mode(
     // Simulate some startup delay and health checks
     simulate_startup_delay(ctx, output).await?;
 
-    output.println(format!("Node daemon started successfully on port {}", port));
+    output.println(format!("Node daemon started successfully on port {port}"));
 
     // Run a short, effect-driven heartbeat loop to verify the node can make progress
     for idx in 0..3 {
         ctx.effects().sleep_ms(200).await.map_err(|e| {
-            TerminalError::Operation(format!("daemon heartbeat sleep failed: {}", e))
+            TerminalError::Operation(format!("daemon heartbeat sleep failed: {e}"))
         })?;
         let epoch = ctx.effects().current_epoch().await.unwrap_or(0);
         output.println(format!("Daemon heartbeat {} at epoch {}", idx + 1, epoch));
@@ -96,8 +95,7 @@ async fn run_interactive_mode(
     output: &mut CliOutput,
 ) -> TerminalResult<()> {
     output.println(format!(
-        "Node started in interactive mode on port {}. Press Ctrl+C to stop.",
-        port
+        "Node started in interactive mode on port {port}. Press Ctrl+C to stop."
     ));
 
     let start_time = ctx.effects().current_epoch().await.unwrap_or(0);
@@ -128,7 +126,7 @@ async fn simulate_startup_delay(
         ctx.effects()
             .sleep_ms(25)
             .await
-            .map_err(|e| TerminalError::Operation(format!("startup sleep failed: {}", e)))?;
+            .map_err(|e| TerminalError::Operation(format!("startup sleep failed: {e}")))?;
     }
 
     output.println("Startup complete");
@@ -143,13 +141,13 @@ async fn simulate_interactive_session(
 ) -> TerminalResult<()> {
     for i in 1..=3 {
         let current = ctx.effects().current_epoch().await.unwrap_or(0);
-        output.println(format!("Interactive tick {} at epoch {}", i, current));
+        output.println(format!("Interactive tick {i} at epoch {current}"));
 
         // Simulate some work
         ctx.effects()
             .sleep_ms(50)
             .await
-            .map_err(|e| TerminalError::Operation(format!("interactive sleep failed: {}", e)))?;
+            .map_err(|e| TerminalError::Operation(format!("interactive sleep failed: {e}")))?;
     }
 
     output.println("Interactive session ended (simulated)");

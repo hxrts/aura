@@ -17,13 +17,12 @@ impl AddressResolver {
     pub async fn resolve(host: &str, port: u16) -> TransportResult<Vec<SocketAddr>> {
         let addresses: Vec<_> = tokio::net::lookup_host((host, port))
             .await
-            .map_err(|e| TransportError::ConnectionFailed(format!("DNS resolution failed: {}", e)))?
+            .map_err(|e| TransportError::ConnectionFailed(format!("DNS resolution failed: {e}")))?
             .collect();
 
         if addresses.is_empty() {
             return Err(TransportError::ConnectionFailed(format!(
-                "No addresses found for {}",
-                host
+                "No addresses found for {host}"
             )));
         }
 
@@ -47,8 +46,7 @@ impl AddressResolver {
 
         // For hostnames, we'd need async resolution
         Err(TransportError::Protocol(format!(
-            "Hostname resolution not supported in synchronous context: {}",
-            host
+            "Hostname resolution not supported in synchronous context: {host}"
         )))
     }
 
@@ -76,7 +74,7 @@ impl TimeoutHelper {
     {
         timeout(duration, operation)
             .await
-            .map_err(|_| TransportError::Timeout(format!("{} timeout", operation_name)))?
+            .map_err(|_| TransportError::Timeout(format!("{operation_name} timeout")))?
     }
 
     /// Create exponential backoff delay
@@ -124,8 +122,7 @@ impl BufferUtils {
 
         if size > max_size {
             return Err(TransportError::Protocol(format!(
-                "Buffer size {} exceeds maximum {}",
-                size, max_size
+                "Buffer size {size} exceeds maximum {max_size}"
             )));
         }
 
@@ -241,8 +238,7 @@ impl UrlValidator {
             "ws" | "wss" => {}
             other => {
                 return Err(TransportError::Protocol(format!(
-                    "Invalid WebSocket scheme: {}",
-                    other
+                    "Invalid WebSocket scheme: {other}"
                 )))
             }
         }
@@ -259,6 +255,6 @@ impl UrlValidator {
     /// Validate TCP connection string
     pub fn validate_tcp_address(addr: &str) -> TransportResult<SocketAddr> {
         addr.parse::<SocketAddr>()
-            .map_err(|e| TransportError::Protocol(format!("Invalid TCP address: {}", e)))
+            .map_err(|e| TransportError::Protocol(format!("Invalid TCP address: {e}")))
     }
 }

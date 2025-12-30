@@ -126,8 +126,7 @@ impl UpgradeProposal {
         let parts: Vec<&str> = version_str.split('.').collect();
         if parts.len() != 3 {
             return Err(AuraError::invalid(format!(
-                "Invalid version format: {}. Expected major.minor.patch",
-                version_str
+                "Invalid version format: {version_str}. Expected major.minor.patch"
             )));
         }
 
@@ -471,7 +470,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         // Create ceremony ID
@@ -512,7 +511,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         // Track if we need to emit threshold reached
@@ -699,7 +698,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         // Get the upgrade hash from the ceremony
@@ -820,7 +819,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
         let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
         let fact = OTACeremonyFact::CeremonyInitiated {
@@ -837,7 +836,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         };
 
         let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:initiated:{}", ceremony_id_hex);
+        let key = format!("ota:initiated:{ceremony_id_hex}");
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
         journal.facts.insert(key, FactValue::Bytes(fact_bytes));
@@ -856,7 +855,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
         let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
         let fact = OTACeremonyFact::CommitmentReceived {
@@ -888,7 +887,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
         let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
 
@@ -916,7 +915,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         };
 
         let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:threshold:{}", ceremony_id_hex);
+        let key = format!("ota:threshold:{ceremony_id_hex}");
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
         journal.facts.insert(key, FactValue::Bytes(fact_bytes));
@@ -937,7 +936,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
         let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
         let fact = OTACeremonyFact::CeremonyCommitted {
@@ -953,7 +952,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         };
 
         let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:committed:{}", ceremony_id_hex);
+        let key = format!("ota:committed:{ceremony_id_hex}");
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
         journal.facts.insert(key, FactValue::Bytes(fact_bytes));
@@ -972,7 +971,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
         let ceremony_id_hex = hex::encode(ceremony_id.0.as_bytes());
         let fact = OTACeremonyFact::CeremonyAborted {
@@ -983,7 +982,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         };
 
         let mut journal = self.effects.get_journal().await?;
-        let key = format!("ota:aborted:{}", ceremony_id_hex);
+        let key = format!("ota:aborted:{ceremony_id_hex}");
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
         journal.facts.insert(key, FactValue::Bytes(fact_bytes));

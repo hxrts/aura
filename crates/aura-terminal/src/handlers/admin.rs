@@ -41,14 +41,13 @@ async fn replace_admin(
 
     let account_id: AccountId = account
         .parse()
-        .map_err(|e: uuid::Error| TerminalError::Input(format!("{}", e)))?;
+        .map_err(|e: uuid::Error| TerminalError::Input(format!("{e}")))?;
     let new_admin_id: AuthorityId = new_admin
         .parse()
-        .map_err(|e: uuid::Error| TerminalError::Input(format!("{}", e)))?;
+        .map_err(|e: uuid::Error| TerminalError::Input(format!("{e}")))?;
 
     output.println(format!(
-        "Replacing admin for account {} with {} (activation epoch {})",
-        account_id, new_admin_id, activation_epoch
+        "Replacing admin for account {account_id} with {new_admin_id} (activation epoch {activation_epoch})"
     ));
 
     // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
@@ -66,32 +65,31 @@ async fn replace_admin(
     let fact_value = serde_json::to_vec(&fact_content)
         .map(FactValue::Bytes)
         .map_err(|e| {
-            TerminalError::Operation(format!("Failed to encode admin replacement fact: {}", e))
+            TerminalError::Operation(format!("Failed to encode admin replacement fact: {e}"))
         })?;
 
     let mut delta = Journal::new();
-    let fact_key = format!("admin_replace:{}", account_id);
+    let fact_key = format!("admin_replace:{account_id}");
     delta.facts.insert(fact_key.clone(), fact_value);
 
     let current = ctx
         .effects()
         .get_journal()
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to load journal: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to load journal: {e}")))?;
     let merged = ctx
         .effects()
         .merge_facts(&current, &delta)
         .await
         .map_err(|e| {
-            TerminalError::Operation(format!("Failed to merge admin replacement fact: {}", e))
+            TerminalError::Operation(format!("Failed to merge admin replacement fact: {e}"))
         })?;
     ctx.effects().persist_journal(&merged).await.map_err(|e| {
-        TerminalError::Operation(format!("Failed to persist admin replacement fact: {}", e))
+        TerminalError::Operation(format!("Failed to persist admin replacement fact: {e}"))
     })?;
 
     output.println(format!(
-        "Admin replacement recorded; new admin {} activates at epoch {}",
-        new_admin_id, activation_epoch
+        "Admin replacement recorded; new admin {new_admin_id} activates at epoch {activation_epoch}"
     ));
 
     Ok(output)

@@ -249,8 +249,7 @@ impl JournalCoupler {
                         "Failed to persist optimistic journal changes"
                     );
                     aura_core::AuraError::internal(format!(
-                        "Optimistic journal persistence failed for operation '{}': {}",
-                        operation_id, e
+                        "Optimistic journal persistence failed for operation '{operation_id}': {e}"
                     ))
                 })?;
 
@@ -339,9 +338,8 @@ impl JournalCoupler {
                         "Failed to persist journal changes - operation succeeded but journal not committed"
                     );
                     aura_core::AuraError::internal(format!(
-                        "Journal persistence failed for operation '{}': {}. \
-                         Operation completed but journal state is inconsistent.",
-                        operation_id, e
+                        "Journal persistence failed for operation '{operation_id}': {e}. \
+                         Operation completed but journal state is inconsistent."
                     ))
                 })?;
 
@@ -425,8 +423,7 @@ impl JournalCoupler {
                         let delay_ms = 10 * (attempt + 1) as u64;
                         effect_system.sleep_ms(delay_ms).await.map_err(|e| {
                             aura_core::AuraError::internal(format!(
-                                "Failed to sleep during journal operation retry: {}",
-                                e
+                                "Failed to sleep during journal operation retry: {e}"
                             ))
                         })?;
                     }
@@ -582,7 +579,7 @@ impl JournalCoupler {
                         description: annotation
                             .description
                             .clone()
-                            .unwrap_or_else(|| format!("Custom operation: {}", custom_op)),
+                            .unwrap_or_else(|| format!("Custom operation: {custom_op}")),
                     };
                     Ok((final_journal, journal_op))
                 } else {
@@ -603,7 +600,7 @@ impl JournalCoupler {
                         description: annotation
                             .description
                             .clone()
-                            .unwrap_or_else(|| format!("Custom operation (no-op): {}", custom_op)),
+                            .unwrap_or_else(|| format!("Custom operation (no-op): {custom_op}")),
                     };
                     Ok((current_journal.clone(), journal_op))
                 }

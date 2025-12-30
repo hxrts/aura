@@ -324,8 +324,7 @@ impl DeliveryTracker {
         for sent_msg in sent.iter() {
             if !received.contains(sent_msg) {
                 return Err(AuraError::invalid(format!(
-                    "Message {:?} was sent but not received",
-                    sent_msg
+                    "Message {sent_msg:?} was sent but not received"
                 )));
             }
         }

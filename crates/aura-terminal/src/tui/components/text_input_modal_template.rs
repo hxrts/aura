@@ -70,7 +70,7 @@ pub fn TextInputModal(props: &TextInputModalProps) -> impl Into<AnyElement<'stat
 
     // Display text for input
     let display_value = if value.is_empty() {
-        placeholder.clone()
+        placeholder
     } else {
         value.clone()
     };
@@ -92,7 +92,7 @@ pub fn TextInputModal(props: &TextInputModalProps) -> impl Into<AnyElement<'stat
 
     // Status for error/loading
     let status = if !error.is_empty() {
-        ModalStatus::Error(error.clone())
+        ModalStatus::Error(error)
     } else if submitting {
         ModalStatus::Loading("Saving...".to_string())
     } else {

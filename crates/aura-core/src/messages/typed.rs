@@ -126,15 +126,14 @@ impl fmt::Display for AuthTag {
             } => {
                 write!(
                     f,
-                    "ThresholdSig({}/{})",
-                    participant_count, threshold_config
+                    "ThresholdSig({participant_count}/{threshold_config})"
                 )
             }
             AuthTag::Mac { algorithm, .. } => {
-                write!(f, "MAC({})", algorithm)
+                write!(f, "MAC({algorithm})")
             }
             AuthTag::AeadTag { algorithm, .. } => {
-                write!(f, "AEAD({})", algorithm)
+                write!(f, "AEAD({algorithm})")
             }
             AuthTag::None => write!(f, "NoAuth"),
         }
@@ -236,7 +235,7 @@ impl std::str::FromStr for SemanticVersion {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split('.').collect();
         if parts.len() != 3 {
-            return Err(format!("Invalid version format: {}", s));
+            return Err(format!("Invalid version format: {s}"));
         }
 
         let major = parts[0]

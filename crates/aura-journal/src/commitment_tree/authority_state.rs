@@ -148,8 +148,7 @@ impl AuthorityTreeState {
 
         if !self.active_leaves.contains(&leaf_id) {
             return Err(aura_core::AuraError::not_found(format!(
-                "Leaf {} not found or already removed",
-                leaf_index
+                "Leaf {leaf_index} not found or already removed"
             )));
         }
 

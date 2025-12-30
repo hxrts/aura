@@ -84,7 +84,7 @@ impl SimulationFaultHandler {
 
     fn next_fault_id(&self, prefix: &str) -> String {
         let id = self.fault_counter.fetch_add(1, Ordering::SeqCst);
-        format!("{}_{}", prefix, id)
+        format!("{prefix}_{id}")
     }
 
     /// Add fault to active tracking
@@ -154,7 +154,7 @@ impl ChaosEffects for SimulationFaultHandler {
         let fault_id = self.next_fault_id("corruption");
         self.track_fault(
             fault_id,
-            format!("MessageCorruption({:?})", corruption_type),
+            format!("MessageCorruption({corruption_type:?})"),
             None, // Permanent until stopped
         );
 
@@ -183,13 +183,13 @@ impl ChaosEffects for SimulationFaultHandler {
 
         let fault_id = self.next_fault_id("delay");
         let peers_desc = match affected_peers {
-            Some(ref peers) => format!("peers: {:?}", peers),
+            Some(ref peers) => format!("peers: {peers:?}"),
             None => "all peers".to_string(),
         };
 
         self.track_fault(
             fault_id,
-            format!("NetworkDelay({:?}, {})", delay_range, peers_desc),
+            format!("NetworkDelay({delay_range:?}, {peers_desc})"),
             None,
         );
 
@@ -284,8 +284,7 @@ impl ChaosEffects for SimulationFaultHandler {
         self.track_fault(
             fault_id,
             format!(
-                "ResourceExhaustion({:?}, {:.2})",
-                resource_type, constraint_level
+                "ResourceExhaustion({resource_type:?}, {constraint_level:.2})"
             ),
             None,
         );
@@ -317,8 +316,7 @@ impl ChaosEffects for SimulationFaultHandler {
         self.track_fault(
             fault_id,
             format!(
-                "TimingFaults(skew: {:?}, drift: {:.2})",
-                time_skew, clock_drift_rate
+                "TimingFaults(skew: {time_skew:?}, drift: {clock_drift_rate:.2})"
             ),
             None,
         );

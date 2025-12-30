@@ -56,13 +56,13 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
 
     // Build header with context info
     let header_text = if let Some(screen) = current_screen {
-        format!("Help - {}", screen)
+        format!("Help - {screen}")
     } else {
         "Keyboard Shortcuts".to_string()
     };
 
     // Header and footer props
-    let header_props = ModalHeaderProps::new(header_text.clone());
+    let header_props = ModalHeaderProps::new(header_text);
     let footer_props = ModalFooterProps::new(vec![
         KeyHint::new("Esc", "Close"),
         KeyHint::new("?", "Toggle"),
@@ -73,7 +73,7 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
         .into_iter()
         .take(4)
         .map(|(category, cmds)| {
-            let cat_name = category.clone();
+            let cat_name = category;
 
             // Build command items as 50% width grid cells
             let cmd_elements: Vec<AnyElement<'static>> = cmds

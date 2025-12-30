@@ -48,22 +48,22 @@ impl StorageCoreEffects for FilesystemStorageHandler {
             });
         }
 
-        let file_path = self.base_path.join(format!("{}.dat", key));
+        let file_path = self.base_path.join(format!("{key}.dat"));
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await.map_err(|e| {
-                StorageError::WriteFailed(format!("Failed to create directory: {}", e))
+                StorageError::WriteFailed(format!("Failed to create directory: {e}"))
             })?;
         }
 
         fs::write(&file_path, value)
             .await
-            .map_err(|e| StorageError::WriteFailed(format!("Failed to write file: {}", e)))?;
+            .map_err(|e| StorageError::WriteFailed(format!("Failed to write file: {e}")))?;
 
         Ok(())
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        let file_path = self.base_path.join(format!("{}.dat", key));
+        let file_path = self.base_path.join(format!("{key}.dat"));
 
         if !file_path.exists() {
             return Ok(None);
@@ -71,13 +71,13 @@ impl StorageCoreEffects for FilesystemStorageHandler {
 
         let data = fs::read(&file_path)
             .await
-            .map_err(|e| StorageError::ReadFailed(format!("Failed to read file: {}", e)))?;
+            .map_err(|e| StorageError::ReadFailed(format!("Failed to read file: {e}")))?;
 
         Ok(Some(data))
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-        let file_path = self.base_path.join(format!("{}.dat", key));
+        let file_path = self.base_path.join(format!("{key}.dat"));
 
         if !file_path.exists() {
             return Ok(false);
@@ -85,7 +85,7 @@ impl StorageCoreEffects for FilesystemStorageHandler {
 
         fs::remove_file(&file_path)
             .await
-            .map_err(|e| StorageError::DeleteFailed(format!("Failed to remove file: {}", e)))?;
+            .map_err(|e| StorageError::DeleteFailed(format!("Failed to remove file: {e}")))?;
 
         Ok(true)
     }
@@ -103,14 +103,13 @@ impl StorageCoreEffects for FilesystemStorageHandler {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(e) => {
                     return Err(StorageError::ReadFailed(format!(
-                        "Failed to read directory: {}",
-                        e
+                        "Failed to read directory: {e}"
                     )))
                 }
             };
 
             while let Some(entry) = entries.next_entry().await.map_err(|e| {
-                StorageError::ReadFailed(format!("Failed to read directory entry: {}", e))
+                StorageError::ReadFailed(format!("Failed to read directory entry: {e}"))
             })? {
                 Self::visit_entry_for_keys(&self.base_path, entry, prefix, &mut stack, &mut keys)
                     .await?;
@@ -125,7 +124,7 @@ impl StorageCoreEffects for FilesystemStorageHandler {
 #[async_trait]
 impl StorageExtendedEffects for FilesystemStorageHandler {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        let file_path = self.base_path.join(format!("{}.dat", key));
+        let file_path = self.base_path.join(format!("{key}.dat"));
         Ok(file_path.exists())
     }
 
@@ -158,14 +157,13 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
                 return Err(StorageError::DeleteFailed(format!(
-                    "Failed to remove storage directory: {}",
-                    e
+                    "Failed to remove storage directory: {e}"
                 )))
             }
         }
 
         fs::create_dir_all(&self.base_path).await.map_err(|e| {
-            StorageError::WriteFailed(format!("Failed to recreate storage directory: {}", e))
+            StorageError::WriteFailed(format!("Failed to recreate storage directory: {e}"))
         })?;
         Ok(())
     }
@@ -181,8 +179,7 @@ impl StorageExtendedEffects for FilesystemStorageHandler {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(e) => {
                     return Err(StorageError::ReadFailed(format!(
-                        "Failed to read directory: {}",
-                        e
+                        "Failed to read directory: {e}"
                     )))
                 }
             };
@@ -232,7 +229,7 @@ impl FilesystemStorageHandler {
         keys: &mut Vec<String>,
     ) -> Result<(), StorageError> {
         let file_type = entry.file_type().await.map_err(|e| {
-            StorageError::ReadFailed(format!("Failed to stat directory entry: {}", e))
+            StorageError::ReadFailed(format!("Failed to stat directory entry: {e}"))
         })?;
         let path = entry.path();
 
@@ -249,7 +246,7 @@ impl FilesystemStorageHandler {
         }
 
         let rel = path.strip_prefix(base).map_err(|e| {
-            StorageError::ReadFailed(format!("Failed to compute relative key path: {}", e))
+            StorageError::ReadFailed(format!("Failed to compute relative key path: {e}"))
         })?;
         let rel = rel.with_extension("");
         let mut key = rel.to_string_lossy().to_string();

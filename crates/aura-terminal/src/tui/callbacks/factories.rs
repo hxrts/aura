@@ -17,6 +17,8 @@ use crate::tui::effects::{CapabilityPolicy, CommandDispatcher};
 use crate::tui::types::{MfaPolicy, TraversalDepth};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 use aura_core::identifiers::ChannelId;
+use aura_core::effects::reactive::ReactiveEffects;
+use aura_app::signal_defs::CHAT_SIGNAL;
 
 use super::types::*;
 
@@ -40,6 +42,7 @@ pub struct ChatCallbacks {
     pub on_create_channel: CreateChannelCallback,
     pub on_set_topic: SetTopicCallback,
     pub on_close_channel: IdCallback,
+    pub on_list_participants: IdCallback,
 }
 
 impl ChatCallbacks {
@@ -55,15 +58,16 @@ impl ChatCallbacks {
             on_channel_select: Self::make_channel_select(ctx.clone(), app_core, tx.clone()),
             on_create_channel: Self::make_create_channel(ctx.clone(), tx.clone()),
             on_set_topic: Self::make_set_topic(ctx.clone(), tx.clone()),
-            on_close_channel: Self::make_close_channel(ctx, tx),
+            on_close_channel: Self::make_close_channel(ctx.clone(), tx.clone()),
+            on_list_participants: Self::make_list_participants(ctx, tx),
         }
     }
     fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SendCallback {
         Arc::new(move |channel_id: String, content: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let channel_id_clone = channel_id.clone();
-            let content_clone = content.clone();
+            let channel_id_clone = channel_id;
+            let content_clone = content;
 
             spawn_ctx(ctx.clone(), async move {
                 let trimmed = content_clone.trim_start();
@@ -128,13 +132,13 @@ impl ChatCallbacks {
                                         Ok(contact) => {
                                             let id = contact.id.to_string();
                                             let name = if !contact.nickname.is_empty() {
-                                                contact.nickname.clone()
+                                                contact.nickname
                                             } else if let Some(s) = &contact.suggested_name {
                                                 s.clone()
                                             } else {
                                                 id.chars().take(8).collect::<String>() + "..."
                                             };
-                                            let msg = format!("User: {} ({})", name, id);
+                                            let msg = format!("User: {name} ({id})");
                                             let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::info("whois", msg),
                                             ));
@@ -218,12 +222,48 @@ impl ChatCallbacks {
             let app_core = app_core.clone();
             let tx = tx.clone();
             let channel_id_clone = channel_id.clone();
-            spawn_ctx(ctx.clone(), async move {
+            spawn_ctx(ctx, async move {
                 // Parse channel_id string to ChannelId
                 let channel_id_typed = channel_id.parse::<ChannelId>().ok();
                 let core = app_core.read().await;
                 core.views().select_channel(channel_id_typed);
+                let reactive = core.reactive().clone();
+                drop(core);
+
+                if let Ok(mut chat_state) = reactive.read(&*CHAT_SIGNAL).await {
+                    chat_state.select_channel(channel_id_typed);
+                    let _ = reactive.emit(&*CHAT_SIGNAL, chat_state).await;
+                }
                 let _ = tx.try_send(UiUpdate::ChannelSelected(channel_id_clone));
+            });
+        })
+    }
+
+    fn make_list_participants(ctx: Arc<IoContext>, tx: UiUpdateSender) -> IdCallback {
+        Arc::new(move |channel_id: String| {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            let channel_id_clone = channel_id;
+            spawn_ctx(ctx.clone(), async move {
+                match aura_app::workflows::query::list_participants(
+                    ctx.app_core_raw(),
+                    &channel_id_clone,
+                )
+                .await
+                {
+                    Ok(participants) => {
+                        let _ = tx.try_send(UiUpdate::ChannelInfoParticipants {
+                            channel_id: channel_id_clone,
+                            participants,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                            "participants",
+                            e.to_string(),
+                        )));
+                    }
+                }
             });
         })
     }
@@ -735,7 +775,7 @@ impl SettingsCallbacks {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let name_clone = name.clone();
-            let cmd = EffectCommand::UpdateNickname { name: name.clone() };
+            let cmd = EffectCommand::UpdateNickname { name: name };
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
@@ -854,7 +894,7 @@ impl SettingsCallbacks {
         Arc::new(move |device_id: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let device_id_clone = device_id.clone();
+            let device_id_clone = device_id;
 
             spawn_ctx(ctx.clone(), async move {
                 let ceremony_id = match ctx.start_device_removal(&device_id_clone).await {
@@ -958,14 +998,14 @@ pub struct HomeCallbacks {
 impl HomeCallbacks {
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
-            on_send: Self::make_send(ctx.clone(), tx.clone()),
+            on_send: Self::make_send(ctx, tx),
         }
     }
     fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> HomeSendCallback {
         Arc::new(move |content: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let content_clone = content.clone();
+            let content_clone = content;
             spawn_ctx(ctx.clone(), async move {
                 let home_id = {
                     use aura_app::signal_defs::HOMES_SIGNAL;
@@ -984,7 +1024,7 @@ impl HomeCallbacks {
                     }
                 };
 
-                let channel = format!("home:{}", home_id);
+                let channel = format!("home:{home_id}");
                 let home_id_clone = home_id.clone();
 
                 let trimmed = content_clone.trim_start();
@@ -1048,13 +1088,13 @@ impl HomeCallbacks {
                                         Ok(contact) => {
                                             let id = contact.id.to_string();
                                             let name = if !contact.nickname.is_empty() {
-                                                contact.nickname.clone()
+                                                contact.nickname
                                             } else if let Some(s) = &contact.suggested_name {
                                                 s.clone()
                                             } else {
                                                 id.chars().take(8).collect::<String>() + "..."
                                             };
-                                            let msg = format!("User: {} ({})", name, id);
+                                            let msg = format!("User: {name} ({id})");
                                             let _ = tx.try_send(UiUpdate::ToastAdded(
                                                 ToastMessage::info("whois", msg),
                                             ));
@@ -1257,7 +1297,7 @@ impl AppCallbacks {
                     Err(e) => {
                         let _ = tx.try_send(UiUpdate::OperationFailed {
                             operation: "CreateAccount".to_string(),
-                            error: e.to_string(),
+                            error: e,
                         });
                     }
                 }

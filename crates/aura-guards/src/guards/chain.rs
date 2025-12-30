@@ -332,7 +332,7 @@ impl SendGuardChain {
                             error = %e,
                             "Journal coupling failed after successful send authorization"
                         );
-                        AuraError::internal(format!("Journal coupling failed: {}", e))
+                        AuraError::internal(format!("Journal coupling failed: {e}"))
                     })?;
 
                 debug!(

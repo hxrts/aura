@@ -112,16 +112,16 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 // Determine direction based on whether we sent or received the invitation
                 let (direction, other_party_id) = if let Some(own) = own_authority {
                     if sender_id == own {
-                        ("outbound".to_string(), format!("{:?}", receiver_id))
+                        ("outbound".to_string(), format!("{receiver_id:?}"))
                     } else if receiver_id == own {
-                        ("inbound".to_string(), format!("{:?}", sender_id))
+                        ("inbound".to_string(), format!("{sender_id:?}"))
                     } else {
                         // Neither sender nor receiver - this is a third-party observation
-                        ("observed".to_string(), format!("{:?}", receiver_id))
+                        ("observed".to_string(), format!("{receiver_id:?}"))
                     }
                 } else {
                     // No authority context - default to outbound for Sent facts
-                    ("outbound".to_string(), format!("{:?}", receiver_id))
+                    ("outbound".to_string(), format!("{receiver_id:?}"))
                 };
 
                 Some(InvitationDelta::InvitationAdded {

@@ -640,7 +640,7 @@ impl ByzantineMapper {
 
         // Assign roles based on strategy count and capabilities
         for (i, strategy) in strategies.iter().enumerate() {
-            let participant_id = format!("participant_{}", i);
+            let participant_id = format!("participant_{i}");
             let role = if i == 0 && strategies.len() > 1 {
                 ByzantineRole::Leader
             } else if strategy.attack_parameters.coordination.coordinate {
@@ -1022,12 +1022,12 @@ impl ByzantineMapper {
         match scenario.chaos_type {
             ChaosType::KeyInconsistency if strategy.enhanced_name.contains("key") => score += 30,
             ChaosType::ThresholdAttack if strategy.enhanced_name.contains("threshold") => {
-                score += 30
+                score += 30;
             }
             ChaosType::ByzantineCoordination
                 if strategy.attack_parameters.coordination.coordinate =>
             {
-                score += 25
+                score += 25;
             }
             _ => score += 10,
         }

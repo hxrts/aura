@@ -224,7 +224,7 @@ impl std::hash::Hash for QuintValue {
                 4u8.hash(state);
                 // Note: HashSet doesn't implement Hash, so we sort for consistency
                 let mut items: Vec<_> = s.iter().collect();
-                items.sort_by(|a, b| format!("{:?}", a).cmp(&format!("{:?}", b)));
+                items.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
                 items.hash(state);
             }
             QuintValue::Map(m) => {

@@ -201,8 +201,7 @@ impl SigningContext {
             approval_context: ApprovalContext::ElevatedOperation {
                 operation_type: "ota_activation".to_string(),
                 value_context: Some(format!(
-                    "Hard fork activation at epoch {}",
-                    activation_epoch
+                    "Hard fork activation at epoch {activation_epoch}"
                 )),
             },
         }

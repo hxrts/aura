@@ -294,22 +294,21 @@ async fn maybe_emit_reactive_error(
 
 fn format_reactive_error(err: &ReactiveError) -> String {
     match err {
-        ReactiveError::SignalNotFound { id } => format!("signal not found: {}", id),
+        ReactiveError::SignalNotFound { id } => format!("signal not found: {id}"),
         ReactiveError::TypeMismatch {
             id,
             expected,
             actual,
         } => format!(
-            "type mismatch ({}): expected {}, got {}",
-            id, expected, actual
+            "type mismatch ({id}): expected {expected}, got {actual}"
         ),
-        ReactiveError::SubscriptionClosed { id } => format!("subscription closed: {}", id),
+        ReactiveError::SubscriptionClosed { id } => format!("subscription closed: {id}"),
         ReactiveError::EmissionFailed { id, reason } => {
-            format!("emission failed ({}): {}", id, reason)
+            format!("emission failed ({id}): {reason}")
         }
-        ReactiveError::CycleDetected { path } => format!("cycle detected: {}", path),
+        ReactiveError::CycleDetected { path } => format!("cycle detected: {path}"),
         ReactiveError::HandlerUnavailable => "handler unavailable".to_string(),
-        ReactiveError::Internal { reason } => format!("internal error: {}", reason),
+        ReactiveError::Internal { reason } => format!("internal error: {reason}"),
     }
 }
 

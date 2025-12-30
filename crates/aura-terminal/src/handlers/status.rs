@@ -36,7 +36,7 @@ pub async fn handle_status(
             Ok(output)
         }
         Err(e) => {
-            output.eprintln(format!("Failed to read config: {}", e));
+            output.eprintln(format!("Failed to read config: {e}"));
             format_default_status(&mut output);
             Ok(output)
         }

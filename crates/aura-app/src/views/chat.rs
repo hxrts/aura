@@ -136,6 +136,13 @@ impl ChatState {
         }
     }
 
+    /// Mark a channel as left (decrement member count)
+    pub fn mark_channel_left(&mut self, channel_id: &ChannelId) {
+        if let Some(channel) = self.channel_mut(channel_id) {
+            channel.member_count = channel.member_count.saturating_sub(1);
+        }
+    }
+
     /// Update channel topic
     pub fn update_topic(&mut self, channel_id: &ChannelId, topic: String) {
         if let Some(channel) = self.channel_mut(channel_id) {

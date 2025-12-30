@@ -370,7 +370,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             proposal_hash,
             trace_id: Some(change_id.clone()),
             new_guardian_ids: new_guardian_set.iter().map(|g| g.authority_id).collect(),
-            new_threshold: final_threshold as u16,
+            new_threshold: final_threshold,
             completed_at: self
                 .effect_system()
                 .physical_time()
@@ -464,7 +464,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             .effect_system()
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?;
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?;
 
         // Simulate guardian votes
         let mut votes = Vec::new();

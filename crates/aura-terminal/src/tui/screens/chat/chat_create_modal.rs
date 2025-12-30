@@ -115,7 +115,7 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
 
     // Status for error/creating states
     let status = if !error.is_empty() {
-        ModalStatus::Error(error.clone())
+        ModalStatus::Error(error)
     } else if creating {
         ModalStatus::Loading("Creating...".to_string())
     } else {
@@ -150,10 +150,10 @@ pub fn ChatCreateModal(props: &ChatCreateModalProps) -> impl Into<AnyElement<'st
                 #(match step {
                     CreateChannelStep::Details => {
                         let name_input = LabeledInputProps::new("Group Name:", "Enter group name...")
-                            .with_value(name.clone())
+                            .with_value(name)
                             .with_focused(active_field == 0);
                         let topic_input = LabeledInputProps::new("Topic (optional):", "Enter topic...")
-                            .with_value(topic.clone())
+                            .with_value(topic)
                             .with_focused(active_field == 1);
                         vec![element! {
                             View(flex_direction: FlexDirection::Column, gap: Spacing::SM) {

@@ -115,7 +115,7 @@ impl SignalGraph {
 
         if signals.contains_key(&id) {
             return Err(ReactiveError::Internal {
-                reason: format!("Signal '{}' already registered", id),
+                reason: format!("Signal '{id}' already registered"),
             });
         }
 

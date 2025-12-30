@@ -100,8 +100,8 @@ impl ScopeSegment {
 impl fmt::Display for ScopeSegment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Named(name) => write!(f, "{}", name),
-            Self::Typed { kind, id } => write!(f, "{}:{}", kind, id),
+            Self::Named(name) => write!(f, "{name}"),
+            Self::Typed { kind, id } => write!(f, "{kind}:{id}"),
         }
     }
 }
@@ -256,7 +256,7 @@ impl fmt::Display for ScopeId {
                 if i > 0 {
                     write!(f, "/")?;
                 }
-                write!(f, "{}", segment)?;
+                write!(f, "{segment}")?;
             }
             Ok(())
         }
@@ -369,10 +369,10 @@ impl fmt::Display for Finality {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Local => write!(f, "local"),
-            Self::Replicated { ack_count } => write!(f, "replicated({})", ack_count),
+            Self::Replicated { ack_count } => write!(f, "replicated({ack_count})"),
             Self::Checkpointed => write!(f, "checkpointed"),
-            Self::Consensus { proof } => write!(f, "consensus({:?})", proof),
-            Self::Anchored { anchor } => write!(f, "anchored({:?})", anchor),
+            Self::Consensus { proof } => write!(f, "consensus({proof:?})"),
+            Self::Anchored { anchor } => write!(f, "anchored({anchor:?})"),
         }
     }
 }

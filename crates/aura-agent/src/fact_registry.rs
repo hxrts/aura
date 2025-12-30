@@ -73,7 +73,7 @@ pub fn build_fact_registry() -> FactRegistry {
     registry.register::<RecoveryFact>(RECOVERY_FACT_TYPE_ID, Box::new(RecoveryFactReducer));
     registry.register::<MaintenanceFact>(
         MAINTENANCE_FACT_TYPE_ID,
-        Box::new(MaintenanceFactReducer::default()),
+        Box::new(MaintenanceFactReducer),
     );
     register_moderation_facts(&mut registry);
 

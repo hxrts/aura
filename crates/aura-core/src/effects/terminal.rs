@@ -549,9 +549,9 @@ impl fmt::Display for TerminalError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::EndOfInput => write!(f, "end of input"),
-            Self::IoError(msg) => write!(f, "terminal I/O error: {}", msg),
+            Self::IoError(msg) => write!(f, "terminal I/O error: {msg}"),
             Self::NotAvailable => write!(f, "terminal not available"),
-            Self::InvalidOperation(msg) => write!(f, "invalid operation: {}", msg),
+            Self::InvalidOperation(msg) => write!(f, "invalid operation: {msg}"),
             Self::Timeout => write!(f, "timeout waiting for terminal event"),
         }
     }

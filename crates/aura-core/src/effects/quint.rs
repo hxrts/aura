@@ -528,7 +528,7 @@ where
         obj.iter()
             .map(|(k, v)| {
                 let key = K::from_str(k)
-                    .map_err(|_| crate::AuraError::invalid(format!("invalid map key: {}", k)))?;
+                    .map_err(|_| crate::AuraError::invalid(format!("invalid map key: {k}")))?;
                 let val = V::from_quint(v)?;
                 Ok((key, val))
             })
@@ -557,7 +557,7 @@ impl QuintMappable for AuthorityId {
             .as_str()
             .ok_or_else(|| crate::AuraError::invalid("expected string for AuthorityId"))?;
         s.parse()
-            .map_err(|e| crate::AuraError::invalid(format!("invalid AuthorityId: {}", e)))
+            .map_err(|e| crate::AuraError::invalid(format!("invalid AuthorityId: {e}")))
     }
 
     fn quint_type_name() -> &'static str {
@@ -576,7 +576,7 @@ impl QuintMappable for ContextId {
             .as_str()
             .ok_or_else(|| crate::AuraError::invalid("expected string for ContextId"))?;
         s.parse()
-            .map_err(|e| crate::AuraError::invalid(format!("invalid ContextId: {}", e)))
+            .map_err(|e| crate::AuraError::invalid(format!("invalid ContextId: {e}")))
     }
 
     fn quint_type_name() -> &'static str {

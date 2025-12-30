@@ -82,7 +82,7 @@ impl TraversalService {
             let reason = match from.current_home {
                 Some(from_home) => {
                     if let Some(required) = self.required_capability(from_home, to_home) {
-                        format!("missing capability: {}", required)
+                        format!("missing capability: {required}")
                     } else {
                         "no traversal path exists".to_string()
                     }

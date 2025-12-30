@@ -174,8 +174,7 @@ impl WriterFence {
     pub fn ensure_open(&self, context: &str) -> AuraResult<()> {
         if *self.inner.read() {
             return Err(AuraError::coordination_failed(format!(
-                "{} blocked by snapshot writer fence",
-                context
+                "{context} blocked by snapshot writer fence"
             )));
         }
         Ok(())

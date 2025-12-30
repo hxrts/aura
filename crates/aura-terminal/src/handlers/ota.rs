@@ -62,8 +62,7 @@ async fn propose_upgrade(
     let mut output = CliOutput::new();
 
     output.println(format!(
-        "Proposing {} upgrade to version {}: {}",
-        upgrade_type, to_version, description
+        "Proposing {upgrade_type} upgrade to version {to_version}: {description}"
     ));
 
     let kind = match upgrade_type {
@@ -71,8 +70,7 @@ async fn propose_upgrade(
         "hard" => UpgradeKind::HardFork,
         _ => {
             return Err(TerminalError::Input(format!(
-                "Invalid upgrade type: {}. Use 'soft' or 'hard'",
-                upgrade_type
+                "Invalid upgrade type: {upgrade_type}. Use 'soft' or 'hard'"
             )))
         }
     };
@@ -86,13 +84,13 @@ async fn propose_upgrade(
     }
     let major: u16 = parts[0]
         .parse()
-        .map_err(|e| TerminalError::Input(format!("Invalid major version: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid major version: {e}")))?;
     let minor: u16 = parts[1]
         .parse()
-        .map_err(|e| TerminalError::Input(format!("Invalid minor version: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid minor version: {e}")))?;
     let patch: u16 = parts[2]
         .parse()
-        .map_err(|e| TerminalError::Input(format!("Invalid patch version: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid patch version: {e}")))?;
     let version = SemanticVersion::new(major, minor, patch);
 
     // Compute artifact hash from local file if available, otherwise hash the URL string
@@ -100,8 +98,7 @@ async fn propose_upgrade(
 
     let proposal = UpgradeProposal {
         package_id: ids::uuid(&format!(
-            "ota:{}:{}:{}:{}",
-            major, minor, patch, download_url
+            "ota:{major}:{minor}:{patch}:{download_url}"
         )),
         version,
         artifact_hash,
@@ -118,18 +115,18 @@ async fn propose_upgrade(
 
     proposal
         .validate()
-        .map_err(|e| TerminalError::Operation(format!("Invalid upgrade proposal: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Invalid upgrade proposal: {e}")))?;
 
     let key = format!("ota:proposal:{}", proposal.package_id);
     ctx.effects()
         .store(
             &key,
             serde_json::to_vec(&proposal).map_err(|e| {
-                TerminalError::Operation(format!("Failed to serialize proposal: {}", e))
+                TerminalError::Operation(format!("Failed to serialize proposal: {e}"))
             })?,
         )
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to store proposal: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to store proposal: {e}")))?;
 
     output.kv("Proposal ID", proposal.package_id.to_string());
     output.kv("Version", proposal.version.to_string());
@@ -145,7 +142,7 @@ async fn set_policy(ctx: &HandlerContext<'_>, policy: &str) -> TerminalResult<Cl
     ctx.effects()
         .store(key, policy.as_bytes().to_vec())
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to set policy: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to set policy: {e}")))?;
 
     output.kv("OTA policy set to", policy);
     Ok(output)
@@ -186,13 +183,13 @@ async fn opt_in(ctx: &HandlerContext<'_>, proposal_id: &str) -> TerminalResult<C
     let mut output = CliOutput::new();
 
     let proposal_uuid = Uuid::parse_str(proposal_id)
-        .map_err(|e| TerminalError::Input(format!("proposal_id must be a UUID: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("proposal_id must be a UUID: {e}")))?;
 
-    let key = format!("ota:optin:{}", proposal_uuid);
+    let key = format!("ota:optin:{proposal_uuid}");
     ctx.effects()
         .store(&key, b"opted-in".to_vec())
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to opt in: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to opt in: {e}")))?;
 
     output.kv("Opted into proposal", proposal_uuid.to_string());
     Ok(output)
@@ -243,7 +240,7 @@ fn compute_artifact_hash(download_url: &str) -> TerminalResult<Hash32> {
     let path = Path::new(download_url);
     if path.exists() {
         let data = fs::read(path)
-            .map_err(|e| TerminalError::Operation(format!("Failed to read artifact: {}", e)))?;
+            .map_err(|e| TerminalError::Operation(format!("Failed to read artifact: {e}")))?;
         hasher.update(&data);
     } else {
         hasher.update(download_url.as_bytes());

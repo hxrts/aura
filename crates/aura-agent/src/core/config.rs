@@ -33,6 +33,7 @@ pub fn default_storage_path() -> PathBuf {
 
 /// Agent configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct AgentConfig {
     /// Device ID for this agent
     #[serde(with = "device_id_serde")]
@@ -59,19 +60,6 @@ pub struct AgentConfig {
     pub lan_discovery: LanDiscoveryConfig,
 }
 
-impl Default for AgentConfig {
-    fn default() -> Self {
-        Self {
-            device_id: DeviceId::default(),
-            storage: StorageConfig::default(),
-            network: NetworkConfig::default(),
-            reliability: ReliabilityConfig::default(),
-            choreography: ChoreographyConfig::default(),
-            guardian: GuardianConsensusPolicy::default(),
-            lan_discovery: LanDiscoveryConfig::default(),
-        }
-    }
-}
 
 /// Storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

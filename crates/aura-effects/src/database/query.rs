@@ -156,7 +156,7 @@ impl Default for AuraQuery {
 
 /// Convert bytes to hex string without external crate
 fn bytes_to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 impl AuraQuery {
@@ -256,7 +256,7 @@ impl AuraQuery {
                     self.add_fact(
                         predicate,
                         vec![
-                            FactTerm::String(format!("{}.nested", key)),
+                            FactTerm::String(format!("{key}.nested")),
                             FactTerm::String(hash_hex),
                         ],
                     )
@@ -298,7 +298,7 @@ impl AuraQuery {
 
         // Add authority context if present
         if let Some(ref authority) = self.authority_context {
-            let auth_fact = format!("authority(\"{}\");", authority);
+            let auth_fact = format!("authority(\"{authority}\");");
             authorizer
                 .add_code(auth_fact)
                 .map_err(|e| QueryError::FactAddition(e.to_string()))?;
@@ -306,7 +306,7 @@ impl AuraQuery {
 
         // Add context facts
         for (key, value) in &self.context_facts {
-            let context_fact = format!("context(\"{}\", \"{}\");", key, value);
+            let context_fact = format!("context(\"{key}\", \"{value}\");");
             authorizer
                 .add_code(context_fact)
                 .map_err(|e| QueryError::FactAddition(e.to_string()))?;
@@ -373,8 +373,8 @@ impl AuraQuery {
             .into_iter()
             .filter(|f| {
                 // Check if this fact's predicate matches the rule head
-                let fact_str = format!("{}", f);
-                fact_str.starts_with(&format!("{}(", head_predicate))
+                let fact_str = format!("{f}");
+                fact_str.starts_with(&format!("{head_predicate}("))
             })
             .map(|f| {
                 // Extract the fact arguments as strings

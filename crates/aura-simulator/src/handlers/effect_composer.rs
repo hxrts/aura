@@ -144,8 +144,7 @@ impl SimulationEffectComposer {
     pub fn with_itf_fuzzer(mut self) -> Result<Self, SimulationComposerError> {
         let fuzzer = ITFBasedFuzzer::new().map_err(|e| {
             SimulationComposerError::EffectSystemCreationFailed(format!(
-                "Failed to create ITF fuzzer: {}",
-                e
+                "Failed to create ITF fuzzer: {e}"
             ))
         })?;
         self.itf_fuzzer = Some(fuzzer);
@@ -159,8 +158,7 @@ impl SimulationEffectComposer {
     ) -> Result<Self, SimulationComposerError> {
         let fuzzer = ITFBasedFuzzer::with_config(config).map_err(|e| {
             SimulationComposerError::EffectSystemCreationFailed(format!(
-                "Failed to create ITF fuzzer: {}",
-                e
+                "Failed to create ITF fuzzer: {e}"
             ))
         })?;
         self.itf_fuzzer = Some(fuzzer);
@@ -330,8 +328,7 @@ impl ComposedSimulationEnvironment {
                 .await
                 .map_err(|e| {
                     SimulationComposerError::EffectOperationFailed(format!(
-                        "Chaos effect failed: {}",
-                        e
+                        "Chaos effect failed: {e}"
                     ))
                 }),
             None => Err(SimulationComposerError::MissingRequiredComponent(
@@ -352,8 +349,7 @@ impl ComposedSimulationEnvironment {
                 .await
                 .map_err(|e| {
                     SimulationComposerError::EffectOperationFailed(format!(
-                        "Testing effect failed: {}",
-                        e
+                        "Testing effect failed: {e}"
                     ))
                 }),
             None => Err(SimulationComposerError::MissingRequiredComponent(
@@ -472,8 +468,7 @@ impl ComposedSimulationEnvironment {
             .await
             .map_err(|e| {
                 SimulationComposerError::EffectOperationFailed(format!(
-                    "Failed to generate ITF traces: {}",
-                    e
+                    "Failed to generate ITF traces: {e}"
                 ))
             })
     }
@@ -526,7 +521,7 @@ impl ComposedSimulationEnvironment {
 
             // Record state variable values
             for (var_name, var_value) in &itf_state.variables {
-                tick_data.insert(format!("var_{}", var_name), var_value.to_string());
+                tick_data.insert(format!("var_{var_name}"), var_value.to_string());
             }
 
             scenario_handler
@@ -581,8 +576,7 @@ impl ComposedSimulationEnvironment {
 
         fuzzer.verify_properties(spec_file).await.map_err(|e| {
             SimulationComposerError::EffectOperationFailed(format!(
-                "Property verification failed: {}",
-                e
+                "Property verification failed: {e}"
             ))
         })
     }

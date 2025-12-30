@@ -221,7 +221,7 @@ impl TuiState {
         let message = if display_name.is_empty() {
             "Account created successfully".to_string()
         } else {
-            format!("Welcome, {}!", display_name)
+            format!("Welcome, {display_name}!")
         };
         self.next_toast_id += 1;
         self.toast_queue

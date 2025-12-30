@@ -103,7 +103,7 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
         self.effect_system
             .sign(signing_context)
             .await
-            .map_err(|e| crate::RecoveryError::internal(format!("Guardian signing failed: {}", e)))
+            .map_err(|e| crate::RecoveryError::internal(format!("Guardian signing failed: {e}")))
     }
 
     /// Create a success response with collected guardian signatures.
@@ -171,7 +171,7 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
             new_root: *new_tree_root,
         };
         let message = serde_json::to_vec(&operation)
-            .map_err(|e| crate::RecoveryError::internal(format!("Serialization failed: {}", e)))?;
+            .map_err(|e| crate::RecoveryError::internal(format!("Serialization failed: {e}")))?;
 
         // Get the guardian's public key package
         let public_key = self
@@ -180,8 +180,7 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
             .await
             .ok_or_else(|| {
                 crate::RecoveryError::not_found(format!(
-                    "No public key for guardian: {:?}",
-                    guardian_authority
+                    "No public key for guardian: {guardian_authority:?}"
                 ))
             })?;
 
@@ -190,7 +189,7 @@ impl<E: RecoveryEffects> BaseCoordinator<E> {
             .frost_verify(&message, signature, &public_key)
             .await
             .map_err(|e| {
-                crate::RecoveryError::internal(format!("Signature verification failed: {}", e))
+                crate::RecoveryError::internal(format!("Signature verification failed: {e}"))
             })
     }
 }

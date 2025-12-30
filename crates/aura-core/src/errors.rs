@@ -242,37 +242,37 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for AuraError {
 
 impl From<biscuit_auth::error::Token> for AuraError {
     fn from(err: biscuit_auth::error::Token) -> Self {
-        Self::permission_denied(format!("Biscuit token error: {}", err))
+        Self::permission_denied(format!("Biscuit token error: {err}"))
     }
 }
 
 impl From<uuid::Error> for AuraError {
     fn from(err: uuid::Error) -> Self {
-        Self::invalid(format!("UUID error: {}", err))
+        Self::invalid(format!("UUID error: {err}"))
     }
 }
 
 impl From<hex::FromHexError> for AuraError {
     fn from(err: hex::FromHexError) -> Self {
-        Self::serialization(format!("Hex decoding error: {}", err))
+        Self::serialization(format!("Hex decoding error: {err}"))
     }
 }
 
 impl From<base64::DecodeError> for AuraError {
     fn from(err: base64::DecodeError) -> Self {
-        Self::serialization(format!("Base64 decoding error: {}", err))
+        Self::serialization(format!("Base64 decoding error: {err}"))
     }
 }
 
 impl From<crate::effects::StorageError> for AuraError {
     fn from(err: crate::effects::StorageError) -> Self {
-        Self::storage(format!("Storage error: {}", err))
+        Self::storage(format!("Storage error: {err}"))
     }
 }
 
 impl From<crate::effects::TimeError> for AuraError {
     fn from(err: crate::effects::TimeError) -> Self {
-        Self::internal(format!("Time error: {}", err))
+        Self::internal(format!("Time error: {err}"))
     }
 }
 

@@ -103,7 +103,7 @@ impl<E: StorageEffects> AmpEvidenceEffects for E {
         context: ContextId,
     ) -> Result<()> {
         // Create evidence delta recording witness participation
-        let evidence_entry = format!("witness:{}:context:{}", witness, context);
+        let evidence_entry = format!("witness:{witness}:context:{context}");
         let mut delta = EvidenceDelta::default();
         delta
             .entries

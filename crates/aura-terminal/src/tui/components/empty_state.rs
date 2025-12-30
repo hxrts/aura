@@ -94,7 +94,7 @@ pub fn NoResults(props: &NoResultsProps) -> impl Into<AnyElement<'static>> {
     let title = if query.is_empty() {
         "No results".to_string()
     } else {
-        format!("No results for \"{}\"", query)
+        format!("No results for \"{query}\"")
     };
 
     element! {

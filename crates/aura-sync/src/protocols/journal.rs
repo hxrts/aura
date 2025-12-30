@@ -395,7 +395,7 @@ impl JournalSyncProtocol {
                     .anti_entropy
                     .execute(effects, peer)
                     .await
-                    .map_err(|e| sync_session_error(format!("Anti-entropy sync failed: {}", e)))?;
+                    .map_err(|e| sync_session_error(format!("Anti-entropy sync failed: {e}")))?;
 
                 tracing::debug!(
                 "Anti-entropy sync with peer {} completed: {} applied, {} duplicates, {} rounds",

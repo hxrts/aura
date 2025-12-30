@@ -99,8 +99,7 @@ impl PrivacyBudgetTracker {
             );
 
             return Err(AuraError::permission_denied(format!(
-                "Operation '{}' would exceed privacy budget",
-                operation_id
+                "Operation '{operation_id}' would exceed privacy budget"
             )));
         }
 
@@ -224,8 +223,7 @@ pub async fn track_leakage_consumption<
     let tracker = load_privacy_tracker(context_id, authority_id, effect_system).await?;
     if !tracker.can_afford_operation(leakage_budget) {
         return Err(AuraError::permission_denied(format!(
-            "Operation '{}' would exceed privacy budget limits",
-            operation_id
+            "Operation '{operation_id}' would exceed privacy budget limits"
         )));
     }
 
@@ -375,7 +373,7 @@ pub async fn get_privacy_budget_status<E: GuardEffects + PhysicalTimeEffects>(
     effect_system: &E,
 ) -> AuraResult<Option<PrivacyBudgetState>> {
     match load_privacy_tracker(context_id, authority_id, effect_system).await {
-        Ok(tracker) => Ok(Some(tracker.state.clone())),
+        Ok(tracker) => Ok(Some(tracker.state)),
         Err(_) => Ok(None),
     }
 }
@@ -429,7 +427,7 @@ pub async fn reset_privacy_budget<E: GuardEffects + PhysicalTimeEffects + GuardC
 }
 
 fn privacy_limits_key(context_id: ContextId) -> String {
-    format!("privacy_limits:{}", context_id)
+    format!("privacy_limits:{context_id}")
 }
 
 fn leakage_fact_key(
@@ -504,13 +502,13 @@ fn leakage_budget_entries(
     for observer in observable_by {
         match observer {
             AdversaryClass::External => {
-                entries.push((LeakageObserverClass::External, budget.external))
+                entries.push((LeakageObserverClass::External, budget.external));
             }
             AdversaryClass::Neighbor => {
-                entries.push((LeakageObserverClass::Neighbor, budget.neighbor))
+                entries.push((LeakageObserverClass::Neighbor, budget.neighbor));
             }
             AdversaryClass::InGroup => {
-                entries.push((LeakageObserverClass::InGroup, budget.in_group))
+                entries.push((LeakageObserverClass::InGroup, budget.in_group));
             }
         }
     }

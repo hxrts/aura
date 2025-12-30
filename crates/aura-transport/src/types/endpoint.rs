@@ -61,9 +61,9 @@ impl EndpointAddress {
     pub fn from_host_port(host: &str, port: u16) -> Self {
         // If host looks like IPv6, wrap in brackets
         if host.contains(':') && !host.starts_with('[') {
-            Self(format!("[{}]:{}", host, port))
+            Self(format!("[{host}]:{port}"))
         } else {
-            Self(format!("{}:{}", host, port))
+            Self(format!("{host}:{port}"))
         }
     }
 

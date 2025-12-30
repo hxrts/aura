@@ -152,12 +152,30 @@ pub enum UiUpdate {
     /// A new channel was created
     ChannelCreated(String),
 
+    /// Chat state changed (channel/message counts + selection)
+    ChatStateUpdated {
+        /// Total number of channels
+        channel_count: usize,
+        /// Total number of messages in selected channel
+        message_count: usize,
+        /// Selected channel index (if known)
+        selected_index: Option<usize>,
+    },
+
     /// Channel topic was updated
     TopicSet {
         /// The channel name
         channel: String,
         /// The new topic
         topic: String,
+    },
+
+    /// Channel info participants were updated
+    ChannelInfoParticipants {
+        /// Channel ID for the modal
+        channel_id: String,
+        /// Participants to display
+        participants: Vec<String>,
     },
 
     // =========================================================================

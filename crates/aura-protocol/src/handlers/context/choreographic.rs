@@ -45,7 +45,7 @@ impl ChoreographicContext {
         value: &T,
     ) -> Result<Self, AuraHandlerError> {
         let serialized = aura_core::util::serialization::to_vec(value).map_err(|e| {
-            AuraHandlerError::context_error(format!("Failed to serialize state: {}", e))
+            AuraHandlerError::context_error(format!("Failed to serialize state: {e}"))
         })?;
 
         let mut new_state = (*self.protocol_state).clone();
@@ -67,7 +67,7 @@ impl ChoreographicContext {
         match self.protocol_state.get(key) {
             Some(data) => {
                 let value = aura_core::util::serialization::from_slice(data).map_err(|e| {
-                    AuraHandlerError::context_error(format!("Failed to deserialize state: {}", e))
+                    AuraHandlerError::context_error(format!("Failed to deserialize state: {e}"))
                 })?;
                 Ok(Some(value))
             }

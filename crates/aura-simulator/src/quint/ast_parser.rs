@@ -233,7 +233,7 @@ impl QuintAstParser {
             QuintDefinition::Import { name, from } => Ok(ParsedQuintDefinition {
                 name: name.clone(),
                 kind: "import".to_string(),
-                expression: format!("from {}", from),
+                expression: format!("from {from}"),
                 return_type: None,
                 parameters: vec![],
                 annotations: HashMap::new(),

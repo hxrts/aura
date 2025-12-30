@@ -25,7 +25,7 @@ fn encode_label(label: Label) -> Vec<u8> {
 
 fn decode_label(payload: Vec<u8>) -> ChoreoResult<Label> {
     let label = String::from_utf8(payload)
-        .map_err(|e| ChoreographyError::Transport(format!("Label decode failed: {}", e)))?;
+        .map_err(|e| ChoreographyError::Transport(format!("Label decode failed: {e}")))?;
     Ok(Label(Box::leak(label.into_boxed_str())))
 }
 
@@ -147,7 +147,7 @@ where
 
     fn to_choreo_role(&self, device_id: &DeviceId) -> Result<ChoreographicRole, ChoreographyError> {
         let idx = self.role_index(device_id).ok_or_else(|| {
-            ChoreographyError::Transport(format!("Unknown role for device {}", device_id))
+            ChoreographyError::Transport(format!("Unknown role for device {device_id}"))
         })?;
         Ok(ChoreographicRole::new(device_id.0, idx as u32))
     }
@@ -193,7 +193,7 @@ where
     ) -> ChoreoResult<()> {
         let role = self.to_choreo_role(&to)?;
         let payload = to_vec(msg).map_err(|e| {
-            ChoreographyError::Transport(format!("Choreography encode failed: {}", e))
+            ChoreographyError::Transport(format!("Choreography encode failed: {e}"))
         })?;
         self.effects
             .send_to_role_bytes(role, payload)
@@ -214,7 +214,7 @@ where
             .await
             .map_err(|e| ChoreographyError::Transport(e.to_string()))?;
         let message = from_slice(&payload).map_err(|e| {
-            ChoreographyError::Transport(format!("Choreography decode failed: {}", e))
+            ChoreographyError::Transport(format!("Choreography decode failed: {e}"))
         })?;
         Ok(message)
     }

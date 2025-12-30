@@ -38,7 +38,7 @@ pub fn format_rule(rule: &DatalogRule) -> String {
 /// - Null: `null`
 pub fn format_value(value: &DatalogValue) -> String {
     match value {
-        DatalogValue::Variable(name) => format!("${}", name),
+        DatalogValue::Variable(name) => format!("${name}"),
         DatalogValue::String(s) => format!("\"{}\"", s.replace('"', "\\\"")),
         DatalogValue::Integer(n) => n.to_string(),
         DatalogValue::Boolean(b) => b.to_string(),
@@ -62,7 +62,7 @@ pub fn parse_fact_to_row(fact_strings: &[String]) -> DatalogRow {
                 // Split by ", " and create indexed bindings
                 for (i, arg) in args_str.split(", ").enumerate() {
                     let value = parse_arg_to_value(arg.trim());
-                    row = row.with_binding(format!("arg{}", i), value);
+                    row = row.with_binding(format!("arg{i}"), value);
                 }
             }
         }

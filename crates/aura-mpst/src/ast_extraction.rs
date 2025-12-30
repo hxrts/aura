@@ -91,13 +91,13 @@ pub fn generate_aura_choreography_code(
     let mut code = String::new();
 
     // Generate module header
-    code.push_str(&format!("pub mod {} {{\n", namespace));
+    code.push_str(&format!("pub mod {namespace} {{\n"));
 
     // Generate role enum
     code.push_str("    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n");
     code.push_str("    pub enum Role {\n");
     for role in roles {
-        code.push_str(&format!("        {},\n", role));
+        code.push_str(&format!("        {role},\n"));
     }
     code.push_str("    }\n\n");
 
@@ -106,32 +106,28 @@ pub fn generate_aura_choreography_code(
         match effect {
             AuraEffect::GuardCapability { capability, role } => {
                 code.push_str(&format!(
-                    "    // Guard capability '{}' for role {}\n",
-                    capability, role
+                    "    // Guard capability '{capability}' for role {role}\n"
                 ));
             }
             AuraEffect::FlowCost { cost, role } => {
-                code.push_str(&format!("    // Flow cost {} for role {}\n", cost, role));
+                code.push_str(&format!("    // Flow cost {cost} for role {role}\n"));
             }
             AuraEffect::JournalFacts { facts, role } => {
                 code.push_str(&format!(
-                    "    // Journal facts '{}' for role {}\n",
-                    facts, role
+                    "    // Journal facts '{facts}' for role {role}\n"
                 ));
             }
             AuraEffect::JournalMerge { role } => {
-                code.push_str(&format!("    // Journal merge for role {}\n", role));
+                code.push_str(&format!("    // Journal merge for role {role}\n"));
             }
             AuraEffect::AuditLog { action, role } => {
                 code.push_str(&format!(
-                    "    // Audit log '{}' for role {}\n",
-                    action, role
+                    "    // Audit log '{action}' for role {role}\n"
                 ));
             }
             AuraEffect::Leakage { observers, role } => {
                 code.push_str(&format!(
-                    "    // Leakage to observers {:?} for role {}\n",
-                    observers, role
+                    "    // Leakage to observers {observers:?} for role {role}\n"
                 ));
             }
         }

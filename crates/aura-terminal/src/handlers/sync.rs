@@ -59,7 +59,7 @@ async fn handle_daemon_mode(
     let mut output = CliOutput::new();
 
     output.println("Starting sync daemon...");
-    output.kv("Interval", format!("{}s", interval_secs));
+    output.kv("Interval", format!("{interval_secs}s"));
     output.kv("Max concurrent", max_concurrent.to_string());
 
     // Parse initial peers
@@ -96,7 +96,7 @@ async fn handle_daemon_mode(
     manager
         .start(time_handler.clone())
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {e}")))?;
 
     println!("\nSync daemon started. Press Ctrl+C to stop.\n");
 
@@ -132,7 +132,7 @@ async fn handle_daemon_mode(
                         health.active_sessions
                     );
                 } else {
-                    println!("[tick {}] Sync daemon running (uptime: {}s)", tick_count, uptime_secs);
+                    println!("[tick {tick_count}] Sync daemon running (uptime: {uptime_secs}s)");
                 }
 
                 // Get metrics periodically
@@ -155,7 +155,7 @@ async fn handle_daemon_mode(
     manager
         .stop()
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to stop sync service: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to stop sync service: {e}")))?;
 
     let _ = ctx; // Acknowledge context for future use
 
@@ -194,7 +194,7 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Terminal
     manager
         .start(time_handler.clone())
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to start sync service: {e}")))?;
 
     // Full sync_with_peers needs the full effect system
     // For now, just add peers and show status

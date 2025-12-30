@@ -54,9 +54,9 @@ pub async fn handle_invitation(
             let service = agent.invitations()?;
             let result = service.accept(invitation_id).await?;
             if result.success {
-                output.println(format!("Invitation {} accepted", invitation_id));
+                output.println(format!("Invitation {invitation_id} accepted"));
             } else if let Some(err) = result.error {
-                output.eprintln(format!("Invitation {} failed: {}", invitation_id, err));
+                output.eprintln(format!("Invitation {invitation_id} failed: {err}"));
             }
             Ok(output)
         }
@@ -65,11 +65,10 @@ pub async fn handle_invitation(
             let service = agent.invitations()?;
             let result = service.decline(invitation_id).await?;
             if result.success {
-                output.println(format!("Invitation {} declined", invitation_id));
+                output.println(format!("Invitation {invitation_id} declined"));
             } else if let Some(err) = result.error {
                 output.eprintln(format!(
-                    "Invitation {} decline failed: {}",
-                    invitation_id, err
+                    "Invitation {invitation_id} decline failed: {err}"
                 ));
             }
             Ok(output)
@@ -79,11 +78,10 @@ pub async fn handle_invitation(
             let service = agent.invitations()?;
             let result = service.cancel(invitation_id).await?;
             if result.success {
-                output.println(format!("Invitation {} canceled", invitation_id));
+                output.println(format!("Invitation {invitation_id} canceled"));
             } else if let Some(err) = result.error {
                 output.eprintln(format!(
-                    "Invitation {} cancel failed: {}",
-                    invitation_id, err
+                    "Invitation {invitation_id} cancel failed: {err}"
                 ));
             }
             Ok(output)
@@ -123,7 +121,7 @@ pub async fn handle_invitation(
         InvitationAction::Import { code } => {
             let mut output = CliOutput::new();
             let shareable = InvitationService::import_code(code)
-                .map_err(|e| TerminalError::Input(format!("Invalid invitation code: {}", e)))?;
+                .map_err(|e| TerminalError::Input(format!("Invalid invitation code: {e}")))?;
 
             output.section("Invitation Details");
             output.kv("Invitation ID", shareable.invitation_id.to_string());
@@ -141,9 +139,9 @@ pub async fn handle_invitation(
                 if let Some(dt) =
                     std::time::UNIX_EPOCH.checked_add(std::time::Duration::new(secs, nanos))
                 {
-                    output.kv("Expires", format!("{:?}", dt));
+                    output.kv("Expires", format!("{dt:?}"));
                 } else {
-                    output.kv("Expires", format!("{} (ms since epoch)", exp));
+                    output.kv("Expires", format!("{exp} (ms since epoch)"));
                 }
             } else {
                 output.kv("Expires", "Never");
@@ -162,16 +160,16 @@ fn format_invitation_type(shareable: &ShareableInvitation) -> String {
     match &shareable.invitation_type {
         aura_agent::handlers::InvitationType::Contact { nickname } => {
             if let Some(name) = nickname {
-                format!("Contact (nickname: {})", name)
+                format!("Contact (nickname: {name})")
             } else {
                 "Contact".to_string()
             }
         }
         aura_agent::handlers::InvitationType::Guardian { subject_authority } => {
-            format!("Guardian (for: {})", subject_authority)
+            format!("Guardian (for: {subject_authority})")
         }
         aura_agent::handlers::InvitationType::Channel { home_id } => {
-            format!("Channel (home: {})", home_id)
+            format!("Channel (home: {home_id})")
         }
         aura_agent::handlers::InvitationType::DeviceEnrollment {
             subject_authority,
@@ -182,11 +180,10 @@ fn format_invitation_type(shareable: &ShareableInvitation) -> String {
         } => {
             let label = device_name
                 .as_deref()
-                .map(|s| format!(" (name: {})", s))
+                .map(|s| format!(" (name: {s})"))
                 .unwrap_or_default();
             format!(
-                "Device enrollment (authority: {}, device: {}{}, pending_epoch: {})",
-                subject_authority, device_id, label, pending_epoch
+                "Device enrollment (authority: {subject_authority}, device: {device_id}{label}, pending_epoch: {pending_epoch})"
             )
         }
     }
@@ -201,11 +198,11 @@ async fn create_invitation(
 ) -> TerminalResult<aura_agent::Invitation> {
     let receiver_id = AuthorityId::from_uuid(
         uuid::Uuid::from_str(invitee)
-            .map_err(|e| TerminalError::Input(format!("invalid invitee authority: {}", e)))?,
+            .map_err(|e| TerminalError::Input(format!("invalid invitee authority: {e}")))?,
     );
     let subject_authority = AuthorityId::from_uuid(
         uuid::Uuid::from_str(account)
-            .map_err(|e| TerminalError::Input(format!("invalid account authority: {}", e)))?,
+            .map_err(|e| TerminalError::Input(format!("invalid account authority: {e}")))?,
     );
     let service = agent.invitations()?;
     let expires_ms = ttl_secs.map(|s| s * 1000);

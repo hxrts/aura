@@ -178,24 +178,24 @@ async fn try_load_account(
     let Some(bytes) = storage
         .retrieve(ACCOUNT_FILENAME)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Failed to read account config: {e}")))?
     else {
         return Ok(AccountLoadResult::NotFound);
     };
 
     let config: AccountConfig = serde_json::from_slice(&bytes)
-        .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to parse account config: {e}")))?;
 
     // Parse authority ID from hex string (16 bytes = UUID)
     let authority_bytes: [u8; 16] = hex::decode(&config.authority_id)
-        .map_err(|e| AuraError::internal(format!("Invalid authority_id hex: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Invalid authority_id hex: {e}")))?
         .try_into()
         .map_err(|_| AuraError::internal("Invalid authority_id length (expected 16 bytes)"))?;
     let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(authority_bytes));
 
     // Parse context ID from hex string (16 bytes = UUID)
     let context_bytes: [u8; 16] = hex::decode(&config.context_id)
-        .map_err(|e| AuraError::internal(format!("Invalid context_id hex: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Invalid context_id hex: {e}")))?
         .try_into()
         .map_err(|_| AuraError::internal("Invalid context_id length (expected 16 bytes)"))?;
     let context_id = ContextId::from_uuid(uuid::Uuid::from_bytes(context_bytes));
@@ -216,8 +216,8 @@ fn create_placeholder_ids(device_id_str: &str) -> (AuthorityId, ContextId) {
     // The "placeholder" status is tracked separately via `has_existing_account`.
     // Keeping the identity stable avoids needing to rebuild the runtime after account creation.
     let authority_entropy =
-        aura_core::hash::hash(format!("authority:{}", device_id_str).as_bytes());
-    let context_entropy = aura_core::hash::hash(format!("context:{}", device_id_str).as_bytes());
+        aura_core::hash::hash(format!("authority:{device_id_str}").as_bytes());
+    let context_entropy = aura_core::hash::hash(format!("context:{device_id_str}").as_bytes());
 
     (
         AuthorityId::new_from_entropy(authority_entropy),
@@ -235,7 +235,7 @@ async fn persist_account_config(
     let created_at = time
         .physical_time()
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to fetch physical time: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Failed to fetch physical time: {e}")))?
         .ts_ms;
 
     let config = AccountConfig {
@@ -246,12 +246,12 @@ async fn persist_account_config(
     };
 
     let content = serde_json::to_vec_pretty(&config)
-        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {e}")))?;
 
     storage
         .store(ACCOUNT_FILENAME, content)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to write account config: {e}")))?;
 
     Ok(())
 }
@@ -271,8 +271,8 @@ pub async fn create_account(
     // Create new account with deterministic IDs based on device_id
     // This ensures the same device_id always creates the same account
     let authority_entropy =
-        aura_core::hash::hash(format!("authority:{}", device_id_str).as_bytes());
-    let context_entropy = aura_core::hash::hash(format!("context:{}", device_id_str).as_bytes());
+        aura_core::hash::hash(format!("authority:{device_id_str}").as_bytes());
+    let context_entropy = aura_core::hash::hash(format!("context:{device_id_str}").as_bytes());
 
     let authority_id = AuthorityId::new_from_entropy(authority_entropy);
     let context_id = ContextId::new_from_entropy(context_entropy);
@@ -379,24 +379,24 @@ pub async fn export_account_backup(
     let Some(account_bytes) = storage
         .retrieve(ACCOUNT_FILENAME)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to read account config: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Failed to read account config: {e}")))?
     else {
         return Err(AuraError::internal("No account exists to backup"));
     };
 
     let account: AccountConfig = serde_json::from_slice(&account_bytes)
-        .map_err(|e| AuraError::internal(format!("Failed to parse account config: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to parse account config: {e}")))?;
 
     let journal = storage
         .retrieve(JOURNAL_FILENAME)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to read journal: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Failed to read journal: {e}")))?
         .and_then(|b| String::from_utf8(b).ok());
 
     let backup_at = time
         .physical_time()
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to fetch physical time: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Failed to fetch physical time: {e}")))?
         .ts_ms;
 
     // Create backup structure
@@ -410,13 +410,13 @@ pub async fn export_account_backup(
 
     // Serialize to JSON
     let json = serde_json::to_string(&backup)
-        .map_err(|e| AuraError::internal(format!("Failed to serialize backup: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to serialize backup: {e}")))?;
 
     // Encode as base64 with prefix
     use base64::Engine;
     let encoded = base64::engine::general_purpose::STANDARD.encode(json.as_bytes());
 
-    Ok(format!("{}{}", BACKUP_PREFIX, encoded))
+    Ok(format!("{BACKUP_PREFIX}{encoded}"))
 }
 
 /// Import and restore account from backup code
@@ -438,8 +438,7 @@ pub async fn import_account_backup(
     // Parse backup code
     if !backup_code.starts_with(BACKUP_PREFIX) {
         return Err(AuraError::internal(format!(
-            "Invalid backup code format (expected prefix '{}')",
-            BACKUP_PREFIX
+            "Invalid backup code format (expected prefix '{BACKUP_PREFIX}')"
         )));
     }
 
@@ -449,14 +448,14 @@ pub async fn import_account_backup(
     use base64::Engine;
     let json_bytes = base64::engine::general_purpose::STANDARD
         .decode(encoded)
-        .map_err(|e| AuraError::internal(format!("Invalid backup code encoding: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Invalid backup code encoding: {e}")))?;
 
     let json = String::from_utf8(json_bytes)
-        .map_err(|e| AuraError::internal(format!("Invalid backup code UTF-8: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Invalid backup code UTF-8: {e}")))?;
 
     // Parse backup structure
     let backup: AccountBackup = serde_json::from_str(&json)
-        .map_err(|e| AuraError::internal(format!("Invalid backup format: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Invalid backup format: {e}")))?;
 
     // Validate version
     if backup.version > BACKUP_VERSION {
@@ -468,14 +467,14 @@ pub async fn import_account_backup(
 
     // Parse authority ID
     let authority_bytes: [u8; 16] = hex::decode(&backup.account.authority_id)
-        .map_err(|e| AuraError::internal(format!("Invalid authority_id in backup: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Invalid authority_id in backup: {e}")))?
         .try_into()
         .map_err(|_| AuraError::internal("Invalid authority_id length in backup"))?;
     let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(authority_bytes));
 
     // Parse context ID
     let context_bytes: [u8; 16] = hex::decode(&backup.account.context_id)
-        .map_err(|e| AuraError::internal(format!("Invalid context_id in backup: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Invalid context_id in backup: {e}")))?
         .try_into()
         .map_err(|_| AuraError::internal("Invalid context_id length in backup"))?;
     let context_id = ContextId::from_uuid(uuid::Uuid::from_bytes(context_bytes));
@@ -484,7 +483,7 @@ pub async fn import_account_backup(
     if storage
         .exists(ACCOUNT_FILENAME)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to check account existence: {}", e)))?
+        .map_err(|e| AuraError::internal(format!("Failed to check account existence: {e}")))?
         && !overwrite
     {
         return Err(AuraError::internal(
@@ -494,19 +493,19 @@ pub async fn import_account_backup(
 
     // Write account configuration.
     let account_content = serde_json::to_vec_pretty(&backup.account)
-        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to serialize account config: {e}")))?;
 
     storage
         .store(ACCOUNT_FILENAME, account_content)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to write account config: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to write account config: {e}")))?;
 
     // Write journal if present in backup
     if let Some(ref journal_content) = backup.journal {
         storage
             .store(JOURNAL_FILENAME, journal_content.as_bytes().to_vec())
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to write journal: {}", e)))?;
+            .map_err(|e| AuraError::internal(format!("Failed to write journal: {e}")))?;
     }
 
     Ok((authority_id, context_id))
@@ -526,7 +525,7 @@ pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
         stdio.println(format_args!(
             "Demo mode runs a real agent with simulated effects."
         ));
-        stdio.println(format_args!("Seed: {} (deterministic)", DEMO_SEED));
+        stdio.println(format_args!("Seed: {DEMO_SEED} (deterministic)"));
         stdio.newline();
         TuiMode::Demo { seed: DEMO_SEED }
     } else {
@@ -554,7 +553,7 @@ async fn handle_tui_launch(
         TuiMode::Production => "Production",
         TuiMode::Demo { .. } => "Demo (Simulation)",
     };
-    stdio.println(format_args!("Starting Aura TUI ({})", mode_str));
+    stdio.println(format_args!("Starting Aura TUI ({mode_str})"));
     stdio.println(format_args!("================"));
 
     // Use the single source of truth for path resolution
@@ -577,7 +576,7 @@ async fn handle_tui_launch(
         .unwrap_or_else(|| crate::ids::device_id("tui:production-device"));
 
     stdio.println(format_args!("Data directory: {}", base_path.display()));
-    stdio.println(format_args!("Device ID: {}", device_id));
+    stdio.println(format_args!("Device ID: {device_id}"));
     std::env::set_var("AURA_DEMO_BOB_DEVICE_ID", device_id.to_string());
 
     // Determine device ID string for account derivation
@@ -587,16 +586,16 @@ async fn handle_tui_launch(
     let (authority_id, context_id, has_existing_account) =
         match try_load_account(storage.as_ref()).await? {
         AccountLoadResult::Loaded { authority, context } => {
-            stdio.println(format_args!("Authority: {}", authority));
-            stdio.println(format_args!("Context: {}", context));
+            stdio.println(format_args!("Authority: {authority}"));
+            stdio.println(format_args!("Context: {context}"));
             (authority, context, true)
         }
         AccountLoadResult::NotFound => {
             // Use placeholder IDs - the TUI will show account setup modal
             let (authority, context) = create_placeholder_ids(device_id_for_account);
             stdio.println(format_args!("No existing account - will show setup modal"));
-            stdio.println(format_args!("Placeholder Authority: {}", authority));
-            stdio.println(format_args!("Placeholder Context: {}", context));
+            stdio.println(format_args!("Placeholder Authority: {authority}"));
+            stdio.println(format_args!("Placeholder Context: {context}"));
             (authority, context, false)
         }
     };
@@ -643,9 +642,9 @@ async fn handle_tui_launch(
             .with_authority(authority_id)
             .build_production(&effect_ctx)
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to create agent: {}", e)))?,
+            .map_err(|e| AuraError::internal(format!("Failed to create agent: {e}")))?,
         TuiMode::Demo { seed } => {
-            stdio.println(format_args!("Using simulation agent with seed: {}", seed));
+            stdio.println(format_args!("Using simulation agent with seed: {seed}"));
 
             #[cfg(feature = "development")]
             {
@@ -684,7 +683,7 @@ async fn handle_tui_launch(
                     .build_simulation_async(seed, &effect_ctx)
                     .await
                     .map_err(|e| {
-                        AuraError::internal(format!("Failed to create simulation agent: {}", e))
+                        AuraError::internal(format!("Failed to create simulation agent: {e}"))
                     })?
             }
         }
@@ -699,7 +698,7 @@ async fn handle_tui_launch(
     };
     let agent = Arc::new(agent);
     let app_core = AppCore::with_runtime(app_config, agent.clone().as_runtime_bridge())
-        .map_err(|e| AuraError::internal(format!("Failed to create AppCore: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to create AppCore: {e}")))?;
 
     let app_core = Arc::new(RwLock::new(app_core));
 
@@ -708,7 +707,7 @@ async fn handle_tui_launch(
     if let Err(e) =
         aura_app::workflows::settings::refresh_settings_from_runtime(app_core.raw()).await
     {
-        stdio.eprintln(format_args!("Warning: Failed to refresh settings: {}", e));
+        stdio.eprintln(format_args!("Warning: Failed to refresh settings: {e}"));
     }
 
     stdio.println(format_args!(
@@ -907,7 +906,7 @@ async fn handle_tui_launch(
 
     // Run the iocraft TUI app with context
     let (_stdio, result) = during_fullscreen(stdio, run_app_with_context(ctx)).await;
-    let result = result.map_err(|e| AuraError::internal(format!("TUI failed: {}", e)));
+    let result = result.map_err(|e| AuraError::internal(format!("TUI failed: {e}")));
 
     // In demo mode, stop the simulator cleanly
     #[cfg(feature = "development")]
@@ -965,11 +964,11 @@ fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
     let log_key = std::env::var("AURA_TUI_LOG_PATH")
         .ok()
         .filter(|path| !path.trim().is_empty())
-        .unwrap_or_else(|| format!("{}/{}", TUI_LOG_KEY_PREFIX, default_name));
+        .unwrap_or_else(|| format!("{TUI_LOG_KEY_PREFIX}/{default_name}"));
 
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(TUI_LOG_QUEUE_CAPACITY);
     let storage_task = storage.clone();
-    let log_key_task = log_key.clone();
+    let log_key_task = log_key;
 
     tokio::spawn(async move {
         let mut buffer: Vec<u8> = Vec::new();
@@ -987,7 +986,7 @@ fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let make_writer = {
-        let sender = tx.clone();
+        let sender = tx;
         move || StorageLogWriter {
             sender: sender.clone(),
         }

@@ -84,7 +84,7 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
                     error = %error,
                     "Biscuit token requirement failed"
                 );
-                failed_requirements.push(format!("Token {}: {}", idx, error));
+                failed_requirements.push(format!("Token {idx}: {error}"));
             }
         }
     }
@@ -413,7 +413,7 @@ where
             .await
             .map_err(|e| {
                 error!(error = %e, "Failed to apply sequence deltas");
-                AuraError::internal(format!("Sequence delta application failed: {}", e))
+                AuraError::internal(format!("Sequence delta application failed: {e}"))
             })?;
     }
 

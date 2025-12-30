@@ -144,11 +144,11 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
 
     if is_equivocating {
         // Quint: newEquivocators = inst.equivocators.union(Set(witness))
-        new_state.equivocators.insert(proposal.witness.clone());
+        new_state.equivocators.insert(proposal.witness);
         // Don't add proposal from equivocator
     } else {
         // Quint: newProposals = inst.proposals.union(Set(proposal))
-        new_state.proposals.push(proposal.clone());
+        new_state.proposals.push(proposal);
     }
 
     // Quint: matchingCount = countMatchingProposals(newProposals, rid, inst.prestateHash)

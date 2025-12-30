@@ -73,7 +73,7 @@ pub fn example_budget_table() -> Vec<(u8, HomeFlowBudget)> {
     let mut table = Vec::new();
 
     for n in 1..=MAX_NEIGHBORHOODS {
-        let mut budget = HomeFlowBudget::new(format!("example_{}_neighborhoods", n));
+        let mut budget = HomeFlowBudget::new(format!("example_{n}_neighborhoods"));
         for _ in 0..n {
             budget.join_neighborhood().unwrap();
         }

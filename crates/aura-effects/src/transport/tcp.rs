@@ -42,12 +42,12 @@ impl TcpTransportHandler {
         let stream = timeout(self.config.connect_timeout, TcpStream::connect(addr))
             .await
             .map_err(|_| TransportError::Timeout("TCP connect timeout".to_string()))?
-            .map_err(|e| TransportError::ConnectionFailed(format!("TCP connect failed: {}", e)))?;
+            .map_err(|e| TransportError::ConnectionFailed(format!("TCP connect failed: {e}")))?;
 
         let local_addr = stream.local_addr()?.to_string();
         let remote_addr = stream.peer_addr()?.to_string();
 
-        let connection_id = format!("tcp-{}-{}", local_addr, remote_addr);
+        let connection_id = format!("tcp-{local_addr}-{remote_addr}");
 
         let mut metadata = HashMap::new();
         metadata.insert("protocol".to_string(), "tcp".to_string());
@@ -68,7 +68,7 @@ impl TcpTransportHandler {
     pub async fn listen(&self, bind_addr: SocketAddr) -> TransportResult<TcpListener> {
         let listener = TcpListener::bind(bind_addr)
             .await
-            .map_err(|e| TransportError::ConnectionFailed(format!("TCP bind failed: {}", e)))?;
+            .map_err(|e| TransportError::ConnectionFailed(format!("TCP bind failed: {e}")))?;
 
         Ok(listener)
     }
@@ -81,11 +81,11 @@ impl TcpTransportHandler {
         let (stream, peer_addr) = listener
             .accept()
             .await
-            .map_err(|e| TransportError::ConnectionFailed(format!("TCP accept failed: {}", e)))?;
+            .map_err(|e| TransportError::ConnectionFailed(format!("TCP accept failed: {e}")))?;
 
         let local_addr = stream.local_addr()?.to_string();
         let remote_addr = peer_addr.to_string();
-        let connection_id = format!("tcp-{}-{}", local_addr, remote_addr);
+        let connection_id = format!("tcp-{local_addr}-{remote_addr}");
 
         let mut metadata = HashMap::new();
         metadata.insert("protocol".to_string(), "tcp".to_string());
@@ -185,7 +185,7 @@ impl NetworkCoreEffects for TcpTransportHandler {
         let addr_str = format!("127.0.0.1:{}", peer_id.as_u128() % 65535 + 1024);
         let addr: SocketAddr = addr_str.parse().map_err(|e| NetworkError::SendFailed {
             peer_id: Some(peer_id),
-            reason: format!("Invalid address: {}", e),
+            reason: format!("Invalid address: {e}"),
         })?;
 
         let mut stream = TcpStream::connect(addr)
@@ -218,14 +218,14 @@ impl NetworkCoreEffects for TcpTransportHandler {
             .unwrap_or_else(|_| "127.0.0.1:0".to_string())
             .parse()
             .map_err(|e| NetworkError::ReceiveFailed {
-                reason: format!("Invalid listen address: {}", e),
+                reason: format!("Invalid listen address: {e}"),
             })?;
 
         let listener =
             TcpListener::bind(bind_addr)
                 .await
                 .map_err(|e| NetworkError::ReceiveFailed {
-                    reason: format!("Failed to bind listener: {}", e),
+                    reason: format!("Failed to bind listener: {e}"),
                 })?;
 
         let accept_result = timeout(self.config.read_timeout, listener.accept())
@@ -235,7 +235,7 @@ impl NetworkCoreEffects for TcpTransportHandler {
             })
             .and_then(|res| {
                 res.map_err(|e| NetworkError::ReceiveFailed {
-                    reason: format!("Failed to accept TCP connection: {}", e),
+                    reason: format!("Failed to accept TCP connection: {e}"),
                 })
             })?;
 
@@ -250,7 +250,7 @@ impl NetworkCoreEffects for TcpTransportHandler {
             })
             .and_then(|res| {
                 res.map_err(|e| NetworkError::ReceiveFailed {
-                    reason: format!("TCP read failed: {}", e),
+                    reason: format!("TCP read failed: {e}"),
                 })
             })?;
 
@@ -289,7 +289,7 @@ impl NetworkExtendedEffects for TcpTransportHandler {
         // Open a TCP connection and return a connection ID
         let addr: SocketAddr = address
             .parse()
-            .map_err(|e| NetworkError::ConnectionFailed(format!("Invalid address: {}", e)))?;
+            .map_err(|e| NetworkError::ConnectionFailed(format!("Invalid address: {e}")))?;
         let _stream = TcpStream::connect(addr)
             .await
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;

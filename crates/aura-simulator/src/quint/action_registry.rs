@@ -149,7 +149,7 @@ impl ActionRegistry {
         state: &Value,
     ) -> Result<ActionResult> {
         let handler = self.handlers.get(action_name).ok_or_else(|| {
-            aura_core::AuraError::invalid(format!("unknown action: {}", action_name))
+            aura_core::AuraError::invalid(format!("unknown action: {action_name}"))
         })?;
 
         handler.execute(params, nondet_picks, state).await

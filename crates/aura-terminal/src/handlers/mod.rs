@@ -219,7 +219,7 @@ impl CliHandler {
 
         println!();
         println!("=== Home Storage Budget ===");
-        println!("{}", budget_status);
+        println!("{budget_status}");
 
         Ok(())
     }
@@ -408,16 +408,16 @@ impl CliHandler {
     pub async fn handle_tui(&self, args: &TuiArgs) -> TerminalResult<()> {
         tui::handle_tui(args)
             .await
-            .map_err(|e| TerminalError::Operation(format!("TUI command failed: {}", e)))
+            .map_err(|e| TerminalError::Operation(format!("TUI command failed: {e}")))
     }
 
     /// Log error message through effects
     pub async fn log_error(&self, message: &str) {
-        eprintln!("ERROR: {}", message);
+        eprintln!("ERROR: {message}");
     }
 
     /// Log info message through effects
     pub async fn log_info(&self, message: &str) {
-        println!("INFO: {}", message);
+        println!("INFO: {message}");
     }
 }

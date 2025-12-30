@@ -257,8 +257,7 @@ fn apply_operation(state: &mut TreeState, op: &AttestedOp) -> Result<(), Reducti
                 let meet_result = old_policy.meet(new_policy);
                 if &meet_result != new_policy {
                     return Err(ReductionError::InvalidOperation(format!(
-                        "Policy change from {:?} to {:?} is not stricter-or-equal (meet = {:?})",
-                        old_policy, new_policy, meet_result
+                        "Policy change from {old_policy:?} to {new_policy:?} is not stricter-or-equal (meet = {meet_result:?})"
                     )));
                 }
             }

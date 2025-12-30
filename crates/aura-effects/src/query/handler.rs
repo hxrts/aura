@@ -121,18 +121,15 @@ impl QueryFacts {
 
 /// Policy for capability enforcement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum CapabilityPolicy {
     /// Allow all queries regardless of granted capabilities.
     AllowAll,
     /// Deny queries unless capabilities are explicitly granted.
+    #[default]
     DenyUnlessGranted,
 }
 
-impl Default for CapabilityPolicy {
-    fn default() -> Self {
-        CapabilityPolicy::DenyUnlessGranted
-    }
-}
 
 /// Capability checker for query authorization.
 ///
@@ -345,7 +342,7 @@ fn fact_value_to_args(value: &FactValue) -> Vec<String> {
         FactValue::Number(n) => vec![n.to_string()],
         FactValue::Bytes(b) => {
             // Convert bytes to hex string manually
-            let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
+            let hex: String = b.iter().map(|byte| format!("{byte:02x}")).collect();
             vec![hex]
         }
         FactValue::Set(s) => s.iter().cloned().collect(),

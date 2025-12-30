@@ -128,7 +128,7 @@ impl CommitFact {
 
         let frost_pkg: frost_ed25519::keys::PublicKeyPackage =
             group_pkg.try_into().map_err(|e: String| {
-                AuraError::invalid(format!("Invalid group public key package: {}", e))
+                AuraError::invalid(format!("Invalid group public key package: {e}"))
             })?;
 
         frost_verify_aggregate(
@@ -137,7 +137,7 @@ impl CommitFact {
             &self.threshold_signature.signature,
         )
         .map_err(|e| {
-            AuraError::crypto(format!("Threshold signature verification failed: {}", e))
+            AuraError::crypto(format!("Threshold signature verification failed: {e}"))
         })?;
 
         Ok(())

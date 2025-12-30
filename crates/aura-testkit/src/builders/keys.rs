@@ -117,19 +117,19 @@ impl KeySetBuilder {
         (0..self.count)
             .map(|i| {
                 let seed_str = if let Some(ref base) = self.base_seed {
-                    format!("{}-{}", base, i)
+                    format!("{base}-{i}")
                 } else {
-                    format!("key-seed-{}", i)
+                    format!("key-seed-{i}")
                 };
 
                 match self.key_type {
                     KeyType::Standard => KeyTestFixture::from_seed_string(&seed_str),
                     KeyType::DeviceSpecific => {
-                        let enhanced_seed = format!("{}-device-specific", seed_str);
+                        let enhanced_seed = format!("{seed_str}-device-specific");
                         KeyTestFixture::from_seed_string(&enhanced_seed)
                     }
                     KeyType::Threshold => {
-                        let enhanced_seed = format!("{}-threshold", seed_str);
+                        let enhanced_seed = format!("{seed_str}-threshold");
                         KeyTestFixture::from_seed_string(&enhanced_seed)
                     }
                 }
@@ -178,7 +178,7 @@ pub mod helpers {
 
     /// Create device-specific keys (seeded with device ID)
     pub fn test_keys_for_device(count: usize, device_id: DeviceId) -> Vec<KeyTestFixture> {
-        let base_seed = format!("device-{:?}", device_id);
+        let base_seed = format!("device-{device_id:?}");
         KeySetBuilder::new(count)
             .with_seed(base_seed)
             .with_key_type(KeyType::DeviceSpecific)
@@ -192,7 +192,7 @@ pub mod helpers {
         base_seed: &str,
     ) -> Vec<KeyTestFixture> {
         KeySetBuilder::new(count)
-            .with_seed(format!("{}-threshold-{}", base_seed, threshold))
+            .with_seed(format!("{base_seed}-threshold-{threshold}"))
             .with_key_type(KeyType::Threshold)
             .build()
     }

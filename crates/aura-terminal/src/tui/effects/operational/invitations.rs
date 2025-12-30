@@ -37,8 +37,7 @@ pub async fn handle_invitations(
                 Ok(id) => id,
                 Err(_) => {
                     return Some(Err(OpError::InvalidArgument(format!(
-                        "Invalid receiver authority ID: {}",
-                        receiver_id
+                        "Invalid receiver authority ID: {receiver_id}"
                     ))));
                 }
             };
@@ -64,8 +63,7 @@ pub async fn handle_invitations(
                         Ok(info) => info,
                         Err(e) => {
                             return Some(Err(OpError::Failed(format!(
-                                "Failed to create contact invitation: {}",
-                                e
+                                "Failed to create contact invitation: {e}"
                             ))));
                         }
                     }
@@ -96,8 +94,7 @@ pub async fn handle_invitations(
                         Ok(info) => info,
                         Err(e) => {
                             return Some(Err(OpError::Failed(format!(
-                                "Failed to create guardian invitation: {}",
-                                e
+                                "Failed to create guardian invitation: {e}"
                             ))));
                         }
                     }
@@ -137,16 +134,14 @@ pub async fn handle_invitations(
                         Ok(info) => info,
                         Err(e) => {
                             return Some(Err(OpError::Failed(format!(
-                                "Failed to create channel invitation: {}",
-                                e
+                                "Failed to create channel invitation: {e}"
                             ))));
                         }
                     }
                 }
                 other => {
                     return Some(Err(OpError::InvalidArgument(format!(
-                        "Unknown invitation type: {}",
-                        other
+                        "Unknown invitation type: {other}"
                     ))));
                 }
             };
@@ -157,8 +152,7 @@ pub async fn handle_invitations(
                     code,
                 })),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to export invitation: {}",
-                    e
+                    "Failed to export invitation: {e}"
                 )))),
             }
         }
@@ -168,8 +162,7 @@ pub async fn handle_invitations(
                 Ok(id) => id,
                 Err(_) => {
                     return Some(Err(OpError::InvalidArgument(format!(
-                        "Invalid contact authority ID: {}",
-                        contact_id
+                        "Invalid contact authority ID: {contact_id}"
                     ))));
                 }
             };
@@ -197,8 +190,7 @@ pub async fn handle_invitations(
                     info.invitation_id
                 )))),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to send home invitation: {}",
-                    e
+                    "Failed to send home invitation: {e}"
                 )))),
             }
         }
@@ -214,8 +206,7 @@ pub async fn handle_invitations(
                     // Workflow failed (likely RuntimeBridge unavailable in demo mode)
                     // Return error - the UI layer can decide how to handle this
                     Some(Err(OpError::Failed(format!(
-                        "Failed to export invitation: {}",
-                        e
+                        "Failed to export invitation: {e}"
                     ))))
                 }
             }
@@ -233,8 +224,7 @@ pub async fn handle_invitations(
                         if let Err(e) = accept_invitation(app_core, &invitation.invitation_id).await
                         {
                             return Some(Err(OpError::InvalidArgument(format!(
-                                "Failed to accept invitation: {}",
-                                e
+                                "Failed to accept invitation: {e}"
                             ))));
                         }
                     }
@@ -242,12 +232,12 @@ pub async fn handle_invitations(
                     // Format invitation type for display
                     let invitation_type = match &invitation.invitation_type {
                         InvitationBridgeType::Channel { home_id } => {
-                            format!("channel:{}", home_id)
+                            format!("channel:{home_id}")
                         }
                         InvitationBridgeType::Guardian { .. } => "guardian".to_string(),
                         InvitationBridgeType::Contact { nickname } => {
                             if let Some(name) = nickname {
-                                format!("contact:{}", name)
+                                format!("contact:{name}")
                             } else {
                                 "contact".to_string()
                             }
@@ -258,9 +248,9 @@ pub async fn handle_invitations(
                             ..
                         } => {
                             if let Some(name) = device_name {
-                                format!("device:{}", name)
+                                format!("device:{name}")
                             } else {
-                                format!("device:{}", device_id)
+                                format!("device:{device_id}")
                             }
                         }
                     };
@@ -274,8 +264,7 @@ pub async fn handle_invitations(
                     }))
                 }
                 Err(e) => Some(Err(OpError::InvalidArgument(format!(
-                    "Invalid invitation code: {}",
-                    e
+                    "Invalid invitation code: {e}"
                 )))),
             }
         }
@@ -284,8 +273,7 @@ pub async fn handle_invitations(
             match accept_invitation(app_core, invitation_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to accept invitation: {}",
-                    e
+                    "Failed to accept invitation: {e}"
                 )))),
             }
         }
@@ -294,8 +282,7 @@ pub async fn handle_invitations(
             match decline_invitation(app_core, invitation_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to decline invitation: {}",
-                    e
+                    "Failed to decline invitation: {e}"
                 )))),
             }
         }
@@ -304,8 +291,7 @@ pub async fn handle_invitations(
             match cancel_invitation(app_core, invitation_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to cancel invitation: {}",
-                    e
+                    "Failed to cancel invitation: {e}"
                 )))),
             }
         }

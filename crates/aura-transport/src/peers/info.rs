@@ -161,7 +161,7 @@ impl PeerInfo {
                 ts_ms: 0,
                 uncertainty: None,
             }),
-        )
+        );
     }
 
     /// Update peer status with specific timestamp
@@ -198,7 +198,7 @@ impl BlindedPeerCapabilities {
                 ts_ms: 0,
                 uncertainty: None,
             }),
-        )
+        );
     }
 
     /// Add blinded capability with specific timestamp

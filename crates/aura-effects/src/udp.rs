@@ -40,7 +40,7 @@ impl UdpEndpointEffects for RealUdpSocket {
         addr: &UdpEndpoint,
     ) -> Result<usize, NetworkError> {
         let addr: SocketAddr = addr.as_str().parse().map_err(|e| {
-            NetworkError::ConnectionFailed(format!("Invalid UDP address '{}': {e}", addr))
+            NetworkError::ConnectionFailed(format!("Invalid UDP address '{addr}': {e}"))
         })?;
         self.socket
             .send_to(payload, addr)

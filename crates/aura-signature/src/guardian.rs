@@ -34,15 +34,14 @@ pub fn verify_guardian_signature(
         aura_core::ed25519_verify(message, signature, guardian_public_key).map_err(|e| {
             AuthenticationError::InvalidGuardianSignature {
                 details: format!(
-                    "Guardian {} signature verification failed: {}",
-                    guardian_id, e
+                    "Guardian {guardian_id} signature verification failed: {e}"
                 ),
             }
         })?;
 
     if !valid {
         return Err(AuthenticationError::InvalidGuardianSignature {
-            details: format!("Guardian {} signature invalid", guardian_id),
+            details: format!("Guardian {guardian_id} signature invalid"),
         });
     }
 

@@ -201,7 +201,7 @@ impl NamespacedSync {
         context: &ContextId,
     ) -> Result<bool> {
         // Look for context participant facts in the journal
-        let context_key = format!("context_participants/{}", context);
+        let context_key = format!("context_participants/{context}");
         let participants_data = match effects.retrieve(&context_key).await {
             Ok(Some(data)) => data,
             Ok(None) => {
@@ -270,7 +270,7 @@ impl NamespacedSync {
         effects: &E,
         peer: &AuthorityId,
     ) -> Result<Option<Vec<u8>>> {
-        let peer_token_key = format!("peer_tokens/{}", peer);
+        let peer_token_key = format!("peer_tokens/{peer}");
         match effects.retrieve(&peer_token_key).await {
             Ok(Some(token)) => Ok(Some(token)),
             Ok(None) => Ok(None),
@@ -290,21 +290,21 @@ impl NamespacedSync {
     ) -> Result<bool> {
         let root = self.load_root_public_key(effects).await?;
         let token = biscuit_auth::Biscuit::from(token_bytes, root).map_err(|e| {
-            AuraError::invalid(format!("Biscuit parse failed for {}: {}", operation, e))
+            AuraError::invalid(format!("Biscuit parse failed for {operation}: {e}"))
         })?;
 
         // Minimal policy: if token parses and targets the namespace, accept.
         let mut authorizer = token
             .authorizer()
-            .map_err(|e| AuraError::invalid(format!("Biscuit authorizer build failed: {}", e)))?;
-        let scope_str = format!("{:?}", scope);
+            .map_err(|e| AuraError::invalid(format!("Biscuit authorizer build failed: {e}")))?;
+        let scope_str = format!("{scope:?}");
         // Minimal policy: ensure the token can be evaluated without failing and record the
         // operation scope for auditing. Additional caveats should be attached by the caller.
         authorizer
             .allow()
-            .map_err(|e| AuraError::invalid(format!("Biscuit allow rule failed: {}", e)))?;
+            .map_err(|e| AuraError::invalid(format!("Biscuit allow rule failed: {e}")))?;
         authorizer.authorize().map_err(|e| {
-            AuraError::permission_denied(format!("Biscuit evaluation failed: {}", e))
+            AuraError::permission_denied(format!("Biscuit evaluation failed: {e}"))
         })?;
         tracing::debug!(
             "Validated Biscuit token for {} on scope {} (root verified)",
@@ -329,11 +329,11 @@ impl NamespacedSync {
         // Development fallback key
         let dev_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
         let dev_bytes = hex::decode(dev_key_hex)
-            .map_err(|e| AuraError::invalid(format!("decode dev root key: {}", e)))?;
+            .map_err(|e| AuraError::invalid(format!("decode dev root key: {e}")))?;
         let mut key_array = [0u8; 32];
         key_array.copy_from_slice(&dev_bytes[..32]);
         biscuit_auth::PublicKey::from_bytes(&key_array)
-            .map_err(|e| AuraError::invalid(format!("load dev root key: {}", e)))
+            .map_err(|e| AuraError::invalid(format!("load dev root key: {e}")))
     }
 
     /// Process incoming sync request with pagination support
@@ -521,7 +521,7 @@ impl NamespacedAntiEntropy {
         let request_data = serde_json::to_vec(&request).map_err(|e| {
             sync_serialization_error(
                 "SyncRequest",
-                format!("Failed to serialize sync request: {}", e),
+                format!("Failed to serialize sync request: {e}"),
             )
         })?;
 
@@ -533,24 +533,21 @@ impl NamespacedAntiEntropy {
                 .await
                 .map_err(|e| {
                     sync_network_error(format!(
-                        "Failed to send sync request to peer {}: {}",
-                        peer, e
+                        "Failed to send sync request to peer {peer}: {e}"
                     ))
                 })?;
 
             // Receive response from the peer
             let (sender_id, response_data) = effects.receive().await.map_err(|e| {
                 sync_network_error(format!(
-                    "Failed to receive sync response from peer {}: {}",
-                    peer, e
+                    "Failed to receive sync response from peer {peer}: {e}"
                 ))
             })?;
 
             // Verify the response came from the expected peer
             if sender_id != peer_uuid {
                 return Err(sync_session_error(format!(
-                    "Received sync response from unexpected peer: expected {}, got {}",
-                    peer, sender_id
+                    "Received sync response from unexpected peer: expected {peer}, got {sender_id}"
                 )));
             }
 
@@ -559,8 +556,7 @@ impl NamespacedAntiEntropy {
                 sync_serialization_error(
                     "SyncResponse",
                     format!(
-                        "Failed to deserialize sync response from peer {}: {}",
-                        peer, e
+                        "Failed to deserialize sync response from peer {peer}: {e}"
                     ),
                 )
             })?;

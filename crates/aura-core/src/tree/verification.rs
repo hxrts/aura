@@ -211,7 +211,7 @@ fn verify_frost_signature(
 ) -> Result<(), VerificationError> {
     // Deserialize the group verifying key
     let verifying_key = frost_ed25519::VerifyingKey::deserialize(*group_public_key)
-        .map_err(|e| VerificationError::InvalidSignature(format!("Invalid group key: {}", e)))?;
+        .map_err(|e| VerificationError::InvalidSignature(format!("Invalid group key: {e}")))?;
 
     // Use the tree_signing module's verification
     tree_signing::frost_verify_aggregate(&verifying_key, message, signature)

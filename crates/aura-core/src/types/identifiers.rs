@@ -554,7 +554,7 @@ impl IndividualIdExt for IndividualId {
 
     fn from_dkd_context(context: &str, fingerprint: &[u8; 32]) -> Self {
         let fingerprint_hex = hex::encode(fingerprint);
-        Self(format!("dkd:{}:{}", context, fingerprint_hex))
+        Self(format!("dkd:{context}:{fingerprint_hex}"))
     }
 }
 
@@ -579,7 +579,7 @@ impl DataId {
 
     fn derive_tagged(prefix: &str) -> String {
         let uuid = derived_uuid(prefix.as_bytes());
-        format!("{}{}", prefix, uuid)
+        format!("{prefix}{uuid}")
     }
 
     /// Get the inner string
@@ -824,9 +824,9 @@ impl MessageContext {
 impl fmt::Display for MessageContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MessageContext::Relay(relay_id) => write!(f, "{}", relay_id),
-            MessageContext::Group(group_id) => write!(f, "{}", group_id),
-            MessageContext::DkdContext(dkd_id) => write!(f, "{}", dkd_id),
+            MessageContext::Relay(relay_id) => write!(f, "{relay_id}"),
+            MessageContext::Group(group_id) => write!(f, "{group_id}"),
+            MessageContext::DkdContext(dkd_id) => write!(f, "{dkd_id}"),
         }
     }
 }

@@ -90,7 +90,7 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
 
     // Status for error/importing
     let status = if !error.is_empty() {
-        ModalStatus::Error(error.clone())
+        ModalStatus::Error(error)
     } else if importing {
         ModalStatus::Loading("Importing...".to_string())
     } else {

@@ -1264,7 +1264,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             format!("{}", pending_epoch.value()),
         );
 
-        let public_key_package = effects
+        let public_key_package = match effects
             .secure_retrieve(
                 &pubkey_location,
                 &[
@@ -1273,13 +1273,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 ],
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to load threshold public key package: {e}"
-                ))
-            })?;
+        {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!(error = %e, "Missing MFA public key package");
+                Vec::new()
+            }
+        };
 
-        let threshold_config = effects
+        let threshold_config = match effects
             .secure_retrieve(
                 &config_location,
                 &[
@@ -1288,11 +1290,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 ],
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to load threshold config metadata: {e}"
-                ))
-            })?;
+        {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::warn!(error = %e, "Missing MFA threshold config");
+                Vec::new()
+            }
+        };
 
         let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
             std::collections::HashMap::new();
@@ -1517,7 +1521,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .into_iter()
             .filter(|id| *id != current_device_id)
             .collect();
-        other_device_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        other_device_ids.sort_by_key(|a| a.to_string());
 
         let mut participant_device_ids: Vec<aura_core::DeviceId> =
             Vec::with_capacity(other_device_ids.len() + 2);
@@ -1862,7 +1866,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .copied()
             .filter(|id| *id != current_device_id)
             .collect();
-        other_device_ids.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        other_device_ids.sort_by_key(|a| a.to_string());
 
         let mut participant_device_ids: Vec<aura_core::DeviceId> =
             Vec::with_capacity(other_device_ids.len() + 1);

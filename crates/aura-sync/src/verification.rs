@@ -250,7 +250,7 @@ impl MerkleVerifier {
                         error = %e,
                         "Fact verification failed"
                     );
-                    rejected.push((fact, format!("Verification error: {}", e)));
+                    rejected.push((fact, format!("Verification error: {e}")));
                 }
             }
         }
@@ -304,8 +304,7 @@ impl MerkleVerifier {
         // Reject if timestamp is too far in the future
         if fact_time_ms > now_ms + MAX_CLOCK_SKEW_MS {
             return Err(format!(
-                "Timestamp {} is too far in the future (current time: {}, max skew: {}ms)",
-                fact_time_ms, now_ms, MAX_CLOCK_SKEW_MS
+                "Timestamp {fact_time_ms} is too far in the future (current time: {now_ms}, max skew: {MAX_CLOCK_SKEW_MS}ms)"
             ));
         }
 

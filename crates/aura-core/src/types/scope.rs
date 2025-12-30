@@ -111,8 +111,7 @@ impl ResourceScope {
             }
             ResourceScope::Storage { authority_id, path } => {
                 format!(
-                    "resource(\"/storage/{}/{}\"), resource_type(\"storage\")",
-                    authority_id, path
+                    "resource(\"/storage/{authority_id}/{path}\"), resource_type(\"storage\")"
                 )
             }
         }
@@ -134,7 +133,7 @@ impl ResourceScope {
                 format!("/context/{}/{}", context_id, operation.as_str())
             }
             ResourceScope::Storage { authority_id, path } => {
-                format!("/storage/{}/{}", authority_id, path)
+                format!("/storage/{authority_id}/{path}")
             }
         }
     }

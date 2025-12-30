@@ -8,8 +8,8 @@ pub async fn load_config_bytes(ctx: &HandlerContext<'_>, key: &str) -> TerminalR
         .effects()
         .retrieve(key)
         .await
-        .map_err(|e| TerminalError::Config(format!("read {}: {}", key, e)))?
-        .ok_or_else(|| TerminalError::NotFound(format!("config {}", key)))?;
+        .map_err(|e| TerminalError::Config(format!("read {key}: {e}")))?
+        .ok_or_else(|| TerminalError::NotFound(format!("config {key}")))?;
     Ok(data)
 }
 
@@ -17,5 +17,5 @@ pub async fn load_config_bytes(ctx: &HandlerContext<'_>, key: &str) -> TerminalR
 pub async fn load_config_utf8(ctx: &HandlerContext<'_>, key: &str) -> TerminalResult<String> {
     let bytes = load_config_bytes(ctx, key).await?;
     String::from_utf8(bytes)
-        .map_err(|e| TerminalError::Config(format!("config {} is not UTF-8: {}", key, e)))
+        .map_err(|e| TerminalError::Config(format!("config {key} is not UTF-8: {e}")))
 }

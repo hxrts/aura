@@ -226,7 +226,7 @@ impl std::fmt::Display for EffectPolicyError {
                     "Operation {} requires approval{}",
                     operation.as_str(),
                     context_id
-                        .map(|c| format!(" in context {}", c))
+                        .map(|c| format!(" in context {c}"))
                         .unwrap_or_else(String::new)
                 )
             }

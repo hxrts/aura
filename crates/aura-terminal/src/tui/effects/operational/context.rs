@@ -55,12 +55,10 @@ pub async fn handle_context(
             // Accept a pending home invitation via workflow
             match accept_pending_home_invitation(app_core).await {
                 Ok(invitation_id) => Some(Ok(OpResponse::Data(format!(
-                    "Accepted home invitation: {}",
-                    invitation_id
+                    "Accepted home invitation: {invitation_id}"
                 )))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to accept home invitation: {}",
-                    e
+                    "Failed to accept home invitation: {e}"
                 )))),
             }
         }

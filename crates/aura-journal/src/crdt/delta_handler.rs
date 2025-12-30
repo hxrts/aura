@@ -23,7 +23,7 @@ where
     /// Buffer of accumulated deltas
     pub delta_inbox: VecDeque<D>,
     /// Maximum number of deltas to buffer before folding
-    pub fold_threshold: usize,
+    pub fold_threshold: u32,
 }
 
 impl<S, D> DeltaHandler<S, D>
@@ -50,7 +50,7 @@ where
     }
 
     /// Create a delta handler with custom fold threshold
-    pub fn with_threshold(fold_threshold: usize) -> Self {
+    pub fn with_threshold(fold_threshold: u32) -> Self {
         Self {
             state: S::bottom(),
             delta_inbox: VecDeque::new(),
@@ -103,12 +103,12 @@ where
     }
 
     /// Set fold threshold
-    pub fn set_fold_threshold(&mut self, threshold: usize) {
+    pub fn set_fold_threshold(&mut self, threshold: u32) {
         self.fold_threshold = threshold;
     }
 
     /// Get fold threshold
-    pub fn get_fold_threshold(&self) -> usize {
+    pub fn get_fold_threshold(&self) -> u32 {
         self.fold_threshold
     }
 
@@ -159,7 +159,7 @@ where
         self.delta_inbox.push_back(msg.payload);
 
         // Check if we should fold deltas into state
-        if self.delta_inbox.len() >= self.fold_threshold {
+        if self.delta_inbox.len() >= self.fold_threshold as usize {
             self.fold_deltas();
         }
     }

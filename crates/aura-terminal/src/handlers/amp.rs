@@ -41,15 +41,15 @@ async fn handle_amp_inspect(
     let mut output = CliOutput::new();
 
     let context = ContextId::from_str(context_str)
-        .map_err(|e| TerminalError::Input(format!("Invalid context id: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid context id: {e}")))?;
     let channel = ChannelId::from_str(channel_str)
-        .map_err(|e| TerminalError::Input(format!("Invalid channel id: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid channel id: {e}")))?;
 
     let state = get_channel_state(ctx.effects(), context, channel)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {e}")))?;
 
-    output.section(format!("Channel State for {}:{}", context_str, channel_str));
+    output.section(format!("Channel State for {context_str}:{channel_str}"));
     output.kv("Current Epoch", state.chan_epoch.to_string());
     output.kv("Current Generation", state.current_gen.to_string());
     output.kv("Last Checkpoint Gen", state.last_checkpoint_gen.to_string());
@@ -78,13 +78,13 @@ async fn handle_amp_bump(
     let mut output = CliOutput::new();
 
     let context = ContextId::from_str(context_str)
-        .map_err(|e| TerminalError::Input(format!("Invalid context id: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid context id: {e}")))?;
     let channel = ChannelId::from_str(channel_str)
-        .map_err(|e| TerminalError::Input(format!("Invalid channel id: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid channel id: {e}")))?;
 
     let state = get_channel_state(ctx.effects(), context, channel)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {e}")))?;
 
     if state.pending_bump.is_some() {
         output.eprintln("Error: Channel already has a pending bump");
@@ -98,7 +98,7 @@ async fn handle_amp_bump(
         new_epoch: state.chan_epoch + 1,
         reason: ChannelBumpReason::Routine,
         bump_id: Hash32::new(hash::hash(
-            format!("amp-bump:{}:{}", context, channel).as_bytes(),
+            format!("amp-bump:{context}:{channel}").as_bytes(),
         )),
     };
 
@@ -127,13 +127,13 @@ async fn handle_amp_checkpoint(
     let mut output = CliOutput::new();
 
     let context = ContextId::from_str(context_str)
-        .map_err(|e| TerminalError::Input(format!("Invalid context id: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid context id: {e}")))?;
     let channel = ChannelId::from_str(channel_str)
-        .map_err(|e| TerminalError::Input(format!("Invalid channel id: {}", e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid channel id: {e}")))?;
 
     let state = get_channel_state(ctx.effects(), context, channel)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to get channel state: {e}")))?;
 
     let checkpoint = ChannelCheckpoint {
         context,
@@ -154,11 +154,10 @@ async fn handle_amp_checkpoint(
             aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint.clone()),
         ))
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to create checkpoint: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to create checkpoint: {e}")))?;
 
     output.section(format!(
-        "Checkpoint created for {}:{}",
-        context_str, channel_str
+        "Checkpoint created for {context_str}:{channel_str}"
     ));
     output.kv("Epoch", checkpoint.chan_epoch.to_string());
     output.kv("Base Generation", checkpoint.base_gen.to_string());

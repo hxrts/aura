@@ -261,8 +261,7 @@ impl ItfTraceConverter {
             for var in &trace.vars {
                 if !state.variables.contains_key(var) {
                     return Err(AuraError::invalid(format!(
-                        "State missing variable: {}",
-                        var
+                        "State missing variable: {var}"
                     )));
                 }
             }
@@ -278,13 +277,13 @@ impl ItfTraceConverter {
         } else {
             serde_json::to_string(trace)
         };
-        result.map_err(|e| AuraError::invalid(format!("JSON serialization failed: {}", e)))
+        result.map_err(|e| AuraError::invalid(format!("JSON serialization failed: {e}")))
     }
 
     /// Parse ITF trace from JSON
     pub fn parse_itf_from_json(&self, json: &str) -> Result<ItfTrace> {
         serde_json::from_str(json)
-            .map_err(|e| AuraError::invalid(format!("JSON parsing failed: {}", e)))
+            .map_err(|e| AuraError::invalid(format!("JSON parsing failed: {e}")))
     }
 }
 
@@ -516,7 +515,7 @@ impl TraceConverter {
         let start_time = crate::utils::time::current_unix_timestamp_millis();
 
         // Generate unique trace ID
-        let trace_id = format!("trace_{}", start_time);
+        let trace_id = format!("trace_{start_time}");
 
         // Check cache first
         if let Some(cached_trace) = self.conversion_cache.get(&trace_id) {
@@ -820,7 +819,7 @@ impl TraceConverter {
         );
 
         Ok(QuintTraceEvent {
-            event_id: format!("transition_{}", index),
+            event_id: format!("transition_{index}"),
             event_type: "state_transition".to_string(),
             timestamp: to_state.time,
             parameters,
@@ -1032,7 +1031,7 @@ impl TraceConverter {
             }
 
             events.push(QuintTraceEvent {
-                event_id: format!("fault_{}", index),
+                event_id: format!("fault_{index}"),
                 event_type: "fault_injection".to_string(),
                 timestamp: record.timestamp,
                 parameters,

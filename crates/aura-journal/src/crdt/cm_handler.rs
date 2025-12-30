@@ -214,7 +214,7 @@ where
             pending_count: self.buffer.len(),
             is_idle: self.buffer.is_empty(),
             metrics: HandlerMetrics {
-                applied_operations: Some(self.applied_operations.len()),
+                applied_operations: Some(self.applied_operations.len() as u32),
                 ..Default::default()
             },
         }

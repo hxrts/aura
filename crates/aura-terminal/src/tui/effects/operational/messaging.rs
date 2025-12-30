@@ -51,12 +51,10 @@ pub async fn handle_messaging(
             .await
             {
                 Ok(channel_id) => Some(Ok(OpResponse::Data(format!(
-                    "Channel created: {}",
-                    channel_id
+                    "Channel created: {channel_id}"
                 )))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to create channel: {}",
-                    e
+                    "Failed to create channel: {e}"
                 )))),
             }
         }
@@ -65,12 +63,10 @@ pub async fn handle_messaging(
             let timestamp = super::time::current_time_ms(app_core).await;
             match send_message(app_core, channel, content, timestamp).await {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!(
-                    "Message sent: {}",
-                    message_id
+                    "Message sent: {message_id}"
                 )))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to send message: {}",
-                    e
+                    "Failed to send message: {e}"
                 )))),
             }
         }
@@ -80,12 +76,10 @@ pub async fn handle_messaging(
             let timestamp = super::time::current_time_ms(app_core).await;
             match send_direct_message(app_core, target, content, timestamp).await {
                 Ok(dm_channel_id) => Some(Ok(OpResponse::Data(format!(
-                    "Message sent to DM channel: {}",
-                    dm_channel_id
+                    "Message sent to DM channel: {dm_channel_id}"
                 )))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to send message: {}",
-                    e
+                    "Failed to send message: {e}"
                 )))),
             }
         }
@@ -95,12 +89,10 @@ pub async fn handle_messaging(
             let timestamp = super::time::current_time_ms(app_core).await;
             match start_direct_chat(app_core, contact_id, timestamp).await {
                 Ok(dm_channel_id) => Some(Ok(OpResponse::Data(format!(
-                    "Started DM chat: {}",
-                    dm_channel_id
+                    "Started DM chat: {dm_channel_id}"
                 )))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to start chat: {}",
-                    e
+                    "Failed to start chat: {e}"
                 )))),
             }
         }
@@ -116,8 +108,7 @@ pub async fn handle_messaging(
             {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to set topic: {}",
-                    e
+                    "Failed to set topic: {e}"
                 )))),
             }
         }
@@ -127,11 +118,10 @@ pub async fn handle_messaging(
             let timestamp = super::time::current_time_ms(app_core).await;
             match send_action(app_core, channel, action, timestamp).await {
                 Ok(message_id) => {
-                    Some(Ok(OpResponse::Data(format!("Action sent: {}", message_id))))
+                    Some(Ok(OpResponse::Data(format!("Action sent: {message_id}"))))
                 }
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to send action: {}",
-                    e
+                    "Failed to send action: {e}"
                 )))),
             }
         }
@@ -140,29 +130,25 @@ pub async fn handle_messaging(
             // Invite user to current channel - use workflow
             match invite_user_to_channel(app_core, target, None, None, None).await {
                 Ok(invitation_id) => Some(Ok(OpResponse::Data(format!(
-                    "Invitation sent: {}",
-                    invitation_id
+                    "Invitation sent: {invitation_id}"
                 )))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to invite user: {}",
-                    e
+                    "Failed to invite user: {e}"
                 )))),
             }
         }
 
         EffectCommand::JoinChannel { channel } => match join_channel(app_core, channel).await {
-            Ok(()) => Some(Ok(OpResponse::Data(format!("Joined channel: {}", channel)))),
+            Ok(()) => Some(Ok(OpResponse::Data(format!("Joined channel: {channel}")))),
             Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                "Failed to join channel: {}",
-                e
+                "Failed to join channel: {e}"
             )))),
         },
 
         EffectCommand::LeaveChannel { channel } => match leave_channel(app_core, channel).await {
             Ok(()) => Some(Ok(OpResponse::Ok)),
             Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                "Failed to leave channel: {}",
-                e
+                "Failed to leave channel: {e}"
             )))),
         },
 
@@ -176,8 +162,7 @@ pub async fn handle_messaging(
             {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to close channel: {}",
-                    e
+                    "Failed to close channel: {e}"
                 )))),
             }
         }
@@ -190,12 +175,10 @@ pub async fn handle_messaging(
             let timestamp = super::time::current_time_ms(app_core).await;
             match send_message(app_core, channel, content, timestamp).await {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!(
-                    "Message retried: {}",
-                    message_id
+                    "Message retried: {message_id}"
                 )))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to retry message: {}",
-                    e
+                    "Failed to retry message: {e}"
                 )))),
             }
         }

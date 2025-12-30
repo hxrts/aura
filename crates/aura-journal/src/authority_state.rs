@@ -88,7 +88,7 @@ impl AuthorityState {
         let threshold_signature = effects
             .sign(signing_context)
             .await
-            .map_err(|e| AuraError::internal(format!("Threshold signing failed: {}", e)))?;
+            .map_err(|e| AuraError::internal(format!("Threshold signing failed: {e}")))?;
 
         // Convert ThresholdSignature to Ed25519 Signature
         let signature_bytes = threshold_signature.signature_bytes();
@@ -135,7 +135,7 @@ impl AuthorityState {
         let threshold_signature = effects
             .sign(signing_context)
             .await
-            .map_err(|e| AuraError::internal(format!("Threshold signing failed: {}", e)))?;
+            .map_err(|e| AuraError::internal(format!("Threshold signing failed: {e}")))?;
 
         // Convert ThresholdSignature to Ed25519 Signature
         let signature_bytes = threshold_signature.signature_bytes();
@@ -276,7 +276,7 @@ pub fn reduce_authority_state(
 ) -> Result<AuthorityState> {
     // Use the reduction function to get tree state from facts
     let tree_state = reduce_account_facts(journal)
-        .map_err(|e| AuraError::invalid(format!("Journal namespace mismatch: {}", e)))?;
+        .map_err(|e| AuraError::invalid(format!("Journal namespace mismatch: {e}")))?;
 
     Ok(AuthorityState::with_authority(tree_state, authority_id))
 }

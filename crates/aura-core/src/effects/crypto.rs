@@ -411,6 +411,6 @@ impl<T: CryptoCoreEffects + ?Sized> CryptoCoreEffects for std::sync::Arc<T> {
     }
 
     fn secure_zero(&self, data: &mut [u8]) {
-        (**self).secure_zero(data)
+        (**self).secure_zero(data);
     }
 }

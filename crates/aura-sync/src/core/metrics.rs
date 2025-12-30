@@ -389,7 +389,7 @@ impl MetricsCollector {
 
         // Start timing this session
         if let Ok(mut timers) = self.registry.active_timers.lock() {
-            timers.insert(format!("sync_session_{}", session_id), now);
+            timers.insert(format!("sync_session_{session_id}"), now);
         }
     }
 
@@ -405,7 +405,7 @@ impl MetricsCollector {
     ) {
         let duration = if let Ok(mut timers) = self.registry.active_timers.lock() {
             timers
-                .remove(&format!("sync_session_{}", session_id))
+                .remove(&format!("sync_session_{session_id}"))
                 .map(|start| {
                     let elapsed_secs = now.saturating_sub(start);
                     Duration::from_secs(elapsed_secs)
@@ -452,7 +452,7 @@ impl MetricsCollector {
     pub fn record_sync_failure(&self, session_id: &str, category: ErrorCategory, details: &str) {
         // Remove timer and update counters
         if let Ok(mut timers) = self.registry.active_timers.lock() {
-            timers.remove(&format!("sync_session_{}", session_id));
+            timers.remove(&format!("sync_session_{session_id}"));
         }
 
         if let Ok(operational) = self.registry.operational.lock() {

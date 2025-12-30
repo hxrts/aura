@@ -340,16 +340,16 @@ impl std::fmt::Display for StatelessFixtureError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StatelessFixtureError::EffectSystemError(msg) => {
-                write!(f, "Effect system initialization failed: {}", msg)
+                write!(f, "Effect system initialization failed: {msg}")
             }
             StatelessFixtureError::AccountCreationError(msg) => {
-                write!(f, "Account creation failed: {}", msg)
+                write!(f, "Account creation failed: {msg}")
             }
             StatelessFixtureError::DeviceConfigError(msg) => {
-                write!(f, "Device configuration error: {}", msg)
+                write!(f, "Device configuration error: {msg}")
             }
             StatelessFixtureError::InvalidParameter { param, reason } => {
-                write!(f, "Invalid parameter '{}': {}", param, reason)
+                write!(f, "Invalid parameter '{param}': {reason}")
             }
         }
     }
@@ -483,7 +483,7 @@ where
     let mut device_keys = Vec::new();
     for _device_id in &device_ids {
         let (signing_key, verify_key) = effects.ed25519_generate_keypair().await.map_err(|e| {
-            aura_core::AuraError::crypto(format!("Failed to generate keypair: {}", e))
+            aura_core::AuraError::crypto(format!("Failed to generate keypair: {e}"))
         })?;
         device_keys.push((signing_key, verify_key));
     }

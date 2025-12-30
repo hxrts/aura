@@ -164,7 +164,7 @@ impl MultiDeviceScenarioFactory {
     /// Create a new multi-device scenario factory
     pub fn new(device_count: usize, threshold: u16) -> Self {
         // Deterministic UUID generation
-        let hash_input = format!("scenario-factory-{}-{}", device_count, threshold);
+        let hash_input = format!("scenario-factory-{device_count}-{threshold}");
         let hash_bytes = hash(hash_input.as_bytes());
         let uuid = Uuid::from_bytes(hash_bytes[..16].try_into().unwrap());
         Self {
@@ -247,7 +247,7 @@ pub mod helpers {
     /// Create test data for threshold-based scenarios
     pub fn threshold_scenario(threshold: u16, total: usize) -> TestScenarioConfig {
         TestScenarioConfig {
-            scenario_name: format!("threshold-{}-{}", threshold, total),
+            scenario_name: format!("threshold-{threshold}-{total}"),
             device_count: total,
             threshold,
             base_seed: Some(100 + threshold as u64),

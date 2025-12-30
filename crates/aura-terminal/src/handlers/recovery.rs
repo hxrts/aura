@@ -83,13 +83,13 @@ fn encode_recovery_fact<T: serde::Serialize>(
         context_id,
         binding_type: kind.to_string(),
         binding_data: serde_json::to_vec(payload).map_err(|e| {
-            TerminalError::Operation(format!("Failed to serialize recovery payload: {}", e))
+            TerminalError::Operation(format!("Failed to serialize recovery payload: {e}"))
         })?,
     });
 
     serde_json::to_vec(&content)
         .map(FactValue::Bytes)
-        .map_err(|e| TerminalError::Operation(format!("Failed to encode fact content: {}", e)))
+        .map_err(|e| TerminalError::Operation(format!("Failed to encode fact content: {e}")))
 }
 
 async fn start_recovery(
@@ -103,11 +103,11 @@ async fn start_recovery(
 ) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
-    output.section(format!("Starting {} recovery", priority));
+    output.section(format!("Starting {priority} recovery"));
     output.kv("Account", account);
     output.kv("Guardians", guardians);
     output.kv("Threshold", threshold.to_string());
-    output.kv("Dispute window", format!("{} hours", dispute_hours));
+    output.kv("Dispute window", format!("{dispute_hours} hours"));
 
     if let Some(just) = justification {
         output.kv("Justification", just);
@@ -168,10 +168,10 @@ async fn start_recovery(
 
     // Convert to the new recovery protocol format
     let commitment = Hash32::new(hash::hash(
-        format!("recovery-commitment:{}", account_authority).as_bytes(),
+        format!("recovery-commitment:{account_authority}").as_bytes(),
     ));
     let new_public_key =
-        hash::hash(format!("recovery-new-key:{}", account_authority).as_bytes()).to_vec();
+        hash::hash(format!("recovery-new-key:{account_authority}").as_bytes()).to_vec();
 
     let recovery_request_new = aura_recovery::recovery_protocol::RecoveryRequest {
         recovery_id: account_authority.to_string(),
@@ -215,34 +215,32 @@ async fn start_recovery(
         )
         .await
         .map_err(|e| {
-            TerminalError::Operation(format!("Failed to initiate recovery protocol: {}", e))
+            TerminalError::Operation(format!("Failed to initiate recovery protocol: {e}"))
         })?;
 
     // Store request payload deterministically via StorageEffects
-    let request_path = format!("recovery_request_{}.json", account_authority);
+    let request_path = format!("recovery_request_{account_authority}.json");
     let request_json = serde_json::to_vec_pretty(&recovery_request).map_err(|e| {
-        TerminalError::Operation(format!("Failed to serialize recovery request: {}", e))
+        TerminalError::Operation(format!("Failed to serialize recovery request: {e}"))
     })?;
 
-    let storage_key = format!("recovery_request:{}", request_path);
+    let storage_key = format!("recovery_request:{request_path}");
     ctx.effects()
         .store(&storage_key, request_json.clone())
         .await
         .map_err(|e| {
             TerminalError::Operation(format!(
-                "Failed to store recovery request via storage effects: {}",
-                e
+                "Failed to store recovery request via storage effects: {e}"
             ))
         })?;
 
     output.kv("Recovery request stored at", &storage_key);
     output.println(format!(
-        "Share the stored request key with guardians and ask them to run `aura recovery approve --request-file {}`",
-        request_path
+        "Share the stored request key with guardians and ask them to run `aura recovery approve --request-file {request_path}`"
     ));
 
     // Update journal with recovery initiation using proper effects
-    let recovery_fact_key = format!("recovery_initiated.{}", account_authority);
+    let recovery_fact_key = format!("recovery_initiated.{account_authority}");
     let recovery_fact_value =
         encode_recovery_fact(ctx.context_id(), "recovery_initiated", &recovery_request)?;
 
@@ -255,16 +253,16 @@ async fn start_recovery(
         .effects()
         .get_journal()
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get journal: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to get journal: {e}")))?;
     let updated_journal = ctx
         .effects()
         .merge_facts(&current_journal, &journal_delta)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to merge journal facts: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to merge journal facts: {e}")))?;
     ctx.effects()
         .persist_journal(&updated_journal)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to persist journal: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to persist journal: {e}")))?;
 
     output.blank();
     output.println("Recovery initiated successfully via protocol coordinator.");
@@ -287,7 +285,7 @@ async fn approve_recovery(
     let file_key = format!("recovery_request:{}", request_file.display());
     let request_content = match ctx.effects().retrieve(&file_key).await {
         Ok(Some(data)) => String::from_utf8(data)
-            .map_err(|e| TerminalError::Config(format!("Invalid UTF-8 in request file: {}", e)))?,
+            .map_err(|e| TerminalError::Config(format!("Invalid UTF-8 in request file: {e}")))?,
         Ok(None) => {
             return Err(TerminalError::NotFound(format!(
                 "Request file not found: {}",
@@ -296,14 +294,13 @@ async fn approve_recovery(
         }
         Err(e) => {
             return Err(TerminalError::Operation(format!(
-                "Failed to read request file via storage effects: {}",
-                e
+                "Failed to read request file via storage effects: {e}"
             )))
         }
     };
 
     let recovery_request: RecoveryRequest = serde_json::from_str(&request_content)
-        .map_err(|e| TerminalError::Config(format!("Failed to parse recovery request: {}", e)))?;
+        .map_err(|e| TerminalError::Config(format!("Failed to parse recovery request: {e}")))?;
 
     output.kv("Account", recovery_request.account_id.to_string());
     output.kv("Initiator", recovery_request.initiator_id.to_string());
@@ -324,8 +321,7 @@ async fn approve_recovery(
         .by_authority(&guardian_authority)
         .ok_or_else(|| {
             TerminalError::Input(format!(
-                "Current authority {} is not a guardian for this recovery",
-                guardian_authority
+                "Current authority {guardian_authority} is not a guardian for this recovery"
             ))
         })?;
 
@@ -388,7 +384,7 @@ async fn approve_recovery(
 
     // Persist approval so the requesting device can collect it
     let response_json = serde_json::to_vec_pretty(&response).map_err(|e| {
-        TerminalError::Operation(format!("Failed to serialize approval response: {}", e))
+        TerminalError::Operation(format!("Failed to serialize approval response: {e}"))
     })?;
 
     let response_key = format!(
@@ -400,8 +396,7 @@ async fn approve_recovery(
         .await
         .map_err(|e| {
             TerminalError::Operation(format!(
-                "Failed to store approval response via storage effects: {}",
-                e
+                "Failed to store approval response via storage effects: {e}"
             ))
         })?;
 
@@ -412,12 +407,12 @@ async fn approve_recovery(
 
     ctx.effects()
         .store(
-            &format!("recovery_response_file:{}", response_path),
+            &format!("recovery_response_file:{response_path}"),
             response_json,
         )
         .await
         .map_err(|e| {
-            TerminalError::Operation(format!("Failed to persist approval response: {}", e))
+            TerminalError::Operation(format!("Failed to persist approval response: {e}"))
         })?;
 
     output.kv("Guardian approval saved at", &response_path);
@@ -437,7 +432,7 @@ async fn get_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
 
     // Query Journal for recovery-related facts using proper JournalEffects
     let current_journal = ctx.effects().get_journal().await.map_err(|e| {
-        TerminalError::Operation(format!("Failed to get journal via effects: {}", e))
+        TerminalError::Operation(format!("Failed to get journal via effects: {e}"))
     })?;
 
     let recovery_facts: Vec<_> = current_journal
@@ -482,7 +477,7 @@ async fn dispute_recovery(
 
     // Parse evidence identifier
     let _ = uuid::Uuid::parse_str(evidence)
-        .map_err(|e| TerminalError::Input(format!("Invalid evidence ID '{}': {}", evidence, e)))?;
+        .map_err(|e| TerminalError::Input(format!("Invalid evidence ID '{evidence}': {e}")))?;
 
     if evidence.is_empty() {
         return Err(TerminalError::Input("Evidence ID cannot be empty".into()));
@@ -502,18 +497,18 @@ async fn dispute_recovery(
 
     // Get current journal state via proper JournalEffects
     let dispute_journal = ctx.effects().get_journal().await.map_err(|e| {
-        TerminalError::Operation(format!("Failed to get journal via effects: {}", e))
+        TerminalError::Operation(format!("Failed to get journal via effects: {e}"))
     })?;
 
     // Look up recovery evidence by ID in Journal
-    let evidence_key = format!("recovery_evidence.{}", evidence);
+    let evidence_key = format!("recovery_evidence.{evidence}");
     if let Some(value) = dispute_journal.facts.get(&evidence_key) {
         let evidence_json: serde_json::Value = match value {
             FactValue::String(data) => serde_json::from_str(data),
             FactValue::Bytes(bytes) => serde_json::from_slice(bytes),
             _ => Ok(serde_json::Value::Null),
         }
-        .map_err(|e| TerminalError::Config(format!("Failed to parse evidence JSON: {}", e)))?;
+        .map_err(|e| TerminalError::Config(format!("Failed to parse evidence JSON: {e}")))?;
 
         if let Some(dispute_window_ends) = evidence_json
             .get("dispute_window_ends_at_ms")
@@ -522,19 +517,17 @@ async fn dispute_recovery(
             let current_time = ctx.effects().current_timestamp().await.unwrap_or(0);
             if current_time > dispute_window_ends {
                 return Err(TerminalError::Input(format!(
-                    "Dispute window has closed for evidence {}",
-                    evidence
+                    "Dispute window has closed for evidence {evidence}"
                 )));
             }
         }
     }
 
     // Check if this guardian has already filed a dispute
-    let existing_dispute_key = format!("recovery_dispute.{}.{}", evidence, guardian_authority);
+    let existing_dispute_key = format!("recovery_dispute.{evidence}.{guardian_authority}");
     if dispute_journal.facts.contains_key(&existing_dispute_key) {
         return Err(TerminalError::Input(format!(
-            "Guardian {} has already filed a dispute for evidence {}",
-            guardian_authority, evidence
+            "Guardian {guardian_authority} has already filed a dispute for evidence {evidence}"
         )));
     }
 
@@ -562,20 +555,20 @@ async fn dispute_recovery(
     // Get current journal and merge the delta
     let current_journal =
         ctx.effects().get_journal().await.map_err(|e| {
-            TerminalError::Operation(format!("Failed to get current journal: {}", e))
+            TerminalError::Operation(format!("Failed to get current journal: {e}"))
         })?;
 
     let updated_journal = ctx
         .effects()
         .merge_facts(&current_journal, &journal_delta)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to merge journal facts: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to merge journal facts: {e}")))?;
 
     // Persist the updated journal
     ctx.effects()
         .persist_journal(&updated_journal)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to persist journal: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to persist journal: {e}")))?;
 
     output.kv("Dispute recorded with key", &dispute_key);
     output.blank();
@@ -597,7 +590,7 @@ async fn generate_guardian_approval(
 
     // Create recovery message to sign
     let recovery_message = serde_json::to_vec(&request).map_err(|e| {
-        TerminalError::Operation(format!("Failed to serialize recovery request: {}", e))
+        TerminalError::Operation(format!("Failed to serialize recovery request: {e}"))
     })?;
 
     // Deterministic partial signature derived from the recovery message hash.
@@ -614,7 +607,7 @@ async fn generate_guardian_approval(
     Ok(GuardianKeyApproval {
         guardian_id: guardian.authority_id,
         key_share: key_share_bytes.to_vec(),
-        partial_signature: partial_sig_bytes.to_vec(),
+        partial_signature: partial_sig_bytes,
         timestamp: aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
             ts_ms: timestamp_ms,
             uncertainty: None,

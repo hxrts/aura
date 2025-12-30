@@ -181,7 +181,7 @@ impl EpochRotationCoordinator {
         let rotation = EpochRotation {
             rotation_id: rotation_id.clone(),
             target_epoch,
-            participants: participants.clone(),
+            participants: participants,
             confirmations: HashMap::new(),
             initiated_at: now.clone(),
             status: RotationStatus::Initiated,
@@ -237,7 +237,7 @@ impl EpochRotationCoordinator {
         let rotation = self
             .pending_rotations
             .get_mut(rotation_id)
-            .ok_or_else(|| SyncError::not_found(format!("Rotation not found: {}", rotation_id)))?;
+            .ok_or_else(|| SyncError::not_found(format!("Rotation not found: {rotation_id}")))?;
 
         if rotation.status != RotationStatus::Synchronizing {
             return Err(sync_protocol_error(

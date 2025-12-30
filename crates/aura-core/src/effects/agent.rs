@@ -476,11 +476,11 @@ pub enum ConfigError {
 impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConfigError::NotFound(key) => write!(f, "Configuration key not found: {}", key),
-            ConfigError::InvalidJson(msg) => write!(f, "Invalid JSON value: {}", msg),
-            ConfigError::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
-            ConfigError::StorageError(msg) => write!(f, "Storage error: {}", msg),
-            ConfigError::PermissionDenied(msg) => write!(f, "Permission denied: {}", msg),
+            ConfigError::NotFound(key) => write!(f, "Configuration key not found: {key}"),
+            ConfigError::InvalidJson(msg) => write!(f, "Invalid JSON value: {msg}"),
+            ConfigError::SerializationError(msg) => write!(f, "Serialization error: {msg}"),
+            ConfigError::StorageError(msg) => write!(f, "Storage error: {msg}"),
+            ConfigError::PermissionDenied(msg) => write!(f, "Permission denied: {msg}"),
         }
     }
 }

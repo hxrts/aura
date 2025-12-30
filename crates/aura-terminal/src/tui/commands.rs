@@ -309,16 +309,16 @@ impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotACommand => write!(f, "Not a command"),
-            Self::UnknownCommand(cmd) => write!(f, "Unknown command: /{}", cmd),
+            Self::UnknownCommand(cmd) => write!(f, "Unknown command: /{cmd}"),
             Self::MissingArgument { command, argument } => {
-                write!(f, "/{} requires <{}>", command, argument)
+                write!(f, "/{command} requires <{argument}>")
             }
             Self::InvalidArgument {
                 command,
                 argument,
                 reason,
             } => {
-                write!(f, "/{}: invalid {}: {}", command, argument, reason)
+                write!(f, "/{command}: invalid {argument}: {reason}")
             }
         }
     }
@@ -617,14 +617,14 @@ fn parse_duration(s: &str) -> Result<Duration, String> {
 
     let num: u64 = num_str
         .parse()
-        .map_err(|_| format!("invalid number: {}", num_str))?;
+        .map_err(|_| format!("invalid number: {num_str}"))?;
 
     let secs = match unit {
         's' => num,
         'm' => num * 60,
         'h' => num * 3600,
         'd' => num * 86400,
-        _ => return Err(format!("unknown unit: {}", unit)),
+        _ => return Err(format!("unknown unit: {unit}")),
     };
 
     Ok(Duration::from_secs(secs))

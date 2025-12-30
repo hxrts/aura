@@ -48,7 +48,7 @@ async fn create_authority(ctx: &HandlerContext<'_>, threshold: u32) -> TerminalR
     let now = effects
         .physical_time()
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to get time: {}", e)))?
+        .map_err(|e| TerminalError::Operation(format!("Failed to get time: {e}")))?
         .ts_ms;
     let authority_id =
         crate::ids::authority_id(&format!("authority:{}:{}", effect_ctx.authority_id(), now));
@@ -60,16 +60,16 @@ async fn create_authority(ctx: &HandlerContext<'_>, threshold: u32) -> TerminalR
         created_ms: now,
     };
 
-    let key = format!("authority:{}", authority_id);
+    let key = format!("authority:{authority_id}");
     effects
         .store(
             &key,
             serde_json::to_vec(&record).map_err(|e| {
-                TerminalError::Operation(format!("Failed to serialize authority record: {}", e))
+                TerminalError::Operation(format!("Failed to serialize authority record: {e}"))
             })?,
         )
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to persist authority: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to persist authority: {e}")))?;
 
     output.kv("Created authority", authority_id.to_string());
     output.kv("Threshold", threshold.to_string());
@@ -85,14 +85,14 @@ async fn show_authority(
 
     let effects = ctx.effects();
 
-    let key = format!("authority:{}", authority_id);
+    let key = format!("authority:{authority_id}");
     if let Some(bytes) = effects
         .retrieve(&key)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to read authority: {}", e)))?
+        .map_err(|e| TerminalError::Operation(format!("Failed to read authority: {e}")))?
     {
         let record: AuthorityRecord = serde_json::from_slice(&bytes).map_err(|e| {
-            TerminalError::Config(format!("Failed to parse authority record: {}", e))
+            TerminalError::Config(format!("Failed to parse authority record: {e}"))
         })?;
         output.kv("Authority", record.authority_id.to_string());
         output.kv("Threshold", record.threshold.to_string());
@@ -105,7 +105,7 @@ async fn show_authority(
             },
         );
     } else {
-        output.eprintln(format!("Authority {} not found in storage", authority_id));
+        output.eprintln(format!("Authority {authority_id} not found in storage"));
     }
 
     Ok(output)
@@ -125,7 +125,7 @@ async fn list_authorities(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput>
     } else {
         output.section(format!("Stored authorities ({})", keys.len()));
         for key in keys {
-            output.println(format!("  - {}", key));
+            output.println(format!("  - {key}"));
         }
     }
 
@@ -141,19 +141,18 @@ async fn add_device(
 
     let effects = ctx.effects();
 
-    let key = format!("authority:{}", authority_id);
+    let key = format!("authority:{authority_id}");
     let mut record: AuthorityRecord = if let Some(bytes) = effects
         .retrieve(&key)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to read authority: {}", e)))?
+        .map_err(|e| TerminalError::Operation(format!("Failed to read authority: {e}")))?
     {
         serde_json::from_slice(&bytes).map_err(|e| {
-            TerminalError::Config(format!("Failed to parse authority record: {}", e))
+            TerminalError::Config(format!("Failed to parse authority record: {e}"))
         })?
     } else {
         return Err(TerminalError::NotFound(format!(
-            "Authority {} not found; create it first",
-            authority_id
+            "Authority {authority_id} not found; create it first"
         )));
     };
 
@@ -163,14 +162,13 @@ async fn add_device(
         .store(
             &key,
             serde_json::to_vec(&record).map_err(|e| {
-                TerminalError::Operation(format!("Failed to serialize authority record: {}", e))
+                TerminalError::Operation(format!("Failed to serialize authority record: {e}"))
             })?,
         )
         .await
         .map_err(|e| {
             TerminalError::Operation(format!(
-                "Failed to update authority {}: {}",
-                authority_id, e
+                "Failed to update authority {authority_id}: {e}"
             ))
         })?;
 

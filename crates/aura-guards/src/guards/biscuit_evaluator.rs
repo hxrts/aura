@@ -63,15 +63,13 @@ impl BiscuitGuardEvaluator {
 
         if !auth_result.authorized {
             return Err(GuardError::AuthorizationFailed(format!(
-                "Token does not grant capability: {}",
-                guard_capability
+                "Token does not grant capability: {guard_capability}"
             )));
         }
 
         if let Err(e) = budget.record_charge(flow_cost) {
             return Err(GuardError::FlowBudget(format!(
-                "Failed to record charge: {}",
-                e
+                "Failed to record charge: {e}"
             )));
         }
 

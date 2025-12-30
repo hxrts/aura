@@ -50,12 +50,12 @@ impl WebSocketTransportHandler {
         .await
         .map_err(|_| TransportError::Timeout("WebSocket connect timeout".to_string()))?
         .map_err(|e| {
-            TransportError::ConnectionFailed(format!("WebSocket connect failed: {}", e))
+            TransportError::ConnectionFailed(format!("WebSocket connect failed: {e}"))
         })?;
 
         let local_addr = ws_stream.get_ref().local_addr()?.to_string();
         let remote_addr = ws_stream.get_ref().peer_addr()?.to_string();
-        let connection_id = format!("ws-{}-{}", local_addr, remote_addr);
+        let connection_id = format!("ws-{local_addr}-{remote_addr}");
 
         let mut metadata = HashMap::new();
         metadata.insert("protocol".to_string(), "websocket".to_string());
@@ -91,10 +91,10 @@ impl WebSocketTransportHandler {
             .await
             .map_err(|_| TransportError::Timeout("WebSocket accept timeout".to_string()))?
             .map_err(|e| {
-                TransportError::ConnectionFailed(format!("WebSocket accept failed: {}", e))
+                TransportError::ConnectionFailed(format!("WebSocket accept failed: {e}"))
             })?;
 
-        let connection_id = format!("ws-{}-{}", local_addr, remote_addr);
+        let connection_id = format!("ws-{local_addr}-{remote_addr}");
 
         let mut metadata = HashMap::new();
         metadata.insert("protocol".to_string(), "websocket".to_string());
@@ -122,7 +122,7 @@ impl WebSocketTransportHandler {
             .await
             .map_err(|_| TransportError::Timeout("WebSocket send timeout".to_string()))?
             .map_err(|e| {
-                TransportError::ConnectionFailed(format!("WebSocket send failed: {}", e))
+                TransportError::ConnectionFailed(format!("WebSocket send failed: {e}"))
             })?;
 
         Ok(())
@@ -140,7 +140,7 @@ impl WebSocketTransportHandler {
                 TransportError::ConnectionFailed("WebSocket connection closed".to_string())
             })?
             .map_err(|e| {
-                TransportError::ConnectionFailed(format!("WebSocket receive failed: {}", e))
+                TransportError::ConnectionFailed(format!("WebSocket receive failed: {e}"))
             })?;
 
         match message {
@@ -155,7 +155,7 @@ impl WebSocketTransportHandler {
                     .send(Message::Pong(data.clone()))
                     .await
                     .map_err(|e| {
-                        TransportError::ConnectionFailed(format!("WebSocket pong failed: {}", e))
+                        TransportError::ConnectionFailed(format!("WebSocket pong failed: {e}"))
                     })?;
                 // Return ping data
                 Ok(data)
@@ -182,7 +182,7 @@ impl WebSocketTransportHandler {
             .await
             .map_err(|_| TransportError::Timeout("WebSocket send text timeout".to_string()))?
             .map_err(|e| {
-                TransportError::ConnectionFailed(format!("WebSocket send text failed: {}", e))
+                TransportError::ConnectionFailed(format!("WebSocket send text failed: {e}"))
             })?;
 
         Ok(())
@@ -205,7 +205,7 @@ impl WebSocketTransportHandler {
             .unwrap_or(Message::Close(None));
 
         ws_stream.send(close_frame).await.map_err(|e| {
-            TransportError::ConnectionFailed(format!("WebSocket close failed: {}", e))
+            TransportError::ConnectionFailed(format!("WebSocket close failed: {e}"))
         })?;
 
         Ok(())
@@ -301,10 +301,10 @@ impl NetworkExtendedEffects for WebSocketTransportHandler {
 impl NetworkCoreEffects for WebSocketTransportHandler {
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         // Convert UUID to WebSocket URL - simplified mapping
-        let url_str = format!("ws://localhost:8080/{}", peer_id);
+        let url_str = format!("ws://localhost:8080/{peer_id}");
         let url: Url = url_str.parse().map_err(|e| NetworkError::SendFailed {
             peer_id: Some(peer_id),
-            reason: format!("Invalid WebSocket URL: {}", e),
+            reason: format!("Invalid WebSocket URL: {e}"),
         })?;
 
         let (mut ws_stream, _connection) = self

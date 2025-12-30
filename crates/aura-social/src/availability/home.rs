@@ -103,7 +103,7 @@ where
 
     /// Convert hash to storage key.
     fn hash_to_key(hash: &Hash32) -> String {
-        format!("content:{}", hash)
+        format!("content:{hash}")
     }
 }
 

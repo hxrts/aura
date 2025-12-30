@@ -329,7 +329,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
     // =========================================================================
-    let shared_channels = use_channels_subscription(&mut hooks, &app_ctx);
+    let shared_channels = use_channels_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Neighborhood homes subscription: SharedNeighborhoodHomes for dispatch handlers to read
@@ -344,7 +344,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Notifications subscription: keep notification count in sync for navigation
     // =========================================================================
-    use_notifications_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    use_notifications_subscription(&mut hooks, &app_ctx, update_tx_holder);
 
     // =========================================================================
     // Threshold subscription: SharedThreshold for dispatch handlers to read
@@ -670,8 +670,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 let msg = error_message
                                                     .clone()
                                                     .unwrap_or_else(|| "Guardian ceremony failed".to_string());
-                                                s.error = Some(msg.clone());
-
                                                 // Return to threshold selection so the user can retry.
                                                 s.step = crate::tui::state_machine::GuardianSetupStep::ChooseThreshold;
                                                 s.ceremony.clear();
@@ -684,8 +682,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 toast = Some((
                                                     match kind {
                                                         aura_app::runtime_bridge::CeremonyKind::GuardianRotation => format!(
-                                                            "Guardian ceremony complete! {}-of-{} committed",
-                                                            threshold, total_count
+                                                            "Guardian ceremony complete! {threshold}-of-{total_count} committed"
                                                         ),
                                                         aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment => {
                                                             "Device enrollment complete".to_string()
@@ -695,8 +692,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         }
                                                         aura_app::runtime_bridge::CeremonyKind::DeviceRotation => {
                                                             format!(
-                                                                "Device threshold ceremony complete ({}-of-{})",
-                                                                threshold, total_count
+                                                                "Device threshold ceremony complete ({threshold}-of-{total_count})"
                                                             )
                                                         }
                                                     },
@@ -762,8 +758,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 let msg = error_message
                                                     .clone()
                                                     .unwrap_or_else(|| "Multifactor ceremony failed".to_string());
-                                                s.error = Some(msg.clone());
-
                                                 s.step = crate::tui::state_machine::GuardianSetupStep::ChooseThreshold;
                                                 s.ceremony.clear();
                                                 s.ceremony_responses.clear();
@@ -774,8 +768,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 dismiss_modal = true;
                                                 toast = Some((
                                                     format!(
-                                                        "Multifactor ceremony complete! {}-of-{} committed",
-                                                        threshold, total_count
+                                                        "Multifactor ceremony complete! {threshold}-of-{total_count} committed"
                                                     ),
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
@@ -874,11 +867,52 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::ChannelCreated(_) => {
                             // CHAT_SIGNAL should reflect the new channel; no extra work.
                         }
+                        UiUpdate::ChatStateUpdated {
+                            channel_count,
+                            message_count,
+                            selected_index,
+                        } => {
+                            tui.with_mut(|state| {
+                                state.chat.channel_count = channel_count;
+                                state.chat.message_count = message_count;
+
+                                if channel_count == 0 {
+                                    state.chat.selected_channel = 0;
+                                    state.chat.message_scroll = 0;
+                                    return;
+                                }
+
+                                let mut idx = selected_index.unwrap_or(0);
+                                if idx >= channel_count {
+                                    idx = channel_count.saturating_sub(1);
+                                }
+                                state.chat.selected_channel = idx;
+
+                                if state.chat.message_scroll >= message_count {
+                                    state.chat.message_scroll = message_count.saturating_sub(1);
+                                }
+                            });
+                        }
                         UiUpdate::TopicSet {
                             channel: _,
                             topic: _,
                         } => {
                             // CHAT_SIGNAL should reflect updated topic; no extra work.
+                        }
+                        UiUpdate::ChannelInfoParticipants {
+                            channel_id,
+                            participants,
+                        } => {
+                            tui.with_mut(|state| {
+                                state.modal_queue.update_active(|modal| {
+                                    if let crate::tui::state_machine::QueuedModal::ChatInfo(ref mut info) = modal {
+                                        if info.channel_id == channel_id
+                                            && (participants.len() > 1 || info.participants.len() <= 1) {
+                                                info.participants = participants.clone();
+                                            }
+                                    }
+                                });
+                            });
                         }
 
                         // =========================================================================
@@ -1016,8 +1050,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 let msg = error_message
                                                     .clone()
                                                     .unwrap_or_else(|| "Guardian ceremony failed".to_string());
-                                                s.error = Some(msg.clone());
-
                                                 // Return to threshold selection so the user can retry.
                                                 s.step = crate::tui::state_machine::GuardianSetupStep::ChooseThreshold;
                                                 s.ceremony.clear();
@@ -1032,8 +1064,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 dismiss_modal = true;
                                                 toast = Some((
                                                     format!(
-                                                        "Guardian ceremony complete! {}-of-{} committed",
-                                                        threshold, total_count
+                                                        "Guardian ceremony complete! {threshold}-of-{total_count} committed"
                                                     ),
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
@@ -1371,11 +1402,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         ],
     };
 
-    let tasks_for_events = tasks.clone();
+    let tasks_for_events = tasks;
     hooks.use_terminal_events({
         let mut screen = screen.clone();
         let mut should_exit = should_exit.clone();
-        let mut tui = tui.clone();
+        let mut tui = tui;
         // Clone AppCore for key rotation operations
         let app_core_for_ceremony = app_ctx.app_core.clone();
         // Clone update channel sender for ceremony UI updates
@@ -1383,20 +1414,20 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         // Clone callbacks registry for command dispatch
         let callbacks = callbacks.clone();
         // Clone shared contacts Arc for guardian setup dispatch
-        let shared_channels_for_dispatch = shared_channels.clone();
-        let shared_neighborhood_homes_for_dispatch = shared_neighborhood_homes.clone();
-        let shared_pending_requests_for_dispatch = shared_pending_requests.clone();
+        let shared_channels_for_dispatch = shared_channels;
+        let shared_neighborhood_homes_for_dispatch = shared_neighborhood_homes;
+        let shared_pending_requests_for_dispatch = shared_pending_requests;
         // This Arc is updated by a reactive subscription, so reading from it
         // always gets current contacts (not stale props)
-        let shared_contacts_for_dispatch = shared_contacts.clone();
+        let shared_contacts_for_dispatch = shared_contacts;
         // Clone shared messages Arc for message retry dispatch
         // Used to look up failed messages by ID to get channel and content for retry
-        let shared_messages_for_dispatch = shared_messages.clone();
+        let shared_messages_for_dispatch = shared_messages;
         // Used to map device selection for MFA wizard
-        let shared_devices_for_dispatch = shared_devices.clone();
+        let shared_devices_for_dispatch = shared_devices;
         move |event| {
             // Convert iocraft event to aura-core event and run through state machine
-            if let Some(core_event) = convert_iocraft_event(event.clone()) {
+            if let Some(core_event) = convert_iocraft_event(event) {
                 // Get current state, apply transition, update state
                 let current = tui.read_clone();
                 let (mut new_state, commands) = transition(&current, core_event);
@@ -1526,12 +1557,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     }
                                                 }
 
+                                                if participants.len() <= 1 && channel.member_count > 1 {
+                                                    let extra = channel
+                                                        .member_count
+                                                        .saturating_sub(participants.len() as u32);
+                                                    if extra > 0 {
+                                                        participants.push(format!("+{extra} others"));
+                                                    }
+                                                }
+
                                                 modal_state.participants = participants;
                                                 new_state
                                                     .modal_queue
                                                     .enqueue(crate::tui::state_machine::QueuedModal::ChatInfo(
                                                         modal_state,
                                                     ));
+                                                (cb.chat.on_list_participants)(channel.id.clone());
                                             } else {
                                                 new_state.toast_error("No channel selected");
                                             }
@@ -1782,7 +1823,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .map(|d| {
                                                 let name = if d.name.is_empty() {
                                                     let short = d.id.chars().take(8).collect::<String>();
-                                                    format!("Device {}", short)
+                                                    format!("Device {short}")
                                                 } else {
                                                     d.name.clone()
                                                 };
@@ -1835,7 +1876,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 if let Some(tx) = update_tx_for_ceremony.clone() {
                                                     let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                                         "guardian-ceremony-failed",
-                                                        format!("Invalid threshold: {}", e),
+                                                        format!("Invalid threshold: {e}"),
                                                     )));
                                                 }
                                                 continue;
@@ -1866,8 +1907,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                                                             "guardian-ceremony-started",
                                                             format!(
-                                                                "Guardian ceremony started! Waiting for {}-of-{} guardians to respond",
-                                                                k, n
+                                                                "Guardian ceremony started! Waiting for {k}-of-{n} guardians to respond"
                                                             ),
                                                         )));
 
@@ -1896,7 +1936,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     let app_core_monitor = app.clone();
                                                     let update_tx_monitor = update_tx.clone();
                                                     let tasks = tasks.clone();
-                                                    let tasks_handle = tasks.clone();
+                                                    let tasks_handle = tasks;
                                                     tasks_handle.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
@@ -1960,7 +2000,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 if let Some(tx) = update_tx_for_ceremony.clone() {
                                                     let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                                         "mfa-ceremony-failed",
-                                                        format!("Invalid threshold: {}", e),
+                                                        format!("Invalid threshold: {e}"),
                                                     )));
                                                 }
                                                 continue;
@@ -1996,8 +2036,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                                                             "mfa-ceremony-started",
                                                             format!(
-                                                                "Multifactor ceremony started ({}-of-{})",
-                                                                k, n
+                                                                "Multifactor ceremony started ({k}-of-{n})"
                                                             ),
                                                         )));
                                                     }
@@ -2025,7 +2064,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     let app_core_monitor = app.clone();
                                                     let update_tx_monitor = update_tx.clone();
                                                     let tasks = tasks.clone();
-                                                    let tasks_handle = tasks.clone();
+                                                    let tasks_handle = tasks;
                                                     tasks_handle.spawn(async move {
                                                         let _ = monitor_key_rotation_ceremony(
                                                             &app_core_monitor,
@@ -2224,7 +2263,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::CreateHome { name, description } => {
                                         // UI-only for now; home creation is not wired to runtime yet.
-                                        new_state.toast_success(format!("Home '{}' created", name));
+                                        new_state.toast_success(format!("Home '{name}' created"));
                                         new_state.modal_queue.dismiss();
                                         let _ = description; // Suppress unused warning until wired
                                     }

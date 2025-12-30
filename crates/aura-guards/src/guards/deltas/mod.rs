@@ -75,8 +75,7 @@ pub async fn apply_delta_facts<E: aura_core::effects::JournalEffects + TimeEffec
                 }
 
                 return Err(AuraError::internal(format!(
-                    "Delta application failed at fact {}: {}",
-                    index, e
+                    "Delta application failed at fact {index}: {e}"
                 )));
             }
         }
@@ -102,7 +101,7 @@ async fn apply_single_fact<E: aura_core::effects::JournalEffects + TimeEffects>(
     effect_system
         .apply_journal_operation(journal_operation)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to apply journal operation: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to apply journal operation: {e}")))?;
 
     // Return the applied fact (possibly with additional metadata)
     Ok(fact.clone())
@@ -160,18 +159,18 @@ async fn merge_json_fact<E: aura_core::effects::JournalEffects + TimeEffects>(
     let current = effect_system
         .get_journal()
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to load journal: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to load journal: {e}")))?;
     let delta = journal_from_json_fact(fact)?;
 
     let merged = effect_system
         .merge_facts(&current, &delta)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to merge journal: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to merge journal: {e}")))?;
 
     effect_system
         .persist_journal(&merged)
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to persist journal: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to persist journal: {e}")))?;
 
     Ok(())
 }

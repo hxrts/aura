@@ -122,9 +122,9 @@ impl InMemoryTransportHandler {
     ) -> TransportResult<async_channel::Receiver<Vec<u8>>> {
         let (tx, rx) = async_unbounded();
 
-        let connection_id = format!("mem-{}", connection_uuid);
+        let connection_id = format!("mem-{connection_uuid}");
         let local_addr = "memory://local".to_string();
-        let remote_addr = format!("memory://{}", peer_id);
+        let remote_addr = format!("memory://{peer_id}");
 
         let mut metadata = HashMap::new();
         metadata.insert("protocol".to_string(), "memory".to_string());
@@ -170,13 +170,12 @@ impl InMemoryTransportHandler {
 
         if let Some(tx) = registry.channels.get(peer_id) {
             tx.send(data).await.map_err(|_| {
-                TransportError::ConnectionFailed(format!("Failed to send to peer: {}", peer_id))
+                TransportError::ConnectionFailed(format!("Failed to send to peer: {peer_id}"))
             })?;
             Ok(())
         } else {
             Err(TransportError::ConnectionFailed(format!(
-                "Peer not found: {}",
-                peer_id
+                "Peer not found: {peer_id}"
             )))
         }
     }
@@ -194,8 +193,7 @@ impl InMemoryTransportHandler {
 
         if !failed_peers.is_empty() {
             return Err(TransportError::ConnectionFailed(format!(
-                "Failed to send to peers: {:?}",
-                failed_peers
+                "Failed to send to peers: {failed_peers:?}"
             )));
         }
 

@@ -82,7 +82,7 @@ impl std::fmt::Display for HomeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Display first 8 bytes as hex
         for byte in &self.0[..4] {
-            write!(f, "{:02x}", byte)?;
+            write!(f, "{byte:02x}")?;
         }
         write!(f, "...")
     }
@@ -127,7 +127,7 @@ impl Default for NeighborhoodId {
 impl std::fmt::Display for NeighborhoodId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for byte in &self.0[..4] {
-            write!(f, "{:02x}", byte)?;
+            write!(f, "{byte:02x}")?;
         }
         write!(f, "...")
     }
@@ -359,7 +359,7 @@ impl StewardFact {
     /// Convert to Datalog fact string
     pub fn to_datalog(&self) -> String {
         let caps = self.capabilities.to_capability_set();
-        let caps_str: Vec<_> = caps.iter().map(|s| format!("\"{}\"", s)).collect();
+        let caps_str: Vec<_> = caps.iter().map(|s| format!("\"{s}\"")).collect();
         format!(
             "steward(\"{}\", \"{}\", {}, [{}]);",
             self.authority_id,
@@ -682,10 +682,10 @@ impl std::fmt::Display for SocialFactError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SocialFactError::V1ConstraintViolation(msg) => {
-                write!(f, "v1 constraint violation: {}", msg)
+                write!(f, "v1 constraint violation: {msg}")
             }
             SocialFactError::InvalidFact(msg) => {
-                write!(f, "invalid fact: {}", msg)
+                write!(f, "invalid fact: {msg}")
             }
             SocialFactError::StorageLimitExceeded {
                 budget_type,
@@ -694,8 +694,7 @@ impl std::fmt::Display for SocialFactError {
             } => {
                 write!(
                     f,
-                    "{} storage limit exceeded: {} / {} bytes",
-                    budget_type, current, limit
+                    "{budget_type} storage limit exceeded: {current} / {limit} bytes"
                 )
             }
         }

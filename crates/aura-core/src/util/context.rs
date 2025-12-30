@@ -398,7 +398,7 @@ impl ContextDerivationService {
                 DkdContextDerivation::validate_app_label(app_label)
             }
             _ => Err(ContextDerivationError::InvalidInput {
-                reason: format!("Unknown context type: {}", context_type),
+                reason: format!("Unknown context type: {context_type}"),
             }),
         }
     }

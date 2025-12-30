@@ -203,7 +203,7 @@ where
         if let Some(_desc) = description {
             self.effects
                 .record_metric(
-                    format!("checkpoint_{}_description", checkpoint_id),
+                    format!("checkpoint_{checkpoint_id}_description"),
                     1.0, // Just recording presence
                 )
                 .await?;
@@ -226,8 +226,7 @@ where
 
         if checkpoint.is_none() {
             return Err(AuraError::invalid(format!(
-                "Checkpoint not found: {}",
-                checkpoint_id
+                "Checkpoint not found: {checkpoint_id}"
             )));
         }
 

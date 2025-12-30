@@ -163,7 +163,7 @@ where
         };
 
         let binding_data = serde_json::to_vec(&membership_data)
-            .map_err(|e| AmpChannelError::Internal(format!("Serialization error: {}", e)))?;
+            .map_err(|e| AmpChannelError::Internal(format!("Serialization error: {e}")))?;
 
         self.effects
             .insert_relational_fact(RelationalFact::Generic {
@@ -197,7 +197,7 @@ where
         };
 
         let binding_data = serde_json::to_vec(&membership_data)
-            .map_err(|e| AmpChannelError::Internal(format!("Serialization error: {}", e)))?;
+            .map_err(|e| AmpChannelError::Internal(format!("Serialization error: {e}")))?;
 
         self.effects
             .insert_relational_fact(RelationalFact::Generic {

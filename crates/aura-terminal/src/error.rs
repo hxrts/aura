@@ -79,7 +79,7 @@ impl From<crate::tui::effects::DispatchError> for TerminalError {
                 TerminalError::NotFound(resource)
             }
             crate::tui::effects::DispatchError::InvalidParameter { param, reason } => {
-                TerminalError::Input(format!("{}: {}", param, reason))
+                TerminalError::Input(format!("{param}: {reason}"))
             }
             crate::tui::effects::DispatchError::NotImplemented { command } => {
                 TerminalError::NotImplemented(command)

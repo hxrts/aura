@@ -233,9 +233,9 @@ impl QuintSimulationState {
             for (ctx_str, budget_val) in budgets_obj {
                 let ctx: ContextId = ctx_str
                     .parse()
-                    .map_err(|e| format!("invalid context id: {}", e))?;
+                    .map_err(|e| format!("invalid context id: {e}"))?;
                 let budget = FlowBudget::from_quint(budget_val)
-                    .map_err(|e| format!("invalid budget: {}", e))?;
+                    .map_err(|e| format!("invalid budget: {e}"))?;
                 self.budgets.insert(ctx, budget);
             }
         }
@@ -245,7 +245,7 @@ impl QuintSimulationState {
             for (auth_str, token_val) in tokens_obj {
                 let auth: AuthorityId = auth_str
                     .parse()
-                    .map_err(|e| format!("invalid authority id: {}", e))?;
+                    .map_err(|e| format!("invalid authority id: {e}"))?;
                 let token = CapabilityToken::from_quint(token_val)
                     .ok_or_else(|| "invalid token".to_string())?;
                 self.tokens.insert(auth, token);
@@ -257,7 +257,7 @@ impl QuintSimulationState {
             for (ctx_str, epoch_val) in epochs_obj {
                 let ctx: ContextId = ctx_str
                     .parse()
-                    .map_err(|e| format!("invalid context id: {}", e))?;
+                    .map_err(|e| format!("invalid context id: {e}"))?;
                 let epoch = epoch_val
                     .as_u64()
                     .ok_or_else(|| "invalid epoch".to_string())?;
@@ -298,7 +298,7 @@ impl QuintSimulationState {
         let budget = self
             .budgets
             .get_mut(ctx)
-            .ok_or_else(|| format!("context {} not found", ctx))?;
+            .ok_or_else(|| format!("context {ctx} not found"))?;
 
         if budget.spent + cost as u64 > budget.limit {
             return Err(format!(
@@ -334,7 +334,7 @@ impl QuintSimulationState {
         let token = self
             .tokens
             .get_mut(auth)
-            .ok_or_else(|| format!("authority {} not found", auth))?;
+            .ok_or_else(|| format!("authority {auth} not found"))?;
 
         if new_cap > token.cap_level {
             return Err(format!(

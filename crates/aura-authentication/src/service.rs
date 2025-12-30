@@ -149,7 +149,7 @@ impl AuthService {
 
         let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::ChallengeGenerated {
-            context_id: context_id,
+            context_id,
             session_id: session_id.clone(),
             authority_id: snapshot.authority_id,
             device_id: snapshot.device_id,
@@ -200,7 +200,7 @@ impl AuthService {
 
         let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::ProofSubmitted {
-            context_id: context_id,
+            context_id,
             session_id: session_id.clone(),
             authority_id: snapshot.authority_id,
             proof_hash,
@@ -217,7 +217,7 @@ impl AuthService {
                 fact_data,
             },
             EffectCommand::RecordReceipt {
-                operation: format!("proof_submission:{}", session_id),
+                operation: format!("proof_submission:{session_id}"),
                 peer: None,
                 timestamp_ms: snapshot.now_ms,
             },
@@ -265,7 +265,7 @@ impl AuthService {
 
         let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::SessionIssued {
-            context_id: context_id,
+            context_id,
             session_id: session_id.clone(),
             authority_id: snapshot.authority_id,
             device_id: snapshot.device_id,
@@ -343,14 +343,14 @@ impl AuthService {
 
         let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::GuardianApprovalRequested {
-            context_id: context_id,
+            context_id,
             request_id: request_id.clone(),
             account_id,
             requester_id: snapshot.authority_id,
             operation_type: context.operation_type.clone(),
             required_guardians,
             is_emergency: context.is_emergency,
-            justification: context.justification.clone(),
+            justification: context.justification,
             requested_at_ms: snapshot.now_ms,
             expires_at_ms,
         };
@@ -401,7 +401,7 @@ impl AuthService {
         let context_id = derive_auth_context_id(snapshot);
         let fact = if approved {
             AuthFact::GuardianApproved {
-                context_id: context_id,
+                context_id,
                 request_id: request_id.clone(),
                 guardian_id: snapshot.authority_id,
                 signature,
@@ -410,7 +410,7 @@ impl AuthService {
             }
         } else {
             AuthFact::GuardianDenied {
-                context_id: context_id,
+                context_id,
                 request_id: request_id.clone(),
                 guardian_id: snapshot.authority_id,
                 reason: justification,
@@ -428,7 +428,7 @@ impl AuthService {
                 fact_data,
             },
             EffectCommand::RecordReceipt {
-                operation: format!("guardian_decision:{}:{}", request_id, approved),
+                operation: format!("guardian_decision:{request_id}:{approved}"),
                 peer: Some(snapshot.authority_id),
                 timestamp_ms: snapshot.now_ms,
             },
@@ -456,7 +456,7 @@ impl AuthService {
 
         let context_id = derive_auth_context_id(snapshot);
         let fact = AuthFact::SessionRevoked {
-            context_id: context_id,
+            context_id,
             session_id: session_id.clone(),
             revoked_by: snapshot.authority_id,
             reason,
@@ -470,7 +470,7 @@ impl AuthService {
                 fact_data,
             },
             EffectCommand::RecordReceipt {
-                operation: format!("session_revocation:{}", session_id),
+                operation: format!("session_revocation:{session_id}"),
                 peer: None,
                 timestamp_ms: snapshot.now_ms,
             },

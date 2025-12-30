@@ -163,7 +163,7 @@ impl fmt::Display for ContentId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "content:{}", self.hash.to_hex())?;
         if let Some(size) = self.size {
-            write!(f, ":{}", size)?;
+            write!(f, ":{size}")?;
         }
         Ok(())
     }
@@ -262,7 +262,7 @@ impl fmt::Display for ChunkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "chunk:{}", self.hash.to_hex())?;
         if let Some(seq) = self.sequence {
-            write!(f, ":{}", seq)?;
+            write!(f, ":{seq}")?;
         }
         Ok(())
     }
@@ -312,7 +312,7 @@ impl ContentSize {
     pub fn human_readable(&self) -> String {
         let size = self.0 as f64;
         if size < 1024.0 {
-            format!("{} B", size)
+            format!("{size} B")
         } else if size < 1024.0 * 1024.0 {
             format!("{:.1} KB", size / 1024.0)
         } else if size < 1024.0 * 1024.0 * 1024.0 {

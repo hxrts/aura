@@ -29,12 +29,12 @@ impl TopicId {
 
     /// Create a topic ID for CRDT synchronization
     pub fn crdt_sync(session_id: SessionId, crdt_type: &str) -> Self {
-        Self::new(session_id, format!("crdt-sync-{}", crdt_type))
+        Self::new(session_id, format!("crdt-sync-{crdt_type}"))
     }
 
     /// Create a topic ID for operation broadcast
     pub fn operation_broadcast(session_id: SessionId, crdt_type: &str) -> Self {
-        Self::new(session_id, format!("op-broadcast-{}", crdt_type))
+        Self::new(session_id, format!("op-broadcast-{crdt_type}"))
     }
 }
 

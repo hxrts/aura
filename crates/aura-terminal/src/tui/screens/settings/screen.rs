@@ -160,10 +160,10 @@ pub fn SettingsScreen(
             let name = if display_name.is_empty() {
                 "(not set)".into()
             } else {
-                display_name.clone()
+                display_name
             };
             vec![
-                (format!("Display Name: {}", name), Theme::TEXT),
+                (format!("Display Name: {name}"), Theme::TEXT),
                 (String::new(), Theme::TEXT),
                 (
                     "Your display name is shared with contacts".into(),
@@ -180,13 +180,12 @@ pub fn SettingsScreen(
                 vec![
                     (
                         format!(
-                            "Current Threshold: {} of {} guardians",
-                            threshold_k, threshold_n
+                            "Current Threshold: {threshold_k} of {threshold_n} guardians"
                         ),
                         Theme::SECONDARY,
                     ),
                     (String::new(), Theme::TEXT),
-                    (format!("Available Guardians: {}", threshold_n), Theme::TEXT),
+                    (format!("Available Guardians: {threshold_n}"), Theme::TEXT),
                     (String::new(), Theme::TEXT),
                     (
                         "Guardians help recover your account if you".into(),
@@ -200,7 +199,7 @@ pub fn SettingsScreen(
                 // Guardians exist but threshold not configured yet
                 vec![
                     (
-                        format!("Guardians Available: {}", guardian_count),
+                        format!("Guardians Available: {guardian_count}"),
                         Theme::SECONDARY,
                     ),
                     (String::new(), Theme::TEXT),

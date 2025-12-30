@@ -69,19 +69,16 @@ pub async fn handle_recovery(
                                     .await
                                 {
                                     Ok(ceremony_id) => Some(Ok(OpResponse::Data(format!(
-                                        "Recovery started: {}",
-                                        ceremony_id
+                                        "Recovery started: {ceremony_id}"
                                     )))),
                                     Err(e) => Some(Err(OpError::Failed(format!(
-                                        "Failed to start recovery: {}",
-                                        e
+                                        "Failed to start recovery: {e}"
                                     )))),
                                 }
                             }
                         }
                         Err(e) => Some(Err(OpError::Failed(format!(
-                            "Failed to get recovery status: {}",
-                            e
+                            "Failed to get recovery status: {e}"
                         )))),
                     }
                 }
@@ -97,8 +94,7 @@ pub async fn handle_recovery(
             match approve_recovery(app_core, guardian_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to approve recovery: {}",
-                    e
+                    "Failed to approve recovery: {e}"
                 )))),
             }
         }
@@ -132,8 +128,7 @@ pub async fn handle_recovery(
                             None => Some(Err(OpError::Failed("No active recovery".to_string()))),
                         },
                         Err(e) => Some(Err(OpError::Failed(format!(
-                            "Failed to get recovery status: {}",
-                            e
+                            "Failed to get recovery status: {e}"
                         )))),
                     }
                 }
@@ -163,8 +158,7 @@ pub async fn handle_recovery(
                             ))),
                         },
                         Err(e) => Some(Err(OpError::Failed(format!(
-                            "Failed to get recovery status: {}",
-                            e
+                            "Failed to get recovery status: {e}"
                         )))),
                     }
                 }
@@ -200,8 +194,7 @@ pub async fn handle_recovery(
                                 Ok(auth_id) => auth_id,
                                 Err(_) => {
                                     return Some(Err(OpError::InvalidArgument(format!(
-                                        "Invalid contact ID: {}",
-                                        id
+                                        "Invalid contact ID: {id}"
                                     ))));
                                 }
                             };
@@ -218,8 +211,7 @@ pub async fn handle_recovery(
                                     invitation_info.invitation_id
                                 )))),
                                 Err(e) => Some(Err(OpError::Failed(format!(
-                                    "Failed to create guardian invitation: {}",
-                                    e
+                                    "Failed to create guardian invitation: {e}"
                                 )))),
                             }
                         }

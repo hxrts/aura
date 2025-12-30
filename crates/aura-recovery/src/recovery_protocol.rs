@@ -206,7 +206,7 @@ impl RecoveryProtocol {
             .add_recovery_grant(self.account_authority, grant.clone())?;
 
         // Persist consensus evidence alongside the recovery grant.
-        let _ = self
+        self
             .recovery_context
             .add_fact(commit_fact.to_relational_fact())?;
 
@@ -488,7 +488,7 @@ impl RecoveryProtocolHandler {
             network
                 .send_to_peer(guardian_id.0, message_data.clone())
                 .await
-                .map_err(|e| AuraError::network(format!("Failed to notify guardian: {}", e)))?;
+                .map_err(|e| AuraError::network(format!("Failed to notify guardian: {e}")))?;
         }
 
         // Update journal state with recovery initiation
@@ -555,7 +555,7 @@ impl RecoveryProtocolHandler {
         network
             .send_to_peer(self.protocol.account_authority.0, result_data)
             .await
-            .map_err(|e| AuraError::network(format!("Failed to notify account: {}", e)))?;
+            .map_err(|e| AuraError::network(format!("Failed to notify account: {e}")))?;
 
         // Update journal state with recovery completion
         self.update_journal_recovery_state_via_effects(
@@ -591,7 +591,7 @@ impl RecoveryProtocolHandler {
 
         let mut journal = journal_effects.get_journal().await?;
         journal.facts.insert_with_context(
-            format!("recovery_state:{}", recovery_id),
+            format!("recovery_state:{recovery_id}"),
             aura_core::journal::FactValue::String(state_data.to_string()),
             self.protocol.account_authority.to_string(),
             timestamp,

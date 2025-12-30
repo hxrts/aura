@@ -50,7 +50,7 @@ impl From<Layer3Error> for AuraError {
     fn from(error: Layer3Error) -> Self {
         match error {
             Layer3Error::UnsupportedOperation { operation } => {
-                AuraError::invalid(format!("Unsupported operation: {}", operation))
+                AuraError::invalid(format!("Unsupported operation: {operation}"))
             }
             Layer3Error::HandlerFailure { message } => AuraError::internal(message),
             Layer3Error::InvalidInput { message } => AuraError::invalid(message),

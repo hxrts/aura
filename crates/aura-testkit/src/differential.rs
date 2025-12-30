@@ -55,11 +55,11 @@ pub enum DifferentialError {
 impl std::fmt::Display for DifferentialError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::OracleNotFound(path) => write!(f, "Lean oracle not found at: {}", path),
-            Self::OracleInvocationFailed(msg) => write!(f, "Oracle invocation failed: {}", msg),
-            Self::ParseError(msg) => write!(f, "Failed to parse oracle output: {}", msg),
-            Self::Divergence(report) => write!(f, "Divergence detected:\n{}", report),
-            Self::IoError(msg) => write!(f, "IO error: {}", msg),
+            Self::OracleNotFound(path) => write!(f, "Lean oracle not found at: {path}"),
+            Self::OracleInvocationFailed(msg) => write!(f, "Oracle invocation failed: {msg}"),
+            Self::ParseError(msg) => write!(f, "Failed to parse oracle output: {msg}"),
+            Self::Divergence(report) => write!(f, "Divergence detected:\n{report}"),
+            Self::IoError(msg) => write!(f, "IO error: {msg}"),
         }
     }
 }
@@ -97,7 +97,7 @@ impl std::fmt::Display for DivergenceReport {
         )?;
         writeln!(f, "║ Command: {:<52} ║", self.command)?;
         if let Some(field) = &self.diverged_field {
-            writeln!(f, "║ Field: {:<54} ║", field)?;
+            writeln!(f, "║ Field: {field:<54} ║")?;
         }
         writeln!(
             f,
@@ -108,7 +108,7 @@ impl std::fmt::Display for DivergenceReport {
             "║ Rust Output:                                                 ║"
         )?;
         for line in self.rust_output.lines().take(5) {
-            writeln!(f, "║   {:<58} ║", line)?;
+            writeln!(f, "║   {line:<58} ║")?;
         }
         writeln!(
             f,
@@ -119,7 +119,7 @@ impl std::fmt::Display for DivergenceReport {
             "║ Lean Output:                                                 ║"
         )?;
         for line in self.lean_output.lines().take(5) {
-            writeln!(f, "║   {:<58} ║", line)?;
+            writeln!(f, "║   {line:<58} ║")?;
         }
         writeln!(
             f,
@@ -177,7 +177,7 @@ impl LeanOracle {
         input: &I,
     ) -> DifferentialResult<O> {
         let input_json = serde_json::to_string(input)
-            .map_err(|e| DifferentialError::ParseError(format!("Input serialization: {}", e)))?;
+            .map_err(|e| DifferentialError::ParseError(format!("Input serialization: {e}")))?;
 
         let mut child = Command::new(&self.binary_path)
             .arg(command)
@@ -205,7 +205,7 @@ impl LeanOracle {
         }
 
         serde_json::from_slice(&output.stdout)
-            .map_err(|e| DifferentialError::ParseError(format!("Output parsing: {}", e)))
+            .map_err(|e| DifferentialError::ParseError(format!("Output parsing: {e}")))
     }
 }
 

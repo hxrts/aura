@@ -124,7 +124,7 @@ impl SimulationEffectSystem {
         if self.fault_injection_enabled {
             self.injected_faults
                 .lock()
-                .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {}", e))
+                .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {e}"))
                 .insert(operation.to_string(), config);
         }
     }
@@ -133,7 +133,7 @@ impl SimulationEffectSystem {
     pub fn clear_faults(&self) {
         self.injected_faults
             .lock()
-            .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {}", e))
+            .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {e}"))
             .clear();
     }
 
@@ -146,7 +146,7 @@ impl SimulationEffectSystem {
         let faults = self
             .injected_faults
             .lock()
-            .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {}", e));
+            .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {e}"));
         if let Some(config) = faults.get(operation) {
             // Simple deterministic "probability" based on seed
             let threshold = (self.seed % 100) as f64 / 100.0;
@@ -222,7 +222,7 @@ impl CryptoCoreEffects for SimulationEffectSystem {
     }
 
     fn secure_zero(&self, data: &mut [u8]) {
-        self.crypto.secure_zero(data)
+        self.crypto.secure_zero(data);
     }
 }
 
@@ -591,7 +591,7 @@ impl SimulationEffectSystem {
             active_fault_count: self
                 .injected_faults
                 .lock()
-                .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {}", e))
+                .unwrap_or_else(|e| panic!("Fault injection lock poisoned: {e}"))
                 .len(),
             supported_effect_types: vec![
                 "crypto".to_string(),

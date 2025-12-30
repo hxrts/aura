@@ -49,8 +49,7 @@ impl RealSecureStorageHandler {
             Ok(())
         } else {
             Err(SecureStorageError::permission_denied(format!(
-                "missing capability: {:?}",
-                required
+                "missing capability: {required:?}"
             )))
         }
     }

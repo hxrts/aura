@@ -300,7 +300,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         let (ceremony_id, commands) = self.plan_initiate_ceremony(
@@ -331,7 +331,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         let (accepted, commands) =
@@ -418,7 +418,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         let (relationship_id, commands) = self.plan_commit_ceremony(ceremony_id, timestamp_ms)?;
@@ -444,7 +444,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             .effects
             .physical_time()
             .await
-            .map_err(|e| AuraError::internal(format!("Time error: {}", e)))?
+            .map_err(|e| AuraError::internal(format!("Time error: {e}")))?
             .ts_ms;
 
         let commands = self.plan_abort_ceremony(ceremony_id, reason, timestamp_ms)?;
@@ -571,7 +571,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
         };
 
         let signature = self.effects.sign(signing_context).await.map_err(|e| {
-            AuraError::internal(format!("Failed to sign invitation acceptance: {}", e))
+            AuraError::internal(format!("Failed to sign invitation acceptance: {e}"))
         })?;
 
         Ok(Self::build_acceptance_proposal(
@@ -645,7 +645,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             timestamp_ms,
         };
         InvitationCeremonyCommand::JournalAppend {
-            key: format!("ceremony:initiated:{}", ceremony_id_hex),
+            key: format!("ceremony:initiated:{ceremony_id_hex}"),
             fact,
         }
     }
@@ -662,7 +662,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             timestamp_ms,
         };
         InvitationCeremonyCommand::JournalAppend {
-            key: format!("ceremony:accepted:{}", ceremony_id_hex),
+            key: format!("ceremony:accepted:{ceremony_id_hex}"),
             fact,
         }
     }
@@ -681,7 +681,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             timestamp_ms,
         };
         InvitationCeremonyCommand::JournalAppend {
-            key: format!("ceremony:committed:{}", ceremony_id_hex),
+            key: format!("ceremony:committed:{ceremony_id_hex}"),
             fact,
         }
     }
@@ -699,7 +699,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
             timestamp_ms,
         };
         InvitationCeremonyCommand::JournalAppend {
-            key: format!("ceremony:aborted:{}", ceremony_id_hex),
+            key: format!("ceremony:aborted:{ceremony_id_hex}"),
             fact,
         }
     }

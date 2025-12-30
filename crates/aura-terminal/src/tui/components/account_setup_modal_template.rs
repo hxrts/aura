@@ -102,7 +102,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 
     // Input field props
     let input_props = LabeledInputProps::new("Display Name *", "Enter your name...")
-        .with_value(display_name.clone())
+        .with_value(display_name)
         .with_focused(props.focused);
 
     element! {

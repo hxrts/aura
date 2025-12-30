@@ -526,7 +526,7 @@ pub fn NeighborhoodScreenV2(
         parts.push(props.view.enter_depth.label().to_string());
 
         // Always show channel name
-        parts.push(format!("# {}", channel_name));
+        parts.push(format!("# {channel_name}"));
 
         parts.join(" › ")
     };

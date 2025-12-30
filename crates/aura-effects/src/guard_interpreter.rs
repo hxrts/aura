@@ -193,8 +193,7 @@ where
                 let current = self.journal.get_journal().await.map_err(|e| {
                     error!("Failed to get current journal: {}", e);
                     AuraError::from(Layer3Error::handler_failure(format!(
-                        "Failed to get journal: {}",
-                        e
+                        "Failed to get journal: {e}"
                     )))
                 })?;
 
@@ -209,8 +208,7 @@ where
                     .map_err(|e| {
                         error!("Failed to merge facts: {}", e);
                         AuraError::from(Layer3Error::handler_failure(format!(
-                            "Failed to merge: {}",
-                            e
+                            "Failed to merge: {e}"
                         )))
                     })?;
 
@@ -218,8 +216,7 @@ where
                 self.journal.persist_journal(&updated).await.map_err(|e| {
                     error!("Failed to persist journal: {}", e);
                     AuraError::from(Layer3Error::handler_failure(format!(
-                        "Failed to persist: {}",
-                        e
+                        "Failed to persist: {e}"
                     )))
                 })?;
 
@@ -261,8 +258,7 @@ where
                 self.leakage.record_leakage(event).await.map_err(|e| {
                     error!("Failed to record leakage: {}", e);
                     AuraError::from(Layer3Error::handler_failure(format!(
-                        "Failed to record leakage: {}",
-                        e
+                        "Failed to record leakage: {e}"
                     )))
                 })?;
 
@@ -280,8 +276,7 @@ where
                 self.storage.store(&key, data).await.map_err(|e| {
                     error!("Failed to store metadata: {}", e);
                     AuraError::from(Layer3Error::handler_failure(format!(
-                        "Failed to store: {}",
-                        e
+                        "Failed to store: {e}"
                     )))
                 })?;
 
@@ -317,8 +312,7 @@ where
                     .map_err(|e| {
                         error!("Failed to send envelope: {}", e);
                         AuraError::from(Layer3Error::handler_failure(format!(
-                            "Failed to send: {}",
-                            e
+                            "Failed to send: {e}"
                         )))
                     })?;
 

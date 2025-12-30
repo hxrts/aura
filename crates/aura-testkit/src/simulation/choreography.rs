@@ -117,7 +117,7 @@ impl ChoreographyTestHarness {
                 effects_builder
                     .build()
                     .map_err(|e| TestError::ChoreographyExecution {
-                        reason: format!("Failed to create test context: {}", e),
+                        reason: format!("Failed to create test context: {e}"),
                     })?;
             devices.push((fixture, test_context));
         }
@@ -566,7 +566,7 @@ impl EndedSession {
                 match status.status {
                     SessionStatus::Ended => return Ok(()),
                     SessionStatus::Active => {
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
                 }
             }
@@ -619,10 +619,10 @@ impl std::fmt::Display for TestError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TestError::InvalidDeviceIndex { index, max } => {
-                write!(f, "Invalid device index {}, max is {}", index, max)
+                write!(f, "Invalid device index {index}, max is {max}")
             }
             TestError::SessionNotFound { session_id } => {
-                write!(f, "Session not found: {}", session_id)
+                write!(f, "Session not found: {session_id}")
             }
             TestError::SessionTimeout {
                 session_id,
@@ -630,18 +630,17 @@ impl std::fmt::Display for TestError {
             } => {
                 write!(
                     f,
-                    "Session '{}' did not complete within {:?}. This usually means:\n\
+                    "Session '{session_id}' did not complete within {timeout:?}. This usually means:\n\
                      1. The session was never ended (call session.end().await?)\n\
                      2. The session has a deadlock or is waiting for an event that never occurs\n\
                      3. The timeout duration is too short for the test workload\n\
                      Debugging: Check session status, verify all devices are responding, \
-                     and ensure the choreography completes successfully.",
-                    session_id, timeout
+                     and ensure the choreography completes successfully."
                 )
             }
-            TestError::Transport(err) => write!(f, "Transport error: {}", err),
+            TestError::Transport(err) => write!(f, "Transport error: {err}"),
             TestError::ChoreographyExecution { reason } => {
-                write!(f, "Choreography execution failed: {}", reason)
+                write!(f, "Choreography execution failed: {reason}")
             }
         }
     }
@@ -682,7 +681,7 @@ impl std::fmt::Display for TransportError {
             TransportError::ChannelClosed => write!(f, "Communication channel closed"),
             TransportError::SerializationError => write!(f, "Message serialization failed"),
             TransportError::DeviceNotFound { device_id } => {
-                write!(f, "Device not found: {}", device_id)
+                write!(f, "Device not found: {device_id}")
             }
         }
     }

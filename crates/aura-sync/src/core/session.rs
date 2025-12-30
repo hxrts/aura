@@ -424,7 +424,7 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
         if session.is_timed_out(current_time) {
@@ -452,8 +452,7 @@ where
                 Ok(())
             }
             _ => Err(sync_session_error(format!(
-                "Session {} is not in initializing state",
-                session_id
+                "Session {session_id} is not in initializing state"
             ))),
         }
     }
@@ -492,7 +491,7 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
         if session.is_timed_out(current_time) {
@@ -506,8 +505,7 @@ where
                 Ok(())
             }
             _ => Err(sync_session_error(format!(
-                "Session {} is not active",
-                session_id
+                "Session {session_id} is not active"
             ))),
         }
     }
@@ -548,7 +546,7 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
 
         let duration_ms = session.duration_ms(current_time).unwrap_or(0);
         let participants = session.participants().to_vec();
@@ -561,7 +559,7 @@ where
             metadata,
         };
 
-        *session = SessionState::Completed(result.clone());
+        *session = SessionState::Completed(result);
 
         // Record metrics
         if let Some(ref metrics) = self.metrics {
@@ -612,7 +610,7 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
 
         let duration_ms = session.duration_ms(current_time).unwrap_or(0);
 
@@ -675,10 +673,10 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {session_id} not found")))?;
 
         let duration_ms = session.duration_ms(current_time).unwrap_or(0);
-        let last_known_state = format!("{:?}", session);
+        let last_known_state = format!("{session:?}");
 
         let result = SessionResult::Timeout {
             duration_ms,

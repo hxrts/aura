@@ -28,8 +28,7 @@ pub async fn handle_contacts(
             match update_contact_nickname(app_core, contact_id, nickname, now).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to update contact nickname: {}",
-                    e
+                    "Failed to update contact nickname: {e}"
                 )))),
             }
         }
@@ -38,8 +37,7 @@ pub async fn handle_contacts(
             match remove_contact(app_core, contact_id, now).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to remove contact: {}",
-                    e
+                    "Failed to remove contact: {e}"
                 )))),
             }
         }

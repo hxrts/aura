@@ -84,7 +84,7 @@ impl AntiEntropyHandler {
         // Evaluate guard chain - this enforces authorization and flow budget
         let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
             tracing::error!(peer = ?peer_id, error = %e, "Guard chain evaluation failed");
-            SyncError::GuardChainFailure(format!("Digest request guard failed: {}", e))
+            SyncError::GuardChainFailure(format!("Digest request guard failed: {e}"))
         })?;
 
         if !guard_result.authorized {
@@ -242,7 +242,7 @@ impl AntiEntropyHandler {
         // Evaluate guard chain
         let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
             tracing::error!(peer = ?peer_id, error = %e, "Guard chain evaluation failed for ops request");
-            SyncError::GuardChainFailure(format!("Ops request guard failed: {}", e))
+            SyncError::GuardChainFailure(format!("Ops request guard failed: {e}"))
         })?;
 
         if !guard_result.authorized {

@@ -369,7 +369,7 @@ impl<T: QueryEffects + ?Sized> QueryEffects for Arc<T> {
     }
 
     async fn invalidate(&self, predicate: &crate::query::FactPredicate) {
-        (**self).invalidate(predicate).await
+        (**self).invalidate(predicate).await;
     }
 
     async fn query_with_isolation<Q: Query>(

@@ -22,7 +22,7 @@ pub fn format_recovery_status(active: &[String], completed: &[String]) -> String
     if !completed.is_empty() {
         let _ = writeln!(output, "Completed recovery sessions ({}):", completed.len());
         for key in completed {
-            let _ = writeln!(output, "  - {}", key);
+            let _ = writeln!(output, "  - {key}");
         }
     }
 

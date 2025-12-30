@@ -200,8 +200,8 @@ impl<S: MvState + Top> CrdtHandler<S> for MvHandler<S> {
             pending_count: 0,
             is_idle: true,
             metrics: HandlerMetrics {
-                constraints_applied: Some(self.constraint_history.len()),
-                consistency_proofs: Some(self.consistency_proofs.len()),
+                constraints_applied: Some(self.constraint_history.len() as u32),
+                consistency_proofs: Some(self.consistency_proofs.len() as u32),
                 ..Default::default()
             },
         }

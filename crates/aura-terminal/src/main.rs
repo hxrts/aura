@@ -62,7 +62,7 @@ async fn main() -> Result<(), AuraError> {
             // Check if this is a help request (exit code 0)
             let exit_code = e.clone().exit_code();
             if exit_code == 0 {
-                CliOutput::new().println(format!("{:?}", e)).render();
+                CliOutput::new().println(format!("{e:?}")).render();
                 std::process::exit(0);
             }
             // For other errors, show our friendly usage
@@ -85,21 +85,20 @@ async fn main() -> Result<(), AuraError> {
         .testing_mode()
         .build()
         .await
-        .map_err(|e| AuraError::agent(format!("{}", e)))?;
+        .map_err(|e| AuraError::agent(format!("{e}")))?;
     let agent = Arc::new(agent);
 
     // Create AppCore with runtime bridge (dependency inversion pattern)
     let config = AppConfig::default();
     let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())
-        .map_err(|e| AuraError::agent(format!("{}", e)))?;
+        .map_err(|e| AuraError::agent(format!("{e}")))?;
     let app_core = Arc::new(RwLock::new(app_core));
 
     // Initialize logging through effects
     let log_level = if args.verbose { "debug" } else { "info" };
     CliOutput::new()
         .println(format!(
-            "Initializing Aura CLI with log level: {}",
-            log_level
+            "Initializing Aura CLI with log level: {log_level}"
         ))
         .render();
 
@@ -111,26 +110,26 @@ async fn main() -> Result<(), AuraError> {
         Commands::Init(init) => cli_handler
             .handle_init(init.num_devices, init.threshold, &init.output)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Status(status) => {
             let config_path =
                 resolve_config_path(status.config.as_ref(), args.config.as_ref(), &cli_handler)
                     .await
-                    .map_err(|e| AuraError::agent(format!("{}", e)))?;
+                    .map_err(|e| AuraError::agent(format!("{e}")))?;
             cli_handler
                 .handle_status(&config_path)
                 .await
-                .map_err(|e| AuraError::agent(format!("{}", e)))?
+                .map_err(|e| AuraError::agent(format!("{e}")))?;
         }
         Commands::Node(node) => {
             let config_path =
                 resolve_config_path(node.config.as_ref(), args.config.as_ref(), &cli_handler)
                     .await
-                    .map_err(|e| AuraError::agent(format!("{}", e)))?;
+                    .map_err(|e| AuraError::agent(format!("{e}")))?;
             cli_handler
                 .handle_node(node.port.unwrap_or(58835), node.daemon, &config_path)
                 .await
-                .map_err(|e| AuraError::agent(format!("{}", e)))?
+                .map_err(|e| AuraError::agent(format!("{e}")))?;
         }
         Commands::Threshold(ThresholdArgs {
             configs,
@@ -139,7 +138,7 @@ async fn main() -> Result<(), AuraError> {
         }) => cli_handler
             .handle_threshold(&configs, threshold, &mode)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         #[cfg(feature = "development")]
         Commands::Scenarios { action } => cli_handler
             .handle_scenarios(&action)
@@ -153,35 +152,35 @@ async fn main() -> Result<(), AuraError> {
         Commands::Snapshot { action } => cli_handler
             .handle_snapshot(&action)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Admin { action } => cli_handler
             .handle_admin(&action)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Recovery { action } => cli_handler
             .handle_recovery(&action)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Invite { action } => cli_handler
             .handle_invitation(&action)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Authority { command } => cli_handler
             .handle_authority(&command)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Context { action } => cli_handler
             .handle_context(&action)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Amp { action } => cli_handler
             .handle_amp(&action)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Chat { command } => cli_handler
             .handle_chat(&command)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Sync { action } => {
             // Default to daemon mode if no subcommand specified
             let sync_action = action.unwrap_or(SyncAction::Daemon {
@@ -193,17 +192,17 @@ async fn main() -> Result<(), AuraError> {
             cli_handler
                 .handle_sync(&sync_action)
                 .await
-                .map_err(|e| AuraError::agent(format!("{}", e)))?
+                .map_err(|e| AuraError::agent(format!("{e}")))?;
         }
         #[cfg(feature = "terminal")]
         Commands::Tui(args) => cli_handler
             .handle_tui(&args)
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
         Commands::Version => cli_handler
             .handle_version()
             .await
-            .map_err(|e| AuraError::agent(format!("{}", e)))?,
+            .map_err(|e| AuraError::agent(format!("{e}")))?,
     }
 
     Ok(())

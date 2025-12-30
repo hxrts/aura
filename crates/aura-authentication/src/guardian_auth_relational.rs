@@ -166,7 +166,7 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
 
     // Serialize the operation and verify the guardian's signature
     let operation_bytes = aura_core::util::serialization::to_vec(&request.operation)
-        .map_err(|e| AuraError::serialization(format!("Failed to serialize operation: {}", e)))?;
+        .map_err(|e| AuraError::serialization(format!("Failed to serialize operation: {e}")))?;
 
     // Ensure signature length is valid
     let sig_bytes: [u8; 64] = proof
@@ -179,8 +179,7 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
     let verifying_key_bytes: [u8; 32] = binding.guardian_commitment.0;
     let verifying_key = Ed25519VerifyingKey::from_bytes(&verifying_key_bytes).map_err(|e| {
         AuraError::crypto(format!(
-            "Invalid guardian commitment (pubkey decode failed): {}",
-            e
+            "Invalid guardian commitment (pubkey decode failed): {e}"
         ))
     })?;
 
@@ -190,7 +189,7 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
         return Ok(GuardianAuthResponse {
             success: false,
             authorized: false,
-            error: Some(format!("Invalid guardian signature: {}", err)),
+            error: Some(format!("Invalid guardian signature: {err}")),
         });
     }
 

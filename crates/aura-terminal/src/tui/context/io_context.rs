@@ -66,7 +66,7 @@ impl std::fmt::Display for ContextBuildError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ContextBuildError::MissingField(field) => {
-                write!(f, "IoContextBuilder: missing required field '{}'", field)
+                write!(f, "IoContextBuilder: missing required field '{field}'")
             }
         }
     }
@@ -192,7 +192,7 @@ impl IoContextBuilder {
             self.has_existing_account,
         ));
         let account_files =
-            AccountFilesHelper::new(base_path, device_id, has_existing_account.clone());
+            AccountFilesHelper::new(base_path, device_id, has_existing_account);
 
         let invited_lan_peers = Arc::new(RwLock::new(HashSet::new()));
         let current_context = Arc::new(RwLock::new(None));
@@ -648,7 +648,7 @@ impl IoContext {
             .await
         {
             Some(Ok(OpResponse::InvitationCode { code, .. })) => Ok(code),
-            Some(Ok(other)) => Err(format!("Unexpected response: {:?}", other)),
+            Some(Ok(other)) => Err(format!("Unexpected response: {other:?}")),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
@@ -676,7 +676,7 @@ impl IoContext {
             .await
         {
             Some(Ok(OpResponse::InvitationCode { code, .. })) => Ok(code),
-            Some(Ok(other)) => Err(format!("Unexpected response: {:?}", other)),
+            Some(Ok(other)) => Err(format!("Unexpected response: {other:?}")),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
@@ -708,7 +708,7 @@ impl IoContext {
                 pending_epoch,
                 device_id,
             }),
-            Some(Ok(other)) => Err(format!("Unexpected response: {:?}", other)),
+            Some(Ok(other)) => Err(format!("Unexpected response: {other:?}")),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;
@@ -727,7 +727,7 @@ impl IoContext {
             .await
         {
             Some(Ok(OpResponse::DeviceRemovalStarted { ceremony_id })) => Ok(ceremony_id),
-            Some(Ok(other)) => Err(format!("Unexpected response: {:?}", other)),
+            Some(Ok(other)) => Err(format!("Unexpected response: {other:?}")),
             Some(Err(err)) => {
                 let terr: TerminalError = err.clone().into();
                 self.operational.emit_error(terr).await;

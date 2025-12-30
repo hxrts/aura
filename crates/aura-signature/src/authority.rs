@@ -33,15 +33,14 @@ pub fn verify_authority_signature(
         aura_core::ed25519_verify(message, signature, authority_public_key).map_err(|e| {
             AuthenticationError::InvalidAuthoritySignature {
                 details: format!(
-                    "Authority {} signature verification failed: {}",
-                    authority_id, e
+                    "Authority {authority_id} signature verification failed: {e}"
                 ),
             }
         })?;
 
     if !valid {
         return Err(AuthenticationError::InvalidAuthoritySignature {
-            details: format!("Authority {} signature invalid", authority_id),
+            details: format!("Authority {authority_id} signature invalid"),
         });
     }
 
@@ -64,7 +63,7 @@ pub fn verify_signature(
 ) -> Result<()> {
     let valid = aura_core::ed25519_verify(message, signature, public_key).map_err(|e| {
         AuthenticationError::InvalidAuthoritySignature {
-            details: format!("Signature verification failed: {}", e),
+            details: format!("Signature verification failed: {e}"),
         }
     })?;
 

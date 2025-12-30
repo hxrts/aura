@@ -160,11 +160,11 @@ impl From<ChatError> for AuraError {
     fn from(error: ChatError) -> Self {
         match error {
             ChatError::GroupNotFound { group_id } => {
-                AuraError::not_found(format!("Chat group not found: {}", group_id))
+                AuraError::not_found(format!("Chat group not found: {group_id}"))
             }
             ChatError::NotAuthorized { reason } => AuraError::permission_denied(reason),
             ChatError::MessageNotFound { message_id } => {
-                AuraError::not_found(format!("Message not found: {}", message_id))
+                AuraError::not_found(format!("Message not found: {message_id}"))
             }
             ChatError::InvalidGroup { reason } => AuraError::invalid(reason),
             ChatError::Transport { error } => AuraError::network(error),

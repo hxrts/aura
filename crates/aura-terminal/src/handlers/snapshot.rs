@@ -41,13 +41,13 @@ async fn propose_snapshot(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput>
         .effects()
         .get_current_epoch()
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to load epoch: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to load epoch: {e}")))?;
 
     let state_digest = ctx
         .effects()
         .get_current_commitment()
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to load commitment: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to load commitment: {e}")))?;
 
     let mut id_bytes = [0u8; 16];
     id_bytes.copy_from_slice(&state_digest.0[..16]);
@@ -65,27 +65,27 @@ async fn propose_snapshot(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput>
     let fact_value = serde_json::to_vec(&fact_content)
         .map(FactValue::Bytes)
         .map_err(|e| {
-            TerminalError::Operation(format!("Failed to encode snapshot proposal fact: {}", e))
+            TerminalError::Operation(format!("Failed to encode snapshot proposal fact: {e}"))
         })?;
 
     let mut delta = Journal::new();
-    let fact_key = format!("snapshot_proposed:{}", proposal_id);
+    let fact_key = format!("snapshot_proposed:{proposal_id}");
     delta.facts.insert(fact_key.clone(), fact_value);
 
     let current = ctx
         .effects()
         .get_journal()
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to load journal: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to load journal: {e}")))?;
     let merged = ctx
         .effects()
         .merge_facts(&current, &delta)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to merge snapshot fact: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to merge snapshot fact: {e}")))?;
     ctx.effects()
         .persist_journal(&merged)
         .await
-        .map_err(|e| TerminalError::Operation(format!("Failed to persist snapshot fact: {}", e)))?;
+        .map_err(|e| TerminalError::Operation(format!("Failed to persist snapshot fact: {e}")))?;
 
     output.kv("Snapshot proposal recorded with key", fact_key);
 

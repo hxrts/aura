@@ -206,7 +206,7 @@ where
 
         // Store connection state using injected time effects
         let current_time = self.effects.physical_time().await.map_err(|e| {
-            TransportCoordinationError::Effect(format!("Failed to get time: {}", e))
+            TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
         })?;
         let now_ms = current_time.ts_ms;
 
@@ -229,7 +229,7 @@ where
     /// Send data to connected peer - NO choreography
     pub async fn send_data(&self, connection_id: &str, data: Vec<u8>) -> CoordinationResult<()> {
         let current_time = self.effects.physical_time().await.map_err(|e| {
-            TransportCoordinationError::Effect(format!("Failed to get time: {}", e))
+            TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
         })?;
         let now_ms = current_time.ts_ms;
 
@@ -239,8 +239,7 @@ where
                 connection_state.last_activity_ms = now_ms;
             } else {
                 return Err(TransportCoordinationError::ProtocolFailed(format!(
-                    "Connection not found: {}",
-                    connection_id
+                    "Connection not found: {connection_id}"
                 )));
             }
         }
@@ -250,7 +249,7 @@ where
             .send_data(&self.effects, connection_id, data)
             .await
             .map_err(|e| {
-                TransportCoordinationError::ProtocolFailed(format!("Send failed: {}", e))
+                TransportCoordinationError::ProtocolFailed(format!("Send failed: {e}"))
             })?;
 
         Ok(())
@@ -269,7 +268,7 @@ where
             .disconnect(&self.effects, connection_id)
             .await
             .map_err(|e| {
-                TransportCoordinationError::ProtocolFailed(format!("Disconnect failed: {}", e))
+                TransportCoordinationError::ProtocolFailed(format!("Disconnect failed: {e}"))
             })?;
 
         Ok(())
@@ -293,7 +292,7 @@ where
         max_idle: std::time::Duration,
     ) -> CoordinationResult<usize> {
         let current_time = self.effects.physical_time().await.map_err(|e| {
-            TransportCoordinationError::Effect(format!("Failed to get time: {}", e))
+            TransportCoordinationError::Effect(format!("Failed to get time: {e}"))
         })?;
         let now_ms = current_time.ts_ms;
         let max_idle_ms = max_idle.as_millis() as u64;

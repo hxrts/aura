@@ -570,7 +570,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                     fact_data: proof_hash.to_vec(),
                 },
                 EffectCommand::RecordReceipt {
-                    operation: format!("proof_submission:{}", session_id),
+                    operation: format!("proof_submission:{session_id}"),
                     peer: None,
                     timestamp_ms: snapshot.now_ms,
                 },
@@ -709,7 +709,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
                     fact_data: request_id.as_bytes().to_vec(),
                 },
                 EffectCommand::RecordReceipt {
-                    operation: format!("guardian_decision:{}:{}", request_id, approved),
+                    operation: format!("guardian_decision:{request_id}:{approved}"),
                     peer: Some(snapshot.authority_id),
                     timestamp_ms: snapshot.now_ms,
                 },

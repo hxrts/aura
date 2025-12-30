@@ -297,7 +297,7 @@ impl ITFBasedFuzzer {
             config.working_dir.clone(),
         )
         .map_err(|e| {
-            ITFFuzzError::QuintCliError(format!("Failed to create QuintCliRunner: {}", e))
+            ITFFuzzError::QuintCliError(format!("Failed to create QuintCliRunner: {e}"))
         })?;
 
         Ok(Self {
@@ -391,10 +391,10 @@ impl ITFBasedFuzzer {
     ) -> Result<Vec<ITFTrace>, ITFFuzzError> {
         let traces = self
             .quint_cli
-            .generate_traces(spec_file, count, self.config.max_bound as u32)
+            .generate_traces(spec_file, count, self.config.max_bound)
             .await
             .map_err(|e| {
-                ITFFuzzError::QuintCliError(format!("Failed to generate traces: {}", e))
+                ITFFuzzError::QuintCliError(format!("Failed to generate traces: {e}"))
             })?;
 
         let mut itf_traces = Vec::new();
@@ -411,9 +411,9 @@ impl ITFBasedFuzzer {
     pub async fn verify_properties(&self, spec_file: &Path) -> Result<bool, ITFFuzzError> {
         let result = self
             .quint_cli
-            .verify_spec(spec_file, Some(self.config.max_bound as u32))
+            .verify_spec(spec_file, Some(self.config.max_bound))
             .await
-            .map_err(|e| ITFFuzzError::QuintCliError(format!("Verification failed: {}", e)))?;
+            .map_err(|e| ITFFuzzError::QuintCliError(format!("Verification failed: {e}")))?;
 
         Ok(result.outcome == "ok")
     }
@@ -427,7 +427,7 @@ impl ITFBasedFuzzer {
         self.quint_cli
             .check_property(spec_file, property_name)
             .await
-            .map_err(|e| ITFFuzzError::QuintCliError(format!("Property check failed: {}", e)))
+            .map_err(|e| ITFFuzzError::QuintCliError(format!("Property check failed: {e}")))
     }
 
     /// Parse Quint spec and extract properties
@@ -436,7 +436,7 @@ impl ITFBasedFuzzer {
             .quint_cli
             .parse_spec(spec_file)
             .await
-            .map_err(|e| ITFFuzzError::QuintCliError(format!("Failed to parse spec: {}", e)))?;
+            .map_err(|e| ITFFuzzError::QuintCliError(format!("Failed to parse spec: {e}")))?;
 
         // Extract property names from parse output
         let properties = parse_result
@@ -466,14 +466,14 @@ impl ITFBasedFuzzer {
         // Use JSON serialization as the bridge between external ITF representation and internal converter
         let json = serde_json::to_string(itf_trace)?;
         let internal_itf = self.itf_converter.parse_itf_from_json(&json).map_err(|e| {
-            ITFFuzzError::TraceConversionError(format!("Failed to parse ITF from JSON: {}", e))
+            ITFFuzzError::TraceConversionError(format!("Failed to parse ITF from JSON: {e}"))
         })?;
 
         // Validate the converted trace
         self.itf_converter
             .validate_itf_trace(&internal_itf)
             .map_err(|e| {
-                ITFFuzzError::TraceConversionError(format!("ITF validation failed: {}", e))
+                ITFFuzzError::TraceConversionError(format!("ITF validation failed: {e}"))
             })?;
 
         Ok(internal_itf)
@@ -501,7 +501,7 @@ impl ITFBasedFuzzer {
         // Log conversion warnings
         if !result.warnings.is_empty() {
             for warning in &result.warnings {
-                eprintln!("Conversion warning: {}", warning);
+                eprintln!("Conversion warning: {warning}");
             }
         }
 
@@ -521,8 +521,7 @@ impl ITFBasedFuzzer {
             .serialize_itf_to_json(&internal_itf, pretty)
             .map_err(|e| {
                 ITFFuzzError::TraceConversionError(format!(
-                    "Failed to serialize ITF to JSON: {}",
-                    e
+                    "Failed to serialize ITF to JSON: {e}"
                 ))
             })?;
         Ok(result)
@@ -580,7 +579,7 @@ impl ITFBasedFuzzer {
         let result = simulator
             .replay_trace(itf_trace, initial_state)
             .await
-            .map_err(|e| ITFFuzzError::TraceConversionError(format!("Replay failed: {}", e)))?;
+            .map_err(|e| ITFFuzzError::TraceConversionError(format!("Replay failed: {e}")))?;
 
         Ok(GenerativeSimulationResult {
             steps: result.steps,
@@ -620,7 +619,7 @@ impl ITFBasedFuzzer {
         let simulator = GenerativeSimulator::new(registry, config);
 
         let result = simulator.explore(initial_state, seed).await.map_err(|e| {
-            ITFFuzzError::TraceConversionError(format!("Exploration failed: {}", e))
+            ITFFuzzError::TraceConversionError(format!("Exploration failed: {e}"))
         })?;
 
         Ok(GenerativeSimulationResult {
@@ -660,7 +659,7 @@ impl ITFBasedFuzzer {
 
             // Generate test case from validated execution
             let test_case = ValidatedTestCase {
-                id: format!("validated_test_{}", i),
+                id: format!("validated_test_{i}"),
                 source_trace: trace.clone(),
                 executed_steps: sim_result.steps,
                 final_state: sim_result.final_state,
@@ -810,7 +809,7 @@ impl ITFBasedFuzzer {
         // Create ephemeral output file for counterexample
         let temp_dir = std::env::temp_dir();
         let counterexample_file =
-            temp_dir.join(format!("counterexample_{}_{}.itf", property, bound));
+            temp_dir.join(format!("counterexample_{property}_{bound}.itf"));
 
         // Run `quint verify` with the specific bound
         let output = std::process::Command::new(&self.config.quint_executable)
@@ -828,7 +827,7 @@ impl ITFBasedFuzzer {
                 spec_file.to_str().unwrap(),
             ])
             .output()
-            .map_err(|e| ITFFuzzError::CommandFailed(format!("quint verify failed: {}", e)))?;
+            .map_err(|e| ITFFuzzError::CommandFailed(format!("quint verify failed: {e}")))?;
 
         let satisfied = output.status.success();
         let mut counterexample_trace = None;
@@ -851,7 +850,7 @@ impl ITFBasedFuzzer {
                         .await;
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to parse counterexample file: {}", e);
+                    eprintln!("Warning: Failed to parse counterexample file: {e}");
                 }
             }
         }
@@ -894,7 +893,7 @@ impl ITFBasedFuzzer {
             violations.push(PropertyViolation {
                 property_name: property_name.clone(),
                 violation_trace: counterexample.clone(),
-                violation_step: violation_step as u64,
+                violation_step: violation_step,
                 violation_description: format!(
                     "Property '{}' violated at step {} with bound {}",
                     property_name, violation_step, result.checking_bound
@@ -1008,7 +1007,7 @@ impl ITFBasedFuzzer {
                     runs_executed += 1;
                 }
                 Err(e) => {
-                    errors.push(format!("Run {}: {}", run_id, e));
+                    errors.push(format!("Run {run_id}: {e}"));
                     // Continue with other runs even if one fails
                 }
             }
@@ -1071,7 +1070,7 @@ impl ITFBasedFuzzer {
         )
         .await
         .map_err(|_| ITFFuzzError::CommandFailed("Simulation timeout".to_string()))?
-        .map_err(|e| ITFFuzzError::CommandFailed(format!("quint run failed: {}", e)))?;
+        .map_err(|e| ITFFuzzError::CommandFailed(format!("quint run failed: {e}")))?;
 
         // Check if simulation succeeded
         if !output.status.success() {
@@ -1208,7 +1207,7 @@ impl ITFBasedFuzzer {
         // Look for action-based properties
         for state in &trace.states {
             if let Some(action) = &state.action_taken {
-                properties.push(format!("{}_property", action));
+                properties.push(format!("{action}_property"));
             }
         }
 
@@ -1253,7 +1252,7 @@ impl ITFBasedFuzzer {
             if var_name.contains("decision") || var_name.contains("choice") {
                 decisions.push(Decision {
                     variable: var_name.clone(),
-                    condition: format!("{} = {}", var_name, var_value),
+                    condition: format!("{var_name} = {var_value}"),
                     outcome: var_value.clone(),
                 });
             }
@@ -1359,7 +1358,7 @@ impl ITFBasedFuzzer {
                 }
                 Err(e) => {
                     performance_monitor.end_phase("model_checking");
-                    println!("⚠️ Model checking failed: {}", e);
+                    println!("⚠️ Model checking failed: {e}");
                     return Err(e);
                 }
             }
@@ -1380,7 +1379,7 @@ impl ITFBasedFuzzer {
                 }
                 Err(e) => {
                     performance_monitor.end_phase("simulation");
-                    println!("⚠️ Simulation testing failed: {}", e);
+                    println!("⚠️ Simulation testing failed: {e}");
                     return Err(e);
                 }
             }
@@ -1479,12 +1478,11 @@ impl ITFBasedFuzzer {
             for precondition in &action.preconditions {
                 if precondition.contains("violation") || precondition.contains("error") {
                     violations.push(PropertyViolation {
-                        property_name: format!("test_case_property_{}", step_idx),
+                        property_name: format!("test_case_property_{step_idx}"),
                         violation_trace: test_case.source_trace.clone(),
                         violation_step: step_idx as u64,
                         violation_description: format!(
-                            "Precondition violation detected: {}",
-                            precondition
+                            "Precondition violation detected: {precondition}"
                         ),
                         violation_state: ITFState {
                             meta: ITFStateMeta { index: step_idx as u64 },
@@ -1578,8 +1576,7 @@ impl ITFBasedFuzzer {
             let failed_properties = mc_result.violations.len();
             if failed_properties > 0 {
                 recommendations.push(format!(
-                    "Review {} failed properties in model checking phase",
-                    failed_properties
+                    "Review {failed_properties} failed properties in model checking phase"
                 ));
             }
         }
@@ -1606,7 +1603,7 @@ impl ITFBasedFuzzer {
     ) -> Result<(), ITFFuzzError> {
         let content = match format {
             CIOutputFormat::Json => serde_json::to_string_pretty(result).map_err(|e| {
-                ITFFuzzError::TraceConversionError(format!("JSON serialization failed: {}", e))
+                ITFFuzzError::TraceConversionError(format!("JSON serialization failed: {e}"))
             })?,
             CIOutputFormat::JunitXml => self.generate_junit_xml(result),
             CIOutputFormat::GitHubActions => self.generate_github_actions_output(result),

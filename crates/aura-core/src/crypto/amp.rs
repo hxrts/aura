@@ -113,7 +113,7 @@ pub fn derive_message_key(
     // Expand to 32-byte message key
     let mut output = [0u8; 32];
     hkdf.expand(&info, &mut output)
-        .map_err(|e| AuraError::crypto(format!("HKDF expansion failed: {}", e)))?;
+        .map_err(|e| AuraError::crypto(format!("HKDF expansion failed: {e}")))?;
 
     Ok(Hash32::from(output))
 }

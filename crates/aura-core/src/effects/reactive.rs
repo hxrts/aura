@@ -97,7 +97,7 @@ impl SignalId {
     pub fn unique(prefix: &str) -> Self {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
-        Self(format!("{}:{}", prefix, id))
+        Self(format!("{prefix}:{id}"))
     }
 
     /// Get the string representation.
@@ -514,7 +514,7 @@ impl<T: ReactiveEffects + ?Sized> ReactiveEffects for Arc<T> {
     }
 
     async fn invalidate_queries(&self, changed: &FactPredicate) {
-        (**self).invalidate_queries(changed).await
+        (**self).invalidate_queries(changed).await;
     }
 }
 
