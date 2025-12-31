@@ -13,15 +13,22 @@ use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use std::sync::Arc;
 
-/// Invitation service
+/// Invitation service API
 ///
 /// Provides invitation operations through a clean public API.
-pub struct InvitationService {
+#[derive(Clone)]
+pub struct InvitationServiceApi {
     handler: InvitationHandler,
     effects: Arc<AuraEffectSystem>,
 }
 
-impl InvitationService {
+impl std::fmt::Debug for InvitationServiceApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InvitationServiceApi").finish_non_exhaustive()
+    }
+}
+
+impl InvitationServiceApi {
     /// Create a new invitation service
     pub fn new(
         effects: Arc<AuraEffectSystem>,
@@ -306,18 +313,12 @@ impl InvitationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
     use aura_core::identifiers::ContextId;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([seed + 100; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         authority_context
     }
 
@@ -327,7 +328,7 @@ mod tests {
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
-        let service = InvitationService::new(effects, authority_context);
+        let service = InvitationServiceApi::new(effects, authority_context);
         assert!(service.is_ok());
     }
 
@@ -336,7 +337,7 @@ mod tests {
         let authority_context = create_test_authority(111);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = InvitationService::new(effects, authority_context).unwrap();
+        let service = InvitationServiceApi::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([112u8; 32]);
         let invitation = service
@@ -359,13 +360,13 @@ mod tests {
         let authority_context = create_test_authority(113);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = InvitationService::new(effects, authority_context.clone()).unwrap();
+        let service = InvitationServiceApi::new(effects, authority_context.clone()).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([114u8; 32]);
         let invitation = service
             .invite_as_guardian(
                 receiver_id,
-                authority_context.authority_id,
+                authority_context.authority_id(),
                 Some("Please guard my identity".to_string()),
                 Some(604800000), // 1 week
             )
@@ -381,7 +382,7 @@ mod tests {
         let authority_context = create_test_authority(115);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = InvitationService::new(effects, authority_context).unwrap();
+        let service = InvitationServiceApi::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
         let invitation = service
@@ -397,7 +398,7 @@ mod tests {
         let authority_context = create_test_authority(117);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = InvitationService::new(effects, authority_context).unwrap();
+        let service = InvitationServiceApi::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([118u8; 32]);
 
@@ -431,7 +432,7 @@ mod tests {
         let authority_context = create_test_authority(120);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = InvitationService::new(effects, authority_context).unwrap();
+        let service = InvitationServiceApi::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([121u8; 32]);
         let invitation = service

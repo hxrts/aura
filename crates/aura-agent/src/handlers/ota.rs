@@ -252,19 +252,12 @@ impl OtaHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::identifiers::{AuthorityId};
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([seed.wrapping_add(100); 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
-        authority_context
+        AuthorityContext::new(authority_id)
     }
 
     #[tokio::test]

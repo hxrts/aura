@@ -9,15 +9,22 @@ use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::{AccountId, DeviceId};
 use std::sync::Arc;
 
-/// Authentication service
+/// Authentication service API
 ///
 /// Provides authentication operations through a clean public API.
-pub struct AuthService {
+#[derive(Clone)]
+pub struct AuthServiceApi {
     handler: AuthHandler,
     effects: Arc<AuraEffectSystem>,
 }
 
-impl AuthService {
+impl std::fmt::Debug for AuthServiceApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthServiceApi").finish_non_exhaustive()
+    }
+}
+
+impl AuthServiceApi {
     /// Create a new authentication service
     pub fn new(
         effects: Arc<AuraEffectSystem>,
@@ -93,23 +100,18 @@ impl AuthService {
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::identifiers::{AuthorityId};
 
     #[tokio::test]
     async fn test_auth_service_creation() {
         let authority_id = AuthorityId::new_from_entropy([80u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([81u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new_from_entropy([82u8; 32]);
 
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
-        let service = AuthService::new(effects, authority_context, account_id).unwrap();
+        let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
 
         assert!(!service.device_id().0.is_nil());
     }
@@ -117,18 +119,13 @@ mod tests {
     #[tokio::test]
     async fn test_is_authenticated() {
         let authority_id = AuthorityId::new_from_entropy([83u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([84u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new_from_entropy([85u8; 32]);
 
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
-        let service = AuthService::new(effects, authority_context, account_id).unwrap();
+        let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
 
         // In test mode, is_authenticated should return true
         assert!(service.is_authenticated().await);
@@ -137,18 +134,13 @@ mod tests {
     #[tokio::test]
     async fn test_challenge_response_flow() {
         let authority_id = AuthorityId::new_from_entropy([86u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([87u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new_from_entropy([88u8; 32]);
 
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
-        let service = AuthService::new(effects, authority_context, account_id).unwrap();
+        let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
 
         // Create a challenge
         let challenge = service.create_challenge().await.unwrap();
@@ -159,18 +151,13 @@ mod tests {
     #[tokio::test]
     async fn test_supported_methods() {
         let authority_id = AuthorityId::new_from_entropy([89u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([90u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new_from_entropy([91u8; 32]);
 
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
-        let service = AuthService::new(effects, authority_context, account_id).unwrap();
+        let service = AuthServiceApi::new(effects, authority_context, account_id).unwrap();
 
         let methods = service.supported_methods();
         assert!(methods.contains(&AuthMethod::DeviceKey));

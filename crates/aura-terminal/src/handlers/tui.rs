@@ -69,22 +69,11 @@ pub enum AccountLoadResult {
     NotFound,
 }
 
-/// Account configuration filename
-///
-/// Mode isolation is achieved through separate base directories:
-/// - Production: `$AURA_PATH/.aura/account.json` (default: `~/.aura/account.json`)
-/// - Demo: `$AURA_PATH/.aura-demo/account.json` (default: `~/.aura-demo/account.json`)
-const ACCOUNT_FILENAME: &str = "account.json";
-
-/// Journal filename
-///
-/// Mode isolation is achieved through separate base directories:
-/// - Production: `$AURA_PATH/.aura/journal.json` (default: `~/.aura/journal.json`)
-/// - Demo: `$AURA_PATH/.aura-demo/journal.json` (default: `~/.aura-demo/journal.json`)
-const JOURNAL_FILENAME: &str = "journal.json";
-const TUI_LOG_KEY_PREFIX: &str = "logs";
-const MAX_TUI_LOG_BYTES: usize = 1_000_000;
-const TUI_LOG_QUEUE_CAPACITY: usize = 256;
+// Storage constants re-exported from portable aura-app layer
+pub use aura_app::ui::types::{
+    ACCOUNT_FILENAME, JOURNAL_FILENAME, MAX_TUI_LOG_BYTES, TUI_LOG_KEY_PREFIX,
+    TUI_LOG_QUEUE_CAPACITY,
+};
 
 type BootstrapStorage =
     EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>;
@@ -433,8 +422,8 @@ pub async fn import_account_backup(
     Ok((authority_id, context_id))
 }
 
-/// Demo seed for deterministic simulation
-const DEMO_SEED: u64 = 2024;
+// Demo seed re-exported from portable aura-app layer
+use aura_app::workflows::demo_config::DEMO_SEED_2024 as DEMO_SEED;
 
 /// Handle TUI launch
 pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {

@@ -18,6 +18,7 @@
 
 // Runtime builder and container
 pub mod builder;
+#[cfg(feature = "effect-container")]
 pub mod container;
 
 // Effect system registry
@@ -33,6 +34,7 @@ pub mod subsystems;
 // Context management
 pub mod context;
 pub mod contextual;
+#[cfg(feature = "context-propagation")]
 pub mod propagation;
 
 // Runtime services
@@ -71,12 +73,14 @@ pub use shared_transport::SharedTransport;
 
 // Subsystem re-exports (available for incremental adoption; see Task 3.6 in work/033.md)
 #[allow(unused_imports)]
-pub use subsystems::{ChoreographySubsystem, CryptoSubsystem, JournalSubsystem, TransportSubsystem};
+pub use subsystems::{ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem};
 
 // Runtime system type aliases for backwards compatibility
 pub type RuntimeSystem = AuraEffectSystem;
 pub type RuntimeBuilder = EffectSystemBuilder;
-pub use registry::{EffectRegistry, EffectRegistryError, EffectRegistryExt};
+pub use registry::{
+    EffectOperation, EffectRegistry, EffectRegistryError, EffectRegistryExt, EffectType,
+};
 
 pub use executor::EffectExecutor;
 pub use lifecycle::LifecycleManager;

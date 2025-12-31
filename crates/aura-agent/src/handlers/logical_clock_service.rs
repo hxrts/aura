@@ -40,13 +40,32 @@ impl LogicalClockService {
     /// Advance the logical clock using an observed vector clock.
     pub async fn advance(&self, observed: Option<&VectorClock>) -> LogicalTime {
         let mut state = self.state.write().await;
-        #[allow(deprecated)]
-        let next = aura_effects::time::LogicalClockHandler::advance_logical_time(
-            &state.vector,
-            state.lamport,
-            self.device_id,
-            observed,
-        );
+        let mut next_vector = state.vector.clone();
+        let mut next_scalar = state.lamport;
+
+        if let Some(obs) = observed {
+            for (auth, val) in obs.iter() {
+                let current_count = next_vector.get(auth).copied().unwrap_or(0);
+                next_vector.insert(*auth, current_count.max(*val));
+            }
+            let obs_max = obs
+                .iter()
+                .map(|(_, v)| *v)
+                .max()
+                .unwrap_or(next_scalar);
+            next_scalar = next_scalar.max(obs_max);
+        }
+
+        next_scalar = next_scalar.saturating_add(1);
+        if let Some(auth) = self.device_id {
+            let current_count = next_vector.get(&auth).copied().unwrap_or(0);
+            next_vector.insert(auth, current_count.saturating_add(1));
+        }
+
+        let next = LogicalTime {
+            vector: next_vector,
+            lamport: next_scalar,
+        };
         state.vector = next.vector.clone();
         state.lamport = next.lamport;
         next

@@ -109,9 +109,12 @@ real-android-keystore = []  # Enable real Android Keystore implementation
 # for decoupling the simulator from agent internals
 simulation = ["aura-core/simulation"]
 
+# Experimental runtime modules (not enabled by default)
+effect-container = []
+context-propagation = []
+
 # Platform-specific presets
-# These enable the build() method for platform-specific builders.
-# The builder types are always available for API discoverability.
+# Enable to access the preset builders and AgentBuilder entrypoints.
 ios = []      # iOS preset: Keychain crypto, app container storage
 android = []  # Android preset: Keystore crypto, encrypted storage
 web = []      # Web/WASM preset: Web Crypto API, IndexedDB storage

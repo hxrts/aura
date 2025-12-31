@@ -1,28 +1,12 @@
-//! Choreography Subsystem
+//! Choreography State
 //!
-//! Groups choreography-related fields from AuraEffectSystem:
-//! - `choreography_state`: In-memory session state for runtime coordination
-//! - `composite`: Composite handler adapter for handler registration
-//!
-//! ## Lock Usage
-//!
-//! Uses `parking_lot::RwLock` for `choreography_state` because:
-//! - Session state is accessed synchronously for quick reads/writes
-//! - State transitions are atomic and brief
-//! - See `runtime/CONCURRENCY.md` for full rationale
+//! In-memory choreography session state for runtime coordination.
 
-#![allow(clippy::disallowed_types)]
-
-use aura_composition::CompositeHandlerAdapter;
 use aura_core::ContextId;
 use aura_protocol::effects::{ChoreographicRole, ChoreographyMetrics};
-use parking_lot::RwLock;
 use uuid::Uuid;
 
 /// In-memory choreography session state
-///
-/// Note: Infrastructure for future choreography integration.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ChoreographyState {
     /// Current session ID (if active)
@@ -62,7 +46,6 @@ impl Default for ChoreographyState {
     }
 }
 
-#[allow(dead_code)]
 impl ChoreographyState {
     /// Create a new empty state
     pub fn new() -> Self {
@@ -142,171 +125,5 @@ impl ChoreographyState {
     /// Record a retry
     pub fn record_retry(&mut self) {
         self.metrics.retry_count += 1;
-    }
-}
-
-/// Choreography subsystem grouping session state and handler composition.
-///
-/// This subsystem encapsulates:
-/// - In-memory session state for choreography coordination
-/// - Composite handler adapter for effect registration
-///
-/// Note: Infrastructure for future integration into AuraEffectSystem.
-#[allow(dead_code)]
-pub struct ChoreographySubsystem {
-    /// In-memory choreography session state
-    ///
-    /// Protected by parking_lot::RwLock for concurrent access.
-    /// Lock is never held across .await points.
-    state: RwLock<ChoreographyState>,
-
-    /// Composite handler adapter for handler registration
-    composite: CompositeHandlerAdapter,
-}
-
-#[allow(dead_code)]
-impl ChoreographySubsystem {
-    /// Create a new choreography subsystem
-    pub fn new(composite: CompositeHandlerAdapter) -> Self {
-        Self {
-            state: RwLock::new(ChoreographyState::new()),
-            composite,
-        }
-    }
-
-    /// Get reference to the composite handler
-    pub fn composite(&self) -> &CompositeHandlerAdapter {
-        &self.composite
-    }
-
-    /// Get mutable reference to the composite handler
-    pub fn composite_mut(&mut self) -> &mut CompositeHandlerAdapter {
-        &mut self.composite
-    }
-
-    /// Execute a function with read access to the state
-    pub fn with_state<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&ChoreographyState) -> R,
-    {
-        let state = self.state.read();
-        f(&state)
-    }
-
-    /// Execute a function with write access to the state
-    pub fn with_state_mut<F, R>(&self, f: F) -> R
-    where
-        F: FnOnce(&mut ChoreographyState) -> R,
-    {
-        let mut state = self.state.write();
-        f(&mut state)
-    }
-
-    /// Check if a session is active
-    pub fn is_session_active(&self) -> bool {
-        self.state.read().is_active()
-    }
-
-    /// Get the current session ID
-    pub fn session_id(&self) -> Option<Uuid> {
-        self.state.read().session_id
-    }
-
-    /// Get the current role
-    pub fn current_role(&self) -> Option<ChoreographicRole> {
-        self.state.read().current_role
-    }
-
-    /// Get current metrics snapshot
-    pub fn metrics(&self) -> ChoreographyMetrics {
-        self.state.read().metrics.clone()
-    }
-
-    /// Start a new choreography session
-    pub fn start_session(
-        &self,
-        session_id: Uuid,
-        context_id: ContextId,
-        roles: Vec<ChoreographicRole>,
-        current_role: ChoreographicRole,
-        timeout_ms: Option<u64>,
-        now_ms: u64,
-    ) {
-        self.state.write().start_session(
-            session_id,
-            context_id,
-            roles,
-            current_role,
-            timeout_ms,
-            now_ms,
-        );
-    }
-
-    /// End the current session
-    pub fn end_session(&self, now_ms: u64) {
-        self.state.write().end_session(now_ms);
-    }
-}
-
-// Note: ChoreographySubsystem is intentionally not Clone because
-// CompositeHandlerAdapter does not implement Clone. The subsystem
-// should be wrapped in Arc when shared.
-
-impl std::fmt::Debug for ChoreographySubsystem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let state = self.state.read();
-        f.debug_struct("ChoreographySubsystem")
-            .field("session_id", &state.session_id)
-            .field("current_role", &state.current_role)
-            .field("is_active", &state.is_active())
-            .field("composite", &"<CompositeHandlerAdapter>")
-            .finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_role() -> ChoreographicRole {
-        ChoreographicRole {
-            device_id: Uuid::new_v4(),
-            role_index: 0,
-        }
-    }
-
-    #[test]
-    fn test_choreography_state_lifecycle() {
-        let mut state = ChoreographyState::new();
-        assert!(!state.is_active());
-
-        let session_id = Uuid::new_v4();
-        let context_id = ContextId::new_from_entropy([1u8; 32]);
-        let role = test_role();
-
-        state.start_session(session_id, context_id, vec![role.clone()], role, Some(5000), 1000);
-        assert!(state.is_active());
-        assert!(!state.is_timed_out(3000));
-        assert!(state.is_timed_out(7000));
-
-        state.end_session(2000);
-        assert!(!state.is_active());
-        assert_eq!(state.metrics.total_duration_ms, 1000);
-    }
-
-    #[test]
-    fn test_choreography_state_metrics() {
-        let mut state = ChoreographyState::new();
-
-        state.record_message_sent();
-        state.record_message_sent();
-        state.record_message_received();
-        state.record_timeout();
-        state.record_retry();
-
-        assert_eq!(state.metrics.messages_sent, 2);
-        assert_eq!(state.metrics.messages_received, 1);
-        assert_eq!(state.metrics.timeout_count, 1);
-        assert_eq!(state.metrics.retry_count, 1);
     }
 }

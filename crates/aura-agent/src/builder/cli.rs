@@ -16,7 +16,7 @@ use crate::builder::BuildError;
 use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
 use crate::runtime::EffectContext;
-use crate::{AgentBuilder, AgentResult, AuraAgent, EffectSystemBuilder};
+use crate::{AgentResult, AuraAgent, EffectSystemBuilder};
 
 /// CLI-specific builder with sensible defaults for terminal applications.
 ///
@@ -218,29 +218,5 @@ impl CliPresetBuilder {
 impl Default for CliPresetBuilder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// Extend AgentBuilder with CLI preset entry point
-impl AgentBuilder {
-    /// Create a CLI preset builder for terminal applications.
-    ///
-    /// This provides sensible defaults for command-line tools:
-    /// - File-based storage
-    /// - Real cryptographic operations
-    /// - TCP transport
-    /// - Stderr logging
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let agent = AgentBuilder::cli()
-    ///     .data_dir("~/.aura")
-    ///     .testing_mode()
-    ///     .build()
-    ///     .await?;
-    /// ```
-    pub fn cli() -> CliPresetBuilder {
-        CliPresetBuilder::new()
     }
 }

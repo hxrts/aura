@@ -4,7 +4,7 @@
 //!
 //! This module contains:
 //! - `EffectCommand`: Enum of all commands that can be dispatched to the effect system
-//! - `CommandAuthorizationLevel`: Authorization level classification for commands
+//! - `CommandAuthorizationLevel`: Authorization level classification for commands (re-exported from aura-app)
 //! - `AuraEvent`: Events emitted by the effect system for TUI consumption
 //! - `EventFilter`: Filter for subscribing to specific event types
 //! - `EventSubscription`: Subscription handle for receiving filtered events
@@ -15,44 +15,8 @@
 use aura_app::ui::types::chat::Channel;
 use tokio::sync::broadcast;
 
-/// Authorization level required for a command
-///
-/// Commands are classified by sensitivity level, with each level
-/// requiring progressively stronger authorization:
-/// - **Public**: No authorization required (read-only, status queries)
-/// - **Basic**: User token required (normal user operations)
-/// - **Sensitive**: Elevated authorization (account modifications)
-/// - **Admin**: Steward/admin capabilities (privileged operations)
-///
-/// Levels are ordered: Public < Basic < Sensitive < Admin
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum CommandAuthorizationLevel {
-    /// No authorization required - read-only/status operations
-    Public,
-    /// Basic user token required - normal messaging and channels
-    Basic,
-    /// Elevated authorization - account/device modifications
-    Sensitive,
-    /// Admin/steward capabilities - moderation and privileged ops
-    Admin,
-}
-
-impl CommandAuthorizationLevel {
-    /// Check if this level requires any authorization
-    pub fn requires_auth(&self) -> bool {
-        !matches!(self, Self::Public)
-    }
-
-    /// Get human-readable description
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::Public => "public access",
-            Self::Basic => "user authentication",
-            Self::Sensitive => "elevated authorization",
-            Self::Admin => "administrator privileges",
-        }
-    }
-}
+// Re-export portable authorization types from aura-app
+pub use aura_app::ui::authorization::CommandAuthorizationLevel;
 
 /// Commands that can be dispatched to the effect system
 #[derive(Debug, Clone)]

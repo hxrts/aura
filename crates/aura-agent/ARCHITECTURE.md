@@ -14,9 +14,13 @@ management, and choreography adapters.
 ## Outputs
 - `AgentBuilder`, `AuraAgent`, `EffectContext`, `EffectRegistry`.
 - `AuraEffectSystem`, `EffectSystemBuilder`, `EffectExecutor`.
-- Services: `SessionService`, `AuthService`, `RecoveryService`, `SyncManagerState`.
+- Services: `SessionServiceApi`, `AuthServiceApi`, `RecoveryServiceApi`, `SyncManagerState`.
 - `RuntimeSystem`, `LifecycleManager`, `ReceiptManager`, `FlowBudgetManager`.
 - `ReactiveScheduler` for signal-based notification.
+
+## Naming
+- API-facing services use the `*ServiceApi` suffix (e.g., `AuthServiceApi`).
+- Runtime/internal services live under `runtime/services` and use `*Manager` or `*Service`.
 
 ## Invariants
 - Must NOT create new effect implementations (delegate to aura-effects).
@@ -103,7 +107,7 @@ AuraEffectSystem
 ├── Core Configuration
 │   ├── config: AgentConfig
 │   ├── authority_id: AuthorityId
-│   └── test_mode: bool
+│   └── execution_mode: ExecutionMode
 ├── Subsystems
 │   ├── crypto: CryptoSubsystem
 │   ├── transport: TransportSubsystem
@@ -115,7 +119,7 @@ AuraEffectSystem
 │   ├── tree_handler: PersistentTreeHandler
 │   └── sync_handler: PersistentSyncHandler
 ├── Time Services
-│   ├── time_handler: PhysicalTimeHandler
+│   ├── time_handler: EnhancedTimeHandler
 │   ├── logical_clock: LogicalClockService
 │   └── order_clock: OrderClockHandler
 ├── Authorization & Flow Control
@@ -124,7 +128,7 @@ AuraEffectSystem
 ├── Reactive System
 │   └── reactive_handler: ReactiveHandler
 └── Choreography State
-    └── choreography_state: RwLock<ChoreographyRuntimeState>
+    └── choreography_state: RwLock<ChoreographyState>
 ```
 
 ---
@@ -132,6 +136,13 @@ AuraEffectSystem
 # Concurrency Model
 
 This document describes the concurrency patterns and lock usage in the aura-agent runtime.
+
+## Lock-Safety Enforcement
+
+- The crate enables `clippy::await_holding_lock` to catch `.await` points while holding
+  blocking locks (`std::sync`/`parking_lot`) or async locks in critical sections.
+- Debug builds also start a `parking_lot` deadlock detector thread to surface
+  lock ordering regressions early during development.
 
 ## Lock Type Selection
 

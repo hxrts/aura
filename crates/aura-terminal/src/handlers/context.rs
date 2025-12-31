@@ -5,7 +5,7 @@
 use crate::cli::context::ContextAction;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_core::hash;
+use aura_app::ui::workflows::privacy::{anonymize_peer_id, normalize_context_name};
 use aura_core::types::Epoch;
 use serde::Deserialize;
 use std::fs;
@@ -77,7 +77,7 @@ fn inspect_context(
         snapshot.channels.len()
     ));
     for chan in snapshot.channels.iter().take(5) {
-        let anonymized = anonymize(&chan.peer);
+        let anonymized = anonymize_peer_id(&chan.peer);
         output.println(format!(
             "  - peer={} state={} headroom={} last_event={}",
             anonymized,
@@ -114,7 +114,7 @@ fn show_receipts(
     ));
 
     for receipt in &snapshot.receipts {
-        let hop = anonymize(&receipt.hop);
+        let hop = anonymize_peer_id(&receipt.hop);
         if detailed {
             output.println(format!(
                 "  - hop={} cost={} epoch={} status={} chains={}",
@@ -142,26 +142,16 @@ fn load_context(state_file: &Path, context: &str) -> TerminalResult<ContextSnaps
         .map_err(|e| TerminalError::Config(format!("failed to read {state_file:?}: {e}")))?;
     let file: ContextStateFile = serde_json::from_str(&data)
         .map_err(|e| TerminalError::Config(format!("invalid JSON in {state_file:?}: {e}")))?;
-    let ctx = normalize(context);
+    let ctx = normalize_context_name(context);
     file.contexts
         .into_iter()
-        .find(|entry| normalize(&entry.context) == ctx)
+        .find(|entry| normalize_context_name(&entry.context) == ctx)
         .ok_or_else(|| {
             TerminalError::NotFound(format!("context {context} not found in {state_file:?}"))
         })
 }
 
-fn normalize(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
-}
-
-fn anonymize(value: &str) -> String {
-    let mut hasher = hash::hasher();
-    hasher.update(value.as_bytes());
-    let digest = hasher.finalize();
-    let hex = hex::encode(&digest[..12]);
-    format!("anon-{}", &hex[..12])
-}
+// normalize_context_name and anonymize_peer_id imported from aura_app::ui::workflows::privacy
 
 #[derive(Debug, Deserialize)]
 struct ContextStateFile {
@@ -223,15 +213,15 @@ mod tests {
 
     #[test]
     fn test_normalize_trims_and_lowercases() {
-        assert_eq!(normalize("  HELLO  "), "hello");
-        assert_eq!(normalize("World"), "world");
-        assert_eq!(normalize(""), "");
+        assert_eq!(normalize_context_name("  HELLO  "), "hello");
+        assert_eq!(normalize_context_name("World"), "world");
+        assert_eq!(normalize_context_name(""), "");
     }
 
     #[test]
     fn test_anonymize_produces_consistent_output() {
-        let result1 = anonymize("test-peer-id");
-        let result2 = anonymize("test-peer-id");
+        let result1 = anonymize_peer_id("test-peer-id");
+        let result2 = anonymize_peer_id("test-peer-id");
         assert_eq!(result1, result2);
         assert!(result1.starts_with("anon-"));
         assert_eq!(result1.len(), 17); // "anon-" + 12 hex chars
@@ -239,8 +229,8 @@ mod tests {
 
     #[test]
     fn test_anonymize_different_inputs_produce_different_outputs() {
-        let result1 = anonymize("peer-a");
-        let result2 = anonymize("peer-b");
+        let result1 = anonymize_peer_id("peer-a");
+        let result2 = anonymize_peer_id("peer-b");
         assert_ne!(result1, result2);
     }
 

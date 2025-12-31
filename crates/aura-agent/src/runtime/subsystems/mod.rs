@@ -9,7 +9,7 @@
 //! - **CryptoSubsystem**: Cryptographic operations, RNG, and secure storage
 //! - **TransportSubsystem**: Network transport, inbox management, and statistics
 //! - **JournalSubsystem**: Indexed journal, fact registry, and publication
-//! - **ChoreographySubsystem**: Session state and composite handler adapter
+//! - **ChoreographyState**: In-memory session state for choreography coordination
 //!
 //! ## Design Principles
 //!
@@ -23,7 +23,7 @@ pub mod crypto;
 pub mod journal;
 pub mod transport;
 
-pub use choreography::ChoreographySubsystem;
+pub use choreography::ChoreographyState;
 pub use crypto::CryptoSubsystem;
 pub use journal::JournalSubsystem;
 pub use transport::TransportSubsystem;

@@ -8,8 +8,11 @@
 
 use std::sync::Arc;
 
+// Re-export threshold constants from central location
+pub use crate::thresholds::{validate_guardian_set, MIN_GUARDIANS, MIN_THRESHOLD};
+
 // ============================================================================
-// Constants
+// Dispute Window Constants
 // ============================================================================
 
 /// Default dispute window in hours (48 hours).
@@ -28,12 +31,6 @@ pub const DISPUTE_WINDOW_HOURS_MIN: u64 = 1;
 /// Prevents indefinite recovery windows that could block account access.
 pub const DISPUTE_WINDOW_HOURS_MAX: u64 = 720;
 
-/// Minimum number of guardians required for FROST threshold signing.
-pub const MIN_GUARDIANS: usize = 2;
-
-/// Minimum threshold for guardian ceremonies (at least 2 required).
-pub const MIN_THRESHOLD: u32 = 2;
-
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects, TimeEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
@@ -46,47 +43,9 @@ use serde::Serialize;
 use crate::workflows::journal::{encode_relational_generic, persist_fact_value};
 
 // ============================================================================
-// Guardian Set Validation
+// Guardian Set Validation (re-exported from thresholds)
 // ============================================================================
-
-/// Validate guardian set parameters for a recovery ceremony.
-///
-/// # Arguments
-/// * `guardian_count` - Number of guardians in the set
-/// * `threshold` - Required threshold for approval
-///
-/// # Returns
-/// Ok(()) if valid, Err with detailed message if invalid.
-///
-/// # Validation Rules
-/// - Guardian count must be at least `MIN_GUARDIANS` (2)
-/// - Threshold must be at least `MIN_THRESHOLD` (2)
-/// - Threshold cannot exceed guardian count
-/// - No duplicate guardians allowed (caller responsibility)
-pub fn validate_guardian_set(guardian_count: usize, threshold: u32) -> Result<(), AuraError> {
-    if guardian_count < MIN_GUARDIANS {
-        return Err(AuraError::invalid(format!(
-            "At least {} guardians required for threshold signing, got {}",
-            MIN_GUARDIANS, guardian_count
-        )));
-    }
-
-    if threshold < MIN_THRESHOLD {
-        return Err(AuraError::invalid(format!(
-            "Threshold must be at least {}, got {}",
-            MIN_THRESHOLD, threshold
-        )));
-    }
-
-    if threshold as usize > guardian_count {
-        return Err(AuraError::invalid(format!(
-            "Threshold {} exceeds guardian count {}",
-            threshold, guardian_count
-        )));
-    }
-
-    Ok(())
-}
+// validate_guardian_set is re-exported from crate::thresholds
 
 /// Validate dispute window duration.
 ///
@@ -414,33 +373,7 @@ mod tests {
         AuthorityId::new_from_entropy(entropy)
     }
 
-    #[test]
-    fn test_validate_guardian_set_valid() {
-        // 2-of-2 is valid
-        assert!(validate_guardian_set(2, 2).is_ok());
-        // 2-of-3 is valid
-        assert!(validate_guardian_set(3, 2).is_ok());
-        // 3-of-5 is valid
-        assert!(validate_guardian_set(5, 3).is_ok());
-    }
-
-    #[test]
-    fn test_validate_guardian_set_too_few_guardians() {
-        let err = validate_guardian_set(1, 2).unwrap_err();
-        assert!(err.to_string().contains("At least 2 guardians"));
-    }
-
-    #[test]
-    fn test_validate_guardian_set_threshold_too_low() {
-        let err = validate_guardian_set(3, 1).unwrap_err();
-        assert!(err.to_string().contains("Threshold must be at least 2"));
-    }
-
-    #[test]
-    fn test_validate_guardian_set_threshold_exceeds_count() {
-        let err = validate_guardian_set(2, 3).unwrap_err();
-        assert!(err.to_string().contains("exceeds guardian count"));
-    }
+    // Note: validate_guardian_set tests are in crate::thresholds
 
     #[test]
     fn test_validate_dispute_window_valid() {

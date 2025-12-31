@@ -33,7 +33,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 
 use crate::builder::BuildError;
 use crate::core::AgentConfig;
-use crate::{AgentBuilder, AgentResult, AuraAgent};
+use crate::{AgentResult, AuraAgent};
 
 /// iOS-specific builder with sensible defaults for Apple platform applications.
 ///
@@ -240,32 +240,4 @@ fn default_ios_data_dir() -> PathBuf {
     // On iOS, this would be obtained from:
     // FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)
     PathBuf::from("~/Library/Application Support/aura")
-}
-
-// Extend AgentBuilder with iOS preset entry point
-impl AgentBuilder {
-    /// Create an iOS preset builder for Apple platform applications.
-    ///
-    /// This provides sensible defaults for iOS apps:
-    /// - Keychain-based crypto storage
-    /// - App container storage with data protection
-    /// - System time and random sources
-    /// - os_log-based console output
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let agent = AgentBuilder::ios()
-    ///     .app_group("group.com.example.aura")
-    ///     .build()
-    ///     .await?;
-    /// ```
-    ///
-    /// # Feature Flag
-    ///
-    /// Requires the `ios` feature flag for full functionality.
-    /// Without it, `build()` will return an error.
-    pub fn ios() -> IosPresetBuilder {
-        IosPresetBuilder::new()
-    }
 }

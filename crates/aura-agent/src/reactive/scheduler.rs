@@ -222,7 +222,7 @@ pub struct ReactiveScheduler {
     /// Statistics
     stats: Arc<RwLock<SchedulerStats>>,
     /// Fact registry for domain reducers
-    fact_registry: FactRegistry,
+    fact_registry: Arc<FactRegistry>,
     /// Time effects for simulator-controllable sleeps
     time_effects: Arc<dyn PhysicalTimeEffects>,
 }
@@ -246,7 +246,7 @@ impl ReactiveScheduler {
     /// - `time_effects`: Time effects for simulator-controllable sleeps
     pub fn new(
         config: SchedulerConfig,
-        fact_registry: FactRegistry,
+        fact_registry: Arc<FactRegistry>,
         time_effects: Arc<dyn PhysicalTimeEffects>,
     ) -> (Self, mpsc::Sender<FactSource>, mpsc::Sender<()>) {
         let (fact_tx, fact_rx) = mpsc::channel(256);
@@ -844,7 +844,7 @@ mod tests {
     ) {
         use aura_effects::time::PhysicalTimeHandler;
         let time_effects = Arc::new(PhysicalTimeHandler);
-        ReactiveScheduler::new(config, build_fact_registry(), time_effects)
+        ReactiveScheduler::new(config, Arc::new(build_fact_registry()), time_effects)
     }
 
     #[test]

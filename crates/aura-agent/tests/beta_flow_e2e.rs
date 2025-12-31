@@ -10,7 +10,7 @@
 //!
 //! Note: LAN discovery is tested separately as it requires actual UDP sockets.
 
-use aura_agent::handlers::{InvitationService, InvitationType, ShareableInvitation};
+use aura_agent::handlers::{InvitationServiceApi, InvitationType, ShareableInvitation};
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
@@ -122,7 +122,7 @@ async fn test_two_agent_invitation_flow() -> TestResult {
     assert!(code.starts_with("aura:v1:"));
 
     // User B imports the invitation code
-    let shareable = InvitationService::import_code(&code)?;
+    let shareable = InvitationServiceApi::import_code(&code)?;
 
     assert_eq!(shareable.sender_id, authority_a);
     assert_eq!(
@@ -150,7 +150,7 @@ async fn test_chat_group_flow() -> TestResult {
     let other_user = AuthorityId::new_from_entropy([31u8; 32]);
 
     // Get chat service
-    let chat = agent.chat();
+    let chat = agent.chat()?;
 
     // Create a chat group
     let group = chat
@@ -307,7 +307,7 @@ async fn test_complete_beta_flow() -> TestResult {
         .await?;
 
     // === Step 3: Bob imports the code (out-of-band transfer simulation) ===
-    let shareable = InvitationService::import_code(&code)?;
+    let shareable = InvitationServiceApi::import_code(&code)?;
     assert_eq!(shareable.sender_id, alice_id);
 
     // === Step 4: Alice accepts (simulating invitation acknowledgment) ===
@@ -315,7 +315,7 @@ async fn test_complete_beta_flow() -> TestResult {
     assert!(result.success);
 
     // === Step 5: Chat operations (single-agent for testing) ===
-    let alice_chat = agent_alice.chat();
+    let alice_chat = agent_alice.chat()?;
 
     // Alice creates a group with Bob
     let group = alice_chat
@@ -380,7 +380,7 @@ async fn test_guardian_invitation() -> TestResult {
     // Export and verify
     let code = invitations.export_code(&invitation.invitation_id).await?;
 
-    let shareable = InvitationService::import_code(&code)?;
+    let shareable = InvitationServiceApi::import_code(&code)?;
 
     match shareable.invitation_type {
         InvitationType::Guardian { subject_authority } => {
@@ -412,7 +412,7 @@ async fn test_channel_invitation() -> TestResult {
     // Export and verify
     let code = invitations.export_code(&invitation.invitation_id).await?;
 
-    let shareable = InvitationService::import_code(&code)?;
+    let shareable = InvitationServiceApi::import_code(&code)?;
 
     match shareable.invitation_type {
         InvitationType::Channel { home_id } => {

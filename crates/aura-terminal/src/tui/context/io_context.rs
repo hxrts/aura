@@ -1028,38 +1028,8 @@ impl IoContext {
 
     #[must_use]
     pub fn has_capability(&self, capability: &crate::tui::commands::CommandCapability) -> bool {
-        use crate::tui::commands::CommandCapability;
-        use aura_app::ui::types::home::ResidentRole;
-
-        if matches!(capability, CommandCapability::None) {
-            return true;
-        }
-
-        let Some(role) = self.get_current_role() else {
-            return matches!(
-                capability,
-                CommandCapability::SendDm | CommandCapability::UpdateContact
-            );
-        };
-
-        match capability {
-            CommandCapability::None => true,
-            CommandCapability::SendDm
-            | CommandCapability::SendMessage
-            | CommandCapability::UpdateContact
-            | CommandCapability::ViewMembers
-            | CommandCapability::JoinChannel
-            | CommandCapability::LeaveContext => true,
-            CommandCapability::ModerateKick
-            | CommandCapability::ModerateBan
-            | CommandCapability::ModerateMute
-            | CommandCapability::Invite
-            | CommandCapability::ManageChannel
-            | CommandCapability::PinContent
-            | CommandCapability::GrantSteward => {
-                matches!(role, ResidentRole::Admin | ResidentRole::Owner)
-            }
-        }
+        // Delegate to portable authorization logic in aura-app
+        aura_app::ui::authorization::role_has_capability(self.get_current_role(), capability)
     }
 
     /// Check if the current user can execute a command based on its authorization level.
@@ -1067,29 +1037,13 @@ impl IoContext {
     /// This is a best-effort, UX-focused pre-check. Biscuit/guard-chain enforcement
     /// remains the source of truth.
     pub fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
-        use crate::tui::effects::CommandAuthorizationLevel;
-        use aura_app::ui::types::home::ResidentRole;
-
+        // Delegate to portable authorization logic in aura-app
         let level = command.authorization_level();
-        match level {
-            CommandAuthorizationLevel::Public
-            | CommandAuthorizationLevel::Basic
-            | CommandAuthorizationLevel::Sensitive => Ok(()),
-            CommandAuthorizationLevel::Admin => {
-                let role = self.get_current_role();
-                match role {
-                    Some(ResidentRole::Admin | ResidentRole::Owner) => Ok(()),
-                    Some(ResidentRole::Resident) => Err(format!(
-                        "Permission denied: {} requires administrator privileges",
-                        command_name(command)
-                    )),
-                    None => Err(format!(
-                        "Permission denied: {} requires a home context",
-                        command_name(command)
-                    )),
-                }
-            }
-        }
+        aura_app::ui::authorization::check_authorization_level(
+            level,
+            self.get_current_role(),
+            command_name(command),
+        )
     }
 }
 

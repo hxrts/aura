@@ -19,7 +19,63 @@ use crate::runtime::shared_transport::SharedTransport;
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
 use aura_core::AuthorityId;
 use parking_lot::RwLock;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU32, AtomicU64, Ordering},
+    Arc,
+};
+
+#[derive(Debug, Default)]
+struct TransportStatsCounters {
+    envelopes_sent: AtomicU64,
+    envelopes_received: AtomicU64,
+    send_failures: AtomicU64,
+    receive_failures: AtomicU64,
+    active_channels: AtomicU32,
+    total_payload_bytes: AtomicU64,
+}
+
+impl TransportStatsCounters {
+    fn record_send(&self, payload_len: usize) {
+        self.envelopes_sent.fetch_add(1, Ordering::Relaxed);
+        self.total_payload_bytes
+            .fetch_add(payload_len as u64, Ordering::Relaxed);
+    }
+
+    fn record_receive(&self) {
+        self.envelopes_received.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_send_failure(&self) {
+        self.send_failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_receive_failure(&self) {
+        self.receive_failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn set_active_channels(&self, active: u32) {
+        self.active_channels.store(active, Ordering::Relaxed);
+    }
+
+    fn snapshot(&self) -> TransportStats {
+        let sent = self.envelopes_sent.load(Ordering::Relaxed);
+        let total_bytes = self.total_payload_bytes.load(Ordering::Relaxed);
+        let avg = if sent > 0 {
+            (total_bytes / sent) as u32
+        } else {
+            0
+        };
+
+        TransportStats {
+            envelopes_sent: sent,
+            envelopes_received: self.envelopes_received.load(Ordering::Relaxed),
+            send_failures: self.send_failures.load(Ordering::Relaxed),
+            receive_failures: self.receive_failures.load(Ordering::Relaxed),
+            active_channels: self.active_channels.load(Ordering::Relaxed),
+            avg_envelope_size: avg,
+        }
+    }
+}
 
 /// Transport subsystem grouping network transport operations.
 ///
@@ -44,7 +100,7 @@ pub struct TransportSubsystem {
     shared_transport: Option<SharedTransport>,
 
     /// Transport statistics (messages sent, received, errors, etc.)
-    stats: Arc<RwLock<TransportStats>>,
+    stats: Arc<TransportStatsCounters>,
 }
 
 impl TransportSubsystem {
@@ -54,7 +110,7 @@ impl TransportSubsystem {
             handler: aura_effects::transport::RealTransportHandler::default(),
             inbox: Arc::new(RwLock::new(Vec::new())),
             shared_transport: None,
-            stats: Arc::new(RwLock::new(TransportStats::default())),
+            stats: Arc::new(TransportStatsCounters::default()),
         }
     }
 
@@ -66,24 +122,25 @@ impl TransportSubsystem {
 
         Self {
             handler: aura_effects::transport::RealTransportHandler::default(),
-            inbox: shared.inbox(),
+            inbox: shared.inbox_for(authority),
             shared_transport: Some(shared),
-            stats: Arc::new(RwLock::new(TransportStats::default())),
+            stats: Arc::new(TransportStatsCounters::default()),
         }
     }
 
     /// Create from existing components
+    ///
+    /// Stats are created internally since `TransportStatsCounters` is a private type.
     pub fn from_parts(
         handler: aura_effects::transport::RealTransportHandler,
         inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
         shared_transport: Option<SharedTransport>,
-        stats: Arc<RwLock<TransportStats>>,
     ) -> Self {
         Self {
             handler,
             inbox,
             shared_transport,
-            stats,
+            stats: Arc::new(TransportStatsCounters::default()),
         }
     }
 
@@ -99,7 +156,7 @@ impl TransportSubsystem {
 
     /// Get shared stats reference
     #[allow(dead_code)]
-    pub fn stats(&self) -> Arc<RwLock<TransportStats>> {
+    pub fn stats(&self) -> Arc<TransportStatsCounters> {
         self.stats.clone()
     }
 
@@ -115,8 +172,12 @@ impl TransportSubsystem {
 
     /// Push an envelope to the inbox
     pub fn queue_envelope(&self, envelope: TransportEnvelope) {
-        let mut inbox = self.inbox.write();
-        inbox.push(envelope);
+        if let Some(shared) = self.shared_transport.as_ref() {
+            shared.route_envelope(envelope);
+        } else {
+            let mut inbox = self.inbox.write();
+            inbox.push(envelope);
+        }
     }
 
     /// Drain all envelopes from the inbox
@@ -131,18 +192,34 @@ impl TransportSubsystem {
         self.inbox.read().len()
     }
 
-    /// Update transport statistics
-    pub fn update_stats<F>(&self, f: F)
-    where
-        F: FnOnce(&mut TransportStats),
-    {
-        let mut stats = self.stats.write();
-        f(&mut stats);
+    /// Record a successful send and payload size
+    pub fn record_send(&self, payload_len: usize) {
+        self.stats.record_send(payload_len);
+    }
+
+    /// Record a successful receive
+    pub fn record_receive(&self) {
+        self.stats.record_receive();
+    }
+
+    /// Record a send failure
+    pub fn record_send_failure(&self) {
+        self.stats.record_send_failure();
+    }
+
+    /// Record a receive failure
+    pub fn record_receive_failure(&self) {
+        self.stats.record_receive_failure();
+    }
+
+    /// Set active channel count
+    pub fn set_active_channels(&self, active: u32) {
+        self.stats.set_active_channels(active);
     }
 
     /// Get a snapshot of current stats
     pub fn stats_snapshot(&self) -> TransportStats {
-        self.stats.read().clone()
+        self.stats.snapshot()
     }
 }
 
@@ -210,10 +287,12 @@ mod tests {
     fn test_stats_update() {
         let subsystem = TransportSubsystem::new();
 
-        subsystem.update_stats(|s| {
-            s.envelopes_sent += 5;
-            s.envelopes_received += 3;
-        });
+        for _ in 0..5 {
+            subsystem.record_send(0);
+        }
+        for _ in 0..3 {
+            subsystem.record_receive();
+        }
 
         let snapshot = subsystem.stats_snapshot();
         assert_eq!(snapshot.envelopes_sent, 5);

@@ -261,7 +261,7 @@ impl SyncServiceManager {
         let max_peer_states = self.config.max_peer_states;
         let manager = self.clone();
 
-        tasks.spawn_interval_until(interval, move || {
+        tasks.spawn_interval_until(time_effects.clone(), interval, move || {
             let manager = manager.clone();
             let time_effects = time_effects.clone();
             async move {

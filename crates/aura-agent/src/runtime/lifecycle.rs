@@ -3,7 +3,7 @@
 //! Manages component lifecycle and system shutdown.
 
 use super::EffectContext;
-use crate::handlers::SessionService;
+use crate::handlers::SessionServiceApi;
 use crate::runtime::AuraEffectSystem;
 use std::sync::Arc;
 
@@ -38,10 +38,11 @@ impl LifecycleManager {
     ) -> Result<(), String> {
         // Clean up any stale sessions from previous runs
         let account_id = aura_core::identifiers::AccountId::new_from_entropy(
-            aura_core::hash::hash(&authority_context.authority_id.to_bytes()),
+            aura_core::hash::hash(&authority_context.authority_id().to_bytes()),
         );
 
-        let session_service = SessionService::new(effects, authority_context, account_id);
+        let session_service = SessionServiceApi::new(effects, authority_context, account_id)
+            .map_err(|e| format!("Session service init failed: {e}"))?;
 
         // Clean up sessions older than the timeout
         match session_service

@@ -10,7 +10,6 @@ use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
 };
 use crate::core::AgentConfig;
-use crate::fact_registry::build_fact_registry;
 use crate::reactive::{FactSource, ReactivePipeline, SchedulerConfig};
 use aura_core::effects::task::TaskSpawner;
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -249,7 +248,7 @@ impl RuntimeSystem {
 
         // General runtime maintenance loop (ceremony timeouts, etc.).
         let interval = Duration::from_secs(60);
-        tasks.spawn_interval_until(interval, move || {
+        tasks.spawn_interval_until(time_effects.clone(), interval, move || {
             let ceremony_tracker = ceremony_tracker.clone();
             async move {
                 let _ = ceremony_tracker.cleanup_timed_out().await;
@@ -296,7 +295,7 @@ impl RuntimeSystem {
 
         let pipeline = ReactivePipeline::start(
             SchedulerConfig::default(),
-            build_fact_registry(),
+            self.effect_system.fact_registry(),
             time_effects,
             self.authority_id,
             self.effect_system.reactive_handler(),

@@ -43,14 +43,19 @@
 //!     .await?;
 //! ```
 
+use crate::core::AgentBuilder;
+
 // Core presets (always available)
 mod cli;
 mod custom;
 mod error;
 
-// Platform-specific presets (always compiled, but require feature flags to build)
+// Platform-specific presets (feature-gated)
+#[cfg(feature = "android")]
 mod android;
+#[cfg(feature = "ios")]
 mod ios;
+#[cfg(feature = "web")]
 mod web;
 
 // Core exports
@@ -62,6 +67,40 @@ pub use error::BuildError;
 pub use custom::{Missing, Provided};
 
 // Platform preset exports
+#[cfg(feature = "android")]
 pub use android::AndroidPresetBuilder;
+#[cfg(feature = "ios")]
 pub use ios::{DataProtectionClass, IosPresetBuilder};
+#[cfg(feature = "web")]
 pub use web::WebPresetBuilder;
+
+// Centralized AgentBuilder preset entry points (avoid divergence across modules).
+impl AgentBuilder {
+    /// Create a CLI preset builder for terminal applications.
+    pub fn cli() -> CliPresetBuilder {
+        CliPresetBuilder::new()
+    }
+
+    /// Create a custom preset builder with no default effects.
+    pub fn custom() -> CustomPresetBuilder<Missing, Missing, Missing, Missing, Missing> {
+        CustomPresetBuilder::new()
+    }
+
+    /// Create an iOS preset builder for Apple platform applications.
+    #[cfg(feature = "ios")]
+    pub fn ios() -> IosPresetBuilder {
+        IosPresetBuilder::new()
+    }
+
+    /// Create an Android preset builder for Android applications.
+    #[cfg(feature = "android")]
+    pub fn android() -> AndroidPresetBuilder {
+        AndroidPresetBuilder::new()
+    }
+
+    /// Create a web preset builder for browser/WASM applications.
+    #[cfg(feature = "web")]
+    pub fn web() -> WebPresetBuilder {
+        WebPresetBuilder::new()
+    }
+}

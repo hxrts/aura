@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Session Coordination Handler
 //!
 //! Session coordination operations using choreography macros instead of manual patterns.
@@ -93,7 +92,6 @@ choreography! {
 
 /// Session creation request message
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionRequest {
     pub session_type: SessionType,
     pub participants: Vec<DeviceId>,
@@ -104,7 +102,6 @@ pub struct SessionRequest {
 
 /// Participant invitation message
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // Part of future session coordination API
 pub struct ParticipantInvitation {
     pub session_id: String,
     pub session_type: SessionType,
@@ -114,7 +111,6 @@ pub struct ParticipantInvitation {
 
 /// Session acceptance message
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionAccepted {
     pub session_id: String,
     pub participant_id: DeviceId,
@@ -123,7 +119,6 @@ pub struct SessionAccepted {
 
 /// Session rejection message
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionRejected {
     pub session_id: String,
     pub participant_id: DeviceId,
@@ -133,7 +128,6 @@ pub struct SessionRejected {
 
 /// Session creation success message
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionCreated {
     pub session_id: String,
     pub session_handle: SessionHandle,
@@ -168,7 +162,6 @@ struct SessionInvitationFact {
 
 /// Session creation failure message
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionCreationFailed {
     pub session_id: String,
     pub reason: String,
@@ -176,7 +169,7 @@ pub struct SessionCreationFailed {
 }
 
 /// Session operations handler with authority-first design and choreographic patterns
-#[allow(dead_code)] // Part of future session coordination API
+#[derive(Clone)]
 pub struct SessionOperations {
     /// Effect system for session operations
     effects: Arc<AuraEffectSystem>,
@@ -190,10 +183,8 @@ pub struct SessionOperations {
     pub(super) session_metadata: Arc<RwLock<HashMap<String, HashMap<String, serde_json::Value>>>>,
 }
 
-#[allow(dead_code)]
 impl SessionOperations {
     /// Create new session operations handler
-    #[allow(dead_code)] // Part of future session coordination API
     pub fn new(
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
@@ -209,13 +200,11 @@ impl SessionOperations {
     }
 
     /// Get the device ID derived from authority
-    #[allow(dead_code)] // Part of future session coordination API
     pub(super) fn device_id(&self) -> DeviceId {
         self.authority_context.device_id()
     }
 
     /// Access to effects system for submodules
-    #[allow(dead_code)] // Part of future session coordination API
     pub(super) fn effects(&self) -> &Arc<AuraEffectSystem> {
         &self.effects
     }
@@ -278,12 +267,7 @@ impl SessionOperations {
     }
 
     pub(super) fn guard_context(&self) -> ContextId {
-        self.authority_context
-            .active_contexts
-            .keys()
-            .next()
-            .copied()
-            .unwrap_or_default()
+        self.authority_context.default_context_id()
     }
 
     async fn enforce_guard(
@@ -299,7 +283,7 @@ impl SessionOperations {
         let guard = aura_guards::chain::create_send_guard(
             operation.to_string(),
             self.guard_context(),
-            self.authority_context.authority_id,
+            self.authority_context.authority_id(),
             cost,
         );
         let result = guard
@@ -399,7 +383,6 @@ impl SessionOperations {
     }
 
     /// Execute the session creation choreography protocol
-    #[allow(dead_code)] // Part of future session coordination API
     async fn execute_session_creation_choreography(
         &self,
         request: &SessionRequest,
@@ -439,7 +422,6 @@ impl SessionOperations {
     }
 
     /// Validate session request (choreographic pattern)
-    #[allow(dead_code)] // Part of future session coordination API
     async fn validate_session_request(
         &self,
         request: &SessionRequest,
@@ -466,7 +448,6 @@ impl SessionOperations {
     }
 
     /// Simulate participant invitation and response collection (choreographic pattern)
-    #[allow(dead_code)] // Part of future session coordination API
     async fn invite_participants_choreographically(
         &self,
         request: &SessionRequest,
@@ -497,7 +478,7 @@ impl SessionOperations {
 
             let envelope = TransportEnvelope {
                 destination: AuthorityId::from_uuid(participant_id.0),
-                source: self.authority_context.authority_id,
+                source: self.authority_context.authority_id(),
                 context: self.guard_context(),
                 payload: serde_json::to_vec(&invitation)
                     .map_err(|e| AgentError::effects(format!("serialize invitation: {e}")))?,
@@ -543,7 +524,6 @@ impl SessionOperations {
     }
 
     /// Create final session handle (choreographic pattern)
-    #[allow(dead_code)] // Part of future session coordination API
     async fn create_session_handle_choreographically(
         &self,
         request: &SessionRequest,
@@ -572,7 +552,6 @@ impl SessionOperations {
 
 /// Internal type for tracking participant responses
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Part of future session coordination API
 struct ParticipantResponse {
     participant_id: DeviceId,
     accepted: bool,
@@ -759,12 +738,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_creation() {
-        let mut authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([1u8; 32]));
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([2u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([1u8; 32]));
         let account_id = AccountId::new_from_entropy([3u8; 32]);
 
         let config = AgentConfig::default();
@@ -787,24 +761,17 @@ mod tests {
 
     #[tokio::test]
     async fn invitations_use_transport_envelopes() {
-        use parking_lot::RwLock;
-
-        let mut authority_context =
+        let authority_context =
             AuthorityContext::new(AuthorityId::new_from_entropy([70u8; 32]));
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([11u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
         let account_id = AccountId::new_from_entropy([12u8; 32]);
         let config = AgentConfig::default();
 
         // Use shared transport inbox to verify messages are sent
-        let shared_inbox = Arc::new(RwLock::new(Vec::new()));
+        let shared_transport = crate::runtime::SharedTransport::new();
         let effects = Arc::new(
             AuraEffectSystem::testing_with_shared_transport(
                 &config,
-                crate::runtime::SharedTransport::from_inbox(shared_inbox.clone()),
+                shared_transport.clone(),
             )
             .unwrap(),
         );
@@ -820,10 +787,12 @@ mod tests {
             .unwrap();
 
         // Verify that an invitation was sent to the transport layer
-        let inbox = shared_inbox.read();
+        let destination = AuthorityId::from_uuid(other_device.0);
+        let inbox = shared_transport.inbox_for(destination);
+        let inbox = inbox.read();
         assert_eq!(inbox.len(), 1, "Expected exactly one transport envelope");
         let envelope = &inbox[0];
-        assert_eq!(envelope.destination, AuthorityId::from_uuid(other_device.0));
+        assert_eq!(envelope.destination, destination);
         assert_eq!(
             envelope.metadata.get("type"),
             Some(&"session_invitation".to_string())
@@ -832,13 +801,8 @@ mod tests {
 
     #[tokio::test]
     async fn session_handles_are_persisted() {
-        let mut authority_context =
+        let authority_context =
             AuthorityContext::new(AuthorityId::new_from_entropy([71u8; 32]));
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([13u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
         let account_id = AccountId::new_from_entropy([14u8; 32]);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());

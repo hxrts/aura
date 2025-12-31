@@ -4,6 +4,14 @@
 //! deriving identifiers from stable string seeds instead of consuming
 //! ambient entropy. Seeds should be stable per scenario/user so outputs
 //! remain deterministic across runs.
+//!
+//! ## Note on Domain Prefixes
+//!
+//! This module uses "aura-terminal/" domain prefixes for backwards compatibility
+//! with existing demo scenarios and tests. For new portable code, consider using
+//! `aura_app::ui::workflows::ids` which uses generic "aura/" prefixes.
+//!
+//! The two modules produce DIFFERENT IDs for the same seed due to different domains.
 
 use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId, DeviceId, GuardianId};

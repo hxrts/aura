@@ -18,6 +18,7 @@
 use iocraft::prelude::*;
 
 use aura_app::ui::signals::CHAT_SIGNAL;
+use aura_app::views::display::format_timestamp;
 
 use crate::tui::callbacks::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
@@ -29,26 +30,6 @@ use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
 use crate::tui::theme::{list_item_colors, Spacing, Theme};
 use crate::tui::types::{Channel, Message};
-
-/// Format a timestamp (ms since epoch) as a human-readable time string
-fn format_timestamp(ts_ms: u64) -> String {
-    use std::time::{Duration, UNIX_EPOCH};
-
-    if ts_ms == 0 {
-        return String::new();
-    }
-
-    let timestamp = UNIX_EPOCH + Duration::from_millis(ts_ms);
-    if let Ok(duration) = timestamp.duration_since(UNIX_EPOCH) {
-        // Simple HH:MM format from the duration
-        let total_secs = duration.as_secs();
-        let hours = (total_secs / 3600) % 24;
-        let minutes = (total_secs / 60) % 60;
-        format!("{hours:02}:{minutes:02}")
-    } else {
-        String::new()
-    }
-}
 
 /// Which panel is focused
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

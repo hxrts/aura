@@ -1,7 +1,7 @@
 //! Chat command handlers using the aura-chat service and effect system
 //!
 //! This module implements CLI handlers for chat functionality, integrating
-//! with the agent-layer ChatService for group management and messaging.
+//! with the agent-layer ChatServiceApi for group management and messaging.
 
 use crate::cli::chat::ChatCommands;
 use crate::error::{TerminalError, TerminalResult};
@@ -11,7 +11,7 @@ use aura_agent::AuraEffectSystem;
 use aura_core::effects::ConsoleEffects;
 use std::collections::HashMap;
 
-/// Execute chat management commands through the ChatService
+/// Execute chat management commands through the ChatServiceApi
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
 pub async fn handle_chat(
@@ -23,7 +23,7 @@ pub async fn handle_chat(
         TerminalError::Operation("Agent not available - please initialize an account first".into())
     })?;
 
-    let chat = agent.chat();
+    let chat = agent.chat()?;
     let authority_id = ctx.effect_context().authority_id();
 
     match command {

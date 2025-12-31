@@ -467,6 +467,174 @@ pub async fn update_budget(
 }
 
 // =============================================================================
+// Formatting Functions (Portable)
+// =============================================================================
+
+/// Format budget status as a human-readable string.
+///
+/// Returns a multi-line summary suitable for CLI output or any frontend.
+/// Includes total usage, per-category breakdowns, and capacity warnings.
+///
+/// # Example Output
+///
+/// ```text
+/// Home Storage Budget: home-123
+/// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+///
+/// Total: 2.4 MB / 10.0 MB (24% used)
+///
+/// Resident Storage:
+///   2 residents (8 max)
+///   400.0 KB / 1.6 MB used
+///
+/// Neighborhood Donations:
+///   1 neighborhoods (4 max)
+///   1.0 MB donated
+///
+/// Pinned Content:
+///   1.0 MB / 8.0 MB used
+///
+/// Remaining: 7.6 MB
+/// ```
+#[must_use]
+pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
+    let breakdown = budget.breakdown();
+    let usage_percent = (budget.usage_fraction() * 100.0) as u8;
+
+    let mut output = String::new();
+    output.push_str(&format!("Home Storage Budget: {}\n", budget.home_id));
+    output.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    output.push_str(&format!(
+        "\nTotal: {} / {} ({}% used)\n",
+        BudgetBreakdown::format_size(budget.total_used()),
+        BudgetBreakdown::format_size(breakdown.total),
+        usage_percent
+    ));
+
+    output.push_str("\nResident Storage:\n");
+    output.push_str(&format!(
+        "  {} residents ({} max)\n",
+        budget.resident_count, MAX_RESIDENTS
+    ));
+    output.push_str(&format!(
+        "  {} / {} used\n",
+        BudgetBreakdown::format_size(breakdown.resident_used),
+        BudgetBreakdown::format_size(breakdown.resident_limit)
+    ));
+
+    output.push_str("\nNeighborhood Donations:\n");
+    output.push_str(&format!(
+        "  {} neighborhoods ({} max)\n",
+        budget.neighborhood_count, MAX_NEIGHBORHOODS
+    ));
+    output.push_str(&format!(
+        "  {} donated\n",
+        BudgetBreakdown::format_size(breakdown.neighborhood_donations)
+    ));
+
+    output.push_str("\nPinned Content:\n");
+    output.push_str(&format!(
+        "  {} / {} used\n",
+        BudgetBreakdown::format_size(breakdown.pinned_used),
+        BudgetBreakdown::format_size(breakdown.pinned_limit)
+    ));
+
+    output.push_str(&format!(
+        "\nRemaining: {}\n",
+        BudgetBreakdown::format_size(breakdown.remaining)
+    ));
+
+    // Add warnings if capacity is high
+    if usage_percent > 95 {
+        output.push_str("\n⚠️  CRITICAL: Storage is nearly full!\n");
+    } else if usage_percent > 80 {
+        output.push_str("\n⚠️  WARNING: Storage is running low\n");
+    }
+
+    output
+}
+
+/// Format budget breakdown as a compact one-line summary.
+///
+/// Returns a short status line suitable for status bars or compact displays.
+///
+/// # Example
+///
+/// ```rust
+/// use aura_app::ui::workflows::budget::{HomeFlowBudget, format_budget_compact};
+///
+/// let budget = HomeFlowBudget::new("home-123");
+/// let compact = format_budget_compact(&budget);
+/// assert!(compact.contains("Storage:"));
+/// assert!(compact.contains("%"));
+/// ```
+#[must_use]
+pub fn format_budget_compact(budget: &HomeFlowBudget) -> String {
+    let usage_percent = (budget.usage_fraction() * 100.0) as u8;
+    format!(
+        "Storage: {} / {} ({}%)",
+        BudgetBreakdown::format_size(budget.total_used()),
+        BudgetBreakdown::format_size(budget.total_allocation()),
+        usage_percent
+    )
+}
+
+/// Check if budget can accommodate a new resident, with error message.
+///
+/// Returns `Ok(())` if capacity is available, `Err` with formatted message otherwise.
+/// Use this before attempting to add residents for user-friendly error messages.
+///
+/// # Example
+///
+/// ```rust
+/// use aura_app::ui::workflows::budget::{HomeFlowBudget, check_can_add_resident};
+///
+/// let budget = HomeFlowBudget::new("home");
+/// assert!(check_can_add_resident(&budget).is_ok());
+/// ```
+pub fn check_can_add_resident(budget: &HomeFlowBudget) -> Result<(), String> {
+    if budget.can_add_resident() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Cannot add resident: home at capacity ({}/{})",
+            budget.resident_count, MAX_RESIDENTS
+        ))
+    }
+}
+
+/// Check if budget can accommodate joining a neighborhood, with error message.
+///
+/// Returns `Ok(())` if capacity is available, `Err` with formatted message otherwise.
+/// Use this before attempting to join neighborhoods.
+pub fn check_can_join_neighborhood(budget: &HomeFlowBudget) -> Result<(), String> {
+    if budget.can_join_neighborhood() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Cannot join neighborhood: home at capacity ({}/{})",
+            budget.neighborhood_count, MAX_NEIGHBORHOODS
+        ))
+    }
+}
+
+/// Check if budget can accommodate pinning content of given size, with error message.
+///
+/// Returns `Ok(())` if space is available, `Err` with formatted message otherwise.
+/// Use this before attempting to pin content.
+pub fn check_can_pin(budget: &HomeFlowBudget, size_bytes: u64) -> Result<(), String> {
+    if budget.can_pin(size_bytes) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Cannot pin content: need {}, have {} available",
+            BudgetBreakdown::format_size(size_bytes),
+            BudgetBreakdown::format_size(budget.pinned_storage_remaining())
+        ))
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 

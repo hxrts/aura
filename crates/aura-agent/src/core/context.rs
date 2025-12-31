@@ -6,7 +6,11 @@
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
-use std::collections::HashMap;
+
+/// Derive the default context ID for an authority.
+pub fn default_context_id_for_authority(authority_id: AuthorityId) -> ContextId {
+    ContextId::new_from_entropy(hash(&authority_id.to_bytes()))
+}
 
 /// Authority-first context for agent operations
 ///
@@ -15,13 +19,10 @@ use std::collections::HashMap;
 #[derive(Debug, Clone)]
 pub struct AuthorityContext {
     /// The authority this agent represents
-    pub authority_id: AuthorityId,
+    authority_id: AuthorityId,
 
     /// Cached account ID derived from authority (computed once at construction)
-    pub account_id: AccountId,
-
-    /// Active relational contexts for this authority
-    pub active_contexts: HashMap<ContextId, RelationalContext>,
+    account_id: AccountId,
 
     /// Internal device identifier (derived from authority, not exposed publicly)
     #[allow(dead_code)]
@@ -73,19 +74,23 @@ impl AuthorityContext {
         Self {
             authority_id,
             account_id,
-            active_contexts: HashMap::new(),
             device_id,
         }
     }
 
-    /// Add a relational context
-    pub fn add_context(&mut self, context: RelationalContext) {
-        self.active_contexts.insert(context.context_id, context);
+    /// Authority identifier for this context.
+    pub fn authority_id(&self) -> AuthorityId {
+        self.authority_id
     }
 
-    /// Get a relational context
-    pub fn get_context(&self, context_id: &ContextId) -> Option<&RelationalContext> {
-        self.active_contexts.get(context_id)
+    /// Cached account identifier derived from the authority.
+    pub fn account_id(&self) -> AccountId {
+        self.account_id
+    }
+
+    /// Default context identifier derived from the authority.
+    pub fn default_context_id(&self) -> ContextId {
+        default_context_id_for_authority(self.authority_id)
     }
 
     /// Internal access to device ID (crate-private)

@@ -12,7 +12,7 @@
 use crate::core::AgentConfig;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -163,7 +163,7 @@ impl ReceiptManager {
         let retention_ms = self.config.retention_period.as_millis() as u64;
         let interval = self.config.cleanup_interval;
 
-        tasks.spawn_interval_until(interval, move || {
+        tasks.spawn_interval_until(time.clone(), interval, move || {
             let receipts = receipts.clone();
             let chains = chains.clone();
             let time = time.clone();
@@ -191,6 +191,7 @@ impl ReceiptManager {
                     .filter(|(_, r)| r.timestamp < cutoff)
                     .map(|(id, _)| *id)
                     .collect();
+                let expired_set: HashSet<ReceiptId> = expired_ids.iter().copied().collect();
 
                 let count = expired_ids.len();
 
@@ -202,7 +203,7 @@ impl ReceiptManager {
 
                     // Remove from chains
                     for chain in chains_guard.values_mut() {
-                        chain.retain(|id| !expired_ids.contains(id));
+                        chain.retain(|id| !expired_set.contains(id));
                     }
 
                     // Clean up empty chains
@@ -297,6 +298,7 @@ impl ReceiptManager {
             .filter(|(_, r)| r.timestamp < before_timestamp)
             .map(|(id, _)| *id)
             .collect();
+        let expired_set: HashSet<ReceiptId> = expired_ids.iter().copied().collect();
 
         let count = expired_ids.len();
 
@@ -307,7 +309,7 @@ impl ReceiptManager {
 
         // Remove from chains
         for chain in chains.values_mut() {
-            chain.retain(|id| !expired_ids.contains(id));
+            chain.retain(|id| !expired_set.contains(id));
         }
 
         Ok(count)

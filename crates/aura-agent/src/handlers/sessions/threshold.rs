@@ -10,7 +10,6 @@ use aura_protocol::effects::EffectApiEffects;
 
 impl SessionOperations {
     /// Create threshold operation session
-    #[allow(dead_code)] // Part of future threshold session API
     pub async fn create_threshold_session(
         &self,
         participants: Vec<DeviceId>,
@@ -43,7 +42,6 @@ impl SessionOperations {
     }
 
     /// Create key rotation session
-    #[allow(dead_code)] // Part of future threshold session API
     pub async fn create_key_rotation_session(&self) -> AgentResult<SessionHandle> {
         let device_id = self.device_id();
 

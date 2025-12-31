@@ -2,6 +2,10 @@
 
 /// Chat screen focus
 use aura_app::ui::prelude::*;
+
+// Re-export portable wizard step type
+pub use aura_app::views::wizards::CreateChannelStep;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ChatFocus {
     /// Channel list has focus
@@ -34,18 +38,6 @@ pub struct ChatViewState {
     pub insert_mode_entry_char: Option<char>,
     // Note: Modal state is now stored in ModalQueue, not here.
     // Use modal_queue.enqueue(QueuedModal::ChatCreate/Topic/Info(...)) to show modals.
-}
-
-/// State for create channel modal
-///
-/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
-/// Use `modal_queue.enqueue(QueuedModal::ChatCreate(state))` to show.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum CreateChannelStep {
-    #[default]
-    Details,
-    Members,
-    Threshold,
 }
 
 #[derive(Clone, Debug, Default)]

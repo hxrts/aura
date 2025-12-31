@@ -97,6 +97,7 @@ struct AuthenticatedFact {
 }
 
 /// Authentication handler
+#[derive(Clone)]
 pub struct AuthHandler {
     context: HandlerContext,
     /// Pending challenges awaiting response
@@ -137,7 +138,7 @@ impl AuthHandler {
             challenge_bytes,
             created_at: current_time,
             expires_at: current_time + 300_000, // 5 minute expiry
-            authority_id: self.context.authority.authority_id,
+            authority_id: self.context.authority.authority_id(),
         };
 
         // Store pending challenge
@@ -223,7 +224,7 @@ impl AuthHandler {
                 self.context.effect_context.context_id(),
                 "auth_authenticated",
                 &AuthenticatedFact {
-                    authority_id: self.context.authority.authority_id,
+                    authority_id: self.context.authority.authority_id(),
                     device_id,
                     auth_method: response.auth_method.clone(),
                     challenge_id: response.challenge_id.clone(),
@@ -233,7 +234,7 @@ impl AuthHandler {
 
             Ok(AuthResult {
                 authenticated: true,
-                authority_id: Some(self.context.authority.authority_id),
+                authority_id: Some(self.context.authority.authority_id()),
                 device_id: Some(device_id),
                 failure_reason: None,
                 authenticated_at: current_time,
@@ -444,7 +445,7 @@ impl AuthHandler {
         let guard = create_send_guard(
             "auth:authenticate".to_string(),
             self.context.effect_context.context_id(),
-            self.context.authority.authority_id,
+            self.context.authority.authority_id(),
             50,
         );
         let result = guard.evaluate(effects).await.map_err(|e| {
@@ -463,7 +464,7 @@ impl AuthHandler {
             effects,
             self.context.effect_context.context_id(),
             "auth_authenticated",
-            &serde_json::json!({ "authority": self.context.authority.authority_id }),
+            &serde_json::json!({ "authority": self.context.authority.authority_id() }),
         )
         .await?;
         Ok(())
@@ -476,17 +477,12 @@ mod tests {
     use crate::core::AgentConfig;
     use crate::core::AuthorityContext;
     use crate::runtime::effects::AuraEffectSystem;
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::identifiers::{AuthorityId};
 
     #[tokio::test]
     async fn auth_fact_is_journaled() {
         let authority_id = AuthorityId::new_from_entropy([90u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([8u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
         let effects = AuraEffectSystem::testing(&config).unwrap();
@@ -498,12 +494,7 @@ mod tests {
     #[tokio::test]
     async fn challenge_can_be_created() {
         let authority_id = AuthorityId::new_from_entropy([91u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([9u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
         let effects = AuraEffectSystem::testing(&config).unwrap();
@@ -518,12 +509,7 @@ mod tests {
     #[tokio::test]
     async fn expired_challenge_is_rejected() {
         let authority_id = AuthorityId::new_from_entropy([92u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([10u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
         let effects = AuraEffectSystem::testing(&config).unwrap();
@@ -545,12 +531,7 @@ mod tests {
     #[tokio::test]
     async fn threshold_signature_verification_works() {
         let authority_id = AuthorityId::new_from_entropy([93u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([11u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
         let effects = AuraEffectSystem::testing(&config).unwrap();
@@ -605,12 +586,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_threshold_signature_is_rejected() {
         let authority_id = AuthorityId::new_from_entropy([94u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([12u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
 
         let config = AgentConfig::default();
         let effects = AuraEffectSystem::testing(&config).unwrap();

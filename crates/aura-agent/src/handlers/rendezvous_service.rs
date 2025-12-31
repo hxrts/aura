@@ -218,17 +218,11 @@ use aura_protocol::effects::EffectApiEffects;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([seed + 100; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         authority_context
     }
 

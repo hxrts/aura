@@ -2,14 +2,16 @@
 //!
 //! Common utilities used by domain-specific handlers.
 
-use crate::core::{AgentResult, AuthorityContext};
+use crate::core::{default_context_id_for_authority, AgentResult, AuthorityContext};
 use crate::runtime::{AuraEffectSystem, EffectContext};
-use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+use aura_core::Hash32;
+use aura_journal::FactJournal;
 use serde::Serialize;
 use serde_json;
 
 /// Handler context combining authority context with runtime utilities
+#[derive(Clone)]
 pub struct HandlerContext {
     /// Authority context
     #[allow(dead_code)] // Will be used for authority operations
@@ -24,9 +26,9 @@ impl HandlerContext {
     /// Create a new handler context
     pub fn new(authority: AuthorityContext) -> Self {
         // Create a default context ID for this handler context
-        let context_id = ContextId::new_from_entropy(hash(&authority.authority_id.to_bytes()));
+        let context_id = default_context_id_for_authority(authority.authority_id());
         let effect_context = EffectContext::new(
-            authority.authority_id,
+            authority.authority_id(),
             context_id,
             aura_core::effects::ExecutionMode::Production, // Default
         );
@@ -40,7 +42,7 @@ impl HandlerContext {
     /// Get storage key for this authority
     #[allow(dead_code)] // Part of future handler utilities API
     pub fn authority_storage_key(&self) -> String {
-        format!("authority_{}", self.authority.authority_id)
+        format!("authority_{}", self.authority.authority_id())
     }
 
     /// Get storage key for a context
@@ -123,7 +125,7 @@ impl HandlerUtilities {
         _session_id: Option<SessionId>,
     ) -> EffectContext {
         // Create a default context ID
-        let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+        let context_id = default_context_id_for_authority(authority_id);
 
         // If we have a specific session ID, we would need to update it; by default the
         // EffectContext will allocate a fresh session identifier.
@@ -138,7 +140,7 @@ impl HandlerUtilities {
     /// Validate authority context
     pub fn validate_authority_context(context: &AuthorityContext) -> AgentResult<()> {
         // Basic validation - can be extended
-        if context.authority_id.to_string().is_empty() {
+        if context.authority_id().to_string().is_empty() {
             return Err(crate::core::AgentError::context("Invalid authority ID"));
         }
         Ok(())
@@ -155,4 +157,22 @@ impl HandlerUtilities {
     pub fn context_storage_key(context_id: &ContextId) -> String {
         format!("context_{}", context_id)
     }
+}
+
+/// Compute the commitment for the relational context journal.
+///
+/// This normalizes the shared hashing logic used by AMP and rendezvous flows.
+pub fn context_commitment_from_journal(
+    context_id: ContextId,
+    journal: &FactJournal,
+) -> AgentResult<Hash32> {
+    let mut hasher = aura_core::hash::hasher();
+    hasher.update(b"RELATIONAL_CONTEXT_FACTS");
+    hasher.update(context_id.as_bytes());
+    for fact in journal.facts.iter() {
+        let bytes = aura_core::util::serialization::to_vec(fact)
+            .map_err(|e| crate::core::AgentError::effects(format!("Serialize context fact: {e}")))?;
+        hasher.update(&bytes);
+    }
+    Ok(Hash32(hasher.finalize()))
 }

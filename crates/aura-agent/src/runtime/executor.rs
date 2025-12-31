@@ -6,10 +6,35 @@
 use aura_core::effects::ExecutionMode;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
+use futures::future::BoxFuture;
 use std::sync::Arc;
 
 // Use the registry module's EffectRegistry (not builder's)
-use super::registry::EffectRegistry;
+use super::registry::{EffectOperation, EffectRegistry, EffectType};
+
+/// Handler trait for dynamic effect dispatch.
+pub trait EffectHandler<T>: Send + Sync {
+    fn handle(
+        &self,
+        context: &super::EffectContext,
+        params: T,
+    ) -> BoxFuture<'static, Result<EffectResult, AuraError>>;
+}
+
+impl<T, F> EffectHandler<T> for F
+where
+    F: Fn(&super::EffectContext, T) -> BoxFuture<'static, Result<EffectResult, AuraError>>
+        + Send
+        + Sync,
+{
+    fn handle(
+        &self,
+        context: &super::EffectContext,
+        params: T,
+    ) -> BoxFuture<'static, Result<EffectResult, AuraError>> {
+        (self)(context, params)
+    }
+}
 
 /// Executor for effect operations
 #[derive(Debug)]
@@ -37,9 +62,9 @@ impl EffectExecutor {
     pub async fn execute<T>(
         &self,
         context: &super::EffectContext,
-        effect_type: &str,
-        operation: &str,
-        _params: T,
+        effect_type: EffectType,
+        operation: EffectOperation,
+        params: T,
     ) -> Result<EffectResult, AuraError>
     where
         T: Send + Sync + 'static,
@@ -49,17 +74,13 @@ impl EffectExecutor {
             return Err(AuraError::invalid("Context authority mismatch".to_string()));
         }
 
-        // Get handler from registry
-        let _handler = self
+        let handler = self
             .registry
-            .get::<T>(effect_type, operation)
+            .get_effect_handler::<T>(effect_type, operation)
             .map_err(|e| AuraError::invalid(e.to_string()))?
             .ok_or_else(|| AuraError::invalid(format!("{}.{}", effect_type, operation)))?;
 
-        Err(AuraError::invalid(format!(
-            "Handler for {}.{} is registered but execution dispatch is not implemented yet",
-            effect_type, operation
-        )))
+        handler.handle(context, params).await
     }
 
     /// Get the authority ID
@@ -195,5 +216,47 @@ impl EffectResult {
             EffectResult::Error(msg) => msg,
             EffectResult::Partial(msg) => msg,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::registry::EffectRegistry;
+    use aura_core::effects::ExecutionMode;
+    use aura_core::identifiers::{AuthorityId, ContextId};
+    use futures::future::BoxFuture;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn effect_executor_dispatches_registered_handler() {
+        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
+        let registry = Arc::new(EffectRegistry::new(ExecutionMode::Testing));
+
+        registry
+            .register_effect_handler::<u64, _>(
+                EffectType::Crypto,
+                EffectOperation::from("double"),
+                |_context, value| -> BoxFuture<'static, Result<EffectResult, AuraError>> {
+                    Box::pin(async move { Ok(EffectResult::Success(format!("ok:{value}"))) })
+                },
+            )
+            .expect("register handler");
+
+        let executor = EffectExecutor::testing(authority_id, registry);
+        let context = executor.create_context(context_id);
+
+        let result = executor
+            .execute(
+                &context,
+                EffectType::Crypto,
+                EffectOperation::from("double"),
+                7u64,
+            )
+            .await
+            .expect("execute handler");
+
+        assert!(matches!(result, EffectResult::Success(msg) if msg == "ok:7"));
     }
 }

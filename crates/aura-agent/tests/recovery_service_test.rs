@@ -1,6 +1,6 @@
 //! Recovery Service Integration Tests
 //!
-//! Tests for the RecoveryService public API exposed through AuraAgent.
+//! Tests for the RecoveryServiceApi public API exposed through AuraAgent.
 
 use aura_agent::core::{AgentConfig, AuthorityContext};
 use aura_agent::handlers::RecoveryHandler;

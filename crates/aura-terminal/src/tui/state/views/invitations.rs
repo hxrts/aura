@@ -2,6 +2,15 @@
 //!
 //! Invitation codes are managed from the Contacts screen (workflow + modals),
 //! but the modal state types are shared.
+//!
+//! TTL presets and formatting are re-exported from aura-app for consistency.
+
+// Re-export TTL constants from aura-app for use by TUI components
+pub use aura_app::ui::types::{
+    format_ttl_display, next_ttl_preset, prev_ttl_preset, ttl_hours_to_ms, ttl_preset_index,
+    DEFAULT_INVITATION_TTL_HOURS, INVITATION_TTL_1_DAY, INVITATION_TTL_1_HOUR,
+    INVITATION_TTL_1_WEEK, INVITATION_TTL_30_DAYS, INVITATION_TTL_PRESETS,
+};
 
 /// Focused field in create invitation modal
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -34,9 +43,6 @@ pub struct CreateInvitationModalState {
 }
 
 impl CreateInvitationModalState {
-    /// TTL preset values in hours
-    const TTL_PRESETS: [u64; 4] = [1, 24, 168, 720]; // 1h, 1d, 1w, 30d
-
     /// Create new modal state with defaults
     #[must_use]
     pub fn new() -> Self {
@@ -45,7 +51,7 @@ impl CreateInvitationModalState {
             receiver_name: String::new(),
             type_index: 0,
             message: String::new(),
-            ttl_hours: 24, // Default 24 hours
+            ttl_hours: DEFAULT_INVITATION_TTL_HOURS,
             focused_field: CreateInvitationField::Type,
             error: None,
         }
@@ -66,7 +72,7 @@ impl CreateInvitationModalState {
         self.receiver_name.clear();
         self.type_index = 0;
         self.message.clear();
-        self.ttl_hours = 24;
+        self.ttl_hours = DEFAULT_INVITATION_TTL_HOURS;
         self.focused_field = CreateInvitationField::Type;
         self.error = None;
     }
@@ -105,26 +111,14 @@ impl CreateInvitationModalState {
 
     /// Cycle TTL to next preset
     pub fn ttl_next(&mut self) {
-        let current_idx = Self::TTL_PRESETS
-            .iter()
-            .position(|&h| h == self.ttl_hours)
-            .unwrap_or(1); // Default to 24h index
-        let next_idx = (current_idx + 1) % Self::TTL_PRESETS.len();
-        self.ttl_hours = Self::TTL_PRESETS[next_idx];
+        // Delegate to portable function from aura-app
+        self.ttl_hours = next_ttl_preset(self.ttl_hours);
     }
 
     /// Cycle TTL to previous preset
     pub fn ttl_prev(&mut self) {
-        let current_idx = Self::TTL_PRESETS
-            .iter()
-            .position(|&h| h == self.ttl_hours)
-            .unwrap_or(1); // Default to 24h index
-        let prev_idx = if current_idx == 0 {
-            Self::TTL_PRESETS.len() - 1
-        } else {
-            current_idx - 1
-        };
-        self.ttl_hours = Self::TTL_PRESETS[prev_idx];
+        // Delegate to portable function from aura-app
+        self.ttl_hours = prev_ttl_preset(self.ttl_hours);
     }
 
     #[must_use]

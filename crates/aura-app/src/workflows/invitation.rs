@@ -2,20 +2,153 @@
 //!
 //! This module contains invitation operations that are portable across
 //! all frontends via the RuntimeBridge abstraction.
+//!
+//! ## TTL Presets
+//!
+//! Standard TTL presets for invitation expiration:
+//! - 1 hour: Quick invitations
+//! - 24 hours (default): Standard invitations
+//! - 1 week (168 hours): Extended invitations
+//! - 30 days (720 hours): Long-term invitations
 
 use crate::runtime_bridge::{InvitationBridgeType, InvitationInfo};
+
+// ============================================================================
+// TTL Constants
+// ============================================================================
+
+/// 1 hour TTL preset in hours
+pub const INVITATION_TTL_1_HOUR: u64 = 1;
+
+/// 1 day (24 hours) TTL preset in hours
+pub const INVITATION_TTL_1_DAY: u64 = 24;
+
+/// 1 week (168 hours) TTL preset in hours
+pub const INVITATION_TTL_1_WEEK: u64 = 168;
+
+/// 30 days (720 hours) TTL preset in hours
+pub const INVITATION_TTL_30_DAYS: u64 = 720;
+
+/// Standard TTL presets in hours: 1h, 1d, 1w, 30d
+pub const INVITATION_TTL_PRESETS: [u64; 4] = [
+    INVITATION_TTL_1_HOUR,
+    INVITATION_TTL_1_DAY,
+    INVITATION_TTL_1_WEEK,
+    INVITATION_TTL_30_DAYS,
+];
+
+/// Default TTL for invitations (24 hours)
+pub const DEFAULT_INVITATION_TTL_HOURS: u64 = INVITATION_TTL_1_DAY;
+
+/// Convert TTL from hours to milliseconds.
+///
+/// # Examples
+///
+/// ```ignore
+/// use aura_app::workflows::invitation::ttl_hours_to_ms;
+///
+/// assert_eq!(ttl_hours_to_ms(1), 3_600_000);   // 1 hour
+/// assert_eq!(ttl_hours_to_ms(24), 86_400_000); // 24 hours
+/// ```
+#[inline]
+#[must_use]
+pub const fn ttl_hours_to_ms(hours: u64) -> u64 {
+    hours * 60 * 60 * 1000
+}
+
+/// Format TTL for human-readable display.
+///
+/// Returns a user-friendly string representation of the TTL duration.
+///
+/// # Examples
+///
+/// ```ignore
+/// use aura_app::workflows::invitation::format_ttl_display;
+///
+/// assert_eq!(format_ttl_display(1), "1 hour");
+/// assert_eq!(format_ttl_display(24), "1 day");
+/// assert_eq!(format_ttl_display(168), "1 week");
+/// assert_eq!(format_ttl_display(720), "30 days");
+/// ```
+#[must_use]
+pub fn format_ttl_display(hours: u64) -> String {
+    match hours {
+        0 => "No expiration".to_string(),
+        1 => "1 hour".to_string(),
+        h if h < 24 => format!("{} hours", h),
+        24 => "1 day".to_string(),
+        h if h < 168 => {
+            let days = h / 24;
+            if days == 1 {
+                "1 day".to_string()
+            } else {
+                format!("{} days", days)
+            }
+        }
+        168 => "1 week".to_string(),
+        h if h < 720 => {
+            let weeks = h / 168;
+            if weeks == 1 {
+                "1 week".to_string()
+            } else {
+                format!("{} weeks", weeks)
+            }
+        }
+        720 => "30 days".to_string(),
+        h => {
+            let days = h / 24;
+            format!("{} days", days)
+        }
+    }
+}
+
+/// Get the TTL preset index for a given hours value.
+///
+/// Returns the index in `INVITATION_TTL_PRESETS` that matches or is closest
+/// to the given hours value.
+#[must_use]
+pub fn ttl_preset_index(hours: u64) -> usize {
+    INVITATION_TTL_PRESETS
+        .iter()
+        .position(|&preset| preset == hours)
+        .unwrap_or(1) // Default to 24h (index 1)
+}
+
+/// Get the next TTL preset from the current hours value.
+///
+/// Cycles through presets: 1h -> 24h -> 1w -> 30d -> 1h
+#[must_use]
+pub fn next_ttl_preset(current_hours: u64) -> u64 {
+    let current_index = ttl_preset_index(current_hours);
+    let next_index = (current_index + 1) % INVITATION_TTL_PRESETS.len();
+    INVITATION_TTL_PRESETS[next_index]
+}
+
+/// Get the previous TTL preset from the current hours value.
+///
+/// Cycles through presets: 1h <- 24h <- 1w <- 30d <- 1h
+#[must_use]
+pub fn prev_ttl_preset(current_hours: u64) -> u64 {
+    let current_index = ttl_preset_index(current_hours);
+    let prev_index = if current_index == 0 {
+        INVITATION_TTL_PRESETS.len() - 1
+    } else {
+        current_index - 1
+    };
+    INVITATION_TTL_PRESETS[prev_index]
+}
 use crate::signal_defs::INVITATIONS_SIGNAL;
-use crate::{views::invitations::InvitationsState, AppCore};
-use async_lock::RwLock;
-use aura_core::identifiers::AuthorityId;
-#[cfg(feature = "signals")]
-use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::AuraError;
-use std::sync::Arc;
 use crate::workflows::runtime::require_runtime;
 #[cfg(feature = "signals")]
 use crate::workflows::signals::read_signal;
 use crate::workflows::signals::read_signal_or_default;
+use crate::{views::invitations::InvitationsState, AppCore};
+use async_lock::RwLock;
+#[cfg(feature = "signals")]
+use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::AuthorityId;
+use aura_core::AuraError;
+use std::sync::Arc;
 
 #[cfg(feature = "signals")]
 async fn yield_once() {
@@ -191,17 +324,17 @@ pub async fn accept_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-#[cfg(feature = "signals")]
+    #[cfg(feature = "signals")]
     let initial_contact_count = {
         read_signal(
             app_core,
             &*crate::signal_defs::CONTACTS_SIGNAL,
             crate::signal_defs::CONTACTS_SIGNAL_NAME,
         )
-            .await
-            .unwrap_or_default()
-            .contacts
-            .len()
+        .await
+        .unwrap_or_default()
+        .contacts
+        .len()
     };
 
     #[cfg(feature = "signals")]
@@ -232,10 +365,10 @@ pub async fn accept_invitation(
                     &*crate::signal_defs::CONTACTS_SIGNAL,
                     crate::signal_defs::CONTACTS_SIGNAL_NAME,
                 )
-                    .await
-                    .unwrap_or_default()
-                    .contacts
-                    .len();
+                .await
+                .unwrap_or_default()
+                .contacts
+                .len();
 
                 if contacts_len > initial_contact_count {
                     break;
@@ -355,7 +488,9 @@ impl InvitationRoleValue {
 impl std::fmt::Display for InvitationRoleValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Contact { nickname: Some(name) } => write!(f, "contact (nickname: {})", name),
+            Self::Contact {
+                nickname: Some(name),
+            } => write!(f, "contact (nickname: {})", name),
             Self::Contact { nickname: None } => write!(f, "contact"),
             Self::Guardian => write!(f, "guardian"),
             Self::Channel => write!(f, "channel"),
@@ -417,10 +552,7 @@ pub fn format_invitation_type(inv_type: InvitationType) -> &'static str {
 ///
 /// For more detailed formatting that includes context like channel IDs or authorities.
 #[must_use]
-pub fn format_invitation_type_detailed(
-    inv_type: InvitationType,
-    context: Option<&str>,
-) -> String {
+pub fn format_invitation_type_detailed(inv_type: InvitationType, context: Option<&str>) -> String {
     match (inv_type, context) {
         (InvitationType::Home, None) => "Home".to_string(),
         (InvitationType::Home, Some(ctx)) => format!("Home ({})", ctx),
@@ -485,8 +617,14 @@ mod tests {
 
     #[test]
     fn test_parse_invitation_role_guardian_case_insensitive() {
-        assert_eq!(parse_invitation_role("GUARDIAN"), InvitationRoleValue::Guardian);
-        assert_eq!(parse_invitation_role("Guardian"), InvitationRoleValue::Guardian);
+        assert_eq!(
+            parse_invitation_role("GUARDIAN"),
+            InvitationRoleValue::Guardian
+        );
+        assert_eq!(
+            parse_invitation_role("Guardian"),
+            InvitationRoleValue::Guardian
+        );
     }
 
     #[test]
@@ -497,8 +635,14 @@ mod tests {
 
     #[test]
     fn test_parse_invitation_role_channel_case_insensitive() {
-        assert_eq!(parse_invitation_role("CHANNEL"), InvitationRoleValue::Channel);
-        assert_eq!(parse_invitation_role("Channel"), InvitationRoleValue::Channel);
+        assert_eq!(
+            parse_invitation_role("CHANNEL"),
+            InvitationRoleValue::Channel
+        );
+        assert_eq!(
+            parse_invitation_role("Channel"),
+            InvitationRoleValue::Channel
+        );
     }
 
     #[test]
@@ -589,6 +733,78 @@ mod tests {
             format_invitation_type_detailed(InvitationType::Chat, Some("general")),
             "Channel (general)"
         );
+    }
+
+    // === TTL Tests ===
+
+    #[test]
+    fn test_ttl_constants() {
+        assert_eq!(INVITATION_TTL_1_HOUR, 1);
+        assert_eq!(INVITATION_TTL_1_DAY, 24);
+        assert_eq!(INVITATION_TTL_1_WEEK, 168);
+        assert_eq!(INVITATION_TTL_30_DAYS, 720);
+        assert_eq!(DEFAULT_INVITATION_TTL_HOURS, 24);
+    }
+
+    #[test]
+    fn test_ttl_presets_array() {
+        assert_eq!(INVITATION_TTL_PRESETS.len(), 4);
+        assert_eq!(INVITATION_TTL_PRESETS[0], 1);
+        assert_eq!(INVITATION_TTL_PRESETS[1], 24);
+        assert_eq!(INVITATION_TTL_PRESETS[2], 168);
+        assert_eq!(INVITATION_TTL_PRESETS[3], 720);
+    }
+
+    #[test]
+    fn test_ttl_hours_to_ms() {
+        assert_eq!(ttl_hours_to_ms(1), 3_600_000);
+        assert_eq!(ttl_hours_to_ms(24), 86_400_000);
+        assert_eq!(ttl_hours_to_ms(168), 604_800_000);
+        assert_eq!(ttl_hours_to_ms(720), 2_592_000_000);
+    }
+
+    #[test]
+    fn test_format_ttl_display_presets() {
+        assert_eq!(format_ttl_display(1), "1 hour");
+        assert_eq!(format_ttl_display(24), "1 day");
+        assert_eq!(format_ttl_display(168), "1 week");
+        assert_eq!(format_ttl_display(720), "30 days");
+    }
+
+    #[test]
+    fn test_format_ttl_display_other_values() {
+        assert_eq!(format_ttl_display(0), "No expiration");
+        assert_eq!(format_ttl_display(2), "2 hours");
+        assert_eq!(format_ttl_display(12), "12 hours");
+        assert_eq!(format_ttl_display(48), "2 days");
+        assert_eq!(format_ttl_display(336), "2 weeks");
+        assert_eq!(format_ttl_display(1000), "41 days");
+    }
+
+    #[test]
+    fn test_ttl_preset_index() {
+        assert_eq!(ttl_preset_index(1), 0);
+        assert_eq!(ttl_preset_index(24), 1);
+        assert_eq!(ttl_preset_index(168), 2);
+        assert_eq!(ttl_preset_index(720), 3);
+        // Unknown value defaults to index 1 (24h)
+        assert_eq!(ttl_preset_index(100), 1);
+    }
+
+    #[test]
+    fn test_next_ttl_preset() {
+        assert_eq!(next_ttl_preset(1), 24);
+        assert_eq!(next_ttl_preset(24), 168);
+        assert_eq!(next_ttl_preset(168), 720);
+        assert_eq!(next_ttl_preset(720), 1); // Wraps around
+    }
+
+    #[test]
+    fn test_prev_ttl_preset() {
+        assert_eq!(prev_ttl_preset(1), 720); // Wraps around
+        assert_eq!(prev_ttl_preset(24), 1);
+        assert_eq!(prev_ttl_preset(168), 24);
+        assert_eq!(prev_ttl_preset(720), 168);
     }
 
     // === Workflow Tests ===

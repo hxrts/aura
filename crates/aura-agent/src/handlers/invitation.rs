@@ -58,6 +58,20 @@ pub struct InvitationHandler {
     pending_invitations: Arc<RwLock<HashMap<String, Invitation>>>,
 }
 
+impl Clone for InvitationHandler {
+    fn clone(&self) -> Self {
+        let service = CoreInvitationService::new(
+            self.service.authority_id(),
+            self.service.config().clone(),
+        );
+        Self {
+            context: self.context.clone(),
+            service,
+            pending_invitations: self.pending_invitations.clone(),
+        }
+    }
+}
+
 impl InvitationHandler {
     const IMPORTED_INVITATION_STORAGE_PREFIX: &'static str = "invitation/imported";
     const CREATED_INVITATION_STORAGE_PREFIX: &'static str = "invitation/created";
@@ -67,7 +81,7 @@ impl InvitationHandler {
         HandlerUtilities::validate_authority_context(&authority)?;
 
         let service =
-            CoreInvitationService::new(authority.authority_id, InvitationConfig::default());
+            CoreInvitationService::new(authority.authority_id(), InvitationConfig::default());
 
         Ok(Self {
             context: HandlerContext::new(authority),
@@ -183,7 +197,7 @@ impl InvitationHandler {
         };
 
         GuardSnapshot::new(
-            self.context.authority.authority_id,
+            self.context.authority.authority_id(),
             self.context.effect_context.context_id(),
             100, // Default flow budget
             capabilities,
@@ -256,7 +270,7 @@ impl InvitationHandler {
                 )));
             }
 
-            if invitation.sender_id != self.context.authority.authority_id {
+            if invitation.sender_id != self.context.authority.authority_id() {
                 return Err(AgentError::invalid(format!(
                     "Only sender can cancel invitation {}",
                     invitation_id
@@ -301,7 +315,7 @@ impl InvitationHandler {
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
             context_id: self.context.effect_context.context_id(),
-            sender_id: self.context.authority.authority_id,
+            sender_id: self.context.authority.authority_id(),
             receiver_id,
             invitation_type,
             status: InvitationStatus::Pending,
@@ -311,7 +325,7 @@ impl InvitationHandler {
         };
 
         // Persist the invitation to storage (so it survives service recreation)
-        Self::persist_created_invitation(effects, self.context.authority.authority_id, &invitation)
+        Self::persist_created_invitation(effects, self.context.authority.authority_id(), &invitation)
             .await?;
 
         // Cache the pending invitation (for fast lookup within same service instance)
@@ -356,7 +370,7 @@ impl InvitationHandler {
             let context_id = self.context.effect_context.context_id();
             let fact = ContactFact::Added {
                 context_id,
-                owner_id: self.context.authority.authority_id,
+                owner_id: self.context.authority.authority_id(),
                 contact_id,
                 nickname,
                 added_at: PhysicalTime {
@@ -480,7 +494,7 @@ impl InvitationHandler {
 
             let envelope = aura_core::effects::TransportEnvelope {
                 destination: enrollment.subject_authority,
-                source: self.context.authority.authority_id,
+                source: self.context.authority.authority_id(),
                 context: ceremony_context,
                 payload: Vec::new(),
                 metadata,
@@ -513,7 +527,7 @@ impl InvitationHandler {
         effects: &AuraEffectSystem,
         invitation_id: &str,
     ) -> AgentResult<Option<(AuthorityId, String)>> {
-        let own_id = self.context.authority.authority_id;
+        let own_id = self.context.authority.authority_id();
 
         // First try the local cache (fast path when the same handler instance is reused).
         {
@@ -614,7 +628,7 @@ impl InvitationHandler {
         effects: &AuraEffectSystem,
         invitation_id: &str,
     ) -> AgentResult<Option<DeviceEnrollmentInvitation>> {
-        let own_id = self.context.authority.authority_id;
+        let own_id = self.context.authority.authority_id();
 
         // First try the local cache (fast path when the same handler instance is reused).
         {
@@ -696,7 +710,7 @@ impl InvitationHandler {
 
         // Persist the shareable invitation so later operations (accept/decline) can resolve it
         // even if AuraAgent constructs a fresh InvitationService/InvitationHandler.
-        Self::persist_imported_invitation(effects, self.context.authority.authority_id, &shareable)
+        Self::persist_imported_invitation(effects, self.context.authority.authority_id(), &shareable)
             .await?;
 
         let invitation_id = shareable.invitation_id.clone();
@@ -716,7 +730,7 @@ impl InvitationHandler {
             invitation_id: invitation_id.clone(),
             context_id: self.context.effect_context.context_id(),
             sender_id: shareable.sender_id,
-            receiver_id: self.context.authority.authority_id,
+            receiver_id: self.context.authority.authority_id(),
             invitation_type: shareable.invitation_type,
             status: InvitationStatus::Pending,
             created_at: now_ms,
@@ -833,7 +847,7 @@ impl InvitationHandler {
         // Fall back to persistent storage for created invitations
         if let Some(inv) = Self::load_created_invitation(
             effects,
-            self.context.authority.authority_id,
+            self.context.authority.authority_id(),
             invitation_id,
         )
         .await
@@ -844,7 +858,7 @@ impl InvitationHandler {
         // Check imported invitations and reconstruct if found
         if let Some(shareable) = Self::load_imported_invitation(
             effects,
-            self.context.authority.authority_id,
+            self.context.authority.authority_id(),
             invitation_id,
         )
         .await
@@ -854,7 +868,7 @@ impl InvitationHandler {
                 invitation_id: shareable.invitation_id,
                 context_id: self.context.effect_context.context_id(),
                 sender_id: shareable.sender_id,
-                receiver_id: self.context.authority.authority_id,
+                receiver_id: self.context.authority.authority_id(),
                 invitation_type: shareable.invitation_type,
                 status: InvitationStatus::Pending,
                 created_at: 0, // Unknown from shareable
@@ -1019,7 +1033,6 @@ impl From<&Invitation> for ShareableInvitation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
     use aura_core::identifiers::{AuthorityId, ContextId};
@@ -1029,12 +1042,7 @@ mod tests {
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([seed + 100; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         authority_context
     }
 
@@ -1061,7 +1069,7 @@ mod tests {
             .unwrap();
 
         assert!(invitation.invitation_id.starts_with("inv-"));
-        assert_eq!(invitation.sender_id, authority_context.authority_id);
+        assert_eq!(invitation.sender_id, authority_context.authority_id());
         assert_eq!(invitation.receiver_id, receiver_id);
         assert_eq!(invitation.status, InvitationStatus::Pending);
         assert!(invitation.expires_at.is_some());
@@ -1136,12 +1144,7 @@ mod tests {
         let effects =
             Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
 
-        let mut authority_context = AuthorityContext::new(own_authority);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([120u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(own_authority);
 
         let handler = InvitationHandler::new(authority_context).unwrap();
 
@@ -1221,12 +1224,7 @@ mod tests {
         let effects =
             Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
 
-        let mut authority_context = AuthorityContext::new(own_authority);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([122u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(own_authority);
 
         let handler_import = InvitationHandler::new(authority_context.clone()).unwrap();
         let handler_accept = InvitationHandler::new(authority_context).unwrap();
@@ -1295,12 +1293,7 @@ mod tests {
         let effects =
             Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
 
-        let mut authority_context = AuthorityContext::new(own_authority);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([124u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(own_authority);
 
         // Handler 1: Create an invitation
         let handler_create = InvitationHandler::new(authority_context.clone()).unwrap();

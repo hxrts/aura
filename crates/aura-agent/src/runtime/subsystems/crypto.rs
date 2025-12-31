@@ -7,10 +7,9 @@
 //!
 //! ## Lock Usage
 //!
-//! Uses `parking_lot::Mutex` for `random_rng` because:
-//! - RNG operations are synchronous and brief
-//! - Never held across async boundaries
-//! - See `runtime/CONCURRENCY.md` for full rationale
+//! Uses a thread-local RNG in production to avoid contention, and a
+//! `parking_lot::Mutex`-backed deterministic RNG in tests/simulation.
+//! RNG operations are synchronous and never held across async boundaries.
 
 #![allow(clippy::disallowed_types)]
 
@@ -18,7 +17,68 @@ use aura_effects::{crypto::RealCryptoHandler, secure::RealSecureStorageHandler};
 use parking_lot::Mutex;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
+use std::cell::RefCell;
 use std::sync::Arc;
+
+thread_local! {
+    static THREAD_RNG: RefCell<StdRng> = RefCell::new(StdRng::from_entropy());
+}
+
+#[derive(Debug)]
+pub(crate) enum CryptoRng {
+    Deterministic(Mutex<StdRng>),
+    ThreadLocal,
+}
+
+impl CryptoRng {
+    pub(crate) fn deterministic(rng: StdRng) -> Self {
+        CryptoRng::Deterministic(Mutex::new(rng))
+    }
+
+    pub(crate) fn thread_local() -> Self {
+        CryptoRng::ThreadLocal
+    }
+
+    fn fill_bytes(&self, bytes: &mut [u8]) {
+        match self {
+            CryptoRng::Deterministic(rng) => {
+                let mut rng = rng.lock();
+                rng.fill_bytes(bytes);
+            }
+            CryptoRng::ThreadLocal => {
+                THREAD_RNG.with(|cell| {
+                    let mut rng = cell.borrow_mut();
+                    rng.fill_bytes(bytes);
+                });
+            }
+        }
+    }
+
+    fn next_u64(&self) -> u64 {
+        match self {
+            CryptoRng::Deterministic(rng) => {
+                let mut rng = rng.lock();
+                rng.next_u64()
+            }
+            CryptoRng::ThreadLocal => THREAD_RNG.with(|cell| {
+                let mut rng = cell.borrow_mut();
+                rng.next_u64()
+            }),
+        }
+    }
+}
+
+impl Clone for CryptoRng {
+    fn clone(&self) -> Self {
+        match self {
+            CryptoRng::Deterministic(rng) => {
+                let rng = rng.lock();
+                CryptoRng::Deterministic(Mutex::new(rng.clone()))
+            }
+            CryptoRng::ThreadLocal => CryptoRng::ThreadLocal,
+        }
+    }
+}
 
 /// Crypto subsystem grouping cryptographic operations and key management.
 ///
@@ -30,11 +90,10 @@ pub struct CryptoSubsystem {
     /// Core cryptographic handler for signing, verification, and key operations
     handler: RealCryptoHandler,
 
-    /// Cryptographically secure RNG for key generation and nonces
+    /// Cryptographically secure RNG for key generation and nonces.
     ///
-    /// Protected by parking_lot::Mutex for synchronous access.
-    /// Lock is never held across .await points.
-    rng: Mutex<StdRng>,
+    /// Production uses a thread-local RNG. Deterministic modes use a mutex-backed RNG.
+    rng: CryptoRng,
 
     /// Secure storage for key material (FROST keys, device keys)
     ///
@@ -48,7 +107,7 @@ impl CryptoSubsystem {
     pub fn new(base_path: std::path::PathBuf) -> Self {
         Self {
             handler: RealCryptoHandler::new(),
-            rng: Mutex::new(StdRng::from_entropy()),
+            rng: CryptoRng::thread_local(),
             secure_storage: Arc::new(RealSecureStorageHandler::with_base_path(base_path)),
         }
     }
@@ -58,7 +117,7 @@ impl CryptoSubsystem {
     pub fn seeded(seed: [u8; 32], base_path: std::path::PathBuf) -> Self {
         Self {
             handler: RealCryptoHandler::seeded(seed),
-            rng: Mutex::new(StdRng::from_seed(seed)),
+            rng: CryptoRng::deterministic(StdRng::from_seed(seed)),
             secure_storage: Arc::new(RealSecureStorageHandler::with_base_path(base_path)),
         }
     }
@@ -66,12 +125,12 @@ impl CryptoSubsystem {
     /// Create from existing components
     pub fn from_parts(
         handler: RealCryptoHandler,
-        rng: StdRng,
+        rng: CryptoRng,
         secure_storage: Arc<RealSecureStorageHandler>,
     ) -> Self {
         Self {
             handler,
-            rng: Mutex::new(rng),
+            rng,
             secure_storage,
         }
     }
@@ -96,34 +155,29 @@ impl CryptoSubsystem {
     ///
     /// This is the single point for random byte generation in the crypto subsystem.
     pub fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut rng = self.rng.lock();
         let mut bytes = vec![0u8; len];
-        rng.fill_bytes(&mut bytes);
+        self.rng.fill_bytes(&mut bytes);
         bytes
     }
 
     /// Generate a random u64
     pub fn random_u64(&self) -> u64 {
-        let mut rng = self.rng.lock();
-        rng.next_u64()
+        self.rng.next_u64()
     }
 
     /// Generate a random [u8; 32] array
     pub fn random_32_bytes(&self) -> [u8; 32] {
-        let mut rng = self.rng.lock();
         let mut bytes = [0u8; 32];
-        rng.fill_bytes(&mut bytes);
+        self.rng.fill_bytes(&mut bytes);
         bytes
     }
 }
 
 impl Clone for CryptoSubsystem {
     fn clone(&self) -> Self {
-        // Clone handler and secure_storage, but create new RNG from entropy
-        // since Mutex<StdRng> cannot be cloned and we shouldn't share RNG state
         Self {
             handler: self.handler.clone(),
-            rng: Mutex::new(StdRng::from_entropy()),
+            rng: self.rng.clone(),
             secure_storage: self.secure_storage.clone(),
         }
     }
@@ -133,7 +187,7 @@ impl std::fmt::Debug for CryptoSubsystem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CryptoSubsystem")
             .field("handler", &"<RealCryptoHandler>")
-            .field("rng", &"<Mutex<StdRng>>")
+            .field("rng", &format_args!("{:?}", self.rng))
             .field("secure_storage", &"<Arc<RealSecureStorageHandler>>")
             .finish()
     }

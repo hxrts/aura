@@ -3,6 +3,104 @@
 use aura_core::identifiers::{AuthorityId, ChannelId};
 use serde::{Deserialize, Serialize};
 
+// ============================================================================
+// Message Delivery Status
+// ============================================================================
+
+/// Message delivery status for tracking message lifecycle
+///
+/// Tracks the progression of a message from sending to read receipt.
+/// This is portable across all frontends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum MessageDeliveryStatus {
+    /// Message is being sent (not yet acknowledged)
+    Sending,
+    /// Message was sent and acknowledged by the network
+    #[default]
+    Sent,
+    /// Message was delivered to recipient's device (before read)
+    Delivered,
+    /// Message was read by the recipient
+    Read,
+    /// Message delivery failed (with retry available)
+    Failed,
+}
+
+impl MessageDeliveryStatus {
+    /// Get the status indicator character for display
+    #[must_use]
+    pub fn indicator(&self) -> &'static str {
+        match self {
+            Self::Sending => "⏳",   // Hourglass
+            Self::Sent => "✓",       // Single check (gray)
+            Self::Delivered => "✓✓", // Double check (gray)
+            Self::Read => "✓✓",      // Double check (blue) - color applied by frontend
+            Self::Failed => "✗",     // X mark
+        }
+    }
+
+    /// Get a short description for the status
+    #[must_use]
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Sending => "Sending...",
+            Self::Sent => "Sent",
+            Self::Delivered => "Delivered",
+            Self::Read => "Read",
+            Self::Failed => "Failed",
+        }
+    }
+
+    /// Get a lowercase label for logging/serialization
+    #[must_use]
+    pub fn label_lowercase(&self) -> &'static str {
+        match self {
+            Self::Sending => "sending",
+            Self::Sent => "sent",
+            Self::Delivered => "delivered",
+            Self::Read => "read",
+            Self::Failed => "failed",
+        }
+    }
+
+    /// Whether the message has reached the recipient's device
+    #[must_use]
+    pub fn is_delivered(&self) -> bool {
+        matches!(self, Self::Delivered | Self::Read)
+    }
+
+    /// Whether the message has been read by the recipient
+    #[must_use]
+    pub fn is_read(&self) -> bool {
+        matches!(self, Self::Read)
+    }
+
+    /// Whether the message is still pending (not yet confirmed delivered)
+    #[must_use]
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Self::Sending | Self::Sent)
+    }
+
+    /// Whether the message failed to send
+    #[must_use]
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed)
+    }
+
+    /// Whether the message can be retried (only failed messages)
+    #[must_use]
+    pub fn can_retry(&self) -> bool {
+        matches!(self, Self::Failed)
+    }
+
+    /// Whether the message has been successfully sent (any non-failed, non-sending state)
+    #[must_use]
+    pub fn is_sent(&self) -> bool {
+        matches!(self, Self::Sent | Self::Delivered | Self::Read)
+    }
+}
+
 /// Type of channel
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
@@ -275,5 +373,94 @@ impl ChatState {
     /// Remove a message by ID
     pub fn remove_message(&mut self, message_id: &str) {
         self.messages.retain(|m| m.id != message_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_delivery_status_indicators() {
+        assert_eq!(MessageDeliveryStatus::Sending.indicator(), "⏳");
+        assert_eq!(MessageDeliveryStatus::Sent.indicator(), "✓");
+        assert_eq!(MessageDeliveryStatus::Delivered.indicator(), "✓✓");
+        assert_eq!(MessageDeliveryStatus::Read.indicator(), "✓✓");
+        assert_eq!(MessageDeliveryStatus::Failed.indicator(), "✗");
+    }
+
+    #[test]
+    fn test_delivery_status_descriptions() {
+        assert_eq!(MessageDeliveryStatus::Sending.description(), "Sending...");
+        assert_eq!(MessageDeliveryStatus::Sent.description(), "Sent");
+        assert_eq!(MessageDeliveryStatus::Delivered.description(), "Delivered");
+        assert_eq!(MessageDeliveryStatus::Read.description(), "Read");
+        assert_eq!(MessageDeliveryStatus::Failed.description(), "Failed");
+    }
+
+    #[test]
+    fn test_is_delivered() {
+        assert!(!MessageDeliveryStatus::Sending.is_delivered());
+        assert!(!MessageDeliveryStatus::Sent.is_delivered());
+        assert!(MessageDeliveryStatus::Delivered.is_delivered());
+        assert!(MessageDeliveryStatus::Read.is_delivered());
+        assert!(!MessageDeliveryStatus::Failed.is_delivered());
+    }
+
+    #[test]
+    fn test_is_read() {
+        assert!(!MessageDeliveryStatus::Sending.is_read());
+        assert!(!MessageDeliveryStatus::Sent.is_read());
+        assert!(!MessageDeliveryStatus::Delivered.is_read());
+        assert!(MessageDeliveryStatus::Read.is_read());
+        assert!(!MessageDeliveryStatus::Failed.is_read());
+    }
+
+    #[test]
+    fn test_is_pending() {
+        assert!(MessageDeliveryStatus::Sending.is_pending());
+        assert!(MessageDeliveryStatus::Sent.is_pending());
+        assert!(!MessageDeliveryStatus::Delivered.is_pending());
+        assert!(!MessageDeliveryStatus::Read.is_pending());
+        assert!(!MessageDeliveryStatus::Failed.is_pending());
+    }
+
+    #[test]
+    fn test_is_failed() {
+        assert!(!MessageDeliveryStatus::Sending.is_failed());
+        assert!(!MessageDeliveryStatus::Sent.is_failed());
+        assert!(!MessageDeliveryStatus::Delivered.is_failed());
+        assert!(!MessageDeliveryStatus::Read.is_failed());
+        assert!(MessageDeliveryStatus::Failed.is_failed());
+    }
+
+    #[test]
+    fn test_can_retry() {
+        assert!(!MessageDeliveryStatus::Sending.can_retry());
+        assert!(!MessageDeliveryStatus::Sent.can_retry());
+        assert!(!MessageDeliveryStatus::Delivered.can_retry());
+        assert!(!MessageDeliveryStatus::Read.can_retry());
+        assert!(MessageDeliveryStatus::Failed.can_retry());
+    }
+
+    #[test]
+    fn test_is_sent() {
+        assert!(!MessageDeliveryStatus::Sending.is_sent());
+        assert!(MessageDeliveryStatus::Sent.is_sent());
+        assert!(MessageDeliveryStatus::Delivered.is_sent());
+        assert!(MessageDeliveryStatus::Read.is_sent());
+        assert!(!MessageDeliveryStatus::Failed.is_sent());
+    }
+
+    #[test]
+    fn test_delivery_status_labels() {
+        assert_eq!(MessageDeliveryStatus::Sending.label_lowercase(), "sending");
+        assert_eq!(MessageDeliveryStatus::Sent.label_lowercase(), "sent");
+        assert_eq!(
+            MessageDeliveryStatus::Delivered.label_lowercase(),
+            "delivered"
+        );
+        assert_eq!(MessageDeliveryStatus::Read.label_lowercase(), "read");
+        assert_eq!(MessageDeliveryStatus::Failed.label_lowercase(), "failed");
     }
 }

@@ -13,8 +13,63 @@
 #![allow(clippy::disallowed_types)]
 
 use aura_core::effects::ExecutionMode;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::sync::{Arc, RwLock};
+
+use super::executor::EffectHandler;
+
+/// Typed effect categories for registry keys.
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub enum EffectType {
+    Crypto,
+    Storage,
+    Transport,
+    Journal,
+}
+
+impl EffectType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EffectType::Crypto => "crypto",
+            EffectType::Storage => "storage",
+            EffectType::Transport => "transport",
+            EffectType::Journal => "journal",
+        }
+    }
+}
+
+impl fmt::Display for EffectType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Typed operation identifier for registry keys.
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct EffectOperation(&'static str);
+
+impl EffectOperation {
+    pub const fn new(name: &'static str) -> Self {
+        Self(name)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl fmt::Display for EffectOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl From<&'static str> for EffectOperation {
+    fn from(value: &'static str) -> Self {
+        Self(value)
+    }
+}
 
 /// Dynamic registry for effect handlers
 #[derive(Debug)]
@@ -32,11 +87,37 @@ impl EffectRegistry {
         }
     }
 
+    /// Register a typed effect handler for dynamic dispatch.
+    pub fn register_effect_handler<T, H>(
+        &self,
+        effect_type: EffectType,
+        operation: EffectOperation,
+        handler: H,
+    ) -> Result<(), EffectRegistryError>
+    where
+        T: Send + Sync + 'static,
+        H: EffectHandler<T> + 'static,
+    {
+        let handler: Arc<dyn EffectHandler<T>> = Arc::new(handler);
+        self.register(effect_type, operation, handler)
+    }
+
+    /// Retrieve a typed effect handler for dynamic dispatch.
+    pub fn get_effect_handler<T: Send + Sync + 'static>(
+        &self,
+        effect_type: EffectType,
+        operation: EffectOperation,
+    ) -> Result<Option<Arc<dyn EffectHandler<T>>>, EffectRegistryError> {
+        Ok(self
+            .get::<Arc<dyn EffectHandler<T>>>(effect_type, operation)?
+            .map(|handler| handler.as_ref().clone()))
+    }
+
     /// Register an effect handler
     pub fn register<T: Send + Sync + 'static>(
         &self,
-        effect_type: String,
-        operation: String,
+        effect_type: EffectType,
+        operation: EffectOperation,
         handler: T,
     ) -> Result<(), EffectRegistryError> {
         let key = EffectKey::new(effect_type, operation);
@@ -53,10 +134,10 @@ impl EffectRegistry {
     /// Get an effect handler
     pub fn get<T: Send + Sync + 'static>(
         &self,
-        effect_type: &str,
-        operation: &str,
+        effect_type: EffectType,
+        operation: EffectOperation,
     ) -> Result<Option<Arc<T>>, EffectRegistryError> {
-        let key = EffectKey::new(effect_type.to_string(), operation.to_string());
+        let key = EffectKey::new(effect_type, operation);
 
         let handlers = self
             .handlers
@@ -69,8 +150,8 @@ impl EffectRegistry {
     }
 
     /// Check if an effect handler is registered
-    pub fn has_handler(&self, effect_type: &str, operation: &str) -> bool {
-        let key = EffectKey::new(effect_type.to_string(), operation.to_string());
+    pub fn has_handler(&self, effect_type: EffectType, operation: EffectOperation) -> bool {
+        let key = EffectKey::new(effect_type, operation);
 
         self.handlers
             .read()
@@ -79,14 +160,14 @@ impl EffectRegistry {
     }
 
     /// Get all registered effect types
-    pub fn effect_types(&self) -> Vec<String> {
+    pub fn effect_types(&self) -> Vec<EffectType> {
         self.handlers
             .read()
             .map(|handlers| {
                 handlers
                     .keys()
-                    .map(|key| key.effect_type.clone())
-                    .collect::<std::collections::HashSet<_>>()
+                    .map(|key| key.effect_type)
+                    .collect::<HashSet<_>>()
                     .into_iter()
                     .collect()
             })
@@ -94,14 +175,14 @@ impl EffectRegistry {
     }
 
     /// Get operations for an effect type
-    pub fn operations(&self, effect_type: &str) -> Vec<String> {
+    pub fn operations(&self, effect_type: EffectType) -> Vec<EffectOperation> {
         self.handlers
             .read()
             .map(|handlers| {
                 handlers
                     .keys()
                     .filter(|key| key.effect_type == effect_type)
-                    .map(|key| key.operation.clone())
+                    .map(|key| key.operation)
                     .collect()
             })
             .unwrap_or_default()
@@ -136,12 +217,12 @@ impl Clone for EffectRegistry {
 /// Key for indexing effect handlers
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 struct EffectKey {
-    effect_type: String,
-    operation: String,
+    effect_type: EffectType,
+    operation: EffectOperation,
 }
 
 impl EffectKey {
-    fn new(effect_type: String, operation: String) -> Self {
+    fn new(effect_type: EffectType, operation: EffectOperation) -> Self {
         Self {
             effect_type,
             operation,
@@ -156,8 +237,8 @@ pub enum EffectRegistryError {
     LockError,
     #[error("Handler not found: {effect_type}.{operation}")]
     HandlerNotFound {
-        effect_type: String,
-        operation: String,
+        effect_type: EffectType,
+        operation: EffectOperation,
     },
     #[error("Handler type mismatch")]
     TypeMismatch,
@@ -170,28 +251,28 @@ pub trait EffectRegistryExt {
     /// Register a crypto handler
     fn register_crypto_handler<T: Send + Sync + 'static>(
         &self,
-        operation: &str,
+        operation: EffectOperation,
         handler: T,
     ) -> Result<(), EffectRegistryError>;
 
     /// Register a storage handler
     fn register_storage_handler<T: Send + Sync + 'static>(
         &self,
-        operation: &str,
+        operation: EffectOperation,
         handler: T,
     ) -> Result<(), EffectRegistryError>;
 
     /// Register a transport handler
     fn register_transport_handler<T: Send + Sync + 'static>(
         &self,
-        operation: &str,
+        operation: EffectOperation,
         handler: T,
     ) -> Result<(), EffectRegistryError>;
 
     /// Register a journal handler
     fn register_journal_handler<T: Send + Sync + 'static>(
         &self,
-        operation: &str,
+        operation: EffectOperation,
         handler: T,
     ) -> Result<(), EffectRegistryError>;
 }
@@ -199,33 +280,33 @@ pub trait EffectRegistryExt {
 impl EffectRegistryExt for EffectRegistry {
     fn register_crypto_handler<T: Send + Sync + 'static>(
         &self,
-        operation: &str,
+        operation: EffectOperation,
         handler: T,
     ) -> Result<(), EffectRegistryError> {
-        self.register("crypto".to_string(), operation.to_string(), handler)
+        self.register(EffectType::Crypto, operation, handler)
     }
 
     fn register_storage_handler<T: Send + Sync + 'static>(
         &self,
-        operation: &str,
+        operation: EffectOperation,
         handler: T,
     ) -> Result<(), EffectRegistryError> {
-        self.register("storage".to_string(), operation.to_string(), handler)
+        self.register(EffectType::Storage, operation, handler)
     }
 
     fn register_transport_handler<T: Send + Sync + 'static>(
         &self,
-        operation: &str,
+        operation: EffectOperation,
         handler: T,
     ) -> Result<(), EffectRegistryError> {
-        self.register("transport".to_string(), operation.to_string(), handler)
+        self.register(EffectType::Transport, operation, handler)
     }
 
     fn register_journal_handler<T: Send + Sync + 'static>(
         &self,
-        operation: &str,
+        operation: EffectOperation,
         handler: T,
     ) -> Result<(), EffectRegistryError> {
-        self.register("journal".to_string(), operation.to_string(), handler)
+        self.register(EffectType::Journal, operation, handler)
     }
 }

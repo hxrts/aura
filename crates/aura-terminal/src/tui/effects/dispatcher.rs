@@ -86,7 +86,7 @@ impl std::fmt::Display for DispatchError {
                 write!(
                     f,
                     "Permission denied: requires '{}' capability",
-                    required.as_str()
+                    required.as_biscuit_capability()
                 )
             }
             Self::NotFound { resource } => write!(f, "Not found: {resource}"),

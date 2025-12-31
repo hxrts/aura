@@ -3,6 +3,205 @@
 use aura_core::identifiers::{AuthorityId, ContextId};
 use serde::{Deserialize, Serialize};
 
+// ============================================================================
+// Ceremony Progress Tracking
+// ============================================================================
+
+/// General ceremony progress tracking for threshold-based ceremonies.
+///
+/// This is a portable type for tracking progress of any threshold ceremony:
+/// - Guardian setup ceremonies
+/// - Key rotation ceremonies
+/// - MFA device ceremonies
+/// - Recovery ceremonies
+///
+/// The TUI's `KeyRotationCeremonyUiState` can convert to/from this type.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct CeremonyProgress {
+    /// Number of participants who have accepted/approved
+    pub accepted_count: u32,
+    /// Total number of participants
+    pub total_count: u32,
+    /// Threshold required for completion (M of N)
+    pub threshold: u32,
+}
+
+impl CeremonyProgress {
+    /// Create a new ceremony progress tracker
+    #[must_use]
+    pub fn new(accepted_count: u32, total_count: u32, threshold: u32) -> Self {
+        Self {
+            accepted_count,
+            total_count,
+            threshold,
+        }
+    }
+
+    /// Check if the threshold has been met
+    #[must_use]
+    pub fn is_threshold_met(&self) -> bool {
+        self.accepted_count >= self.threshold
+    }
+
+    /// Get progress as a fraction (0.0 to 1.0) towards threshold
+    ///
+    /// Returns 1.0 if threshold is 0 (no approvals required).
+    #[must_use]
+    pub fn progress_fraction(&self) -> f64 {
+        if self.threshold == 0 {
+            return 1.0;
+        }
+        f64::from(self.accepted_count) / f64::from(self.threshold)
+    }
+
+    /// Get progress as a percentage (0-100)
+    #[must_use]
+    pub fn progress_percentage(&self) -> u32 {
+        if self.threshold == 0 {
+            return 100;
+        }
+        ((self.accepted_count * 100) / self.threshold).min(100)
+    }
+
+    /// Get the number of additional approvals needed
+    #[must_use]
+    pub fn approvals_needed(&self) -> u32 {
+        self.threshold.saturating_sub(self.accepted_count)
+    }
+
+    /// Check if the ceremony can proceed (threshold met)
+    #[must_use]
+    pub fn can_complete(&self) -> bool {
+        self.is_threshold_met()
+    }
+
+    /// Get a human-readable status string
+    #[must_use]
+    pub fn status_text(&self) -> String {
+        if self.is_threshold_met() {
+            format!("{}/{} (ready)", self.accepted_count, self.threshold)
+        } else {
+            format!(
+                "{}/{} ({} more needed)",
+                self.accepted_count,
+                self.threshold,
+                self.approvals_needed()
+            )
+        }
+    }
+
+    /// Record an additional acceptance
+    pub fn record_acceptance(&mut self) {
+        self.accepted_count = self.accepted_count.saturating_add(1);
+    }
+}
+
+// ============================================================================
+// Security Level Classification
+// ============================================================================
+
+/// Security level classification for guardian threshold configurations.
+///
+/// Helps users understand the security implications of their threshold choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum SecurityLevel {
+    /// No guardians configured
+    #[default]
+    None,
+    /// k=1: Any single guardian can recover (least secure)
+    Low,
+    /// k < majority: Less than half required
+    Medium,
+    /// k >= majority: More than half required
+    High,
+    /// k=n: All guardians required (most secure)
+    Maximum,
+}
+
+impl SecurityLevel {
+    /// Get a human-readable description of this security level.
+    #[must_use]
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::None => "No guardians configured yet",
+            Self::Low => "Low security: Any single guardian can recover",
+            Self::Medium => "Medium security: Less than majority required",
+            Self::High => "High security: Majority required",
+            Self::Maximum => "Maximum security: All guardians required",
+        }
+    }
+
+    /// Get a short label for this security level.
+    #[must_use]
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Low => "Low",
+            Self::Medium => "Medium",
+            Self::High => "High",
+            Self::Maximum => "Maximum",
+        }
+    }
+
+    /// Check if this security level is considered safe for production use.
+    ///
+    /// Low security (k=1) is generally not recommended for production.
+    #[must_use]
+    pub fn is_recommended(&self) -> bool {
+        matches!(self, Self::Medium | Self::High | Self::Maximum)
+    }
+}
+
+/// Classify the security level of a guardian threshold configuration.
+///
+/// # Arguments
+/// * `threshold` - Required number of guardians (k)
+/// * `guardian_count` - Total number of guardians (n)
+///
+/// # Returns
+/// The appropriate security level classification.
+///
+/// # Examples
+/// ```rust
+/// use aura_app::views::recovery::{classify_threshold_security, SecurityLevel};
+///
+/// assert_eq!(classify_threshold_security(0, 0), SecurityLevel::None);
+/// assert_eq!(classify_threshold_security(1, 3), SecurityLevel::Low);
+/// assert_eq!(classify_threshold_security(2, 5), SecurityLevel::Medium);
+/// assert_eq!(classify_threshold_security(3, 5), SecurityLevel::High);
+/// assert_eq!(classify_threshold_security(5, 5), SecurityLevel::Maximum);
+/// ```
+#[must_use]
+pub fn classify_threshold_security(threshold: u32, guardian_count: u32) -> SecurityLevel {
+    if guardian_count == 0 {
+        SecurityLevel::None
+    } else if threshold == guardian_count {
+        // Check k=n first (Maximum takes precedence over Low for 1-of-1)
+        SecurityLevel::Maximum
+    } else if threshold == 1 {
+        SecurityLevel::Low
+    } else {
+        let majority = (guardian_count / 2) + 1;
+        if threshold >= majority {
+            SecurityLevel::High
+        } else {
+            SecurityLevel::Medium
+        }
+    }
+}
+
+/// Get a formatted security hint for a threshold configuration.
+///
+/// Convenience function that returns the description string directly.
+#[must_use]
+pub fn security_level_hint(threshold: u32, guardian_count: u32) -> String {
+    classify_threshold_security(threshold, guardian_count)
+        .description()
+        .to_string()
+}
+
 /// Guardian status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
@@ -384,6 +583,59 @@ impl RecoveryState {
     }
 }
 
+// ============================================================================
+// Recovery Status Formatting
+// ============================================================================
+
+/// Format a recovery status report from journal fact keys.
+///
+/// Produces a human-readable summary of active and completed recovery sessions,
+/// suitable for CLI output or logging.
+///
+/// # Arguments
+/// * `active` - List of active recovery session identifiers
+/// * `completed` - List of completed recovery session identifiers
+///
+/// # Returns
+/// A formatted multi-line string summarizing recovery status.
+///
+/// # Example
+/// ```rust
+/// use aura_app::views::recovery::format_recovery_status;
+///
+/// let active = vec!["session-1".to_string(), "session-2".to_string()];
+/// let completed = vec!["old-session".to_string()];
+/// let report = format_recovery_status(&active, &completed);
+///
+/// assert!(report.contains("Found 2 active recovery session(s)"));
+/// assert!(report.contains("session-1"));
+/// assert!(report.contains("Completed recovery sessions (1)"));
+/// ```
+#[must_use]
+pub fn format_recovery_status(active: &[String], completed: &[String]) -> String {
+    use std::fmt::Write;
+
+    let mut output = String::new();
+
+    if active.is_empty() {
+        let _ = writeln!(output, "No active recovery sessions found.");
+    } else {
+        let _ = writeln!(output, "Found {} active recovery session(s):", active.len());
+        for (idx, key) in active.iter().enumerate() {
+            let _ = writeln!(output, "  {}. {}", idx + 1, key);
+        }
+    }
+
+    if !completed.is_empty() {
+        let _ = writeln!(output, "Completed recovery sessions ({}):", completed.len());
+        for key in completed {
+            let _ = writeln!(output, "  - {key}");
+        }
+    }
+
+    output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,5 +845,239 @@ mod tests {
         let binding = state.guardian_binding_for(&account);
         assert!(binding.is_some());
         assert_eq!(binding.unwrap().context_id, context);
+    }
+
+    // === CeremonyProgress Tests ===
+
+    #[test]
+    fn test_ceremony_progress_new() {
+        let progress = CeremonyProgress::new(1, 3, 2);
+        assert_eq!(progress.accepted_count, 1);
+        assert_eq!(progress.total_count, 3);
+        assert_eq!(progress.threshold, 2);
+    }
+
+    #[test]
+    fn test_ceremony_is_threshold_met_false() {
+        let progress = CeremonyProgress::new(1, 3, 2);
+        assert!(!progress.is_threshold_met());
+    }
+
+    #[test]
+    fn test_ceremony_is_threshold_met_true() {
+        let progress = CeremonyProgress::new(2, 3, 2);
+        assert!(progress.is_threshold_met());
+    }
+
+    #[test]
+    fn test_ceremony_is_threshold_met_exceeds() {
+        let progress = CeremonyProgress::new(3, 3, 2);
+        assert!(progress.is_threshold_met());
+    }
+
+    #[test]
+    fn test_ceremony_progress_fraction_zero() {
+        let progress = CeremonyProgress::new(0, 3, 2);
+        assert_eq!(progress.progress_fraction(), 0.0);
+    }
+
+    #[test]
+    fn test_ceremony_progress_fraction_half() {
+        let progress = CeremonyProgress::new(1, 3, 2);
+        assert_eq!(progress.progress_fraction(), 0.5);
+    }
+
+    #[test]
+    fn test_ceremony_progress_fraction_complete() {
+        let progress = CeremonyProgress::new(2, 3, 2);
+        assert_eq!(progress.progress_fraction(), 1.0);
+    }
+
+    #[test]
+    fn test_ceremony_progress_fraction_zero_threshold() {
+        let progress = CeremonyProgress::new(0, 0, 0);
+        assert_eq!(progress.progress_fraction(), 1.0);
+    }
+
+    #[test]
+    fn test_ceremony_progress_percentage() {
+        assert_eq!(CeremonyProgress::new(0, 3, 2).progress_percentage(), 0);
+        assert_eq!(CeremonyProgress::new(1, 3, 2).progress_percentage(), 50);
+        assert_eq!(CeremonyProgress::new(2, 3, 2).progress_percentage(), 100);
+        assert_eq!(CeremonyProgress::new(3, 3, 2).progress_percentage(), 100); // capped
+    }
+
+    #[test]
+    fn test_ceremony_approvals_needed() {
+        assert_eq!(CeremonyProgress::new(0, 3, 2).approvals_needed(), 2);
+        assert_eq!(CeremonyProgress::new(1, 3, 2).approvals_needed(), 1);
+        assert_eq!(CeremonyProgress::new(2, 3, 2).approvals_needed(), 0);
+        assert_eq!(CeremonyProgress::new(3, 3, 2).approvals_needed(), 0); // saturates
+    }
+
+    #[test]
+    fn test_ceremony_can_complete() {
+        assert!(!CeremonyProgress::new(1, 3, 2).can_complete());
+        assert!(CeremonyProgress::new(2, 3, 2).can_complete());
+    }
+
+    #[test]
+    fn test_ceremony_status_text() {
+        assert_eq!(
+            CeremonyProgress::new(1, 3, 2).status_text(),
+            "1/2 (1 more needed)"
+        );
+        assert_eq!(
+            CeremonyProgress::new(2, 3, 2).status_text(),
+            "2/2 (ready)"
+        );
+    }
+
+    #[test]
+    fn test_ceremony_record_acceptance() {
+        let mut progress = CeremonyProgress::new(0, 3, 2);
+        assert_eq!(progress.accepted_count, 0);
+
+        progress.record_acceptance();
+        assert_eq!(progress.accepted_count, 1);
+
+        progress.record_acceptance();
+        assert_eq!(progress.accepted_count, 2);
+        assert!(progress.is_threshold_met());
+    }
+
+    // ========================================================================
+    // Security Level Tests
+    // ========================================================================
+
+    #[test]
+    fn test_security_level_none() {
+        assert_eq!(classify_threshold_security(0, 0), SecurityLevel::None);
+        assert_eq!(classify_threshold_security(1, 0), SecurityLevel::None);
+    }
+
+    #[test]
+    fn test_security_level_low() {
+        assert_eq!(classify_threshold_security(1, 3), SecurityLevel::Low);
+        assert_eq!(classify_threshold_security(1, 5), SecurityLevel::Low);
+        assert_eq!(classify_threshold_security(1, 1), SecurityLevel::Maximum); // k=n case
+    }
+
+    #[test]
+    fn test_security_level_medium() {
+        // Less than majority required
+        assert_eq!(classify_threshold_security(2, 5), SecurityLevel::Medium);
+        assert_eq!(classify_threshold_security(2, 6), SecurityLevel::Medium);
+    }
+
+    #[test]
+    fn test_security_level_high() {
+        // Majority or more required (but not all)
+        assert_eq!(classify_threshold_security(3, 5), SecurityLevel::High);
+        assert_eq!(classify_threshold_security(4, 5), SecurityLevel::High);
+        assert_eq!(classify_threshold_security(2, 3), SecurityLevel::High);
+    }
+
+    #[test]
+    fn test_security_level_maximum() {
+        assert_eq!(classify_threshold_security(3, 3), SecurityLevel::Maximum);
+        assert_eq!(classify_threshold_security(5, 5), SecurityLevel::Maximum);
+    }
+
+    #[test]
+    fn test_security_level_description() {
+        assert_eq!(
+            SecurityLevel::None.description(),
+            "No guardians configured yet"
+        );
+        assert_eq!(
+            SecurityLevel::Low.description(),
+            "Low security: Any single guardian can recover"
+        );
+        assert_eq!(
+            SecurityLevel::Medium.description(),
+            "Medium security: Less than majority required"
+        );
+        assert_eq!(
+            SecurityLevel::High.description(),
+            "High security: Majority required"
+        );
+        assert_eq!(
+            SecurityLevel::Maximum.description(),
+            "Maximum security: All guardians required"
+        );
+    }
+
+    #[test]
+    fn test_security_level_label() {
+        assert_eq!(SecurityLevel::None.label(), "None");
+        assert_eq!(SecurityLevel::Low.label(), "Low");
+        assert_eq!(SecurityLevel::Medium.label(), "Medium");
+        assert_eq!(SecurityLevel::High.label(), "High");
+        assert_eq!(SecurityLevel::Maximum.label(), "Maximum");
+    }
+
+    #[test]
+    fn test_security_level_is_recommended() {
+        assert!(!SecurityLevel::None.is_recommended());
+        assert!(!SecurityLevel::Low.is_recommended());
+        assert!(SecurityLevel::Medium.is_recommended());
+        assert!(SecurityLevel::High.is_recommended());
+        assert!(SecurityLevel::Maximum.is_recommended());
+    }
+
+    #[test]
+    fn test_security_level_hint() {
+        assert_eq!(
+            security_level_hint(2, 3),
+            "High security: Majority required"
+        );
+        assert_eq!(
+            security_level_hint(1, 3),
+            "Low security: Any single guardian can recover"
+        );
+    }
+
+    // === format_recovery_status Tests ===
+
+    #[test]
+    fn test_format_recovery_status_no_sessions() {
+        let result = format_recovery_status(&[], &[]);
+        assert!(result.contains("No active recovery sessions found."));
+        assert!(!result.contains("Completed"));
+    }
+
+    #[test]
+    fn test_format_recovery_status_active_only() {
+        let active = vec!["session-1".to_string(), "session-2".to_string()];
+        let result = format_recovery_status(&active, &[]);
+
+        assert!(result.contains("Found 2 active recovery session(s):"));
+        assert!(result.contains("1. session-1"));
+        assert!(result.contains("2. session-2"));
+        assert!(!result.contains("Completed"));
+    }
+
+    #[test]
+    fn test_format_recovery_status_completed_only() {
+        let completed = vec!["old-session".to_string()];
+        let result = format_recovery_status(&[], &completed);
+
+        assert!(result.contains("No active recovery sessions found."));
+        assert!(result.contains("Completed recovery sessions (1):"));
+        assert!(result.contains("- old-session"));
+    }
+
+    #[test]
+    fn test_format_recovery_status_mixed() {
+        let active = vec!["active-1".to_string()];
+        let completed = vec!["done-1".to_string(), "done-2".to_string()];
+        let result = format_recovery_status(&active, &completed);
+
+        assert!(result.contains("Found 1 active recovery session(s):"));
+        assert!(result.contains("1. active-1"));
+        assert!(result.contains("Completed recovery sessions (2):"));
+        assert!(result.contains("- done-1"));
+        assert!(result.contains("- done-2"));
     }
 }

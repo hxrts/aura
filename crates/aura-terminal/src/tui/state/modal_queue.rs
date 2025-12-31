@@ -13,8 +13,13 @@ use super::views::{
     ImportInvitationModalState, InvitationCodeModalState, NicknameModalState, TopicModalState,
 };
 
-/// Hard cap on pending modals to avoid unbounded growth if callers enqueue repeatedly.
-const MAX_PENDING_MODALS: usize = 64;
+// Re-export portable modal queue constants and types from aura-app
+pub use aura_app::ui::types::{
+    modal_can_user_dismiss, should_interrupt_modal, ModalPriority, MAX_PENDING_MODALS,
+};
+
+// Use the portable constant from aura-app
+use aura_app::ui::types::MAX_PENDING_MODALS as PORTABLE_MAX_PENDING;
 
 /// Unified modal enum - ALL modals MUST be one of these variants.
 ///
@@ -233,7 +238,8 @@ impl ModalQueue {
         if self.active.is_none() {
             self.active = Some(modal);
         } else {
-            if self.pending.len() >= MAX_PENDING_MODALS {
+            // Use portable constant from aura-app
+            if self.pending.len() >= PORTABLE_MAX_PENDING {
                 // Drop the oldest pending modal to keep memory bounded.
                 let _ = self.pending.pop_front();
             }

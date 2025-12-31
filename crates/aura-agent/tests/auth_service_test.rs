@@ -1,6 +1,6 @@
 //! Authentication Service Integration Tests
 //!
-//! Tests for the AuthService public API exposed through AuraAgent.
+//! Tests for the AuthServiceApi public API exposed through AuraAgent.
 
 use aura_agent::{AgentBuilder, AuthMethod, AuthorityId, EffectContext, ExecutionMode};
 use aura_core::hash::hash;

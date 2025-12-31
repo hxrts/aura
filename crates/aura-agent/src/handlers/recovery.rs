@@ -148,6 +148,7 @@ struct ActiveRecovery {
 }
 
 /// Recovery handler
+#[derive(Clone)]
 pub struct RecoveryHandler {
     context: HandlerContext,
     /// Active recovery ceremonies
@@ -201,7 +202,7 @@ impl RecoveryHandler {
             let guard = create_send_guard(
                 "recovery:initiate".to_string(),
                 self.context.effect_context.context_id(),
-                self.context.authority.authority_id,
+                self.context.authority.authority_id(),
                 100, // Higher cost for recovery operations
             );
             let result = guard
@@ -224,7 +225,7 @@ impl RecoveryHandler {
 
         let request = RecoveryRequest {
             recovery_id: recovery_id.clone(),
-            account_authority: self.context.authority.authority_id,
+            account_authority: self.context.authority.authority_id(),
             operation,
             justification,
             guardians: guardians.clone(),
@@ -241,7 +242,7 @@ impl RecoveryHandler {
             "recovery_initiated",
             &serde_json::json!({
                 "recovery_id": recovery_id,
-                "account_authority": self.context.authority.authority_id,
+                "account_authority": self.context.authority.authority_id(),
                 "guardians": guardians,
                 "threshold": threshold,
                 "requested_at": current_time,
@@ -281,7 +282,7 @@ impl RecoveryHandler {
             let guard = create_send_guard(
                 "recovery:approve".to_string(),
                 self.context.effect_context.context_id(),
-                self.context.authority.authority_id,
+                self.context.authority.authority_id(),
                 50,
             );
             let result = guard
@@ -386,7 +387,7 @@ impl RecoveryHandler {
             let guard = create_send_guard(
                 "recovery:complete".to_string(),
                 self.context.effect_context.context_id(),
-                self.context.authority.authority_id,
+                self.context.authority.authority_id(),
                 100,
             );
             let result = guard
@@ -468,7 +469,7 @@ impl RecoveryHandler {
             let guard = create_send_guard(
                 "recovery:cancel".to_string(),
                 self.context.effect_context.context_id(),
-                self.context.authority.authority_id,
+                self.context.authority.authority_id(),
                 30,
             );
             let result = guard
@@ -555,19 +556,13 @@ impl RecoveryHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
     use aura_core::identifiers::ContextId;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([seed + 100; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         authority_context
     }
 

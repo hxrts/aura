@@ -13,15 +13,22 @@ use aura_core::effects::RandomCoreEffects;
 use aura_core::identifiers::AuthorityId;
 use std::sync::Arc;
 
-/// Recovery service
+/// Recovery service API
 ///
 /// Provides recovery operations through a clean public API.
-pub struct RecoveryService {
+#[derive(Clone)]
+pub struct RecoveryServiceApi {
     handler: RecoveryHandler,
     effects: Arc<AuraEffectSystem>,
 }
 
-impl RecoveryService {
+impl std::fmt::Debug for RecoveryServiceApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RecoveryServiceApi").finish_non_exhaustive()
+    }
+}
+
+impl RecoveryServiceApi {
     /// Create a new recovery service
     pub fn new(
         effects: Arc<AuraEffectSystem>,
@@ -282,7 +289,7 @@ impl RecoveryService {
         }
 
         // Get effect system read lock
-        let authority_id = self.handler.authority_context().authority_id;
+        let authority_id = self.handler.authority_context().authority_id();
 
         let participants: Vec<aura_core::threshold::ParticipantIdentity> = guardian_ids
             .iter()
@@ -317,16 +324,15 @@ impl RecoveryService {
     /// Call this after all guardians have accepted and stored their key shares.
     /// This makes the new epoch authoritative.
     pub async fn commit_guardian_keys(&self, new_epoch: u64) -> AgentResult<()> {
-        use crate::core::AgentError;
+        use crate::core::{default_context_id_for_authority, AgentError};
         use aura_core::effects::ThresholdSigningEffects;
-        use aura_core::hash;
         use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
         use aura_core::ContextId;
 
-        let authority_id = self.handler.authority_context().authority_id;
+        let authority_id = self.handler.authority_context().authority_id();
         let policy = policy_for(CeremonyFlow::GuardianSetupRotation);
         if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
-            let context_id = ContextId::new_from_entropy(hash::hash(&authority_id.to_bytes()));
+            let context_id = default_context_id_for_authority(authority_id);
             let has_commit = self
                 .effects
                 .has_dkg_transcript_commit(authority_id, context_id, new_epoch)
@@ -363,7 +369,7 @@ impl RecoveryService {
         use crate::core::AgentError;
         use aura_core::effects::ThresholdSigningEffects;
 
-        let authority_id = self.handler.authority_context().authority_id;
+        let authority_id = self.handler.authority_context().authority_id();
 
         self.effects
             .rollback_key_rotation(&authority_id, failed_epoch)
@@ -435,7 +441,7 @@ impl RecoveryService {
         );
 
         // Get our authority context for source
-        let initiator_id = self.handler.authority_context().authority_id;
+        let initiator_id = self.handler.authority_context().authority_id();
 
         // Create a context ID for guardian ceremonies
         // Use a deterministic derivation from initiator + ceremony ID
@@ -554,19 +560,12 @@ impl RecoveryService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
     use aura_core::identifiers::ContextId;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([seed.wrapping_add(100); 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
-        authority_context
+        AuthorityContext::new(authority_id)
     }
 
     #[tokio::test]
@@ -575,7 +574,7 @@ mod tests {
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
-        let service = RecoveryService::new(effects, authority_context);
+        let service = RecoveryServiceApi::new(effects, authority_context);
         assert!(service.is_ok());
     }
 
@@ -584,7 +583,7 @@ mod tests {
         let authority_context = create_test_authority(151);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = RecoveryService::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let guardians = vec![
             AuthorityId::new_from_entropy([152u8; 32]),
@@ -611,7 +610,7 @@ mod tests {
         let authority_context = create_test_authority(154);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = RecoveryService::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([155u8; 32])];
 
@@ -628,7 +627,7 @@ mod tests {
         let authority_context = create_test_authority(156);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = RecoveryService::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let guardians = vec![
             AuthorityId::new_from_entropy([157u8; 32]),
@@ -656,7 +655,7 @@ mod tests {
         let authority_context = create_test_authority(160);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = RecoveryService::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let current_guardians = vec![AuthorityId::new_from_entropy([161u8; 32])];
         let new_guardians = vec![
@@ -684,7 +683,7 @@ mod tests {
         let authority_context = create_test_authority(164);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = RecoveryService::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         let guardians = vec![AuthorityId::new_from_entropy([165u8; 32])];
 
@@ -723,7 +722,7 @@ mod tests {
         let authority_context = create_test_authority(166);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
-        let service = RecoveryService::new(effects, authority_context).unwrap();
+        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
 
         // Initially empty
         let active = service.list_active().await;

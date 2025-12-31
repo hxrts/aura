@@ -9,6 +9,7 @@
 //! nav bar, ensuring perfect vertical alignment between nav tabs and footer hints.
 
 use aura_app::ui::signals::NetworkStatus;
+use aura_app::ui::types::{format_network_status_with_severity, StatusSeverity};
 
 use crate::tui::layout::dim;
 use crate::tui::theme::Theme;
@@ -40,19 +41,16 @@ pub struct FooterProps {
     pub known_online: usize,
 }
 
-/// Format a timestamp as relative time (e.g., "2m ago", "1h ago")
-fn format_relative_time(now_ms: u64, ts_ms: u64) -> String {
-    let elapsed_ms = now_ms.saturating_sub(ts_ms);
-    let elapsed_secs = elapsed_ms / 1000;
-
-    if elapsed_secs < 60 {
-        "just now".to_string()
-    } else if elapsed_secs < 3600 {
-        format!("{}m ago", elapsed_secs / 60)
-    } else if elapsed_secs < 86400 {
-        format!("{}h ago", elapsed_secs / 3600)
-    } else {
-        format!("{}d ago", elapsed_secs / 86400)
+/// Map StatusSeverity to theme colors.
+fn severity_to_color(severity: StatusSeverity, disabled: bool) -> Color {
+    if disabled {
+        return Theme::TEXT_DISABLED;
+    }
+    match severity {
+        StatusSeverity::Success => Theme::SUCCESS,
+        StatusSeverity::Warning => Theme::WARNING,
+        StatusSeverity::Error => Theme::ERROR,
+        StatusSeverity::Info | StatusSeverity::Disabled => Theme::TEXT_MUTED,
     }
 }
 
@@ -90,37 +88,10 @@ pub fn Footer(props: &FooterProps) -> impl Into<AnyElement<'static>> {
         Theme::TEXT_MUTED
     };
 
-    // Build network status text and color based on unified NetworkStatus
-    let (sync_status, sync_color) = if props.disabled {
-        // Disabled state uses muted colors regardless of network status
-        let status = match &props.network_status {
-            NetworkStatus::Disconnected => "Disconnected".to_string(),
-            NetworkStatus::NoPeers => "No contacts".to_string(),
-            NetworkStatus::Syncing => "Syncing...".to_string(),
-            NetworkStatus::Synced { last_sync_ms } => {
-                if let Some(now_ms) = props.now_ms {
-                    format!("Synced {}", format_relative_time(now_ms, *last_sync_ms))
-                } else {
-                    "Synced".to_string()
-                }
-            }
-        };
-        (status, Theme::TEXT_DISABLED)
-    } else {
-        match &props.network_status {
-            NetworkStatus::Disconnected => ("Disconnected".to_string(), Theme::ERROR),
-            NetworkStatus::NoPeers => ("No contacts".to_string(), Theme::WARNING),
-            NetworkStatus::Syncing => ("Syncing...".to_string(), Theme::WARNING),
-            NetworkStatus::Synced { last_sync_ms } => {
-                let status = if let Some(now_ms) = props.now_ms {
-                    format!("Synced {}", format_relative_time(now_ms, *last_sync_ms))
-                } else {
-                    "Synced".to_string()
-                };
-                (status, Theme::SUCCESS)
-            }
-        }
-    };
+    // Build network status text and color using portable formatting
+    let (sync_status, severity) =
+        format_network_status_with_severity(&props.network_status, props.now_ms);
+    let sync_color = severity_to_color(severity, props.disabled);
 
     // Format: "123 P, 45 On" - must fit in STATUS_COL_WIDTH (15 chars)
     // Max realistic: "999 P, 99 On" = 12 chars
@@ -267,22 +238,25 @@ mod tests {
 
     #[test]
     fn test_format_relative_time() {
+        // Test relative time formatting via the portable aura-app function
+        use aura_app::ui::types::format_relative_time_from;
+
         // Use a large enough value to avoid underflow when subtracting days
         let now_ms = 1_000_000_000; // ~11.5 days in ms
 
         // Test "just now"
-        assert_eq!(format_relative_time(now_ms, now_ms), "just now");
+        assert_eq!(format_relative_time_from(now_ms, now_ms), "just now");
 
         // Test minutes ago
         let two_min_ago = now_ms - 120_000;
-        assert_eq!(format_relative_time(now_ms, two_min_ago), "2m ago");
+        assert_eq!(format_relative_time_from(now_ms, two_min_ago), "2m ago");
 
         // Test hours ago
         let two_hr_ago = now_ms - 7_200_000;
-        assert_eq!(format_relative_time(now_ms, two_hr_ago), "2h ago");
+        assert_eq!(format_relative_time_from(now_ms, two_hr_ago), "2h ago");
 
         // Test days ago
         let two_days_ago = now_ms - 172_800_000;
-        assert_eq!(format_relative_time(now_ms, two_days_ago), "2d ago");
+        assert_eq!(format_relative_time_from(now_ms, two_days_ago), "2d ago");
     }
 }

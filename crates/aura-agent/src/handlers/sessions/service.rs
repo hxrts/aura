@@ -11,24 +11,31 @@ use aura_core::effects::SessionType;
 use aura_core::identifiers::{AccountId, DeviceId};
 use std::sync::Arc;
 
-/// Session management service
+/// Session management service API
 ///
 /// Provides session creation, management, and lifecycle operations
 /// through a clean public API.
-pub struct SessionService {
+#[derive(Clone)]
+pub struct SessionServiceApi {
     operations: SessionOperations,
 }
 
-impl SessionService {
+impl std::fmt::Debug for SessionServiceApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionServiceApi").finish_non_exhaustive()
+    }
+}
+
+impl SessionServiceApi {
     /// Create a new session service
     pub fn new(
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         account_id: AccountId,
-    ) -> Self {
-        Self {
+    ) -> AgentResult<Self> {
+        Ok(Self {
             operations: SessionOperations::new(effects, authority_context, account_id),
-        }
+        })
     }
 
     /// Create a new coordination session
@@ -155,7 +162,7 @@ mod tests {
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
-        let service = SessionService::new(effects, authority_context, account_id);
+        let service = SessionServiceApi::new(effects, authority_context, account_id).unwrap();
 
         // Test creating a coordination session
         let participants = vec![service.device_id()];
@@ -177,7 +184,7 @@ mod tests {
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
 
-        let service = SessionService::new(effects, authority_context, account_id);
+        let service = SessionServiceApi::new(effects, authority_context, account_id).unwrap();
 
         let stats = service.get_stats().await.unwrap();
         assert_eq!(stats.active_sessions, 0);

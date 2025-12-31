@@ -23,7 +23,6 @@ struct SessionMetadataFact {
 
 impl SessionOperations {
     /// Update session metadata
-    #[allow(dead_code)] // Part of future session metadata API
     pub async fn update_session_metadata(
         &self,
         _session_id: &str,
@@ -51,7 +50,6 @@ impl SessionOperations {
     }
 
     /// Add participant to session
-    #[allow(dead_code)] // Part of future session metadata API
     pub async fn add_participant(
         &self,
         _session_id: &str,
@@ -81,7 +79,6 @@ impl SessionOperations {
     }
 
     /// Remove participant from session
-    #[allow(dead_code)] // Part of future session metadata API
     pub async fn remove_participant(
         &self,
         _session_id: &str,
@@ -191,12 +188,7 @@ mod tests {
         use crate::runtime::effects::AuraEffectSystem;
 
         let authority_id = AuthorityId::new_from_entropy([84u8; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(crate::core::context::RelationalContext {
-            context_id: ContextId::new_from_entropy([1u8; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new_from_entropy([12u8; 32]);
 
         let config = AgentConfig::default();

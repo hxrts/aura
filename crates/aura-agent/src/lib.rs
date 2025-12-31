@@ -38,6 +38,7 @@
 //! - Feature protocol implementations (belong in Layer 5 crates)
 //! - Testing harnesses and fixtures (belong in aura-testkit)
 //!
+#![warn(clippy::await_holding_lock)]
 //! ## Design Principles
 //!
 //! - Authority-first design: all operations scoped to specific authorities
@@ -83,6 +84,7 @@ pub mod builder;
 
 // Runtime modules (internal)
 mod runtime;
+mod task_registry;
 
 // Handler modules (public for service access)
 pub mod handlers;
@@ -104,25 +106,28 @@ pub mod fact_types;
 pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, AuthorityContext};
 
 // Builder system exports
-pub use builder::{
-    AndroidPresetBuilder, BuildError, CliPresetBuilder, CustomPresetBuilder, DataProtectionClass,
-    IosPresetBuilder, WebPresetBuilder,
-};
+pub use builder::{BuildError, CliPresetBuilder, CustomPresetBuilder};
+#[cfg(feature = "android")]
+pub use builder::AndroidPresetBuilder;
+#[cfg(feature = "ios")]
+pub use builder::{DataProtectionClass, IosPresetBuilder};
+#[cfg(feature = "web")]
+pub use builder::WebPresetBuilder;
 
 // Session management types
-pub use handlers::{SessionHandle, SessionService, SessionStats};
+pub use handlers::{SessionHandle, SessionServiceApi, SessionStats};
 
 // Authentication types
-pub use handlers::{AuthChallenge, AuthMethod, AuthResponse, AuthResult, AuthService};
+pub use handlers::{AuthChallenge, AuthMethod, AuthResponse, AuthResult, AuthServiceApi};
 
 // Invitation types
 pub use handlers::{
-    Invitation, InvitationResult, InvitationService, InvitationStatus, InvitationType,
+    Invitation, InvitationResult, InvitationServiceApi, InvitationStatus, InvitationType,
 };
 
 // Recovery types
 pub use handlers::{
-    GuardianApproval, RecoveryOperation, RecoveryRequest, RecoveryResult, RecoveryService,
+    GuardianApproval, RecoveryOperation, RecoveryRequest, RecoveryResult, RecoveryServiceApi,
     RecoveryState,
 };
 
@@ -134,9 +139,10 @@ pub use handlers::{ChannelResult, RendezvousHandler, RendezvousResult, Rendezvou
 
 // Runtime types for advanced usage
 pub use runtime::{
-    AuraHandlerAdapter as ChoreographyAdapter, EffectContext, EffectExecutor, EffectRegistry,
-    EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, FlowBudgetManager,
-    LifecycleManager, ReceiptManager, RuntimeBuilder, RuntimeSystem, SharedTransport,
+    AuraHandlerAdapter as ChoreographyAdapter, EffectContext, EffectExecutor, EffectOperation,
+    EffectRegistry, EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, EffectType,
+    FlowBudgetManager, LifecycleManager, ReceiptManager, RuntimeBuilder, RuntimeSystem,
+    SharedTransport,
 };
 
 // Sync service types

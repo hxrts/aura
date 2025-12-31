@@ -16,8 +16,11 @@ pub mod threshold;
 // Re-export the main session operations handler
 pub use coordination::SessionOperations;
 
-// Re-export service for public API
-pub use service::SessionService;
+// Re-export service API for public API
+pub use service::SessionServiceApi;
+
+#[deprecated(note = "Use SessionServiceApi instead.")]
+pub type SessionService = SessionServiceApi;
 
 // Re-export common types
 pub use shared::{SessionHandle, SessionStats};

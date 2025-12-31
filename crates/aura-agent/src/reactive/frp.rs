@@ -8,19 +8,17 @@
 //!
 //! # Blocking Lock Usage
 //!
-//! Uses `parking_lot::Mutex` for DynamicTaskRegistry JoinHandle storage because:
+//! Uses `parking_lot::Mutex` for TaskRegistry JoinHandle storage because:
 //! 1. Operations are O(1) push or O(n) drain (shutdown only)
 //! 2. Lock is never held across `.await` points
 //! 3. No I/O or async work inside lock scope
 
 #![allow(clippy::disallowed_types)]
 
-use parking_lot::Mutex;
-use std::future::Future;
+use crate::task_registry::TaskRegistry;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{broadcast, watch, RwLock};
-use tokio::task::JoinHandle;
+use tokio::sync::{broadcast, RwLock};
 
 /// FRP primitive for reactive values
 ///
@@ -34,29 +32,39 @@ use tokio::task::JoinHandle;
 /// let is_positive = count.map(|x| x > 0).await;
 /// ```
 pub struct Dynamic<T: Clone + Send + Sync + 'static> {
-    state: Arc<RwLock<T>>,
-    updates: broadcast::Sender<T>,
-    tasks: Arc<DynamicTaskRegistry>,
+    state: Arc<RwLock<Arc<T>>>,
+    updates: broadcast::Sender<Arc<T>>,
+    tasks: Arc<TaskRegistry>,
 }
 
 impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     /// Create a new Dynamic with initial value
     pub fn new(initial: T) -> Self {
         let (tx, _) = broadcast::channel(64);
+        let initial = Arc::new(initial);
         Self {
             state: Arc::new(RwLock::new(initial)),
             updates: tx,
-            tasks: Arc::new(DynamicTaskRegistry::new()),
+            tasks: Arc::new(TaskRegistry::new()),
         }
     }
 
     /// Get current value (async read lock)
     pub async fn get(&self) -> T {
+        self.state.read().await.as_ref().clone()
+    }
+
+    /// Get current value as a shared Arc (avoids cloning large state)
+    pub async fn get_arc(&self) -> Arc<T> {
         self.state.read().await.clone()
     }
 
     /// Set value and notify subscribers
     pub async fn set(&self, value: T) {
+        self.set_arc(Arc::new(value)).await;
+    }
+
+    async fn set_arc(&self, value: Arc<T>) {
         *self.state.write().await = value.clone();
         let _ = self.updates.send(value);
     }
@@ -68,19 +76,19 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     {
         let new_value = {
             let current = self.state.read().await;
-            f(&current)
+            f(current.as_ref())
         };
         self.set(new_value).await;
     }
 
     /// Subscribe to value changes
-    pub fn subscribe(&self) -> broadcast::Receiver<T> {
+    pub fn subscribe(&self) -> broadcast::Receiver<Arc<T>> {
         self.updates.subscribe()
     }
 
     /// Try to receive the latest update without blocking
     /// Returns None if no update is available
-    pub fn try_recv(&self, rx: &mut broadcast::Receiver<T>) -> Option<T> {
+    pub fn try_recv(&self, rx: &mut broadcast::Receiver<Arc<T>>) -> Option<Arc<T>> {
         rx.try_recv().ok()
     }
 
@@ -99,8 +107,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         F: Fn(&T) -> U + Send + Sync + 'static,
         U: Clone + Send + Sync + 'static,
     {
-        let initial = self.get().await;
-        let mapped = Dynamic::new(f(&initial));
+        let initial = self.get_arc().await;
+        let mapped = Dynamic::new(f(initial.as_ref()));
 
         // Subscribe BEFORE spawning to ensure we don't miss any updates
         let mut rx = self.subscribe();
@@ -119,13 +127,13 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             loop {
                 match rx.recv().await {
                     Ok(value) => {
-                        let transformed = f(&value);
+                        let transformed = f(value.as_ref());
                         mapped_clone.set(transformed).await;
                     }
                     Err(RecvError::Lagged(_)) => {
                         // Re-sync from the latest state on lag to avoid stale values.
                         let latest = state.read().await.clone();
-                        let transformed = f(&latest);
+                        let transformed = f(latest.as_ref());
                         mapped_clone.set(transformed).await;
                     }
                     Err(RecvError::Closed) => break,
@@ -156,9 +164,9 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         V: Clone + Send + Sync + 'static,
         F: Fn(&T, &U) -> V + Send + Sync + 'static,
     {
-        let a = self.get().await;
-        let b = other.get().await;
-        let combined = Dynamic::new(f(&a, &b));
+        let a = self.get_arc().await;
+        let b = other.get_arc().await;
+        let combined = Dynamic::new(f(a.as_ref(), b.as_ref()));
 
         let mut rx_self = self.subscribe();
         let mut rx_other = other.subscribe();
@@ -176,7 +184,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                             Ok(_) | Err(RecvError::Lagged(_)) => {
                                 let a = self_state.read().await.clone();
                                 let b = other_state.read().await.clone();
-                                let result = f(&a, &b);
+                                let result = f(a.as_ref(), b.as_ref());
                                 combined_clone.set(result).await;
                             }
                             Err(RecvError::Closed) => break,
@@ -187,7 +195,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                             Ok(_) | Err(RecvError::Lagged(_)) => {
                                 let a = self_state.read().await.clone();
                                 let b = other_state.read().await.clone();
-                                let result = f(&a, &b);
+                                let result = f(a.as_ref(), b.as_ref());
                                 combined_clone.set(result).await;
                             }
                             Err(RecvError::Closed) => break,
@@ -227,14 +235,14 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
             loop {
                 match rx.recv().await {
                     Ok(value) => {
-                        if predicate(&value) {
-                            filtered_clone.set(value).await;
+                        if predicate(value.as_ref()) {
+                            filtered_clone.set_arc(value).await;
                         }
                     }
                     Err(RecvError::Lagged(_)) => {
                         let latest = state.read().await.clone();
-                        if predicate(&latest) {
-                            filtered_clone.set(latest).await;
+                        if predicate(latest.as_ref()) {
+                            filtered_clone.set_arc(latest).await;
                         }
                     }
                     Err(RecvError::Closed) => break,
@@ -272,13 +280,13 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
                 match rx.recv().await {
                     Ok(value) => {
                         let acc = folded_clone.get().await;
-                        let new_acc = f(acc, &value);
+                        let new_acc = f(acc, value.as_ref());
                         folded_clone.set(new_acc).await;
                     }
                     Err(RecvError::Lagged(_)) => {
                         let latest = state.read().await.clone();
                         let acc = folded_clone.get().await;
-                        let new_acc = f(acc, &latest);
+                        let new_acc = f(acc, latest.as_ref());
                         folded_clone.set(new_acc).await;
                     }
                     Err(RecvError::Closed) => break,
@@ -304,43 +312,6 @@ impl<T: Clone + Send + Sync + 'static> Drop for Dynamic<T> {
     fn drop(&mut self) {
         if Arc::strong_count(&self.tasks) == 1 {
             self.tasks.shutdown();
-        }
-    }
-}
-
-#[derive(Debug)]
-struct DynamicTaskRegistry {
-    shutdown_tx: watch::Sender<bool>,
-    handles: Mutex<Vec<JoinHandle<()>>>,
-}
-
-impl DynamicTaskRegistry {
-    fn new() -> Self {
-        let (shutdown_tx, _shutdown_rx) = watch::channel(false);
-        Self {
-            shutdown_tx,
-            handles: Mutex::new(Vec::new()),
-        }
-    }
-
-    fn spawn_cancellable<F>(&self, fut: F)
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        let handle = tokio::spawn(async move {
-            tokio::select! {
-                _ = shutdown_rx.changed() => {}
-                _ = fut => {}
-            }
-        });
-        self.handles.lock().push(handle);
-    }
-
-    fn shutdown(&self) {
-        let _ = self.shutdown_tx.send(true);
-        for handle in self.handles.lock().drain(..) {
-            handle.abort();
         }
     }
 }
@@ -384,11 +355,11 @@ mod tests {
 
         dynamic.set(5).await;
         let value = rx.recv().await.unwrap();
-        assert_eq!(value, 5);
+        assert_eq!(*value, 5);
 
         dynamic.set(10).await;
         let value = rx.recv().await.unwrap();
-        assert_eq!(value, 10);
+        assert_eq!(*value, 10);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -523,8 +494,8 @@ mod tests {
         let val1 = rx1.recv().await.unwrap();
         let val2 = rx2.recv().await.unwrap();
 
-        assert_eq!(val1, 42);
-        assert_eq!(val2, 42);
+        assert_eq!(*val1, 42);
+        assert_eq!(*val2, 42);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -576,7 +547,7 @@ mod tests {
         tokio::spawn(async move {
             while let Ok(n) = rx.recv().await {
                 count_clone.update(|c| c + 1).await;
-                sum_clone.update(|s| s + n).await;
+                sum_clone.update(|s| s + *n).await;
             }
         });
 

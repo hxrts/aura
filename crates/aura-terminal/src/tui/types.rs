@@ -21,6 +21,9 @@ use aura_app::ui::types::{
     },
 };
 
+// Re-export portable MessageDeliveryStatus from aura-app
+pub use aura_app::ui::types::MessageDeliveryStatus as PortableDeliveryStatus;
+
 /// A chat channel
 #[derive(Clone, Debug, Default)]
 pub struct Channel {
@@ -134,17 +137,46 @@ impl DeliveryStatus {
 
     /// Whether the message has reached the recipient's device
     pub fn is_delivered(&self) -> bool {
-        matches!(self, DeliveryStatus::Delivered | DeliveryStatus::Read)
+        // Delegate to portable implementation
+        PortableDeliveryStatus::from(*self).is_delivered()
     }
 
     /// Whether the message has been read by the recipient
     pub fn is_read(&self) -> bool {
-        matches!(self, DeliveryStatus::Read)
+        // Delegate to portable implementation
+        PortableDeliveryStatus::from(*self).is_read()
     }
 
     /// Whether the message is still pending (not yet confirmed delivered)
     pub fn is_pending(&self) -> bool {
-        matches!(self, DeliveryStatus::Sending | DeliveryStatus::Sent)
+        // Delegate to portable implementation
+        PortableDeliveryStatus::from(*self).is_pending()
+    }
+}
+
+/// Convert local DeliveryStatus to portable MessageDeliveryStatus from aura-app
+impl From<DeliveryStatus> for PortableDeliveryStatus {
+    fn from(status: DeliveryStatus) -> Self {
+        match status {
+            DeliveryStatus::Sending => Self::Sending,
+            DeliveryStatus::Sent => Self::Sent,
+            DeliveryStatus::Delivered => Self::Delivered,
+            DeliveryStatus::Read => Self::Read,
+            DeliveryStatus::Failed => Self::Failed,
+        }
+    }
+}
+
+/// Convert portable MessageDeliveryStatus from aura-app to local DeliveryStatus
+impl From<PortableDeliveryStatus> for DeliveryStatus {
+    fn from(status: PortableDeliveryStatus) -> Self {
+        match status {
+            PortableDeliveryStatus::Sending => Self::Sending,
+            PortableDeliveryStatus::Sent => Self::Sent,
+            PortableDeliveryStatus::Delivered => Self::Delivered,
+            PortableDeliveryStatus::Read => Self::Read,
+            PortableDeliveryStatus::Failed => Self::Failed,
+        }
     }
 }
 
@@ -555,12 +587,9 @@ impl From<&AppInvitation> for Invitation {
     }
 }
 
-/// Format a timestamp for display
-pub fn format_timestamp(ts: u64) -> String {
-    let hours = (ts / 3600000) % 24;
-    let minutes = (ts / 60000) % 60;
-    format!("{hours:02}:{minutes:02}")
-}
+// Re-export portable timestamp formatter from aura-app.
+// Note: This returns "" for ts=0, treating it as "no timestamp".
+pub use aura_app::views::display::format_timestamp;
 
 /// Settings section
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

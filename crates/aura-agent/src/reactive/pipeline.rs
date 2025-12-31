@@ -40,7 +40,7 @@ impl ReactivePipeline {
     /// already performs batching with a configurable window.
     pub fn start(
         scheduler_config: SchedulerConfig,
-        fact_registry: FactRegistry,
+        fact_registry: Arc<FactRegistry>,
         time_effects: Arc<dyn PhysicalTimeEffects>,
         own_authority: AuthorityId,
         reactive: ReactiveHandler,

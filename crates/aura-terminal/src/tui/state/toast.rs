@@ -9,13 +9,19 @@
 
 use std::collections::VecDeque;
 
-/// Default duration for auto-dismissable toasts: 50 ticks = 5 seconds at 100ms/tick
-const DEFAULT_TOAST_TICKS: u32 = 50;
+// Re-export portable toast lifecycle constants from aura-app
+pub use aura_app::ui::types::{
+    duration_ticks, ms_to_ticks, should_auto_dismiss, ticks_to_ms, will_auto_dismiss,
+    DEFAULT_TOAST_DURATION_MS, DEFAULT_TOAST_TICKS, MAX_PENDING_TOASTS, NO_AUTO_DISMISS,
+    TOAST_TICK_RATE_MS,
+};
 
-/// Special value indicating a toast should never auto-dismiss
-const NO_AUTO_DISMISS: u32 = u32::MAX;
-/// Hard cap on pending toasts to prevent unbounded growth.
-const MAX_PENDING_TOASTS: usize = 128;
+// Use portable constants from aura-app
+use aura_app::ui::types::{
+    DEFAULT_TOAST_TICKS as PORTABLE_DEFAULT_TICKS,
+    MAX_PENDING_TOASTS as PORTABLE_MAX_PENDING,
+    NO_AUTO_DISMISS as PORTABLE_NO_DISMISS,
+};
 
 /// Toast queue that ensures only one toast is visible at a time.
 ///
@@ -55,10 +61,11 @@ impl QueuedToast {
     /// - Error toasts: Never auto-dismiss (must be manually dismissed)
     /// - Other toasts: Auto-dismiss after 5 seconds (50 ticks at 100ms/tick)
     pub fn new(id: u64, message: impl Into<String>, level: ToastLevel) -> Self {
+        // Use portable constants from aura-app
         let ticks_remaining = if level == ToastLevel::Error {
-            NO_AUTO_DISMISS
+            PORTABLE_NO_DISMISS
         } else {
-            DEFAULT_TOAST_TICKS
+            PORTABLE_DEFAULT_TICKS
         };
         Self {
             id,
@@ -98,7 +105,8 @@ impl QueuedToast {
     /// Check if this toast should auto-dismiss
     #[must_use]
     pub fn auto_dismisses(&self) -> bool {
-        self.level != ToastLevel::Error && self.ticks_remaining != NO_AUTO_DISMISS
+        // Use portable function from aura-app
+        should_auto_dismiss(self.level.into(), self.ticks_remaining)
     }
 }
 
@@ -114,7 +122,8 @@ impl ToastQueue {
         if self.active.is_none() {
             self.active = Some(toast);
         } else {
-            if self.pending.len() >= MAX_PENDING_TOASTS {
+            // Use portable constant from aura-app
+            if self.pending.len() >= PORTABLE_MAX_PENDING {
                 // Drop the oldest pending toast to keep memory bounded.
                 let _ = self.pending.pop_front();
             }
@@ -202,12 +211,35 @@ pub enum ToastLevel {
 impl ToastLevel {
     /// Get the dismissal priority (higher = dismiss first on Escape)
     /// Priority: Error (3) > Warning (2) > Info/Success (1)
+    ///
+    /// Delegates to portable implementation from aura-app.
     #[must_use]
     pub fn priority(self) -> u8 {
-        match self {
-            Self::Error => 3,
-            Self::Warning => 2,
-            Self::Info | Self::Success => 1,
+        // Use portable priority from aura-app
+        aura_app::ui::types::ToastLevel::from(self).priority()
+    }
+}
+
+/// Convert local ToastLevel to portable ToastLevel from aura-app
+impl From<ToastLevel> for aura_app::ui::types::ToastLevel {
+    fn from(level: ToastLevel) -> Self {
+        match level {
+            ToastLevel::Info => Self::Info,
+            ToastLevel::Success => Self::Success,
+            ToastLevel::Warning => Self::Warning,
+            ToastLevel::Error => Self::Error,
+        }
+    }
+}
+
+/// Convert portable ToastLevel from aura-app to local ToastLevel
+impl From<aura_app::ui::types::ToastLevel> for ToastLevel {
+    fn from(level: aura_app::ui::types::ToastLevel) -> Self {
+        match level {
+            aura_app::ui::types::ToastLevel::Info => Self::Info,
+            aura_app::ui::types::ToastLevel::Success => Self::Success,
+            aura_app::ui::types::ToastLevel::Warning => Self::Warning,
+            aura_app::ui::types::ToastLevel::Error => Self::Error,
         }
     }
 }

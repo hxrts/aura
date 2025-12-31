@@ -5,10 +5,9 @@
 //! `aura-agent` provides the implementation.
 
 use crate::core::AuraAgent;
-use crate::handlers::InvitationService;
-use crate::runtime::consensus::{
-    build_consensus_params, membership_hash_from_participants, participant_identity_to_authority_id,
-};
+use crate::handlers::shared::context_commitment_from_journal;
+use crate::handlers::InvitationServiceApi;
+use crate::runtime::consensus::build_consensus_params;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
     BridgeDeviceInfo, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo,
@@ -18,11 +17,10 @@ use aura_app::signal_defs::INVITATIONS_SIGNAL;
 use aura_app::views::invitations::InvitationStatus;
 use aura_app::IntentError;
 use aura_app::ReactiveHandler;
-use aura_consensus::protocol::ConsensusParams;
 use aura_core::effects::{
     amp::{
-        AmpChannelEffects, AmpChannelError, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
-        ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
+        AmpChannelEffects, AmpCiphertext, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
+        ChannelLeaveParams, ChannelSendParams,
     },
     random::RandomCoreEffects,
     reactive::ReactiveEffects,
@@ -31,28 +29,41 @@ use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
     ThresholdSigningEffects, TransportEffects,
 };
-use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{
     AgreementMode, ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
 };
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
-use aura_core::AuraError;
 use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_core::Hash32;
 use aura_core::Prestate;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump, RelationalFact};
-use aura_journal::{DomainFact, FactJournal};
+use aura_journal::DomainFact;
 use aura_protocol::amp::{commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects};
 use aura_protocol::effects::TreeEffects;
 use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+use crate::core::default_context_id_for_authority;
+
+mod amp;
+mod consensus;
+mod invitation;
+mod recovery;
+mod rendezvous;
+mod settings;
+
+use amp::map_amp_error;
+use consensus::{map_consensus_error, persist_consensus_dkg_transcript};
+use invitation::{
+    convert_invitation_status_to_bridge, convert_invitation_to_bridge_info,
+    convert_invitation_type_to_bridge,
+};
 
 /// Wrapper to implement RuntimeBridge for AuraAgent
 ///
@@ -67,174 +78,6 @@ impl AgentRuntimeBridge {
     /// Create a new runtime bridge from an AuraAgent
     pub fn new(agent: Arc<AuraAgent>) -> Self {
         Self { agent }
-    }
-}
-
-fn map_consensus_error(err: AuraError) -> IntentError {
-    IntentError::internal_error(format!("{err}"))
-}
-
-fn context_commitment_from_journal(
-    context: ContextId,
-    journal: &FactJournal,
-) -> Result<Hash32, IntentError> {
-    let mut hasher = aura_core::hash::hasher();
-    hasher.update(b"RELATIONAL_CONTEXT_FACTS");
-    hasher.update(context.as_bytes());
-    for fact in journal.facts.iter() {
-        let bytes = aura_core::util::serialization::to_vec(fact)
-            .map_err(|e| IntentError::internal_error(format!("Serialize context fact: {e}")))?;
-        hasher.update(&bytes);
-    }
-    Ok(Hash32(hasher.finalize()))
-}
-
-/// Persist a consensus DKG transcript after successful key generation.
-///
-/// All parameters are semantically distinct and required for DKG transcript persistence:
-/// effects (runtime), prestate (consensus state), params (config), authority (owner),
-/// epoch (version), threshold/max_signers (k-of-n), participants (signers), operation_hash (tracking).
-#[allow(clippy::too_many_arguments)]
-async fn persist_consensus_dkg_transcript(
-    effects: Arc<crate::runtime::AuraEffectSystem>,
-    prestate: Prestate,
-    params: ConsensusParams,
-    authority_id: AuthorityId,
-    epoch: u64,
-    threshold: u16,
-    max_signers: u16,
-    participants: &[ParticipantIdentity],
-    operation_hash: Hash32,
-) -> Result<Option<Hash32>, IntentError> {
-    let mut participant_ids = Vec::with_capacity(participants.len());
-    for participant in participants {
-        participant_ids
-            .push(participant_identity_to_authority_id(participant).map_err(map_consensus_error)?);
-    }
-
-    let membership_hash = membership_hash_from_participants(&participant_ids);
-    let context = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
-    let prestate_hash = prestate.compute_hash();
-
-    let config = aura_consensus::dkg::DkgConfig {
-        epoch,
-        threshold,
-        max_signers,
-        membership_hash,
-        cutoff: epoch,
-        prestate_hash,
-        operation_hash,
-        participants: participant_ids.clone(),
-    };
-
-    let mut packages = Vec::with_capacity(participant_ids.len());
-    for dealer in participant_ids {
-        let package =
-            aura_consensus::dkg::dealer::build_dealer_package(&config, dealer).map_err(|e| {
-                IntentError::internal_error(format!("Failed to build dealer package: {e}"))
-            })?;
-        packages.push(package);
-    }
-
-    let store = aura_consensus::dkg::StorageTranscriptStore::new_default(effects.clone());
-    let (commit, consensus_commit) = aura_consensus::dkg::run_consensus_dkg(
-        &prestate,
-        context,
-        &config,
-        packages,
-        &store,
-        params,
-        effects.as_ref(),
-        effects.as_ref(),
-    )
-    .await
-    .map_err(|e| IntentError::internal_error(format!("Finalize DKG transcript failed: {e}")))?;
-
-    effects
-        .commit_relational_facts(vec![
-            RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::DkgTranscriptCommit(
-                commit.clone(),
-            )),
-            consensus_commit.to_relational_fact(),
-        ])
-        .await
-        .map_err(|e| IntentError::internal_error(format!("Commit DKG fact failed: {e}")))?;
-
-    tracing::info!(
-        authority_id = %authority_id,
-        epoch,
-        "Persisted consensus-backed DKG transcript"
-    );
-
-    Ok(commit.blob_ref.or(Some(commit.transcript_hash)))
-}
-
-const ACCOUNT_CONFIG_KEYS: [&str; 2] = ["account.json", "demo-account.json"];
-
-fn map_amp_error(err: AmpChannelError) -> IntentError {
-    IntentError::internal_error(format!("AMP error: {err}"))
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct StoredAccountConfig {
-    #[serde(default)]
-    authority_id: Option<String>,
-    #[serde(default)]
-    context_id: Option<String>,
-    #[serde(default)]
-    display_name: Option<String>,
-    #[serde(default)]
-    mfa_policy: Option<String>,
-    #[serde(default)]
-    created_at: Option<u64>,
-}
-
-impl AgentRuntimeBridge {
-    async fn try_load_account_config(
-        &self,
-    ) -> Result<Option<(String, StoredAccountConfig)>, IntentError> {
-        let effects = self.agent.runtime().effects();
-
-        for key in ACCOUNT_CONFIG_KEYS {
-            let bytes = effects
-                .retrieve(key)
-                .await
-                .map_err(|e| IntentError::storage_error(format!("Failed to read {key}: {e}")))?;
-
-            let Some(bytes) = bytes else {
-                continue;
-            };
-
-            let config: StoredAccountConfig = serde_json::from_slice(&bytes)
-                .map_err(|e| IntentError::internal_error(format!("Failed to parse {key}: {e}")))?;
-
-            return Ok(Some((key.to_string(), config)));
-        }
-
-        Ok(None)
-    }
-
-    async fn load_account_config(&self) -> Result<(String, StoredAccountConfig), IntentError> {
-        self.try_load_account_config().await?.ok_or_else(|| {
-            IntentError::validation_failed("No account config found. Create an account first.")
-        })
-    }
-
-    async fn store_account_config(
-        &self,
-        key: &str,
-        config: &StoredAccountConfig,
-    ) -> Result<(), IntentError> {
-        let content = serde_json::to_vec_pretty(config)
-            .map_err(|e| IntentError::internal_error(format!("Failed to serialize {key}: {e}")))?;
-
-        let effects = self.agent.runtime().effects();
-        effects
-            .store(key, content)
-            .await
-            .map_err(|e| IntentError::storage_error(format!("Failed to write {key}: {e}")))?;
-
-        Ok(())
     }
 }
 
@@ -334,7 +177,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let journal = effects.fetch_context_journal(context).await.map_err(|e| {
                 IntentError::internal_error(format!("Context journal lookup failed: {e}"))
             })?;
-            let context_commitment = context_commitment_from_journal(context, &journal)?;
+            let context_commitment = context_commitment_from_journal(context, &journal)
+                .map_err(|e| {
+                    IntentError::internal_error(format!("Context commitment failed: {e}"))
+                })?;
             let prestate = Prestate::new(
                 vec![(authority_id, Hash32(tree_state.root_commitment))],
                 context_commitment,
@@ -389,9 +235,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let reactive = effects.reactive_handler();
         let agent = self.agent.clone();
         let tasks = self.agent.runtime().tasks();
+        let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+            Arc::new(effects.time_effects().clone());
         let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(120));
 
-        tasks.spawn_interval_until(std::time::Duration::from_millis(1000), move || {
+        tasks.spawn_interval_until(time_effects, std::time::Duration::from_millis(1000), move || {
             let _effects = effects.clone();
             let reactive = reactive.clone();
             let agent = agent.clone();
@@ -761,33 +609,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn get_discovered_peers(&self) -> Vec<AuthorityId> {
-        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
-            rendezvous.list_cached_peers().await
-        } else {
-            Vec::new()
-        }
+        rendezvous::get_discovered_peers(self).await
     }
 
     async fn get_rendezvous_status(&self) -> RendezvousStatus {
-        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
-            RendezvousStatus {
-                is_running: rendezvous.is_running().await,
-                cached_peers: rendezvous.list_cached_peers().await.len(),
-            }
-        } else {
-            RendezvousStatus::default()
-        }
+        rendezvous::get_rendezvous_status(self).await
     }
 
     async fn trigger_discovery(&self) -> Result<(), IntentError> {
-        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
-            // Trigger an on-demand discovery refresh
-            rendezvous.trigger_discovery().await.map_err(|e| {
-                IntentError::internal_error(format!("Failed to trigger discovery: {}", e))
-            })
-        } else {
-            Err(IntentError::no_agent("Rendezvous service not available"))
-        }
+        rendezvous::trigger_discovery(self).await
     }
 
     // =========================================================================
@@ -795,21 +625,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     // =========================================================================
 
     async fn get_lan_peers(&self) -> Vec<LanPeerInfo> {
-        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
-            rendezvous
-                .list_lan_discovered_peers()
-                .await
-                .into_iter()
-                .map(|peer| LanPeerInfo {
-                    authority_id: peer.authority_id,
-                    address: peer.source_addr.to_string(),
-                    discovered_at_ms: peer.discovered_at_ms,
-                    display_name: peer.descriptor.display_name.clone(),
-                })
-                .collect()
-        } else {
-            Vec::new()
-        }
+        rendezvous::get_lan_peers(self).await
     }
 
     async fn send_lan_invitation(
@@ -817,11 +633,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         _peer: &LanPeerInfo,
         _invitation_code: &str,
     ) -> Result<(), IntentError> {
-        // LAN invitation sending is not yet implemented in RendezvousManager
-        // Future: Add direct peer-to-peer invitation exchange over LAN
-        Err(IntentError::internal_error(
-            "LAN invitation sending not yet implemented",
-        ))
+        rendezvous::send_lan_invitation(self, _peer, _invitation_code).await
     }
 
     // =========================================================================
@@ -946,7 +758,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             && consensus_required
         {
             let effects = self.agent.runtime().effects();
-            let context_id = ContextId::new_from_entropy(hash(&authority.to_bytes()));
+            let context_id = default_context_id_for_authority(authority);
             let has_commit = effects
                 .has_dkg_transcript_commit(authority, context_id, new_epoch.value())
                 .await
@@ -1788,7 +1600,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| IntentError::internal_error(format!("Create device invite: {e}")))?;
 
         // Use compile-time safe export since we already have the invitation
-        let enrollment_code = InvitationService::export_invitation(&invitation);
+        let enrollment_code = InvitationServiceApi::export_invitation(&invitation);
 
         Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {
             ceremony_id,
@@ -2106,7 +1918,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
-            let context_id = ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+            let context_id = default_context_id_for_authority(authority_id);
             let has_commit = effects
                 .has_dkg_transcript_commit(authority_id, context_id, pending_epoch.value())
                 .await
@@ -2592,41 +2404,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         accept: bool,
         _reason: Option<String>,
     ) -> Result<(), IntentError> {
-        // Verify the ceremony exists and get tracker
-        let tracker = self.agent.ceremony_tracker().await;
-        let _state = tracker
-            .get(ceremony_id)
-            .await
-            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
-
-        if accept {
-            // Record acceptance in ceremony tracker
-            tracker
-                .mark_accepted(
-                    ceremony_id,
-                    aura_core::threshold::ParticipantIdentity::guardian(self.agent.authority_id()),
-                )
-                .await
-                .map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to record guardian acceptance: {}",
-                        e
-                    ))
-                })?;
-            Ok(())
-        } else {
-            // Mark ceremony as failed due to decline
-            tracker
-                .mark_failed(
-                    ceremony_id,
-                    Some("Guardian declined invitation".to_string()),
-                )
-                .await
-                .map_err(|e| {
-                    IntentError::internal_error(format!("Failed to record guardian decline: {}", e))
-                })?;
-            Ok(())
-        }
+        recovery::respond_to_guardian_ceremony(self, ceremony_id, accept, _reason).await
     }
 
     // =========================================================================
@@ -2681,81 +2459,6 @@ impl AuraAgent {
 }
 
 // ============================================================================
-// Helper functions
-// ============================================================================
-
-/// Convert domain Invitation to bridge InvitationInfo
-fn convert_invitation_to_bridge_info(
-    invitation: &crate::handlers::invitation::Invitation,
-) -> InvitationInfo {
-    InvitationInfo {
-        invitation_id: invitation.invitation_id.clone(),
-        sender_id: invitation.sender_id,
-        receiver_id: invitation.receiver_id,
-        invitation_type: convert_invitation_type_to_bridge(&invitation.invitation_type),
-        status: convert_invitation_status_to_bridge(&invitation.status),
-        created_at_ms: invitation.created_at,
-        expires_at_ms: invitation.expires_at,
-        message: invitation.message.clone(),
-    }
-}
-
-/// Convert domain InvitationType to bridge InvitationBridgeType
-fn convert_invitation_type_to_bridge(
-    inv_type: &crate::handlers::invitation::InvitationType,
-) -> InvitationBridgeType {
-    match inv_type {
-        crate::handlers::invitation::InvitationType::Contact { nickname } => {
-            InvitationBridgeType::Contact {
-                nickname: nickname.clone(),
-            }
-        }
-        crate::handlers::invitation::InvitationType::Guardian { subject_authority } => {
-            InvitationBridgeType::Guardian {
-                subject_authority: *subject_authority,
-            }
-        }
-        crate::handlers::invitation::InvitationType::Channel { home_id } => {
-            InvitationBridgeType::Channel {
-                home_id: home_id.clone(),
-            }
-        }
-        crate::handlers::invitation::InvitationType::DeviceEnrollment {
-            subject_authority,
-            initiator_device_id,
-            device_id,
-            device_name,
-            ceremony_id,
-            pending_epoch,
-            key_package: _,
-            threshold_config: _,
-            public_key_package: _,
-        } => InvitationBridgeType::DeviceEnrollment {
-            subject_authority: *subject_authority,
-            initiator_device_id: *initiator_device_id,
-            device_id: *device_id,
-            device_name: device_name.clone(),
-            ceremony_id: ceremony_id.clone(),
-            pending_epoch: Epoch::new(*pending_epoch),
-        },
-    }
-}
-
-/// Convert domain InvitationStatus to bridge InvitationBridgeStatus
-fn convert_invitation_status_to_bridge(
-    status: &crate::handlers::invitation::InvitationStatus,
-) -> InvitationBridgeStatus {
-    match status {
-        crate::handlers::invitation::InvitationStatus::Pending => InvitationBridgeStatus::Pending,
-        crate::handlers::invitation::InvitationStatus::Accepted => InvitationBridgeStatus::Accepted,
-        crate::handlers::invitation::InvitationStatus::Declined => InvitationBridgeStatus::Declined,
-        crate::handlers::invitation::InvitationStatus::Cancelled => {
-            InvitationBridgeStatus::Cancelled
-        }
-        crate::handlers::invitation::InvitationStatus::Expired => InvitationBridgeStatus::Expired,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

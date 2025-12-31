@@ -593,10 +593,10 @@ The runtime exposes domain handlers as services through `AuraAgent`. Each handle
 
 ```rust
 impl AuraAgent {
-    pub fn sessions(&self) -> &SessionService { ... }
-    pub fn auth(&self) -> &AuthService { ... }
-    pub fn invitations(&self) -> &InvitationService { ... }
-    pub fn recovery(&self) -> &RecoveryService { ... }
+    pub fn sessions(&self) -> &SessionServiceApi { ... }
+    pub fn auth(&self) -> &AuthServiceApi { ... }
+    pub fn invitations(&self) -> &InvitationServiceApi { ... }
+    pub fn recovery(&self) -> &RecoveryServiceApi { ... }
 }
 ```
 
@@ -608,10 +608,10 @@ The `ServiceRegistry` initializes all services during agent startup. It holds re
 
 ```rust
 pub struct ServiceRegistry {
-    sessions: Arc<SessionService>,
-    auth: Arc<AuthService>,
-    invitations: Arc<InvitationService>,
-    recovery: Arc<RecoveryService>,
+    sessions: Arc<SessionServiceApi>,
+    auth: Arc<AuthServiceApi>,
+    invitations: Arc<InvitationServiceApi>,
+    recovery: Arc<RecoveryServiceApi>,
 }
 ```
 
@@ -870,12 +870,12 @@ Services in `aura-agent` wrap handlers, run guard evaluation, and interpret comm
 
 ```rust
 // aura-agent/src/handlers/chat_service.rs
-pub struct ChatService {
+pub struct ChatServiceApi {
     handler: ChatFactService,
     effects: Arc<AuraEffectSystem>,
 }
 
-impl ChatService {
+impl ChatServiceApi {
     pub fn new(effects: Arc<AuraEffectSystem>) -> Self {
         Self {
             handler: ChatFactService::new(),
@@ -908,15 +908,15 @@ impl ChatService {
 The agent exposes services through clean accessor methods:
 
 ```rust
-// aura-agent/src/core/api.rs
+// aura-agent/src/core/agent.rs
 impl AuraAgent {
-    pub fn chat(&self) -> ChatService {
-        ChatService::new(self.runtime.effects())
+    pub fn chat(&self) -> ChatServiceApi {
+        ChatServiceApi::new(self.runtime.effects())
     }
 
-    pub async fn invitations(&self) -> AgentResult<InvitationService> {
+    pub async fn invitations(&self) -> AgentResult<InvitationServiceApi> {
         // Lazy initialization with caching
-        InvitationService::new(self.runtime.effects(), self.context.clone())
+        InvitationServiceApi::new(self.runtime.effects(), self.context.clone())
     }
 }
 ```

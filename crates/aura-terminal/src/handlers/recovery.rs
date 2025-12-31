@@ -12,7 +12,7 @@ use aura_agent::handlers::{
     GuardianProfile, GuardianSet, RecoveryDispute, RecoveryOperation, RecoveryRequest,
     RecoveryResponse,
 };
-use aura_app::ui::workflows::recovery_cli::{self, DISPUTE_WINDOW_HOURS_DEFAULT};
+use aura_app::ui::workflows::recovery_cli::{self, validate_guardian_set, DISPUTE_WINDOW_HOURS_DEFAULT};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash;
 use aura_core::Hash32;
@@ -107,14 +107,9 @@ async fn start_recovery(
     }
     let guardian_set = GuardianSet::new(guardian_profiles);
 
-    let threshold_u16 = threshold as u16;
-    if guardian_set.len() < threshold_u16 as usize {
-        return Err(TerminalError::Input(format!(
-            "Threshold {} exceeds number of guardians {}",
-            threshold,
-            guardian_set.len()
-        )));
-    }
+    // Validate guardian set using portable workflow function
+    validate_guardian_set(guardian_set.len(), threshold)
+        .map_err(|e| TerminalError::Input(e.to_string()))?;
 
     // Get current timestamp
     let physical_time = ctx

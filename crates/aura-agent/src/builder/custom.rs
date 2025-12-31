@@ -47,7 +47,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use crate::builder::BuildError;
 use crate::core::AgentConfig;
 use crate::runtime::EffectContext;
-use crate::{AgentBuilder, AgentResult, AuraAgent, EffectSystemBuilder};
+use crate::{AgentResult, AuraAgent, EffectSystemBuilder};
 
 /// Marker type indicating an effect has not been provided.
 pub struct Missing;
@@ -373,39 +373,5 @@ impl
         };
 
         Ok(AuraAgent::new(runtime, authority_id))
-    }
-}
-
-// Extend AgentBuilder with custom preset entry point
-impl AgentBuilder {
-    /// Create a custom preset builder with no default effects.
-    ///
-    /// This uses Rust's type system to enforce that all required
-    /// effects are provided before building. Attempting to call
-    /// `build()` without providing all required effects results
-    /// in a compile error.
-    ///
-    /// # Required Effects
-    ///
-    /// - `CryptoEffects` - via `with_crypto()`
-    /// - `StorageEffects` - via `with_storage()`
-    /// - `PhysicalTimeEffects` - via `with_time()`
-    /// - `RandomEffects` - via `with_random()`
-    /// - `ConsoleEffects` - via `with_console()`
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let agent = AgentBuilder::custom()
-    ///     .with_crypto(Arc::new(MyCrypto::new()))
-    ///     .with_storage(Arc::new(MyStorage::new()))
-    ///     .with_time(Arc::new(MyTime::new()))
-    ///     .with_random(Arc::new(MyRandom::new()))
-    ///     .with_console(Arc::new(MyConsole::new()))
-    ///     .build()
-    ///     .await?;
-    /// ```
-    pub fn custom() -> CustomPresetBuilder<Missing, Missing, Missing, Missing, Missing> {
-        CustomPresetBuilder::new()
     }
 }

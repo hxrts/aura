@@ -142,21 +142,8 @@ pub fn ThresholdModal(props: &ThresholdModalProps) -> impl Into<AnyElement<'stat
     // Build threshold display text
     let threshold_text = format!("{k} of {n} guardians required");
 
-    // Security level hint based on threshold
-    let security_hint = if n == 0 {
-        "No guardians configured yet".to_string()
-    } else if k == 1 {
-        "Low security: Any single guardian can recover".to_string()
-    } else if k == n {
-        "Maximum security: All guardians required".to_string()
-    } else {
-        let majority = (n / 2) + 1;
-        if k >= majority {
-            "High security: Majority required".to_string()
-        } else {
-            "Medium security: Less than majority required".to_string()
-        }
-    };
+    // Security level hint based on threshold (uses portable function)
+    let security_hint = aura_app::ui::types::security_level_hint(k as u32, n as u32);
 
     element! {
         View(

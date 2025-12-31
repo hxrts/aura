@@ -2,7 +2,7 @@
 //!
 //! Provides efficient O(log n) lookups using B-tree indexes,
 //! O(1) membership testing using Bloom filters, and
-//! cryptographic integrity verification using Merkle trees.
+//! cryptographic verification of integrity using Merkle trees.
 
 use super::authority_index::AuthorityIndex;
 use super::merkle::build_merkle_tree;
@@ -23,7 +23,7 @@ use std::collections::HashSet;
 ///
 /// Provides efficient O(log n) lookups using B-tree indexes,
 /// O(1) membership testing using Bloom filters, and
-/// cryptographic integrity verification using Merkle trees.
+/// cryptographic verification or integrity using Merkle trees.
 ///
 /// # Performance Guarantees
 ///

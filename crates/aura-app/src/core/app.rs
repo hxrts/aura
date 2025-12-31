@@ -844,9 +844,9 @@ impl AppCore {
     // Note: Invitation, Recovery, and Authentication service operations
     // have been removed from AppCore. Frontends that need these should
     // access the agent services directly via:
-    // - agent.invitations() -> InvitationService
-    // - agent.recovery() -> RecoveryService
-    // - agent.auth() -> AuthService
+    // - agent.invitations() -> InvitationServiceApi
+    // - agent.recovery() -> RecoveryServiceApi
+    // - agent.auth() -> AuthServiceApi
     //
     // This maintains clean separation between:
     // - AppCore: Intent dispatch, ViewState, basic runtime status

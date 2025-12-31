@@ -21,15 +21,15 @@ pub mod shared;
 
 // Re-export session types for public API
 pub use sessions::coordination::SessionOperations;
-pub use sessions::service::SessionService;
+pub use sessions::service::SessionServiceApi;
 pub use sessions::shared::{SessionHandle, SessionStats};
 
 // Re-export auth types for public API
 pub use auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult};
-pub use auth_service::AuthService;
+pub use auth_service::AuthServiceApi;
 
 // Re-export chat types for public API
-pub use chat_service::ChatService;
+pub use chat_service::ChatServiceApi;
 pub use aura_chat::{ChatGroupId, ChatMessageId};
 
 // Re-export invitation types for public API
@@ -37,14 +37,26 @@ pub use invitation::{
     Invitation, InvitationHandler, InvitationResult, InvitationStatus, InvitationType,
     ShareableInvitation, ShareableInvitationError,
 };
-pub use invitation_service::InvitationService;
+pub use invitation_service::InvitationServiceApi;
 
 // Re-export recovery types for public API
 pub use recovery::{
     GuardianApproval, RecoveryHandler, RecoveryOperation, RecoveryRequest, RecoveryResult,
     RecoveryState,
 };
-pub use recovery_service::RecoveryService;
+pub use recovery_service::RecoveryServiceApi;
+
+// Backwards-compatible aliases (prefer *ServiceApi names for clarity)
+#[deprecated(note = "Use AuthServiceApi instead.")]
+pub type AuthService = AuthServiceApi;
+#[deprecated(note = "Use ChatServiceApi instead.")]
+pub type ChatService = ChatServiceApi;
+#[deprecated(note = "Use InvitationServiceApi instead.")]
+pub type InvitationService = InvitationServiceApi;
+#[deprecated(note = "Use RecoveryServiceApi instead.")]
+pub type RecoveryService = RecoveryServiceApi;
+#[deprecated(note = "Use SessionServiceApi instead.")]
+pub type SessionService = SessionServiceApi;
 
 // Re-export rendezvous types for public API
 pub use rendezvous::{ChannelResult, RendezvousHandler, RendezvousResult};

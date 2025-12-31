@@ -33,7 +33,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 
 use crate::builder::BuildError;
 use crate::core::AgentConfig;
-use crate::{AgentBuilder, AgentResult, AuraAgent};
+use crate::{AgentResult, AuraAgent};
 
 /// Web/WASM-specific builder with sensible defaults for browser applications.
 ///
@@ -214,33 +214,5 @@ impl WebPresetBuilder {
 impl Default for WebPresetBuilder {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-// Extend AgentBuilder with Web preset entry point
-impl AgentBuilder {
-    /// Create a Web/WASM preset builder for browser applications.
-    ///
-    /// This provides sensible defaults for web apps:
-    /// - Web Crypto API for cryptographic operations
-    /// - IndexedDB for persistent storage
-    /// - Performance API for timing
-    /// - Console API for logging
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let agent = AgentBuilder::web()
-    ///     .storage_prefix("myapp_")
-    ///     .build()
-    ///     .await?;
-    /// ```
-    ///
-    /// # Feature Flag
-    ///
-    /// Requires the `web` feature flag for full functionality.
-    /// Without it, `build()` will return an error.
-    pub fn web() -> WebPresetBuilder {
-        WebPresetBuilder::new()
     }
 }

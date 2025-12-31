@@ -1,6 +1,6 @@
 //! Invitation Service Integration Tests
 //!
-//! Tests for the InvitationService public API exposed through AuraAgent.
+//! Tests for the InvitationServiceApi public API exposed through AuraAgent.
 
 use aura_agent::{
     AgentBuilder, AuthorityId, EffectContext, ExecutionMode, InvitationStatus, InvitationType,

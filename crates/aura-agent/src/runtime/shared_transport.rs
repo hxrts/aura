@@ -16,7 +16,7 @@
 
 #![allow(clippy::disallowed_types)]
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use aura_core::effects::transport::TransportEnvelope;
@@ -25,11 +25,11 @@ use parking_lot::RwLock;
 
 /// Shared transport state for multi-agent simulations.
 ///
-/// - `inbox`: shared message store (routing is done by destination AuthorityId)
+/// - `inboxes`: per-authority message queues (routing by destination AuthorityId)
 /// - `online`: set of authorities currently instantiated in this shared network
 #[derive(Clone, Debug)]
 pub struct SharedTransport {
-    inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    inboxes: Arc<RwLock<HashMap<AuthorityId, Arc<RwLock<Vec<TransportEnvelope>>>>>>,
     online: Arc<RwLock<HashSet<AuthorityId>>>,
 }
 
@@ -37,30 +37,46 @@ impl SharedTransport {
     /// Create a new empty shared transport network.
     pub fn new() -> Self {
         Self {
-            inbox: Arc::new(RwLock::new(Vec::new())),
+            inboxes: Arc::new(RwLock::new(HashMap::new())),
             online: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
-    /// Wrap an existing shared inbox (legacy simulation wiring).
-    ///
-    /// This preserves the historical `Arc<RwLock<Vec<TransportEnvelope>>>` sharing model
-    /// while allowing newer code to track an explicit online set.
-    pub fn from_inbox(inbox: Arc<RwLock<Vec<TransportEnvelope>>>) -> Self {
+    /// Wrap an existing per-authority inbox (legacy simulation wiring).
+    pub fn from_inbox(authority_id: AuthorityId, inbox: Arc<RwLock<Vec<TransportEnvelope>>>) -> Self {
+        let mut inboxes = HashMap::new();
+        inboxes.insert(authority_id, inbox);
+        let mut online = HashSet::new();
+        online.insert(authority_id);
         Self {
-            inbox,
-            online: Arc::new(RwLock::new(HashSet::new())),
+            inboxes: Arc::new(RwLock::new(inboxes)),
+            online: Arc::new(RwLock::new(online)),
         }
     }
 
-    /// Access the shared inbox used for routing envelopes.
-    pub fn inbox(&self) -> Arc<RwLock<Vec<TransportEnvelope>>> {
-        self.inbox.clone()
+    fn ensure_inbox(&self, authority_id: AuthorityId) -> Arc<RwLock<Vec<TransportEnvelope>>> {
+        let mut inboxes = self.inboxes.write();
+        inboxes
+            .entry(authority_id)
+            .or_insert_with(|| Arc::new(RwLock::new(Vec::new())))
+            .clone()
+    }
+
+    /// Access the inbox for a specific authority.
+    pub fn inbox_for(&self, authority_id: AuthorityId) -> Arc<RwLock<Vec<TransportEnvelope>>> {
+        self.ensure_inbox(authority_id)
+    }
+
+    /// Route an envelope into the destination authority inbox.
+    pub fn route_envelope(&self, envelope: TransportEnvelope) {
+        let inbox = self.ensure_inbox(envelope.destination);
+        inbox.write().push(envelope);
     }
 
     /// Register an authority as "online" in this shared network.
     pub fn register(&self, authority_id: AuthorityId) {
         self.online.write().insert(authority_id);
+        let _ = self.ensure_inbox(authority_id);
     }
 
     /// Count other authorities currently registered as online.
@@ -79,5 +95,44 @@ impl SharedTransport {
 impl Default for SharedTransport {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_core::identifiers::ContextId;
+    use std::collections::HashMap;
+
+    fn envelope_for(destination: AuthorityId, source: AuthorityId) -> TransportEnvelope {
+        TransportEnvelope {
+            destination,
+            source,
+            context: ContextId::new_from_entropy([0u8; 32]),
+            payload: vec![1, 2, 3],
+            metadata: HashMap::new(),
+            receipt: None,
+        }
+    }
+
+    #[test]
+    fn routes_envelopes_to_destination_inbox() {
+        let shared = SharedTransport::new();
+        let a = AuthorityId::new_from_entropy([1u8; 32]);
+        let b = AuthorityId::new_from_entropy([2u8; 32]);
+
+        shared.route_envelope(envelope_for(a, b));
+        shared.route_envelope(envelope_for(b, a));
+
+        let inbox_a = shared.inbox_for(a);
+        let inbox_b = shared.inbox_for(b);
+
+        let inbox_a = inbox_a.read();
+        let inbox_b = inbox_b.read();
+
+        assert_eq!(inbox_a.len(), 1);
+        assert_eq!(inbox_a[0].destination, a);
+        assert_eq!(inbox_b.len(), 1);
+        assert_eq!(inbox_b[0].destination, b);
     }
 }

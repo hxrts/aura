@@ -200,7 +200,7 @@ Web of trust systems model relationships between devices for authorization decis
 
 ### Relationship Formation
 
-Use relational contexts plus `InvitationService` to model trust formation. Create a shared context for the participants, exchange capabilities via invitations (e.g., `InvitationType::Contact`), and record trust facts in the relational journal. The legacy `relationship_formation` module has been removed.
+Use relational contexts plus `InvitationServiceApi` to model trust formation. Create a shared context for the participants, exchange capabilities via invitations (e.g., `InvitationType::Contact`), and record trust facts in the relational journal. The legacy `relationship_formation` module has been removed.
 
 ### Trust Computation
 

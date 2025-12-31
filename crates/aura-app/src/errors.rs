@@ -7,6 +7,108 @@
 
 use std::fmt;
 
+// Re-export ToastLevel from views/notifications (single source of truth)
+pub use crate::views::notifications::ToastLevel;
+
+/// Type alias for backwards compatibility.
+///
+/// `ToastSeverity` is now unified with `ToastLevel` from notifications.
+/// Note: `ToastLevel::Success` variant is not used for error severity mapping.
+pub type ToastSeverity = ToastLevel;
+
+// ============================================================================
+// Error Categories (Terminal-compatible)
+// ============================================================================
+
+/// High-level error categories for frontend error handling.
+///
+/// These categories provide a consistent way to classify errors across
+/// frontends (TUI, CLI, mobile) for appropriate UI treatment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ErrorCategory {
+    /// User input validation errors (correctable by user)
+    Input,
+    /// Configuration errors (correctable by modifying settings)
+    Config,
+    /// Authorization/capability errors (may require elevated privileges)
+    Capability,
+    /// Resource not found errors (transient or permanent)
+    NotFound,
+    /// Network connectivity errors (often transient)
+    Network,
+    /// Feature not implemented (development limitation)
+    NotImplemented,
+    /// General operation failures (catch-all)
+    Operation,
+}
+
+impl ErrorCategory {
+    /// Check if this error category is user-correctable.
+    ///
+    /// User-correctable errors are those where the user can take action
+    /// to resolve the issue (e.g., fix input, change settings).
+    #[must_use]
+    pub fn is_user_correctable(&self) -> bool {
+        matches!(self, Self::Input | Self::Config)
+    }
+
+    /// Check if this error category is likely transient.
+    ///
+    /// Transient errors may resolve on retry.
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        matches!(self, Self::Network | Self::NotFound)
+    }
+
+    /// Get the appropriate toast severity for this category.
+    #[must_use]
+    pub fn toast_severity(&self) -> ToastSeverity {
+        match self {
+            Self::Input => ToastSeverity::Info,
+            Self::Config => ToastSeverity::Warning,
+            Self::Capability => ToastSeverity::Error,
+            Self::NotFound => ToastSeverity::Warning,
+            Self::Network => ToastSeverity::Warning,
+            Self::NotImplemented => ToastSeverity::Info,
+            Self::Operation => ToastSeverity::Error,
+        }
+    }
+
+    /// Get a short label for this category.
+    #[must_use]
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Input => "Input",
+            Self::Config => "Config",
+            Self::Capability => "Permission",
+            Self::NotFound => "Not Found",
+            Self::Network => "Network",
+            Self::NotImplemented => "Unimplemented",
+            Self::Operation => "Operation",
+        }
+    }
+
+    /// Get a hint for the user on how to resolve this category of error.
+    #[must_use]
+    pub fn resolution_hint(&self) -> &'static str {
+        match self {
+            Self::Input => "Check your input and try again",
+            Self::Config => "Review your configuration settings",
+            Self::Capability => "This action requires additional permissions",
+            Self::NotFound => "The requested resource could not be found",
+            Self::Network => "Check your network connection and retry",
+            Self::NotImplemented => "This feature is not yet available",
+            Self::Operation => "An unexpected error occurred",
+        }
+    }
+}
+
+impl fmt::Display for ErrorCategory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
 /// Network error codes
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NetworkErrorCode {
@@ -97,16 +199,6 @@ impl fmt::Display for SyncStage {
     }
 }
 
-/// Toast severity levels for error display
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToastSeverity {
-    /// Informational - blue styling
-    Info,
-    /// Warning - yellow styling
-    Warning,
-    /// Error - red styling
-    Error,
-}
 
 /// Categorized application errors
 #[derive(Clone, Debug)]
@@ -313,5 +405,93 @@ mod tests {
         assert_eq!(err.code(), "INTERNAL");
         assert!(!err.is_recoverable());
         assert_eq!(err.toast_level(), ToastSeverity::Error);
+    }
+
+    // ========================================================================
+    // ErrorCategory Tests
+    // ========================================================================
+
+    #[test]
+    fn test_error_category_user_correctable() {
+        assert!(ErrorCategory::Input.is_user_correctable());
+        assert!(ErrorCategory::Config.is_user_correctable());
+        assert!(!ErrorCategory::Capability.is_user_correctable());
+        assert!(!ErrorCategory::NotFound.is_user_correctable());
+        assert!(!ErrorCategory::Network.is_user_correctable());
+        assert!(!ErrorCategory::NotImplemented.is_user_correctable());
+        assert!(!ErrorCategory::Operation.is_user_correctable());
+    }
+
+    #[test]
+    fn test_error_category_transient() {
+        assert!(!ErrorCategory::Input.is_transient());
+        assert!(!ErrorCategory::Config.is_transient());
+        assert!(!ErrorCategory::Capability.is_transient());
+        assert!(ErrorCategory::NotFound.is_transient());
+        assert!(ErrorCategory::Network.is_transient());
+        assert!(!ErrorCategory::NotImplemented.is_transient());
+        assert!(!ErrorCategory::Operation.is_transient());
+    }
+
+    #[test]
+    fn test_error_category_toast_severity() {
+        assert_eq!(ErrorCategory::Input.toast_severity(), ToastSeverity::Info);
+        assert_eq!(
+            ErrorCategory::Config.toast_severity(),
+            ToastSeverity::Warning
+        );
+        assert_eq!(
+            ErrorCategory::Capability.toast_severity(),
+            ToastSeverity::Error
+        );
+        assert_eq!(
+            ErrorCategory::NotFound.toast_severity(),
+            ToastSeverity::Warning
+        );
+        assert_eq!(
+            ErrorCategory::Network.toast_severity(),
+            ToastSeverity::Warning
+        );
+        assert_eq!(
+            ErrorCategory::NotImplemented.toast_severity(),
+            ToastSeverity::Info
+        );
+        assert_eq!(
+            ErrorCategory::Operation.toast_severity(),
+            ToastSeverity::Error
+        );
+    }
+
+    #[test]
+    fn test_error_category_labels() {
+        assert_eq!(ErrorCategory::Input.label(), "Input");
+        assert_eq!(ErrorCategory::Config.label(), "Config");
+        assert_eq!(ErrorCategory::Capability.label(), "Permission");
+        assert_eq!(ErrorCategory::NotFound.label(), "Not Found");
+        assert_eq!(ErrorCategory::Network.label(), "Network");
+        assert_eq!(ErrorCategory::NotImplemented.label(), "Unimplemented");
+        assert_eq!(ErrorCategory::Operation.label(), "Operation");
+    }
+
+    #[test]
+    fn test_error_category_display() {
+        assert_eq!(format!("{}", ErrorCategory::Input), "Input");
+        assert_eq!(format!("{}", ErrorCategory::Network), "Network");
+    }
+
+    #[test]
+    fn test_error_category_resolution_hints() {
+        // Just verify they're non-empty
+        for category in [
+            ErrorCategory::Input,
+            ErrorCategory::Config,
+            ErrorCategory::Capability,
+            ErrorCategory::NotFound,
+            ErrorCategory::Network,
+            ErrorCategory::NotImplemented,
+            ErrorCategory::Operation,
+        ] {
+            assert!(!category.resolution_hint().is_empty());
+        }
     }
 }

@@ -29,14 +29,11 @@
 #[cfg(feature = "simulation")]
 use aura_core::effects::{
     SimulationEnvironmentConfig, SimulationEnvironmentError, SimulationEnvironmentFactory,
-    TransportEnvelope,
 };
 #[cfg(feature = "simulation")]
 use aura_core::hash::hash;
 #[cfg(feature = "simulation")]
 use aura_core::identifiers::AuthorityId;
-#[cfg(feature = "simulation")]
-use parking_lot::RwLock;
 #[cfg(feature = "simulation")]
 use std::sync::Arc;
 
@@ -132,7 +129,7 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
     async fn create_simulation_environment_with_shared_transport(
         &self,
         config: SimulationEnvironmentConfig,
-        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+        shared_transport: SharedTransport,
     ) -> Result<Arc<Self::EffectSystem>, SimulationEnvironmentError> {
         let agent_config = self.to_agent_config(&config);
 
@@ -153,7 +150,7 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
             &agent_config,
             config.seed,
             authority_id,
-            SharedTransport::from_inbox(shared_inbox),
+            shared_transport,
         )
         .map_err(|e| SimulationEnvironmentError::CreationFailed(e.to_string()))?;
 
@@ -188,10 +185,10 @@ mod tests {
         let factory = EffectSystemFactory::new();
         let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let config = SimulationEnvironmentConfig::new(42, device_id);
-        let shared_inbox = Arc::new(RwLock::new(Vec::new()));
+        let shared_transport = SharedTransport::new();
 
         let result = factory
-            .create_simulation_environment_with_shared_transport(config, shared_inbox)
+            .create_simulation_environment_with_shared_transport(config, shared_transport)
             .await;
         assert!(result.is_ok());
     }

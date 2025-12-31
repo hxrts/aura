@@ -7,6 +7,7 @@
 //! integration (capability checks, flow budget charging, fact emission).
 
 use crate::core::{AgentError, AgentResult};
+use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::AuraEffectSystem;
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
@@ -27,7 +28,6 @@ use aura_core::{Hash32, Prestate};
 use aura_guards::GuardContextProvider;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_journal::DomainFact;
-use aura_journal::FactJournal;
 use aura_protocol::amp::{
     commit_bump_with_consensus, emit_proposed_bump, get_channel_state, AmpChannelCoordinator,
     AmpJournalEffects,
@@ -35,23 +35,30 @@ use aura_protocol::amp::{
 use aura_protocol::effects::TreeEffects;
 use uuid::Uuid;
 
-/// Chat service for the agent layer.
+/// Chat service API for the agent layer.
 ///
 /// The service commits chat facts into the agent's canonical fact store
 /// (`AuraEffectSystem::commit_generic_fact_bytes`) so reactive views and sync
 /// pipelines can observe them.
-pub struct ChatService {
+#[derive(Clone)]
+pub struct ChatServiceApi {
     effects: std::sync::Arc<AuraEffectSystem>,
     facts: ChatFactService,
 }
 
-impl ChatService {
+impl std::fmt::Debug for ChatServiceApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChatServiceApi").finish_non_exhaustive()
+    }
+}
+
+impl ChatServiceApi {
     /// Create a new chat service.
-    pub fn new(effects: std::sync::Arc<AuraEffectSystem>) -> Self {
-        Self {
+    pub fn new(effects: std::sync::Arc<AuraEffectSystem>) -> AgentResult<Self> {
+        Ok(Self {
             effects,
             facts: ChatFactService::new(),
-        }
+        })
     }
 
     fn channel_id_for_group(group_id: &ChatGroupId) -> ChannelId {
@@ -74,22 +81,6 @@ impl ChatService {
         AmpChannelCoordinator::new(self.effects.clone())
     }
 
-    fn context_commitment_from_journal(
-        &self,
-        context_id: ContextId,
-        journal: &FactJournal,
-    ) -> AgentResult<Hash32> {
-        let mut hasher = aura_core::hash::hasher();
-        hasher.update(b"RELATIONAL_CONTEXT_FACTS");
-        hasher.update(context_id.as_bytes());
-        for fact in journal.facts.iter() {
-            let bytes = aura_core::util::serialization::to_vec(fact)
-                .map_err(|e| AgentError::effects(format!("Serialize context fact: {e}")))?;
-            hasher.update(&bytes);
-        }
-        Ok(Hash32(hasher.finalize()))
-    }
-
     async fn build_amp_prestate(
         &self,
         authority_id: AuthorityId,
@@ -105,7 +96,7 @@ impl ChatService {
             .fetch_context_journal(context_id)
             .await
             .map_err(|e| AgentError::effects(format!("Context journal lookup failed: {e}")))?;
-        let context_commitment = self.context_commitment_from_journal(context_id, &journal)?;
+        let context_commitment = context_commitment_from_journal(context_id, &journal)?;
         Ok(Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,

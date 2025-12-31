@@ -77,7 +77,7 @@ impl RendezvousHandler {
         HandlerUtilities::validate_authority_context(&authority)?;
 
         let config = RendezvousConfig::default();
-        let service = RendezvousService::new(authority.authority_id, config);
+        let service = RendezvousService::new(authority.authority_id(), config);
 
         Ok(Self {
             context: HandlerContext::new(authority),
@@ -112,7 +112,7 @@ impl RendezvousHandler {
             let guard = create_send_guard(
                 "rendezvous:publish_descriptor".to_string(),
                 context_id,
-                self.context.authority.authority_id,
+                self.context.authority.authority_id(),
                 1, // Low cost for descriptor publication
             );
             let result = guard
@@ -196,7 +196,7 @@ impl RendezvousHandler {
     ) -> bool {
         let cache = self.descriptor_cache.read().await;
         cache
-            .get(&(context_id, self.context.authority.authority_id))
+            .get(&(context_id, self.context.authority.authority_id()))
             .map(|desc| {
                 let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
                 now_ms >= refresh_threshold
@@ -222,7 +222,7 @@ impl RendezvousHandler {
             let guard = create_send_guard(
                 "rendezvous:initiate_channel".to_string(),
                 context_id,
-                self.context.authority.authority_id,
+                self.context.authority.authority_id(),
                 2, // Handshake cost
             );
             let result = guard
@@ -364,7 +364,7 @@ impl RendezvousHandler {
             let guard = create_send_guard(
                 "rendezvous:relay_request".to_string(),
                 context_id,
-                self.context.authority.authority_id,
+                self.context.authority.authority_id(),
                 2, // Relay request cost
             );
             let result = guard
@@ -416,7 +416,7 @@ impl RendezvousHandler {
         context_id: ContextId,
     ) -> AgentResult<GuardSnapshot> {
         Ok(GuardSnapshot {
-            authority_id: self.context.authority.authority_id,
+            authority_id: self.context.authority.authority_id(),
             context_id,
             flow_budget_remaining: 1000, // Default budget
             capabilities: vec![
@@ -465,19 +465,13 @@ impl RendezvousHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
     use std::sync::Arc;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([seed + 100; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         authority_context
     }
 

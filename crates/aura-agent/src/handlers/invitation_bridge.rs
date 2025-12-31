@@ -6,16 +6,17 @@
 
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::TransportEffects;
-use aura_core::hash::hash;
-use aura_core::identifiers::ContextId;
+use aura_core::effects::{FlowBudgetEffects, StorageCoreEffects, TransportEffects};
+use aura_core::effects::{TransportEnvelope, TransportReceipt};
+use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::Receipt;
 use aura_invitation::guards::{EffectCommand, GuardOutcome};
 use aura_invitation::InvitationFact;
 use aura_journal::DomainFact;
 use std::collections::HashMap;
 
 use super::shared::HandlerUtilities;
-use super::{invitation::InvitationHandler, InvitationService};
+use super::{invitation::InvitationHandler, InvitationServiceApi};
 
 /// Execute a guard outcome's effect commands
 ///
@@ -47,31 +48,75 @@ pub async fn execute_guard_outcome(
         )));
     }
 
+    let context_id = authority.default_context_id();
+    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id());
+    let mut pending_receipt: Option<Receipt> = None;
+
     // Execute each effect command
     for command in outcome.effects {
-        execute_effect_command(command, authority, effects).await?;
+        execute_effect_command(
+            command,
+            authority,
+            context_id,
+            effects,
+            charge_peer,
+            &mut pending_receipt,
+        )
+        .await?;
     }
 
     Ok(())
+}
+
+fn resolve_charge_peer(commands: &[EffectCommand], fallback: AuthorityId) -> AuthorityId {
+    commands
+        .iter()
+        .find_map(|command| match command {
+            EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
+            EffectCommand::RecordReceipt { peer, .. } => *peer,
+            _ => None,
+        })
+        .unwrap_or(fallback)
 }
 
 /// Execute a single effect command
 async fn execute_effect_command(
     command: EffectCommand,
     authority: &AuthorityContext,
+    context_id: ContextId,
     effects: &AuraEffectSystem,
+    charge_peer: AuthorityId,
+    pending_receipt: &mut Option<Receipt>,
 ) -> AgentResult<()> {
     match command {
         EffectCommand::JournalAppend { fact } => {
-            execute_journal_append(fact, authority, effects).await
+            execute_journal_append(fact, authority, context_id, effects).await
         }
-        EffectCommand::ChargeFlowBudget { cost } => execute_charge_flow_budget(cost, effects).await,
+        EffectCommand::ChargeFlowBudget { cost } => {
+            *pending_receipt =
+                execute_charge_flow_budget(cost, context_id, charge_peer, effects).await?;
+            Ok(())
+        }
         EffectCommand::NotifyPeer {
             peer,
             invitation_id,
-        } => execute_notify_peer(peer, invitation_id, authority, effects).await,
+        } => execute_notify_peer(
+            peer,
+            invitation_id,
+            authority,
+            pending_receipt.clone(),
+            effects,
+        )
+        .await,
         EffectCommand::RecordReceipt { operation, peer } => {
-            execute_record_receipt(operation, peer, effects).await
+            execute_record_receipt(
+                operation,
+                peer,
+                context_id,
+                pending_receipt.take(),
+                effects,
+            )
+            .await
         }
     }
 }
@@ -80,11 +125,9 @@ async fn execute_effect_command(
 async fn execute_journal_append(
     fact: InvitationFact,
     authority: &AuthorityContext,
+    context_id: ContextId,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
-    // Derive context ID from authority ID (same pattern as HandlerContext::new)
-    let context_id = ContextId::new_from_entropy(hash(&authority.authority_id.to_bytes()));
-
     // Append the fact to the journal
     HandlerUtilities::append_generic_fact(
         authority,
@@ -97,23 +140,30 @@ async fn execute_journal_append(
 }
 
 /// Execute a flow budget charge command
-async fn execute_charge_flow_budget(cost: u32, effects: &AuraEffectSystem) -> AgentResult<()> {
+async fn execute_charge_flow_budget(
+    cost: u32,
+    context_id: ContextId,
+    peer: AuthorityId,
+    effects: &AuraEffectSystem,
+) -> AgentResult<Option<Receipt>> {
     // In testing mode, skip actual charging
     if effects.is_testing() {
-        return Ok(());
+        return Ok(None);
     }
 
-    // Flow budget charging will use FlowBudgetEffects when integrated.
-    // Currently logs the charge request for debugging.
-    tracing::debug!(cost = cost, "Flow budget charge requested");
-    Ok(())
+    let receipt = effects
+        .charge_flow(&context_id, &peer, cost)
+        .await
+        .map_err(|e| AgentError::effects(format!("Failed to charge invitation flow: {e}")))?;
+    Ok(Some(receipt))
 }
 
 /// Execute a peer notification command
 async fn execute_notify_peer(
-    peer: aura_core::identifiers::AuthorityId,
+    peer: AuthorityId,
     invitation_id: String,
     authority: &AuthorityContext,
+    receipt: Option<Receipt>,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
     // In testing mode, skip actual notification
@@ -122,13 +172,13 @@ async fn execute_notify_peer(
     }
 
     let invitation =
-        InvitationHandler::load_created_invitation(effects, authority.authority_id, &invitation_id)
+        InvitationHandler::load_created_invitation(effects, authority.authority_id(), &invitation_id)
             .await
             .ok_or_else(|| {
                 AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
             })?;
 
-    let code = InvitationService::export_invitation(&invitation);
+    let code = InvitationServiceApi::export_invitation(&invitation);
     let mut metadata = HashMap::new();
     metadata.insert(
         "content-type".to_string(),
@@ -140,13 +190,13 @@ async fn execute_notify_peer(
         invitation.context_id.to_string(),
     );
 
-    let envelope = aura_core::effects::TransportEnvelope {
+    let envelope = TransportEnvelope {
         destination: peer,
-        source: authority.authority_id,
+        source: authority.authority_id(),
         context: invitation.context_id,
         payload: code.into_bytes(),
         metadata,
-        receipt: None,
+        receipt: receipt.map(transport_receipt_from_flow),
     };
 
     effects
@@ -157,10 +207,25 @@ async fn execute_notify_peer(
     Ok(())
 }
 
+fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
+    TransportReceipt {
+        context: receipt.ctx,
+        src: receipt.src,
+        dst: receipt.dst,
+        epoch: receipt.epoch.value(),
+        cost: receipt.cost,
+        nonce: receipt.nonce,
+        prev: receipt.prev.0,
+        sig: receipt.sig,
+    }
+}
+
 /// Execute a receipt recording command
 async fn execute_record_receipt(
     operation: String,
-    peer: Option<aura_core::identifiers::AuthorityId>,
+    peer: Option<AuthorityId>,
+    context_id: ContextId,
+    receipt: Option<Receipt>,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
     // In testing mode, skip actual receipt recording
@@ -168,32 +233,42 @@ async fn execute_record_receipt(
         return Ok(());
     }
 
-    // Receipt recording will use JournalEffects when integrated.
-    // Currently logs the receipt request for debugging.
-    tracing::debug!(
-        operation = %operation,
-        peer = ?peer,
-        "Receipt recording requested"
+    let Some(receipt) = receipt else {
+        tracing::debug!(
+            operation = %operation,
+            peer = ?peer,
+            context = %context_id,
+            "Invitation receipt recording skipped (no receipt available)"
+        );
+        return Ok(());
+    };
+
+    let peer_id = peer.unwrap_or(receipt.dst);
+    let operation_key = operation.replace(' ', "_");
+    let key = format!(
+        "invitation/receipts/{}/{}/{}/{}",
+        receipt.ctx, peer_id, operation_key, receipt.nonce
     );
+    let bytes = serde_json::to_vec(&receipt).map_err(|e| {
+        AgentError::effects(format!("Failed to serialize invitation receipt: {e}"))
+    })?;
+    effects
+        .store(&key, bytes)
+        .await
+        .map_err(|e| AgentError::effects(format!("Failed to store invitation receipt: {e}")))?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
     use aura_core::identifiers::{AuthorityId, ContextId};
     use aura_invitation::guards::GuardOutcome;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let mut authority_context = AuthorityContext::new(authority_id);
-        authority_context.add_context(RelationalContext {
-            context_id: ContextId::new_from_entropy([seed + 100; 32]),
-            participants: vec![],
-            metadata: Default::default(),
-        });
+        let authority_context = AuthorityContext::new(authority_id);
         authority_context
     }
 
@@ -234,7 +309,7 @@ mod tests {
         let fact = InvitationFact::sent_ms(
             ContextId::new_from_entropy([232u8; 32]),
             "inv-test".to_string(),
-            authority.authority_id,
+            authority.authority_id(),
             AuthorityId::new_from_entropy([133u8; 32]),
             "contact".to_string(),
             1000,

@@ -34,7 +34,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 
 use crate::builder::BuildError;
 use crate::core::AgentConfig;
-use crate::{AgentBuilder, AgentResult, AuraAgent};
+use crate::{AgentResult, AuraAgent};
 
 /// Android-specific builder with sensible defaults for Android applications.
 ///
@@ -237,33 +237,4 @@ fn default_android_data_dir() -> PathBuf {
     // On Android, this would be obtained from:
     // context.getFilesDir() or context.getNoBackupFilesDir()
     PathBuf::from("/data/data/com.example.aura/files")
-}
-
-// Extend AgentBuilder with Android preset entry point
-impl AgentBuilder {
-    /// Create an Android preset builder for Android applications.
-    ///
-    /// This provides sensible defaults for Android apps:
-    /// - Android Keystore for crypto operations
-    /// - App-private encrypted storage
-    /// - System time and SecureRandom sources
-    /// - Logcat-based console output
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let agent = AgentBuilder::android()
-    ///     .application_id("com.example.aura")
-    ///     .use_strongbox(true)
-    ///     .build()
-    ///     .await?;
-    /// ```
-    ///
-    /// # Feature Flag
-    ///
-    /// Requires the `android` feature flag for full functionality.
-    /// Without it, `build()` will return an error.
-    pub fn android() -> AndroidPresetBuilder {
-        AndroidPresetBuilder::new()
-    }
 }

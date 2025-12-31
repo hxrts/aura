@@ -24,6 +24,40 @@ pub const DEFAULT_MAX_RETRIES: u32 = 3;
 /// Default logging level.
 pub const DEFAULT_LOG_LEVEL: &str = "info";
 
+/// Default node heartbeat interval in milliseconds.
+/// Used for startup coordination and health checks.
+pub const NODE_HEARTBEAT_INTERVAL_MS: u64 = 200;
+
+/// Number of heartbeats to send during node startup.
+pub const NODE_STARTUP_HEARTBEATS: u32 = 3;
+
+// ============================================================================
+// Storage Constants
+// ============================================================================
+
+/// Account configuration filename.
+///
+/// Mode isolation is achieved through separate base directories:
+/// - Production: `$AURA_PATH/.aura/account.json` (default: `~/.aura/account.json`)
+/// - Demo: `$AURA_PATH/.aura-demo/account.json` (default: `~/.aura-demo/account.json`)
+pub const ACCOUNT_FILENAME: &str = "account.json";
+
+/// Journal filename.
+///
+/// Mode isolation is achieved through separate base directories:
+/// - Production: `$AURA_PATH/.aura/journal.json` (default: `~/.aura/journal.json`)
+/// - Demo: `$AURA_PATH/.aura-demo/journal.json` (default: `~/.aura-demo/journal.json`)
+pub const JOURNAL_FILENAME: &str = "journal.json";
+
+/// TUI log key prefix for storage.
+pub const TUI_LOG_KEY_PREFIX: &str = "logs";
+
+/// Maximum TUI log storage size in bytes (1 MB).
+pub const MAX_TUI_LOG_BYTES: usize = 1_000_000;
+
+/// TUI log queue capacity.
+pub const TUI_LOG_QUEUE_CAPACITY: usize = 256;
+
 // ============================================================================
 // Configuration Functions
 // ============================================================================
@@ -220,5 +254,20 @@ mod tests {
         assert_eq!(DEFAULT_NETWORK_TIMEOUT_SECS, 30);
         assert_eq!(DEFAULT_MAX_RETRIES, 3);
         assert_eq!(DEFAULT_LOG_LEVEL, "info");
+    }
+
+    #[test]
+    fn test_storage_constants() {
+        assert_eq!(ACCOUNT_FILENAME, "account.json");
+        assert_eq!(JOURNAL_FILENAME, "journal.json");
+        assert_eq!(TUI_LOG_KEY_PREFIX, "logs");
+        assert_eq!(MAX_TUI_LOG_BYTES, 1_000_000);
+        assert_eq!(TUI_LOG_QUEUE_CAPACITY, 256);
+    }
+
+    #[test]
+    fn test_storage_filenames_are_json() {
+        assert!(ACCOUNT_FILENAME.ends_with(".json"));
+        assert!(JOURNAL_FILENAME.ends_with(".json"));
     }
 }

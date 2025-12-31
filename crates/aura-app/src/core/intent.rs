@@ -18,6 +18,10 @@ use aura_core::types::Epoch;
 use aura_journal::JournalFact;
 use serde::{Deserialize, Serialize};
 
+// Re-export types from views (single source of truth)
+pub use crate::views::chat::ChannelType;
+pub use crate::views::invitations::InvitationType;
+
 /// Screen identifier for navigation intents
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
@@ -38,30 +42,6 @@ pub enum Screen {
     Settings,
     /// Help screen
     Help,
-}
-
-/// Channel type for chat
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
-pub enum ChannelType {
-    /// Home-level messaging
-    Home,
-    /// Direct message
-    DirectMessage,
-    /// Guardian chat
-    Guardian,
-}
-
-/// Invitation type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
-pub enum InvitationType {
-    /// Invite to home
-    Home,
-    /// Invite as guardian
-    Guardian,
-    /// Invite to chat
-    Chat,
 }
 
 /// An intent is a user action that becomes a fact.
@@ -737,6 +717,7 @@ impl Intent {
                     ChannelType::Home => "Home",
                     ChannelType::DirectMessage => "DirectMessage",
                     ChannelType::Guardian => "Guardian",
+                    ChannelType::All => "All", // Filter variant - not typically used for creation
                 };
                 format!("CreateChannel::name={}&channel_type={}", name, ct)
             }

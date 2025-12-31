@@ -44,7 +44,7 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
 
     let pipeline = ReactivePipeline::start(
         SchedulerConfig::default(),
-        build_fact_registry(),
+        Arc::new(build_fact_registry()),
         time_effects,
         own_authority,
         reactive.clone(),
@@ -102,7 +102,7 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
 
     let pipeline = ReactivePipeline::start(
         SchedulerConfig::default(),
-        build_fact_registry(),
+        Arc::new(build_fact_registry()),
         time_effects,
         own_authority,
         reactive.clone(),
@@ -162,7 +162,7 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
 
     let pipeline = ReactivePipeline::start(
         SchedulerConfig::default(),
-        build_fact_registry(),
+        Arc::new(build_fact_registry()),
         time_effects,
         own_authority,
         reactive.clone(),

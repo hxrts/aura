@@ -20,7 +20,7 @@ use std::str::FromStr;
 // CLI handlers use direct agent service access (more efficient for CLI context)
 // TUI handlers should use aura_app::ui::workflows::invitation for portability
 use aura_agent::handlers::ShareableInvitation;
-use aura_agent::{AuraAgent, InvitationService};
+use aura_agent::{AuraAgent, InvitationServiceApi};
 
 /// Handle invitation-related CLI commands
 ///
@@ -117,7 +117,7 @@ pub async fn handle_invitation(
         }
         InvitationAction::Import { code } => {
             let mut output = CliOutput::new();
-            let shareable = InvitationService::import_code(code)
+            let shareable = InvitationServiceApi::import_code(code)
                 .map_err(|e| TerminalError::Input(format!("Invalid invitation code: {e}")))?;
 
             output.section("Invitation Details");

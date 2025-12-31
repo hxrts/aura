@@ -1,7 +1,5 @@
 //! Enhanced time handler for production use with advanced scheduling capabilities.
 
-#![allow(dead_code)]
-
 use aura_core::effects::{
     PhysicalTimeEffects, RandomExtendedEffects, TimeoutHandle, WakeCondition,
 };
@@ -20,6 +18,7 @@ struct TimeoutTask {
 }
 
 /// Enhanced time handler with scheduling, timeouts, and event-driven waking
+#[derive(Clone)]
 pub struct EnhancedTimeHandler {
     /// Registered contexts for time events
     contexts: Arc<RwLock<HashMap<Uuid, ()>>>,

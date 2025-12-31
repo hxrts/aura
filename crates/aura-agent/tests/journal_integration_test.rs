@@ -123,7 +123,7 @@ fn scheduler_with_registry(
     use aura_effects::time::PhysicalTimeHandler;
     use std::sync::Arc;
     let time_effects = Arc::new(PhysicalTimeHandler);
-    ReactiveScheduler::new(config, build_fact_registry(), time_effects)
+    ReactiveScheduler::new(config, Arc::new(build_fact_registry()), time_effects)
 }
 
 // =============================================================================

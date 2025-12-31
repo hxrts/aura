@@ -68,11 +68,14 @@ pub mod admin;
 pub mod authority;
 pub mod budget;
 pub mod amp;
+pub mod chat_commands;
 pub mod config;
 pub mod ceremonies;
 pub(crate) mod channel_ref;
 pub mod contacts;
 pub mod context;
+pub mod demo_config;
+pub mod ids;
 pub mod invitation;
 pub(crate) mod journal;
 #[cfg(feature = "signals")]
@@ -80,6 +83,7 @@ pub mod messaging;
 pub mod moderation;
 pub mod network;
 pub(crate) mod parse;
+pub mod privacy;
 pub mod query;
 #[cfg(feature = "signals")]
 pub mod recovery;

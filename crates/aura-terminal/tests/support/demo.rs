@@ -18,8 +18,8 @@
 use aura_terminal::ids;
 use base64::Engine;
 
-/// Default seed used in demo mode.
-pub const DEFAULT_DEMO_SEED: u64 = 2024;
+// Re-export portable demo seed from aura-app
+pub use aura_app::workflows::demo_config::DEMO_SEED_2024 as DEFAULT_DEMO_SEED;
 
 /// Demo agent names.
 pub const ALICE: &str = "Alice";

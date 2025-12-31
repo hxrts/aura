@@ -1,5 +1,13 @@
 //! Account setup modal state
 
+use aura_app::ui::prelude::*;
+
+// Re-export portable validation for callers that only import this module
+pub use aura_app::workflows::account::{
+    is_valid_display_name, validate_display_name, DisplayNameError,
+    MAX_DISPLAY_NAME_LENGTH, MIN_DISPLAY_NAME_LENGTH,
+};
+
 /// State for account setup modal
 #[derive(Clone, Debug, Default)]
 pub struct AccountSetupModalState {
@@ -14,10 +22,11 @@ pub struct AccountSetupModalState {
 }
 
 impl AccountSetupModalState {
-    /// Whether we can submit the form
+    /// Whether we can submit the form.
+    /// Uses portable validation from aura-app.
     #[must_use]
     pub fn can_submit(&self) -> bool {
-        !self.display_name.trim().is_empty() && !self.creating && !self.success
+        can_submit_account_setup(&self.display_name, self.creating, self.success)
     }
 
     /// Start the creating state.

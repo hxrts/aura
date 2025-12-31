@@ -124,6 +124,131 @@ pub fn validate_threshold_compatibility(configs: &[(&str, u32)]) -> Result<(), A
     Ok(())
 }
 
+// ============================================================================
+// Display Name Validation
+// ============================================================================
+
+/// Maximum allowed length for a display name.
+pub const MAX_DISPLAY_NAME_LENGTH: usize = 64;
+
+/// Minimum allowed length for a display name.
+pub const MIN_DISPLAY_NAME_LENGTH: usize = 1;
+
+/// Display name validation error types.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DisplayNameError {
+    /// Display name is empty or whitespace-only
+    Empty,
+    /// Display name exceeds maximum length
+    TooLong {
+        /// Actual length
+        length: usize,
+        /// Maximum allowed
+        max: usize,
+    },
+    /// Display name contains invalid characters
+    InvalidChars {
+        /// Description of the issue
+        reason: String,
+    },
+}
+
+impl std::fmt::Display for DisplayNameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Empty => write!(f, "Display name cannot be empty"),
+            Self::TooLong { length, max } => {
+                write!(f, "Display name too long: {length} characters (max {max})")
+            }
+            Self::InvalidChars { reason } => {
+                write!(f, "Display name contains invalid characters: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DisplayNameError {}
+
+/// Validate a display name for account setup.
+///
+/// # Arguments
+/// * `name` - The display name to validate
+///
+/// # Returns
+/// * `Ok(String)` - The trimmed, validated display name
+/// * `Err(DisplayNameError)` - If validation fails
+///
+/// # Validation Rules
+/// - Must not be empty or whitespace-only
+/// - Must not exceed `MAX_DISPLAY_NAME_LENGTH` characters
+/// - Must not contain control characters
+///
+/// # Examples
+/// ```rust
+/// use aura_app::ui::workflows::account::validate_display_name;
+///
+/// assert!(validate_display_name("Alice").is_ok());
+/// assert!(validate_display_name("").is_err());
+/// assert!(validate_display_name("   ").is_err());
+/// ```
+pub fn validate_display_name(name: &str) -> Result<String, DisplayNameError> {
+    let trimmed = name.trim();
+
+    // Check for empty
+    if trimmed.is_empty() {
+        return Err(DisplayNameError::Empty);
+    }
+
+    // Check length
+    if trimmed.len() > MAX_DISPLAY_NAME_LENGTH {
+        return Err(DisplayNameError::TooLong {
+            length: trimmed.len(),
+            max: MAX_DISPLAY_NAME_LENGTH,
+        });
+    }
+
+    // Check for control characters (excluding normal whitespace)
+    if trimmed.chars().any(|c| c.is_control()) {
+        return Err(DisplayNameError::InvalidChars {
+            reason: "control characters not allowed".to_string(),
+        });
+    }
+
+    Ok(trimmed.to_string())
+}
+
+/// Check if a display name is valid without returning the trimmed value.
+///
+/// Convenience function for form validation that just needs a boolean.
+///
+/// # Examples
+/// ```rust
+/// use aura_app::ui::workflows::account::is_valid_display_name;
+///
+/// assert!(is_valid_display_name("Alice"));
+/// assert!(!is_valid_display_name(""));
+/// ```
+#[must_use]
+pub fn is_valid_display_name(name: &str) -> bool {
+    validate_display_name(name).is_ok()
+}
+
+/// Check if a form can be submitted based on display name.
+///
+/// This mirrors the TUI's `can_submit()` logic for portable use.
+///
+/// # Arguments
+/// * `display_name` - The current display name input
+/// * `is_creating` - Whether creation is already in progress
+/// * `is_success` - Whether creation already succeeded
+///
+/// # Returns
+/// `true` if the form can be submitted
+#[must_use]
+pub fn can_submit_account_setup(display_name: &str, is_creating: bool, is_success: bool) -> bool {
+    is_valid_display_name(display_name) && !is_creating && !is_success
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,6 +348,102 @@ mod tests {
         let context2 = derive_recovered_context_id(&authority);
         assert_eq!(context1, context2);
     }
+
+    // =========================================================================
+    // Display Name Validation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_validate_display_name_valid() {
+        assert_eq!(validate_display_name("Alice").unwrap(), "Alice");
+        assert_eq!(validate_display_name("Bob Smith").unwrap(), "Bob Smith");
+        assert_eq!(validate_display_name("  Trimmed  ").unwrap(), "Trimmed");
+    }
+
+    #[test]
+    fn test_validate_display_name_empty() {
+        assert_eq!(validate_display_name(""), Err(DisplayNameError::Empty));
+        assert_eq!(validate_display_name("   "), Err(DisplayNameError::Empty));
+        assert_eq!(validate_display_name("\t\n"), Err(DisplayNameError::Empty));
+    }
+
+    #[test]
+    fn test_validate_display_name_too_long() {
+        let long_name = "a".repeat(MAX_DISPLAY_NAME_LENGTH + 1);
+        match validate_display_name(&long_name) {
+            Err(DisplayNameError::TooLong { length, max }) => {
+                assert_eq!(length, MAX_DISPLAY_NAME_LENGTH + 1);
+                assert_eq!(max, MAX_DISPLAY_NAME_LENGTH);
+            }
+            other => panic!("Expected TooLong error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_validate_display_name_max_length_ok() {
+        let max_name = "a".repeat(MAX_DISPLAY_NAME_LENGTH);
+        assert!(validate_display_name(&max_name).is_ok());
+    }
+
+    #[test]
+    fn test_validate_display_name_control_chars() {
+        assert!(matches!(
+            validate_display_name("Alice\x00Bob"),
+            Err(DisplayNameError::InvalidChars { .. })
+        ));
+        assert!(matches!(
+            validate_display_name("Name\x07Bell"),
+            Err(DisplayNameError::InvalidChars { .. })
+        ));
+    }
+
+    #[test]
+    fn test_is_valid_display_name() {
+        assert!(is_valid_display_name("Alice"));
+        assert!(!is_valid_display_name(""));
+        assert!(!is_valid_display_name("   "));
+    }
+
+    #[test]
+    fn test_can_submit_account_setup() {
+        // Valid name, not creating, not success -> can submit
+        assert!(can_submit_account_setup("Alice", false, false));
+
+        // Empty name -> cannot submit
+        assert!(!can_submit_account_setup("", false, false));
+
+        // Valid name but already creating -> cannot submit
+        assert!(!can_submit_account_setup("Alice", true, false));
+
+        // Valid name but already succeeded -> cannot submit
+        assert!(!can_submit_account_setup("Alice", false, true));
+
+        // Both flags set -> cannot submit
+        assert!(!can_submit_account_setup("Alice", true, true));
+    }
+
+    #[test]
+    fn test_display_name_error_display() {
+        assert_eq!(
+            DisplayNameError::Empty.to_string(),
+            "Display name cannot be empty"
+        );
+        assert_eq!(
+            DisplayNameError::TooLong {
+                length: 100,
+                max: 64
+            }
+            .to_string(),
+            "Display name too long: 100 characters (max 64)"
+        );
+        assert_eq!(
+            DisplayNameError::InvalidChars {
+                reason: "control characters not allowed".to_string()
+            }
+            .to_string(),
+            "Display name contains invalid characters: control characters not allowed"
+        );
+    }
 }
 
 // =============================================================================
@@ -242,7 +463,7 @@ mod tests {
 ///
 /// # Example
 /// ```
-/// use aura_app::workflows::account::derive_authority_id;
+/// use aura_app::ui::workflows::account::derive_authority_id;
 ///
 /// let id1 = derive_authority_id("my-device");
 /// let id2 = derive_authority_id("my-device");
@@ -266,7 +487,7 @@ pub fn derive_authority_id(device_id: &str) -> AuthorityId {
 ///
 /// # Example
 /// ```
-/// use aura_app::workflows::account::derive_context_id;
+/// use aura_app::ui::workflows::account::derive_context_id;
 ///
 /// let id1 = derive_context_id("my-device");
 /// let id2 = derive_context_id("my-device");
