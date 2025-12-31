@@ -32,18 +32,15 @@ pub async fn handle_init(
     ));
     output.kv("Output directory", output_dir.display().to_string());
 
-    // Validate parameters through effects
-    if threshold > num_devices {
-        output.eprintln("Threshold cannot be greater than number of devices");
-        return Err(TerminalError::Input(format!(
-            "Invalid parameters: threshold ({threshold}) > num_devices ({num_devices})"
-        )));
-    }
+    // Validate parameters using portable workflow
+    let threshold_config =
+        aura_app::ui::workflows::account::validate_threshold_params(threshold, num_devices)
+            .map_err(|e| {
+                output.eprintln(e.to_string());
+                TerminalError::Input(e.to_string())
+            })?;
 
-    if threshold == 0 {
-        output.eprintln("Threshold must be greater than 0");
-        return Err(TerminalError::Input("Invalid threshold: 0".into()));
-    }
+    output.kv("Configuration", threshold_config.display_string());
 
     // Create directory structure through storage effects
     let configs_dir = output_dir.join("configs");
@@ -140,29 +137,12 @@ async fn create_effect_api(
     Ok(effect_api_data.into_bytes())
 }
 
-/// Create device configuration content (pure function)
+/// Create device configuration content (delegates to portable workflow).
 fn create_device_config(device_num: u32, threshold: u32, total_devices: u32) -> String {
-    format!(
-        r#"# Device {} configuration
-device_id = "device_{}"
-threshold = {}
-total_devices = {}
+    use aura_app::ui::workflows::config::{generate_device_config, DeviceConfigDefaults};
 
-[logging]
-level = "info"
-structured = false
-
-[network]
-default_port = {}
-timeout = 30
-max_retries = 3
-"#,
-        device_num,
-        device_num,
-        threshold,
-        total_devices,
-        58835 + device_num - 1 // Different port for each device
-    )
+    let defaults = DeviceConfigDefaults::new(device_num, threshold, total_devices);
+    generate_device_config(&defaults)
 }
 
 #[cfg(test)]

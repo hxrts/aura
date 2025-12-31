@@ -88,6 +88,7 @@ pub struct GlobalArgs {
     pub command: Commands,
 }
 
+#[must_use]
 pub fn cli_parser() -> impl Parser<GlobalArgs> {
     let verbose = short('v')
         .long("verbose")

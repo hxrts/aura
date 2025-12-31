@@ -17,6 +17,14 @@
 //! │ (trait)            │       │ (impl)             │        │                    │
 //! └────────────────────┘       └────────────────────┘        └────────────────────┘
 //! ```
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `parking_lot::RwLock` for shared simulation transport because this is
+//! test/simulation infrastructure with brief sync-only operations. See
+//! `SharedTransport` documentation for details.
+
+#![allow(clippy::disallowed_types)]
 
 #[cfg(feature = "simulation")]
 use aura_core::effects::{
@@ -27,9 +35,7 @@ use aura_core::effects::{
 use aura_core::hash::hash;
 #[cfg(feature = "simulation")]
 use aura_core::identifiers::AuthorityId;
-// Layer 6 runtime code: parking_lot::RwLock allowed per clippy.toml
 #[cfg(feature = "simulation")]
-#[allow(clippy::disallowed_types)]
 use parking_lot::RwLock;
 #[cfg(feature = "simulation")]
 use std::sync::Arc;

@@ -97,7 +97,7 @@ impl MockRuntimeBridge {
         let device_id = DeviceId::new();
         Self {
             authority_id,
-            device_id: device_id,
+            device_id,
             reactive_handler: ReactiveHandler::new(),
             facts: Arc::new(RwLock::new(Vec::new())),
             invitations: Arc::new(RwLock::new(HashMap::new())),

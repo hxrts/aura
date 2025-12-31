@@ -33,6 +33,7 @@ impl ContactMultiSelectProps {
     }
 }
 
+#[must_use]
 pub fn contact_multi_select(props: &ContactMultiSelectProps) -> impl Into<AnyElement<'static>> {
     let selected_count = props.selected.len();
     let min_required = props.min_selected.unwrap_or(0);

@@ -143,6 +143,7 @@ pub fn ErrorToast<'a>(props: &ErrorToastProps<'a>) -> impl Into<AnyElement<'a>> 
 }
 
 /// Get the absolute positioning rect for a toast overlay
+#[must_use]
 pub fn toast_rect(compositor_footer: &Rect) -> Rect {
     *compositor_footer
 }

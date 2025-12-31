@@ -84,6 +84,7 @@ pub struct TextareaState {
 }
 
 impl TextareaState {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -97,11 +98,13 @@ impl TextareaState {
     }
 
     /// Get lines as a vector
+    #[must_use]
     pub fn lines(&self) -> Vec<&str> {
         self.text.lines().collect()
     }
 
     /// Get current line content
+    #[must_use]
     pub fn current_line(&self) -> Option<&str> {
         self.lines().get(self.row).copied()
     }

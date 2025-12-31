@@ -15,6 +15,7 @@ pub struct UiTaskRegistry {
 }
 
 impl UiTaskRegistry {
+    #[must_use]
     pub fn new() -> Self {
         let (shutdown_tx, _shutdown_rx) = watch::channel(false);
         Self {

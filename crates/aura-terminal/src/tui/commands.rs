@@ -40,6 +40,7 @@ pub enum CommandCapability {
 
 impl CommandCapability {
     /// Get capability string for Biscuit evaluation
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::None => "",
@@ -193,6 +194,7 @@ pub enum IrcCommand {
 
 impl IrcCommand {
     /// Get the capability required to execute this command
+    #[must_use]
     pub fn required_capability(&self) -> CommandCapability {
         match self {
             Self::Msg { .. } => CommandCapability::SendDm,
@@ -215,6 +217,7 @@ impl IrcCommand {
     }
 
     /// Get command name
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             Self::Msg { .. } => "msg",
@@ -241,6 +244,7 @@ impl IrcCommand {
     }
 
     /// Check if this is a user-level command
+    #[must_use]
     pub fn is_user_command(&self) -> bool {
         matches!(
             self,
@@ -256,6 +260,7 @@ impl IrcCommand {
     }
 
     /// Check if this is a moderator-level command
+    #[must_use]
     pub fn is_moderator_command(&self) -> bool {
         matches!(
             self,
@@ -272,6 +277,7 @@ impl IrcCommand {
     }
 
     /// Check if this is an admin-level command
+    #[must_use]
     pub fn is_admin_command(&self) -> bool {
         matches!(
             self,
@@ -631,6 +637,7 @@ fn parse_duration(s: &str) -> Result<Duration, String> {
 }
 
 /// Check if input looks like a command (starts with /)
+#[must_use]
 pub fn is_command(input: &str) -> bool {
     input.trim().starts_with('/')
 }
@@ -663,6 +670,7 @@ pub enum CommandCategory {
 
 impl CommandCategory {
     /// Get category display name
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             Self::User => "User Commands",
@@ -673,6 +681,7 @@ impl CommandCategory {
 }
 
 /// Get help for all commands
+#[must_use]
 pub fn all_command_help() -> Vec<CommandHelp> {
     vec![
         // User commands
@@ -822,6 +831,7 @@ pub fn all_command_help() -> Vec<CommandHelp> {
 }
 
 /// Get help for a specific command
+#[must_use]
 pub fn command_help(name: &str) -> Option<CommandHelp> {
     all_command_help()
         .into_iter()

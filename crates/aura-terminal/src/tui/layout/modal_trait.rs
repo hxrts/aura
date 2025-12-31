@@ -22,6 +22,7 @@ pub struct ModalContext {
 
 impl ModalContext {
     /// Create a new modal context with standard dimensions
+    #[must_use]
     pub fn new() -> Self {
         Self {
             screen: ScreenContext::unfocused(),

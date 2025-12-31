@@ -9,6 +9,7 @@
 //! to drive the agent without exposing implementation details.
 
 pub mod api;
+pub mod ceremony_processor;
 pub mod config;
 pub mod context;
 pub mod error;

@@ -4,8 +4,9 @@
 //! Stewards (Admins) have elevated permissions within a home.
 
 use crate::{views::home::ResidentRole, AppCore};
+use crate::workflows::parse::parse_authority_id;
 use async_lock::RwLock;
-use aura_core::{identifiers::AuthorityId, AuraError};
+use aura_core::AuraError;
 use std::sync::Arc;
 
 /// Grant steward (Admin) role to a resident
@@ -32,9 +33,7 @@ pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Res
     }
 
     // Parse target as AuthorityId
-    let target_id = target
-        .parse::<AuthorityId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {}", target)))?;
+    let target_id = parse_authority_id(target)?;
 
     // Find and update the target resident
     let resident = home_state
@@ -80,9 +79,7 @@ pub async fn revoke_steward(
     }
 
     // Parse target as AuthorityId
-    let target_id = target
-        .parse::<AuthorityId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {}", target)))?;
+    let target_id = parse_authority_id(target)?;
 
     // Find and update the target resident
     let resident = home_state

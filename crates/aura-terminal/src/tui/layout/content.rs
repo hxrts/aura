@@ -20,6 +20,7 @@ impl<R: LayoutRegion> BoundedContent<R> {
     /// Create bounded content from an element.
     ///
     /// In debug builds, panics if the specified height exceeds region bounds.
+    #[must_use]
     pub fn new(element: AnyElement<'static>, height_used: u16) -> Self {
         debug_assert!(
             height_used <= R::HEIGHT,
@@ -36,6 +37,7 @@ impl<R: LayoutRegion> BoundedContent<R> {
     }
 
     /// Create bounded content that fills the entire region.
+    #[must_use]
     pub fn full(element: AnyElement<'static>) -> Self {
         Self {
             element,
@@ -45,31 +47,37 @@ impl<R: LayoutRegion> BoundedContent<R> {
     }
 
     /// Maximum width for this content
+    #[must_use]
     pub const fn max_width() -> u16 {
         R::WIDTH
     }
 
     /// Maximum height for this content
+    #[must_use]
     pub const fn max_height() -> u16 {
         R::HEIGHT
     }
 
     /// Actual height used by this content
+    #[must_use]
     pub fn height_used(&self) -> u16 {
         self.height_used
     }
 
     /// Remaining height available in this region
+    #[must_use]
     pub fn remaining_height(&self) -> u16 {
         R::HEIGHT.saturating_sub(self.height_used)
     }
 
     /// Consume the bounded content and return the inner element
+    #[must_use]
     pub fn into_element(self) -> AnyElement<'static> {
         self.element
     }
 
     /// Get a reference to the inner element
+    #[must_use]
     pub fn element(&self) -> &AnyElement<'static> {
         &self.element
     }
@@ -94,6 +102,7 @@ pub type ModalContent = MiddleContent;
 pub type ToastContent = FooterContent;
 
 /// Empty content for a region (transparent/no rendering)
+#[must_use]
 pub fn empty_content<R: LayoutRegion>() -> BoundedContent<R> {
     BoundedContent::new(
         element! {
@@ -105,16 +114,19 @@ pub fn empty_content<R: LayoutRegion>() -> BoundedContent<R> {
 }
 
 /// Create nav content from an element
+#[must_use]
 pub fn nav_content(element: AnyElement<'static>, height: u16) -> NavContent {
     BoundedContent::new(element, height)
 }
 
 /// Create middle content from an element
+#[must_use]
 pub fn middle_content(element: AnyElement<'static>, height: u16) -> MiddleContent {
     BoundedContent::new(element, height)
 }
 
 /// Create footer content from an element
+#[must_use]
 pub fn footer_content(element: AnyElement<'static>, height: u16) -> FooterContent {
     BoundedContent::new(element, height)
 }

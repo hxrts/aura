@@ -13,6 +13,7 @@
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::InvitationAction;
+use aura_app::ui::types::{parse_invitation_role, InvitationRoleValue};
 use aura_core::identifiers::AuthorityId;
 use std::str::FromStr;
 
@@ -203,21 +204,28 @@ async fn create_invitation(
     let service = agent.invitations()?;
     let expires_ms = ttl_secs.map(|s| s * 1000);
 
-    if role.eq_ignore_ascii_case("guardian") {
-        service
-            .invite_as_guardian(receiver_id, subject_authority, None, expires_ms)
-            .await
-            .map_err(|e| TerminalError::Operation(e.to_string()))
-    } else if role.eq_ignore_ascii_case("channel") {
-        service
-            .invite_to_channel(receiver_id, "channel".to_string(), None, expires_ms)
-            .await
-            .map_err(|e| TerminalError::Operation(e.to_string()))
-    } else {
-        service
-            .invite_as_contact(receiver_id, Some(role.to_string()), None, expires_ms)
-            .await
-            .map_err(|e| TerminalError::Operation(e.to_string()))
+    // Use portable parsing from aura_app
+    let parsed_role = parse_invitation_role(role);
+
+    match parsed_role {
+        InvitationRoleValue::Guardian => {
+            service
+                .invite_as_guardian(receiver_id, subject_authority, None, expires_ms)
+                .await
+                .map_err(|e| TerminalError::Operation(e.to_string()))
+        }
+        InvitationRoleValue::Channel => {
+            service
+                .invite_to_channel(receiver_id, "channel".to_string(), None, expires_ms)
+                .await
+                .map_err(|e| TerminalError::Operation(e.to_string()))
+        }
+        InvitationRoleValue::Contact { nickname } => {
+            service
+                .invite_as_contact(receiver_id, nickname, None, expires_ms)
+                .await
+                .map_err(|e| TerminalError::Operation(e.to_string()))
+        }
     }
 }
 

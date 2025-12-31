@@ -47,6 +47,7 @@ impl FormField {
         self
     }
 
+    #[must_use]
     pub fn required(mut self) -> Self {
         self.required = true;
         self
@@ -230,6 +231,7 @@ pub struct FormModalState {
 }
 
 impl FormModalState {
+    #[must_use]
     pub fn new(fields: Vec<FormField>) -> Self {
         Self {
             fields,
@@ -268,6 +270,7 @@ impl FormModalState {
     }
 
     /// Get current field
+    #[must_use]
     pub fn current_field(&self) -> Option<&FormField> {
         self.fields.get(self.focused)
     }
@@ -301,6 +304,7 @@ impl FormModalState {
     }
 
     /// Check if all required fields are filled
+    #[must_use]
     pub fn can_submit(&self) -> bool {
         self.fields
             .iter()
@@ -309,6 +313,7 @@ impl FormModalState {
     }
 
     /// Get all field values as a map
+    #[must_use]
     pub fn values(&self) -> std::collections::HashMap<String, String> {
         self.fields
             .iter()
@@ -317,6 +322,7 @@ impl FormModalState {
     }
 
     /// Get value for a specific field
+    #[must_use]
     pub fn get_value(&self, id: &str) -> Option<&str> {
         self.fields
             .iter()

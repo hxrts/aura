@@ -14,6 +14,7 @@ use aura_core::effects::amp::{
 use aura_core::effects::{RandomCoreEffects, RandomExtendedEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::Hash32;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_journal::fact::{
     ChannelBumpReason, ChannelCheckpoint, ChannelPolicy, ProposedChannelEpochBump, RelationalFact,
@@ -75,7 +76,7 @@ where
             chan_epoch: 0,
             base_gen: 0,
             window,
-            ck_commitment: Default::default(),
+            ck_commitment: Hash32::default(),
             skip_window_override: Some(window),
         };
 

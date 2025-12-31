@@ -1,6 +1,24 @@
-// Lock poisoning is not applicable with parking_lot; keep handlers explicit and fast.
-
 //! Indexed Journal Handler - B-tree indexes, Bloom filters, and Merkle trees
+//!
+//! # Blocking Lock Usage
+//!
+//! This module uses `parking_lot::RwLock` for synchronous interior mutability.
+//! This is appropriate because:
+//!
+//! 1. All lock-protected operations are O(log n) or O(1) - sub-millisecond
+//! 2. Locks are never held across `.await` points
+//! 3. Lock poisoning is not applicable with parking_lot
+//!
+//! # Scale Expectations
+//!
+//! Designed for 10k-100k facts per index. If scaling beyond this, consider:
+//! - Migrating to `tokio::sync::RwLock` for async-safe access
+//! - Using a dedicated indexing thread with channels
+//! - Switching to lock-free concurrent data structures (DashMap)
+
+#![allow(clippy::disallowed_types)]
+
+// Note: Module-level allow covers handler.rs, wrapper.rs, and test code
 //!
 //! # Effect Classification
 //!

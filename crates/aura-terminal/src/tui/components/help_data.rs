@@ -34,6 +34,7 @@ impl HelpCommand {
 /// 1. Navigation (always first - applies to all screens)
 /// 2. Current screen commands (most relevant)
 /// 3. Other screen commands (excluded for Neighborhood to reduce clutter)
+#[must_use]
 pub fn get_help_commands_for_screen(current_screen: Option<&str>) -> Vec<HelpCommand> {
     let all_commands = get_help_commands();
 
@@ -76,6 +77,7 @@ pub fn get_help_commands_for_screen(current_screen: Option<&str>) -> Vec<HelpCom
 }
 
 /// Get all keyboard shortcuts organized by category
+#[must_use]
 pub fn get_help_commands() -> Vec<HelpCommand> {
     vec![
         // Global navigation

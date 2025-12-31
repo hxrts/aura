@@ -15,6 +15,7 @@ pub struct AccountSetupModalState {
 
 impl AccountSetupModalState {
     /// Whether we can submit the form
+    #[must_use]
     pub fn can_submit(&self) -> bool {
         !self.display_name.trim().is_empty() && !self.creating && !self.success
     }
@@ -29,6 +30,7 @@ impl AccountSetupModalState {
     ///
     /// We intentionally avoid reading OS time directly from the TUI state.
     /// Runtime-backed operations should report progress via signals.
+    #[must_use]
     pub fn should_show_spinner(&self) -> bool {
         self.creating
     }

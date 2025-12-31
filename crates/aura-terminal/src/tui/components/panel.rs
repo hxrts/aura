@@ -101,6 +101,7 @@ impl PanelStyle {
     ///
     /// Delegates to `theme::focus_border_color` for consistency.
     #[inline]
+    #[must_use]
     pub fn border_color(focused: bool) -> Color {
         focus_border_color(focused)
     }

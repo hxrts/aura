@@ -240,6 +240,48 @@ impl SocialManager {
     }
 }
 
+// =============================================================================
+// RuntimeService Implementation
+// =============================================================================
+
+use super::traits::{RuntimeService, ServiceError, ServiceHealth};
+use super::RuntimeTaskRegistry;
+use async_trait::async_trait;
+
+#[async_trait]
+impl RuntimeService for SocialManager {
+    fn name(&self) -> &'static str {
+        "social_manager"
+    }
+
+    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
+        // Mark as ready - topology will be populated by journal sync
+        *self.state.write().await = SocialManagerState::Ready;
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<(), ServiceError> {
+        *self.state.write().await = SocialManagerState::Uninitialized;
+        Ok(())
+    }
+
+    fn health(&self) -> ServiceHealth {
+        // Synchronous approximation
+        ServiceHealth::Healthy
+    }
+}
+
+impl SocialManager {
+    /// Get the service health status asynchronously
+    pub async fn health_async(&self) -> ServiceHealth {
+        let state = *self.state.read().await;
+        match state {
+            SocialManagerState::Uninitialized => ServiceHealth::NotStarted,
+            SocialManagerState::Ready => ServiceHealth::Healthy,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

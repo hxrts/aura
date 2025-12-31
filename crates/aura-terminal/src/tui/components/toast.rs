@@ -20,6 +20,7 @@ pub enum ToastLevel {
 }
 
 impl ToastLevel {
+    #[must_use]
     pub fn icon(self) -> &'static str {
         match self {
             Self::Info => "ℹ",
@@ -31,10 +32,12 @@ impl ToastLevel {
     }
 
     /// Alias for icon() - returns the indicator symbol for this level
+    #[must_use]
     pub fn indicator(self) -> &'static str {
         self.icon()
     }
 
+    #[must_use]
     pub fn color(self) -> Color {
         match self {
             Self::Info => Theme::SECONDARY,
@@ -46,6 +49,7 @@ impl ToastLevel {
     }
 
     /// Whether this level represents a conflict that requires user attention
+    #[must_use]
     pub fn is_conflict(self) -> bool {
         matches!(self, Self::Conflict)
     }
@@ -68,6 +72,7 @@ impl ToastMessage {
         }
     }
 
+    #[must_use]
     pub fn with_level(mut self, level: ToastLevel) -> Self {
         self.level = level;
         self
@@ -98,11 +103,13 @@ impl ToastMessage {
     }
 
     /// Check if this toast is an error level toast
+    #[must_use]
     pub fn is_error(&self) -> bool {
         matches!(self.level, ToastLevel::Error)
     }
 
     /// Check if this toast is a conflict notification
+    #[must_use]
     pub fn is_conflict(&self) -> bool {
         matches!(self.level, ToastLevel::Conflict)
     }

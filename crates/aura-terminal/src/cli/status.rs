@@ -8,6 +8,7 @@ pub struct StatusArgs {
     pub config: Option<PathBuf>,
 }
 
+#[must_use]
 pub fn status_parser() -> impl Parser<StatusArgs> {
     let config = long("config")
         .short('c')

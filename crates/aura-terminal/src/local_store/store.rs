@@ -23,6 +23,7 @@ pub struct LocalStore {
 
 impl LocalStore {
     /// Create a new local store with default data.
+    #[must_use]
     pub fn new(config: LocalStoreConfig) -> Self {
         Self {
             config,
@@ -68,6 +69,7 @@ impl LocalStore {
     }
 
     /// Get a reference to the current data
+    #[must_use]
     pub fn data(&self) -> &LocalData {
         &self.data
     }
@@ -86,6 +88,7 @@ impl LocalStore {
     }
 
     /// Get the store path
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.config.path
     }

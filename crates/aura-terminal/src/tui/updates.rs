@@ -52,6 +52,7 @@ pub type UiUpdateSender = tokio::sync::mpsc::Sender<UiUpdate>;
 pub type UiUpdateReceiver = tokio::sync::mpsc::Receiver<UiUpdate>;
 
 /// Create a new UI update channel pair
+#[must_use]
 pub fn ui_update_channel() -> (UiUpdateSender, UiUpdateReceiver) {
     tokio::sync::mpsc::channel(1024)
 }
@@ -390,6 +391,7 @@ impl UiUpdate {
     }
 
     /// Check if this update represents an error
+    #[must_use]
     pub fn is_error(&self) -> bool {
         matches!(self, Self::OperationFailed { .. } | Self::SyncFailed { .. })
     }

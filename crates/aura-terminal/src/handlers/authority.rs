@@ -1,13 +1,17 @@
 //! Authority inspection CLI commands
 //!
 //! Returns structured `CliOutput` for testability.
+//! Uses portable types from `aura_app::ui::workflows::authority`.
 
 use crate::cli::authority::AuthorityCommands;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
+use aura_app::ui::types::{
+    authority_key_prefix, authority_storage_key, deserialize_authority, serialize_authority,
+    AuthorityRecord,
+};
 use aura_core::effects::{PhysicalTimeEffects, StorageCoreEffects};
 use aura_core::identifiers::AuthorityId;
-use serde::{Deserialize, Serialize};
 
 /// Handle authority inspection commands
 ///
@@ -31,14 +35,6 @@ pub async fn handle_authority(
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct AuthorityRecord {
-    authority_id: AuthorityId,
-    threshold: u32,
-    devices: Vec<String>,
-    created_ms: u64,
-}
-
 async fn create_authority(ctx: &HandlerContext<'_>, threshold: u32) -> TerminalResult<CliOutput> {
     let mut output = CliOutput::new();
 
@@ -53,21 +49,13 @@ async fn create_authority(ctx: &HandlerContext<'_>, threshold: u32) -> TerminalR
     let authority_id =
         crate::ids::authority_id(&format!("authority:{}:{}", effect_ctx.authority_id(), now));
 
-    let record = AuthorityRecord {
-        authority_id,
-        threshold,
-        devices: vec![],
-        created_ms: now,
-    };
+    // Use portable AuthorityRecord constructor
+    let record = AuthorityRecord::new(authority_id, threshold, now);
 
-    let key = format!("authority:{authority_id}");
+    let key = authority_storage_key(&authority_id);
+    let bytes = serialize_authority(&record).map_err(|e| TerminalError::Operation(e))?;
     effects
-        .store(
-            &key,
-            serde_json::to_vec(&record).map_err(|e| {
-                TerminalError::Operation(format!("Failed to serialize authority record: {e}"))
-            })?,
-        )
+        .store(&key, bytes)
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to persist authority: {e}")))?;
 
@@ -85,14 +73,13 @@ async fn show_authority(
 
     let effects = ctx.effects();
 
-    let key = format!("authority:{authority_id}");
+    let key = authority_storage_key(authority_id);
     if let Some(bytes) = effects
         .retrieve(&key)
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to read authority: {e}")))?
     {
-        let record: AuthorityRecord = serde_json::from_slice(&bytes)
-            .map_err(|e| TerminalError::Config(format!("Failed to parse authority record: {e}")))?;
+        let record = deserialize_authority(&bytes).map_err(|e| TerminalError::Config(e))?;
         output.kv("Authority", record.authority_id.to_string());
         output.kv("Threshold", record.threshold.to_string());
         output.kv(
@@ -116,7 +103,7 @@ async fn list_authorities(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput>
     let effects = ctx.effects();
 
     let keys = effects
-        .list_keys(Some("authority:"))
+        .list_keys(Some(authority_key_prefix()))
         .await
         .unwrap_or_default();
     if keys.is_empty() {
@@ -140,36 +127,29 @@ async fn add_device(
 
     let effects = ctx.effects();
 
-    let key = format!("authority:{authority_id}");
+    let key = authority_storage_key(authority_id);
     let mut record: AuthorityRecord = if let Some(bytes) = effects
         .retrieve(&key)
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to read authority: {e}")))?
     {
-        serde_json::from_slice(&bytes)
-            .map_err(|e| TerminalError::Config(format!("Failed to parse authority record: {e}")))?
+        deserialize_authority(&bytes).map_err(|e| TerminalError::Config(e))?
     } else {
         return Err(TerminalError::NotFound(format!(
             "Authority {authority_id} not found; create it first"
         )));
     };
 
-    record.devices.push(public_key.to_string());
+    // Use portable add_device method
+    record.add_device(public_key);
 
-    effects
-        .store(
-            &key,
-            serde_json::to_vec(&record).map_err(|e| {
-                TerminalError::Operation(format!("Failed to serialize authority record: {e}"))
-            })?,
-        )
-        .await
-        .map_err(|e| {
-            TerminalError::Operation(format!("Failed to update authority {authority_id}: {e}"))
-        })?;
+    let bytes = serialize_authority(&record).map_err(|e| TerminalError::Operation(e))?;
+    effects.store(&key, bytes).await.map_err(|e| {
+        TerminalError::Operation(format!("Failed to update authority {authority_id}: {e}"))
+    })?;
 
     output.kv("Added device to authority", authority_id.to_string());
-    output.kv("Total devices", record.devices.len().to_string());
+    output.kv("Total devices", record.device_count().to_string());
 
     Ok(output)
 }

@@ -1,19 +1,23 @@
 //! Runtime task registry for agent background work.
 //!
 //! Tracks spawned tasks and supports cooperative shutdown.
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `parking_lot::Mutex` for JoinHandle storage because:
+//! 1. Operations are O(1) push or O(n) drain (shutdown only)
+//! 2. Lock is never held across `.await` points
+//! 3. No I/O or async work inside lock scope
+
+#![allow(clippy::disallowed_types)]
 
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use futures::future::BoxFuture;
-// Layer 6 runtime code: parking_lot::Mutex is acceptable here because:
-// 1. This is runtime assembly code (aura-agent/src/runtime/) explicitly allowed per clippy.toml
-// 2. The lock protects JoinHandle storage and is never held across .await points
-// 3. Lock operations are brief (push/drain) with no async work inside
-#[allow(clippy::disallowed_types)]
 use parking_lot::Mutex;
-use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 

@@ -1,8 +1,12 @@
 //! Runtime Services
 //!
 //! Service components per Layer-6 spec.
+//!
+//! All service managers implement the `RuntimeService` trait for unified
+//! lifecycle management. See `traits.rs` for the trait definition.
 
 pub mod authority_manager;
+pub mod traits;
 pub mod ceremony_tracker;
 pub mod context_manager;
 pub mod flow_budget_manager;
@@ -26,3 +30,4 @@ pub use runtime_tasks::RuntimeTaskRegistry;
 pub use social_manager::{SocialManager, SocialManagerConfig, SocialManagerState};
 pub use sync_manager::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
 pub use threshold_signing::ThresholdSigningService;
+pub use traits::{RuntimeService, ServiceError, ServiceErrorKind, ServiceHealth};

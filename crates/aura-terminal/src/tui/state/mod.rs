@@ -108,6 +108,7 @@ pub struct TuiState {
 
 impl TuiState {
     /// Create a new TUI state with default values
+    #[must_use]
     pub fn new() -> Self {
         Self {
             terminal_size: (80, 24),
@@ -116,6 +117,7 @@ impl TuiState {
     }
 
     /// Create a TUI state with specific terminal size
+    #[must_use]
     pub fn with_size(width: u16, height: u16) -> Self {
         Self {
             terminal_size: (width, height),
@@ -124,6 +126,7 @@ impl TuiState {
     }
 
     /// Create a TUI state with the account setup modal visible (via queue)
+    #[must_use]
     pub fn with_account_setup() -> Self {
         let mut state = Self::new();
         state.show_account_setup_queued();
@@ -131,6 +134,7 @@ impl TuiState {
     }
 
     /// Get the current screen
+    #[must_use]
     pub fn screen(&self) -> Screen {
         self.router.current()
     }
@@ -150,6 +154,7 @@ impl TuiState {
     }
 
     /// Check if any modal is active (queue-based)
+    #[must_use]
     pub fn has_queued_modal(&self) -> bool {
         self.modal_queue.is_active()
     }
@@ -188,6 +193,7 @@ impl TuiState {
     }
 
     /// Check if any toast is active (queue-based)
+    #[must_use]
     pub fn has_queued_toast(&self) -> bool {
         self.toast_queue.is_active()
     }
@@ -236,6 +242,7 @@ impl TuiState {
     }
 
     /// Check if the current modal is a text input modal (queue-based)
+    #[must_use]
     pub fn is_queued_modal_text_input(&self) -> bool {
         match self.modal_queue.current() {
             Some(QueuedModal::AccountSetup(_)) => true,
@@ -250,6 +257,7 @@ impl TuiState {
     }
 
     /// Check if in insert mode (for text input)
+    #[must_use]
     pub fn is_insert_mode(&self) -> bool {
         match self.screen() {
             Screen::Chat => self.chat.insert_mode,
@@ -263,11 +271,13 @@ impl TuiState {
     // ========================================================================
 
     /// Check if any modal is active
+    #[must_use]
     pub fn has_modal(&self) -> bool {
         self.has_queued_modal()
     }
 
     /// Get the current modal type (for backwards compatibility in tests)
+    #[must_use]
     pub fn current_modal_type(&self) -> ModalType {
         match self.modal_queue.current() {
             Some(QueuedModal::AccountSetup(_)) => ModalType::AccountSetup,
@@ -281,6 +291,7 @@ impl TuiState {
     }
 
     /// Get reference to account setup state if it's the active modal
+    #[must_use]
     pub fn account_setup_state(&self) -> Option<&AccountSetupModalState> {
         match self.modal_queue.current() {
             Some(QueuedModal::AccountSetup(state)) => Some(state),
@@ -311,11 +322,13 @@ impl TuiState {
     // ========================================================================
 
     /// Check if chat create modal is active
+    #[must_use]
     pub fn is_chat_create_modal_active(&self) -> bool {
         matches!(self.modal_queue.current(), Some(QueuedModal::ChatCreate(_)))
     }
 
     /// Get chat create modal state if active
+    #[must_use]
     pub fn chat_create_modal_state(&self) -> Option<&CreateChannelModalState> {
         match self.modal_queue.current() {
             Some(QueuedModal::ChatCreate(state)) => Some(state),
@@ -332,11 +345,13 @@ impl TuiState {
     }
 
     /// Check if chat topic modal is active
+    #[must_use]
     pub fn is_chat_topic_modal_active(&self) -> bool {
         matches!(self.modal_queue.current(), Some(QueuedModal::ChatTopic(_)))
     }
 
     /// Get chat topic modal state if active
+    #[must_use]
     pub fn chat_topic_modal_state(&self) -> Option<&TopicModalState> {
         match self.modal_queue.current() {
             Some(QueuedModal::ChatTopic(state)) => Some(state),
@@ -345,11 +360,13 @@ impl TuiState {
     }
 
     /// Check if chat info modal is active
+    #[must_use]
     pub fn is_chat_info_modal_active(&self) -> bool {
         matches!(self.modal_queue.current(), Some(QueuedModal::ChatInfo(_)))
     }
 
     /// Check if guardian setup modal is active
+    #[must_use]
     pub fn is_guardian_setup_modal_active(&self) -> bool {
         matches!(
             self.modal_queue.current(),
@@ -358,6 +375,7 @@ impl TuiState {
     }
 
     /// Get guardian setup modal state if active
+    #[must_use]
     pub fn guardian_setup_modal_state(&self) -> Option<&GuardianSetupModalState> {
         match self.modal_queue.current() {
             Some(QueuedModal::GuardianSetup(state)) => Some(state),

@@ -52,26 +52,31 @@ impl<'a> HandlerContext<'a> {
     }
 
     /// Access the effect context for propagation through async calls
+    #[must_use]
     pub fn effect_context(&self) -> &EffectContext {
         self.effect_ctx
     }
 
     /// Access the effect system for effect calls
+    #[must_use]
     pub fn effects(&self) -> &AuraEffectSystem {
         self.effect_system
     }
 
     /// Get the device ID for this handler context
+    #[must_use]
     pub fn device_id(&self) -> DeviceId {
         self.device_id
     }
 
     /// Get the context ID from the effect context
+    #[must_use]
     pub fn context_id(&self) -> ContextId {
         self.effect_ctx.context_id()
     }
 
     /// Access the agent if available (for higher-level services)
+    #[must_use]
     pub fn agent(&self) -> Option<&'a AuraAgent> {
         self.agent
     }
@@ -106,6 +111,7 @@ impl HandlerResult {
     }
 
     /// Create a silent result
+    #[must_use]
     pub fn silent() -> Self {
         Self::Silent
     }

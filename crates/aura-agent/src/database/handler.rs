@@ -33,6 +33,12 @@ use std::collections::HashSet;
 /// - `might_contain`: O(1) with <1% false positive rate
 /// - `merkle_root`: O(n) on first call, O(1) cached
 /// - `verify_fact_inclusion`: O(log n)
+///
+/// # Concurrency Model
+///
+/// Uses `parking_lot::RwLock` for fine-grained synchronous locking.
+/// Each operation acquires and releases locks in sub-millisecond time.
+/// See module documentation for scale expectations and alternatives.
 pub struct IndexedJournalHandler {
     /// B-tree indexes protected by RwLock for concurrent access
     pub(crate) index: RwLock<AuthorityIndex>,

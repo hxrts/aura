@@ -9,6 +9,7 @@
 
 mod state;
 
+pub mod account;
 pub mod chat;
 pub mod contacts;
 pub mod home;
@@ -19,6 +20,7 @@ pub mod recovery;
 pub use state::ViewState;
 
 // Re-export state types for convenience
+pub use account::{AccountBackup, AccountConfig, BACKUP_PREFIX, BACKUP_VERSION};
 pub use chat::{Channel, ChannelType, ChatState, Message};
 pub use contacts::{Contact, ContactsState, MySuggestion, SuggestionPolicy};
 pub use home::{BanRecord, HomeState, HomesState, KickRecord, MuteRecord, Resident, ResidentRole};
@@ -27,6 +29,6 @@ pub use invitations::{
 };
 pub use neighborhood::{AdjacencyType, NeighborHome, NeighborhoodState, TraversalPosition};
 pub use recovery::{
-    Guardian, GuardianStatus, RecoveryApproval, RecoveryProcess, RecoveryProcessStatus,
-    RecoveryState,
+    Guardian, GuardianBinding, GuardianStatus, RecoveryApproval, RecoveryProcess,
+    RecoveryProcessStatus, RecoveryState,
 };

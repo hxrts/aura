@@ -38,10 +38,11 @@
 //! }
 //! ```
 
-use crate::{AppCore, BUDGET_SIGNAL};
+use crate::signal_defs::{BUDGET_SIGNAL, BUDGET_SIGNAL_NAME};
+use crate::AppCore;
 use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use async_lock::RwLock;
-use aura_core::{effects::reactive::ReactiveEffects, AuraError};
+use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
@@ -462,7 +463,7 @@ pub async fn update_budget(
     app_core: &Arc<RwLock<AppCore>>,
     budget: HomeFlowBudget,
 ) -> Result<(), AuraError> {
-    emit_signal(app_core, &*BUDGET_SIGNAL, budget, "BUDGET_SIGNAL").await
+    emit_signal(app_core, &*BUDGET_SIGNAL, budget, BUDGET_SIGNAL_NAME).await
 }
 
 // =============================================================================
@@ -473,6 +474,7 @@ pub async fn update_budget(
 mod tests {
     use super::*;
     use crate::AppConfig;
+    use aura_core::effects::reactive::ReactiveEffects;
 
     // -------------------------------------------------------------------------
     // Domain type tests

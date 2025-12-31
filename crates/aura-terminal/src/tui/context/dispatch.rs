@@ -47,6 +47,7 @@ impl AccountFilesHelper {
         }
     }
 
+    #[must_use]
     pub fn has_account(&self) -> bool {
         self.has_existing_account.load(Ordering::Relaxed)
     }

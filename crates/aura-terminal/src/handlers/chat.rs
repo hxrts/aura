@@ -6,8 +6,8 @@
 use crate::cli::chat::ChatCommands;
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::HandlerContext;
-use aura_agent::AuraEffectSystem;
 use aura_agent::handlers::{ChatGroupId, ChatMessageId};
+use aura_agent::AuraEffectSystem;
 use aura_core::effects::ConsoleEffects;
 use std::collections::HashMap;
 

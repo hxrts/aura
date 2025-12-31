@@ -64,6 +64,11 @@ pub struct NeighborhoodState {
     pub max_depth: u32,
     /// Whether currently loading neighbors
     pub loading: bool,
+    /// Currently connected peer IDs
+    ///
+    /// Managed by the network workflow - terminals should not maintain local peer state.
+    #[serde(default)]
+    pub connected_peers: std::collections::HashSet<String>,
 }
 
 impl NeighborhoodState {

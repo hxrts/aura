@@ -1091,6 +1091,40 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 }
 
+// =============================================================================
+// RuntimeService Implementation
+// =============================================================================
+
+use super::traits::{RuntimeService, ServiceError, ServiceHealth};
+use super::RuntimeTaskRegistry;
+
+#[async_trait]
+impl RuntimeService for ThresholdSigningService {
+    fn name(&self) -> &'static str {
+        "threshold_signing"
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["ceremony_tracker"]
+    }
+
+    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
+        // ThresholdSigningService is stateless wrapper around effects
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<(), ServiceError> {
+        // Clear signing contexts on shutdown
+        let mut contexts = self.contexts.write().await;
+        contexts.clear();
+        Ok(())
+    }
+
+    fn health(&self) -> ServiceHealth {
+        ServiceHealth::Healthy
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

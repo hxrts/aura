@@ -1,20 +1,21 @@
 //! Guardian Recovery CLI Commands
 //!
-//! Commands for managing guardian-based account recovery.
-//! Uses the authority model - guardians are identified by AuthorityId.
+//! Thin view layer for guardian-based account recovery.
+//! All business logic is delegated to aura_app::workflows::recovery_cli.
+//! This module handles I/O, serialization, and output formatting.
 //!
 //! Returns structured `CliOutput` for testability.
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
-use aura_app::ui::workflows::recovery_cli;
+use aura_agent::handlers::{
+    GuardianProfile, GuardianSet, RecoveryDispute, RecoveryOperation, RecoveryRequest,
+    RecoveryResponse,
+};
+use aura_app::ui::workflows::recovery_cli::{self, DISPUTE_WINDOW_HOURS_DEFAULT};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash;
-use aura_core::time::TimeStamp;
-use aura_core::{AuthorityId, Hash32};
-use aura_agent::handlers::{
-    GuardianProfile, GuardianSet, RecoveryDispute, RecoveryOperation, RecoveryRequest, RecoveryResponse,
-};
+use aura_core::Hash32;
 use aura_effects::StorageCoreEffects;
 use std::path::Path;
 
@@ -23,17 +24,9 @@ use crate::ids;
 use crate::RecoveryAction;
 
 /// Extract a millisecond timestamp from any TimeStamp variant for display/logging.
-fn timestamp_ms(ts: &TimeStamp) -> u64 {
-    match ts {
-        TimeStamp::PhysicalClock(p) => p.ts_ms,
-        TimeStamp::LogicalClock(l) => l.lamport,
-        TimeStamp::OrderClock(o) => {
-            let mut buf = [0u8; 8];
-            buf.copy_from_slice(&o.0[..8]);
-            u64::from_be_bytes(buf)
-        }
-        TimeStamp::Range(r) => r.latest_ms,
-    }
+/// Delegates to portable workflow function.
+fn timestamp_ms(ts: &aura_core::time::TimeStamp) -> u64 {
+    recovery_cli::extract_timestamp_ms(ts)
 }
 
 /// Handle recovery action requests from CLI
@@ -124,23 +117,28 @@ async fn start_recovery(
     }
 
     // Get current timestamp
-    let physical_time = ctx.effects().physical_time().await.map_err(|e| {
-        TerminalError::Operation(format!("Failed to get physical time: {e}"))
-    })?;
+    let physical_time = ctx
+        .effects()
+        .physical_time()
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to get physical time: {e}")))?;
     let current_time = physical_time.ts_ms;
 
     // Create guardian authorities list
-    let guardian_authorities: Vec<AuthorityId> =
+    let guardian_authorities: Vec<aura_core::AuthorityId> =
         guardian_set.iter().map(|g| g.authority_id).collect();
 
-    // Create recovery request using authority model
+    // Create recovery request for serialization (terminal-layer type)
     let recovery_request = RecoveryRequest {
         recovery_id: format!("recovery-{account_authority}"),
         account_authority,
         operation: RecoveryOperation::ReplaceTree {
-            new_public_key: hash::hash(format!("recovery-new-key:{account_authority}").as_bytes()).to_vec(),
+            new_public_key: hash::hash(format!("recovery-new-key:{account_authority}").as_bytes())
+                .to_vec(),
         },
-        justification: justification.unwrap_or("CLI recovery operation").to_string(),
+        justification: justification
+            .unwrap_or("CLI recovery operation")
+            .to_string(),
         guardians: guardian_authorities.clone(),
         threshold,
         requested_at: current_time,
@@ -149,14 +147,14 @@ async fn start_recovery(
 
     output.println("Executing recovery protocol via proper coordinator...");
 
-    // Convert to the new recovery protocol format
+    // Build protocol request using portable workflow
     let commitment = Hash32::new(hash::hash(
         format!("recovery-commitment:{account_authority}").as_bytes(),
     ));
     let new_public_key =
         hash::hash(format!("recovery-new-key:{account_authority}").as_bytes()).to_vec();
 
-    let recovery_request_new = recovery_cli::build_protocol_request(
+    let recovery_request_protocol = recovery_cli::build_protocol_request(
         account_authority,
         commitment,
         new_public_key,
@@ -165,20 +163,18 @@ async fn start_recovery(
             .to_string(),
     );
 
-    // Initiate recovery using the proper protocol
+    // Initiate recovery using the proper protocol (portable workflow)
     recovery_cli::initiate_recovery_protocol(
         ctx.effects(),
         account_authority,
         guardian_authorities,
         threshold,
-        recovery_request_new,
+        recovery_request_protocol,
     )
-        .await
-        .map_err(|e| {
-            TerminalError::Operation(format!("Failed to initiate recovery protocol: {e}"))
-        })?;
+    .await
+    .map_err(|e| TerminalError::Operation(format!("Failed to initiate recovery protocol: {e}")))?;
 
-    // Store request payload deterministically via StorageEffects
+    // Store request payload via StorageEffects (terminal handles serialization format)
     let request_path = format!("recovery_request_{account_authority}.json");
     let request_json = serde_json::to_vec_pretty(&recovery_request).map_err(|e| {
         TerminalError::Operation(format!("Failed to serialize recovery request: {e}"))
@@ -199,7 +195,7 @@ async fn start_recovery(
         "Share the stored request key with guardians and ask them to run `aura recovery approve --request-file {request_path}`"
     ));
 
-    // Update journal with recovery initiation using proper effects
+    // Update journal with recovery initiation using portable workflow
     let recovery_fact_key = format!("recovery_initiated.{account_authority}");
     recovery_cli::record_recovery_fact(
         ctx.effects(),
@@ -228,7 +224,7 @@ async fn approve_recovery(
     output.section("Approving Recovery");
     output.kv("Request file", request_file.display().to_string());
 
-    // Read and parse recovery request file via StorageEffects
+    // Read and parse recovery request file via StorageEffects (terminal handles deserialization)
     let file_key = format!("recovery_request:{}", request_file.display());
     let request_content = match ctx.effects().retrieve(&file_key).await {
         Ok(Some(data)) => String::from_utf8(data)
@@ -261,16 +257,14 @@ async fn approve_recovery(
     // Get current authority from context
     let guardian_authority = ctx.effect_context().authority_id();
 
-    // Find this authority in the guardian set
-    let guardian_index = recovery_request
-        .guardians
-        .iter()
-        .position(|g| *g == guardian_authority)
-        .ok_or_else(|| {
-            TerminalError::Input(format!(
-                "Current authority {guardian_authority} is not a guardian for this recovery"
-            ))
-        })?;
+    // Find this authority in the guardian set using portable workflow
+    let guardian_index =
+        recovery_cli::find_guardian_index(&recovery_request.guardians, guardian_authority)
+            .ok_or_else(|| {
+                TerminalError::Input(format!(
+                    "Current authority {guardian_authority} is not a guardian for this recovery"
+                ))
+            })?;
 
     // Build a GuardianProfile from the authority
     let guardian_profile = GuardianProfile::with_label(
@@ -284,12 +278,24 @@ async fn approve_recovery(
         format!("{} ({})", label, guardian_profile.authority_id),
     );
 
-    // Execute guardian approval through choreographic system
+    // Execute guardian approval using portable workflow
     output.println("Executing guardian approval workflow...");
 
-    // Generate real guardian approval using FROST threshold signing
-    let approval_result =
-        generate_guardian_approval(ctx, &recovery_request, &guardian_profile).await?;
+    // Hash the request for signing
+    let request_bytes = serde_json::to_vec(&recovery_request).map_err(|e| {
+        TerminalError::Operation(format!("Failed to serialize recovery request: {e}"))
+    })?;
+    let request_hash = Hash32::new(hash::hash(&request_bytes));
+
+    // Generate approval using portable workflow
+    let approval_result = recovery_cli::generate_guardian_approval(
+        ctx.effects(),
+        recovery_request.account_authority,
+        &guardian_profile,
+        request_hash,
+    )
+    .await
+    .map_err(|e| TerminalError::Operation(format!("Failed to generate approval: {e}")))?;
 
     output.println("Guardian approval completed successfully!");
     output.kv(
@@ -301,24 +307,17 @@ async fn approve_recovery(
         format!("{} bytes", approval_result.key_share.len()),
     );
 
-    // Build recovery share and evidence for downstream aggregation
-    let share = aura_agent::handlers::RecoveryShare {
-        guardian_id: guardian_profile.authority_id,
-        guardian_label: guardian_profile.label.clone(),
-        share: approval_result.key_share.clone(),
-        partial_signature: approval_result.partial_signature.clone(),
-        issued_at_ms: timestamp_ms(&approval_result.timestamp),
-    };
+    // Build recovery share using portable workflow
+    let share = recovery_cli::build_recovery_share(&guardian_profile, &approval_result);
 
-    let evidence = aura_agent::handlers::RecoveryEvidence {
-        context_id: ctx.context_id(),
-        account_id: recovery_request.account_authority,
-        approving_guardians: vec![guardian_profile.authority_id],
-        completed_at_ms: timestamp_ms(&approval_result.timestamp),
-        dispute_window_ends_at_ms: timestamp_ms(&approval_result.timestamp) + 48 * 3600 * 1000,
-        disputes: Vec::new(),
-        threshold_signature: None,
-    };
+    // Build recovery evidence using portable workflow
+    let evidence = recovery_cli::build_recovery_evidence(
+        ctx.context_id(),
+        recovery_request.account_authority,
+        guardian_profile.authority_id,
+        timestamp_ms(&approval_result.timestamp),
+        DISPUTE_WINDOW_HOURS_DEFAULT,
+    );
 
     let response = RecoveryResponse {
         success: true,
@@ -335,7 +334,7 @@ async fn approve_recovery(
         ),
     };
 
-    // Persist approval so the requesting device can collect it
+    // Persist approval (terminal handles serialization format)
     let response_json = serde_json::to_vec_pretty(&response).map_err(|e| {
         TerminalError::Operation(format!("Failed to serialize approval response: {e}"))
     })?;
@@ -383,10 +382,10 @@ async fn get_status(ctx: &HandlerContext<'_>) -> TerminalResult<CliOutput> {
     output.section("Recovery Status");
     output.println("Querying Journal for active recovery sessions...");
 
-    let (recovery_facts, completed_facts) =
-        recovery_cli::list_recovery_fact_keys(ctx.effects())
-            .await
-            .map_err(|e| TerminalError::Operation(format!("Failed to list recovery facts: {e}")))?;
+    // Use portable workflow to list recovery facts
+    let (recovery_facts, completed_facts) = recovery_cli::list_recovery_fact_keys(ctx.effects())
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to list recovery facts: {e}")))?;
 
     // Find active recoveries (initiated but not completed)
     let active_recoveries: Vec<String> = recovery_facts
@@ -437,9 +436,11 @@ async fn dispute_recovery(
     output.println("Validating dispute window and guardian eligibility...");
 
     // Create dispute record
-    let physical_time = ctx.effects().physical_time().await.map_err(|e| {
-        TerminalError::Operation(format!("Failed to get physical time: {e}"))
-    })?;
+    let physical_time = ctx
+        .effects()
+        .physical_time()
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to get physical time: {e}")))?;
     let current_timestamp = physical_time.ts_ms;
 
     let dispute = RecoveryDispute {
@@ -450,7 +451,7 @@ async fn dispute_recovery(
 
     output.kv("Dispute timestamp", dispute.filed_at_ms.to_string());
 
-    // Store dispute in journal via app workflow
+    // Store dispute in journal via portable workflow
     let dispute_key = recovery_cli::record_recovery_dispute(
         ctx.effects(),
         ctx.context_id(),
@@ -466,45 +467,4 @@ async fn dispute_recovery(
     output.println("Dispute filed successfully!");
 
     Ok(output)
-}
-
-/// Generate real guardian approval for recovery request using FROST threshold signing
-async fn generate_guardian_approval(
-    ctx: &HandlerContext<'_>,
-    request: &RecoveryRequest,
-    guardian: &GuardianProfile,
-) -> TerminalResult<aura_agent::handlers::GuardianKeyApproval> {
-    use aura_agent::handlers::GuardianKeyApproval;
-
-    // Get current timestamp
-    let physical_time = ctx.effects().physical_time().await.map_err(|e| {
-        TerminalError::Operation(format!("Failed to get physical time: {e}"))
-    })?;
-    let timestamp_ms = physical_time.ts_ms;
-
-    // Create recovery message to sign
-    let recovery_message = serde_json::to_vec(&request).map_err(|e| {
-        TerminalError::Operation(format!("Failed to serialize recovery request: {e}"))
-    })?;
-
-    // Deterministic partial signature derived from the recovery message hash.
-    let partial_sig_bytes: Vec<u8> = hash::hash(&recovery_message).to_vec();
-
-    let key_share_bytes = hash::hash(
-        format!(
-            "guardian-key-share:{}:{}",
-            guardian.authority_id, request.account_authority
-        )
-        .as_bytes(),
-    );
-
-    Ok(GuardianKeyApproval {
-        guardian_id: guardian.authority_id,
-        key_share: key_share_bytes.to_vec(),
-        partial_signature: partial_sig_bytes,
-        timestamp: aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-            ts_ms: timestamp_ms,
-            uncertainty: None,
-        }),
-    })
 }

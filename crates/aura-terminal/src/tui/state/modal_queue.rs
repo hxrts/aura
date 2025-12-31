@@ -179,6 +179,7 @@ impl ContactSelectModalState {
     }
 
     /// Get the currently focused contact ID
+    #[must_use]
     pub fn focused_contact_id(&self) -> Option<&str> {
         self.contacts
             .get(self.selected_index)
@@ -222,6 +223,7 @@ pub struct ModalQueue {
 
 impl ModalQueue {
     /// Create a new empty modal queue
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -248,6 +250,7 @@ impl ModalQueue {
     }
 
     /// Get a reference to the currently active modal (for rendering).
+    #[must_use]
     pub fn current(&self) -> Option<&QueuedModal> {
         self.active.as_ref()
     }
@@ -258,6 +261,7 @@ impl ModalQueue {
     }
 
     /// Check if any modal is currently active.
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.active.is_some()
     }
@@ -269,6 +273,7 @@ impl ModalQueue {
     }
 
     /// Get the number of pending modals (not including active).
+    #[must_use]
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }

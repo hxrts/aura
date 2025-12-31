@@ -77,6 +77,7 @@ fn add_device_command() -> impl Parser<AuthorityCommands> {
     .help("Add a device public key to an authority")
 }
 
+#[must_use]
 pub fn authority_parser() -> impl Parser<AuthorityCommands> {
     construct!([
         create_command(),

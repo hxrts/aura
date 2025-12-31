@@ -27,6 +27,9 @@ pub mod registry;
 pub mod executor;
 pub mod lifecycle;
 
+// Subsystem extraction for AuraEffectSystem
+pub mod subsystems;
+
 // Context management
 pub mod context;
 pub mod contextual;
@@ -66,6 +69,10 @@ pub use context::EffectContext;
 pub use effects::AuraEffectSystem;
 pub use shared_transport::SharedTransport;
 
+// Subsystem re-exports (available for incremental adoption; see Task 3.6 in work/033.md)
+#[allow(unused_imports)]
+pub use subsystems::{ChoreographySubsystem, CryptoSubsystem, JournalSubsystem, TransportSubsystem};
+
 // Runtime system type aliases for backwards compatibility
 pub type RuntimeSystem = AuraEffectSystem;
 pub type RuntimeBuilder = EffectSystemBuilder;
@@ -76,8 +83,8 @@ pub use lifecycle::LifecycleManager;
 #[allow(unused_imports)] // Re-exported for public API
 pub use services::{
     AuthorityError, AuthorityManager, AuthorityState, AuthorityStatus, FlowBudgetManager,
-    ReceiptManager, SharedAuthorityManager, SyncManagerConfig, SyncManagerState,
-    SyncServiceManager,
+    ReceiptManager, RuntimeService, ServiceError, ServiceErrorKind, ServiceHealth,
+    SharedAuthorityManager, SyncManagerConfig, SyncManagerState, SyncServiceManager,
 };
 
 // Simulation factory re-export

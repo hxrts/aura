@@ -63,7 +63,6 @@ pub mod effects;
 pub mod flow_budget;
 pub mod local_store;
 pub mod navigation;
-pub mod recovery_session;
 
 // Public surface area
 //

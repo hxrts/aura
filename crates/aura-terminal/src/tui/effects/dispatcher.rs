@@ -161,6 +161,7 @@ pub struct CommandDispatcher {
 
 impl CommandDispatcher {
     /// Create a new command dispatcher with default policy (DenyNonPublic)
+    #[must_use]
     pub fn new() -> Self {
         Self {
             current_channel: None,
@@ -169,6 +170,7 @@ impl CommandDispatcher {
     }
 
     /// Create a dispatcher with a specific capability policy
+    #[must_use]
     pub fn with_policy(policy: CapabilityPolicy) -> Self {
         Self {
             current_channel: None,
@@ -188,6 +190,7 @@ impl CommandDispatcher {
     ///     runtime_bridge.has_command_capability(cap.as_str())
     /// }));
     /// ```
+    #[must_use]
     pub fn with_biscuit_policy(
         checker: Box<dyn Fn(&CommandCapability) -> bool + Send + Sync>,
     ) -> Self {
@@ -218,6 +221,7 @@ impl CommandDispatcher {
     }
 
     /// Get the current channel context
+    #[must_use]
     pub fn current_channel(&self) -> Option<&str> {
         self.current_channel.as_deref()
     }

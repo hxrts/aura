@@ -15,6 +15,9 @@ use aura_core::{
 use aura_journal::fact::RelationalFact;
 use crate::workflows::runtime::require_runtime;
 use crate::workflows::parse::parse_authority_id;
+use crate::workflows::state_helpers::with_recovery_state;
+use crate::workflows::time::current_time_ms;
+use crate::workflows::snapshot_policy::recovery_snapshot;
 use aura_journal::ProtocolRelationalFact;
 use std::sync::Arc;
 use std::future::Future;
@@ -55,10 +58,7 @@ pub async fn start_recovery(
         )));
     }
 
-    let initiated_at = runtime
-        .current_time_ms()
-        .await
-        .map_err(|e| AuraError::agent(format!("Failed to get time: {e}")))?;
+    let initiated_at = current_time_ms(app_core).await?;
 
     let guardians = guardian_ids
         .iter()
@@ -100,6 +100,7 @@ pub async fn start_recovery(
         guardian_count: guardian_ids.len() as u32,
         active_recovery: Some(recovery_process),
         pending_requests: Vec::new(),
+        guardian_bindings: Vec::new(),
     };
 
     // Update ViewState - signal forwarding auto-propagates to RECOVERY_SIGNAL
@@ -207,8 +208,7 @@ pub async fn dispute_recovery(
 pub async fn get_recovery_status(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<RecoveryState, AuraError> {
-    let core = app_core.read().await;
-    Ok(core.snapshot().recovery)
+    Ok(recovery_snapshot(app_core).await)
 }
 
 /// Get ceremony status from runtime
@@ -293,8 +293,10 @@ async fn set_recovery_state(
     app_core: &Arc<RwLock<AppCore>>,
     state: RecoveryState,
 ) -> Result<(), AuraError> {
-    let mut core = app_core.write().await;
-    core.views_mut().set_recovery(state);
+    with_recovery_state(app_core, |recovery_state| {
+        *recovery_state = state;
+    })
+    .await?;
     Ok(())
 }
 
@@ -350,6 +352,7 @@ mod tests {
                 progress: 0,
             }),
             pending_requests: vec![],
+            guardian_bindings: vec![],
         };
 
         // Update ViewState directly

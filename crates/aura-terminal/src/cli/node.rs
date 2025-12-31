@@ -7,6 +7,7 @@ pub struct NodeArgs {
     pub config: Option<std::path::PathBuf>,
 }
 
+#[must_use]
 pub fn node_parser() -> impl Parser<NodeArgs> {
     let port = long("port")
         .help("Port to listen on")

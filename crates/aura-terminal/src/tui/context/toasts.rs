@@ -22,6 +22,7 @@ pub struct ToastHelper {
 
 impl ToastHelper {
     /// Create a new toast helper
+    #[must_use]
     pub fn new() -> Self {
         Self {
             toasts: Arc::new(RwLock::new(Vec::new())),

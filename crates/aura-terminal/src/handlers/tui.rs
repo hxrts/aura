@@ -15,9 +15,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 // Import app types from aura-app (pure layer)
 use aura_app::ui::prelude::*;
+// Import portable account types and ID derivation functions
+use aura_app::ui::types::{AccountBackup, AccountConfig};
+use aura_app::ui::workflows::account::{
+    derive_authority_id, derive_context_id, derive_recovered_context_id, parse_backup_code,
+};
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::StorageConfig;
@@ -52,22 +56,7 @@ pub enum TuiMode {
     Demo { seed: u64 },
 }
 
-/// Account configuration stored on disk
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccountConfig {
-    /// The authority ID for this account
-    authority_id: String,
-    /// The primary context ID for this account
-    context_id: String,
-    /// User display name for this device
-    ///
-    /// This is a UI-facing profile field and is not yet persisted as a journal fact.
-    /// It is stored here so terminal frontends can restore the entered name across sessions.
-    #[serde(default)]
-    display_name: Option<String>,
-    /// Account creation timestamp (ms since epoch)
-    created_at: u64,
-}
+// AccountConfig is now imported from aura_app::ui::types
 
 /// Account loading result
 pub enum AccountLoadResult {
@@ -259,6 +248,8 @@ async fn persist_account_config(
 ///
 /// Called when user completes the account setup modal.
 /// The base_path should be mode-specific (.aura or .aura-demo).
+///
+/// Uses portable ID derivation from aura_app::workflows::account.
 pub async fn create_account(
     base_path: &Path,
     device_id_str: &str,
@@ -267,13 +258,9 @@ pub async fn create_account(
     let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
 
-    // Create new account with deterministic IDs based on device_id
-    // This ensures the same device_id always creates the same account
-    let authority_entropy = aura_core::hash::hash(format!("authority:{device_id_str}").as_bytes());
-    let context_entropy = aura_core::hash::hash(format!("context:{device_id_str}").as_bytes());
-
-    let authority_id = AuthorityId::new_from_entropy(authority_entropy);
-    let context_id = ContextId::new_from_entropy(context_entropy);
+    // Use portable ID derivation functions from aura-app
+    let authority_id = derive_authority_id(device_id_str);
+    let context_id = derive_context_id(device_id_str);
 
     // Persist to storage using effect-backed handlers.
     persist_account_config(
@@ -295,6 +282,8 @@ pub async fn create_account(
 /// Unlike `create_account()` which derives from device_id, this preserves
 /// the cryptographically identical authority from before the loss.
 ///
+/// Uses portable ID derivation from aura_app::workflows::account.
+///
 /// # Arguments
 /// * `base_path` - Data directory for account storage (mode-specific)
 /// * `recovered_authority_id` - The ORIGINAL authority_id reconstructed by guardians
@@ -310,17 +299,9 @@ pub async fn restore_recovered_account(
     let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
 
-    // Use the recovered authority directly (NOT derived from device_id)
-    // This is the key difference from create_account()
-    let authority_bytes = recovered_authority_id.to_bytes();
-
-    // For context, either use the recovered one or derive deterministically from authority
-    let context_id = recovered_context_id.unwrap_or_else(|| {
-        let context_entropy = aura_core::hash::hash(
-            format!("context:recovered:{}", hex::encode(authority_bytes)).as_bytes(),
-        );
-        ContextId::new_from_entropy(context_entropy)
-    });
+    // For context, either use the recovered one or derive using portable function
+    let context_id = recovered_context_id
+        .unwrap_or_else(|| derive_recovered_context_id(&recovered_authority_id));
 
     persist_account_config(&storage, &time, recovered_authority_id, context_id, None).await?;
 
@@ -330,36 +311,15 @@ pub async fn restore_recovered_account(
 // =============================================================================
 // Account Backup/Export
 // =============================================================================
-
-/// Current backup format version
-const BACKUP_VERSION: u32 = 1;
-
-/// Backup format prefix for identification
-const BACKUP_PREFIX: &str = "aura:backup:v1:";
-
-/// Complete account backup data structure
-///
-/// Contains all data needed to restore an account on a new device:
-/// - Account configuration (authority_id, context_id, created_at)
-/// - Journal facts (all state history)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccountBackup {
-    /// Backup format version
-    pub version: u32,
-    /// Account configuration
-    pub account: AccountConfig,
-    /// Journal content (JSON string of all facts)
-    pub journal: Option<String>,
-    /// Backup creation timestamp (ms since epoch)
-    pub backup_at: u64,
-    /// Device ID that created the backup (informational only)
-    pub source_device: Option<String>,
-}
+// AccountBackup, AccountConfig, BACKUP_VERSION, and BACKUP_PREFIX are now
+// imported from aura_app::ui::types for portable backup operations.
 
 /// Export account to a portable backup code
 ///
 /// The backup code is a base64-encoded JSON blob with a prefix for easy identification.
 /// Format: `aura:backup:v1:<base64>`
+///
+/// Uses portable AccountBackup from aura_app::ui::types.
 ///
 /// # Arguments
 /// * `base_path` - Data directory containing account and journal files (mode-specific)
@@ -397,27 +357,18 @@ pub async fn export_account_backup(
         .map_err(|e| AuraError::internal(format!("Failed to fetch physical time: {e}")))?
         .ts_ms;
 
-    // Create backup structure
-    let backup = AccountBackup {
-        version: BACKUP_VERSION,
-        account,
-        journal,
-        backup_at,
-        source_device: device_id.map(String::from),
-    };
+    // Create backup structure using portable type
+    let backup = AccountBackup::new(account, journal, backup_at, device_id.map(String::from));
 
-    // Serialize to JSON
-    let json = serde_json::to_string(&backup)
-        .map_err(|e| AuraError::internal(format!("Failed to serialize backup: {e}")))?;
-
-    // Encode as base64 with prefix
-    use base64::Engine;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(json.as_bytes());
-
-    Ok(format!("{BACKUP_PREFIX}{encoded}"))
+    // Encode using portable method
+    backup
+        .encode()
+        .map_err(|e| AuraError::internal(format!("Failed to encode backup: {e}")))
 }
 
 /// Import and restore account from backup code
+///
+/// Uses portable parse_backup_code from aura_app::workflows::account.
 ///
 /// # Arguments
 /// * `base_path` - Data directory to restore account to (mode-specific)
@@ -433,44 +384,17 @@ pub async fn import_account_backup(
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let storage = open_bootstrap_storage(base_path);
 
-    // Parse backup code
-    if !backup_code.starts_with(BACKUP_PREFIX) {
-        return Err(AuraError::internal(format!(
-            "Invalid backup code format (expected prefix '{BACKUP_PREFIX}')"
-        )));
-    }
+    // Parse and validate backup using portable function
+    let backup = parse_backup_code(backup_code)?;
 
-    let encoded = &backup_code[BACKUP_PREFIX.len()..];
-
-    // Decode base64
-    use base64::Engine;
-    let json_bytes = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .map_err(|e| AuraError::internal(format!("Invalid backup code encoding: {e}")))?;
-
-    let json = String::from_utf8(json_bytes)
-        .map_err(|e| AuraError::internal(format!("Invalid backup code UTF-8: {e}")))?;
-
-    // Parse backup structure
-    let backup: AccountBackup = serde_json::from_str(&json)
-        .map_err(|e| AuraError::internal(format!("Invalid backup format: {e}")))?;
-
-    // Validate version
-    if backup.version > BACKUP_VERSION {
-        return Err(AuraError::internal(format!(
-            "Backup version {} is newer than supported version {}",
-            backup.version, BACKUP_VERSION
-        )));
-    }
-
-    // Parse authority ID
+    // Parse authority ID from validated backup
     let authority_bytes: [u8; 16] = hex::decode(&backup.account.authority_id)
         .map_err(|e| AuraError::internal(format!("Invalid authority_id in backup: {e}")))?
         .try_into()
         .map_err(|_| AuraError::internal("Invalid authority_id length in backup"))?;
     let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(authority_bytes));
 
-    // Parse context ID
+    // Parse context ID from validated backup
     let context_bytes: [u8; 16] = hex::decode(&backup.account.context_id)
         .map_err(|e| AuraError::internal(format!("Invalid context_id in backup: {e}")))?
         .try_into()
@@ -499,7 +423,7 @@ pub async fn import_account_backup(
         .map_err(|e| AuraError::internal(format!("Failed to write account config: {e}")))?;
 
     // Write journal if present in backup
-    if let Some(ref journal_content) = backup.journal {
+    if let Some(journal_content) = &backup.journal {
         storage
             .store(JOURNAL_FILENAME, journal_content.as_bytes().to_vec())
             .await

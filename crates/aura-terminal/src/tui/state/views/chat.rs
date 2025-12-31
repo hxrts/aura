@@ -84,6 +84,7 @@ pub struct CreateChannelModalState {
 
 impl CreateChannelModalState {
     /// Create a new modal state ready to be enqueued
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -104,10 +105,12 @@ impl CreateChannelModalState {
         self.error = None;
     }
 
+    #[must_use]
     pub fn can_submit(&self) -> bool {
         !self.name.trim().is_empty()
     }
 
+    #[must_use]
     pub fn selected_member_ids(&self) -> Vec<String> {
         self.selected_indices
             .iter()
@@ -116,10 +119,12 @@ impl CreateChannelModalState {
             .collect()
     }
 
+    #[must_use]
     pub fn total_participants(&self) -> u8 {
         (self.selected_indices.len() + 1) as u8
     }
 
+    #[must_use]
     pub fn default_threshold(total_n: u8) -> u8 {
         default_channel_threshold(total_n)
     }
@@ -163,6 +168,7 @@ pub struct TopicModalState {
 
 impl TopicModalState {
     /// Create initialized state for a channel topic edit
+    #[must_use]
     pub fn for_channel(channel_id: &str, current_topic: &str) -> Self {
         Self {
             channel_id: channel_id.to_string(),
@@ -196,6 +202,7 @@ pub struct ChannelInfoModalState {
 
 impl ChannelInfoModalState {
     /// Create initialized state for channel info display
+    #[must_use]
     pub fn for_channel(channel_id: &str, name: &str, topic: Option<&str>) -> Self {
         Self {
             channel_id: channel_id.to_string(),

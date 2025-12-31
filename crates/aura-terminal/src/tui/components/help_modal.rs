@@ -153,6 +153,7 @@ pub struct HelpModalState {
 
 impl HelpModalState {
     /// Create a new state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }

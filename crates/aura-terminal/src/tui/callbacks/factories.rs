@@ -348,6 +348,7 @@ pub struct ContactsCallbacks {
 }
 
 impl ContactsCallbacks {
+    #[must_use]
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_update_nickname: Self::make_update_nickname(ctx.clone(), tx.clone()),
@@ -482,6 +483,7 @@ pub struct InvitationsCallbacks {
 }
 
 impl InvitationsCallbacks {
+    #[must_use]
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_accept: Self::make_accept(ctx.clone(), tx.clone()),
@@ -622,6 +624,7 @@ pub struct RecoveryCallbacks {
 }
 
 impl RecoveryCallbacks {
+    #[must_use]
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_start_recovery: Self::make_start_recovery(ctx.clone(), tx.clone()),
@@ -732,6 +735,7 @@ pub struct SettingsCallbacks {
 }
 
 impl SettingsCallbacks {
+    #[must_use]
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_update_mfa: Self::make_update_mfa(ctx.clone(), tx.clone()),
@@ -995,6 +999,7 @@ pub struct HomeCallbacks {
 }
 
 impl HomeCallbacks {
+    #[must_use]
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_send: Self::make_send(ctx, tx),
@@ -1145,6 +1150,7 @@ pub struct NeighborhoodCallbacks {
 }
 
 impl NeighborhoodCallbacks {
+    #[must_use]
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_enter_home: Self::make_enter_home(ctx.clone(), tx.clone()),
@@ -1243,6 +1249,7 @@ pub struct AppCallbacks {
 }
 
 impl AppCallbacks {
+    #[must_use]
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_create_account: Self::make_create_account(ctx, tx),

@@ -15,6 +15,7 @@
 use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
 use crate::database::IndexedJournalHandler;
+use crate::runtime::subsystems::{CryptoSubsystem, JournalSubsystem, TransportSubsystem};
 use crate::fact_registry::build_fact_registry;
 use crate::handlers::logical_clock_service::LogicalClockService;
 use async_trait::async_trait;
@@ -57,7 +58,6 @@ use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use biscuit_auth::{Biscuit, KeyPair, PublicKey};
 use parking_lot::RwLock;
 use rand::rngs::StdRng;
-use rand::RngCore;
 use rand::SeedableRng;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -73,52 +73,57 @@ const CHOREO_FLOW_COST_PER_KB: u32 = 1;
 /// Concrete effect system combining all effects for runtime usage
 ///
 /// Note: This wraps aura-composition infrastructure for Layer 6 runtime concerns.
+///
+/// ## Subsystem Organization
+///
+/// Related fields are grouped into subsystems for better organization:
+/// - `crypto`: Cryptographic operations, RNG, secure key storage
+/// - `transport`: Network transport, inbox management, statistics
+/// - `journal`: Indexed journal, fact registry, publication channel
+///
+/// Remaining fields are core infrastructure used across subsystems.
 pub struct AuraEffectSystem {
+    // === Core Configuration ===
     config: AgentConfig,
+    authority_id: AuthorityId,
+    test_mode: bool,
+
+    // === Subsystems (grouped related fields) ===
+    /// Cryptographic operations subsystem
+    crypto: CryptoSubsystem,
+    /// Network transport subsystem
+    transport: TransportSubsystem,
+    /// Journal and fact management subsystem
+    journal: JournalSubsystem,
+
+    // === Composition & Handlers ===
     composite: CompositeHandlerAdapter,
-    crypto_handler: aura_effects::crypto::RealCryptoHandler,
-    random_rng: parking_lot::Mutex<StdRng>,
+
+    // === Storage Infrastructure ===
     storage_handler: Arc<
         EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
     >,
+    tree_handler: PersistentTreeHandler,
+    sync_handler: PersistentSyncHandler,
+
+    // === Time Services ===
     time_handler: PhysicalTimeHandler,
     logical_clock: LogicalClockService,
     order_clock: OrderClockHandler,
+
+    // === Authorization & Flow Control ===
     authorization_handler: aura_authorization::effects::WotAuthorizationHandler<
         aura_effects::crypto::RealCryptoHandler,
     >,
     leakage_handler: aura_effects::leakage::ProductionLeakageHandler<
         EncryptedStorage<FilesystemStorageHandler, RealCryptoHandler, RealSecureStorageHandler>,
     >,
-    journal_policy: Option<(
-        biscuit_auth::Biscuit,
-        aura_authorization::BiscuitAuthorizationBridge,
-    )>,
-    journal_verifying_key: Option<Vec<u8>>,
-    authority_id: AuthorityId,
-    tree_handler: PersistentTreeHandler,
-    sync_handler: PersistentSyncHandler,
-    transport_handler: aura_effects::transport::RealTransportHandler,
-    transport_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
-    shared_transport: Option<SharedTransport>,
-    transport_stats: Arc<RwLock<TransportStats>>,
-    fact_registry: Arc<FactRegistry>,
+
+    // === Reactive System ===
     /// Reactive signal graph for UI-facing state.
-    ///
-    /// This is the canonical ReactiveEffects surface for frontends when running
-    /// with a full runtime. It is driven by the ReactiveScheduler pipeline.
     reactive_handler: ReactiveHandler,
-    /// Secure storage for cryptographic key material (FROST keys, device keys)
-    secure_storage_handler: Arc<RealSecureStorageHandler>,
-    /// Indexed journal handler for efficient fact lookups (B-tree, Bloom, Merkle)
-    indexed_journal: Arc<IndexedJournalHandler>,
-    /// Test mode flag to bypass authorization guards
-    test_mode: bool,
-    /// Optional fact publication sink for the reactive scheduler.
-    ///
-    /// When configured, committed typed facts are sent to the reactive scheduler
-    /// so UI signals can be updated via the canonical scheduler pipeline.
-    fact_publish_tx: parking_lot::Mutex<Option<mpsc::Sender<crate::reactive::FactSource>>>,
+
+    // === Choreography State ===
     /// In-memory choreography session state for runtime coordination.
     choreography_state: parking_lot::RwLock<ChoreographyRuntimeState>,
 }
@@ -239,6 +244,8 @@ impl AuraEffectSystem {
         let device_id = config.device_id();
         let authority = authority_override.unwrap_or_else(|| AuthorityId::from_uuid(device_id.0));
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
+
+        // === Build CryptoSubsystem ===
         let crypto_handler = match crypto_seed {
             Some(seed) => RealCryptoHandler::seeded(seed),
             None => RealCryptoHandler::new(),
@@ -247,6 +254,16 @@ impl AuraEffectSystem {
             Some(seed) => StdRng::from_seed(seed),
             None => StdRng::from_entropy(),
         };
+        let secure_storage_handler = Arc::new(RealSecureStorageHandler::with_base_path(
+            config.storage.base_path.clone(),
+        ));
+        let crypto = CryptoSubsystem::from_parts(
+            crypto_handler.clone(),
+            random_rng,
+            secure_storage_handler.clone(),
+        );
+
+        // === Build Storage Infrastructure ===
         let time_handler = PhysicalTimeHandler::new();
         let authorization_handler = Self::init_authorization_handler(
             authority,
@@ -254,9 +271,6 @@ impl AuraEffectSystem {
             &journal_verifying_key,
             &time_handler,
         );
-        let secure_storage_handler = Arc::new(RealSecureStorageHandler::with_base_path(
-            config.storage.base_path.clone(),
-        ));
         let encrypted_storage_config = {
             let mut cfg = EncryptedStorageConfig::default()
                 .with_encryption_enabled(config.storage.encryption_enabled);
@@ -270,19 +284,18 @@ impl AuraEffectSystem {
         };
         let storage_handler = Arc::new(EncryptedStorage::new(
             FilesystemStorageHandler::new(config.storage.base_path.clone()),
-            Arc::new(crypto_handler.clone()),
-            secure_storage_handler.clone(),
+            Arc::new(crypto_handler),
+            secure_storage_handler,
             encrypted_storage_config,
         ));
         let leakage_handler =
             aura_effects::leakage::ProductionLeakageHandler::with_storage(storage_handler.clone());
-        // Both tree and sync handlers share the same storage backend (no shared in-memory oplog)
         let tree_handler = PersistentTreeHandler::new(storage_handler.clone());
         let sync_handler = PersistentSyncHandler::new(storage_handler.clone());
+
+        // === Build TransportSubsystem ===
         let transport_handler = aura_effects::transport::RealTransportHandler::default();
         // Use shared transport if provided (simulation mode), otherwise create new local inbox.
-        // Also register the authority as "online" in the shared network so transport stats
-        // can reflect currently running peer runtimes.
         if let Some(shared) = &shared_transport {
             shared.register(authority);
         }
@@ -291,35 +304,41 @@ impl AuraEffectSystem {
             .map(|shared| shared.inbox())
             .unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())));
         let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
-        // Create indexed journal with capacity for 100k facts
+        let transport = TransportSubsystem::from_parts(
+            transport_handler,
+            transport_inbox,
+            shared_transport,
+            transport_stats,
+        );
+
+        // === Build JournalSubsystem ===
         let indexed_journal = Arc::new(IndexedJournalHandler::with_capacity(100_000));
+        let fact_registry = Arc::new(build_fact_registry());
+        let journal = JournalSubsystem::from_parts(
+            indexed_journal,
+            fact_registry,
+            None, // fact_publish_tx attached later via attach_fact_sink
+            journal_policy,
+            journal_verifying_key,
+        );
 
         Self {
             config,
+            authority_id: authority,
+            test_mode,
+            crypto,
+            transport,
+            journal,
             composite,
-            crypto_handler,
-            random_rng: parking_lot::Mutex::new(random_rng),
             storage_handler,
+            tree_handler,
+            sync_handler,
             time_handler,
             logical_clock: LogicalClockService::new(Some(device_id)),
             order_clock: OrderClockHandler,
             authorization_handler,
             leakage_handler,
-            journal_policy,
-            journal_verifying_key,
-            authority_id: authority,
-            tree_handler,
-            sync_handler,
-            transport_handler,
-            transport_inbox,
-            shared_transport,
-            transport_stats,
-            fact_registry: Arc::new(build_fact_registry()),
             reactive_handler: ReactiveHandler::new(),
-            secure_storage_handler,
-            indexed_journal,
-            test_mode,
-            fact_publish_tx: parking_lot::Mutex::new(None),
             choreography_state: parking_lot::RwLock::new(ChoreographyRuntimeState::default()),
         }
     }
@@ -338,16 +357,15 @@ impl AuraEffectSystem {
     ///
     /// This is called during runtime startup when the ReactivePipeline is started.
     pub fn attach_fact_sink(&self, tx: mpsc::Sender<crate::reactive::FactSource>) {
-        *self.fact_publish_tx.lock() = Some(tx);
+        self.journal.attach_fact_sink(tx);
     }
 
     pub(crate) fn requeue_envelope(&self, envelope: TransportEnvelope) {
-        let mut inbox = self.transport_inbox.write();
-        inbox.push(envelope);
+        self.transport.queue_envelope(envelope);
     }
 
     async fn publish_typed_facts(&self, facts: Vec<TypedFact>) -> Result<(), AuraError> {
-        let tx = self.fact_publish_tx.lock().clone();
+        let tx = self.journal.fact_publisher();
         let Some(tx) = tx else {
             return Ok(());
         };
@@ -708,16 +726,16 @@ impl AuraEffectSystem {
     }
 
     /// Get the fact registry for domain-specific fact reduction.
-    pub fn fact_registry(&self) -> &FactRegistry {
-        &self.fact_registry
+    pub fn fact_registry(&self) -> Arc<FactRegistry> {
+        self.journal.fact_registry()
     }
 
     /// Get the indexed journal handler for efficient fact lookups.
     ///
     /// Provides O(log n) B-tree indexed lookups, O(1) Bloom filter membership tests,
     /// and Merkle tree integrity verification.
-    pub fn indexed_journal(&self) -> &Arc<IndexedJournalHandler> {
-        &self.indexed_journal
+    pub fn indexed_journal(&self) -> Arc<IndexedJournalHandler> {
+        self.journal.indexed_journal()
     }
 
     /// Build a permissive Biscuit policy/bridge pair for journal enforcement.
@@ -776,17 +794,17 @@ impl AuraEffectSystem {
         NoopBiscuitAuthorizationHandler,
     > {
         let authorization = self
-            .journal_policy
-            .as_ref()
+            .journal
+            .journal_policy()
             .and_then(|(token, _bridge)| token.to_vec().ok())
             .map(|bytes| (bytes, NoopBiscuitAuthorizationHandler));
 
         aura_journal::JournalHandlerFactory::create(
             self.authority_id,
-            self.crypto_handler.clone(),
+            self.crypto.handler().clone(),
             self.storage_handler.clone(),
             authorization,
-            self.journal_verifying_key.clone(),
+            self.journal.journal_verifying_key().map(|s| s.to_vec()),
             None, // Fact registry is accessed via AuraEffectSystem::fact_registry() instead
         )
     }
@@ -922,21 +940,17 @@ impl aura_protocol::effects::TreeEffects for AuraEffectSystem {
 impl RandomCoreEffects for AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut bytes = vec![0u8; len];
-        self.random_rng.lock().fill_bytes(&mut bytes);
-        bytes
+        self.crypto.random_bytes(len)
     }
 
     #[allow(clippy::disallowed_methods)]
     async fn random_bytes_32(&self) -> [u8; 32] {
-        let mut bytes = [0u8; 32];
-        self.random_rng.lock().fill_bytes(&mut bytes);
-        bytes
+        self.crypto.random_32_bytes()
     }
 
     #[allow(clippy::disallowed_methods)]
     async fn random_u64(&self) -> u64 {
-        self.random_rng.lock().next_u64()
+        self.crypto.random_u64()
     }
 }
 
@@ -997,27 +1011,24 @@ impl SyncEffects for AuraEffectSystem {
 #[async_trait]
 impl TransportEffects for AuraEffectSystem {
     async fn send_envelope(&self, envelope: TransportEnvelope) -> Result<(), TransportError> {
-        {
-            let mut inbox = self.transport_inbox.write();
-            inbox.push(envelope.clone());
-        }
+        self.transport.queue_envelope(envelope.clone());
 
-        {
-            let mut stats = self.transport_stats.write();
+        self.transport.update_stats(|stats| {
             stats.envelopes_sent = stats.envelopes_sent.saturating_add(1);
             let running_total = (stats.avg_envelope_size as u64)
                 .saturating_mul(stats.envelopes_sent.saturating_sub(1))
                 .saturating_add(envelope.payload.len() as u64);
             stats.avg_envelope_size = (running_total / stats.envelopes_sent.max(1)) as u32;
-        }
+        });
 
-        self.transport_handler.send_envelope(envelope).await
+        self.transport.handler().send_envelope(envelope).await
     }
 
     async fn receive_envelope(&self) -> Result<TransportEnvelope, TransportError> {
         let self_device_id = self.config.device_id.to_string();
+        let inbox = self.transport.inbox();
         let maybe = {
-            let mut inbox = self.transport_inbox.write();
+            let mut inbox = inbox.write();
             // In shared transport mode, filter by destination (this agent's authority ID)
             inbox
                 .iter()
@@ -1042,8 +1053,9 @@ impl TransportEffects for AuraEffectSystem {
 
         match maybe {
             Some(env) => {
-                let mut stats = self.transport_stats.write();
-                stats.envelopes_received = stats.envelopes_received.saturating_add(1);
+                self.transport.update_stats(|stats| {
+                    stats.envelopes_received = stats.envelopes_received.saturating_add(1);
+                });
                 Ok(env)
             }
             None => Err(TransportError::NoMessage),
@@ -1056,8 +1068,9 @@ impl TransportEffects for AuraEffectSystem {
         context: ContextId,
     ) -> Result<TransportEnvelope, TransportError> {
         let self_device_id = self.config.device_id.to_string();
+        let inbox = self.transport.inbox();
         let maybe = {
-            let mut inbox = self.transport_inbox.write();
+            let mut inbox = inbox.write();
             // In shared transport mode, filter by destination AND source/context
             inbox
                 .iter()
@@ -1083,8 +1096,9 @@ impl TransportEffects for AuraEffectSystem {
 
         match maybe {
             Some(env) => {
-                let mut stats = self.transport_stats.write();
-                stats.envelopes_received = stats.envelopes_received.saturating_add(1);
+                self.transport.update_stats(|stats| {
+                    stats.envelopes_received = stats.envelopes_received.saturating_add(1);
+                });
                 Ok(env)
             }
             None => Err(TransportError::NoMessage),
@@ -1092,19 +1106,20 @@ impl TransportEffects for AuraEffectSystem {
     }
 
     async fn is_channel_established(&self, context: ContextId, peer: AuthorityId) -> bool {
-        if let Some(shared) = &self.shared_transport {
+        if let Some(shared) = self.transport.shared_transport() {
             return shared.is_peer_online(peer);
         }
 
-        self.transport_handler
+        self.transport
+            .handler()
             .is_channel_established(context, peer)
             .await
     }
 
     async fn get_transport_stats(&self) -> TransportStats {
-        let mut stats = self.transport_stats.read().clone();
+        let mut stats = self.transport.stats_snapshot();
 
-        if let Some(shared) = &self.shared_transport {
+        if let Some(shared) = self.transport.shared_transport() {
             stats.active_channels = shared.connected_peer_count(self.authority_id) as u32;
         }
 
@@ -1122,7 +1137,7 @@ impl CryptoCoreEffects for AuraEffectSystem {
         info: &[u8],
         output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .hkdf_derive(ikm, salt, info, output_len)
             .await
     }
@@ -1132,11 +1147,11 @@ impl CryptoCoreEffects for AuraEffectSystem {
         master_key: &[u8],
         context: &crypto::KeyDerivationContext,
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler.derive_key(master_key, context).await
+        self.crypto.handler().derive_key(master_key, context).await
     }
 
     async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-        self.crypto_handler.ed25519_generate_keypair().await
+        self.crypto.handler().ed25519_generate_keypair().await
     }
 
     async fn ed25519_sign(
@@ -1144,7 +1159,7 @@ impl CryptoCoreEffects for AuraEffectSystem {
         message: &[u8],
         private_key: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler.ed25519_sign(message, private_key).await
+        self.crypto.handler().ed25519_sign(message, private_key).await
     }
 
     async fn ed25519_verify(
@@ -1153,25 +1168,25 @@ impl CryptoCoreEffects for AuraEffectSystem {
         signature: &[u8],
         public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .ed25519_verify(message, signature, public_key)
             .await
     }
 
     fn is_simulated(&self) -> bool {
-        self.crypto_handler.is_simulated()
+        self.crypto.handler().is_simulated()
     }
 
     fn crypto_capabilities(&self) -> Vec<String> {
-        self.crypto_handler.crypto_capabilities()
+        self.crypto.handler().crypto_capabilities()
     }
 
     fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        self.crypto_handler.constant_time_eq(a, b)
+        self.crypto.handler().constant_time_eq(a, b)
     }
 
     fn secure_zero(&self, data: &mut [u8]) {
-        self.crypto_handler.secure_zero(data)
+        self.crypto.handler().secure_zero(data)
     }
 }
 
@@ -1183,13 +1198,13 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         threshold: u16,
         max_signers: u16,
     ) -> Result<crypto::FrostKeyGenResult, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .frost_generate_keys(threshold, max_signers)
             .await
     }
 
     async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler.frost_generate_nonces(key_package).await
+        self.crypto.handler().frost_generate_nonces(key_package).await
     }
 
     async fn frost_create_signing_package(
@@ -1199,7 +1214,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         participants: &[u16],
         public_key_package: &[u8],
     ) -> Result<FrostSigningPackage, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .frost_create_signing_package(message, nonces, participants, public_key_package)
             .await
     }
@@ -1210,7 +1225,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key_share: &[u8],
         nonces: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .frost_sign_share(signing_package, key_share, nonces)
             .await
     }
@@ -1220,7 +1235,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         signing_package: &crypto::FrostSigningPackage,
         signature_shares: &[Vec<u8>],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .frost_aggregate_signatures(signing_package, signature_shares)
             .await
     }
@@ -1231,13 +1246,13 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         signature: &[u8],
         public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .frost_verify(message, signature, public_key)
             .await
     }
 
     async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler.ed25519_public_key(private_key).await
+        self.crypto.handler().ed25519_public_key(private_key).await
     }
 
     async fn chacha20_encrypt(
@@ -1246,7 +1261,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .chacha20_encrypt(plaintext, key, nonce)
             .await
     }
@@ -1257,7 +1272,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .chacha20_decrypt(ciphertext, key, nonce)
             .await
     }
@@ -1268,7 +1283,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .aes_gcm_encrypt(plaintext, key, nonce)
             .await
     }
@@ -1279,7 +1294,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .aes_gcm_decrypt(ciphertext, key, nonce)
             .await
     }
@@ -1291,7 +1306,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         new_threshold: u16,
         new_max_signers: u16,
     ) -> Result<crypto::FrostKeyGenResult, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
             .await
     }
@@ -1301,7 +1316,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         threshold: u16,
         max_signers: u16,
     ) -> Result<SigningKeyGenResult, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .generate_signing_keys(threshold, max_signers)
             .await
     }
@@ -1312,7 +1327,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         threshold: u16,
         max_signers: u16,
     ) -> Result<SigningKeyGenResult, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .generate_signing_keys_with(method, threshold, max_signers)
             .await
     }
@@ -1323,7 +1338,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key_package: &[u8],
         mode: SigningMode,
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .sign_with_key(message, key_package, mode)
             .await
     }
@@ -1335,7 +1350,7 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         public_key_package: &[u8],
         mode: SigningMode,
     ) -> Result<bool, CryptoError> {
-        self.crypto_handler
+        self.crypto.handler()
             .verify_signature(message, signature, public_key_package, mode)
             .await
     }
@@ -1457,7 +1472,7 @@ impl SecureStorageEffects for AuraEffectSystem {
         key: &[u8],
         caps: &[SecureStorageCapability],
     ) -> Result<(), SecureStorageError> {
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_store(location, key, caps)
             .await
     }
@@ -1467,7 +1482,7 @@ impl SecureStorageEffects for AuraEffectSystem {
         location: &SecureStorageLocation,
         caps: &[SecureStorageCapability],
     ) -> Result<Vec<u8>, SecureStorageError> {
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_retrieve(location, caps)
             .await
     }
@@ -1477,7 +1492,7 @@ impl SecureStorageEffects for AuraEffectSystem {
         location: &SecureStorageLocation,
         caps: &[SecureStorageCapability],
     ) -> Result<(), SecureStorageError> {
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_delete(location, caps)
             .await
     }
@@ -1486,7 +1501,7 @@ impl SecureStorageEffects for AuraEffectSystem {
         &self,
         location: &SecureStorageLocation,
     ) -> Result<bool, SecureStorageError> {
-        self.secure_storage_handler.secure_exists(location).await
+        self.crypto.secure_storage().secure_exists(location).await
     }
 
     async fn secure_list_keys(
@@ -1494,7 +1509,7 @@ impl SecureStorageEffects for AuraEffectSystem {
         namespace: &str,
         caps: &[SecureStorageCapability],
     ) -> Result<Vec<String>, SecureStorageError> {
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_list_keys(namespace, caps)
             .await
     }
@@ -1505,7 +1520,7 @@ impl SecureStorageEffects for AuraEffectSystem {
         context: &str,
         caps: &[SecureStorageCapability],
     ) -> Result<Option<Vec<u8>>, SecureStorageError> {
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_generate_key(location, context, caps)
             .await
     }
@@ -1516,7 +1531,7 @@ impl SecureStorageEffects for AuraEffectSystem {
         caps: &[SecureStorageCapability],
         expires_at: &aura_core::time::PhysicalTime,
     ) -> Result<Vec<u8>, SecureStorageError> {
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_create_time_bound_token(location, caps, expires_at)
             .await
     }
@@ -1526,23 +1541,23 @@ impl SecureStorageEffects for AuraEffectSystem {
         token: &[u8],
         location: &SecureStorageLocation,
     ) -> Result<Vec<u8>, SecureStorageError> {
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_access_with_token(token, location)
             .await
     }
 
     async fn get_device_attestation(&self) -> Result<Vec<u8>, SecureStorageError> {
-        self.secure_storage_handler.get_device_attestation().await
+        self.crypto.secure_storage().get_device_attestation().await
     }
 
     async fn is_secure_storage_available(&self) -> bool {
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .is_secure_storage_available()
             .await
     }
 
     fn get_secure_storage_capabilities(&self) -> Vec<String> {
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .get_secure_storage_capabilities()
     }
 }
@@ -1552,7 +1567,7 @@ impl SecureStorageEffects for AuraEffectSystem {
 impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
     async fn bootstrap_authority(&self, authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
         // Generate 1-of-1 signing keys (uses Ed25519 for single-signer mode)
-        let signing_keys = self.crypto_handler.generate_signing_keys(1, 1).await?;
+        let signing_keys = self.crypto.handler().generate_signing_keys(1, 1).await?;
 
         // Store key package in secure storage
         // Location varies by mode: signing_keys/ for Ed25519, frost_keys/ for FROST
@@ -1566,7 +1581,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             "1",                        // signer index 1
         );
         let caps = vec![SecureStorageCapability::Write];
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_store(&location, &signing_keys.key_packages[0], &caps)
             .await?;
 
@@ -1575,7 +1590,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             format!("{}_public", key_prefix),
             format!("{}/0", authority),
         );
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_store(&pub_location, &signing_keys.public_key_package, &caps)
             .await?;
 
@@ -1610,7 +1625,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         );
         let caps = vec![SecureStorageCapability::Read];
         let key_package = self
-            .secure_storage_handler
+            .crypto
+            .secure_storage()
             .secure_retrieve(&location, &caps)
             .await?;
 
@@ -1620,14 +1636,16 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             format!("{}/{}", context.authority, current_epoch),
         );
         let public_key_package = self
-            .secure_storage_handler
+            .crypto
+            .secure_storage()
             .secure_retrieve(&pub_location, &caps)
             .await
             .unwrap_or_else(|_| vec![0u8; 32]); // Fallback for bootstrapped authorities
 
         // Generate nonces
         let nonces = self
-            .crypto_handler
+            .crypto
+            .handler()
             .frost_generate_nonces(&key_package)
             .await
             .map_err(|e| AuraError::internal(format!("Nonce generation failed: {}", e)))?;
@@ -1635,7 +1653,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         // Create signing package (single participant)
         let participants = vec![1u16];
         let signing_package = self
-            .crypto_handler
+            .crypto
+            .handler()
             .frost_create_signing_package(
                 &message,
                 std::slice::from_ref(&nonces),
@@ -1647,14 +1666,16 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
 
         // Sign
         let share = self
-            .crypto_handler
+            .crypto
+            .handler()
             .frost_sign_share(&signing_package, &key_package, &nonces)
             .await
             .map_err(|e| AuraError::internal(format!("Signature share creation failed: {}", e)))?;
 
         // Aggregate (trivial for single signer)
         let signature = self
-            .crypto_handler
+            .crypto
+            .handler()
             .frost_aggregate_signatures(&signing_package, &[share])
             .await
             .map_err(|e| AuraError::internal(format!("Signature aggregation failed: {}", e)))?;
@@ -1708,7 +1729,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             format!("{}/{}", authority, current_epoch),
             "1",
         );
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_exists(&location)
             .await
             .unwrap_or(false)
@@ -1717,7 +1738,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
     async fn public_key_package(&self, authority: &AuthorityId) -> Option<Vec<u8>> {
         let location = SecureStorageLocation::new("frost_public_keys", format!("{}/0", authority));
         let caps = vec![SecureStorageCapability::Read];
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_retrieve(&location, &caps)
             .await
             .ok()
@@ -1761,12 +1782,13 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
 
         // Generate new threshold keys
         let key_result = if new_threshold >= 2 {
-            self.crypto_handler
+            self.crypto.handler()
                 .frost_rotate_keys(&[], 0, new_threshold, new_total_participants)
                 .await?
         } else {
             let result = self
-                .crypto_handler
+                .crypto
+                .handler()
                 .generate_signing_keys(new_threshold, new_total_participants)
                 .await?;
             aura_core::effects::crypto::FrostKeyGenResult {
@@ -1786,7 +1808,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
                 format!("{}/{}", authority, new_epoch),
                 participant.storage_key(),
             );
-            self.secure_storage_handler
+            self.crypto.secure_storage()
                 .secure_store(&location, key_package, &caps)
                 .await?;
         }
@@ -1797,7 +1819,7 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             format!("{}", authority),
             format!("{}", new_epoch),
         );
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_store(&pub_location, &key_result.public_key_package, &caps)
             .await?;
 
@@ -1915,7 +1937,7 @@ impl JournalEffects for AuraEffectSystem {
             uncertainty: None,
         });
         for (predicate, value) in journal.facts.iter() {
-            self.indexed_journal.add_fact(
+            self.journal.indexed_journal().add_fact(
                 predicate.clone(),
                 value.clone(),
                 Some(self.authority_id),
@@ -1963,21 +1985,21 @@ impl JournalEffects for AuraEffectSystem {
 #[async_trait]
 impl IndexedJournalEffects for AuraEffectSystem {
     fn watch_facts(&self) -> Box<dyn indexed::FactStreamReceiver> {
-        self.indexed_journal.watch_facts()
+        self.journal.indexed_journal().watch_facts()
     }
 
     async fn facts_by_predicate(
         &self,
         predicate: &str,
     ) -> Result<Vec<indexed::IndexedFact>, AuraError> {
-        self.indexed_journal.facts_by_predicate(predicate).await
+        self.journal.indexed_journal().facts_by_predicate(predicate).await
     }
 
     async fn facts_by_authority(
         &self,
         authority: &AuthorityId,
     ) -> Result<Vec<indexed::IndexedFact>, AuraError> {
-        self.indexed_journal.facts_by_authority(authority).await
+        self.journal.indexed_journal().facts_by_authority(authority).await
     }
 
     async fn facts_in_range(
@@ -1985,11 +2007,11 @@ impl IndexedJournalEffects for AuraEffectSystem {
         start: aura_core::time::TimeStamp,
         end: aura_core::time::TimeStamp,
     ) -> Result<Vec<indexed::IndexedFact>, AuraError> {
-        self.indexed_journal.facts_in_range(start, end).await
+        self.journal.indexed_journal().facts_in_range(start, end).await
     }
 
     async fn all_facts(&self) -> Result<Vec<indexed::IndexedFact>, AuraError> {
-        self.indexed_journal.all_facts().await
+        self.journal.indexed_journal().all_facts().await
     }
 
     fn might_contain(
@@ -1997,23 +2019,23 @@ impl IndexedJournalEffects for AuraEffectSystem {
         predicate: &str,
         value: &aura_core::domain::journal::FactValue,
     ) -> bool {
-        self.indexed_journal.might_contain(predicate, value)
+        self.journal.indexed_journal().might_contain(predicate, value)
     }
 
     async fn merkle_root(&self) -> Result<[u8; 32], AuraError> {
-        self.indexed_journal.merkle_root().await
+        self.journal.indexed_journal().merkle_root().await
     }
 
     async fn verify_fact_inclusion(&self, fact: &indexed::IndexedFact) -> Result<bool, AuraError> {
-        self.indexed_journal.verify_fact_inclusion(fact).await
+        self.journal.indexed_journal().verify_fact_inclusion(fact).await
     }
 
     async fn get_bloom_filter(&self) -> Result<BloomFilter, AuraError> {
-        self.indexed_journal.get_bloom_filter().await
+        self.journal.indexed_journal().get_bloom_filter().await
     }
 
     async fn index_stats(&self) -> Result<indexed::IndexStats, AuraError> {
-        self.indexed_journal.index_stats().await
+        self.journal.indexed_journal().index_stats().await
     }
 }
 
@@ -2462,7 +2484,7 @@ impl FlowBudgetEffects for AuraEffectSystem {
         peer: &AuthorityId,
         cost: u32,
     ) -> aura_core::AuraResult<aura_core::Receipt> {
-        if let Some((token, bridge)) = &self.journal_policy {
+        if let Some((token, bridge)) = &self.journal.journal_policy() {
             let scope = ResourceScope::Context {
                 context_id: *context,
                 operation: ContextOp::UpdateParams,
@@ -2947,7 +2969,8 @@ impl AuraEffectSystem {
         let caps = vec![SecureStorageCapability::Read];
 
         match self
-            .secure_storage_handler
+            .crypto
+            .secure_storage()
             .secure_retrieve(&location, &caps)
             .await
         {
@@ -2972,7 +2995,7 @@ impl AuraEffectSystem {
         ];
 
         let data = epoch.to_le_bytes().to_vec();
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_store(&location, &data, &caps)
             .await
             .map_err(|e| AuraError::storage(format!("Failed to store epoch state: {}", e)))
@@ -2990,7 +3013,8 @@ impl AuraEffectSystem {
         let shares_location =
             SecureStorageLocation::new("participant_shares", format!("{}/{}", authority, epoch));
         let _ = self
-            .secure_storage_handler
+            .crypto
+            .secure_storage()
             .secure_delete(&shares_location, &delete_caps)
             .await;
 
@@ -3001,7 +3025,8 @@ impl AuraEffectSystem {
             format!("{}", epoch),
         );
         let _ = self
-            .secure_storage_handler
+            .crypto
+            .secure_storage()
             .secure_delete(&pubkey_location, &delete_caps)
             .await;
 
@@ -3012,7 +3037,8 @@ impl AuraEffectSystem {
             format!("{}", epoch),
         );
         let _ = self
-            .secure_storage_handler
+            .crypto
+            .secure_storage()
             .secure_delete(&metadata_location, &delete_caps)
             .await;
 
@@ -3055,7 +3081,7 @@ impl AuraEffectSystem {
         let data = serde_json::to_vec(&metadata).map_err(|e| {
             AuraError::storage(format!("Failed to serialize threshold metadata: {}", e))
         })?;
-        self.secure_storage_handler
+        self.crypto.secure_storage()
             .secure_store(&location, &data, &caps)
             .await
             .map_err(|e| {
@@ -3089,7 +3115,8 @@ impl AuraEffectSystem {
         let caps = vec![SecureStorageCapability::Read];
 
         match self
-            .secure_storage_handler
+            .crypto
+            .secure_storage()
             .secure_retrieve(&location, &caps)
             .await
         {
@@ -3153,10 +3180,10 @@ impl std::fmt::Debug for AuraEffectSystem {
         f.debug_struct("AuraEffectSystem")
             .field("config", &self.config)
             .field("authority_id", &self.authority_id)
-            .field("journal_policy", &self.journal_policy.is_some())
+            .field("journal_policy", &self.journal.journal_policy().is_some())
             .field(
                 "journal_verifying_key",
-                &self.journal_verifying_key.is_some(),
+                &self.journal.journal_verifying_key().is_some(),
             )
             .finish_non_exhaustive()
     }

@@ -889,7 +889,7 @@ impl ITFBasedFuzzer {
             violations.push(PropertyViolation {
                 property_name: property_name.clone(),
                 violation_trace: counterexample.clone(),
-                violation_step: violation_step,
+                violation_step,
                 violation_description: format!(
                     "Property '{}' violated at step {} with bound {}",
                     property_name, violation_step, result.checking_bound

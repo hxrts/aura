@@ -3,9 +3,10 @@
 //! This module contains the aggregate view state that holds all view states.
 
 use super::{
-    ChatState, ContactsState, HomeState, HomesState, InvitationsState, NeighborhoodState,
-    RecoveryState,
+    ChatState, ContactsState, HomesState, InvitationsState, NeighborhoodState, RecoveryState,
 };
+#[cfg(feature = "signals")]
+use super::HomeState;
 use crate::core::StateSnapshot;
 #[cfg(feature = "signals")]
 use aura_core::identifiers::ChannelId;

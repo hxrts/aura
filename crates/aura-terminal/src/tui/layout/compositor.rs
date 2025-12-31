@@ -16,6 +16,7 @@ pub struct Rect {
 }
 
 impl Rect {
+    #[must_use]
     pub const fn new(x: u16, y: u16, width: u16, height: u16) -> Self {
         Self {
             x,
@@ -26,11 +27,13 @@ impl Rect {
     }
 
     /// Bottom edge (y + height)
+    #[must_use]
     pub const fn bottom(&self) -> u16 {
         self.y + self.height
     }
 
     /// Right edge (x + width)
+    #[must_use]
     pub const fn right(&self) -> u16 {
         self.x + self.width
     }
@@ -118,6 +121,7 @@ impl LayoutCompositor {
     }
 
     /// Create a compositor with exact 80×31 dimensions (no centering)
+    #[must_use]
     pub fn exact() -> Self {
         Self {
             nav_rect: Rect::new(0, 0, dim::TOTAL_WIDTH, dim::NAV_HEIGHT),
@@ -136,46 +140,55 @@ impl LayoutCompositor {
     }
 
     /// Get the fixed rect for nav bar
+    #[must_use]
     pub fn nav_rect(&self) -> Rect {
         self.nav_rect
     }
 
     /// Get the fixed rect for middle content (screen or modal)
+    #[must_use]
     pub fn middle_rect(&self) -> Rect {
         self.middle_rect
     }
 
     /// Get the fixed rect for footer (key hints or toast)
+    #[must_use]
     pub fn footer_rect(&self) -> Rect {
         self.footer_rect
     }
 
     /// X offset for centering
+    #[must_use]
     pub fn x_offset(&self) -> u16 {
         self.x_offset
     }
 
     /// Y offset for centering
+    #[must_use]
     pub fn y_offset(&self) -> u16 {
         self.y_offset
     }
 
     /// Current terminal width
+    #[must_use]
     pub fn terminal_width(&self) -> u16 {
         self.terminal_width
     }
 
     /// Current terminal height
+    #[must_use]
     pub fn terminal_height(&self) -> u16 {
         self.terminal_height
     }
 
     /// Check if terminal is larger than minimum (layout will be centered)
+    #[must_use]
     pub fn is_centered(&self) -> bool {
         self.x_offset > 0 || self.y_offset > 0
     }
 
     /// Total layout bounds (the 80×31 area)
+    #[must_use]
     pub fn layout_bounds(&self) -> Rect {
         Rect::new(
             self.x_offset,

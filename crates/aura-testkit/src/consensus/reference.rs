@@ -226,7 +226,12 @@ pub fn detect_equivocators_ref(votes: &[Vote]) -> BTreeSet<String> {
 
 /// Reference result type for transitions
 /// Mirrors TransitionResult but simplified
+///
+/// Note: ConsensusState is ~280 bytes vs String's ~24 bytes. We accept this
+/// size imbalance rather than boxing because this is test infrastructure
+/// where memory efficiency is less critical than code clarity.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum TransitionResultRef {
     /// Transition succeeded
     Ok(ConsensusState),

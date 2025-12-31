@@ -33,6 +33,7 @@ pub struct ToastContext {
 
 impl ToastContext {
     /// Create a new toast context with standard dimensions
+    #[must_use]
     pub fn new(level: ToastLevel) -> Self {
         Self {
             level,
@@ -42,21 +43,25 @@ impl ToastContext {
     }
 
     /// Create an info toast context
+    #[must_use]
     pub fn info() -> Self {
         Self::new(ToastLevel::Info)
     }
 
     /// Create a success toast context
+    #[must_use]
     pub fn success() -> Self {
         Self::new(ToastLevel::Success)
     }
 
     /// Create a warning toast context
+    #[must_use]
     pub fn warning() -> Self {
         Self::new(ToastLevel::Warning)
     }
 
     /// Create an error toast context
+    #[must_use]
     pub fn error() -> Self {
         Self::new(ToastLevel::Error)
     }

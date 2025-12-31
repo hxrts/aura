@@ -147,6 +147,7 @@ pub fn ConfirmationModal<'a>(props: &ConfirmModalProps<'a>) -> impl Into<AnyElem
 }
 
 /// Get the absolute positioning rect for a modal overlay
+#[must_use]
 pub fn modal_rect(compositor_middle: &Rect) -> Rect {
     *compositor_middle
 }

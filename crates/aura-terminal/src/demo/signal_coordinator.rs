@@ -23,11 +23,11 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
+use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{CHAT_SIGNAL, RECOVERY_SIGNAL};
 use aura_app::ui::types::chat::Message as ChatMessage;
 use aura_app::ui::types::recovery::{Guardian, GuardianStatus, RecoveryProcessStatus};
 use aura_app::ui::types::{ChatState, RecoveryState};
-use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuthorityId;
 use aura_core::Hash32;

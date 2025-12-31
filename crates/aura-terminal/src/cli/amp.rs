@@ -69,6 +69,7 @@ fn checkpoint_command() -> impl Parser<AmpAction> {
         .help("Emit a checkpoint at the current generation")
 }
 
+#[must_use]
 pub fn amp_parser() -> impl Parser<AmpAction> {
     construct!([inspect_command(), bump_command(), checkpoint_command()])
 }

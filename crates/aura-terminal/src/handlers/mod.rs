@@ -151,21 +151,25 @@ impl CliHandler {
     }
 
     /// Get the device ID for this handler
+    #[must_use]
     pub fn device_id(&self) -> DeviceId {
         self.device_id
     }
 
     /// Access the effect context for downstream operations
+    #[must_use]
     pub fn effect_context(&self) -> &EffectContext {
         &self.effect_context
     }
 
     /// Access the AppCore (for advanced operations)
+    #[must_use]
     pub fn app_core(&self) -> &Arc<RwLock<AppCore>> {
         &self.app_core
     }
 
     /// Access the agent (for effect system and service access)
+    #[must_use]
     pub fn agent(&self) -> &Arc<AuraAgent> {
         &self.agent
     }

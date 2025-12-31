@@ -8,17 +8,19 @@
 //!
 //! # Blocking Lock Usage
 //!
-//! Uses `parking_lot::RwLock` because:
-//! 1. This is Layer 6 runtime code explicitly allowed per clippy.toml
-//! 2. Locks protect in-memory simulation state with brief, sync-only access
-//! 3. No lock is held across .await points
+//! Uses `parking_lot::RwLock` for synchronous interior mutability because:
+//! 1. This is simulation/test infrastructure, not production code paths
+//! 2. Operations are O(1) HashSet lookups/inserts (sub-microsecond)
+//! 3. Locks are never held across `.await` points
+//! 4. Peer count in simulations is small (typically <10)
+
+#![allow(clippy::disallowed_types)]
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::AuthorityId;
-#[allow(clippy::disallowed_types)]
 use parking_lot::RwLock;
 
 /// Shared transport state for multi-agent simulations.

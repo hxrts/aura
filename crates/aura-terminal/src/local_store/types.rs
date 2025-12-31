@@ -36,6 +36,7 @@ pub struct ContactCache {
 
 impl ContactCache {
     /// Create a new contact cache entry
+    #[must_use]
     pub fn new(authority_id: AuthorityId) -> Self {
         Self {
             authority_id,
@@ -47,6 +48,7 @@ impl ContactCache {
     }
 
     /// Get the best display name for this contact
+    #[must_use]
     pub fn display(&self) -> String {
         self.nickname
             .clone()
@@ -79,6 +81,7 @@ pub struct LocalData {
 
 impl LocalData {
     /// Create empty local data
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -90,6 +93,7 @@ impl LocalData {
     }
 
     /// Get a cached contact by authority ID
+    #[must_use]
     pub fn get_contact(&self, authority_id: &AuthorityId) -> Option<&ContactCache> {
         self.contacts.get(&authority_id.to_string())
     }
@@ -116,6 +120,7 @@ impl LocalData {
     }
 
     /// Get a custom setting
+    #[must_use]
     pub fn get_setting(&self, key: &str) -> Option<&String> {
         self.settings.get(key)
     }
@@ -138,6 +143,7 @@ impl LocalStoreConfig {
     ///
     /// This converts the file path to a key suitable for StorageEffects.
     /// The path is converted to a canonical string representation.
+    #[must_use]
     pub fn storage_key(&self) -> String {
         format!("local-store:{}", self.path.display())
     }

@@ -34,7 +34,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::{HealthCheck, HealthStatus, Service, ServiceMetrics, ServiceState};
-use crate::core::{sync_session_error, MetricsCollector, SessionManager, SyncResult};
+use crate::core::{sync_session_error, MetricsCollector, SessionConfig, SessionManager, SyncResult};
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol, SyncProtocolEffects};
 use aura_core::effects::{PhysicalTimeEffects, TimeError};
@@ -184,7 +184,7 @@ impl SyncService {
             .physical_time()
             .await
             .map_err(time_error_to_aura)?;
-        let session_manager = SessionManager::new(Default::default(), now);
+        let session_manager = SessionManager::new(SessionConfig::default(), now);
         let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
         let metrics = MetricsCollector::new();
 

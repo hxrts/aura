@@ -59,6 +59,11 @@
 //! This crate implements the RelationalContext abstraction that manages
 //! relationships between authorities without exposing internal structure.
 
+// RelationalContext uses std::sync::RwLock for synchronous interior mutability.
+// All methods are synchronous and never cross .await boundaries, so blocking
+// locks are safe here. See clippy.toml for blocking lock policy.
+#![allow(clippy::disallowed_types)]
+
 #[cfg(test)]
 use aura_core::relational::GuardianParameters;
 use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};

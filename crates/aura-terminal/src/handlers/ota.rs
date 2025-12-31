@@ -7,11 +7,12 @@
 
 use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
+use aura_agent::handlers::{UpgradeKind, UpgradeProposal};
+use aura_app::ui::types::{parse_semantic_version, parse_upgrade_kind, UpgradeKindValue};
 use aura_core::effects::StorageCoreEffects;
 use aura_core::types::Epoch;
 use aura_core::{hash, AccountId, Hash32, SemanticVersion};
 use aura_maintenance::IdentityEpochFence;
-use aura_agent::handlers::{UpgradeKind, UpgradeProposal};
 use std::fs;
 use std::path::Path;
 use uuid::Uuid;
@@ -64,32 +65,17 @@ async fn propose_upgrade(
         "Proposing {upgrade_type} upgrade to version {to_version}: {description}"
     ));
 
-    let kind = match upgrade_type {
-        "soft" => UpgradeKind::SoftFork,
-        "hard" => UpgradeKind::HardFork,
-        _ => {
-            return Err(TerminalError::Input(format!(
-                "Invalid upgrade type: {upgrade_type}. Use 'soft' or 'hard'"
-            )))
-        }
+    // Use portable parsing from aura_app
+    let kind_value = parse_upgrade_kind(upgrade_type)
+        .map_err(|e| TerminalError::Input(e.to_string()))?;
+    let kind = match kind_value {
+        UpgradeKindValue::Soft => UpgradeKind::SoftFork,
+        UpgradeKindValue::Hard => UpgradeKind::HardFork,
     };
 
-    // Parse version string (e.g., "1.2.3")
-    let parts: Vec<&str> = to_version.split('.').collect();
-    if parts.len() != 3 {
-        return Err(TerminalError::Input(
-            "Invalid semantic version format. Expected: major.minor.patch".into(),
-        ));
-    }
-    let major: u16 = parts[0]
-        .parse()
-        .map_err(|e| TerminalError::Input(format!("Invalid major version: {e}")))?;
-    let minor: u16 = parts[1]
-        .parse()
-        .map_err(|e| TerminalError::Input(format!("Invalid minor version: {e}")))?;
-    let patch: u16 = parts[2]
-        .parse()
-        .map_err(|e| TerminalError::Input(format!("Invalid patch version: {e}")))?;
+    // Parse version string using portable helper
+    let (major, minor, patch) = parse_semantic_version(to_version)
+        .map_err(|e| TerminalError::Input(e.to_string()))?;
     let version = SemanticVersion::new(major, minor, patch);
 
     // Compute artifact hash from local file if available, otherwise hash the URL string

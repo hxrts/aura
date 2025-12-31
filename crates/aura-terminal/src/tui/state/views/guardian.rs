@@ -1,7 +1,7 @@
 //! Guardian setup modal state
 
-use aura_app::ui::prelude::*;
 use super::KeyRotationCeremonyUiState;
+use aura_app::ui::prelude::*;
 
 /// Step in the guardian setup wizard
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -77,11 +77,13 @@ impl Default for GuardianSetupModalState {
 
 impl GuardianSetupModalState {
     /// Get total selected guardians (n)
+    #[must_use]
     pub fn threshold_n(&self) -> u8 {
         self.selected_indices.len() as u8
     }
 
     /// Create initialized state with contacts, pre-selecting current guardians
+    #[must_use]
     pub fn with_contacts(contacts: Vec<GuardianCandidate>) -> Self {
         let mut selected_indices = Vec::new();
         // Pre-select current guardians
@@ -135,6 +137,7 @@ impl GuardianSetupModalState {
     }
 
     /// Check if a contact index is selected
+    #[must_use]
     pub fn is_selected(&self, index: usize) -> bool {
         self.selected_indices.contains(&index)
     }
@@ -154,11 +157,13 @@ impl GuardianSetupModalState {
     }
 
     /// Check if can proceed from contact selection to threshold step
+    #[must_use]
     pub fn can_proceed_to_threshold(&self) -> bool {
         self.selected_indices.len() >= 2 // Need at least 2 guardians
     }
 
     /// Check if can start ceremony
+    #[must_use]
     pub fn can_start_ceremony(&self) -> bool {
         let n = self.threshold_n();
         // FROST requires threshold >= 2 for multi-party signing
@@ -210,6 +215,7 @@ impl GuardianSetupModalState {
     }
 
     /// Check if all guardians have accepted
+    #[must_use]
     pub fn all_accepted(&self) -> bool {
         !self.ceremony_responses.is_empty()
             && self
@@ -219,6 +225,7 @@ impl GuardianSetupModalState {
     }
 
     /// Check if any guardian has declined
+    #[must_use]
     pub fn any_declined(&self) -> bool {
         self.ceremony_responses
             .iter()
@@ -226,6 +233,7 @@ impl GuardianSetupModalState {
     }
 
     /// Get list of selected contact IDs
+    #[must_use]
     pub fn selected_contact_ids(&self) -> Vec<String> {
         self.selected_indices
             .iter()

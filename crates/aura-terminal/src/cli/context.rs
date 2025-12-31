@@ -55,6 +55,7 @@ fn receipts_command() -> impl Parser<ContextAction> {
     .help("Show receipts and flow budget headroom for a context")
 }
 
+#[must_use]
 pub fn context_parser() -> impl Parser<ContextAction> {
     construct!([inspect_command(), receipts_command()])
 }

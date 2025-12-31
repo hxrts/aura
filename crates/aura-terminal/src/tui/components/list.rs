@@ -197,6 +197,7 @@ pub fn List(props: &ListProps) -> impl Into<AnyElement<'static>> {
 }
 
 /// Helper to navigate list selection
+#[must_use]
 pub fn navigate_list(current: usize, total: usize, direction: ListNavigation) -> usize {
     if total == 0 {
         return 0;

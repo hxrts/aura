@@ -32,16 +32,16 @@ pub use hints::DemoHints;
 pub use signal_coordinator::DemoSignalCoordinator;
 pub use simulator::DemoSimulator;
 
-use crate::error::TerminalResult;
+use crate::error::{TerminalError, TerminalResult};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
+use aura_app::ui::types::GuardianBinding;
 use aura_core::effects::{amp::AmpChannelEffects, StorageCoreEffects};
 use aura_core::hash::hash;
 use aura_core::{AuthorityId, ChannelId, ContextId, DeviceId};
@@ -60,16 +60,12 @@ pub enum DemoPhase {
     GuardianCoordination,
 }
 
-/// Capabilities an agent can acquire through ceremonies
+/// Capabilities an agent can acquire through ceremonies.
+///
+/// Note: Guardian capabilities are now tracked separately via `GuardianBinding`
+/// in the agent state, using the portable type from aura-app.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AgentCapability {
-    /// Can approve recovery requests for a specific account
-    Guardian {
-        /// The account authority this agent is guardian for
-        account_authority: AuthorityId,
-        /// The relational context for this guardian binding
-        context_id: ContextId,
-    },
     /// Can participate in messaging channels
     Messaging {
         /// Channel ID
@@ -239,8 +235,12 @@ impl Default for AgentConfig {
 /// Agent state tracking
 #[derive(Debug, Clone, Default)]
 pub struct AgentState {
-    /// Capabilities acquired through ceremonies
+    /// Capabilities acquired through ceremonies (messaging, consensus witness)
     pub capabilities: HashSet<AgentCapability>,
+
+    /// Guardian bindings - accounts this agent is a guardian for.
+    /// Uses portable GuardianBinding type from aura-app.
+    pub guardian_bindings: Vec<GuardianBinding>,
 
     /// Whether agent is actively monitoring events
     pub monitoring: bool,
@@ -252,7 +252,7 @@ pub struct AgentState {
     pub messages_sent: usize,
 
     /// Last action timestamp
-    pub last_action_time: Option<Instant>,
+    pub last_action_time: Option<PhysicalTime>,
 
     /// Current demo phase awareness
     pub current_phase: Option<DemoPhase>,
@@ -350,27 +350,35 @@ impl SimulatedAgent {
         Ok(())
     }
 
-    /// Check if agent has guardian capability for a specific account
+    /// Check if agent has guardian capability for a specific account.
+    ///
+    /// Uses the portable `GuardianBinding` type from aura-app.
     pub fn is_guardian_for(&self, account: &AuthorityId) -> bool {
-        self.state.capabilities.iter().any(|cap| {
-            matches!(cap, AgentCapability::Guardian { account_authority, .. } if account_authority == account)
-        })
+        self.state
+            .guardian_bindings
+            .iter()
+            .any(|binding| binding.account_authority == *account)
     }
 
-    /// Add guardian capability for an account
+    /// Add guardian capability for an account.
     ///
     /// This makes the agent a guardian for the specified account,
     /// allowing them to approve recovery requests.
+    /// Uses the portable `GuardianBinding` type from aura-app.
     pub fn add_guardian_for(&mut self, account: AuthorityId, context_id: ContextId) {
-        self.state.capabilities.insert(AgentCapability::Guardian {
-            account_authority: account,
-            context_id,
-        });
-        tracing::info!(
-            "Agent {} is now a guardian for account {}",
-            self.name,
-            account
-        );
+        // Prevent duplicates
+        if !self.is_guardian_for(&account) {
+            self.state.guardian_bindings.push(GuardianBinding::new(
+                account,
+                context_id,
+                0, // bound_at timestamp - demo doesn't track this precisely
+            ));
+            tracing::info!(
+                "Agent {} is now a guardian for account {}",
+                self.name,
+                account
+            );
+        }
     }
 
     /// Check for and process incoming transport messages (guardian invitations, etc.)
@@ -405,11 +413,8 @@ impl SimulatedAgent {
                                 ceremony_id
                             );
 
-                            // Add guardian capability for the initiator
-                            self.state.capabilities.insert(AgentCapability::Guardian {
-                                account_authority: envelope.source,
-                                context_id: envelope.context,
-                            });
+                            // Add guardian binding for the initiator (using portable type)
+                            self.add_guardian_for(envelope.source, envelope.context);
 
                             // Send acceptance response back through transport
                             let mut response_metadata = std::collections::HashMap::new();
@@ -651,11 +656,8 @@ impl SimulatedAgent {
         let delay = self.calculate_response_delay();
         PhysicalTimeHandler::new().sleep_ms(delay / 2).await.ok();
 
-        // Add guardian capability
-        self.state.capabilities.insert(AgentCapability::Guardian {
-            account_authority: *account,
-            context_id: *context_id,
-        });
+        // Add guardian binding (using portable type from aura-app)
+        self.add_guardian_for(*account, *context_id);
 
         // Store guardian binding in simulator storage
         let env = self.environment.lock().await;
@@ -779,31 +781,46 @@ impl SimulatedAgent {
             return Ok(());
         }
 
-        #[allow(clippy::disallowed_methods)]
-        {
-            self.state.last_action_time = Some(Instant::now());
-        }
+        let now = {
+            let env = self.environment.lock().await;
+            env.effect_system()
+                .physical_time()
+                .await
+                .map_err(|e| TerminalError::Operation(format!("Failed to read time: {e}")))?
+        };
+        self.state.last_action_time = Some(now);
 
         Ok(())
     }
 
     /// Get agent statistics
-    pub fn get_statistics(&self) -> AgentStatistics {
-        AgentStatistics {
+    pub async fn get_statistics(&self) -> TerminalResult<AgentStatistics> {
+        let now = {
+            let env = self.environment.lock().await;
+            env.effect_system()
+                .physical_time()
+                .await
+                .map_err(|e| TerminalError::Operation(format!("Failed to read time: {e}")))?
+        };
+        let uptime = self
+            .state
+            .last_action_time
+            .map(|t| now.ts_ms.saturating_sub(t.ts_ms))
+            .map(std::time::Duration::from_millis)
+            .unwrap_or_default();
+
+        Ok(AgentStatistics {
             name: self.name.clone(),
             authority_id: self.authority_id,
             device_id: self.device_id,
             monitoring: self.state.monitoring,
             capabilities: self.state.capabilities.iter().cloned().collect(),
+            guardian_bindings: self.state.guardian_bindings.clone(),
             recovery_approvals: self.state.recovery_approvals,
             messages_sent: self.state.messages_sent,
             current_phase: self.state.current_phase.clone(),
-            uptime: self
-                .state
-                .last_action_time
-                .map(|t| t.elapsed())
-                .unwrap_or_default(),
-        }
+            uptime,
+        })
     }
 }
 
@@ -818,8 +835,10 @@ pub struct AgentStatistics {
     pub device_id: DeviceId,
     /// Whether monitoring is active
     pub monitoring: bool,
-    /// Current capabilities
+    /// Current capabilities (messaging, consensus witness)
     pub capabilities: Vec<AgentCapability>,
+    /// Guardian bindings - accounts this agent is guardian for
+    pub guardian_bindings: Vec<GuardianBinding>,
     /// Number of recovery approvals
     pub recovery_approvals: usize,
     /// Number of messages sent

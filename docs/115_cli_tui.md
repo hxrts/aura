@@ -82,7 +82,7 @@ The user interface split is:
 
 ## Relationship to `aura-app`
 
-`AppCore` is the shared boundary for both frontends. It owns reactive state and provides stable APIs for dispatching intents and reading derived views. It also defines the signal catalog in `aura_app::signal_defs`.
+`AppCore` is the shared boundary for both frontends. It owns reactive state and provides stable APIs for dispatching intents and reading derived views. Frontends should use the `aura_app::ui` facade (especially `aura_app::ui::signals` and `aura_app::ui::workflows`) as the public API surface.
 
 The frontends use `AppCore` in two ways:
 - Trigger work by calling `AppCore.dispatch(intent)` or by calling effect-backed handlers that ultimately produce journaled facts.
@@ -92,7 +92,7 @@ This split keeps domain semantics centralized. It also makes it possible to reus
 
 ## Time system in UI
 
-UI code must never read OS clocks (for example, `SystemTime::now()` or `Instant::now()`). All wall-clock needs must flow through the runtime via `RuntimeBridge::current_time_ms` (or `PhysicalTimeEffects` inside handlers). Demo mode and relative-time UI (e.g., “Synced Xm ago”) must be driven by runtime time so simulations remain deterministic.
+UI code must never read OS clocks (for example, `SystemTime::now()` or `Instant::now()`). All wall-clock needs must flow through algebraic effects (`PhysicalTimeEffects` via the handler/effect system). Demo mode and relative-time UI (e.g., “Synced Xm ago”) must be driven by runtime time so simulations remain deterministic.
 
 Aura time domains are: `PhysicalClock` (wall time), `LogicalClock` (causality), `OrderClock` (privacy-preserving ordering), and `Range` (validity windows). When attested time is required, use `ProvenancedTime`/`TimeAttestationEffects` rather than embedding OS timestamps in UI state.
 
@@ -192,7 +192,7 @@ Subscriptions should be owned by the component that renders the data. A subscrip
 
 The footer “connected peers” count is a UI convenience signal. It must represent **how many of your contacts are online**, not a seeded or configured peer list.
 
-- Source: `CONNECTION_STATUS_SIGNAL` (emitted by `aura_app::workflows::system::refresh_account()`).
+- Source: `CONNECTION_STATUS_SIGNAL` (emitted by `aura_app::ui::workflows::system::refresh_account()`).
 - Contact set: read from `CONTACTS_SIGNAL` (signal truth), not from `ViewState` snapshots.
 - Online check: `RuntimeBridge::is_peer_online(contact_id)` (best-effort; demo uses a shared in-memory transport, production can use real transport channel health).
 
@@ -242,7 +242,7 @@ This policy aligns with [Privacy and Information Flow](003_information_flow_cont
 
 ## Errors and user feedback
 
-Domain and dispatch failures are emitted through `aura_app::signal_defs::ERROR_SIGNAL`. The app shell subscribes to this signal and renders errors as queued toasts. When the account setup modal is active, errors are routed into the modal instead of creating a toast.
+Domain and dispatch failures are emitted through `aura_app::ui::signals::ERROR_SIGNAL`. The app shell subscribes to this signal and renders errors as queued toasts. When the account setup modal is active, errors are routed into the modal instead of creating a toast.
 
 UI-only failures use `UiUpdate::OperationFailed`. This is used primarily for account file operations that occur before AppCore dispatch.
 

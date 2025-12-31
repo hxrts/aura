@@ -168,34 +168,50 @@ disallowed_types = "deny"
 missing_docs_in_private_items = "allow"
 
 # Additional lints for code quality
-too_many_arguments = "warn"
+# too_many_arguments: disabled by default, enable for style audits
+too_many_arguments = "allow"
 type_complexity = "warn"
 unwrap_used = "warn"
 expect_used = "warn"
 
 # === Rust Style Guide Enforcement ===
+#
+# DISABLED BY DEFAULT (too noisy for active development):
+#   - must_use_candidate, trivially_copy_pass_by_ref, needless_pass_by_value
+#   - unused_async (many trait impls are async for signature compatibility)
+#   - manual_let_else, cognitive_complexity, fn_params_excessive_bools, etc.
+#
+# To run a stricter audit with all style lints enabled:
+#   cargo clippy -- -W clippy::must_use_candidate -W clippy::trivially_copy_pass_by_ref \
+#                   -W clippy::needless_pass_by_value -W clippy::unused_async \
+#                   -W clippy::manual_let_else -W clippy::cognitive_complexity \
+#                   -W clippy::fn_params_excessive_bools -W clippy::struct_excessive_bools \
+#                   -W clippy::too_many_arguments
 
 # Safety §4 / Style by Numbers: "#[must_use] for APIs where dropping the value is likely a bug"
-must_use_candidate = "warn"
+# Disabled: too noisy (2000+ warnings), enable for periodic audits
+must_use_candidate = "allow"
 
 # APIs: misuse hard - "avoid bool parameters (use enums)"
-fn_params_excessive_bools = "warn"
-struct_excessive_bools = "warn"
+fn_params_excessive_bools = "allow"
+struct_excessive_bools = "allow"
 
 # Memory §7: "pre-size collections", "avoid per-request allocations"
 large_types_passed_by_value = "warn"
-trivially_copy_pass_by_ref = "warn"
-needless_pass_by_value = "warn"
+# Disabled: often intentional for API ergonomics
+trivially_copy_pass_by_ref = "allow"
+needless_pass_by_value = "allow"
 redundant_clone = "warn"
 implicit_clone = "warn"
 vec_box = "warn"
 
 # Safety §1: "simple, explicit control flow"
-cognitive_complexity = "warn"
-manual_let_else = "warn"
+cognitive_complexity = "allow"
+manual_let_else = "allow"
 
 # Safety §5: Error handling - async functions that never await are suspicious
-unused_async = "warn"
+# Disabled: many trait implementations must be async for signature compatibility
+unused_async = "allow"
 
 # Performance: format!("{}", x) → format!("{x}")
 uninlined_format_args = "warn"

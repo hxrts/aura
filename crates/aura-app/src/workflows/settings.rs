@@ -4,7 +4,7 @@
 //! It follows the reactive signal pattern and emits SETTINGS_SIGNAL updates.
 
 use crate::{
-    signal_defs::{DeviceInfo, SettingsState, SETTINGS_SIGNAL},
+    signal_defs::{DeviceInfo, SettingsState, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME},
     AppCore,
 };
 use async_lock::RwLock;
@@ -16,18 +16,14 @@ use std::sync::Arc;
 async fn refresh_settings_signal_from_runtime(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let runtime = {
+    let (settings, devices) = {
         let core = app_core.read().await;
-        core.runtime().cloned()
+        match core.settings_snapshot().await {
+            Some(snapshot) => snapshot,
+            None => return Ok(()),
+        }
     };
-    let Some(runtime) = runtime else {
-        // No runtime bridge: keep default settings state.
-        return Ok(());
-    };
-
-    let settings = runtime.get_settings().await;
-    let devices = runtime.list_devices().await;
-    let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, "SETTINGS_SIGNAL").await?;
+    let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
     state.display_name = settings.display_name;
     state.mfa_policy = settings.mfa_policy;
     state.threshold_k = settings.threshold_k as u8;
@@ -43,7 +39,7 @@ async fn refresh_settings_signal_from_runtime(
         })
         .collect();
 
-    emit_signal(app_core, &*SETTINGS_SIGNAL, state, "SETTINGS_SIGNAL").await
+    emit_signal(app_core, &*SETTINGS_SIGNAL, state, SETTINGS_SIGNAL_NAME).await
 }
 
 /// Refresh SETTINGS_SIGNAL from the current RuntimeBridge settings.
@@ -125,7 +121,7 @@ pub async fn set_channel_mode(
 /// **Returns**: Current settings state
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> Result<SettingsState, AuraError> {
-    read_signal(app_core, &SETTINGS_SIGNAL, "settings")
+    read_signal(app_core, &SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME)
         .await
 }
 

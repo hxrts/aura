@@ -26,6 +26,7 @@ pub enum PeerInvitationStatus {
 
 impl PeerInvitationStatus {
     /// Get a display label for the status
+    #[must_use]
     pub fn label(&self) -> &'static str {
         match self {
             Self::None => "",
@@ -36,6 +37,7 @@ impl PeerInvitationStatus {
     }
 
     /// Get the color for this status
+    #[must_use]
     pub fn color(&self) -> Color {
         match self {
             Self::None => Theme::TEXT_MUTED,
@@ -89,24 +91,28 @@ impl DiscoveredPeerInfo {
     }
 
     /// Set the age in seconds
+    #[must_use]
     pub fn with_age(mut self, age_secs: u64) -> Self {
         self.age_secs = age_secs;
         self
     }
 
     /// Set the invitation status
+    #[must_use]
     pub fn with_status(mut self, status: PeerInvitationStatus) -> Self {
         self.invitation_status = status;
         self
     }
 
     /// Mark as having a pending invitation
+    #[must_use]
     pub fn with_pending_invitation(mut self) -> Self {
         self.invitation_status = PeerInvitationStatus::Pending;
         self
     }
 
     /// Get display label (name or truncated authority ID)
+    #[must_use]
     pub fn display_label(&self) -> String {
         if let Some(name) = &self.display_name {
             name.clone()
@@ -122,6 +128,7 @@ impl DiscoveredPeerInfo {
     }
 
     /// Format age for display
+    #[must_use]
     pub fn age_display(&self) -> String {
         if self.age_secs < 60 {
             format!("{}s ago", self.age_secs)
@@ -281,6 +288,7 @@ pub struct DiscoveredPeersState {
 
 impl DiscoveredPeersState {
     /// Create new state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -309,6 +317,7 @@ impl DiscoveredPeersState {
     }
 
     /// Get the selected peer
+    #[must_use]
     pub fn get_selected(&self) -> Option<&DiscoveredPeerInfo> {
         self.peers.get(self.selected_index)
     }
@@ -319,11 +328,13 @@ impl DiscoveredPeersState {
     }
 
     /// Check if there are any peers
+    #[must_use]
     pub fn has_peers(&self) -> bool {
         !self.peers.is_empty()
     }
 
     /// Check if can invite (has peers and one is selected)
+    #[must_use]
     pub fn can_invite(&self) -> bool {
         self.focused && self.get_selected().is_some()
     }

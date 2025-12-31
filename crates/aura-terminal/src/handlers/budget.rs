@@ -48,6 +48,7 @@ pub use aura_app::ui::workflows::budget::{
 ///
 /// Returns a multi-line summary suitable for CLI output or TUI display.
 /// Includes total usage, per-category breakdowns, and capacity warnings.
+#[must_use]
 pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
     let breakdown = budget.breakdown();
     let usage_percent = (budget.usage_fraction() * 100.0) as u8;
@@ -110,6 +111,7 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
 /// Format budget breakdown as a compact one-line summary
 ///
 /// Returns a short status line suitable for status bars or compact displays.
+#[must_use]
 pub fn format_budget_compact(budget: &HomeFlowBudget) -> String {
     let usage_percent = (budget.usage_fraction() * 100.0) as u8;
     format!(

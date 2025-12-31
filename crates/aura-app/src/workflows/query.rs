@@ -7,6 +7,7 @@ use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
 use aura_core::AuraError;
 use crate::workflows::parse::parse_authority_id;
+use crate::workflows::snapshot_policy::full_snapshot;
 use std::sync::Arc;
 
 /// List participants in a channel
@@ -21,8 +22,7 @@ pub async fn list_participants(
     app_core: &Arc<RwLock<AppCore>>,
     channel: &str,
 ) -> Result<Vec<String>, AuraError> {
-    let app_core_guard = app_core.read().await;
-    let snapshot = app_core_guard.snapshot();
+    let snapshot = full_snapshot(app_core).await;
     let contacts = &snapshot.contacts;
 
     let mut participants = Vec::new();
@@ -66,8 +66,7 @@ pub async fn get_user_info(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
 ) -> Result<Contact, AuraError> {
-    let app_core_guard = app_core.read().await;
-    let snapshot = app_core_guard.snapshot();
+    let snapshot = full_snapshot(app_core).await;
     let contacts = &snapshot.contacts;
 
     // Look up contact by ID (if parseable as AuthorityId)
@@ -108,8 +107,7 @@ pub async fn get_user_info(
 /// **Returns**: List of contacts
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
-    let app_core_guard = app_core.read().await;
-    let snapshot = app_core_guard.snapshot();
+    let snapshot = full_snapshot(app_core).await;
     snapshot
         .contacts
         .filtered_contacts()

@@ -20,8 +20,7 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::util::graph::{CycleError, DagNode};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
-use aura_journal::{DomainFact, FactRegistry};
-use aura_social::{SocialFact, SOCIAL_FACT_TYPE_ID};
+use aura_journal::FactRegistry;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -719,278 +718,28 @@ fn topological_sort(views: Vec<Arc<dyn AnyView>>) -> Vec<Arc<dyn AnyView>> {
 // Delta Types and Reduction Functions
 // =============================================================================
 //
-// These types define the incremental updates (deltas) that views can apply
-// to maintain their state. Each view type has a corresponding delta enum
-// and a reduction function that transforms journal facts into deltas.
+// Reduction types have been extracted to the `reductions` module for better
+// organization. Re-export them here for backward compatibility.
 
-use aura_chat::{ChatDelta, ChatViewReducer, CHAT_FACT_TYPE_ID};
-use aura_composition::{downcast_delta, ViewDeltaReducer};
-use aura_invitation::{InvitationDelta, InvitationViewReducer, INVITATION_FACT_TYPE_ID};
-use aura_recovery::{RecoveryDelta, RecoveryViewReducer, RECOVERY_FACT_TYPE_ID};
-
-/// Reduction adapter for chat view
-///
-/// Delegates to `ChatViewReducer` from `aura-chat` crate.
-pub struct ChatReduction;
-
-impl ViewReduction<ChatDelta> for ChatReduction {
-    fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<ChatDelta> {
-        let reducer = ChatViewReducer;
-
-        facts
-            .iter()
-            .filter_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) if binding_type == CHAT_FACT_TYPE_ID => {
-                    // Use the domain reducer and downcast back to ChatDelta
-                    let view_deltas =
-                        reducer.reduce_fact(binding_type, binding_data, own_authority);
-                    view_deltas
-                        .into_iter()
-                        .filter_map(|vd| downcast_delta::<ChatDelta>(&vd).cloned())
-                        .next()
-                }
-                _ => None,
-            })
-            .collect()
-    }
-}
-
-/// Delta type for guardians view
-#[derive(Debug, Clone, PartialEq)]
-pub enum GuardianDelta {
-    /// A new guardian was added to the recovery network
-    GuardianAdded {
-        authority_id: String,
-        name: String,
-        added_at: u64,
-        share_index: Option<u32>,
-    },
-    /// A guardian was removed
-    GuardianRemoved { authority_id: String },
-    /// A guardian's status changed
-    GuardianStatusChanged {
-        authority_id: String,
-        old_status: String,
-        new_status: String,
-        last_seen: Option<u64>,
-    },
-    /// Recovery threshold was updated
-    ThresholdUpdated { threshold: u32, total: u32 },
-}
-
-/// Reduction function for guardians view
-pub struct GuardianReduction;
-
-impl ViewReduction<GuardianDelta> for GuardianReduction {
-    fn reduce(&self, facts: &[Fact], _own_authority: Option<AuthorityId>) -> Vec<GuardianDelta> {
-        facts
-            .iter()
-            .filter_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::Protocol(
-                    aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id, .. },
-                )) => Some(GuardianDelta::GuardianAdded {
-                    authority_id: format!("{:?}", guardian_id),
-                    name: "unknown".to_string(),
-                    added_at: 0,
-                    share_index: None,
-                }),
-                FactContent::Relational(RelationalFact::Generic { binding_type, .. }) => {
-                    if binding_type == "guardian_removed" {
-                        Some(GuardianDelta::GuardianRemoved {
-                            authority_id: "unknown".to_string(),
-                        })
-                    } else if binding_type == "threshold_updated" {
-                        Some(GuardianDelta::ThresholdUpdated {
-                            threshold: 2,
-                            total: 3,
-                        })
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })
-            .collect()
-    }
-}
-
-/// Reduction adapter for recovery view
-///
-/// Delegates to `RecoveryViewReducer` from `aura-recovery` crate.
-pub struct RecoveryReduction;
-
-impl ViewReduction<RecoveryDelta> for RecoveryReduction {
-    fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<RecoveryDelta> {
-        let reducer = RecoveryViewReducer;
-
-        facts
-            .iter()
-            .filter_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) if binding_type == RECOVERY_FACT_TYPE_ID => {
-                    // Use the domain reducer and downcast back to RecoveryDelta
-                    let view_deltas =
-                        reducer.reduce_fact(binding_type, binding_data, own_authority);
-                    view_deltas
-                        .into_iter()
-                        .filter_map(|vd| downcast_delta::<RecoveryDelta>(&vd).cloned())
-                        .next()
-                }
-                _ => None,
-            })
-            .collect()
-    }
-}
-
-/// Reduction adapter for invitations view
-///
-/// Delegates to `InvitationViewReducer` from `aura-invitation` crate.
-pub struct InvitationReduction;
-
-impl ViewReduction<InvitationDelta> for InvitationReduction {
-    fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<InvitationDelta> {
-        let reducer = InvitationViewReducer;
-
-        facts
-            .iter()
-            .filter_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) if binding_type == INVITATION_FACT_TYPE_ID => {
-                    // Use the domain reducer and downcast back to InvitationDelta
-                    let view_deltas =
-                        reducer.reduce_fact(binding_type, binding_data, own_authority);
-                    view_deltas
-                        .into_iter()
-                        .filter_map(|vd| downcast_delta::<InvitationDelta>(&vd).cloned())
-                        .next()
-                }
-                _ => None,
-            })
-            .collect()
-    }
-}
-
-/// Delta type for home view
-#[derive(Debug, Clone, PartialEq)]
-pub enum HomeDelta {
-    /// A new home was created
-    HomeCreated {
-        home_id: String,
-        name: String,
-        created_at: u64,
-        creator_id: String,
-    },
-    /// A resident joined the home
-    ResidentAdded {
-        authority_id: String,
-        name: String,
-        joined_at: u64,
-    },
-    /// A resident left the home
-    ResidentRemoved { authority_id: String, left_at: u64 },
-    /// Home storage statistics updated
-    StorageUpdated {
-        used_bytes: u64,
-        total_bytes: u64,
-        updated_at: u64,
-    },
-}
-
-/// Reduction function for home view
-pub struct HomeReduction;
-
-impl ViewReduction<HomeDelta> for HomeReduction {
-    fn reduce(&self, facts: &[Fact], _own_authority: Option<AuthorityId>) -> Vec<HomeDelta> {
-        facts
-            .iter()
-            .filter_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) => {
-                    // Only process social facts
-                    if binding_type != SOCIAL_FACT_TYPE_ID {
-                        return None;
-                    }
-
-                    // Deserialize the SocialFact from binding_data
-                    let social_fact = SocialFact::from_bytes(binding_data)?;
-
-                    match social_fact {
-                        SocialFact::HomeCreated {
-                            home_id,
-                            created_at,
-                            creator_id,
-                            name,
-                            ..
-                        } => Some(HomeDelta::HomeCreated {
-                            home_id: format!("{}", home_id),
-                            name,
-                            created_at: created_at.ts_ms,
-                            creator_id: creator_id.to_string(),
-                        }),
-                        SocialFact::ResidentJoined {
-                            authority_id,
-                            joined_at,
-                            name,
-                            ..
-                        } => Some(HomeDelta::ResidentAdded {
-                            authority_id: authority_id.to_string(),
-                            name,
-                            joined_at: joined_at.ts_ms,
-                        }),
-                        SocialFact::ResidentLeft {
-                            authority_id,
-                            left_at,
-                            ..
-                        } => Some(HomeDelta::ResidentRemoved {
-                            authority_id: authority_id.to_string(),
-                            left_at: left_at.ts_ms,
-                        }),
-                        SocialFact::StorageUpdated {
-                            used_bytes,
-                            total_bytes,
-                            updated_at,
-                            ..
-                        } => Some(HomeDelta::StorageUpdated {
-                            used_bytes,
-                            total_bytes,
-                            updated_at: updated_at.ts_ms,
-                        }),
-                        // Other social facts don't map to HomeDelta
-                        _ => None,
-                    }
-                }
-                _ => None,
-            })
-            .collect()
-    }
-}
+pub use super::reductions::{
+    ChatReduction, GuardianDelta, GuardianReduction, HomeDelta, HomeReduction, InvitationReduction,
+    RecoveryReduction,
+};
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fact_registry::build_fact_registry;
-    use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
+    use aura_chat::{ChatDelta, ChatFact, CHAT_FACT_TYPE_ID};
     use aura_core::{
         identifiers::{AuthorityId, ChannelId, ContextId},
         time::{OrderTime, PhysicalTime, TimeStamp},
     };
-    use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
+    use aura_invitation::{InvitationDelta, InvitationFact, INVITATION_FACT_TYPE_ID};
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_journal::DomainFact;
-    use aura_social::HomeId;
+    use aura_recovery::RecoveryDelta;
+    use aura_social::{HomeId, SocialFact, SOCIAL_FACT_TYPE_ID};
     use tokio::sync::mpsc;
 
     /// Helper to create a test context ID

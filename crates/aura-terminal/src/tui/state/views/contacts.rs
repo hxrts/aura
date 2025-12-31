@@ -38,6 +38,7 @@ pub struct NicknameModalState {
 
 impl NicknameModalState {
     /// Create initialized state for editing a contact's nickname
+    #[must_use]
     pub fn for_contact(contact_id: &str, current_name: &str) -> Self {
         Self {
             contact_id: contact_id.to_string(),
@@ -48,6 +49,7 @@ impl NicknameModalState {
     }
 
     /// Set the suggested name (shown as hint in the modal)
+    #[must_use]
     pub fn with_suggestion(mut self, suggested: Option<String>) -> Self {
         self.suggested_name = suggested;
         self
@@ -61,6 +63,7 @@ impl NicknameModalState {
         self.error = None;
     }
 
+    #[must_use]
     pub fn can_submit(&self) -> bool {
         // Allow empty nicknames as "clear nickname" so the suggested name can
         // become visible again.

@@ -35,6 +35,7 @@
 pub mod app_signal_views;
 pub mod frp;
 pub mod pipeline;
+pub mod reductions;
 pub mod scheduler;
 
 // Re-export main types for convenience
@@ -43,10 +44,13 @@ pub use app_signal_views::{
 };
 pub use frp::Dynamic;
 pub use pipeline::ReactivePipeline;
+pub use reductions::{
+    ChatReduction, GuardianDelta, GuardianReduction, HomeDelta, HomeReduction, InvitationReduction,
+    RecoveryReduction,
+};
 pub use scheduler::{
-    topological_sort_dag, AnyView, ChatReduction, FactSource, GuardianDelta, GuardianReduction,
-    HomeDelta, HomeReduction, InvitationReduction, ReactiveScheduler, ReactiveView,
-    RecoveryReduction, SchedulerConfig, ViewAdapter, ViewNode, ViewReduction, ViewUpdate,
+    topological_sort_dag, AnyView, FactSource, ReactiveScheduler, ReactiveView, SchedulerConfig,
+    ViewAdapter, ViewNode, ViewReduction, ViewUpdate,
 };
 
 // Re-export domain delta types from their source crates

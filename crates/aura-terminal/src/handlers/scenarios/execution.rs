@@ -2,15 +2,13 @@
 //!
 //! Handles parsing TOML scenario files and executing actions.
 
+use crate::error::{TerminalError, TerminalResult};
+use aura_core::effects::{ConsoleEffects, PhysicalTimeEffects};
+use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
-
-use crate::error::{TerminalError, TerminalResult};
-use aura_core::effects::ConsoleEffects;
-use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 
 use super::logging::{log_line, persist_log, ScenarioLog};
 use super::simulation::simulate_cli_recovery_demo;
@@ -53,10 +51,19 @@ pub async fn execute_scenarios(
 
     for scenario in scenario_files {
         println!("Executing: {}", scenario.display());
-        let start = Instant::now();
+        let start = ctx
+            .effects()
+            .physical_time()
+            .await
+            .map_err(|e| TerminalError::Operation(format!("Failed to read time: {e}")))?;
         let run_result = run_scenario_file(ctx, &scenario).await;
 
-        let duration_ms = Instant::now().duration_since(start).as_millis() as u64;
+        let end = ctx
+            .effects()
+            .physical_time()
+            .await
+            .map_err(|e| TerminalError::Operation(format!("Failed to read time: {e}")))?;
+        let duration_ms = end.ts_ms.saturating_sub(start.ts_ms);
         let (success, error, log_path) = match run_result {
             Ok(log_path) => (true, None, log_path),
             Err(e) => (false, Some(e.to_string()), None),

@@ -11,6 +11,7 @@ pub struct InitArgs {
     pub output: PathBuf,
 }
 
+#[must_use]
 pub fn init_parser() -> impl Parser<InitArgs> {
     let num_devices = long("num-devices")
         .short('n')

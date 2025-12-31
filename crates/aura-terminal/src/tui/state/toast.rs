@@ -69,6 +69,7 @@ impl QueuedToast {
     }
 
     /// Create with custom duration (in ticks, 100ms per tick)
+    #[must_use]
     pub fn with_duration(mut self, ticks: u32) -> Self {
         self.ticks_remaining = ticks;
         self
@@ -95,6 +96,7 @@ impl QueuedToast {
     }
 
     /// Check if this toast should auto-dismiss
+    #[must_use]
     pub fn auto_dismisses(&self) -> bool {
         self.level != ToastLevel::Error && self.ticks_remaining != NO_AUTO_DISMISS
     }
@@ -102,6 +104,7 @@ impl QueuedToast {
 
 impl ToastQueue {
     /// Create a new empty toast queue
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -128,11 +131,13 @@ impl ToastQueue {
     }
 
     /// Get a reference to the currently active toast (for rendering).
+    #[must_use]
     pub fn current(&self) -> Option<&QueuedToast> {
         self.active.as_ref()
     }
 
     /// Check if any toast is currently active.
+    #[must_use]
     pub fn is_active(&self) -> bool {
         self.active.is_some()
     }
@@ -164,6 +169,7 @@ impl ToastQueue {
     }
 
     /// Get the number of pending toasts (not including active).
+    #[must_use]
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
@@ -196,6 +202,7 @@ pub enum ToastLevel {
 impl ToastLevel {
     /// Get the dismissal priority (higher = dismiss first on Escape)
     /// Priority: Error (3) > Warning (2) > Info/Success (1)
+    #[must_use]
     pub fn priority(self) -> u8 {
         match self {
             Self::Error => 3,

@@ -44,10 +44,13 @@ pub mod signals {
 }
 
 pub mod workflows {
-    pub use crate::workflows::budget;
+    pub use crate::workflows::account;
     pub use crate::workflows::admin;
+    pub use crate::workflows::authority;
+    pub use crate::workflows::budget;
     pub use crate::workflows::amp;
     pub use crate::workflows::ceremonies;
+    pub use crate::workflows::config;
     pub use crate::workflows::contacts;
     pub use crate::workflows::context;
     pub use crate::workflows::invitation;
@@ -85,15 +88,30 @@ pub mod types {
         default_channel_threshold, default_guardian_threshold, normalize_channel_threshold,
         normalize_guardian_threshold, normalize_recovery_threshold,
     };
+    pub use crate::workflows::config::{
+        default_port, generate_device_config, DeviceConfigDefaults, DEFAULT_BASE_PORT,
+        DEFAULT_LOG_LEVEL, DEFAULT_MAX_RETRIES, DEFAULT_NETWORK_TIMEOUT_SECS,
+    };
+    pub use crate::workflows::system::{
+        parse_semantic_version, parse_upgrade_kind, validate_version_string, UpgradeKindValue,
+    };
+    pub use crate::workflows::invitation::{
+        format_invitation_type, format_invitation_type_detailed, parse_invitation_role,
+        InvitationRoleValue,
+    };
+    pub use crate::workflows::authority::{
+        authority_key_prefix, authority_storage_key, deserialize_authority, serialize_authority,
+        AuthorityRecord,
+    };
     pub use crate::views::{
-        AdjacencyType, BanRecord, Channel, ChannelType, ChatState, Contact, ContactsState,
-        Guardian, GuardianStatus, HomesState, HomeState, Invitation, InvitationDirection,
-        InvitationStatus, InvitationsState, KickRecord, Message, MuteRecord,
-        MySuggestion,
-        NeighborHome, NeighborhoodState, RecoveryApproval, RecoveryProcess, RecoveryProcessStatus,
+        AccountBackup, AccountConfig, AdjacencyType, BACKUP_PREFIX, BACKUP_VERSION, BanRecord,
+        Channel, ChannelType, ChatState, Contact, ContactsState, Guardian, GuardianBinding,
+        GuardianStatus, HomesState, HomeState, Invitation, InvitationDirection, InvitationStatus,
+        InvitationsState, KickRecord, Message, MuteRecord, MySuggestion, NeighborHome,
+        NeighborhoodState, RecoveryApproval, RecoveryProcess, RecoveryProcessStatus,
         RecoveryState, Resident, ResidentRole, SuggestionPolicy, TraversalPosition,
     };
-    pub use crate::views::{chat, contacts, home, invitations, neighborhood, recovery};
+    pub use crate::views::{account, chat, contacts, home, invitations, neighborhood, recovery};
     #[cfg(feature = "signals")]
     pub use crate::reactive_state::{ReactiveState, ReactiveVec};
     pub use crate::effects::reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};

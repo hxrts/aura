@@ -17,6 +17,7 @@ pub struct KeyHint {
 
 impl KeyHint {
     /// Create a new key hint
+    #[must_use]
     pub const fn new(key: &'static str, action: &'static str) -> Self {
         Self { key, action }
     }
@@ -35,6 +36,7 @@ pub struct ScreenContext {
 
 impl ScreenContext {
     /// Create a new screen context with standard dimensions
+    #[must_use]
     pub fn new() -> Self {
         Self {
             is_focused: true,
@@ -44,6 +46,7 @@ impl ScreenContext {
     }
 
     /// Create context for unfocused screen
+    #[must_use]
     pub fn unfocused() -> Self {
         Self {
             is_focused: false,

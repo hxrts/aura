@@ -116,6 +116,7 @@ pub fn use_nav_status_signals(
 pub struct SharedContacts(Arc<RwLock<Vec<Contact>>>);
 
 impl SharedContacts {
+    #[must_use]
     pub fn new() -> Self {
         Self(Arc::new(RwLock::new(Vec::new())))
     }
@@ -177,6 +178,7 @@ pub fn use_contacts_subscription(
 pub struct SharedDevices(Arc<RwLock<Vec<Device>>>);
 
 impl SharedDevices {
+    #[must_use]
     pub fn new() -> Self {
         Self(Arc::new(RwLock::new(Vec::new())))
     }

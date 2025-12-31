@@ -10,10 +10,10 @@ use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::ids;
 // Import sync types from aura-agent (runtime layer)
+use aura_agent::handlers::HealthStatus;
 use aura_agent::{SyncManagerConfig, SyncServiceManager};
 use aura_core::identifiers::DeviceId;
 use aura_effects::time::PhysicalTimeHandler;
-use aura_agent::handlers::HealthStatus;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
@@ -62,12 +62,11 @@ async fn handle_daemon_mode(
     output.kv("Interval", format!("{interval_secs}s"));
     output.kv("Max concurrent", max_concurrent.to_string());
 
-    // Parse initial peers
+    // Parse initial peers using portable helper
     let initial_peers: Vec<DeviceId> = if let Some(peers_str) = peers {
-        peers_str
-            .split(',')
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| ids::device_id(s.trim()))
+        aura_app::ui::workflows::sync::parse_peer_list(peers_str)
+            .into_iter()
+            .map(|s| ids::device_id(&s))
             .collect()
     } else {
         Vec::new()

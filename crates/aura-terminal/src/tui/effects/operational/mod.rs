@@ -48,12 +48,11 @@ mod system;
 mod time;
 pub mod types;
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::ui::signals::{ConnectionStatus, SyncStatus, ERROR_SIGNAL};
 use aura_app::ui::prelude::*;
+use aura_app::ui::signals::{ConnectionStatus, SyncStatus, ERROR_SIGNAL};
 use aura_core::effects::reactive::ReactiveEffects;
 
 pub use types::{OpError, OpResponse, OpResult};
@@ -65,18 +64,17 @@ use crate::error::TerminalError;
 ///
 /// This handler processes commands that
 /// are purely runtime operations (sync, peer management, etc.).
+///
+/// Note: Peer state is managed through AppCore signals (via the network workflow),
+/// not through local state in this handler.
 pub struct OperationalHandler {
     app_core: Arc<RwLock<AppCore>>,
-    peers: Arc<RwLock<HashSet<String>>>,
 }
 
 impl OperationalHandler {
     /// Create a new operational handler
     pub fn new(app_core: Arc<RwLock<AppCore>>) -> Self {
-        Self {
-            app_core,
-            peers: Arc::new(RwLock::new(HashSet::new())),
-        }
+        Self { app_core }
     }
 
     /// Execute an operational command
@@ -97,7 +95,7 @@ impl OperationalHandler {
         }
 
         // Network/Peer commands
-        if let Some(result) = network::handle_network(command, &self.app_core, &self.peers).await {
+        if let Some(result) = network::handle_network(command, &self.app_core).await {
             return Some(result);
         }
 
@@ -168,7 +166,8 @@ impl OperationalHandler {
 
     /// Update connection status signal
     pub async fn set_connection_status(&self, status: ConnectionStatus) {
-        let _ = aura_app::ui::workflows::network::set_connection_status(&self.app_core, status).await;
+        let _ =
+            aura_app::ui::workflows::network::set_connection_status(&self.app_core, status).await;
     }
 
     /// Update sync status signal
@@ -228,7 +227,6 @@ impl OperationalHandler {
     fn clone(&self) -> Self {
         Self {
             app_core: self.app_core.clone(),
-            peers: self.peers.clone(),
         }
     }
 }

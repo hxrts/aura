@@ -23,6 +23,7 @@ pub struct TuiArgs {
     pub demo: bool,
 }
 
+#[must_use]
 pub fn tui_parser() -> impl Parser<TuiArgs> {
     let data_dir = short('d')
         .long("data-dir")

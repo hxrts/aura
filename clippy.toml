@@ -82,20 +82,35 @@ disallowed-types = [
 ]
 
 # Performance and correctness
-too-many-arguments-threshold = 8
 type-complexity-threshold = 250
 
 # Security-focused lints
 allow-unwrap-in-tests = true
 
 # === Rust Style Guide Thresholds ===
-
-# Safety §1: "functions small enough to fit on one screen"
-cognitive-complexity-threshold = 25
-
-# APIs: misuse hard - "avoid bool parameters (use enums)"
-max-fn-params-bools = 2
-max-struct-bools = 2
+#
+# LINTS DISABLED BY DEFAULT (too noisy for active development):
+#   - must_use_candidate (2000+ warnings)
+#   - trivially_copy_pass_by_ref, needless_pass_by_value
+#   - unused_async (trait impls often async for signature compatibility)
+#   - manual_let_else, cognitive_complexity
+#   - fn_params_excessive_bools, struct_excessive_bools, too_many_arguments
+#
+# To run a FULL STYLE AUDIT with all lints enabled:
+#   cargo clippy -- -W clippy::must_use_candidate -W clippy::trivially_copy_pass_by_ref \
+#                   -W clippy::needless_pass_by_value -W clippy::unused_async \
+#                   -W clippy::manual_let_else -W clippy::cognitive_complexity \
+#                   -W clippy::fn_params_excessive_bools -W clippy::struct_excessive_bools \
+#                   -W clippy::too_many_arguments
+#
+# Rationale: These are aspirational style guidelines. Enable them periodically
+# for code quality audits, not during active development.
+#
+# Thresholds (applied when lints are enabled):
+#   cognitive-complexity-threshold = 25
+#   max-fn-params-bools = 2
+#   max-struct-bools = 2
+#   too-many-arguments-threshold = 8
 
 # Memory §7: large types should be passed by reference
 trivial-copy-size-limit = 32

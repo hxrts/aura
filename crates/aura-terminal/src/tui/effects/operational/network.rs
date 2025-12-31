@@ -1,8 +1,10 @@
 //! Network/Peer command handlers
 //!
 //! Handlers for AddPeer, RemovePeer, ListPeers, DiscoverPeers, ListLanPeers, InviteLanPeer.
+//!
+//! Peer state is managed through AppCore signals via the network workflow.
+//! This handler is a thin view layer that delegates to aura_app::workflows::network.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_lock::RwLock;
@@ -12,44 +14,40 @@ use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 /// Handle network/peer commands
+///
+/// Delegates to aura_app::workflows::network for all peer state management.
+/// No local state is maintained - all peer tracking uses AppCore signals.
 pub async fn handle_network(
     command: &EffectCommand,
     app_core: &Arc<RwLock<AppCore>>,
-    peers: &Arc<RwLock<HashSet<String>>>,
 ) -> Option<OpResult> {
     match command {
         EffectCommand::AddPeer { peer_id } => {
-            let count = {
-                let mut peers = peers.write().await;
-                peers.insert(peer_id.clone());
-                peers.len()
-            };
-
-            if let Err(e) =
-                aura_app::ui::workflows::network::update_connection_status(app_core, count).await
-            {
-                tracing::debug!("Failed to update connection status: {}", e);
+            // Delegate to workflow - it manages peer state in AppCore signals
+            match aura_app::ui::workflows::network::add_peer(app_core, peer_id.clone()).await {
+                Ok(count) => {
+                    tracing::info!("Added peer: {} (total: {})", peer_id, count);
+                    Some(Ok(OpResponse::Ok))
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to add peer: {}", e);
+                    Some(Err(OpError::Failed(e.to_string())))
+                }
             }
-
-            tracing::info!("Added peer: {}", peer_id);
-            Some(Ok(OpResponse::Ok))
         }
 
         EffectCommand::RemovePeer { peer_id } => {
-            let count = {
-                let mut peers = peers.write().await;
-                peers.remove(peer_id);
-                peers.len()
-            };
-
-            if let Err(e) =
-                aura_app::ui::workflows::network::update_connection_status(app_core, count).await
-            {
-                tracing::debug!("Failed to update connection status: {}", e);
+            // Delegate to workflow - it manages peer state in AppCore signals
+            match aura_app::ui::workflows::network::remove_peer(app_core, peer_id).await {
+                Ok(count) => {
+                    tracing::info!("Removed peer: {} (remaining: {})", peer_id, count);
+                    Some(Ok(OpResponse::Ok))
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to remove peer: {}", e);
+                    Some(Err(OpError::Failed(e.to_string())))
+                }
             }
-
-            tracing::info!("Removed peer: {}", peer_id);
-            Some(Ok(OpResponse::Ok))
         }
 
         EffectCommand::ListPeers => {

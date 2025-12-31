@@ -59,20 +59,24 @@ pub struct RegionMarker<R: LayoutRegion> {
 }
 
 impl<R: LayoutRegion> RegionMarker<R> {
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             _marker: PhantomData,
         }
     }
 
+    #[must_use]
     pub const fn height(&self) -> u16 {
         R::HEIGHT
     }
 
+    #[must_use]
     pub const fn width(&self) -> u16 {
         R::WIDTH
     }
 
+    #[must_use]
     pub const fn name(&self) -> &'static str {
         R::NAME
     }

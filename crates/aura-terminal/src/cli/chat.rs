@@ -416,6 +416,7 @@ fn export_command() -> impl Parser<ChatCommands> {
     .help("Export chat history to file")
 }
 
+#[must_use]
 pub fn chat_parser() -> impl Parser<ChatCommands> {
     construct!([
         create_command(),

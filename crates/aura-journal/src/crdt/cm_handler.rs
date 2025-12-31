@@ -110,6 +110,8 @@ where
             if self.is_causal_ready(&self.buffer[i].ctx)
                 && !self.state.seen(&self.buffer[i].op.id())
             {
+                // SAFETY: i < self.buffer.len() was just verified, so remove cannot return None
+                #[allow(clippy::unwrap_used)]
                 ready_ops.push(self.buffer.remove(i).unwrap());
             } else {
                 i += 1;

@@ -712,6 +712,64 @@ impl RendezvousManager {
     }
 }
 
+// =============================================================================
+// RuntimeService Implementation
+// =============================================================================
+
+use super::traits::{RuntimeService, ServiceError, ServiceHealth};
+use super::RuntimeTaskRegistry;
+use async_trait::async_trait;
+
+#[async_trait]
+impl RuntimeService for RendezvousManager {
+    fn name(&self) -> &'static str {
+        "rendezvous_manager"
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["transport"]
+    }
+
+    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
+        self.start()
+            .await
+            .map_err(|e| ServiceError::startup_failed("rendezvous_manager", e))
+    }
+
+    async fn stop(&self) -> Result<(), ServiceError> {
+        self.stop()
+            .await
+            .map_err(|e| ServiceError::shutdown_failed("rendezvous_manager", e))
+    }
+
+    fn health(&self) -> ServiceHealth {
+        // Synchronous approximation - for full health use async method
+        ServiceHealth::Healthy
+    }
+}
+
+impl RendezvousManager {
+    /// Get the service health status asynchronously
+    pub async fn health_async(&self) -> ServiceHealth {
+        let state = self.state().await;
+        match state {
+            RendezvousManagerState::Stopped => ServiceHealth::Stopped,
+            RendezvousManagerState::Starting => ServiceHealth::Starting,
+            RendezvousManagerState::Stopping => ServiceHealth::Stopping,
+            RendezvousManagerState::Running => {
+                // Check if underlying service is available
+                if self.service.read().await.is_some() {
+                    ServiceHealth::Healthy
+                } else {
+                    ServiceHealth::Unhealthy {
+                        reason: "underlying service not available".to_string(),
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -59,28 +59,35 @@ use crate::workflows::budget::HomeFlowBudget;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Signal for chat state (channels, messages, selected channel)
+pub const CHAT_SIGNAL_NAME: &str = "CHAT_SIGNAL";
 pub static CHAT_SIGNAL: LazyLock<Signal<ChatState>> = LazyLock::new(|| Signal::new("app:chat"));
 
 /// Signal for recovery state (guardians, recovery status, threshold)
+pub const RECOVERY_SIGNAL_NAME: &str = "RECOVERY_SIGNAL";
 pub static RECOVERY_SIGNAL: LazyLock<Signal<RecoveryState>> =
     LazyLock::new(|| Signal::new("app:recovery"));
 
 /// Signal for invitations state (sent/received invitations)
+pub const INVITATIONS_SIGNAL_NAME: &str = "INVITATIONS_SIGNAL";
 pub static INVITATIONS_SIGNAL: LazyLock<Signal<InvitationsState>> =
     LazyLock::new(|| Signal::new("app:invitations"));
 
 /// Signal for contacts state (contacts, nicknames, display names)
+pub const CONTACTS_SIGNAL_NAME: &str = "CONTACTS_SIGNAL";
 pub static CONTACTS_SIGNAL: LazyLock<Signal<ContactsState>> =
     LazyLock::new(|| Signal::new("app:contacts"));
 
 /// Signal for multi-home state (all homes the user has created/joined)
+pub const HOMES_SIGNAL_NAME: &str = "HOMES_SIGNAL";
 pub static HOMES_SIGNAL: LazyLock<Signal<HomesState>> = LazyLock::new(|| Signal::new("app:homes"));
 
 /// Signal for neighborhood state (nearby peers, relay info)
+pub const NEIGHBORHOOD_SIGNAL_NAME: &str = "NEIGHBORHOOD_SIGNAL";
 pub static NEIGHBORHOOD_SIGNAL: LazyLock<Signal<NeighborhoodState>> =
     LazyLock::new(|| Signal::new("app:neighborhood"));
 
 /// Signal for home storage budget (resident/neighborhood/pinned allocations)
+pub const BUDGET_SIGNAL_NAME: &str = "BUDGET_SIGNAL";
 pub static BUDGET_SIGNAL: LazyLock<Signal<HomeFlowBudget>> =
     LazyLock::new(|| Signal::new("app:budget"));
 
@@ -131,34 +138,42 @@ pub fn create_neighborhood_bound() -> BoundSignal<NeighborhoodQuery> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Signal for connection status (online/offline)
+pub const CONNECTION_STATUS_SIGNAL_NAME: &str = "CONNECTION_STATUS_SIGNAL";
 pub static CONNECTION_STATUS_SIGNAL: LazyLock<Signal<ConnectionStatus>> =
     LazyLock::new(|| Signal::new("app:connection_status"));
 
 /// Signal for sync status (syncing/synced)
+pub const SYNC_STATUS_SIGNAL_NAME: &str = "SYNC_STATUS_SIGNAL";
 pub static SYNC_STATUS_SIGNAL: LazyLock<Signal<SyncStatus>> =
     LazyLock::new(|| Signal::new("app:sync_status"));
 
 /// Signal for unified network status (combines transport and sync state)
+pub const NETWORK_STATUS_SIGNAL_NAME: &str = "NETWORK_STATUS_SIGNAL";
 pub static NETWORK_STATUS_SIGNAL: LazyLock<Signal<NetworkStatus>> =
     LazyLock::new(|| Signal::new("app:network_status"));
 
 /// Signal for transport-level peer count (active channels/connections)
+pub const TRANSPORT_PEERS_SIGNAL_NAME: &str = "TRANSPORT_PEERS_SIGNAL";
 pub static TRANSPORT_PEERS_SIGNAL: LazyLock<Signal<usize>> =
     LazyLock::new(|| Signal::new("app:transport_peers"));
 
 /// Signal for error notifications
+pub const ERROR_SIGNAL_NAME: &str = "ERROR_SIGNAL";
 pub static ERROR_SIGNAL: LazyLock<Signal<Option<AppError>>> =
     LazyLock::new(|| Signal::new("app:error"));
 
 /// Signal for unread message count (derived from chat state)
+pub const UNREAD_COUNT_SIGNAL_NAME: &str = "UNREAD_COUNT_SIGNAL";
 pub static UNREAD_COUNT_SIGNAL: LazyLock<Signal<usize>> =
     LazyLock::new(|| Signal::new("app:unread_count"));
 
 /// Signal for discovered peers (rendezvous + LAN)
+pub const DISCOVERED_PEERS_SIGNAL_NAME: &str = "DISCOVERED_PEERS_SIGNAL";
 pub static DISCOVERED_PEERS_SIGNAL: LazyLock<Signal<DiscoveredPeersState>> =
     LazyLock::new(|| Signal::new("app:discovered_peers"));
 
 /// Signal for account settings and profile
+pub const SETTINGS_SIGNAL_NAME: &str = "SETTINGS_SIGNAL";
 pub static SETTINGS_SIGNAL: LazyLock<Signal<SettingsState>> =
     LazyLock::new(|| Signal::new("app:settings"));
 

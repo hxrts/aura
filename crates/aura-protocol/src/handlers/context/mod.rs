@@ -8,15 +8,15 @@
 //! than mutating in place.
 
 mod agent;
+mod aura_context;
 mod choreographic;
-mod context;
 mod middleware;
 mod simulation;
 
 // Re-export all public types
 pub use agent::{AgentContext, AuthenticationState, PlatformInfo, SessionMetadata};
+pub use aura_context::AuraContext;
 pub use choreographic::ChoreographicContext;
-pub use context::AuraContext;
 pub use middleware::{MetricsContext, MiddlewareContext, RetryContext, TracingContext};
 pub use simulation::{FaultInjectionSettings, PropertyCheckingConfig, SimulationContext};
 

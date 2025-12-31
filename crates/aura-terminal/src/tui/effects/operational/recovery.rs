@@ -15,7 +15,9 @@ use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::ui::workflows::recovery::{approve_recovery, get_recovery_status, start_recovery_from_state};
+pub use aura_app::ui::workflows::recovery::{
+    approve_recovery, get_recovery_status, start_recovery_from_state,
+};
 
 /// Handle recovery commands
 pub async fn handle_recovery(
@@ -23,16 +25,14 @@ pub async fn handle_recovery(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Option<OpResult> {
     match command {
-        EffectCommand::StartRecovery => {
-            match start_recovery_from_state(app_core).await {
-                Ok(ceremony_id) => Some(Ok(OpResponse::Data(format!(
-                    "Recovery started: {ceremony_id}"
-                )))),
-                Err(e) => Some(Err(OpError::Failed(format!(
-                    "Failed to start recovery: {e}"
-                )))),
-            }
-        }
+        EffectCommand::StartRecovery => match start_recovery_from_state(app_core).await {
+            Ok(ceremony_id) => Some(Ok(OpResponse::Data(format!(
+                "Recovery started: {ceremony_id}"
+            )))),
+            Err(e) => Some(Err(OpError::Failed(format!(
+                "Failed to start recovery: {e}"
+            )))),
+        },
 
         EffectCommand::SubmitGuardianApproval { guardian_id } => {
             // Approve a pending recovery request.

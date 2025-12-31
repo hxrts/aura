@@ -38,6 +38,7 @@ impl CreateInvitationModalState {
     const TTL_PRESETS: [u64; 4] = [1, 24, 168, 720]; // 1h, 1d, 1w, 30d
 
     /// Create new modal state with defaults
+    #[must_use]
     pub fn new() -> Self {
         Self {
             receiver_id: String::new(),
@@ -126,6 +127,7 @@ impl CreateInvitationModalState {
         self.ttl_hours = Self::TTL_PRESETS[prev_idx];
     }
 
+    #[must_use]
     pub fn ttl_secs(&self) -> Option<u64> {
         if self.ttl_hours == 0 {
             None
@@ -150,11 +152,13 @@ pub struct ImportInvitationModalState {
 
 impl ImportInvitationModalState {
     /// Create new modal state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Create with pre-filled code
+    #[must_use]
     pub fn with_code(code: &str) -> Self {
         Self {
             code: code.to_string(),
@@ -170,6 +174,7 @@ impl ImportInvitationModalState {
         self.importing = false;
     }
 
+    #[must_use]
     pub fn can_submit(&self) -> bool {
         !self.code.trim().is_empty() && !self.importing
     }
@@ -194,6 +199,7 @@ pub struct InvitationCodeModalState {
 
 impl InvitationCodeModalState {
     /// Create initialized state for showing an invitation code
+    #[must_use]
     pub fn for_invitation(invitation_id: &str) -> Self {
         Self {
             invitation_id: invitation_id.to_string(),
@@ -204,6 +210,7 @@ impl InvitationCodeModalState {
         }
     }
 
+    #[must_use]
     pub fn for_code(code: String) -> Self {
         Self {
             invitation_id: String::new(),

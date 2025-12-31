@@ -191,3 +191,35 @@ impl FlowBudgetManager {
         removed
     }
 }
+
+// =============================================================================
+// RuntimeService Implementation
+// =============================================================================
+
+use super::traits::{RuntimeService, ServiceError, ServiceHealth};
+use super::RuntimeTaskRegistry;
+use async_trait::async_trait;
+use std::sync::Arc;
+
+#[async_trait]
+impl RuntimeService for FlowBudgetManager {
+    fn name(&self) -> &'static str {
+        "flow_budget_manager"
+    }
+
+    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
+        // FlowBudgetManager is stateless and always ready
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<(), ServiceError> {
+        // Clear all budgets on shutdown
+        let mut budgets = self.budgets.write().await;
+        budgets.clear();
+        Ok(())
+    }
+
+    fn health(&self) -> ServiceHealth {
+        ServiceHealth::Healthy
+    }
+}

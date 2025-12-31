@@ -5,11 +5,12 @@
 
 use crate::AppCore;
 use async_lock::RwLock;
-use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
 use std::sync::Arc;
+use crate::workflows::context::default_relational_context;
+use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::require_runtime;
 
 /// Update (or clear) a contact's nickname.
@@ -24,9 +25,7 @@ pub async fn update_contact_nickname(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    let target = contact_id
-        .parse::<AuthorityId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {contact_id}")))?;
+    let target = parse_authority_id(contact_id)?;
 
     let trimmed = nickname.trim();
     if trimmed.len() > 100 {
@@ -38,7 +37,7 @@ pub async fn update_contact_nickname(
     // Contacts are currently modeled as generic relational facts; use a stable
     // default context so they don't depend on "current home/chat" context.
     let fact = ContactFact::renamed_with_timestamp_ms(
-        ContextId::default(),
+        default_relational_context(),
         owner_id,
         target,
         trimmed.to_string(),
@@ -62,16 +61,14 @@ pub async fn remove_contact(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    let target = contact_id
-        .parse::<AuthorityId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {contact_id}")))?;
+    let target = parse_authority_id(contact_id)?;
 
     let owner_id = runtime.authority_id();
 
     // Contacts are currently modeled as generic relational facts; use a stable
     // default context so they don't depend on "current home/chat" context.
     let fact = ContactFact::removed_with_timestamp_ms(
-        ContextId::default(),
+        default_relational_context(),
         owner_id,
         target,
         timestamp_ms,

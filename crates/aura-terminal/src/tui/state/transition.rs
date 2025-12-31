@@ -24,6 +24,7 @@ use super::TuiState;
 /// # Returns
 ///
 /// A tuple of (new state, commands to execute)
+#[must_use]
 pub fn transition(state: &TuiState, event: TerminalEvent) -> (TuiState, Vec<TuiCommand>) {
     let mut new_state = state.clone();
     let mut commands = Vec::new();

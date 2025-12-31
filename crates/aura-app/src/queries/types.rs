@@ -1001,6 +1001,7 @@ impl Query for RecoveryQuery {
             guardian_count,
             active_recovery: None,
             pending_requests: Vec::new(),
+            guardian_bindings: Vec::new(),
         })
     }
 }
@@ -1232,6 +1233,7 @@ impl Query for NeighborhoodQuery {
             neighbors,
             max_depth: 3,
             loading: false,
+            connected_peers: std::collections::HashSet::new(),
         })
     }
 }

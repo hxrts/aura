@@ -2,17 +2,16 @@
 //!
 //! Simulates the full CLI recovery demo flow using the simulator.
 
+use crate::error::{TerminalError, TerminalResult};
+use aura_agent::handlers::{
+    GuardianProfile, GuardianSet, GuardianSetupCoordinator, RecoveryContext, RecoveryOperationType,
+    RecoveryRequest,
+};
+use aura_agent::AgentConfig;
+use aura_core::effects::PhysicalTimeEffects;
+use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
-
-use crate::error::{TerminalError, TerminalResult};
-use aura_agent::AgentConfig;
-use aura_agent::handlers::{
-    GuardianProfile, GuardianSet, GuardianSetupCoordinator, RecoveryContext,
-    RecoveryOperationType, RecoveryRequest,
-};
-use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 
 use crate::handlers::HandlerContext;
 
@@ -34,11 +33,15 @@ pub struct CliRecoverySimResult {
 /// Simulate the CLI recovery demo flow
 pub async fn simulate_cli_recovery_demo(
     seed: u64,
-    _ctx: &HandlerContext<'_>,
+    ctx: &HandlerContext<'_>,
 ) -> TerminalResult<CliRecoverySimResult> {
     let handler = SimulationScenarioHandler::new(seed);
     let mut steps = Vec::new();
-    let start = Instant::now();
+    let start = ctx
+        .effects()
+        .physical_time()
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to read time: {e}")))?;
 
     // Run guardian setup choreography via recovery coordinator using simulation effects
     run_guardian_setup_choreography(&mut steps).await?;
@@ -202,9 +205,16 @@ pub async fn simulate_cli_recovery_demo(
     }
     .to_string();
 
+    let end = ctx
+        .effects()
+        .physical_time()
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Failed to read time: {e}")))?;
+    let duration_ms = end.ts_ms.saturating_sub(start.ts_ms);
+
     Ok(CliRecoverySimResult {
         outcome,
-        duration_ms: start.elapsed().as_millis() as u64,
+        duration_ms,
         steps,
         validation_results,
     })

@@ -99,10 +99,7 @@ impl From<CrdtCoordinatorError> for AuraError {
 /// Merge source vector clock into target, taking the maximum for each actor.
 pub fn merge_vector_clocks(target: &mut VectorClock, other: &VectorClock) {
     for (actor, time) in other.iter() {
-        let current = match target.get(actor).copied() {
-            Some(value) => value,
-            None => 0,
-        };
+        let current = target.get(actor).copied().unwrap_or_default();
         if *time > current {
             target.insert(*actor, *time);
         }
@@ -111,18 +108,12 @@ pub fn merge_vector_clocks(target: &mut VectorClock, other: &VectorClock) {
 
 /// Get the maximum counter value from a vector clock (Lamport time).
 pub fn max_counter(clock: &VectorClock) -> u64 {
-    match clock.iter().map(|(_, counter)| *counter).max() {
-        Some(value) => value,
-        None => 0,
-    }
+    clock.iter().map(|(_, counter)| *counter).max().unwrap_or_default()
 }
 
 /// Increment the counter for a specific actor in the vector clock.
 pub fn increment_actor(clock: &mut VectorClock, actor: DeviceId) {
-    let current = match clock.get(&actor).copied() {
-        Some(value) => value,
-        None => 0,
-    };
+    let current = clock.get(&actor).copied().unwrap_or_default();
     clock.insert(actor, current.saturating_add(1));
 }
 

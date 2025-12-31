@@ -43,6 +43,7 @@ impl ModalHeaderProps {
         }
     }
 
+    #[must_use]
     pub fn with_step(mut self, current: usize, total: usize) -> Self {
         self.step = Some((current, total));
         self
@@ -60,6 +61,7 @@ impl ModalHeaderProps {
 /// ```ignore
 /// #(modal_header(&ModalHeaderProps::new("Create New Chat").with_step(1, 3)))
 /// ```
+#[must_use]
 pub fn modal_header(props: &ModalHeaderProps) -> impl Into<AnyElement<'static>> {
     let title = props.title.clone();
     let subtitle = props.subtitle.clone();
@@ -118,6 +120,7 @@ pub struct ModalFooterProps {
 }
 
 impl ModalFooterProps {
+    #[must_use]
     pub fn new(hints: Vec<KeyHint>) -> Self {
         Self { hints }
     }
@@ -133,6 +136,7 @@ impl ModalFooterProps {
 ///     KeyHint::new("Enter", "Submit"),
 /// ])))
 /// ```
+#[must_use]
 pub fn modal_footer(props: &ModalFooterProps) -> impl Into<AnyElement<'static>> {
     let hints = props.hints.clone();
 
@@ -169,6 +173,7 @@ pub fn modal_footer(props: &ModalFooterProps) -> impl Into<AnyElement<'static>> 
 /// ```ignore
 /// #(key_hint_group("Enter", "Submit"))
 /// ```
+#[must_use]
 pub fn key_hint_group(key: &str, action: &str) -> impl Into<AnyElement<'static>> {
     let key = key.to_string();
     let action = action.to_string();
@@ -219,16 +224,19 @@ impl LabeledInputProps {
         self
     }
 
+    #[must_use]
     pub fn with_focused(mut self, focused: bool) -> Self {
         self.focused = focused;
         self
     }
 
+    #[must_use]
     pub fn with_error(mut self, error: Option<String>) -> Self {
         self.error = error;
         self
     }
 
+    #[must_use]
     pub fn with_required(mut self, required: bool) -> Self {
         self.required = required;
         self
@@ -247,6 +255,7 @@ impl LabeledInputProps {
 ///     error: None,
 /// }))
 /// ```
+#[must_use]
 pub fn labeled_input(props: &LabeledInputProps) -> impl Into<AnyElement<'static>> {
     let label = if props.required {
         format!("{}*", props.label)
@@ -335,6 +344,7 @@ pub enum ModalStatus {
 /// ```ignore
 /// #(status_message(&ModalStatus::Loading("Creating...".to_string())))
 /// ```
+#[must_use]
 pub fn status_message(status: &ModalStatus) -> impl Into<AnyElement<'static>> {
     match status.clone() {
         ModalStatus::Idle => element! { View {} },
@@ -392,6 +402,7 @@ pub struct MultiSelectListProps {
 }
 
 impl MultiSelectListProps {
+    #[must_use]
     pub fn new(items: Vec<SelectableItem>) -> Self {
         Self {
             items,
@@ -401,16 +412,19 @@ impl MultiSelectListProps {
         }
     }
 
+    #[must_use]
     pub fn with_selected(mut self, indices: Vec<usize>) -> Self {
         self.selected_indices = indices;
         self
     }
 
+    #[must_use]
     pub fn with_focused(mut self, index: usize) -> Self {
         self.focused_index = index;
         self
     }
 
+    #[must_use]
     pub fn with_max_height(mut self, height: u32) -> Self {
         self.max_height = Some(height);
         self
@@ -428,6 +442,7 @@ impl MultiSelectListProps {
 ///     max_height: Some(10),
 /// }))
 /// ```
+#[must_use]
 pub fn multi_select_list(props: &MultiSelectListProps) -> impl Into<AnyElement<'static>> {
     let items = props.items.clone();
     let selected = props.selected_indices.clone();

@@ -124,6 +124,7 @@ fn remove_peer_command() -> impl Parser<SyncAction> {
         .help("Remove a peer from the sync list")
 }
 
+#[must_use]
 pub fn sync_action_parser() -> impl Parser<SyncAction> {
     construct!([
         daemon_command(),

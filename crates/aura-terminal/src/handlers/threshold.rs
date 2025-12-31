@@ -84,7 +84,7 @@ fn parse_config_data(data: &[u8]) -> Result<ThresholdConfig, TerminalError> {
     Ok(config)
 }
 
-/// Validate threshold parameters (pure function)
+/// Validate threshold parameters using portable workflow
 fn validate_threshold_params(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
@@ -97,35 +97,26 @@ fn validate_threshold_params(
 
     let num_devices = configs.len() as u32;
 
-    if threshold > num_devices {
-        output.eprintln(format!(
-            "Threshold ({threshold}) cannot be greater than number of devices ({num_devices})"
-        ));
-        return Err(TerminalError::Input(format!(
-            "Invalid threshold: {threshold} > {num_devices}"
-        )));
-    }
+    // Use portable validation from aura-app workflow
+    aura_app::ui::workflows::account::validate_threshold_params(threshold, num_devices).map_err(
+        |e| {
+            output.eprintln(e.to_string());
+            TerminalError::Input(e.to_string())
+        },
+    )?;
 
-    if threshold == 0 {
-        output.eprintln("Threshold must be greater than 0");
-        return Err(TerminalError::Input("Invalid threshold: 0".into()));
-    }
+    // Verify all configs have compatible threshold settings using portable workflow
+    let config_tuples: Vec<(&str, u32)> = configs
+        .iter()
+        .map(|(path, config)| (path.to_str().unwrap_or("unknown"), config.threshold))
+        .collect();
 
-    // Verify all configs have compatible threshold settings
-    for (path, config) in configs {
-        if config.threshold != configs[0].1.threshold {
-            output.eprintln(format!(
-                "Threshold mismatch in {}: expected {}, got {}",
-                path.display(),
-                configs[0].1.threshold,
-                config.threshold
-            ));
-            return Err(TerminalError::Config(format!(
-                "Threshold mismatch in {}",
-                path.display()
-            )));
-        }
-    }
+    aura_app::ui::workflows::account::validate_threshold_compatibility(&config_tuples).map_err(
+        |e| {
+            output.eprintln(e.to_string());
+            TerminalError::Config(e.to_string())
+        },
+    )?;
 
     output.println("Threshold parameters validated");
     Ok(())
@@ -392,11 +383,9 @@ pub async fn handle_dkd_test(
         })
         .collect();
 
-    if participants.is_empty() || threshold == 0 || threshold > total {
-        return Err(TerminalError::Input(format!(
-            "Invalid DKD parameters: threshold={threshold}, total={total}"
-        )));
-    }
+    // Validate parameters using portable workflow (uses workflow)
+    aura_app::ui::workflows::account::validate_threshold_params(threshold as u32, total as u32)
+        .map_err(|e| TerminalError::Input(format!("Invalid DKD parameters: {e}")))?;
 
     let config = DkdConfig {
         threshold,

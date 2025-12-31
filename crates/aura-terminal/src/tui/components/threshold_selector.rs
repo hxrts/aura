@@ -27,6 +27,7 @@ impl ThresholdSelectorProps {
     }
 }
 
+#[must_use]
 pub fn threshold_selector(props: &ThresholdSelectorProps) -> impl Into<AnyElement<'static>> {
     let k = props.k;
     let n = props.n;

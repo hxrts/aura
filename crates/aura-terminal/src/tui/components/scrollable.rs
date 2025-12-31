@@ -51,6 +51,7 @@ pub fn Scrollable(props: &ScrollableProps) -> impl Into<AnyElement<'static>> {
 }
 
 /// Helper to calculate scroll bounds
+#[must_use]
 pub fn calculate_scroll(
     current_offset: usize,
     total_items: usize,

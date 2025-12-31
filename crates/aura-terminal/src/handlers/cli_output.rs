@@ -35,6 +35,7 @@ pub struct CliOutput {
 
 impl CliOutput {
     /// Create an empty output
+    #[must_use]
     pub fn new() -> Self {
         Self { lines: Vec::new() }
     }
@@ -119,16 +120,19 @@ impl CliOutput {
     }
 
     /// Get all output lines
+    #[must_use]
     pub fn lines(&self) -> &[OutputLine] {
         &self.lines
     }
 
     /// Check if output is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.lines.is_empty()
     }
 
     /// Get all stdout lines as strings
+    #[must_use]
     pub fn stdout_lines(&self) -> Vec<&str> {
         self.lines
             .iter()
@@ -140,6 +144,7 @@ impl CliOutput {
     }
 
     /// Get all stderr lines as strings
+    #[must_use]
     pub fn stderr_lines(&self) -> Vec<&str> {
         self.lines
             .iter()
@@ -174,6 +179,7 @@ pub struct CliOutputBuilder {
 
 impl CliOutputBuilder {
     /// Start building output
+    #[must_use]
     pub fn new() -> Self {
         Self {
             output: CliOutput::new(),
@@ -205,6 +211,7 @@ impl CliOutputBuilder {
     }
 
     /// Build the final output
+    #[must_use]
     pub fn build(self) -> CliOutput {
         self.output
     }

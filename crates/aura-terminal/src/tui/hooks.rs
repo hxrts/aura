@@ -119,6 +119,7 @@ pub struct AppCoreContext {
 
 impl AppCoreContext {
     /// Create a new AppCoreContext
+    #[must_use]
     pub fn new(app_core: InitializedAppCore, io_context: Arc<IoContext>) -> Self {
         Self {
             app_core,
@@ -129,6 +130,7 @@ impl AppCoreContext {
     /// Get a snapshot of the current state
     ///
     /// This is useful for initializing iocraft State<T> values.
+    #[must_use]
     pub fn snapshot(&self) -> aura_app::ui::types::StateSnapshot {
         // Use try_read to avoid blocking in sync context
         // Fall back to default if lock is held
@@ -167,6 +169,7 @@ impl AppCoreContext {
         self.io_context.add_info_toast(id, message).await;
     }
 
+    #[must_use]
     pub fn tasks(&self) -> Arc<UiTaskRegistry> {
         self.io_context.tasks()
     }
@@ -315,6 +318,7 @@ impl<T: Clone + Send + Sync + 'static> ReactiveValue for T {}
 ///
 /// Returns the current value. For real-time push-based updates, use `use_future`
 /// with signal subscription (see module documentation).
+#[must_use]
 pub fn snapshot_state<T: Clone>(state: &ReactiveState<T>) -> T {
     state.get()
 }
@@ -322,16 +326,19 @@ pub fn snapshot_state<T: Clone>(state: &ReactiveState<T>) -> T {
 /// Snapshot of a ReactiveVec for use in iocraft components
 ///
 /// Returns a cloned vector of all current items.
+#[must_use]
 pub fn snapshot_vec<T: Clone>(vec: &ReactiveVec<T>) -> Vec<T> {
     vec.get_cloned()
 }
 
 /// Helper to check if a ReactiveVec is empty
+#[must_use]
 pub fn is_vec_empty<T: Clone>(vec: &ReactiveVec<T>) -> bool {
     vec.is_empty()
 }
 
 /// Helper to get the length of a ReactiveVec
+#[must_use]
 pub fn vec_len<T: Clone>(vec: &ReactiveVec<T>) -> usize {
     vec.len()
 }
@@ -460,6 +467,7 @@ impl Default for HomeSnapshot {
 
 impl HomeSnapshot {
     /// Get residents list from home state
+    #[must_use]
     pub fn residents(&self) -> &[aura_app::ui::types::home::Resident] {
         self.home_state
             .as_ref()
@@ -468,6 +476,7 @@ impl HomeSnapshot {
     }
 
     /// Get storage info from home state
+    #[must_use]
     pub fn storage(&self) -> aura_app::ui::types::HomeFlowBudget {
         self.home_state
             .as_ref()
@@ -572,6 +581,7 @@ pub struct CallbackContext {
 
 impl CallbackContext {
     /// Create a new CallbackContext with the given registry
+    #[must_use]
     pub fn new(registry: CallbackRegistry) -> Self {
         Self { registry }
     }

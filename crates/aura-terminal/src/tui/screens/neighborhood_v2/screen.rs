@@ -279,7 +279,8 @@ fn short_id(id: &str, len: usize) -> String {
 fn is_steward_role(role: aura_app::ui::types::home::ResidentRole) -> bool {
     matches!(
         role,
-        aura_app::ui::types::home::ResidentRole::Admin | aura_app::ui::types::home::ResidentRole::Owner
+        aura_app::ui::types::home::ResidentRole::Admin
+            | aura_app::ui::types::home::ResidentRole::Owner
     )
 }
 
@@ -292,7 +293,10 @@ fn convert_resident(r: &aura_app::ui::types::home::Resident) -> Resident {
     }
 }
 
-fn convert_budget(storage: &aura_app::ui::types::HomeFlowBudget, resident_count: u32) -> HomeBudget {
+fn convert_budget(
+    storage: &aura_app::ui::types::HomeFlowBudget,
+    resident_count: u32,
+) -> HomeBudget {
     HomeBudget {
         total: storage.total_allocation(),
         used: storage.total_used(),

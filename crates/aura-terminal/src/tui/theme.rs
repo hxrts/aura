@@ -216,6 +216,7 @@ impl Icons {
 ///
 /// Use this instead of `if focused { Theme::BORDER_FOCUS } else { Theme::BORDER }`
 #[inline]
+#[must_use]
 pub fn focus_border_color(focused: bool) -> Color {
     if focused {
         Theme::BORDER_FOCUS
@@ -229,6 +230,7 @@ pub fn focus_border_color(focused: bool) -> Color {
 /// Returns `(primary_color, muted_color)` tuple.
 /// Use this for panels/sections that change text color based on focus.
 #[inline]
+#[must_use]
 pub fn focus_text_colors(focused: bool) -> (Color, Color) {
     if focused {
         (Theme::TEXT, Theme::TEXT_MUTED)
@@ -242,6 +244,7 @@ pub fn focus_text_colors(focused: bool) -> (Color, Color) {
 /// Returns `(background_color, text_color)` tuple.
 /// Use this for selectable list items.
 #[inline]
+#[must_use]
 pub fn list_item_colors(selected: bool) -> (Color, Color) {
     if selected {
         (Theme::LIST_BG_SELECTED, Theme::LIST_TEXT_SELECTED)
@@ -255,6 +258,7 @@ pub fn list_item_colors(selected: bool) -> (Color, Color) {
 /// Returns `(background_color, primary_text_color, muted_text_color)` tuple.
 /// Use this for list items with secondary/description text.
 #[inline]
+#[must_use]
 pub fn list_item_colors_with_muted(selected: bool) -> (Color, Color, Color) {
     if selected {
         (

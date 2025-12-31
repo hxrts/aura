@@ -17,21 +17,25 @@ fn digest(seed: &str, domain: &str) -> [u8; 32] {
 }
 
 /// Deterministically derive an AuthorityId from a seed label.
+#[must_use]
 pub fn authority_id(seed: &str) -> AuthorityId {
     AuthorityId::new_from_entropy(digest(seed, "aura-terminal/authority"))
 }
 
 /// Deterministically derive a ContextId from a seed label.
+#[must_use]
 pub fn context_id(seed: &str) -> ContextId {
     ContextId::new_from_entropy(digest(seed, "aura-terminal/context"))
 }
 
 /// Deterministically derive a DeviceId from a seed label.
+#[must_use]
 pub fn device_id(seed: &str) -> DeviceId {
     DeviceId::new_from_entropy(digest(seed, "aura-terminal/device"))
 }
 
 /// Deterministically derive a UUID from a seed label (for non-core IDs).
+#[must_use]
 pub fn uuid(seed: &str) -> Uuid {
     let bytes = digest(seed, "aura-terminal/uuid");
     let mut uuid_bytes = [0u8; 16];
@@ -40,6 +44,7 @@ pub fn uuid(seed: &str) -> Uuid {
 }
 
 /// Deterministically derive a GuardianId from a seed label.
+#[must_use]
 pub fn guardian_id(seed: &str) -> GuardianId {
     GuardianId::new_from_entropy(digest(seed, "aura-terminal/guardian"))
 }

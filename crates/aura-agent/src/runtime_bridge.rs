@@ -89,6 +89,12 @@ fn context_commitment_from_journal(
     Ok(Hash32(hasher.finalize()))
 }
 
+/// Persist a consensus DKG transcript after successful key generation.
+///
+/// All parameters are semantically distinct and required for DKG transcript persistence:
+/// effects (runtime), prestate (consensus state), params (config), authority (owner),
+/// epoch (version), threshold/max_signers (k-of-n), participants (signers), operation_hash (tracking).
+#[allow(clippy::too_many_arguments)]
 async fn persist_consensus_dkg_transcript(
     effects: Arc<crate::runtime::AuraEffectSystem>,
     prestate: Prestate,
@@ -2535,7 +2541,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 let short = id.to_string();
                 let short = short.chars().take(8).collect::<String>();
                 BridgeDeviceInfo {
-                    id: id.clone(),
+                    id,
                     name: format!("Device {short}"),
                     is_current: leaf.device_id == current_device,
                     last_seen: None,

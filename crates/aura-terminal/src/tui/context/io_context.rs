@@ -29,11 +29,11 @@ cfg_if! {
         use aura_agent::AuraAgent;
     }
 }
+use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{
     ConnectionStatus, SyncStatus, CONNECTION_STATUS_SIGNAL, DISCOVERED_PEERS_SIGNAL, ERROR_SIGNAL,
     SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
 };
-use aura_app::ui::prelude::*;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::types::Epoch;
 
@@ -106,35 +106,41 @@ pub struct IoContextBuilder {
 
 impl IoContextBuilder {
     /// Create a new builder with default values.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Set the initialized AppCore (required).
+    #[must_use]
     pub fn with_app_core(mut self, app_core: InitializedAppCore) -> Self {
         self.app_core = Some(app_core);
         self
     }
 
     /// Set the base path for account files (required).
+    #[must_use]
     pub fn with_base_path(mut self, path: PathBuf) -> Self {
         self.base_path = Some(path);
         self
     }
 
     /// Set the device ID string (required).
+    #[must_use]
     pub fn with_device_id(mut self, id: String) -> Self {
         self.device_id = Some(id);
         self
     }
 
     /// Set the TUI mode (required).
+    #[must_use]
     pub fn with_mode(mut self, mode: TuiMode) -> Self {
         self.mode = Some(mode);
         self
     }
 
     /// Set whether an existing account is present (default: false).
+    #[must_use]
     pub fn with_existing_account(mut self, exists: bool) -> Self {
         self.has_existing_account = exists;
         self
@@ -287,10 +293,12 @@ impl IoContext {
     ///     .with_existing_account(true)
     ///     .build()?;
     /// ```
+    #[must_use]
     pub fn builder() -> IoContextBuilder {
         IoContextBuilder::new()
     }
 
+    #[must_use]
     pub fn tasks(&self) -> Arc<UiTaskRegistry> {
         self.tasks.clone()
     }
@@ -302,6 +310,7 @@ impl IoContext {
     /// Use `IoContext::builder()` instead for more flexible construction.
     #[doc(hidden)]
     #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
+    #[must_use]
     pub fn new(
         app_core: InitializedAppCore,
         base_path: PathBuf,
@@ -319,6 +328,7 @@ impl IoContext {
     /// Use `IoContext::builder()` instead for more flexible construction.
     #[doc(hidden)]
     #[deprecated(since = "0.1.0", note = "Use IoContext::builder() instead")]
+    #[must_use]
     pub fn with_account_status(
         app_core: InitializedAppCore,
         has_existing_account: bool,
@@ -377,13 +387,14 @@ impl IoContext {
     /// **Note**: This method cannot be called inside a tokio runtime.
     /// Use `with_defaults_async()` instead.
     #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
+    #[must_use]
     pub fn with_defaults() -> Self {
         if tokio::runtime::Handle::try_current().is_ok() {
             panic!("IoContext::with_defaults() cannot be called inside a tokio runtime; use IoContext::with_defaults_async().await instead");
         }
 
-        let app_core =
-            AppCore::new(aura_app::ui::types::AppConfig::default()).expect("Failed to create default AppCore");
+        let app_core = AppCore::new(aura_app::ui::types::AppConfig::default())
+            .expect("Failed to create default AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
         let app_core = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -406,8 +417,8 @@ impl IoContext {
     /// Create an IoContext with default configuration (async version).
     #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
     pub async fn with_defaults_async() -> Self {
-        let app_core =
-            AppCore::new(aura_app::ui::types::AppConfig::default()).expect("Failed to create default AppCore");
+        let app_core = AppCore::new(aura_app::ui::types::AppConfig::default())
+            .expect("Failed to create default AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
         let app_core = InitializedAppCore::new(app_core)
             .await
@@ -425,18 +436,22 @@ impl IoContext {
     }
 
     #[inline]
+    #[must_use]
     pub fn has_app_core(&self) -> bool {
         true
     }
 
+    #[must_use]
     pub fn app_core(&self) -> &InitializedAppCore {
         &self.app_core
     }
 
+    #[must_use]
     pub fn app_core_raw(&self) -> &Arc<RwLock<AppCore>> {
         self.app_core.raw()
     }
 
+    #[must_use]
     pub fn has_account(&self) -> bool {
         self.account_files.has_account()
     }
@@ -511,18 +526,22 @@ impl IoContext {
                 Ok(())
             }
         } else {
+            #[must_use]
             pub fn is_demo_mode(&self) -> bool {
                 false
             }
 
+            #[must_use]
             pub fn demo_alice_code(&self) -> String {
                 String::new()
             }
 
+            #[must_use]
             pub fn demo_carol_code(&self) -> String {
                 String::new()
             }
 
+            #[must_use]
             pub fn demo_mobile_device_id(&self) -> String {
                 String::new()
             }
@@ -575,34 +594,42 @@ impl IoContext {
     // View snapshots (synchronous, best-effort)
     // =========================================================================
 
+    #[must_use]
     pub fn snapshot_chat(&self) -> ChatSnapshot {
         self.snapshots.snapshot_chat()
     }
 
+    #[must_use]
     pub fn snapshot_contacts(&self) -> ContactsSnapshot {
         self.snapshots.snapshot_contacts()
     }
 
+    #[must_use]
     pub fn snapshot_recovery(&self) -> RecoverySnapshot {
         self.snapshots.snapshot_recovery()
     }
 
+    #[must_use]
     pub fn snapshot_neighborhood(&self) -> NeighborhoodSnapshot {
         self.snapshots.snapshot_neighborhood()
     }
 
+    #[must_use]
     pub fn snapshot_home(&self) -> HomeSnapshot {
         self.snapshots.snapshot_home()
     }
 
+    #[must_use]
     pub fn snapshot_invitations(&self) -> InvitationsSnapshot {
         self.snapshots.snapshot_invitations()
     }
 
+    #[must_use]
     pub fn snapshot_devices(&self) -> DevicesSnapshot {
         self.snapshots.snapshot_devices()
     }
 
+    #[must_use]
     pub fn snapshot_guardians(&self) -> GuardiansSnapshot {
         self.snapshots.snapshot_guardians()
     }
@@ -992,12 +1019,14 @@ impl IoContext {
     // Capability checking (best-effort, snapshot-based)
     // =========================================================================
 
+    #[must_use]
     pub fn get_current_role(&self) -> Option<aura_app::ui::types::home::ResidentRole> {
         let snapshot = self.snapshots.try_state_snapshot()?;
         let home_state = snapshot.homes.current_home()?;
         Some(home_state.my_role)
     }
 
+    #[must_use]
     pub fn has_capability(&self, capability: &crate::tui::commands::CommandCapability) -> bool {
         use crate::tui::commands::CommandCapability;
         use aura_app::ui::types::home::ResidentRole;

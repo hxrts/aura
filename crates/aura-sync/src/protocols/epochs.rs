@@ -181,7 +181,7 @@ impl EpochRotationCoordinator {
         let rotation = EpochRotation {
             rotation_id: rotation_id.clone(),
             target_epoch,
-            participants: participants,
+            participants,
             confirmations: HashMap::new(),
             initiated_at: now.clone(),
             status: RotationStatus::Initiated,

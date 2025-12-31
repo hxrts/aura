@@ -4,7 +4,8 @@
 //! all frontends via the RuntimeBridge abstraction.
 
 use crate::runtime_bridge::{InvitationBridgeType, InvitationInfo};
-use crate::{views::invitations::InvitationsState, AppCore, INVITATIONS_SIGNAL};
+use crate::signal_defs::INVITATIONS_SIGNAL;
+use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::RwLock;
 use aura_core::identifiers::AuthorityId;
 #[cfg(feature = "signals")]
@@ -12,6 +13,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuraError;
 use std::sync::Arc;
 use crate::workflows::runtime::require_runtime;
+#[cfg(feature = "signals")]
 use crate::workflows::signals::read_signal;
 use crate::workflows::signals::read_signal_or_default;
 
@@ -189,9 +191,13 @@ pub async fn accept_invitation(
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
-    #[cfg(feature = "signals")]
+#[cfg(feature = "signals")]
     let initial_contact_count = {
-        read_signal(app_core, &*crate::signal_defs::CONTACTS_SIGNAL, "CONTACTS_SIGNAL")
+        read_signal(
+            app_core,
+            &*crate::signal_defs::CONTACTS_SIGNAL,
+            crate::signal_defs::CONTACTS_SIGNAL_NAME,
+        )
             .await
             .unwrap_or_default()
             .contacts
@@ -224,12 +230,12 @@ pub async fn accept_invitation(
                 let contacts_len = read_signal(
                     app_core,
                     &*crate::signal_defs::CONTACTS_SIGNAL,
-                    "CONTACTS_SIGNAL",
+                    crate::signal_defs::CONTACTS_SIGNAL_NAME,
                 )
-                .await
-                .unwrap_or_default()
-                .contacts
-                .len();
+                    .await
+                    .unwrap_or_default()
+                    .contacts
+                    .len();
 
                 if contacts_len > initial_contact_count {
                     break;
@@ -300,6 +306,135 @@ pub async fn import_invitation(
         .map_err(|e| AuraError::agent(format!("Failed to import invitation: {}", e)))
 }
 
+// ============================================================================
+// Invitation Role Parsing and Formatting
+// ============================================================================
+
+use crate::views::invitations::InvitationType;
+
+/// Portable invitation role value for CLI parsing.
+///
+/// This enum represents the user-facing role categories for invitation creation.
+/// It maps to the underlying `InvitationType` but includes additional context
+/// like whether it's a "contact" (default) invitation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvitationRoleValue {
+    /// Contact invitation (default for unknown roles)
+    Contact {
+        /// Optional nickname for the contact
+        nickname: Option<String>,
+    },
+    /// Guardian invitation
+    Guardian,
+    /// Channel/Chat invitation
+    Channel,
+}
+
+impl InvitationRoleValue {
+    /// Get the canonical string representation.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Contact { .. } => "contact",
+            Self::Guardian => "guardian",
+            Self::Channel => "channel",
+        }
+    }
+
+    /// Convert to `InvitationType`.
+    #[must_use]
+    pub fn to_invitation_type(&self) -> InvitationType {
+        match self {
+            Self::Contact { .. } => InvitationType::Home,
+            Self::Guardian => InvitationType::Guardian,
+            Self::Channel => InvitationType::Chat,
+        }
+    }
+}
+
+impl std::fmt::Display for InvitationRoleValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Contact { nickname: Some(name) } => write!(f, "contact (nickname: {})", name),
+            Self::Contact { nickname: None } => write!(f, "contact"),
+            Self::Guardian => write!(f, "guardian"),
+            Self::Channel => write!(f, "channel"),
+        }
+    }
+}
+
+/// Parse an invitation role string into a portable value.
+///
+/// Recognizes "guardian" and "channel" (case-insensitive).
+/// Any other value is treated as a contact role with the input as nickname.
+///
+/// # Examples
+///
+/// ```ignore
+/// use aura_app::workflows::invitation::parse_invitation_role;
+///
+/// // Known roles
+/// let guardian = parse_invitation_role("guardian");
+/// assert!(matches!(guardian, InvitationRoleValue::Guardian));
+///
+/// let channel = parse_invitation_role("CHANNEL");
+/// assert!(matches!(channel, InvitationRoleValue::Channel));
+///
+/// // Unknown roles become contact with nickname
+/// let custom = parse_invitation_role("friend");
+/// assert!(matches!(custom, InvitationRoleValue::Contact { nickname: Some(n) } if n == "friend"));
+/// ```
+#[must_use]
+pub fn parse_invitation_role(role: &str) -> InvitationRoleValue {
+    if role.eq_ignore_ascii_case("guardian") {
+        InvitationRoleValue::Guardian
+    } else if role.eq_ignore_ascii_case("channel") {
+        InvitationRoleValue::Channel
+    } else {
+        // Default: treat as contact with optional nickname
+        let nickname = if role.is_empty() {
+            None
+        } else {
+            Some(role.to_string())
+        };
+        InvitationRoleValue::Contact { nickname }
+    }
+}
+
+/// Format an invitation type for human-readable display.
+///
+/// Provides consistent formatting of invitation types across all frontends.
+#[must_use]
+pub fn format_invitation_type(inv_type: InvitationType) -> &'static str {
+    match inv_type {
+        InvitationType::Home => "Home",
+        InvitationType::Guardian => "Guardian",
+        InvitationType::Chat => "Channel",
+    }
+}
+
+/// Format an invitation type with additional context.
+///
+/// For more detailed formatting that includes context like channel IDs or authorities.
+#[must_use]
+pub fn format_invitation_type_detailed(
+    inv_type: InvitationType,
+    context: Option<&str>,
+) -> String {
+    match (inv_type, context) {
+        (InvitationType::Home, None) => "Home".to_string(),
+        (InvitationType::Home, Some(ctx)) => format!("Home ({})", ctx),
+        (InvitationType::Guardian, None) => "Guardian".to_string(),
+        (InvitationType::Guardian, Some(ctx)) => format!("Guardian (for: {})", ctx),
+        (InvitationType::Chat, None) => "Channel".to_string(),
+        (InvitationType::Chat, Some(ctx)) => format!("Channel ({})", ctx),
+    }
+}
+
+// ============================================================================
+// Additional Invitation Operations
+// ============================================================================
+
 /// Accept the first pending home/channel invitation
 ///
 /// **What it does**: Finds and accepts the first pending channel invitation
@@ -339,6 +474,124 @@ pub async fn accept_pending_home_invitation(
 mod tests {
     use super::*;
     use crate::AppConfig;
+
+    // === Invitation Role Parsing Tests ===
+
+    #[test]
+    fn test_parse_invitation_role_guardian() {
+        let result = parse_invitation_role("guardian");
+        assert_eq!(result, InvitationRoleValue::Guardian);
+    }
+
+    #[test]
+    fn test_parse_invitation_role_guardian_case_insensitive() {
+        assert_eq!(parse_invitation_role("GUARDIAN"), InvitationRoleValue::Guardian);
+        assert_eq!(parse_invitation_role("Guardian"), InvitationRoleValue::Guardian);
+    }
+
+    #[test]
+    fn test_parse_invitation_role_channel() {
+        let result = parse_invitation_role("channel");
+        assert_eq!(result, InvitationRoleValue::Channel);
+    }
+
+    #[test]
+    fn test_parse_invitation_role_channel_case_insensitive() {
+        assert_eq!(parse_invitation_role("CHANNEL"), InvitationRoleValue::Channel);
+        assert_eq!(parse_invitation_role("Channel"), InvitationRoleValue::Channel);
+    }
+
+    #[test]
+    fn test_parse_invitation_role_contact_default() {
+        let result = parse_invitation_role("friend");
+        assert!(matches!(
+            result,
+            InvitationRoleValue::Contact { nickname: Some(n) } if n == "friend"
+        ));
+    }
+
+    #[test]
+    fn test_parse_invitation_role_empty_is_contact_no_nickname() {
+        let result = parse_invitation_role("");
+        assert!(matches!(
+            result,
+            InvitationRoleValue::Contact { nickname: None }
+        ));
+    }
+
+    #[test]
+    fn test_invitation_role_as_str() {
+        assert_eq!(InvitationRoleValue::Guardian.as_str(), "guardian");
+        assert_eq!(InvitationRoleValue::Channel.as_str(), "channel");
+        assert_eq!(
+            InvitationRoleValue::Contact { nickname: None }.as_str(),
+            "contact"
+        );
+    }
+
+    #[test]
+    fn test_invitation_role_display() {
+        assert_eq!(format!("{}", InvitationRoleValue::Guardian), "guardian");
+        assert_eq!(format!("{}", InvitationRoleValue::Channel), "channel");
+        assert_eq!(
+            format!("{}", InvitationRoleValue::Contact { nickname: None }),
+            "contact"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                InvitationRoleValue::Contact {
+                    nickname: Some("Alice".to_string())
+                }
+            ),
+            "contact (nickname: Alice)"
+        );
+    }
+
+    #[test]
+    fn test_invitation_role_to_invitation_type() {
+        assert_eq!(
+            InvitationRoleValue::Guardian.to_invitation_type(),
+            InvitationType::Guardian
+        );
+        assert_eq!(
+            InvitationRoleValue::Channel.to_invitation_type(),
+            InvitationType::Chat
+        );
+        assert_eq!(
+            InvitationRoleValue::Contact { nickname: None }.to_invitation_type(),
+            InvitationType::Home
+        );
+    }
+
+    #[test]
+    fn test_format_invitation_type() {
+        assert_eq!(format_invitation_type(InvitationType::Home), "Home");
+        assert_eq!(format_invitation_type(InvitationType::Guardian), "Guardian");
+        assert_eq!(format_invitation_type(InvitationType::Chat), "Channel");
+    }
+
+    #[test]
+    fn test_format_invitation_type_detailed() {
+        assert_eq!(
+            format_invitation_type_detailed(InvitationType::Home, None),
+            "Home"
+        );
+        assert_eq!(
+            format_invitation_type_detailed(InvitationType::Home, Some("living room")),
+            "Home (living room)"
+        );
+        assert_eq!(
+            format_invitation_type_detailed(InvitationType::Guardian, Some("alice-authority")),
+            "Guardian (for: alice-authority)"
+        );
+        assert_eq!(
+            format_invitation_type_detailed(InvitationType::Chat, Some("general")),
+            "Channel (general)"
+        );
+    }
+
+    // === Workflow Tests ===
 
     #[tokio::test]
     async fn test_list_invitations_default() {

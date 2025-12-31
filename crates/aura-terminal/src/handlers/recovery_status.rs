@@ -7,6 +7,7 @@
 use std::fmt::Write;
 
 /// Format a recovery status report from journal fact keys.
+#[must_use]
 pub fn format_recovery_status(active: &[String], completed: &[String]) -> String {
     let mut output = String::new();
 

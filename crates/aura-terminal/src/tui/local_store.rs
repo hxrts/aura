@@ -51,6 +51,7 @@ impl<S: StorageEffects> TuiLocalStore<S> {
     }
 
     /// Get the current local data
+    #[must_use]
     pub fn data(&self) -> &LocalData {
         self.store.data()
     }
@@ -62,6 +63,7 @@ impl<S: StorageEffects> TuiLocalStore<S> {
     }
 
     /// Check if there are unsaved changes
+    #[must_use]
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
@@ -93,6 +95,7 @@ impl<S: StorageEffects> TuiLocalStore<S> {
     // ─── Convenience Methods ─────────────────────────────────────────────────
 
     /// Get theme preference
+    #[must_use]
     pub fn theme(&self) -> crate::local_store::ThemePreference {
         self.data().theme
     }
@@ -110,6 +113,7 @@ impl<S: StorageEffects> TuiLocalStore<S> {
     }
 
     /// Get a contact
+    #[must_use]
     pub fn get_contact(&self, authority_id: &AuthorityId) -> Option<&ContactCache> {
         self.data().get_contact(authority_id)
     }
@@ -122,6 +126,7 @@ impl<S: StorageEffects> TuiLocalStore<S> {
     }
 
     /// Get recent conversations
+    #[must_use]
     pub fn recent_conversations(&self) -> &[String] {
         &self.data().recent_conversations
     }
@@ -133,6 +138,7 @@ impl<S: StorageEffects> TuiLocalStore<S> {
     }
 
     /// Get last active screen
+    #[must_use]
     pub fn last_screen(&self) -> Option<&str> {
         self.data().last_screen.as_deref()
     }
@@ -144,6 +150,7 @@ impl<S: StorageEffects> TuiLocalStore<S> {
     }
 
     /// Get a custom setting
+    #[must_use]
     pub fn get_setting(&self, key: &str) -> Option<&String> {
         self.data().get_setting(key)
     }

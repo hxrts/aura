@@ -35,6 +35,7 @@ impl SnapshotHelper {
     }
 
     /// Get a best-effort `StateSnapshot` (returns `None` if lock is contended).
+    #[must_use]
     pub fn try_state_snapshot(&self) -> Option<aura_app::ui::types::StateSnapshot> {
         self.app_core.try_read().map(|core| core.snapshot())
     }
@@ -48,6 +49,7 @@ impl SnapshotHelper {
 // relying on snapshots for rendering; snapshot accessors exist primarily for
 // deterministic tests and a few legacy utilities.
 impl SnapshotHelper {
+    #[must_use]
     pub fn snapshot_chat(&self) -> ChatSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             ChatSnapshot {
@@ -60,6 +62,7 @@ impl SnapshotHelper {
         }
     }
 
+    #[must_use]
     pub fn snapshot_guardians(&self) -> GuardiansSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             GuardiansSnapshot {
@@ -75,6 +78,7 @@ impl SnapshotHelper {
         }
     }
 
+    #[must_use]
     pub fn snapshot_recovery(&self) -> RecoverySnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             let (progress_percent, is_in_progress) = snapshot
@@ -102,6 +106,7 @@ impl SnapshotHelper {
         }
     }
 
+    #[must_use]
     pub fn snapshot_invitations(&self) -> InvitationsSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             let pending_count = snapshot.invitations.pending_count as usize;
@@ -122,6 +127,7 @@ impl SnapshotHelper {
         }
     }
 
+    #[must_use]
     pub fn snapshot_home(&self) -> HomeSnapshot {
         use aura_app::ui::types::home::ResidentRole;
 
@@ -138,6 +144,7 @@ impl SnapshotHelper {
         }
     }
 
+    #[must_use]
     pub fn snapshot_contacts(&self) -> ContactsSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             ContactsSnapshot {
@@ -148,6 +155,7 @@ impl SnapshotHelper {
         }
     }
 
+    #[must_use]
     pub fn snapshot_neighborhood(&self) -> NeighborhoodSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             let home_id = snapshot.neighborhood.home_home_id.clone();
@@ -171,6 +179,7 @@ impl SnapshotHelper {
         }
     }
 
+    #[must_use]
     pub fn snapshot_devices(&self) -> DevicesSnapshot {
         use crate::tui::types::Device;
 

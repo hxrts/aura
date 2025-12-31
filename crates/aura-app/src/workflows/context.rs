@@ -136,6 +136,11 @@ pub async fn current_home_context_or_fallback(
     Err(AuraError::not_found("No current home selected"))
 }
 
+/// Stable fallback context for relational facts that should not depend on UI selection.
+pub fn default_relational_context() -> ContextId {
+    ContextId::default()
+}
+
 /// Get current traversal position
 ///
 /// **What it does**: Reads current position from neighborhood state

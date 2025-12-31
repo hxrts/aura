@@ -8,8 +8,8 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::ui::types::InvitationBridgeType;
 use aura_app::ui::prelude::*;
+use aura_app::ui::types::InvitationBridgeType;
 use aura_core::effects::reactive::ReactiveEffects;
 
 use super::types::{OpError, OpResponse, OpResult};

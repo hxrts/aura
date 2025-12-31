@@ -5,12 +5,16 @@
 //!
 //! This module provides UI-agnostic reactive programming infrastructure
 //! that can be used by CLI, webapp, or other UI layers.
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `parking_lot::Mutex` for DynamicTaskRegistry JoinHandle storage because:
+//! 1. Operations are O(1) push or O(n) drain (shutdown only)
+//! 2. Lock is never held across `.await` points
+//! 3. No I/O or async work inside lock scope
 
-// Layer 6 runtime code: parking_lot::Mutex is acceptable here because:
-// 1. This is runtime composition layer (aura-agent) which may use tokio directly
-// 2. The lock protects JoinHandle storage and is never held across .await points
-// 3. Lock operations are brief (push/drain) with no async work inside
-#[allow(clippy::disallowed_types)]
+#![allow(clippy::disallowed_types)]
+
 use parking_lot::Mutex;
 use std::future::Future;
 use std::sync::Arc;

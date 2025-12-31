@@ -107,6 +107,9 @@ pub enum ReceiptError {
     VerificationFailed,
 }
 
+/// Chain index mapping (ContextId, AuthorityId) to ordered receipt IDs.
+type ChainIndex = Arc<RwLock<HashMap<(ContextId, AuthorityId), Vec<ReceiptId>>>>;
+
 /// Receipt manager service
 ///
 /// Manages receipt chains for flow budget audit trails. Integrates with the
@@ -119,7 +122,7 @@ pub struct ReceiptManager {
     /// Receipt storage by ID
     receipts: Arc<RwLock<HashMap<ReceiptId, Receipt>>>,
     /// Chain index: (ContextId, AuthorityId) -> list of ReceiptIds in order
-    chains: Arc<RwLock<HashMap<(ContextId, AuthorityId), Vec<ReceiptId>>>>,
+    chains: ChainIndex,
 }
 
 impl ReceiptManager {
@@ -364,5 +367,53 @@ impl ReceiptManager {
             previous,
             content_hash,
         })
+    }
+}
+
+// =============================================================================
+// RuntimeService Implementation
+// =============================================================================
+
+use super::traits::{RuntimeService, ServiceError, ServiceHealth};
+use async_trait::async_trait;
+
+#[async_trait]
+impl RuntimeService for ReceiptManager {
+    fn name(&self) -> &'static str {
+        "receipt_manager"
+    }
+
+    fn dependencies(&self) -> &[&'static str] {
+        &["flow_budget_manager"]
+    }
+
+    async fn start(&self, tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
+        // Start cleanup task if auto-cleanup is enabled
+        // Note: This requires time effects which should be configured externally
+        // The cleanup task is typically started via start_cleanup_task()
+        if self.config.auto_cleanup_enabled {
+            tracing::debug!(
+                "ReceiptManager: auto-cleanup enabled, call start_cleanup_task() with time effects"
+            );
+        }
+        let _ = tasks; // Acknowledge tasks param
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<(), ServiceError> {
+        // Clear all receipts on shutdown
+        {
+            let mut receipts = self.receipts.write().await;
+            receipts.clear();
+        }
+        {
+            let mut chains = self.chains.write().await;
+            chains.clear();
+        }
+        Ok(())
+    }
+
+    fn health(&self) -> ServiceHealth {
+        ServiceHealth::Healthy
     }
 }

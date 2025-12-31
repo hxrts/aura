@@ -22,6 +22,7 @@ pub enum Screen {
 
 impl Screen {
     /// Get the numeric key (1-6) for this screen
+    #[must_use]
     pub fn key_number(&self) -> u8 {
         match self {
             Screen::Neighborhood => 1,
@@ -33,6 +34,7 @@ impl Screen {
     }
 
     /// Get screen from numeric key (1-6)
+    #[must_use]
     pub fn from_key(key: u8) -> Option<Self> {
         match key {
             1 => Some(Screen::Neighborhood),
@@ -45,6 +47,7 @@ impl Screen {
     }
 
     /// Get the display name for the screen
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             Screen::Neighborhood => "Neighborhood",
@@ -56,6 +59,7 @@ impl Screen {
     }
 
     /// Get the icon/emoji for the screen
+    #[must_use]
     pub fn icon(&self) -> &'static str {
         match self {
             Screen::Neighborhood => "⊞",
@@ -67,6 +71,7 @@ impl Screen {
     }
 
     /// Get all screens in order
+    #[must_use]
     pub fn all() -> &'static [Screen] {
         &[
             Screen::Neighborhood,
@@ -78,6 +83,7 @@ impl Screen {
     }
 
     /// Get next screen in tab order
+    #[must_use]
     pub fn next(&self) -> Screen {
         match self {
             Screen::Neighborhood => Screen::Chat,
@@ -89,6 +95,7 @@ impl Screen {
     }
 
     /// Get previous screen in tab order
+    #[must_use]
     pub fn prev(&self) -> Screen {
         match self {
             Screen::Neighborhood => Screen::Settings,
@@ -140,6 +147,7 @@ impl Default for Router {
 
 impl Router {
     /// Create a new router starting at the given screen
+    #[must_use]
     pub fn new(initial: Screen) -> Self {
         Self {
             current: initial,
@@ -150,6 +158,7 @@ impl Router {
     }
 
     /// Get the current screen
+    #[must_use]
     pub fn current(&self) -> Screen {
         self.current
     }
@@ -222,16 +231,19 @@ impl Router {
     }
 
     /// Check if we can go back
+    #[must_use]
     pub fn can_back(&self) -> bool {
         !self.history.is_empty()
     }
 
     /// Check if we can go forward
+    #[must_use]
     pub fn can_forward(&self) -> bool {
         !self.forward.is_empty()
     }
 
     /// Get history length
+    #[must_use]
     pub fn history_len(&self) -> usize {
         self.history.len()
     }

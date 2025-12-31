@@ -189,6 +189,7 @@ pub struct ContactSelectState {
 
 impl ContactSelectState {
     /// Create a new state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -231,11 +232,13 @@ impl ContactSelectState {
     }
 
     /// Get the selected contact ID
+    #[must_use]
     pub fn get_selected_id(&self) -> Option<String> {
         self.contacts.get(self.selected_index).map(|c| c.id.clone())
     }
 
     /// Check if selection is valid
+    #[must_use]
     pub fn can_select(&self) -> bool {
         !self.contacts.is_empty()
     }

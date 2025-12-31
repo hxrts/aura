@@ -69,6 +69,7 @@ pub struct IocraftTerminalAdapter {
 
 impl IocraftTerminalAdapter {
     /// Create a new adapter with default 80x24 terminal size.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             event_queue: Mutex::new(VecDeque::new()),
@@ -79,6 +80,7 @@ impl IocraftTerminalAdapter {
     }
 
     /// Create an adapter with predetermined events (for testing).
+    #[must_use]
     pub fn with_events(events: Vec<TerminalEvent>) -> Self {
         Self {
             event_queue: Mutex::new(events.into()),
@@ -89,6 +91,7 @@ impl IocraftTerminalAdapter {
     }
 
     /// Create an adapter with custom size.
+    #[must_use]
     pub fn with_size(width: u16, height: u16) -> Self {
         Self {
             event_queue: Mutex::new(VecDeque::new()),
@@ -99,6 +102,7 @@ impl IocraftTerminalAdapter {
     }
 
     /// Create an adapter with an event channel (for receiving external events).
+    #[must_use]
     pub fn with_channel(receiver: mpsc::Receiver<TerminalEvent>) -> Self {
         Self {
             event_queue: Mutex::new(VecDeque::new()),
@@ -223,6 +227,7 @@ impl TerminalOutputEffects for IocraftTerminalAdapter {
 /// This bridges between iocraft's event model and our effect trait's model.
 /// Only Press events are converted - Release and Repeat events are filtered out
 /// to prevent duplicate character input.
+#[must_use]
 pub fn convert_iocraft_event(event: iocraft::prelude::TerminalEvent) -> Option<TerminalEvent> {
     use aura_core::effects::terminal::KeyEvent as AuraKeyEvent;
 
@@ -304,6 +309,7 @@ pub struct EventBridge {
 
 impl EventBridge {
     /// Create a new event bridge and return the adapter it connects to.
+    #[must_use]
     pub fn new() -> (Self, IocraftTerminalAdapter) {
         let (sender, receiver) = mpsc::channel(1024);
         let adapter = IocraftTerminalAdapter::with_channel(receiver);

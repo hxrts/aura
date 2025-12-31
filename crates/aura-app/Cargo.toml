@@ -108,6 +108,8 @@ thiserror = "2"
 cfg-if = "1"
 uuid = { version = "1.6", features = ["v4"] }
 async-trait = "0.1"
+base64 = "0.22"
+hex = "0.4"
 
 # Runtime-agnostic async primitives (no tokio/async-std coupling)
 async-lock = "3"

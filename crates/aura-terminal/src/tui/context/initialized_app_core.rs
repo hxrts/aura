@@ -24,6 +24,7 @@ impl InitializedAppCore {
     }
 
     #[inline]
+    #[must_use]
     pub fn raw(&self) -> &Arc<RwLock<AppCore>> {
         &self.app_core
     }

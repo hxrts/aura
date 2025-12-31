@@ -36,6 +36,7 @@ pub enum TextStyle {
 
 impl TextStyle {
     /// Get the color for this style
+    #[must_use]
     pub fn color(&self) -> Color {
         match self {
             TextStyle::Normal => Theme::TEXT,
@@ -53,6 +54,7 @@ impl TextStyle {
     }
 
     /// Get the weight for this style
+    #[must_use]
     pub fn weight(&self) -> Weight {
         match self {
             TextStyle::Label => Weight::Bold,

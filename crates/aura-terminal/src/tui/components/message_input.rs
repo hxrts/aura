@@ -115,6 +115,7 @@ pub struct MessageInputState {
 }
 
 impl MessageInputState {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -167,11 +168,13 @@ impl MessageInputState {
     }
 
     /// Check if message is empty
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
     /// Check if this looks like a command (starts with /)
+    #[must_use]
     pub fn is_command(&self) -> bool {
         self.text.starts_with('/')
     }

@@ -278,7 +278,7 @@ async fn load_privacy_tracker<E: GuardEffects + PhysicalTimeEffects>(
 
     let now_ms = effect_system.physical_time().await?.ts_ms;
     let window_start =
-        now_ms.saturating_sub(tracker.state.tracking_window_hours.saturating_mul(3600_000));
+        now_ms.saturating_sub(tracker.state.tracking_window_hours.saturating_mul(3_600_000));
 
     let reset_ts = events
         .iter()

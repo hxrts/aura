@@ -61,6 +61,7 @@ pub struct InvitationCodeState {
 
 impl InvitationCodeState {
     /// Create a new invitation code state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }

@@ -918,6 +918,66 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_UI" = true ]; then
 
   forbidden_crate_hits=$(rg --no-heading "aura_(journal|protocol|consensus|guards|amp|anti_entropy|transport|recovery|sync|invitation|authentication|relational|chat)::" crates/aura-terminal/src -g "*.rs" || true)
   emit_hits "Direct protocol/domain crate usage in aura-terminal (use aura_app::ui facade)" "$forbidden_crate_hits"
+
+  section "Terminal time — use algebraic effects (PhysicalTimeEffects), no OS time"
+
+  terminal_time_hits=$(rg --no-heading -n "SystemTime::now|Instant::now|std::time::Instant|std::time::SystemTime|chrono::Utc::now|chrono::Local::now" crates/aura-terminal/src -g "*.rs" || true)
+  filtered_terminal_time=$(echo "$terminal_time_hits" \
+    | grep -v "///" \
+    | grep -v "//!" \
+    | grep -v "//" || true)
+  emit_hits "Direct OS time usage in aura-terminal (use PhysicalTimeEffects)" "$filtered_terminal_time"
+
+  section "Terminal business logic — validation and domain state should be in aura_app::workflows"
+
+  # Check for threshold validation logic in terminal (should use workflows::account)
+  # Filter: threshold vs num_devices/configs.len comparisons (domain validation)
+  # Exclude: progress() calculations, UI-only checks, tests, and lines using workflow
+  threshold_validation=$(rg --no-heading "threshold\s*(>|<|==|!=)\s*(num_devices|configs\.len|0)" crates/aura-terminal/src -g "*.rs" || true)
+  filtered_threshold=""
+  if [ -n "$threshold_validation" ]; then
+    while IFS= read -r hit; do
+      [ -z "$hit" ] && continue
+      file="${hit%%:*}"
+      # Check if previous line has UI/division/guard comment
+      line_content="${hit#*:}"
+      line_num=$(grep -n "$line_content" "$file" 2>/dev/null | head -1 | cut -d: -f1)
+      if [ -n "$line_num" ] && [ "$line_num" -gt 1 ]; then
+        prev_line=$((line_num - 1))
+        prev_content=$(sed -n "${prev_line}p" "$file" 2>/dev/null)
+        # Skip if previous line has UI/progress/division comment
+        if echo "$prev_content" | grep -qiE "// (UI|progress|Division|guard|not domain)"; then
+          continue
+        fi
+      fi
+      # Skip if line itself has workflow/test markers
+      if echo "$hit" | grep -qE "(uses workflow|workflows::account|/tests/)"; then
+        continue
+      fi
+      filtered_threshold="${filtered_threshold}${hit}"$'\n'
+    done <<< "$threshold_validation"
+  fi
+  emit_hits "Threshold validation in terminal (use aura_app::ui::workflows::account)" "$filtered_threshold"
+
+  # Check for local domain state (HashSet/HashMap of peers, guardians, etc)
+  # These should use AppCore signals instead
+  local_domain_state=$(rg --no-heading "HashSet<.*Id>|HashMap<.*Id," crates/aura-terminal/src/handlers -g "*.rs" || true)
+  filtered_domain_state=$(echo "$local_domain_state" \
+    | grep -v "// temporary" \
+    | grep -v "// local cache" \
+    | grep -v "/tests/" || true)
+  emit_hits "Local domain state in terminal handlers (use AppCore signals)" "$filtered_domain_state"
+
+  # Check for guardian count validation in terminal (should be in workflows)
+  guardian_validation=$(rg --no-heading "guardians?\.(len|count|is_empty)\(\)\s*(>|<|==|>=|<=)" crates/aura-terminal/src -g "*.rs" || true)
+  filtered_guardian=$(echo "$guardian_validation" \
+    | grep -v "// uses workflow" \
+    | grep -v "/tests/" || true)
+  if [ -n "$filtered_guardian" ]; then
+    emit_hits "Guardian count validation in terminal (consider moving to workflow)" "$filtered_guardian"
+  fi
+
+  verbose "Terminal layer should only handle I/O and formatting; all business logic belongs in aura_app::workflows"
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_WORKFLOWS" = true ]; then
@@ -926,26 +986,26 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_WORKFLOWS" = true ]; then
   runtime_string_hits=$(rg --no-heading "Runtime bridge not available" crates/aura-app/src/workflows -g "*.rs" || true)
   filtered_runtime_string_hits=$(echo "$runtime_string_hits" \
     | grep -v "crates/aura-app/src/workflows/runtime.rs" \
-    | grep -v "contains\\(\"Runtime bridge not available\"\\)" || true)
-  emit_hits "Direct runtime error strings in workflows (use require_runtime)" "$filtered_runtime_string_hits"
+    | grep -v '\.contains(' || true)
+  emit_hits "Direct runtime error strings in workflows (use workflows::runtime::require_runtime for consistent errors + wiring)" "$filtered_runtime_string_hits"
 
   parse_authority_hits=$(rg --no-heading "parse::<AuthorityId>" crates/aura-app/src/workflows -g "*.rs" || true)
   filtered_parse_authority_hits=$(echo "$parse_authority_hits" | grep -v "crates/aura-app/src/workflows/parse.rs" || true)
-  emit_hits "Direct AuthorityId parsing in workflows (use parse_authority_id)" "$filtered_parse_authority_hits"
+  emit_hits "Direct AuthorityId parsing in workflows (use workflows::parse::parse_authority_id for normalized errors)" "$filtered_parse_authority_hits"
 
   parse_context_hits=$(rg --no-heading "parse::<ContextId>" crates/aura-app/src/workflows -g "*.rs" || true)
   filtered_parse_context_hits=$(echo "$parse_context_hits" | grep -v "crates/aura-app/src/workflows/parse.rs" || true)
-  emit_hits "Direct ContextId parsing in workflows (use parse_context_id)" "$filtered_parse_context_hits"
+  emit_hits "Direct ContextId parsing in workflows (use workflows::parse::parse_context_id for normalized errors)" "$filtered_parse_context_hits"
 
   signal_access_hits=$(rg --no-heading "\\.(read|emit)\\(&\\*.*_SIGNAL" crates/aura-app/src/workflows -g "*.rs" || true)
   filtered_signal_access_hits=$(echo "$signal_access_hits" | grep -v "crates/aura-app/src/workflows/signals.rs" || true)
-  emit_hits "Direct signal access in workflows (use workflows::signals helpers)" "$filtered_signal_access_hits"
+  emit_hits "Direct signal access in workflows (use workflows::signals::{read_signal, emit_signal} + signal_defs::*_SIGNAL_NAME constants)" "$filtered_signal_access_hits"
 
   init_signals_hits=$(rg --no-heading "init_signals\\(" crates/aura-app/src -g "*.rs" || true)
   filtered_init_signals_hits=$(echo "$init_signals_hits" \
     | grep -v "crates/aura-app/src/core/app.rs" \
     | grep -v "init_signals_with_hooks" || true)
-  emit_hits "Direct init_signals calls (use init_signals_with_hooks)" "$filtered_init_signals_hits"
+  emit_hits "Direct init_signals calls (use AppCore::init_signals_with_hooks to attach workflow hooks)" "$filtered_init_signals_hits"
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_SERIALIZATION" = true ]; then

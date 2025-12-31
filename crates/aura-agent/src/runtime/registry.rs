@@ -2,6 +2,15 @@
 //!
 //! Provides dynamic registry for effect handlers, enabling runtime composition
 //! and protocol-specific handler selection in the authority-centric architecture.
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `std::sync::RwLock` (not tokio or parking_lot) because:
+//! 1. Lock poisoning detection is required - the code handles `PoisonError` explicitly
+//! 2. Operations are brief HashMap lookups/inserts (sub-millisecond)
+//! 3. No `.await` points inside lock scope
+
+#![allow(clippy::disallowed_types)]
 
 use aura_core::effects::ExecutionMode;
 use std::collections::HashMap;

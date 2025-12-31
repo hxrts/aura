@@ -63,10 +63,14 @@
 //! }
 //! ```
 
-pub mod budget;
+pub mod account;
 pub mod admin;
+pub mod authority;
+pub mod budget;
 pub mod amp;
+pub mod config;
 pub mod ceremonies;
+pub(crate) mod channel_ref;
 pub mod contacts;
 pub mod context;
 pub mod invitation;
@@ -82,8 +86,11 @@ pub mod recovery;
 pub mod recovery_cli;
 pub(crate) mod runtime;
 pub(crate) mod signals;
+pub(crate) mod state_helpers;
 pub mod settings;
 pub mod snapshot;
+pub(crate) mod snapshot_policy;
 pub mod steward;
 pub mod sync;
 pub mod system;
+pub(crate) mod time;

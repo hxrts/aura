@@ -92,17 +92,20 @@ impl<T: TerminalEffects> TuiRuntime<T> {
     }
 
     /// Set maximum iterations (for testing to prevent infinite loops).
+    #[must_use]
     pub fn with_max_iterations(mut self, max: usize) -> Self {
         self.max_iterations = Some(max);
         self
     }
 
     /// Get reference to the terminal handler.
+    #[must_use]
     pub fn terminal(&self) -> &T {
         &self.terminal
     }
 
     /// Get current state.
+    #[must_use]
     pub fn state(&self) -> &TuiState {
         &self.state
     }
@@ -113,6 +116,7 @@ impl<T: TerminalEffects> TuiRuntime<T> {
     }
 
     /// Get captured frames.
+    #[must_use]
     pub fn frames(&self) -> &[TerminalFrame] {
         &self.frames
     }
@@ -285,6 +289,7 @@ pub struct RuntimeSnapshot {
 
 impl<T: TerminalEffects> TuiRuntime<T> {
     /// Take a snapshot of current runtime state.
+    #[must_use]
     pub fn snapshot(&self) -> RuntimeSnapshot {
         RuntimeSnapshot {
             state: self.state.clone(),

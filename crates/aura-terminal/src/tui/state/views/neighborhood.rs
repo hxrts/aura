@@ -93,6 +93,7 @@ pub struct HomeCreateModalState {
 
 impl HomeCreateModalState {
     /// Create new modal state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -107,6 +108,7 @@ impl HomeCreateModalState {
     }
 
     /// Check if form can be submitted
+    #[must_use]
     pub fn can_submit(&self) -> bool {
         !self.name.trim().is_empty() && !self.creating
     }
@@ -158,11 +160,13 @@ impl HomeCreateModalState {
     }
 
     /// Get the name
+    #[must_use]
     pub fn get_name(&self) -> &str {
         &self.name
     }
 
     /// Get the description
+    #[must_use]
     pub fn get_description(&self) -> Option<&str> {
         if self.description.is_empty() {
             None

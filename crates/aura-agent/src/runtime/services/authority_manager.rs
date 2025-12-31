@@ -9,6 +9,15 @@
 //! - Manage active contexts per authority
 //! - Track authority status (Initializing, Active, Suspended, ShuttingDown, Terminated)
 //! - Support multi-authority coordination in the runtime
+//!
+//! # Blocking Lock Usage
+//!
+//! Uses `std::sync::RwLock` (not tokio or parking_lot) because:
+//! 1. Lock poisoning detection is required - the code handles `PoisonError` explicitly
+//! 2. Operations are brief HashMap lookups/inserts (sub-millisecond)
+//! 3. No `.await` points inside lock scope
+
+#![allow(clippy::disallowed_types)]
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;

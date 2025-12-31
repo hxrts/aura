@@ -19,6 +19,7 @@ use crate::tui::components::ListNavigation;
 use iocraft::prelude::*;
 
 /// Check if a navigation key was pressed (not released)
+#[must_use]
 pub fn is_nav_key_press(event: &TerminalEvent) -> Option<NavKey> {
     match event {
         TerminalEvent::Key(KeyEvent { code, kind, .. }) if *kind != KeyEventKind::Release => {
@@ -45,6 +46,7 @@ pub enum NavKey {
 
 impl NavKey {
     /// Create NavKey from KeyCode (arrows or hjkl)
+    #[must_use]
     pub fn from_key_code(code: iocraft::prelude::KeyCode) -> Option<Self> {
         use iocraft::prelude::KeyCode;
         match code {
@@ -57,16 +59,19 @@ impl NavKey {
     }
 
     /// Check if this is a vertical navigation key
+    #[must_use]
     pub fn is_vertical(&self) -> bool {
         matches!(self, NavKey::Up | NavKey::Down)
     }
 
     /// Check if this is a horizontal navigation key
+    #[must_use]
     pub fn is_horizontal(&self) -> bool {
         matches!(self, NavKey::Left | NavKey::Right)
     }
 
     /// Convert to ListNavigation for list navigation (vertical keys only)
+    #[must_use]
     pub fn to_list_nav(&self) -> Option<ListNavigation> {
         match self {
             NavKey::Up => Some(ListNavigation::Up),
@@ -86,6 +91,7 @@ pub enum TwoPanelFocus {
 
 impl TwoPanelFocus {
     /// Toggle between list and detail
+    #[must_use]
     pub fn toggle(&self) -> Self {
         match self {
             TwoPanelFocus::List => TwoPanelFocus::Detail,
@@ -94,6 +100,7 @@ impl TwoPanelFocus {
     }
 
     /// Move focus based on navigation key (with wrap-around)
+    #[must_use]
     pub fn navigate(&self, key: NavKey) -> Self {
         match key {
             // Left/Right both toggle (wrap around between two panels)
@@ -103,11 +110,13 @@ impl TwoPanelFocus {
     }
 
     /// Check if list panel is focused
+    #[must_use]
     pub fn is_list(self) -> bool {
         matches!(self, TwoPanelFocus::List)
     }
 
     /// Check if detail panel is focused
+    #[must_use]
     pub fn is_detail(self) -> bool {
         matches!(self, TwoPanelFocus::Detail)
     }
@@ -124,6 +133,7 @@ pub enum ThreePanelFocus {
 
 impl ThreePanelFocus {
     /// Cycle to next panel (left -> center -> right -> left)
+    #[must_use]
     pub fn next(&self) -> Self {
         match self {
             ThreePanelFocus::Left => ThreePanelFocus::Center,
@@ -133,6 +143,7 @@ impl ThreePanelFocus {
     }
 
     /// Cycle to previous panel
+    #[must_use]
     pub fn prev(&self) -> Self {
         match self {
             ThreePanelFocus::Left => ThreePanelFocus::Right,
@@ -142,6 +153,7 @@ impl ThreePanelFocus {
     }
 
     /// Move focus based on navigation key
+    #[must_use]
     pub fn navigate(&self, key: NavKey) -> Self {
         match key {
             NavKey::Left => self.prev(),
@@ -196,6 +208,7 @@ pub struct TwoPanelListNav {
 
 impl TwoPanelListNav {
     /// Create a new two-panel navigation state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -224,11 +237,13 @@ impl TwoPanelListNav {
     }
 
     /// Check if list panel is focused
+    #[must_use]
     pub fn is_list_focused(&self) -> bool {
         matches!(self.focus, TwoPanelFocus::List)
     }
 
     /// Check if detail panel is focused
+    #[must_use]
     pub fn is_detail_focused(&self) -> bool {
         matches!(self.focus, TwoPanelFocus::Detail)
     }
@@ -245,6 +260,7 @@ impl TwoPanelListNav {
     }
 
     /// Get current selected index, clamped to valid range
+    #[must_use]
     pub fn current_index(&self) -> usize {
         if self.count == 0 {
             0
@@ -261,6 +277,7 @@ impl TwoPanelListNav {
 }
 
 /// Navigate within a list (vertical navigation) with wrap-around
+#[must_use]
 pub fn navigate_list(current: usize, count: usize, key: NavKey) -> usize {
     if count == 0 {
         return 0;
@@ -285,6 +302,7 @@ pub fn navigate_list(current: usize, count: usize, key: NavKey) -> usize {
 }
 
 /// Navigate within a 2D grid with wrap-around
+#[must_use]
 pub fn navigate_grid(current: usize, cols: usize, total: usize, key: NavKey) -> usize {
     if total == 0 || cols == 0 {
         return 0;
@@ -350,6 +368,7 @@ pub struct ListNav {
 
 impl ListNav {
     /// Create a new list navigation state
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -383,6 +402,7 @@ impl ListNav {
     }
 
     /// Get the current index, clamped to valid range
+    #[must_use]
     pub fn current(&self) -> usize {
         if self.count == 0 {
             0
@@ -392,6 +412,7 @@ impl ListNav {
     }
 
     /// Check if there are any items
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.count == 0
     }
@@ -414,6 +435,7 @@ impl ListNav {
     /// Get the visible range of items for a given viewport height
     ///
     /// Returns `(start, end)` where `start..end` are the visible indices.
+    #[must_use]
     pub fn visible_range(&self, viewport_height: usize) -> (usize, usize) {
         if self.count == 0 || viewport_height == 0 {
             return (0, 0);
@@ -476,6 +498,7 @@ pub struct GridNav {
 
 impl GridNav {
     /// Create a new grid navigation state
+    #[must_use]
     pub fn new(cols: usize) -> Self {
         Self {
             index: 0,
@@ -510,6 +533,7 @@ impl GridNav {
     }
 
     /// Get current row
+    #[must_use]
     pub fn row(&self) -> usize {
         if self.cols == 0 {
             0
@@ -519,6 +543,7 @@ impl GridNav {
     }
 
     /// Get current column
+    #[must_use]
     pub fn col(&self) -> usize {
         if self.cols == 0 {
             0
@@ -544,6 +569,7 @@ impl GridNav {
     }
 
     /// Get the current index
+    #[must_use]
     pub fn current(&self) -> usize {
         if self.count == 0 {
             0
@@ -580,6 +606,7 @@ pub struct PanelNav {
 
 impl PanelNav {
     /// Create a new panel navigation with specified panel count
+    #[must_use]
     pub fn new(count: usize) -> Self {
         Self { index: 0, count }
     }
@@ -615,16 +642,19 @@ impl PanelNav {
     }
 
     /// Get current panel index
+    #[must_use]
     pub fn current(&self) -> usize {
         self.index
     }
 
     /// Check if at first panel
+    #[must_use]
     pub fn is_first(&self) -> bool {
         self.index == 0
     }
 
     /// Check if at last panel
+    #[must_use]
     pub fn is_last(&self) -> bool {
         self.count > 0 && self.index == self.count - 1
     }
@@ -650,6 +680,7 @@ pub struct ScreenNav {
 
 impl ScreenNav {
     /// Create a new screen navigation with specified panel count
+    #[must_use]
     pub fn new(panel_count: usize) -> Self {
         Self {
             panel: PanelNav::new(panel_count),
@@ -675,11 +706,13 @@ impl ScreenNav {
     }
 
     /// Get current panel index
+    #[must_use]
     pub fn current_panel(&self) -> usize {
         self.panel.current()
     }
 
     /// Get current list selection in current panel
+    #[must_use]
     pub fn current_selection(&self) -> usize {
         self.lists
             .get(self.panel.index)
@@ -688,6 +721,7 @@ impl ScreenNav {
     }
 
     /// Get list navigation for current panel
+    #[must_use]
     pub fn current_list(&self) -> Option<&ListNav> {
         self.lists.get(self.panel.index)
     }

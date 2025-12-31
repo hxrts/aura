@@ -105,6 +105,7 @@ impl CeremonyTracker {
     /// * `total_n` - Total number of participants
     /// * `participants` - Participants invited
     /// * `new_epoch` - Epoch for the new keys
+    #[allow(clippy::too_many_arguments)] // Ceremony registration requires all these distinct parameters
     pub async fn register(
         &self,
         ceremony_id: String,
@@ -360,6 +361,36 @@ impl CeremonyTracker {
 impl Default for CeremonyTracker {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// =============================================================================
+// RuntimeService Implementation
+// =============================================================================
+
+use super::traits::{RuntimeService, ServiceError, ServiceHealth};
+use super::RuntimeTaskRegistry;
+use async_trait::async_trait;
+
+#[async_trait]
+impl RuntimeService for CeremonyTracker {
+    fn name(&self) -> &'static str {
+        "ceremony_tracker"
+    }
+
+    async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
+        // CeremonyTracker is stateless and always ready
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<(), ServiceError> {
+        // Clean up any tracked ceremonies
+        self.cleanup_timed_out().await;
+        Ok(())
+    }
+
+    fn health(&self) -> ServiceHealth {
+        ServiceHealth::Healthy
     }
 }
 

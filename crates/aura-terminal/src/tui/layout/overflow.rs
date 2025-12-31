@@ -27,6 +27,7 @@ impl<R: LayoutRegion> Default for ContentBuilder<R> {
 
 impl<R: LayoutRegion> ContentBuilder<R> {
     /// Create a new content builder for a region
+    #[must_use]
     pub fn new() -> Self {
         Self {
             elements: Vec::new(),
@@ -36,6 +37,7 @@ impl<R: LayoutRegion> ContentBuilder<R> {
     }
 
     /// Maximum height available for this region
+    #[must_use]
     pub const fn max_height() -> u16 {
         R::HEIGHT
     }
@@ -44,6 +46,7 @@ impl<R: LayoutRegion> ContentBuilder<R> {
     ///
     /// In debug builds, panics if this would cause overflow.
     /// In release builds, silently ignores elements that would overflow.
+    #[must_use]
     pub fn add(mut self, element: AnyElement<'static>, height: u16) -> Self {
         let new_height = self.height_used + height;
 
@@ -68,6 +71,7 @@ impl<R: LayoutRegion> ContentBuilder<R> {
     /// Add an element that should fill remaining space.
     ///
     /// The element will be given flex_grow: 1.0 to fill remaining height.
+    #[must_use]
     pub fn fill(mut self, element: AnyElement<'static>) -> Self {
         let remaining = self.remaining();
         if remaining > 0 {
@@ -78,16 +82,19 @@ impl<R: LayoutRegion> ContentBuilder<R> {
     }
 
     /// Remaining height available in this region
+    #[must_use]
     pub fn remaining(&self) -> u16 {
         R::HEIGHT.saturating_sub(self.height_used)
     }
 
     /// Height already used
+    #[must_use]
     pub fn height_used(&self) -> u16 {
         self.height_used
     }
 
     /// Check if there's room for more content
+    #[must_use]
     pub fn has_remaining(&self) -> bool {
         self.remaining() > 0
     }
@@ -95,6 +102,7 @@ impl<R: LayoutRegion> ContentBuilder<R> {
     /// Build into bounded content.
     ///
     /// Wraps all elements in a vertical View with fixed dimensions.
+    #[must_use]
     pub fn build(self) -> BoundedContent<R> {
         let height_used = self.height_used;
 
@@ -132,6 +140,7 @@ pub type ToastBuilder = FooterBuilder;
 // Convenience constructors
 impl NavBuilder {
     /// Create a nav bar builder (3 rows max)
+    #[must_use]
     pub fn nav() -> Self {
         Self::new()
     }
@@ -139,11 +148,13 @@ impl NavBuilder {
 
 impl MiddleBuilder {
     /// Create a middle content builder (25 rows max)
+    #[must_use]
     pub fn middle() -> Self {
         Self::new()
     }
 
     /// Create a modal content builder (25 rows max, same as middle)
+    #[must_use]
     pub fn modal() -> Self {
         Self::new()
     }
@@ -151,11 +162,13 @@ impl MiddleBuilder {
 
 impl FooterBuilder {
     /// Create a footer builder (3 rows max)
+    #[must_use]
     pub fn footer() -> Self {
         Self::new()
     }
 
     /// Create a toast builder (3 rows max, same as footer)
+    #[must_use]
     pub fn toast() -> Self {
         Self::new()
     }
