@@ -331,7 +331,7 @@ mod tests {
         // Set recovery state with active recovery process
         let state = RecoveryState {
             guardians: vec![Guardian {
-                id: AuthorityId::default(),
+                id: AuthorityId::new_from_entropy([1u8; 32]),
                 name: "Alice".to_string(),
                 status: GuardianStatus::Active,
                 added_at: 1000,
@@ -341,7 +341,7 @@ mod tests {
             guardian_count: 3,
             active_recovery: Some(RecoveryProcess {
                 id: "ceremony-123".to_string(),
-                account_id: AuthorityId::default(),
+                account_id: AuthorityId::new_from_entropy([1u8; 32]),
                 status: RecoveryProcessStatus::WaitingForApprovals,
                 approvals_received: 0,
                 approvals_required: 2,

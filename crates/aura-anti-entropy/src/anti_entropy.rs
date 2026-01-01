@@ -468,22 +468,21 @@ impl AntiEntropyHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{TreeOp, TreeOpKind};
-    use aura_journal::{LeafId, LeafNode, LeafRole, NodeIndex};
+    use aura_core::{Epoch, TreeOp, TreeOpKind};
+    use aura_journal::{LeafId, LeafNode, NodeIndex};
 
     fn create_test_op(commitment: Hash32) -> AttestedOp {
         AttestedOp {
             op: TreeOp {
                 parent_commitment: commitment.0,
-                parent_epoch: 1,
+                parent_epoch: Epoch::new(1),
                 op: TreeOpKind::AddLeaf {
-                    leaf: LeafNode {
-                        leaf_id: LeafId(1),
-                        device_id: aura_core::identifiers::DeviceId::deterministic_test_id(),
-                        role: LeafRole::Device,
-                        public_key: vec![1, 2, 3],
-                        meta: vec![],
-                    },
+                    leaf: LeafNode::new_device(
+                        LeafId(1),
+                        aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]),
+                        vec![1, 2, 3],
+                    )
+                    .expect("valid leaf"),
                     under: NodeIndex(0),
                 },
                 version: 1,

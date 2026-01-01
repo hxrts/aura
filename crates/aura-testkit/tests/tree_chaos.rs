@@ -13,7 +13,8 @@
 
 use aura_core::{
     identifiers::DeviceId,
-    tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind},
+    tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOp, TreeOpKind},
+    Epoch,
 };
 use std::collections::BTreeMap;
 
@@ -27,13 +28,12 @@ fn create_test_op(epoch: u64, leaf_id: u32, op_type: &str) -> AttestedOp {
 
     let op = match op_type {
         "add_leaf" => TreeOpKind::AddLeaf {
-            leaf: LeafNode {
-                leaf_id: LeafId(leaf_id),
-                device_id: DeviceId::new(),
-                role: LeafRole::Device,
-                public_key: vec![0u8; 32],
-                meta: vec![],
-            },
+            leaf: LeafNode::new_device(
+                LeafId(leaf_id),
+                DeviceId::new_from_entropy([3u8; 32]),
+                vec![0u8; 32],
+            )
+            .expect("valid leaf"),
             under: NodeIndex(0),
         },
         "remove_leaf" => TreeOpKind::RemoveLeaf {
@@ -52,7 +52,7 @@ fn create_test_op(epoch: u64, leaf_id: u32, op_type: &str) -> AttestedOp {
 
     AttestedOp {
         op: TreeOp {
-            parent_epoch: epoch,
+            parent_epoch: Epoch::new(epoch),
             parent_commitment,
             op,
             version: 1,
@@ -98,16 +98,16 @@ fn test_malicious_signature_rejected() {
 
 #[test]
 fn test_invalid_parent_binding_rejected() {
-    let current_epoch = 5;
+    let current_epoch = Epoch::new(5);
     let current_commitment = [0x05; 32];
 
     // Create operation with stale parent binding
     let mut stale_op = create_test_op(3, 10, "add_leaf"); // References epoch 3
-    stale_op.op.parent_epoch = 3; // Old epoch
+    stale_op.op.parent_epoch = Epoch::new(3); // Old epoch
     stale_op.op.parent_commitment = [0x03; 32]; // Old commitment
 
     // Parent binding verification should reject this
-    assert_eq!(stale_op.op.parent_epoch, 3);
+    assert_eq!(stale_op.op.parent_epoch, Epoch::new(3));
     assert_ne!(stale_op.op.parent_epoch, current_epoch);
     assert_ne!(stale_op.op.parent_commitment, current_commitment);
 
@@ -253,7 +253,7 @@ fn test_concurrent_conflicting_operations_resolve() {
     };
 
     // Both operations have same parent (concurrent at epoch 10)
-    let parent_epoch = 10;
+    let parent_epoch = Epoch::new(10);
     let parent_commitment = [0x0A; 32];
 
     let attested_op1 = AttestedOp {
@@ -334,16 +334,15 @@ fn test_mixed_version_compatibility() {
     // Version 1 operation
     let v1_op = AttestedOp {
         op: TreeOp {
-            parent_epoch: 1,
+            parent_epoch: Epoch::new(1),
             parent_commitment: [0x01; 32],
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode {
-                    leaf_id: LeafId(1),
-                    device_id: DeviceId::new(),
-                    role: LeafRole::Device,
-                    public_key: vec![0u8; 32],
-                    meta: vec![],
-                },
+                leaf: LeafNode::new_device(
+                    LeafId(1),
+                    DeviceId::new_from_entropy([3u8; 32]),
+                    vec![0u8; 32],
+                )
+                .expect("valid leaf"),
                 under: NodeIndex(0),
             },
             version: 1,
@@ -355,16 +354,15 @@ fn test_mixed_version_compatibility() {
     // Version 2 operation (hypothetical future version)
     let v2_op = AttestedOp {
         op: TreeOp {
-            parent_epoch: 1,
+            parent_epoch: Epoch::new(1),
             parent_commitment: [0x01; 32],
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode {
-                    leaf_id: LeafId(2),
-                    device_id: DeviceId::new(),
-                    role: LeafRole::Device,
-                    public_key: vec![0u8; 32],
-                    meta: vec![],
-                },
+                leaf: LeafNode::new_device(
+                    LeafId(2),
+                    DeviceId::new_from_entropy([3u8; 32]),
+                    vec![0u8; 32],
+                )
+                .expect("valid leaf"),
                 under: NodeIndex(0),
             },
             version: 2, // Future version
@@ -396,7 +394,7 @@ fn test_snapshot_forward_compatibility() {
 
     // Current version snapshot
     let v1_snapshot = Snapshot {
-        epoch: 100,
+        epoch: Epoch::new(100),
         commitment: [0x64; 32],
         roster: vec![LeafId(1), LeafId(2), LeafId(3)],
         policies: BTreeMap::new(),
@@ -407,7 +405,7 @@ fn test_snapshot_forward_compatibility() {
 
     // Future version snapshot
     let v2_snapshot = Snapshot {
-        epoch: 100,
+        epoch: Epoch::new(100),
         commitment: [0x64; 32],
         roster: vec![LeafId(1), LeafId(2), LeafId(3)],
         policies: BTreeMap::new(),
@@ -459,7 +457,7 @@ fn test_byzantine_quorum_threshold() {
     // Operation with insufficient signatures should be rejected
     let insufficient_op = AttestedOp {
         op: TreeOp {
-            parent_epoch: 1,
+            parent_epoch: Epoch::new(1),
             parent_commitment: [0x01; 32],
             op: TreeOpKind::RotateEpoch {
                 affected: vec![NodeIndex(0)],
@@ -489,8 +487,8 @@ fn test_byzantine_quorum_threshold() {
 fn test_replay_attack_prevention() {
     // Scenario: Attacker tries to replay old operation in new epoch
 
-    let old_epoch = 5;
-    let current_epoch = 10;
+    let old_epoch = Epoch::new(5);
+    let current_epoch = Epoch::new(10);
 
     // Valid operation at epoch 5
     let old_op = AttestedOp {
@@ -498,13 +496,12 @@ fn test_replay_attack_prevention() {
             parent_epoch: old_epoch,
             parent_commitment: [0x05; 32],
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode {
-                    leaf_id: LeafId(1),
-                    device_id: DeviceId::new(),
-                    role: LeafRole::Device,
-                    public_key: vec![0u8; 32],
-                    meta: vec![],
-                },
+                leaf: LeafNode::new_device(
+                    LeafId(1),
+                    DeviceId::new_from_entropy([3u8; 32]),
+                    vec![0u8; 32],
+                )
+                .expect("valid leaf"),
                 under: NodeIndex(0),
             },
             version: 1,

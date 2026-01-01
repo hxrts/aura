@@ -15,7 +15,7 @@ use aura_testkit::stateful_effects::random::MockRandomHandler;
 /// Test basic threshold policy setup
 #[tokio::test]
 async fn test_threshold_policy_basic() -> Result<()> {
-    let test_id = AuthorityId::new();
+    let test_id = AuthorityId::new_from_entropy([1u8; 32]);
     let mut manager = AuthorityManager::new(format!("/tmp/aura-threshold-test-{}", test_id));
     let random = MockRandomHandler::new_with_seed(45);
 
@@ -41,7 +41,7 @@ async fn test_threshold_policy_basic() -> Result<()> {
 /// Test threshold validation edge cases
 #[tokio::test]
 async fn test_threshold_validation() -> Result<()> {
-    let test_id = AuthorityId::new();
+    let test_id = AuthorityId::new_from_entropy([1u8; 32]);
     let mut manager =
         AuthorityManager::new(format!("/tmp/aura-threshold-validation-test-{}", test_id));
     let random = MockRandomHandler::new_with_seed(46);
@@ -80,7 +80,7 @@ async fn test_threshold_validation() -> Result<()> {
 /// Test authority operations with threshold policy
 #[tokio::test]
 async fn test_authority_with_threshold() -> Result<()> {
-    let test_id = AuthorityId::new();
+    let test_id = AuthorityId::new_from_entropy([1u8; 32]);
     let mut manager = AuthorityManager::new(format!("/tmp/aura-threshold-ops-test-{}", test_id));
     let random = MockRandomHandler::new_with_seed(47);
 

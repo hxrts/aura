@@ -59,7 +59,7 @@ pub enum SecurityLevel {
 impl Default for SecurityContext {
     fn default() -> Self {
         Self {
-            authority_id: AuthorityId::default(),
+            authority_id: AuthorityId::new_from_entropy([1u8; 32]),
             security_level: SecurityLevel::Normal,
             hardware_secure: false,
         }

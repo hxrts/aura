@@ -111,12 +111,12 @@ pub fn compute_binding_message(
     h.update(b"TREE_OP_VERIFY");
 
     // Parent binding (replay prevention)
-    h.update(&attested.op.parent_epoch.to_le_bytes());
+    h.update(&u64::from(attested.op.parent_epoch).to_le_bytes());
     h.update(&attested.op.parent_commitment);
     h.update(&attested.op.version.to_le_bytes());
 
     // Current epoch
-    h.update(&current_epoch.to_le_bytes());
+    h.update(&u64::from(current_epoch).to_le_bytes());
 
     // Group public key (prevents key substitution)
     h.update(group_public_key);
@@ -362,21 +362,20 @@ mod tests {
     use crate::tree::{LeafId, LeafNode, LeafRole, TreeOp, TreeOpKind};
 
     fn test_signing_key() -> BranchSigningKey {
-        BranchSigningKey::new([0xAA; 32], 1)
+        BranchSigningKey::new([0xAA; 32], Epoch::new(1))
     }
 
     fn test_attested_op() -> AttestedOp {
-        let leaf = LeafNode {
-            leaf_id: LeafId(1),
-            device_id: crate::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
-            role: LeafRole::Device,
-            public_key: vec![0u8; 32],
-            meta: vec![],
-        };
+        let leaf = LeafNode::new_device(
+            LeafId(1),
+            crate::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            vec![0u8; 32],
+        )
+        .expect("leaf should build");
 
         AttestedOp {
             op: TreeOp {
-                parent_epoch: 1,
+                parent_epoch: Epoch::new(1),
                 parent_commitment: [0u8; 32],
                 op: TreeOpKind::AddLeaf {
                     leaf,
@@ -394,8 +393,8 @@ mod tests {
         let attested = test_attested_op();
         let group_key = [0xAA; 32];
 
-        let msg1 = compute_binding_message(&attested, 1, &group_key);
-        let msg2 = compute_binding_message(&attested, 1, &group_key);
+        let msg1 = compute_binding_message(&attested, Epoch::new(1), &group_key);
+        let msg2 = compute_binding_message(&attested, Epoch::new(1), &group_key);
 
         assert_eq!(msg1, msg2, "Binding message should be deterministic");
     }
@@ -406,8 +405,8 @@ mod tests {
         let key1 = [0xAA; 32];
         let key2 = [0xBB; 32];
 
-        let msg1 = compute_binding_message(&attested, 1, &key1);
-        let msg2 = compute_binding_message(&attested, 1, &key2);
+        let msg1 = compute_binding_message(&attested, Epoch::new(1), &key1);
+        let msg2 = compute_binding_message(&attested, Epoch::new(1), &key2);
 
         assert_ne!(
             msg1, msg2,
@@ -420,8 +419,8 @@ mod tests {
         let attested = test_attested_op();
         let group_key = [0xAA; 32];
 
-        let msg1 = compute_binding_message(&attested, 1, &group_key);
-        let msg2 = compute_binding_message(&attested, 2, &group_key);
+        let msg1 = compute_binding_message(&attested, Epoch::new(1), &group_key);
+        let msg2 = compute_binding_message(&attested, Epoch::new(2), &group_key);
 
         assert_ne!(
             msg1, msg2,
@@ -438,7 +437,7 @@ mod tests {
         };
 
         let key = test_signing_key();
-        let result = verify_attested_op(&attested, &key, 2, 1); // Requires 2
+        let result = verify_attested_op(&attested, &key, 2, Epoch::new(1)); // Requires 2
 
         assert!(matches!(
             result,
@@ -451,23 +450,22 @@ mod tests {
 
     #[test]
     fn test_signing_witness_from_key() {
-        let key = BranchSigningKey::new([0xCC; 32], 5);
+        let key = BranchSigningKey::new([0xCC; 32], Epoch::new(5));
         let witness = SigningWitness::from_signing_key(&key, 2);
 
         assert_eq!(witness.group_public_key, [0xCC; 32]);
         assert_eq!(witness.threshold, 2);
-        assert_eq!(witness.key_epoch, 5);
+        assert_eq!(witness.key_epoch, Epoch::new(5));
     }
 
     #[test]
     fn test_extract_target_node_add_leaf() {
-        let leaf = LeafNode {
-            leaf_id: LeafId(1),
-            device_id: crate::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
-            role: LeafRole::Device,
-            public_key: vec![],
-            meta: vec![],
-        };
+        let leaf = LeafNode::new_device(
+            LeafId(1),
+            crate::DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            vec![],
+        )
+        .expect("leaf should build");
 
         let op = TreeOpKind::AddLeaf {
             leaf,

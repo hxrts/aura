@@ -14,9 +14,9 @@ use proptest::prelude::*;
 // Re-export proptest for convenience
 pub use proptest;
 
-use aura_core::{AccountId, DeviceId, SessionId};
+use aura_core::{AccountId, DeviceId, Epoch, SessionId};
 use aura_journal::commitment_tree::{
-    AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
+    AttestedOp, LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind,
 };
 use aura_journal::algebra::OpLog;
 use ed25519_dalek::{SigningKey, VerifyingKey};
@@ -259,21 +259,21 @@ pub fn arb_threshold_config() -> impl Strategy<Value = (u16, u16)> {
 /// use aura_testkit::strategies::create_test_tree_op;
 ///
 /// let op = create_test_tree_op([0u8; 32], 1, 42);
-/// assert_eq!(op.op.parent_epoch, 1);
+/// assert_eq!(op.op.parent_epoch, Epoch::new(1));
 /// ```
 pub fn create_test_tree_op(commitment: [u8; 32], epoch: u64, leaf_id: u64) -> AttestedOp {
     AttestedOp {
         op: TreeOp {
             parent_commitment: commitment,
-            parent_epoch: epoch,
+            parent_epoch: Epoch::new(epoch),
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode {
-                    leaf_id: LeafId(
+                leaf: LeafNode::new_device(
+                    LeafId(
                         leaf_id
                             .try_into()
                             .unwrap_or_else(|e| panic!("Invalid leaf_id: {}", e)),
                     ),
-                    device_id: {
+                    {
                         use aura_core::hash::hash;
                         use uuid::Uuid;
                         let hash_input = format!("device-{}", leaf_id);
@@ -281,10 +281,9 @@ pub fn create_test_tree_op(commitment: [u8; 32], epoch: u64, leaf_id: u64) -> At
                         let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
                         DeviceId(Uuid::from_bytes(uuid_bytes))
                     },
-                    role: LeafRole::Device,
-                    public_key: vec![1, 2, 3],
-                    meta: vec![],
-                },
+                    vec![1, 2, 3],
+                )
+                .expect("valid leaf"),
                 under: NodeIndex(0),
             },
             version: 1,

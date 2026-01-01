@@ -1224,6 +1224,7 @@ mod tests {
     use super::*;
     use aura_core::threshold::SigningContext;
     use aura_core::tree::{TreeOp, TreeOpKind};
+    use aura_core::Epoch;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -1231,7 +1232,7 @@ mod tests {
 
     fn test_tree_op() -> TreeOp {
         TreeOp {
-            parent_epoch: 0,
+            parent_epoch: Epoch::initial(),
             parent_commitment: [0u8; 32],
             op: TreeOpKind::RotateEpoch { affected: vec![] },
             version: 1,

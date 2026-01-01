@@ -18,7 +18,8 @@ use super::{reduction::ReductionError, TreeState};
 use aura_core::crypto::tree_signing::tree_op_binding_message;
 use aura_core::hash;
 use aura_core::{
-    commit_leaf, AttestedOp, CryptoEffects, Hash32, LeafId, NodeIndex, Policy, TreeOp, TreeOpKind,
+    commit_leaf, AttestedOp, CryptoEffects, Epoch, Hash32, LeafId, NodeIndex, Policy, TreeOp,
+    TreeOpKind,
 };
 // Removed unused BTreeMap import
 
@@ -33,7 +34,7 @@ pub enum ApplicationError {
     #[error("Parent binding mismatch: expected epoch {expected_epoch}, commitment {expected_commitment:?}")]
     ParentBindingMismatch {
         /// The expected epoch value
-        expected_epoch: u64,
+        expected_epoch: Epoch,
         /// The expected commitment hash
         expected_commitment: Hash32,
     },
@@ -353,10 +354,10 @@ async fn verify_threshold_signature(
 /// Parent binding prevents replay attacks and ensures lineage.
 /// Operations must reference the current (epoch, commitment) to be valid.
 ///
-/// Genesis operations (parent_epoch == 0) are exempt from this check.
+/// Genesis operations (parent_epoch == Epoch::initial()) are exempt from this check.
 fn verify_parent_binding(op: &TreeOp, state: &TreeState) -> ApplicationResult<()> {
     // Genesis operations don't have a parent
-    if op.parent_epoch == 0 {
+    if op.parent_epoch == Epoch::initial() {
         return Ok(());
     }
 
@@ -513,7 +514,7 @@ fn recompute_commitments(
     // Legacy full recomputation (kept for fallback)
     fn recompute_full_tree(state: &mut TreeState) -> ApplicationResult<()> {
         let mut h = hash::hasher();
-        h.update(&state.current_epoch().to_le_bytes());
+        h.update(&u64::from(state.current_epoch()).to_le_bytes());
 
         // Hash all leaf commitments
         for (leaf_id, leaf_commitment) in state.iter_leaf_commitments() {
@@ -608,7 +609,7 @@ fn recompute_commitments(
     // Helper function to recompute root commitment from updated tree
     fn recompute_root_commitment_from_tree(state: &mut TreeState) -> ApplicationResult<()> {
         let mut h = hash::hasher();
-        h.update(&state.current_epoch().to_le_bytes());
+        h.update(&u64::from(state.current_epoch()).to_le_bytes());
 
         // Hash all updated branch commitments in deterministic order
         let mut branch_nodes: Vec<_> = state.list_branch_indices();
@@ -718,7 +719,7 @@ mod tests {
     fn test_verify_parent_binding_genesis() {
         let state = TreeState::new();
         let op = TreeOp {
-            parent_epoch: 0,
+            parent_epoch: Epoch::initial(),
             parent_commitment: [0u8; 32],
             op: TreeOpKind::RotateEpoch {
                 affected: vec![NodeIndex(0)],
@@ -733,10 +734,10 @@ mod tests {
     #[test]
     fn test_verify_parent_binding_mismatch() {
         let mut state = TreeState::new();
-        state.set_epoch(5);
+        state.set_epoch(Epoch::new(5));
 
         let op = TreeOp {
-            parent_epoch: 3, // Wrong epoch
+            parent_epoch: Epoch::new(3), // Wrong epoch
             parent_commitment: state.current_commitment(),
             op: TreeOpKind::RotateEpoch {
                 affected: vec![NodeIndex(0)],
@@ -758,7 +759,8 @@ mod tests {
                 LeafId(1),
                 aura_core::DeviceId(uuid::Uuid::from_bytes([6u8; 16])),
                 vec![0u8; 32]
-            ),
+            )
+            .expect("valid leaf"),
             under: NodeIndex(0)
         }));
     }
@@ -767,10 +769,11 @@ mod tests {
     fn test_apply_operation_add_leaf() {
         let mut state = TreeState::new();
         let device_id = aura_core::DeviceId(uuid::Uuid::from_bytes([7u8; 16]));
-        let leaf = LeafNode::new_device(LeafId(1), device_id, vec![0u8; 32]);
+        let leaf =
+            LeafNode::new_device(LeafId(1), device_id, vec![0u8; 32]).expect("valid leaf");
 
         let op = TreeOp {
-            parent_epoch: 0,
+            parent_epoch: Epoch::initial(),
             parent_commitment: [0u8; 32],
             op: TreeOpKind::AddLeaf {
                 leaf,

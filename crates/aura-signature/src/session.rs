@@ -205,7 +205,7 @@ mod tests {
 
         // Use deterministic seed bytes for reproducible tests
         let seed: [u8; 32] = [42u8; 32];
-        let signing_key = Ed25519SigningKey::from_bytes(&seed);
+        let signing_key = Ed25519SigningKey::from_bytes(seed);
         let verifying_key = signing_key.verifying_key().unwrap();
 
         // Sign the ticket using aura-core wrapper
@@ -228,7 +228,7 @@ mod tests {
 
         // Use different seed for this test
         let seed: [u8; 32] = [137u8; 32];
-        let signing_key = Ed25519SigningKey::from_bytes(&seed);
+        let signing_key = Ed25519SigningKey::from_bytes(seed);
         let verifying_key = signing_key.verifying_key().unwrap();
 
         // Sign the ticket using aura-core wrapper

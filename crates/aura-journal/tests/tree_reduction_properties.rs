@@ -14,10 +14,10 @@
 //!
 //! See docs/123_commitment_tree.md - Deterministic Reduction section
 
-use aura_core::{TreeOp, TreeOpKind};
+use aura_core::{Epoch, TreeOp, TreeOpKind};
 use aura_journal::algebra::{JoinSemilattice, OpLog};
 use aura_journal::commitment_tree::reduce;
-use aura_journal::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex};
+use aura_journal::{AttestedOp, LeafId, LeafNode, NodeIndex};
 use proptest::prelude::*;
 
 /// Create a test operation with specific parameters
@@ -61,15 +61,14 @@ fn create_op(epoch: u64, commitment: [u8; 32], leaf_id: u64) -> AttestedOp {
     AttestedOp {
         op: TreeOp {
             parent_commitment: commitment,
-            parent_epoch: epoch,
+            parent_epoch: Epoch::new(epoch),
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode {
-                    leaf_id: LeafId(leaf_id as u32),
-                    device_id: aura_core::DeviceId::from_bytes(device_bytes),
-                    role: LeafRole::Device,
-                    public_key: vec![1, 2, 3],
-                    meta: vec![],
-                },
+                leaf: LeafNode::new_device(
+                    LeafId(leaf_id as u32),
+                    aura_core::DeviceId::from_bytes(device_bytes),
+                    vec![1, 2, 3],
+                )
+                .expect("valid leaf"),
                 under: NodeIndex(0),
             },
             version: 1,

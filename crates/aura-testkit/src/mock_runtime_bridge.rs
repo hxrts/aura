@@ -89,12 +89,12 @@ impl std::fmt::Debug for MockRuntimeBridge {
 impl MockRuntimeBridge {
     /// Create a new mock runtime bridge with a random authority
     pub fn new() -> Self {
-        Self::with_authority(AuthorityId::new())
+        Self::with_authority(AuthorityId::new_from_entropy([1u8; 32]))
     }
 
     /// Create a new mock runtime bridge with a specific authority
     pub fn with_authority(authority_id: AuthorityId) -> Self {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         Self {
             authority_id,
             device_id,
@@ -572,7 +572,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             ceremony_id: self.next_id(),
             enrollment_code: format!("aura-enroll:mock:{device_name}"),
             pending_epoch: Epoch::new(1),
-            device_id: DeviceId::new(),
+            device_id: DeviceId::new_from_entropy([3u8; 32]),
         })
     }
 
@@ -1051,7 +1051,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_invitation_flow() {
         let bridge = MockRuntimeBridge::new();
-        let receiver = AuthorityId::new();
+        let receiver = AuthorityId::new_from_entropy([1u8; 32]);
 
         // Create invitation
         let invite = bridge

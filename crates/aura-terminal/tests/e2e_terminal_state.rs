@@ -3677,6 +3677,7 @@ async fn test_journal_save_load_roundtrip() {
 #[tokio::test]
 async fn test_journal_compaction_primitives() {
     use aura_core::tree::{AttestedOp, NodeIndex, TreeHash32, TreeOp, TreeOpKind};
+    use aura_core::Epoch;
     use aura_journal::algebra::OpLog;
 
     println!("\n=== Journal Compaction Primitives E2E Test ===\n");
@@ -3693,7 +3694,7 @@ async fn test_journal_compaction_primitives() {
 
         // Create TreeOp with parent_epoch set
         let tree_op = TreeOp {
-            parent_epoch: epoch,
+            parent_epoch: Epoch::new(epoch),
             parent_commitment: TreeHash32::default(),
             op: op_kind,
             version: 1,
@@ -3714,11 +3715,11 @@ async fn test_journal_compaction_primitives() {
     assert_eq!(initial_count, 10, "Should have 10 operations");
 
     // Test compact_before_epoch (removes operations before given epoch)
-    let epoch = 5u64; // Compact operations before epoch 5
+    let epoch = Epoch::new(5); // Compact operations before epoch 5
     let removed = op_log.compact_before_epoch(epoch);
     println!(
         "  ✓ compact_before_epoch({}) removed {} ops, {} remain",
-        epoch,
+        epoch.value(),
         removed,
         op_log.len()
     );

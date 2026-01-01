@@ -29,6 +29,7 @@ use crate::effects::tree::{Cut, Partial, ProposalId, Snapshot, TreeEffects};
 use async_trait::async_trait;
 use aura_core::effects::storage::StorageEffects;
 use aura_core::tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind};
+use aura_core::Epoch;
 use aura_core::{hash, AuraError, Hash32};
 use aura_journal::commitment_tree::reduce;
 use aura_journal::commitment_tree::storage as tree_storage;
@@ -200,7 +201,7 @@ impl TreeEffects for PersistentTreeHandler {
         Ok(Hash32(state.root_commitment))
     }
 
-    async fn get_current_epoch(&self) -> Result<u64, AuraError> {
+    async fn get_current_epoch(&self) -> Result<Epoch, AuraError> {
         let state = self.reduce_state().await?;
         Ok(state.epoch)
     }
@@ -305,7 +306,7 @@ impl TreeEffects for PersistentTreeHandler {
         let signature_share = proposal_id.0 .0.to_vec();
         Ok(Partial {
             signature_share,
-            participant_id: aura_core::identifiers::DeviceId::deterministic_test_id(),
+            participant_id: aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]),
         })
     }
 

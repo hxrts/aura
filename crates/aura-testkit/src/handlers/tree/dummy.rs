@@ -34,7 +34,7 @@ impl TreeOperationEffects for DummyTreeHandler {
         Err(not_implemented("get_current_commitment"))
     }
 
-    async fn get_current_epoch(&self) -> Result<u64, AuraError> {
+    async fn get_current_epoch(&self) -> Result<aura_core::Epoch, AuraError> {
         Err(not_implemented("get_current_epoch"))
     }
 

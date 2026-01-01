@@ -478,10 +478,13 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
         journal.facts.insert_with_context(
             fact.fact_key(),
             aura_core::FactValue::Bytes(serde_json::to_vec(&fact).unwrap_or_default()),
-            format!("ceremony:{}", hex::encode(&fact.ceremony_id().0[..8])),
-            timestamp,
+            aura_core::ActorId::synthetic(&format!(
+                "ceremony:{}",
+                hex::encode(&fact.ceremony_id().0[..8])
+            )),
+            aura_core::FactTimestamp::new(timestamp),
             None,
-        );
+        )?;
         self.effects.persist_journal(&journal).await?;
         Ok(())
     }
@@ -529,9 +532,10 @@ impl<E: RecoveryEffects + 'static> GuardianCeremonyExecutor<E> {
 
         // Look for ceremony facts
         for (key, _) in journal.facts.iter() {
-            if key.starts_with("ceremony:") && key.ends_with(":initiated") {
+            let key_str = key.as_str();
+            if key_str.starts_with("ceremony:") && key_str.ends_with(":initiated") {
                 // Check if this ceremony has a corresponding commit or abort
-                let ceremony_prefix = key.trim_end_matches(":initiated");
+                let ceremony_prefix = key_str.trim_end_matches(":initiated");
                 let has_commit = journal
                     .facts
                     .contains_key(&format!("{ceremony_prefix}:committed"));

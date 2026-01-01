@@ -93,7 +93,7 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
 
     let contact_facts = vec![
         ContactFact::added_with_timestamp_ms(
-            ContextId::default(),
+            ContextId::new_from_entropy([2u8; 32]),
             bob_authority,
             alice_id,
             "Alice".to_string(),
@@ -101,7 +101,7 @@ async fn demo_guardian_ceremony_completes_with_demo_peers() {
         )
         .to_generic(),
         ContactFact::added_with_timestamp_ms(
-            ContextId::default(),
+            ContextId::new_from_entropy([2u8; 32]),
             bob_authority,
             carol_id,
             "Carol".to_string(),

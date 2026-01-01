@@ -23,7 +23,7 @@ async fn test_composite_handler_creation() {
 /// Test effect support using testkit builder
 #[tokio::test]
 async fn test_effect_support() {
-    let device_id = aura_core::identifiers::DeviceId::new();
+    let device_id = aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]);
     let effects = TestEffectsBuilder::for_unit_tests(device_id)
         .with_seed(42) // Deterministic
         .build()
@@ -39,7 +39,7 @@ async fn test_effect_support() {
 /// Test execution mode using testkit
 #[tokio::test]
 async fn test_execution_mode() {
-    let device_id = aura_core::identifiers::DeviceId::new();
+    let device_id = aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]);
 
     // Test different execution modes
     let unit_test_effects = TestEffectsBuilder::for_unit_tests(device_id)
@@ -63,7 +63,7 @@ async fn test_execution_mode() {
 /// Test fixture creation modes
 #[tokio::test]
 async fn test_fixture_modes() {
-    let device_id = aura_core::identifiers::DeviceId::new();
+    let device_id = aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]);
 
     // Unit test mode
     let _ = TestEffectsBuilder::for_unit_tests(device_id)

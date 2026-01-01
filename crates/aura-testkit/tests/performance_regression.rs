@@ -52,7 +52,7 @@ fn test_initialization_performance() {
     let thresholds = PerformanceThresholds::default();
 
     rt.block_on(async {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
 
         // Measure sequential initialization
         let start = Duration::ZERO;
@@ -111,7 +111,7 @@ fn test_effect_execution_performance() {
     let thresholds = PerformanceThresholds::default();
 
     rt.block_on(async {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let system = EffectRegistry::testing()
             .with_device_id(device_id)
             .build()
@@ -248,7 +248,7 @@ fn test_concurrent_performance() {
     let rt = Runtime::new().unwrap();
 
     rt.block_on(async {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let system = EffectRegistry::testing()
             .with_device_id(device_id)
             .build()

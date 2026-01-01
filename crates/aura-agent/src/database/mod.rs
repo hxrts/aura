@@ -338,7 +338,7 @@ mod tests {
             // Simple merge: combine facts from both journals
             let mut result = target.clone();
             for (key, value) in delta.facts.iter() {
-                result.facts.insert(key.clone(), value.clone());
+                result.facts.insert(key.clone(), value.clone())?;
             }
             Ok(result)
         }
@@ -396,14 +396,20 @@ mod tests {
 
         // Create a journal with some facts
         let mut journal = aura_core::Journal::new();
-        journal.facts.insert(
-            "user.name".to_string(),
-            FactValue::String("alice".to_string()),
-        );
-        journal.facts.insert(
-            "user.email".to_string(),
-            FactValue::String("alice@example.com".to_string()),
-        );
+        journal
+            .facts
+            .insert(
+                "user.name".to_string(),
+                FactValue::String("alice".to_string()),
+            )
+            .expect("insert fact should succeed");
+        journal
+            .facts
+            .insert(
+                "user.email".to_string(),
+                FactValue::String("alice@example.com".to_string()),
+            )
+            .expect("insert fact should succeed");
 
         // Persist the journal
         wrapper.persist_journal(&journal).await.unwrap();
@@ -423,13 +429,17 @@ mod tests {
 
         // Create delta with facts
         let mut delta = aura_core::Journal::new();
-        delta.facts.insert(
-            "event.type".to_string(),
-            FactValue::String("login".to_string()),
-        );
         delta
             .facts
-            .insert("event.timestamp".to_string(), FactValue::Number(1234567890));
+            .insert(
+                "event.type".to_string(),
+                FactValue::String("login".to_string()),
+            )
+            .expect("insert fact should succeed");
+        delta
+            .facts
+            .insert("event.timestamp".to_string(), FactValue::Number(1234567890))
+            .expect("insert fact should succeed");
 
         // Merge facts - should trigger indexing of delta
         let _result = wrapper.merge_facts(&target, &delta).await.unwrap();
@@ -447,10 +457,13 @@ mod tests {
         // Store a journal in the mock
         {
             let mut stored = mock_journal.journal.write();
-            stored.facts.insert(
-                "stored.key".to_string(),
-                FactValue::String("stored_value".to_string()),
-            );
+            stored
+                .facts
+                .insert(
+                    "stored.key".to_string(),
+                    FactValue::String("stored_value".to_string()),
+                )
+                .expect("insert fact should succeed");
         }
 
         let wrapper = IndexedJournalWrapper::with_default_index(mock_journal);
@@ -470,10 +483,13 @@ mod tests {
 
         // Create and persist a journal
         let mut journal = aura_core::Journal::new();
-        journal.facts.insert(
-            "test.key".to_string(),
-            FactValue::String("test_value".to_string()),
-        );
+        journal
+            .facts
+            .insert(
+                "test.key".to_string(),
+                FactValue::String("test_value".to_string()),
+            )
+            .expect("insert fact should succeed");
         wrapper.persist_journal(&journal).await.unwrap();
 
         // Bloom filter should indicate presence
@@ -495,7 +511,8 @@ mod tests {
         let mut journal = aura_core::Journal::new();
         journal
             .facts
-            .insert("fact1".to_string(), FactValue::Number(1));
+            .insert("fact1".to_string(), FactValue::Number(1))
+            .expect("insert fact should succeed");
         wrapper.persist_journal(&journal).await.unwrap();
 
         // Merkle root should change
@@ -510,10 +527,13 @@ mod tests {
 
         // Create a journal with a fact
         let mut journal = aura_core::Journal::new();
-        journal.facts.insert(
-            "unique.key".to_string(),
-            FactValue::String("value".to_string()),
-        );
+        journal
+            .facts
+            .insert(
+                "unique.key".to_string(),
+                FactValue::String("value".to_string()),
+            )
+            .expect("insert fact should succeed");
 
         // Persist multiple times
         wrapper.persist_journal(&journal).await.unwrap();

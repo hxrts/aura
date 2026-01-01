@@ -265,12 +265,17 @@ pub async fn list_recovery_fact_keys<E: JournalEffects>(
     let recovery_facts: Vec<String> = current
         .facts
         .keys()
-        .filter(|key| key.contains("recovery") || key == "emergency_recovery_initiated")
+        .filter(|key| {
+            let key_str = key.as_str();
+            key_str.contains("recovery") || key_str == "emergency_recovery_initiated"
+        })
+        .map(|key| key.as_str().to_string())
         .collect();
     let completed_facts: Vec<String> = current
         .facts
         .keys()
-        .filter(|key| key == "emergency_recovery_completed")
+        .filter(|key| key.as_str() == "emergency_recovery_completed")
+        .map(|key| key.as_str().to_string())
         .collect();
 
     Ok((recovery_facts, completed_facts))

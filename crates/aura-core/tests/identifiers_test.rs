@@ -59,6 +59,24 @@ fn test_identifier_creation() {
     assert_ne!(guardian1, guardian2, "GuardianIds should be unique");
 }
 
+/// Test entropy constructor aliases are consistent
+#[test]
+fn test_entropy_constructor_aliases() {
+    use aura_core::{AuthorityId, ContextId};
+
+    let authority_a = AuthorityId::new_from_entropy([1u8; 32]);
+    let authority_b = AuthorityId::from_entropy([1u8; 32]);
+    assert_eq!(authority_a, authority_b);
+
+    let context_a = ContextId::new_from_entropy([2u8; 32]);
+    let context_b = ContextId::from_entropy([2u8; 32]);
+    assert_eq!(context_a, context_b);
+
+    let device_a = DeviceId::new_from_entropy([3u8; 32]);
+    let device_b = DeviceId::from_entropy([3u8; 32]);
+    assert_eq!(device_a, device_b);
+}
+
 /// Test string representations
 #[test]
 fn test_identifier_string_representations() {

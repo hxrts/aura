@@ -47,7 +47,8 @@ impl Journal {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to generate keypair: {e}")))?;
 
-        let group_key = Ed25519VerifyingKey(public_key_bytes);
+        let group_key = Ed25519VerifyingKey::try_from_slice(&public_key_bytes)
+            .map_err(|e| AuraError::internal(format!("Invalid group public key bytes: {e}")))?;
 
         // Create authority ID from account ID for namespace
         let authority_id = AuthorityId::from_uuid(account_id.0);
@@ -61,18 +62,22 @@ impl Journal {
     }
 
     /// Create a new journal for an account with specific group key bytes
-    pub fn new_with_group_key_bytes(account_id: AccountId, group_key_bytes: Vec<u8>) -> Self {
+    pub fn new_with_group_key_bytes(
+        account_id: AccountId,
+        group_key_bytes: [u8; 32],
+    ) -> Result<Self, AuraError> {
         // Create authority ID from account ID for namespace
         let authority_id = AuthorityId::from_uuid(account_id.0);
         let namespace = JournalNamespace::Authority(authority_id);
 
-        let group_key = Ed25519VerifyingKey(group_key_bytes);
+        let group_key = Ed25519VerifyingKey::from_bytes(group_key_bytes)
+            .map_err(|e| AuraError::internal(format!("Invalid group public key bytes: {e}")))?;
 
-        Self {
+        Ok(Self {
             account_state: AccountState::new(account_id, group_key),
             op_log: OpLog::default(),
             fact_journal: FactJournal::new(namespace),
-        }
+        })
     }
 
     /// Merge with another journal

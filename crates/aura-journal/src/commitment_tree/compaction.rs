@@ -81,7 +81,7 @@ fn create_snapshot_fact_operation(
     };
 
     let tree_op = TreeOp {
-        parent_epoch: cut_epoch.saturating_sub(1),
+        parent_epoch: Epoch::from(u64::from(cut_epoch).saturating_sub(1)),
         parent_commitment: snapshot.commitment,
         op: snapshot_op,
         version: 1,
@@ -108,7 +108,7 @@ fn serialize_snapshot_metadata(snapshot: &Snapshot) -> Result<Vec<u8>, Compactio
 
     // Write epoch
     buffer
-        .write_all(&snapshot.epoch.to_be_bytes())
+        .write_all(&u64::from(snapshot.epoch).to_be_bytes())
         .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
 
     // Write tree hash
@@ -155,7 +155,7 @@ fn create_snapshot_signature(
 
     let mut h = hash::hasher();
     h.update(b"SNAPSHOT_FACT");
-    h.update(&tree_op.parent_epoch.to_be_bytes());
+    h.update(&u64::from(tree_op.parent_epoch).to_be_bytes());
     h.update(&tree_op.parent_commitment);
 
     // Hash the operation
@@ -171,7 +171,7 @@ fn serialize_tree_op(tree_op: &aura_core::tree::TreeOp) -> Result<Vec<u8>, Compa
     let mut buffer = Vec::new();
 
     // Write parent epoch
-    buffer.extend_from_slice(&tree_op.parent_epoch.to_be_bytes());
+    buffer.extend_from_slice(&u64::from(tree_op.parent_epoch).to_be_bytes());
 
     // Write parent commitment
     buffer.extend_from_slice(&tree_op.parent_commitment);
@@ -325,7 +325,7 @@ pub enum CompactionError {
 mod tests {
     use super::*;
     use aura_core::tree::{LeafNode, TreeOp, TreeOpKind};
-    use aura_core::{LeafId, NodeIndex, Policy};
+    use aura_core::{Epoch, LeafId, NodeIndex, Policy};
     use std::collections::BTreeMap;
 
     fn create_test_op(epoch: u64, commitment: [u8; 32], leaf_id: u8) -> AttestedOp {
@@ -333,9 +333,10 @@ mod tests {
         AttestedOp {
             op: TreeOp {
                 parent_commitment: commitment,
-                parent_epoch: epoch,
+                parent_epoch: Epoch::new(epoch),
                 op: TreeOpKind::AddLeaf {
-                    leaf: LeafNode::new_device(LeafId(leaf_id as u32), device_id, vec![1, 2, 3]),
+                    leaf: LeafNode::new_device(LeafId(leaf_id as u32), device_id, vec![1, 2, 3])
+                        .expect("valid leaf"),
                     under: NodeIndex(0),
                 },
                 version: 1,
@@ -347,7 +348,7 @@ mod tests {
 
     fn create_test_snapshot(epoch: u64, leaf_ids: Vec<u64>) -> Snapshot {
         Snapshot::new(
-            epoch,
+            Epoch::new(epoch),
             [1u8; 32],
             leaf_ids.into_iter().map(|id| LeafId(id as u32)).collect(),
             BTreeMap::from([(NodeIndex(0), Policy::Any)]),

@@ -22,8 +22,8 @@ async fn creates_and_lists_authorities() {
 #[tokio::test]
 async fn creates_relational_context() {
     let mut manager = AuthorityManager::new("/tmp/aura-context-tests".into());
-    let a = AuthorityId::new();
-    let b = AuthorityId::new();
+    let a = AuthorityId::new_from_entropy([1u8; 32]);
+    let b = AuthorityId::new_from_entropy([1u8; 32]);
 
     let context_id = manager
         .create_context(vec![a, b], "guardian".to_string())

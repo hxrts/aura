@@ -20,7 +20,7 @@ fn test_extension_registry_operations() {
 
 #[test]
 fn test_core_types_available() {
-    let _device_id = DeviceId::new();
+    let _device_id = DeviceId::new_from_entropy([3u8; 32]);
     let _context_id = ContextId::new_from_entropy([0u8; 32]);
 }
 

@@ -84,7 +84,7 @@ impl DkdTestHarness {
         let mut agents = HashMap::new();
         
         for _i in 0..config.participants {
-            let authority_id = AuthorityId::new();
+            let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
             authorities.push(authority_id);
 
             // Create a testing agent using the proper builder pattern
@@ -107,7 +107,7 @@ impl DkdTestHarness {
         
         // === Phase 1: Setup DKD Context ===
         
-        let dkd_context = ContextId::new();
+        let dkd_context = ContextId::new_from_entropy([2u8; 32]);
         
         // Each authority records DKD participation intent
         for authority_id in &self.authorities {
@@ -117,8 +117,8 @@ impl DkdTestHarness {
             let account_id = AccountId::from(authority_id.uuid());
 
             // Create journal with placeholder group key for testing
-            let placeholder_group_key = vec![0u8; 32];
-            let mut journal = Journal::new_with_group_key_bytes(account_id, placeholder_group_key);
+            let placeholder_group_key = [0u8; 32];
+            let mut journal = Journal::new_with_group_key_bytes(account_id, placeholder_group_key)?;
 
             // Record DKD intent
             let mut metadata = HashMap::new();
@@ -180,8 +180,8 @@ impl DkdTestHarness {
 
             // Create journal with placeholder group key for testing
             let account_id = AccountId::from(authority_id.uuid());
-            let placeholder_group_key = vec![0u8; 32];
-            let mut journal = Journal::new_with_group_key_bytes(account_id, placeholder_group_key);
+            let placeholder_group_key = [0u8; 32];
+            let mut journal = Journal::new_with_group_key_bytes(account_id, placeholder_group_key)?;
 
             // Record DKD completion
             let mut metadata = HashMap::new();

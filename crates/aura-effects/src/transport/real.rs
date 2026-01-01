@@ -135,9 +135,9 @@ mod tests {
     async fn test_send_envelope_logs() {
         let handler = RealTransportHandler::new();
         let envelope = TransportEnvelope {
-            destination: AuthorityId::default(),
-            source: AuthorityId::default(),
-            context: ContextId::default(),
+            destination: AuthorityId::new_from_entropy([1u8; 32]),
+            source: AuthorityId::new_from_entropy([1u8; 32]),
+            context: ContextId::new_from_entropy([2u8; 32]),
             payload: b"test".to_vec(),
             metadata: std::collections::HashMap::new(),
             receipt: None,
@@ -158,9 +158,9 @@ mod tests {
     async fn test_receive_after_send_is_stateless() {
         let handler = RealTransportHandler::new();
         let envelope = TransportEnvelope {
-            destination: AuthorityId::default(),
-            source: AuthorityId::default(),
-            context: ContextId::default(),
+            destination: AuthorityId::new_from_entropy([1u8; 32]),
+            source: AuthorityId::new_from_entropy([1u8; 32]),
+            context: ContextId::new_from_entropy([2u8; 32]),
             payload: b"loopback".to_vec(),
             metadata: std::collections::HashMap::new(),
             receipt: None,
@@ -176,8 +176,8 @@ mod tests {
     #[tokio::test]
     async fn test_channel_not_established() {
         let handler = RealTransportHandler::new();
-        let context = ContextId::default();
-        let peer = AuthorityId::default();
+        let context = ContextId::new_from_entropy([2u8; 32]);
+        let peer = AuthorityId::new_from_entropy([1u8; 32]);
 
         let result = handler.is_channel_established(context, peer).await;
         assert!(!result);

@@ -41,8 +41,8 @@ impl GuardRequest {
     pub fn new(authority: AuthorityId, operation: impl Into<String>, cost: u32) -> Self {
         Self {
             authority,
-            context: aura_core::ContextId::default(),
-            peer: AuthorityId::default(),
+            context: aura_core::ContextId::new_from_entropy([2u8; 32]),
+            peer: AuthorityId::new_from_entropy([1u8; 32]),
             operation: operation.into(),
             cost,
             capability: Cap::default(),
@@ -343,7 +343,7 @@ mod tests {
 
         let request = GuardRequest::new(authority, "test_op", 100)
             .with_context_id(context)
-            .with_peer(AuthorityId::default());
+            .with_peer(AuthorityId::new_from_entropy([1u8; 32]));
         let outcome = guard.evaluate(&snapshot, &request);
 
         assert!(outcome.is_authorized());

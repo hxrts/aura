@@ -86,6 +86,7 @@ pub mod encrypted_storage;
 /// Error types for Layer 3 handler implementations.
 pub mod error;
 pub mod guard_interpreter;
+pub mod identifiers;
 pub mod leakage;
 pub mod query;
 pub mod random;
@@ -115,6 +116,10 @@ pub use query::{
 };
 // NOTE: JournalHandler moved to aura-journal per Layer 2 pattern
 pub use guard_interpreter::ProductionEffectInterpreter;
+pub use identifiers::{
+    new_account_id, new_authority_id, new_context_id, new_device_id, new_event_id, new_guardian_id,
+    new_operation_id, new_session_id,
+};
 pub use leakage::ProductionLeakageHandler;
 pub use random::RealRandomHandler;
 pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};

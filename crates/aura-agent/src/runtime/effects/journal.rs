@@ -34,8 +34,9 @@ impl JournalEffects for AuraEffectSystem {
             uncertainty: None,
         });
         for (predicate, value) in journal.facts.iter() {
+            let predicate_key = predicate.as_str().to_string();
             self.journal.indexed_journal().add_fact(
-                predicate.clone(),
+                predicate_key,
                 value.clone(),
                 Some(self.authority_id),
                 Some(timestamp.clone()),

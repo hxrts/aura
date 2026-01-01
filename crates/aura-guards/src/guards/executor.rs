@@ -428,9 +428,9 @@ where
             EffectCommand::RecordLeakage { bits } => {
                 let timestamp = self.effects.physical_time().await?;
                 let event = aura_core::effects::LeakageEvent {
-                    source: AuthorityId::default(),
-                    destination: AuthorityId::default(),
-                    context_id: ContextId::default(),
+                    source: AuthorityId::new_from_entropy([1u8; 32]),
+                    destination: AuthorityId::new_from_entropy([1u8; 32]),
+                    context_id: ContextId::new_from_entropy([2u8; 32]),
                     leakage_amount: bits as u64,
                     observer_class: aura_core::effects::ObserverClass::External,
                     operation: "guard_chain".to_string(),
@@ -508,9 +508,9 @@ where
             EffectCommand::RecordLeakage { bits } => {
                 let timestamp = self.effects.physical_time().await?;
                 let event = aura_core::effects::LeakageEvent {
-                    source: AuthorityId::default(),
-                    destination: AuthorityId::default(),
-                    context_id: ContextId::default(),
+                    source: AuthorityId::new_from_entropy([1u8; 32]),
+                    destination: AuthorityId::new_from_entropy([1u8; 32]),
+                    context_id: ContextId::new_from_entropy([2u8; 32]),
                     leakage_amount: bits as u64,
                     observer_class: aura_core::effects::ObserverClass::External,
                     operation: "guard_chain".to_string(),

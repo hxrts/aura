@@ -15,7 +15,7 @@ use aura_core::hash;
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::{
     tree::{AttestedOp, TreeHash32},
-    Hash32,
+    Epoch, Hash32,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -154,7 +154,11 @@ impl OpLog {
     }
 
     /// Get operations within a specific epoch range
-    pub fn operations_in_epoch_range(&self, start_epoch: u64, end_epoch: u64) -> Vec<&AttestedOp> {
+    pub fn operations_in_epoch_range(
+        &self,
+        start_epoch: Epoch,
+        end_epoch: Epoch,
+    ) -> Vec<&AttestedOp> {
         self.operations
             .values()
             .filter(|op| op.op.parent_epoch >= start_epoch && op.op.parent_epoch <= end_epoch)
@@ -169,7 +173,7 @@ impl OpLog {
     /// Get operations that are children of a specific parent
     pub fn children_of_parent(
         &self,
-        parent_epoch: u64,
+        parent_epoch: Epoch,
         parent_commitment: TreeHash32,
     ) -> Vec<&AttestedOp> {
         self.operations
@@ -185,7 +189,7 @@ impl OpLog {
     /// **WARNING**: This breaks the OR-set semantics and should only be used
     /// for garbage collection after creating a snapshot. The snapshot must
     /// preserve the join-semilattice properties.
-    pub fn compact_before_epoch(&mut self, min_epoch: u64) -> usize {
+    pub fn compact_before_epoch(&mut self, min_epoch: Epoch) -> usize {
         let initial_len = self.operations.len();
 
         self.operations
@@ -317,7 +321,7 @@ fn compute_operation_cid(op: &AttestedOp) -> Hash32 {
     let mut h = hash::hasher();
 
     // Hash the TreeOp
-    h.update(&op.op.parent_epoch.to_le_bytes());
+    h.update(&u64::from(op.op.parent_epoch).to_le_bytes());
     h.update(&op.op.parent_commitment);
     h.update(&op.op.version.to_le_bytes());
 
@@ -359,7 +363,7 @@ mod tests {
     use super::*;
     use aura_core::{LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind};
 
-    fn create_test_operation(leaf_id: u32, parent_epoch: u64) -> AttestedOp {
+    fn create_test_operation(leaf_id: u32, parent_epoch: Epoch) -> AttestedOp {
         AttestedOp {
             op: TreeOp {
                 parent_epoch,
@@ -369,7 +373,8 @@ mod tests {
                         LeafId(leaf_id),
                         aura_core::DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
                         vec![leaf_id as u8; 32],
-                    ),
+                    )
+                    .expect("valid leaf"),
                     under: NodeIndex(0),
                 },
                 version: 1,
@@ -390,7 +395,7 @@ mod tests {
     #[test]
     fn test_add_operation() {
         let mut log = OpLog::new();
-        let op = create_test_operation(1, 0);
+        let op = create_test_operation(1, Epoch::initial());
 
         let cid = log.add_operation(op.clone());
         assert_eq!(log.len(), 1);
@@ -402,7 +407,7 @@ mod tests {
     #[test]
     fn test_duplicate_operations() {
         let mut log = OpLog::new();
-        let op = create_test_operation(1, 0);
+        let op = create_test_operation(1, Epoch::initial());
 
         let cid1 = log.add_operation(op.clone());
         let cid2 = log.add_operation(op);
@@ -415,9 +420,9 @@ mod tests {
     #[test]
     fn test_operation_ordering() {
         let mut log = OpLog::new();
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(2, 0);
-        let op3 = create_test_operation(3, 0);
+        let op1 = create_test_operation(1, Epoch::initial());
+        let op2 = create_test_operation(2, Epoch::initial());
+        let op3 = create_test_operation(3, Epoch::initial());
 
         log.add_operation(op3);
         log.add_operation(op1);
@@ -441,9 +446,9 @@ mod tests {
         let mut log1 = OpLog::new();
         let mut log2 = OpLog::new();
 
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(2, 0);
-        let op3 = create_test_operation(3, 0);
+        let op1 = create_test_operation(1, Epoch::initial());
+        let op2 = create_test_operation(2, Epoch::initial());
+        let op3 = create_test_operation(3, Epoch::initial());
 
         log1.add_operation(op1);
         log1.add_operation(op2.clone());
@@ -469,8 +474,8 @@ mod tests {
         let mut log1 = OpLog::new();
         let mut log2 = OpLog::new();
 
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(2, 0);
+        let op1 = create_test_operation(1, Epoch::initial());
+        let op2 = create_test_operation(2, Epoch::initial());
 
         log1.add_operation(op1.clone());
         log2.add_operation(op2.clone());
@@ -487,25 +492,25 @@ mod tests {
     #[test]
     fn test_filtering_and_queries() {
         let mut log = OpLog::new();
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(2, 5);
-        let op3 = create_test_operation(3, 10);
+        let op1 = create_test_operation(1, Epoch::initial());
+        let op2 = create_test_operation(2, Epoch::new(5));
+        let op3 = create_test_operation(3, Epoch::new(10));
 
         log.add_operation(op1);
         log.add_operation(op2);
         log.add_operation(op3);
 
         // Test epoch range filtering
-        let early_ops = log.operations_in_epoch_range(0, 5);
+        let early_ops = log.operations_in_epoch_range(Epoch::initial(), Epoch::new(5));
         assert_eq!(early_ops.len(), 2);
 
         // Test latest operation
         let latest = log.latest_operation();
         assert!(latest.is_some());
-        assert_eq!(latest.unwrap().op.parent_epoch, 10);
+        assert_eq!(latest.unwrap().op.parent_epoch, Epoch::new(10));
 
         // Test filtering by predicate
-        let epoch_zero_ops = log.filter(|op| op.op.parent_epoch == 0);
+        let epoch_zero_ops = log.filter(|op| op.op.parent_epoch == Epoch::initial());
         assert_eq!(epoch_zero_ops.len(), 1);
     }
 
@@ -514,8 +519,8 @@ mod tests {
         let mut log1 = OpLog::new();
         let mut log2 = OpLog::new();
 
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(2, 0);
+        let op1 = create_test_operation(1, Epoch::initial());
+        let op2 = create_test_operation(2, Epoch::initial());
 
         log1.add_operation(op1.clone());
 
@@ -535,8 +540,8 @@ mod tests {
         let mut log1 = OpLog::new();
         let mut log2 = OpLog::new();
 
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(2, 0);
+        let op1 = create_test_operation(1, Epoch::initial());
+        let op2 = create_test_operation(2, Epoch::initial());
 
         log1.add_operation(op1);
         log2.add_operation(op2);
@@ -556,9 +561,9 @@ mod tests {
     fn test_compaction() {
         let mut log = OpLog::new();
 
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(2, 5);
-        let op3 = create_test_operation(3, 10);
+        let op1 = create_test_operation(1, Epoch::initial());
+        let op2 = create_test_operation(2, Epoch::new(5));
+        let op3 = create_test_operation(3, Epoch::new(10));
 
         log.add_operation(op1);
         log.add_operation(op2);
@@ -567,22 +572,22 @@ mod tests {
         assert_eq!(log.len(), 3);
 
         // Compact operations before epoch 8
-        let removed = log.compact_before_epoch(8);
+        let removed = log.compact_before_epoch(Epoch::new(8));
         assert_eq!(removed, 2); // Should remove op1 and op2
         assert_eq!(log.len(), 1); // Only op3 should remain
     }
 
     #[test]
     fn test_cid_determinism() {
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(1, 0); // Identical
+        let op1 = create_test_operation(1, Epoch::initial());
+        let op2 = create_test_operation(1, Epoch::initial()); // Identical
 
         let cid1 = compute_operation_cid(&op1);
         let cid2 = compute_operation_cid(&op2);
 
         assert_eq!(cid1, cid2); // Same operation should have same CID
 
-        let op3 = create_test_operation(2, 0); // Different leaf_id
+        let op3 = create_test_operation(2, Epoch::initial()); // Different leaf_id
         let cid3 = compute_operation_cid(&op3);
 
         assert_ne!(cid1, cid3); // Different operations should have different CIDs

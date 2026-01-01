@@ -397,7 +397,7 @@ mod tests {
         handler
             .audit_log(
                 "authentication",
-                Some(DeviceId::new()),
+                Some(DeviceId::new_from_entropy([3u8; 32])),
                 "resource",
                 "action",
                 "success",

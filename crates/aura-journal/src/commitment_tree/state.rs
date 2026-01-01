@@ -149,7 +149,7 @@ impl TreeState {
     /// Create a new empty tree state at epoch 0
     pub fn new() -> Self {
         Self {
-            epoch: 0,
+            epoch: Epoch::initial(),
             root_commitment: [0u8; 32],
             branches: BTreeMap::new(),
             leaves: BTreeMap::new(),
@@ -292,7 +292,7 @@ impl TreeState {
 
     /// Increment the epoch (used during reduction)
     pub fn increment_epoch(&mut self) {
-        self.epoch += 1;
+        self.epoch = self.epoch.next();
     }
 
     /// Set the root commitment (used during reduction)
@@ -523,7 +523,7 @@ mod tests {
     #[test]
     fn test_empty_tree() {
         let state = TreeState::new();
-        assert_eq!(state.epoch, 0);
+        assert_eq!(state.epoch, Epoch::initial());
         assert!(state.is_empty());
         assert_eq!(state.num_leaves(), 0);
         assert_eq!(state.num_branches(), 0);
@@ -537,7 +537,8 @@ mod tests {
             LeafId(1),
             aura_core::DeviceId(uuid::Uuid::from_bytes([11u8; 16])),
             vec![0u8; 32],
-        );
+        )
+        .expect("valid leaf");
 
         state.add_leaf(leaf.clone());
 
@@ -553,7 +554,8 @@ mod tests {
             LeafId(1),
             aura_core::DeviceId(uuid::Uuid::from_bytes([12u8; 16])),
             vec![0u8; 32],
-        );
+        )
+        .expect("valid leaf");
 
         state.add_leaf(leaf.clone());
         assert_eq!(state.num_leaves(), 1);
@@ -611,12 +613,12 @@ mod tests {
     #[test]
     fn test_epoch_increment() {
         let mut state = TreeState::new();
-        assert_eq!(state.current_epoch(), 0);
+        assert_eq!(state.current_epoch(), Epoch::initial());
 
         state.increment_epoch();
-        assert_eq!(state.current_epoch(), 1);
+        assert_eq!(state.current_epoch(), Epoch::new(1));
 
         state.increment_epoch();
-        assert_eq!(state.current_epoch(), 2);
+        assert_eq!(state.current_epoch(), Epoch::new(2));
     }
 }

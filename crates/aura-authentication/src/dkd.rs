@@ -862,7 +862,12 @@ impl DkdProtocol {
         // Add fact about the DKD event
         let fact_key = format!("dkd_{}_{}", session_id.0, event_type);
         let fact_value = aura_core::journal::FactValue::String(message.to_string());
-        journal.facts.insert(&fact_key, fact_value);
+        journal
+            .facts
+            .insert(fact_key, fact_value)
+            .map_err(|e| DkdError::JournalFailure {
+                reason: e.to_string(),
+            })?;
 
         // Update journal
         effects

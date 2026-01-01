@@ -120,7 +120,7 @@ async fn demo_refresh_account_reports_two_online_contacts() {
 
     let contact_facts = vec![
         ContactFact::added_with_timestamp_ms(
-            ContextId::default(),
+            ContextId::new_from_entropy([2u8; 32]),
             authority_id,
             alice_id,
             "Alice".to_string(),
@@ -128,7 +128,7 @@ async fn demo_refresh_account_reports_two_online_contacts() {
         )
         .to_generic(),
         ContactFact::added_with_timestamp_ms(
-            ContextId::default(),
+            ContextId::new_from_entropy([2u8; 32]),
             authority_id,
             carol_id,
             "Carol".to_string(),

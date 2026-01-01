@@ -22,7 +22,9 @@
 //! - [`docs/123_commitment_tree.md`](../../../docs/123_commitment_tree.md) - Tree operations
 
 use async_trait::async_trait;
-use aura_core::{AttestedOp, AuraError, Hash32, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind};
+use aura_core::{
+    AttestedOp, AuraError, Epoch, Hash32, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind,
+};
 use aura_journal::commitment_tree::TreeState;
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +32,7 @@ use serde::{Deserialize, Serialize};
 /// Defines a cut point for snapshotting
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cut {
-    pub epoch: u64,
+    pub epoch: Epoch,
     pub commitment: Hash32,
     pub cid: Hash32,
 }
@@ -116,7 +118,7 @@ pub trait TreeEffects: Send + Sync {
     ///
     /// Returns the epoch number of the current tree state. Increments
     /// after `RotateEpoch` operations.
-    async fn get_current_epoch(&self) -> Result<u64, AuraError>;
+    async fn get_current_epoch(&self) -> Result<Epoch, AuraError>;
 
     // ===== Operation Application =====
 
@@ -208,7 +210,7 @@ pub trait TreeEffects: Send + Sync {
     /// ## Examples
     ///
     /// ```ignore
-    /// let leaf = LeafNode { /* ... */ };
+    /// let leaf = LeafNode::new_device(/* leaf_id */, /* device_id */, /* public_key */)?;
     /// let op_kind = tree_effects.add_leaf(leaf, NodeIndex(0)).await?;
     /// // Now run threshold ceremony to attest op_kind
     /// ```

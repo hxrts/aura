@@ -63,7 +63,7 @@ impl<E: JournalEffects + OrderClockEffects> AmpJournalEffects for E {
         let key = format!("relational:{}:{}", context, hex::encode(order.0));
 
         let mut delta = Journal::new();
-        delta.facts.insert(key, FactValue::Bytes(bytes));
+        delta.facts.insert(key, FactValue::Bytes(bytes))?;
 
         let merged = self.merge_facts(&self.get_journal().await?, &delta).await?;
         self.persist_journal(&merged).await?;
@@ -105,7 +105,7 @@ impl<'a, E: ?Sized + JournalEffects + OrderClockEffects> AmpContextStore<'a, E> 
         let key = format!("relational:{}:{}", context, hex::encode(order.0));
 
         let mut delta = Journal::new();
-        delta.facts.insert(key, FactValue::Bytes(bytes));
+        delta.facts.insert(key, FactValue::Bytes(bytes))?;
 
         let merged = self
             .effects

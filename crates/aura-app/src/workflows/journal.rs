@@ -36,7 +36,7 @@ pub async fn persist_fact_value<E: JournalEffects>(
     fact_value: FactValue,
 ) -> Result<(), AuraError> {
     let mut delta = Journal::new();
-    delta.facts.insert(fact_key, fact_value);
+    delta.facts.insert(fact_key, fact_value)?;
 
     let current = effects
         .get_journal()

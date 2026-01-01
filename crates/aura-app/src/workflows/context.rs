@@ -138,7 +138,7 @@ pub async fn current_home_context_or_fallback(
 
 /// Stable fallback context for relational facts that should not depend on UI selection.
 pub fn default_relational_context() -> ContextId {
-    ContextId::default()
+    ContextId::new_from_entropy([2u8; 32])
 }
 
 /// Get current traversal position

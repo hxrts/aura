@@ -144,7 +144,7 @@ impl LogicalClockEffects for ControllableTimeSource {
         }
 
         // Increment local counter using a deterministic test device id
-        let test_device = DeviceId::deterministic_test_id();
+        let test_device = DeviceId::new_from_entropy([3u8; 32]);
         let current = clock.get(&test_device).copied().unwrap_or(0);
         clock.insert(test_device, current + 1);
         let lamport = clock.iter().map(|(_, counter)| *counter).max().unwrap_or(0);

@@ -50,7 +50,7 @@ impl Bottom for TestCounter {
     fn bottom() -> Self {
         Self {
             value: 0,
-            device: DeviceId::new(),
+            device: DeviceId::new_from_entropy([3u8; 32]),
         }
     }
 }
@@ -59,7 +59,7 @@ impl CvState for TestCounter {}
 
 #[aura_test]
 async fn test_guard_chain_executor_happy_path() -> AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([3u8; 32]);
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
 
     // Build effect system and interpreter
@@ -73,7 +73,7 @@ async fn test_guard_chain_executor_happy_path() -> AuraResult<()> {
     );
 
     // Prepare guard request with budgeted peer = authority
-    let context = ContextId::default();
+    let context = ContextId::new_from_entropy([2u8; 32]);
     let request = aura_protocol::guards::pure::GuardRequest::new(device_id, "test_op", 10)
         .with_context_id(context)
         .with_peer(device_id);
@@ -92,7 +92,7 @@ async fn test_guard_chain_executor_happy_path() -> AuraResult<()> {
 
 #[aura_test]
 async fn test_journal_coupler_standalone() -> AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([3u8; 32]);
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
     let mut effect_system = fixture.effect_system_direct();
 
@@ -123,7 +123,7 @@ async fn test_journal_coupler_standalone() -> AuraResult<()> {
 
 #[aura_test]
 async fn test_protocol_guard_with_journal_coupling() -> AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([3u8; 32]);
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
     let mut effect_system = fixture.effect_system_direct();
 
@@ -166,7 +166,7 @@ async fn test_protocol_guard_with_journal_coupling() -> AuraResult<()> {
 
 #[aura_test]
 async fn test_journal_coupling_with_different_annotation_types() -> AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([3u8; 32]);
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
     let mut effect_system = fixture.effect_system_direct();
 
@@ -209,7 +209,7 @@ async fn test_journal_coupling_with_different_annotation_types() -> AuraResult<(
 
 #[aura_test]
 async fn test_optimistic_vs_pessimistic_journal_coupling() -> AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([3u8; 32]);
 
     // Test pessimistic coupling (default)
     let fixture_pessimistic = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
@@ -262,7 +262,7 @@ async fn test_optimistic_vs_pessimistic_journal_coupling() -> AuraResult<()> {
 
 #[aura_test]
 async fn test_journal_coupling_error_handling() -> AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([3u8; 32]);
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
     let mut effect_system = fixture.effect_system_direct();
 
@@ -289,7 +289,7 @@ async fn test_journal_coupling_error_handling() -> AuraResult<()> {
 
 #[aura_test]
 async fn test_guard_chain_capability_enforcement() -> AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([3u8; 32]);
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
     let mut effect_system = fixture.effect_system_direct();
 
@@ -332,7 +332,7 @@ async fn test_guard_chain_capability_enforcement() -> AuraResult<()> {
 
 #[aura_test]
 async fn test_leakage_budget_tracking() -> AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([3u8; 32]);
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
     let mut effect_system = fixture.effect_system_direct();
 
@@ -369,7 +369,7 @@ async fn test_leakage_budget_tracking() -> AuraResult<()> {
 
 #[aura_test]
 async fn test_guard_chain_with_multiple_delta_facts() -> AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([3u8; 32]);
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
     let mut effect_system = fixture.effect_system_direct();
 

@@ -13,7 +13,9 @@ pub mod temporal;
 // Re-export all public types for convenience
 pub use consensus::{Prestate, PrestateBuilder};
 pub use content::{ChunkId, ContentId, ContentSize, Hash32};
-pub use journal::{AuthLevel, Cap, Fact, FactValue, Journal};
+pub use journal::{
+    ActorId, AuthLevel, Cap, Fact, FactKey, FactOpId, FactTimestamp, FactValue, Journal,
+};
 pub use temporal::{
     AnchorProof, ContentFinalityOverride, FactContent, FactOp, FactReceipt, Finality,
     FinalityError, RetractReason, ScopeFinalityConfig, ScopeId, ScopeParseError, ScopeSegment,

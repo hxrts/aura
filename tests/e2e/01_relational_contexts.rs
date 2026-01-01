@@ -4,8 +4,8 @@ use aura_relational::RelationalContext;
 
 #[test]
 fn relational_context_records_guardian_bindings() {
-    let account = AuthorityId::new();
-    let guardian = AuthorityId::new();
+    let account = AuthorityId::new_from_entropy([1u8; 32]);
+    let guardian = AuthorityId::new_from_entropy([1u8; 32]);
 
     let mut context = RelationalContext::with_id(Default::default(), vec![account, guardian]);
 

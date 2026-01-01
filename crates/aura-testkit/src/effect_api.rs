@@ -48,7 +48,7 @@ impl LedgerTestFixture {
         let (_, group_public_key) = crate::test_key_pair(42);
         let initial_state = AccountState::new(
             account_id,
-            aura_core::Ed25519VerifyingKey(group_public_key.to_bytes().to_vec()),
+            group_public_key,
         );
         let effect_api = Arc::new(RwLock::new(
             AccountEffectApi::new(initial_state).expect("Failed to create AccountEffectApi"),

@@ -199,7 +199,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handler_basic_functionality() {
-        let device_id = DeviceId::deterministic_test_id();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let handler = AuraHandlerFactory::for_testing(device_id);
         let ctx = AuraContext::for_testing(device_id);
 
@@ -223,7 +223,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_typed_effect_execution() {
-        let device_id = DeviceId::deterministic_test_id();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let mut handler = AuraHandlerFactory::for_testing(device_id);
         let ctx = AuraContext::for_testing(device_id);
 
@@ -286,7 +286,7 @@ mod tests {
             }
         }
 
-        let device_id = DeviceId::deterministic_test_id();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let ctx = AuraContext::for_testing(device_id);
         let mut handler = EchoHandler;
 

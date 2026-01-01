@@ -340,7 +340,7 @@ async fn append_leakage_facts<E: GuardEffects + PhysicalTimeEffects + GuardConte
         let nonce = effect_system.random_bytes(8).await;
         let key = leakage_fact_key(context_id, observer, timestamp.ts_ms, &nonce);
 
-        delta.facts.insert(key, FactValue::Bytes(bytes));
+        delta.facts.insert(key, FactValue::Bytes(bytes))?;
     }
 
     if delta.facts.is_empty() {
@@ -391,7 +391,7 @@ pub async fn reset_privacy_budget<E: GuardEffects + PhysicalTimeEffects + GuardC
         serde_json::to_vec(&new_limits).map_err(|e| AuraError::serialization(e.to_string()))?;
     delta
         .facts
-        .insert(limits_key, FactValue::Bytes(limits_bytes));
+        .insert(limits_key, FactValue::Bytes(limits_bytes))?;
 
     let reset_event = LeakageFact {
         context_id,
@@ -408,7 +408,7 @@ pub async fn reset_privacy_budget<E: GuardEffects + PhysicalTimeEffects + GuardC
     let reset_bytes =
         serde_json::to_vec(&reset_content).map_err(|e| AuraError::serialization(e.to_string()))?;
     let reset_key = leakage_fact_key(context_id, LeakageObserverClass::External, 0, b"reset");
-    delta.facts.insert(reset_key, FactValue::Bytes(reset_bytes));
+    delta.facts.insert(reset_key, FactValue::Bytes(reset_bytes))?;
 
     let merged = effect_system
         .merge_facts(&effect_system.get_journal().await?, &delta)

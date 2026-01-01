@@ -46,8 +46,8 @@ async fn test_physical_time_effects_basic_operations() {
 #[tokio::test]
 async fn test_logical_clock_effects_causal_ordering() {
     let time_source = ControllableTimeSource::new(1000);
-    let device_a = DeviceId::new();
-    let device_b = DeviceId::new();
+    let device_a = DeviceId::new_from_entropy([3u8; 32]);
+    let device_b = DeviceId::new_from_entropy([3u8; 32]);
 
     // Test logical time advancement
     let logical_time1 = time_source.logical_now().await.unwrap();
@@ -302,7 +302,7 @@ async fn test_time_leakage_properties() {
 async fn test_time_scenario_builder_integration() {
     let scenario = TimeScenarioBuilder::new()
         .with_initial_time(1000)
-        .with_devices(&[DeviceId::new(), DeviceId::new()])
+        .with_devices(&[DeviceId::new_from_entropy([3u8; 32]), DeviceId::new_from_entropy([3u8; 32])])
         .with_time_skew(100) // 100ms skew
         .build();
 

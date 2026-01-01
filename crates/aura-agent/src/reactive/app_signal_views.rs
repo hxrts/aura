@@ -923,7 +923,7 @@ mod tests {
         let home_state = HomeState::new(
             home_id,
             Some("test-home".to_string()),
-            AuthorityId::default(),
+            AuthorityId::new_from_entropy([1u8; 32]),
             0,
             context,
         );
@@ -948,7 +948,7 @@ mod tests {
     #[tokio::test]
     async fn home_signal_view_updates_pins() {
         let reactive = ReactiveHandler::new();
-        let context_id = ContextId::default();
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
         let homes = setup_homes(&reactive, context_id).await;
         let home_id = homes.current_home().unwrap().id;
 
@@ -958,7 +958,7 @@ mod tests {
             context_id,
             home_id,
             "msg-1".to_string(),
-            AuthorityId::default(),
+            AuthorityId::new_from_entropy([1u8; 32]),
             123,
         )
         .to_generic();
@@ -972,7 +972,7 @@ mod tests {
             context_id,
             home_id,
             "msg-1".to_string(),
-            AuthorityId::default(),
+            AuthorityId::new_from_entropy([1u8; 32]),
             124,
         )
         .to_generic();
@@ -986,7 +986,7 @@ mod tests {
     #[tokio::test]
     async fn home_signal_view_updates_bans() {
         let reactive = ReactiveHandler::new();
-        let context_id = ContextId::default();
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
         let homes = setup_homes(&reactive, context_id).await;
         let home_id = homes.current_home().unwrap().id;
         let target = AuthorityId::new_from_entropy([9u8; 32]);
@@ -997,7 +997,7 @@ mod tests {
             context_id,
             None,
             target,
-            AuthorityId::default(),
+            AuthorityId::new_from_entropy([1u8; 32]),
             "spamming".to_string(),
             999,
             None,

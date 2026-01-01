@@ -15,8 +15,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use aura_core::{
-    tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, Snapshot, TreeOp, TreeOpKind},
-    DeviceId, Hash32, JoinSemilattice,
+    tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Snapshot, TreeOp, TreeOpKind},
+    DeviceId, Epoch, Hash32, JoinSemilattice,
 };
 use aura_journal::algebra::OpLog;
 use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
@@ -49,16 +49,15 @@ fn test_uuid(seed: u64) -> Uuid {
 fn create_add_leaf_op(epoch: u64, leaf_id: u32) -> AttestedOp {
     AttestedOp {
         op: TreeOp {
-            parent_epoch: epoch,
+            parent_epoch: Epoch::new(epoch),
             parent_commitment: [epoch as u8; 32],
             op: TreeOpKind::AddLeaf {
-                leaf: LeafNode {
-                    leaf_id: LeafId(leaf_id),
-                    device_id: test_device_id(leaf_id as u64),
-                    role: LeafRole::Device,
-                    public_key: vec![0u8; 32],
-                    meta: vec![],
-                },
+                leaf: LeafNode::new_device(
+                    LeafId(leaf_id),
+                    test_device_id(leaf_id as u64),
+                    vec![0u8; 32],
+                )
+                .expect("valid leaf"),
                 under: NodeIndex(0),
             },
             version: 1,

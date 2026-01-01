@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn test_flood_action_checks() {
         let accept = FloodAction::Accept(DecryptedRendezvous {
-            sender: AuthorityId::default(),
+            sender: AuthorityId::new_from_entropy([1u8; 32]),
             version: 1,
             payload: vec![],
         });

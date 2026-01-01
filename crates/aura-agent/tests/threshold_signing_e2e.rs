@@ -16,6 +16,7 @@ use aura_core::threshold::{
     ThresholdSignature,
 };
 use aura_core::tree::{TreeCommitment, TreeOp, TreeOpKind};
+use aura_core::Epoch;
 use aura_testkit::mock_effects::MockEffects;
 
 /// Helper to create a test authority ID with unique entropy
@@ -26,7 +27,7 @@ fn test_authority(seed: u8) -> AuthorityId {
 /// Helper to create a test tree operation
 fn test_tree_op(epoch: u64) -> TreeOp {
     TreeOp {
-        parent_epoch: epoch,
+        parent_epoch: Epoch::new(epoch),
         parent_commitment: [0u8; 32],
         op: TreeOpKind::RotateEpoch { affected: vec![] },
         version: 1,

@@ -123,7 +123,7 @@ pub fn test_session_id(seed: u64) -> SessionId {
 pub fn test_key_pair(seed: u64) -> (Ed25519SigningKey, Ed25519VerifyingKey) {
     let mut key_bytes = [0u8; 32];
     key_bytes[..8].copy_from_slice(&seed.to_le_bytes());
-    let signing_key = Ed25519SigningKey::from_bytes(&key_bytes);
+    let signing_key = Ed25519SigningKey::from_bytes(key_bytes);
     let verifying_key = signing_key
         .verifying_key()
         .expect("valid signing key should produce valid verifying key");

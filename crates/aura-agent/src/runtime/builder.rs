@@ -280,7 +280,7 @@ impl EffectSystemBuilder {
             _ => {
                 // Create a build-time context for wiring handlers
                 let authority_id = self.authority_id.ok_or("Authority ID required")?;
-                let context_id = aura_core::identifiers::ContextId::default();
+                let context_id = aura_core::identifiers::ContextId::new_from_entropy([2u8; 32]);
                 let ctx = EffectContext::new(authority_id, context_id, self.execution_mode);
 
                 // Use a minimal async runtime just for building

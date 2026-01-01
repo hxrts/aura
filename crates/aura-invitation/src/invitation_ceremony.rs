@@ -710,7 +710,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
                 let mut journal = self.effects.get_journal().await?;
                 journal
                     .facts
-                    .insert(key, FactValue::Bytes(DomainFact::to_bytes(&fact)));
+                    .insert(key, FactValue::Bytes(DomainFact::to_bytes(&fact)))?;
                 self.effects.persist_journal(&journal).await?;
                 Ok(())
             }

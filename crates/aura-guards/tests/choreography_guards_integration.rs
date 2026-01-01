@@ -79,7 +79,7 @@ async fn test_guard_capability_annotation() {
 async fn test_flow_cost_annotation() {
     let interpreter = MockEffectInterpreter::new();
     let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::default();
+    let context = ContextId::new_from_entropy([2u8; 32]);
     let peer = AuthorityId::new_from_entropy([1u8; 32]);
 
     // Simulate what the macro generates for: Client[flow_cost = 200] -> Server: Msg;
@@ -147,7 +147,7 @@ async fn test_journal_facts_annotation() {
 async fn test_multiple_annotations() {
     let interpreter = MockEffectInterpreter::new();
     let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::default();
+    let context = ContextId::new_from_entropy([2u8; 32]);
     let peer = AuthorityId::new_from_entropy([1u8; 32]);
 
     // Simulate what the macro generates for:
@@ -192,7 +192,7 @@ async fn test_multiple_annotations() {
 async fn test_effect_execution_order() {
     let interpreter = MockEffectInterpreter::new();
     let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::default();
+    let context = ContextId::new_from_entropy([2u8; 32]);
     let peer = AuthorityId::new_from_entropy([1u8; 32]);
 
     // Execute commands in specific order
@@ -273,7 +273,7 @@ async fn test_effect_error_handling() {
 
     let interpreter = FailingInterpreter;
     let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::default();
+    let context = ContextId::new_from_entropy([2u8; 32]);
     let peer = AuthorityId::new_from_entropy([1u8; 32]);
 
     // Command that should succeed
@@ -312,7 +312,7 @@ async fn test_guard_chain_integration() {
 
     // Create a snapshot with budget
     let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::default();
+    let context = ContextId::new_from_entropy([2u8; 32]);
     let mut budgets = HashMap::new();
     budgets.insert((context, authority), 500);
 
@@ -333,7 +333,7 @@ async fn test_guard_chain_integration() {
     // Create a guard request
     let request = GuardRequest::new(authority, "test_op", 100)
         .with_context_id(context)
-        .with_peer(AuthorityId::default());
+        .with_peer(AuthorityId::new_from_entropy([1u8; 32]));
 
     // Evaluate with standard guard chain
     let chain = GuardChain::standard();
@@ -359,7 +359,7 @@ async fn test_guard_chain_integration() {
 async fn test_unified_effect_command_system() {
     let interpreter = MockEffectInterpreter::new();
     let authority = AuthorityId::new_from_entropy([1u8; 32]);
-    let context = ContextId::default();
+    let context = ContextId::new_from_entropy([2u8; 32]);
     let peer = AuthorityId::new_from_entropy([1u8; 32]);
 
     // Effect from annotation (macro-generated)

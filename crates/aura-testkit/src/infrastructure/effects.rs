@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn test_effects_builder_unit_test_config() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let builder = TestEffectsBuilder::for_unit_tests(device_id);
 
         assert_eq!(builder.device_id(), device_id);
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_effects_builder_integration_config() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let builder = TestEffectsBuilder::for_integration_tests(device_id);
 
         assert_eq!(builder.device_id(), device_id);
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_effects_builder_simulation_config() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let builder = TestEffectsBuilder::for_simulation(device_id);
 
         assert_eq!(builder.device_id(), device_id);
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_builder_customization() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let builder = TestEffectsBuilder::for_unit_tests(device_id)
             .with_seed(12345)
             .with_time_acceleration(5.0)

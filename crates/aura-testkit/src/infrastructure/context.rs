@@ -62,7 +62,7 @@ impl SimpleTestContext {
     pub fn new(execution_mode: ExecutionMode) -> Self {
         Self {
             execution_mode,
-            device_id: DeviceId::new(),
+            device_id: DeviceId::new_from_entropy([3u8; 32]),
         }
     }
 

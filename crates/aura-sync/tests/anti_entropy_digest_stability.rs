@@ -7,13 +7,15 @@ fn anti_entropy_digest_is_stable_for_identical_inputs() {
     let protocol = AntiEntropyProtocol::new(AntiEntropyConfig::default());
 
     let mut facts = Fact::new();
-    facts.insert_with_context(
-        "example".to_string(),
-        FactValue::Bytes(vec![1, 2, 3]),
-        "anti-entropy-test",
-        0,
-        None,
-    );
+    facts
+        .insert_with_context(
+            "example".to_string(),
+            FactValue::Bytes(vec![1, 2, 3]),
+            aura_core::ActorId::synthetic("anti-entropy-test"),
+            aura_core::FactTimestamp::new(0),
+            None,
+        )
+        .expect("fact insert should succeed");
     let journal = Journal::with_facts(facts);
     let ops = Vec::new();
 

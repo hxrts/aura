@@ -65,19 +65,21 @@ impl<J: JournalEffects> IndexedJournalWrapper<J> {
 
         for (key, value) in journal.facts.iter() {
             // Skip if already indexed
-            if indexed_keys.contains(key) {
+            if indexed_keys.contains(key.as_str()) {
                 continue;
             }
 
+            let key_owned = key.as_str().to_string();
+
             // Add to index
             self.index.add_fact(
-                key.clone(),
+                key_owned.clone(),
                 value.clone(),
                 None, // Authority not available from basic Fact iteration
                 None, // Timestamp not available from basic Fact iteration
             );
 
-            indexed_keys.insert(key.clone());
+            indexed_keys.insert(key_owned);
         }
     }
 

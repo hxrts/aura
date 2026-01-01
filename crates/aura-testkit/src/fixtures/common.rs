@@ -518,7 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_protocol_fixture_creation() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let result = ProtocolTestFixture::for_unit_tests(device_id).await;
         assert!(result.is_ok());
     }

@@ -145,11 +145,11 @@ pub async fn send_direct_message(
         chat_state.selected_channel_id = Some(channel_id);
 
         // Create the message with deterministic ID
-        // Use AuthorityId::default() for self - in production this would be the actual user's ID
+        // Use AuthorityId::new_from_entropy([1u8; 32]) for self - in production this would be the actual user's ID
         let message = Message {
             id: format!("msg-{}-{}", channel_id, now),
             channel_id,
-            sender_id: AuthorityId::default(),
+            sender_id: AuthorityId::new_from_entropy([1u8; 32]),
             sender_name: "You".to_string(),
             content: content.to_string(),
             timestamp: now,
@@ -474,7 +474,7 @@ pub async fn send_message_ref(
 
         runtime.authority_id()
     } else {
-        AuthorityId::default()
+        AuthorityId::new_from_entropy([1u8; 32])
     };
 
     // Update UI state for responsiveness.
@@ -539,7 +539,7 @@ pub async fn start_direct_chat(
     let channel_id = dm_channel_id(contact_id);
 
     // Parse contact_id as AuthorityId for lookup
-    let authority_id = parse_authority_id(contact_id).unwrap_or_else(|_| AuthorityId::default());
+    let authority_id = parse_authority_id(contact_id).unwrap_or_else(|_| AuthorityId::new_from_entropy([1u8; 32]));
 
     let contacts = contacts_snapshot(app_core).await;
 

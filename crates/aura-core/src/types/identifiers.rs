@@ -31,14 +31,14 @@ fn derived_uuid(label: &[u8]) -> Uuid {
 /// Generate a UUID-backed identifier type with standard traits and methods.
 ///
 /// # Generated Methods
-/// - `new()`: Create with deterministic UUID from label
 /// - `new_from_entropy(entropy: [u8; 32])`: Create from caller-provided entropy
+/// - `from_entropy(entropy: [u8; 32])`: Create from caller-provided entropy (alias)
 /// - `from_uuid(uuid: Uuid)`: Create from UUID
 /// - `uuid()`: Get inner UUID
 ///
 /// # Generated Traits
 /// - Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize
-/// - Default (uses deterministic sentinel)
+/// - No Default implementation (avoids deterministic sentinels)
 /// - Display (with optional prefix)
 /// - FromStr (parses UUID, optionally with prefix)
 /// - From<Uuid>, From<Self> for Uuid
@@ -47,24 +47,23 @@ macro_rules! uuid_id {
         $(#[$meta:meta])*
         $name:ident,
         label: $label:expr,
-        prefix: $prefix:expr,
-        default_sentinel: $sentinel:expr
+        prefix: $prefix:expr
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
         pub struct $name(pub Uuid);
 
         impl $name {
-            /// Create a new identifier with deterministic UUID
-            pub fn new() -> Self {
-                Self(derived_uuid($label))
-            }
-
             /// Create from caller-provided entropy
             pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
                 let mut uuid_bytes = [0u8; 16];
                 uuid_bytes.copy_from_slice(&entropy[..16]);
                 Self(Uuid::from_bytes(uuid_bytes))
+            }
+
+            /// Create from caller-provided entropy (alias)
+            pub fn from_entropy(entropy: [u8; 32]) -> Self {
+                Self::new_from_entropy(entropy)
             }
 
             /// Create from a UUID
@@ -75,12 +74,6 @@ macro_rules! uuid_id {
             /// Get the inner UUID
             pub fn uuid(&self) -> Uuid {
                 self.0
-            }
-        }
-
-        impl Default for $name {
-            fn default() -> Self {
-                Self(Uuid::from_bytes($sentinel))
             }
         }
 
@@ -252,17 +245,8 @@ uuid_id!(
     /// recovery, locking, etc.) and ensure session-specific operations are isolated.
     SessionId,
     label: b"session-id",
-    prefix: "session-",
-    default_sentinel: [0u8; 16]  // Uses new() for default
+    prefix: "session-"
 );
-
-// SessionId uses new() for default, override the macro-generated one
-impl SessionId {
-    /// Override default to use new()
-    pub fn default_new() -> Self {
-        Self::new()
-    }
-}
 
 uuid_id!(
     /// Event identifier for journal events
@@ -270,8 +254,7 @@ uuid_id!(
     /// Uniquely identifies events within the journal/effect API system.
     EventId,
     label: b"event-id",
-    prefix: "event-",
-    default_sentinel: [0u8; 16]
+    prefix: "event-"
 );
 
 // EventIdExt moved to aura-effects to maintain clean interface layer
@@ -343,8 +326,7 @@ uuid_id!(
     /// Identifies specific operations across the system.
     OperationId,
     label: b"operation-id",
-    prefix: "operation-",
-    default_sentinel: [0u8; 16]
+    prefix: "operation-"
 );
 
 /// Device identifier for distinguishing different devices in a threshold account
@@ -361,13 +343,9 @@ impl DeviceId {
         uuid_bytes.copy_from_slice(&entropy[..16]);
         Self(Uuid::from_bytes(uuid_bytes))
     }
-    pub fn new() -> Self {
-        Self(derived_uuid(b"device-id"))
-    }
-
-    /// Create a deterministic DeviceId for testing (sentinel, non-nil)
-    pub fn deterministic_test_id() -> Self {
-        Self(derived_uuid(b"aura-deterministic-test-device"))
+    /// Create from caller-provided entropy (alias)
+    pub fn from_entropy(entropy: [u8; 32]) -> Self {
+        Self::new_from_entropy(entropy)
     }
 
     /// Create from a UUID
@@ -400,13 +378,6 @@ impl DeviceId {
     }
 }
 
-impl Default for DeviceId {
-    fn default() -> Self {
-        // Default should remain deterministic-free; use a fixed hash sentinel to avoid ambient RNG.
-        Self::deterministic_test_id()
-    }
-}
-
 impl fmt::Display for DeviceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -433,16 +404,6 @@ impl From<DeviceId> for Uuid {
     }
 }
 
-impl From<&str> for DeviceId {
-    fn from(s: &str) -> Self {
-        DeviceId::from_str(s).unwrap_or_else(|_| {
-            // Create a deterministic UUID from the string if parsing fails
-            let namespace = Uuid::NAMESPACE_DNS;
-            DeviceId(Uuid::new_v5(&namespace, s.as_bytes()))
-        })
-    }
-}
-
 impl From<[u8; 32]> for DeviceId {
     fn from(bytes: [u8; 32]) -> Self {
         Self::from_bytes(bytes)
@@ -456,8 +417,7 @@ uuid_id!(
     /// if the user loses their devices. Each guardian has a unique GuardianId.
     GuardianId,
     label: b"guardian-id",
-    prefix: "",
-    default_sentinel: [0u8; 16]
+    prefix: ""
 );
 
 uuid_id!(
@@ -467,8 +427,7 @@ uuid_id!(
     /// and this ID uniquely identifies each one.
     AccountId,
     label: b"account-id",
-    prefix: "",
-    default_sentinel: [1u8; 16]
+    prefix: ""
 );
 
 impl AccountId {
@@ -489,8 +448,7 @@ uuid_id!(
     /// that is not exposed externally.
     AuthorityId,
     label: b"authority-id",
-    prefix: "authority-",
-    default_sentinel: [2u8; 16]
+    prefix: "authority-"
 );
 
 impl AuthorityId {
@@ -520,8 +478,7 @@ uuid_id!(
     /// ContextIds are opaque and never encode participant data or authority structure.
     ContextId,
     label: b"context-id",
-    prefix: "context-",
-    default_sentinel: [3u8; 16]
+    prefix: "context-"
 );
 
 impl ContextId {

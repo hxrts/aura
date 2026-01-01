@@ -74,7 +74,7 @@ impl CausalOp for DummyOp {
     fn ctx(&self) -> &Self::Ctx {
         use once_cell::sync::Lazy;
         static DUMMY_CTX: Lazy<CausalContext> =
-            Lazy::new(|| CausalContext::new(DeviceId::deterministic_test_id()));
+            Lazy::new(|| CausalContext::new(DeviceId::new_from_entropy([3u8; 32])));
         &DUMMY_CTX
     }
 }

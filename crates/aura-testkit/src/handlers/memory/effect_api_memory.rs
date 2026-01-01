@@ -200,7 +200,7 @@ impl EffectApiEffects for MemoryLedgerHandler {
     async fn effect_api_device_id(
         &self,
     ) -> Result<aura_core::identifiers::DeviceId, EffectApiError> {
-        Ok(aura_core::identifiers::DeviceId::new()) // Memory implementation returns a new device ID
+        Ok(aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32])) // Memory implementation returns a new device ID
     }
 
     async fn new_uuid(&self) -> Result<uuid::Uuid, EffectApiError> {

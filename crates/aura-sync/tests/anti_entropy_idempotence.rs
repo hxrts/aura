@@ -1,11 +1,12 @@
 #![allow(missing_docs)]
 use aura_core::tree::{AttestedOp, TreeOp, TreeOpKind};
+use aura_core::Epoch;
 use aura_sync::protocols::{AntiEntropyConfig, AntiEntropyProtocol};
 
 fn make_attested_op(seed: u8) -> AttestedOp {
     AttestedOp {
         op: TreeOp {
-            parent_epoch: seed as u64,
+            parent_epoch: Epoch::new(seed as u64),
             parent_commitment: [seed; 32],
             op: TreeOpKind::RotateEpoch {
                 affected: Vec::new(),

@@ -66,7 +66,7 @@ const COMMITMENT_VERSION: u16 = 1;
 ///
 /// let policy = Policy::Threshold { m: 2, n: 3 };
 /// let node_idx = NodeIndex(1);
-/// let epoch = 42;
+/// let epoch = Epoch::new(42);
 /// let left = [0u8; 32];
 /// let right = [1u8; 32];
 ///
@@ -86,7 +86,7 @@ pub fn commit_branch(
     h.update(BRANCH_TAG);
     h.update(&COMMITMENT_VERSION.to_le_bytes());
     h.update(&node_index.0.to_le_bytes());
-    h.update(&epoch.to_le_bytes());
+    h.update(&u64::from(epoch).to_le_bytes());
     h.update(&policy_hash);
     h.update(left_commitment);
     h.update(right_commitment);
@@ -119,7 +119,7 @@ pub fn commit_branch(
 /// use aura_core::tree::{commit_leaf, LeafId};
 ///
 /// let leaf_id = LeafId(5);
-/// let epoch = 42;
+/// let epoch = Epoch::new(42);
 /// let pubkey = vec![1, 2, 3, 4]; // Serialized public key
 ///
 /// let commitment = commit_leaf(leaf_id, epoch, &pubkey);
@@ -132,7 +132,7 @@ pub fn commit_leaf(leaf_id: super::LeafId, epoch: Epoch, public_key: &[u8]) -> T
     h.update(LEAF_TAG);
     h.update(&COMMITMENT_VERSION.to_le_bytes());
     h.update(&leaf_id.0.to_le_bytes());
-    h.update(&epoch.to_le_bytes());
+    h.update(&u64::from(epoch).to_le_bytes());
     h.update(&pubkey_hash);
 
     h.finalize()
@@ -208,7 +208,7 @@ mod tests {
     fn test_commit_branch_deterministic() {
         let policy = Policy::Threshold { m: 2, n: 3 };
         let node_idx = NodeIndex(1);
-        let epoch = 42;
+        let epoch = Epoch::new(42);
         let left = [0u8; 32];
         let right = [1u8; 32];
 
@@ -222,7 +222,7 @@ mod tests {
     fn test_commit_branch_changes_with_inputs() {
         let policy = Policy::Threshold { m: 2, n: 3 };
         let node_idx = NodeIndex(1);
-        let epoch = 42;
+        let epoch = Epoch::new(42);
         let left = [0u8; 32];
         let right = [1u8; 32];
 

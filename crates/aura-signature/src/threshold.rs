@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn test_verify_threshold_signature_sufficient_signers() {
         // Deterministic signing key avoids ambient randomness in tests
-        let signing_key = Ed25519SigningKey::from_bytes(&[7u8; 32]);
+        let signing_key = Ed25519SigningKey::from_bytes([7u8; 32]);
         let verifying_key = signing_key.verifying_key().unwrap();
         let message = b"test threshold message";
         let signature = signing_key.sign(message).unwrap();
@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_verify_threshold_signature_insufficient_signers() {
-        let signing_key = Ed25519SigningKey::from_bytes(&[3u8; 32]);
+        let signing_key = Ed25519SigningKey::from_bytes([3u8; 32]);
         let verifying_key = signing_key.verifying_key().unwrap();
         let message = b"test threshold message";
         let signature = signing_key.sign(message).unwrap();
@@ -148,7 +148,7 @@ mod tests {
     fn test_verify_threshold_signature_with_signers() {
         let expected_signers = vec![AuthorityId::new_from_entropy([55u8; 32])];
 
-        let signing_key = Ed25519SigningKey::from_bytes(&[11u8; 32]);
+        let signing_key = Ed25519SigningKey::from_bytes([11u8; 32]);
         let verifying_key = signing_key.verifying_key().unwrap();
         let message = b"test threshold message";
         let signature = signing_key.sign(message).unwrap();

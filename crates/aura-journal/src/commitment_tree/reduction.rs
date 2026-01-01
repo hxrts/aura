@@ -88,7 +88,7 @@ impl DagNode for OpNode<'_> {
         // Convert parent key to a deterministic hash
         let mut hasher = hash::hasher();
         hasher.update(b"PARENT_KEY");
-        hasher.update(&self.0.op.parent_epoch.to_le_bytes());
+        hasher.update(&u64::from(self.0.op.parent_epoch).to_le_bytes());
         hasher.update(&self.0.op.parent_commitment);
         vec![hasher.finalize()]
     }
@@ -402,7 +402,7 @@ fn compute_branch_commitment(
     hasher.update(b"BRANCH");
     hasher.update(&1u16.to_le_bytes()); // version
     hasher.update(&node.0.to_le_bytes());
-    hasher.update(&state.current_epoch().to_le_bytes());
+    hasher.update(&u64::from(state.current_epoch()).to_le_bytes());
     hasher.update(&policy_hash);
 
     // Include child commitments
@@ -418,7 +418,7 @@ fn recompute_root_commitment_simple(state: &mut TreeState) {
     let mut hasher = hash::hasher();
 
     // Include epoch to ensure commitments change on epoch rotation
-    hasher.update(&state.current_epoch().to_le_bytes());
+    hasher.update(&u64::from(state.current_epoch()).to_le_bytes());
 
     // Include all leaf commitments (sorted by LeafId for determinism)
     for (leaf_id, leaf_commitment) in state.iter_leaf_commitments() {
@@ -455,7 +455,7 @@ fn recompute_root_commitment_from_tree(state: &mut TreeState) {
 /// - Commitment verification: Implemented
 fn verify_parent_binding(op: &TreeOp, state: &TreeState) -> Result<(), ReductionError> {
     // Genesis operations (epoch 0) don't have parent binding
-    if op.parent_epoch == 0 {
+    if op.parent_epoch == Epoch::initial() {
         return Ok(());
     }
 
@@ -485,7 +485,7 @@ fn hash_op(op: &AttestedOp) -> TreeHash32 {
     let mut hasher = hash::hasher();
 
     // Hash the operation fields
-    hasher.update(&op.op.parent_epoch.to_le_bytes());
+    hasher.update(&u64::from(op.op.parent_epoch).to_le_bytes());
     hasher.update(&op.op.parent_commitment);
     hasher.update(&op.op.version.to_le_bytes());
 
@@ -633,7 +633,8 @@ mod tests {
                         LeafId(leaf_id),
                         aura_core::DeviceId(uuid::Uuid::from_bytes([10u8; 16])),
                         vec![leaf_id as u8; 32],
-                    ),
+                    )
+                    .expect("valid leaf"),
                     under: NodeIndex(0),
                 },
                 version: 1,
@@ -648,12 +649,12 @@ mod tests {
         let ops = vec![];
         let state = reduce(&ops).unwrap();
         assert!(state.is_empty());
-        assert_eq!(state.epoch, 0);
+        assert_eq!(state.epoch, Epoch::initial());
     }
 
     #[test]
     fn test_reduce_single_op() {
-        let ops = vec![create_test_op(0, 1)];
+        let ops = vec![create_test_op(Epoch::initial(), 1)];
         let state = reduce(&ops).unwrap();
         assert_eq!(state.num_leaves(), 1);
         assert!(state.get_leaf(&LeafId(1)).is_some());
@@ -662,9 +663,9 @@ mod tests {
     #[test]
     fn test_reduce_multiple_ops() {
         let ops = vec![
-            create_test_op(0, 1),
-            create_test_op(0, 2),
-            create_test_op(0, 3),
+            create_test_op(Epoch::initial(), 1),
+            create_test_op(Epoch::initial(), 2),
+            create_test_op(Epoch::initial(), 3),
         ];
 
         let state = reduce(&ops).unwrap();
@@ -673,7 +674,7 @@ mod tests {
 
     #[test]
     fn test_hash_op_deterministic() {
-        let op = create_test_op(0, 1);
+        let op = create_test_op(Epoch::initial(), 1);
         let hash1 = hash_op(&op);
         let hash2 = hash_op(&op);
         assert_eq!(hash1, hash2);
@@ -681,8 +682,8 @@ mod tests {
 
     #[test]
     fn test_hash_op_different_ops() {
-        let op1 = create_test_op(0, 1);
-        let op2 = create_test_op(0, 2);
+        let op1 = create_test_op(Epoch::initial(), 1);
+        let op2 = create_test_op(Epoch::initial(), 2);
         let hash1 = hash_op(&op1);
         let hash2 = hash_op(&op2);
         assert_ne!(hash1, hash2);

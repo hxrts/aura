@@ -147,7 +147,8 @@ impl JournalFactory {
     pub async fn build(self) -> Journal {
         // Create Journal with default group key
         let (_, group_public_key) = crate::test_key_pair(42);
-        Journal::new_with_group_key_bytes(self.account_id, group_public_key.to_bytes().to_vec())
+        Journal::new_with_group_key_bytes(self.account_id, group_public_key.to_bytes())
+            .expect("test journal should build")
     }
 }
 

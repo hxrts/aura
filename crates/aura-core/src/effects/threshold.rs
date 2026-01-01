@@ -196,6 +196,7 @@ mod tests {
     use super::*;
     use crate::threshold::{ApprovalContext, SignableOperation};
     use crate::tree::{TreeOp, TreeOpKind};
+    use crate::Epoch;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -203,7 +204,7 @@ mod tests {
 
     fn test_tree_op() -> TreeOp {
         TreeOp {
-            parent_epoch: 0,
+            parent_epoch: Epoch::initial(),
             parent_commitment: [0u8; 32],
             op: TreeOpKind::RotateEpoch { affected: vec![] },
             version: 1,

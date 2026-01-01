@@ -12,8 +12,11 @@
 //! The Journal serves as the pullback where growing facts and shrinking capabilities meet,
 //! providing the foundational abstraction for all replicated state in Aura.
 
+use crate::identifiers::{AuthorityId, DeviceId};
 use crate::semilattice::{Bottom, JoinSemilattice, MeetSemiLattice, Top};
+use crate::{hash, AuraError};
 use serde::{Deserialize, Serialize};
+use std::borrow::Borrow;
 use std::fmt;
 
 /// Maximum number of entries in the LWW map per journal.
@@ -24,6 +27,184 @@ pub const MAX_FACT_OPERATIONS: usize = 131072;
 
 /// Maximum size in bytes for a FactValue::Bytes payload.
 pub const MAX_FACT_BYTES_SIZE: usize = 1048576; // 1 MiB
+
+/// Strongly-typed fact key.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct FactKey(String);
+
+impl FactKey {
+    pub fn new(key: impl Into<String>) -> Self {
+        Self(key.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for FactKey {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for FactKey {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<&String> for FactKey {
+    fn from(value: &String) -> Self {
+        Self(value.clone())
+    }
+}
+
+impl AsRef<str> for FactKey {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Borrow<str> for FactKey {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for FactKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Actor identifier for fact operations.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum ActorId {
+    Authority(AuthorityId),
+    Device(DeviceId),
+}
+
+impl ActorId {
+    pub fn authority(authority_id: AuthorityId) -> Self {
+        Self::Authority(authority_id)
+    }
+
+    pub fn device(device_id: DeviceId) -> Self {
+        Self::Device(device_id)
+    }
+
+    pub fn synthetic(label: &str) -> Self {
+        Self::Authority(AuthorityId::new_from_entropy(hash::hash(label.as_bytes())))
+    }
+
+    fn append_hash_bytes(&self, out: &mut Vec<u8>) {
+        match self {
+            ActorId::Authority(id) => {
+                out.push(0);
+                out.extend_from_slice(&id.to_bytes());
+            }
+            ActorId::Device(id) => {
+                out.push(1);
+                out.extend_from_slice(id.0.as_bytes());
+            }
+        }
+    }
+}
+
+impl From<AuthorityId> for ActorId {
+    fn from(value: AuthorityId) -> Self {
+        Self::Authority(value)
+    }
+}
+
+impl From<DeviceId> for ActorId {
+    fn from(value: DeviceId) -> Self {
+        Self::Device(value)
+    }
+}
+
+impl From<&AuthorityId> for ActorId {
+    fn from(value: &AuthorityId) -> Self {
+        Self::Authority(*value)
+    }
+}
+
+impl From<&DeviceId> for ActorId {
+    fn from(value: &DeviceId) -> Self {
+        Self::Device(*value)
+    }
+}
+
+impl fmt::Display for ActorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ActorId::Authority(id) => write!(f, "authority:{id}"),
+            ActorId::Device(id) => write!(f, "device:{id}"),
+        }
+    }
+}
+
+/// Monotonic timestamp for facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct FactTimestamp(u64);
+
+impl FactTimestamp {
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<FactTimestamp> for u64 {
+    fn from(value: FactTimestamp) -> Self {
+        value.0
+    }
+}
+
+/// Unique operation identifier for OR-Set semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct FactOpId([u8; 32]);
+
+impl FactOpId {
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    pub fn for_add(actor_id: &ActorId, timestamp: FactTimestamp, key: &FactKey) -> Self {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"fact-op:add");
+        actor_id.append_hash_bytes(&mut data);
+        data.extend_from_slice(&timestamp.value().to_le_bytes());
+        data.extend_from_slice(key.as_str().as_bytes());
+        Self(hash::hash(&data))
+    }
+
+    pub fn for_remove(base: &FactOpId, removed: &FactOpId) -> Self {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"fact-op:remove");
+        data.extend_from_slice(base.as_bytes());
+        data.extend_from_slice(removed.as_bytes());
+        Self(hash::hash(&data))
+    }
+}
+
+impl fmt::Display for FactOpId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", hex::encode(self.0))
+    }
+}
 
 /// Fact type for the journal - represents "what we know" (⊔-monotone)
 ///
@@ -41,7 +222,7 @@ pub struct Fact {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 struct FactCrdt {
     /// Last-Writer-Wins map for fact values with vector clocks
-    lww_map: std::collections::BTreeMap<String, VersionedFactValue>,
+    lww_map: std::collections::BTreeMap<FactKey, VersionedFactValue>,
     /// Operation set for add/remove operations
     operation_set: std::collections::BTreeSet<FactOperation>,
 }
@@ -50,28 +231,28 @@ struct FactCrdt {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 struct VersionedFactValue {
     value: FactValue,
-    timestamp: u64,
-    actor_id: String, // Device/actor that created this value
-    version: u64,     // Logical clock for causality
+    timestamp: FactTimestamp,
+    actor_id: ActorId, // Device/actor that created this value
+    version: FactTimestamp, // Logical clock for causality
 }
 
 /// CRDT operation for fact modifications
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum FactOperation {
     Add {
-        key: String,
+        key: FactKey,
         value: FactValue,
-        timestamp: u64,
-        actor_id: String,
-        op_id: String, // Unique operation ID for OR-Set semantics
+        timestamp: FactTimestamp,
+        actor_id: ActorId,
+        op_id: FactOpId, // Unique operation ID for OR-Set semantics
     },
     Remove {
-        key: String,
-        timestamp: u64,
-        actor_id: String,
-        op_id: String,
+        key: FactKey,
+        timestamp: FactTimestamp,
+        actor_id: ActorId,
+        op_id: FactOpId,
         /// The specific add operation being removed
-        removed_op_id: String,
+        removed_op_id: FactOpId,
     },
 }
 
@@ -151,24 +332,28 @@ impl Fact {
 
     /// Create a fact with a single key-value pair
     #[must_use]
-    pub fn with_value(key: impl Into<String>, value: FactValue) -> Self {
+    pub fn with_value(key: impl Into<FactKey>, value: FactValue) -> Result<Self, AuraError> {
         let mut fact = Self::new();
-        fact.insert(key, value);
-        fact
+        fact.insert(key, value)?;
+        Ok(fact)
     }
 
     /// Insert or update a fact value using CRDT semantics with explicit context.
     pub fn insert_with_context(
         &mut self,
-        key: impl Into<String>,
+        key: impl Into<FactKey>,
         value: FactValue,
-        actor_id: impl Into<String>,
-        timestamp: u64,
-        op_id: Option<String>,
-    ) {
+        actor_id: impl Into<ActorId>,
+        timestamp: FactTimestamp,
+        op_id: Option<FactOpId>,
+    ) -> Result<(), AuraError> {
         let key = key.into();
         let actor_id = actor_id.into();
-        let op_id = op_id.unwrap_or_else(|| format!("{actor_id}:{timestamp}:{key}"));
+
+        self.validate_value(&value)?;
+        self.ensure_entry_capacity(&key)?;
+
+        let op_id = op_id.unwrap_or_else(|| FactOpId::for_add(&actor_id, timestamp, &key));
 
         // Create add operation for OR-Set
         let add_op = FactOperation::Add {
@@ -179,6 +364,7 @@ impl Fact {
             op_id,
         };
 
+        self.ensure_operation_capacity(&add_op)?;
         self.entries.operation_set.insert(add_op);
 
         // Update LWW-Map with versioned value
@@ -188,6 +374,14 @@ impl Fact {
             actor_id,
             version: timestamp, // logical clock derived from physical timestamp
         };
+
+        if let Some(existing) = self.entries.lww_map.get(&key) {
+            if versioned_value.timestamp < existing.timestamp {
+                return Err(AuraError::invalid(format!(
+                    "Non-monotonic timestamp for key {key}"
+                )));
+            }
+        }
 
         // Last-Writer-Wins resolution
         match self.entries.lww_map.get(&key) {
@@ -207,24 +401,32 @@ impl Fact {
                 self.entries.lww_map.insert(key, versioned_value);
             }
         }
+
+        Ok(())
     }
 
     /// Convenience wrapper that uses deterministic defaults.
-    pub fn insert(&mut self, key: impl Into<String>, value: FactValue) {
-        self.insert_with_context(key, value, "local", 0, None);
+    pub fn insert(&mut self, key: impl Into<FactKey>, value: FactValue) -> Result<(), AuraError> {
+        self.insert_with_context(
+            key,
+            value,
+            ActorId::synthetic("local"),
+            FactTimestamp::new(0),
+            None,
+        )
     }
 
     /// Remove a fact value (creates remove operation) with explicit context.
     pub fn remove_with_context(
         &mut self,
-        key: impl Into<String>,
-        actor_id: impl Into<String>,
-        timestamp: u64,
-        op_id: Option<String>,
-    ) {
+        key: impl Into<FactKey>,
+        actor_id: impl Into<ActorId>,
+        timestamp: FactTimestamp,
+        op_id: Option<FactOpId>,
+    ) -> Result<(), AuraError> {
         let key = key.into();
         let actor_id = actor_id.into();
-        let op_id = op_id.unwrap_or_else(|| format!("{actor_id}:{timestamp}:remove:{key}"));
+        let base_op_id = op_id.unwrap_or_else(|| FactOpId::for_add(&actor_id, timestamp, &key));
 
         // Find all add operations for this key to remove them
         let add_ops_to_remove: Vec<_> = self
@@ -239,13 +441,33 @@ impl Fact {
             })
             .collect();
 
+        let new_ops_needed = add_ops_to_remove
+            .iter()
+            .filter(|removed_op_id| {
+                let op_id = FactOpId::for_remove(&base_op_id, removed_op_id);
+                !self.entries.operation_set.contains(&FactOperation::Remove {
+                    key: key.clone(),
+                    timestamp,
+                    actor_id: actor_id.clone(),
+                    op_id,
+                    removed_op_id: (*removed_op_id).clone(),
+                })
+            })
+            .count();
+
+        if self.entries.operation_set.len() + new_ops_needed > MAX_FACT_OPERATIONS {
+            return Err(AuraError::invalid(format!(
+                "Fact operation set exceeded MAX_FACT_OPERATIONS ({MAX_FACT_OPERATIONS})"
+            )));
+        }
+
         // Create remove operations for each add operation
         for removed_op_id in add_ops_to_remove {
             let remove_op = FactOperation::Remove {
                 key: key.clone(),
                 timestamp,
                 actor_id: actor_id.clone(),
-                op_id: format!("{op_id}:{removed_op_id}"),
+                op_id: FactOpId::for_remove(&base_op_id, &removed_op_id),
                 removed_op_id,
             };
             self.entries.operation_set.insert(remove_op);
@@ -253,17 +475,24 @@ impl Fact {
 
         // Remove from LWW map
         self.entries.lww_map.remove(&key);
+
+        Ok(())
     }
 
     /// Convenience wrapper that uses deterministic defaults.
-    pub fn remove(&mut self, key: impl Into<String>) {
-        self.remove_with_context(key, "local", 0, None);
+    pub fn remove(&mut self, key: impl Into<FactKey>) -> Result<(), AuraError> {
+        self.remove_with_context(
+            key,
+            ActorId::synthetic("local"),
+            FactTimestamp::new(0),
+            None,
+        )
     }
 
     /// Get a fact value by key
     pub fn get(&self, key: &str) -> Option<&FactValue> {
         // Check if key is removed in OR-Set
-        if self.is_key_removed(key) {
+        if self.is_key_removed_str(key) {
             return None;
         }
 
@@ -271,7 +500,7 @@ impl Fact {
     }
 
     /// Iterate over all key/value pairs honoring removals
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &FactValue)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&FactKey, &FactValue)> {
         self.entries
             .lww_map
             .iter()
@@ -280,7 +509,11 @@ impl Fact {
     }
 
     /// Check if a key has been removed according to OR-Set semantics
-    fn is_key_removed(&self, key: &str) -> bool {
+    fn is_key_removed(&self, key: &FactKey) -> bool {
+        self.is_key_removed_str(key.as_str())
+    }
+
+    fn is_key_removed_str(&self, key: &str) -> bool {
         let mut add_ops = std::collections::HashSet::new();
         let mut removed_ops = std::collections::HashSet::new();
 
@@ -289,14 +522,14 @@ impl Fact {
             match op {
                 FactOperation::Add {
                     key: op_key, op_id, ..
-                } if op_key == key => {
+                } if op_key.as_str() == key => {
                     add_ops.insert(op_id.clone());
                 }
                 FactOperation::Remove {
                     key: op_key,
                     removed_op_id,
                     ..
-                } if op_key == key => {
+                } if op_key.as_str() == key => {
                     removed_ops.insert(removed_op_id.clone());
                 }
                 _ => {}
@@ -308,17 +541,16 @@ impl Fact {
     }
 
     /// Get all fact keys
-    pub fn keys(&self) -> impl Iterator<Item = String> + '_ {
+    pub fn keys(&self) -> impl Iterator<Item = &FactKey> + '_ {
         self.entries
             .lww_map
             .keys()
             .filter(|k| !self.is_key_removed(k))
-            .cloned()
     }
 
     /// Check if facts contain a key
     pub fn contains_key(&self, key: &str) -> bool {
-        !self.is_key_removed(key) && self.entries.lww_map.contains_key(key)
+        !self.is_key_removed_str(key) && self.entries.lww_map.contains_key(key)
     }
 
     /// Get the number of top-level facts
@@ -338,6 +570,40 @@ impl Fact {
     /// Get the operation set (for debugging/testing)
     pub fn operation_count(&self) -> usize {
         self.entries.operation_set.len()
+    }
+
+    fn validate_value(&self, value: &FactValue) -> Result<(), AuraError> {
+        if let FactValue::Bytes(bytes) = value {
+            if bytes.len() > MAX_FACT_BYTES_SIZE {
+                return Err(AuraError::invalid(format!(
+                    "FactValue::Bytes exceeded MAX_FACT_BYTES_SIZE ({MAX_FACT_BYTES_SIZE})"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_entry_capacity(&self, key: &FactKey) -> Result<(), AuraError> {
+        if !self.entries.lww_map.contains_key(key)
+            && self.entries.lww_map.len() >= MAX_LWW_MAP_ENTRIES_COUNT as usize
+        {
+            return Err(AuraError::invalid(format!(
+                "Fact entries exceeded MAX_LWW_MAP_ENTRIES_COUNT ({MAX_LWW_MAP_ENTRIES_COUNT})"
+            )));
+        }
+        Ok(())
+    }
+
+    fn ensure_operation_capacity(&self, op: &FactOperation) -> Result<(), AuraError> {
+        if self.entries.operation_set.contains(op) {
+            return Ok(());
+        }
+        if self.entries.operation_set.len() + 1 > MAX_FACT_OPERATIONS {
+            return Err(AuraError::invalid(format!(
+                "Fact operation set exceeded MAX_FACT_OPERATIONS ({MAX_FACT_OPERATIONS})"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -988,9 +1254,12 @@ mod tests {
 
     #[test]
     fn test_fact_join_laws() {
-        let fact1 = Fact::with_value("key1", FactValue::String("value1".to_string()));
-        let fact2 = Fact::with_value("key2", FactValue::String("value2".to_string()));
-        let fact3 = Fact::with_value("key3", FactValue::String("value3".to_string()));
+        let fact1 = Fact::with_value("key1", FactValue::String("value1".to_string()))
+            .expect("fact should build");
+        let fact2 = Fact::with_value("key2", FactValue::String("value2".to_string()))
+            .expect("fact should build");
+        let fact3 = Fact::with_value("key3", FactValue::String("value3".to_string()))
+            .expect("fact should build");
 
         // Associativity: (a ⊔ b) ⊔ c = a ⊔ (b ⊔ c)
         let left = fact1.join(&fact2).join(&fact3);
@@ -1036,15 +1305,19 @@ mod tests {
         let mut fact2 = Fact::new();
 
         // Add same key from different actors
-        fact1.insert("key1", FactValue::String("value1".to_string()));
-        fact2.insert("key1", FactValue::String("value2".to_string()));
+        fact1
+            .insert("key1", FactValue::String("value1".to_string()))
+            .expect("insert should succeed");
+        fact2
+            .insert("key1", FactValue::String("value2".to_string()))
+            .expect("insert should succeed");
 
         // Join should resolve conflicts deterministically
         let joined = fact1.join(&fact2);
         assert!(joined.contains_key("key1"));
 
         // Test remove operations
-        fact1.remove("key1");
+        fact1.remove("key1").expect("remove should succeed");
         assert!(!fact1.contains_key("key1"));
 
         // Join with removed fact should handle OR-Set semantics
@@ -1056,10 +1329,14 @@ mod tests {
 
     #[test]
     fn test_journal_merge_and_caps_refinement() {
-        let mut journal_a =
-            Journal::with_facts(Fact::with_value("k1", FactValue::String("v1".to_string())));
-        let mut journal_b =
-            Journal::with_facts(Fact::with_value("k2", FactValue::String("v2".to_string())));
+        let mut journal_a = Journal::with_facts(
+            Fact::with_value("k1", FactValue::String("v1".to_string()))
+                .expect("fact should build"),
+        );
+        let mut journal_b = Journal::with_facts(
+            Fact::with_value("k2", FactValue::String("v2".to_string()))
+                .expect("fact should build"),
+        );
 
         // Refine capabilities on B to simulate attenuation
         journal_b.refine_caps(Cap::new());
@@ -1067,8 +1344,8 @@ mod tests {
         journal_a.merge(&journal_b);
 
         let merged_keys: Vec<_> = journal_a.facts.entries.lww_map.keys().cloned().collect();
-        assert!(merged_keys.contains(&"k1".to_string()));
-        assert!(merged_keys.contains(&"k2".to_string()));
+        assert!(merged_keys.contains(&FactKey::from("k1")));
+        assert!(merged_keys.contains(&FactKey::from("k2")));
         // Cap meet with empty cap produces empty (bottom absorbs)
         assert!(journal_a.caps.is_empty());
     }
@@ -1227,12 +1504,142 @@ mod tests {
 
     #[test]
     fn test_journal_restrict_view() {
-        let journal = Journal::with_facts(Fact::with_value("k", FactValue::Number(1)));
+        let journal = Journal::with_facts(
+            Fact::with_value("k", FactValue::Number(1)).expect("fact should build"),
+        );
         let restricted = journal.restrict_view(Cap::new());
 
         // Facts are preserved, caps are attenuated
         assert!(restricted.facts.contains_key("k"));
         assert!(restricted.caps.is_empty());
+    }
+
+    #[test]
+    fn test_fact_or_set_remove_semantics() {
+        let mut fact = Fact::new();
+        let key = FactKey::from("or-set-key");
+
+        let actor_a = ActorId::authority(AuthorityId::new_from_entropy([1u8; 32]));
+        let actor_b = ActorId::authority(AuthorityId::new_from_entropy([2u8; 32]));
+
+        fact.insert_with_context(
+            key.clone(),
+            FactValue::String("v1".to_string()),
+            actor_a.clone(),
+            FactTimestamp::new(1),
+            None,
+        )
+        .expect("insert should succeed");
+        fact.insert_with_context(
+            key.clone(),
+            FactValue::String("v2".to_string()),
+            actor_b.clone(),
+            FactTimestamp::new(2),
+            None,
+        )
+        .expect("insert should succeed");
+
+        fact.remove_with_context(key.clone(), actor_a.clone(), FactTimestamp::new(3), None)
+            .expect("remove should succeed");
+        assert!(fact.get(key.as_str()).is_none(), "key should be removed");
+
+        // Re-add after removal should resurrect the key.
+        fact.insert_with_context(
+            key.clone(),
+            FactValue::String("v3".to_string()),
+            actor_b,
+            FactTimestamp::new(4),
+            None,
+        )
+        .expect("insert should succeed");
+        assert!(fact.get(key.as_str()).is_some(), "key should be present");
+    }
+
+    #[test]
+    fn test_fact_tie_breaker_actor_id() {
+        let mut fact = Fact::new();
+        let key = FactKey::from("tie-break");
+        let ts = FactTimestamp::new(10);
+
+        let actor_low = ActorId::authority(AuthorityId::new_from_entropy([1u8; 32]));
+        let actor_high = ActorId::authority(AuthorityId::new_from_entropy([2u8; 32]));
+
+        fact.insert_with_context(
+            key.clone(),
+            FactValue::String("high".to_string()),
+            actor_high.clone(),
+            ts,
+            None,
+        )
+        .expect("insert should succeed");
+        fact.insert_with_context(
+            key.clone(),
+            FactValue::String("low".to_string()),
+            actor_low.clone(),
+            ts,
+            None,
+        )
+        .expect("insert should succeed");
+
+        let stored = fact
+            .entries
+            .lww_map
+            .get(&key)
+            .expect("value should exist");
+        assert_eq!(stored.actor_id, actor_low);
+    }
+
+    #[test]
+    fn test_fact_bytes_limit_enforced() {
+        let mut fact = Fact::new();
+        let oversized = vec![0u8; MAX_FACT_BYTES_SIZE + 1];
+        let result = fact.insert("bytes", FactValue::Bytes(oversized));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fact_entry_limit_enforced() {
+        let mut fact = Fact::new();
+        for i in 0..MAX_LWW_MAP_ENTRIES_COUNT {
+            fact.insert(
+                format!("k{i}"),
+                FactValue::Number(i64::from(i)),
+            )
+            .expect("insert within limit");
+        }
+
+        let result = fact.insert(
+            format!("k{}", MAX_LWW_MAP_ENTRIES_COUNT),
+            FactValue::Number(1),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fact_operation_limit_enforced() {
+        let mut fact = Fact::new();
+        let key = FactKey::from("op-limit");
+        let actor = ActorId::authority(AuthorityId::new_from_entropy([9u8; 32]));
+
+        for i in 0..MAX_FACT_OPERATIONS {
+            fact.insert_with_context(
+                key.clone(),
+                FactValue::Number(i as i64),
+                actor.clone(),
+                FactTimestamp::new(i as u64),
+                None,
+            )
+            .expect("insert within op limit");
+        }
+
+        let result = fact.insert_with_context(
+            key,
+            FactValue::Number(0),
+            actor,
+            FactTimestamp::new(MAX_FACT_OPERATIONS as u64 + 1),
+            None,
+        );
+        assert!(result.is_err());
     }
 
     #[test]

@@ -2,7 +2,6 @@
 
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::AuthorityId;
-use aura_core::types::Epoch;
 use aura_core::AuraError;
 use aura_journal::fact::FactContent;
 use aura_journal::DomainFact;
@@ -35,7 +34,7 @@ where
     let proposal = MaintenanceFact::SnapshotProposed(SnapshotProposed::new(
         device_authority,
         proposal_id,
-        Epoch::new(current_epoch),
+        current_epoch,
         state_digest,
     ));
 

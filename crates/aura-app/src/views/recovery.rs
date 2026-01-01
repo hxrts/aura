@@ -643,7 +643,7 @@ mod tests {
     fn create_test_recovery_process() -> RecoveryProcess {
         RecoveryProcess {
             id: "test-ceremony".to_string(),
-            account_id: AuthorityId::default(),
+            account_id: AuthorityId::new_from_entropy([1u8; 32]),
             status: RecoveryProcessStatus::WaitingForApprovals,
             approvals_received: 0,
             approvals_required: 2,
@@ -705,14 +705,14 @@ mod tests {
     #[test]
     fn test_has_guardian_approved_false() {
         let process = create_test_recovery_process();
-        let guardian = AuthorityId::default();
+        let guardian = AuthorityId::new_from_entropy([1u8; 32]);
         assert!(!process.has_guardian_approved(&guardian));
     }
 
     #[test]
     fn test_has_guardian_approved_true() {
         let mut process = create_test_recovery_process();
-        let guardian = AuthorityId::default();
+        let guardian = AuthorityId::new_from_entropy([1u8; 32]);
         process.approved_by.push(guardian);
         assert!(process.has_guardian_approved(&guardian));
     }

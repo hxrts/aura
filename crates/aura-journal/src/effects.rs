@@ -102,7 +102,7 @@ pub struct JournalHandler<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthori
 impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> JournalHandler<C, S, A> {
     /// Creates a new journal handler with a fresh authority ID.
     pub fn new(crypto: C, storage: S) -> Self {
-        Self::with_authority(AuthorityId::default(), crypto, storage)
+        Self::with_authority(AuthorityId::new_from_entropy([1u8; 32]), crypto, storage)
     }
 
     /// Creates a new journal handler with the specified authority ID.

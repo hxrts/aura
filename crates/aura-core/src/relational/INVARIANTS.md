@@ -51,8 +51,8 @@ Information must not flow across relational context boundaries without explicit 
    ```rust
    #[test]
    fn test_namespace_isolation() {
-       let ctx_a = ContextId::new();
-       let ctx_b = ContextId::new();
+       let ctx_a = ContextId::new_from_entropy([2u8; 32]);
+       let ctx_b = ContextId::new_from_entropy([2u8; 32]);
        
        // Facts for context A must fail validation in context B
        let fact_a = Fact::new(ctx_a, ...);

@@ -116,7 +116,9 @@ pub use time::TimeDomain;
 
 // Core algebraic types
 #[doc = "stable: Core journal types with semver guarantees"]
-pub use domain::journal::{AuthLevel, Cap, Fact, FactValue, Journal};
+pub use domain::journal::{
+    ActorId, AuthLevel, Cap, Fact, FactKey, FactOpId, FactTimestamp, FactValue, Journal,
+};
 #[doc = "internal: Semilattice traits are implementation details, use Journal API instead"]
 pub use semilattice::{
     Bottom, CmState, CvState, DeltaState, JoinSemilattice, MeetSemiLattice, MvState, Top,

@@ -164,7 +164,7 @@ impl TreeStateSummary {
         let mut next = self.clone();
 
         // Advance epoch relative to parent binding
-        next.epoch = Epoch::from(op.op.parent_epoch).next();
+        next.epoch = op.op.parent_epoch.next();
 
         // Update commitment deterministically from the operation payload
         if let Ok(bytes) = crate::util::serialization::to_vec(&op.op) {

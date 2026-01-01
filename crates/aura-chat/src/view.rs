@@ -308,7 +308,7 @@ mod tests {
             Some("A test topic".to_string()),
             false,
             1234567890,
-            AuthorityId::default(),
+            AuthorityId::new_from_entropy([1u8; 32]),
         );
 
         let bytes = fact.to_bytes();
@@ -376,7 +376,7 @@ mod tests {
             test_context_id(),
             ChannelId::default(),
             "msg-123".to_string(),
-            AuthorityId::default(),
+            AuthorityId::new_from_entropy([1u8; 32]),
             "Alice".to_string(),
             b"Hello, world!".to_vec(),
             1234567890,

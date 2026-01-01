@@ -790,7 +790,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_optimistic_vs_pessimistic_execution() {
-        let _device_id = DeviceId::deterministic_test_id();
+        let _device_id = DeviceId::new_from_entropy([3u8; 32]);
 
         // Test pessimistic execution (default)
         let pessimistic_coupler = JournalCoupler::new();

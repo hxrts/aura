@@ -704,7 +704,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         );
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())
@@ -738,7 +738,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         );
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())
@@ -779,7 +779,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         let key = format!("recovery:quorum:{}", hex::encode(ceremony_id.0.as_bytes()));
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())
@@ -823,7 +823,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         );
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())
@@ -851,7 +851,7 @@ impl<E: RecoveryCeremonyEffects> RecoveryCeremonyExecutor<E> {
         let key = format!("recovery:aborted:{}", hex::encode(ceremony_id.0.as_bytes()));
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())

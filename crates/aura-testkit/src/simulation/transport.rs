@@ -52,8 +52,8 @@ impl MemoryTransport {
     /// Both transports share the same message queue so they can communicate
     pub fn create_pair() -> (Self, Self) {
         let shared_messages = Arc::new(RwLock::new(HashMap::new()));
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
+        let device1 = DeviceId::new_from_entropy([3u8; 32]);
+        let device2 = DeviceId::new_from_entropy([3u8; 32]);
 
         let transport1 = Self {
             device_id: device1,
@@ -105,7 +105,7 @@ impl Transport for MemoryTransport {
 ///
 /// Standard pattern for creating transport in tests.
 pub fn test_memory_transport() -> MemoryTransport {
-    MemoryTransport::new(DeviceId::new())
+    MemoryTransport::new(DeviceId::new_from_entropy([3u8; 32]))
 }
 
 // Transport patterns removed; use effect system for transport testing.

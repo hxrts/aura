@@ -74,8 +74,8 @@ async fn test_multiple_guardians() -> Result<()> {
 /// Test guardian binding in relational context
 #[test]
 fn test_guardian_binding_facts() {
-    let account_id = AuthorityId::new();
-    let guardian_id = AuthorityId::new();
+    let account_id = AuthorityId::new_from_entropy([1u8; 32]);
+    let guardian_id = AuthorityId::new_from_entropy([1u8; 32]);
 
     let mut context = RelationalContext::new(vec![account_id, guardian_id]);
 

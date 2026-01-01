@@ -990,7 +990,7 @@ mod tests {
 
         // Tree state should be retrievable (empty but deterministic)
         let state = effect_system.get_current_state().await.unwrap();
-        assert_eq!(state.epoch, 0); // fresh tree starts at epoch 0
+        assert_eq!(state.epoch, aura_core::Epoch::initial()); // fresh tree starts at epoch 0
         assert_eq!(state.root_commitment, [0u8; 32]);
 
         // Sync digest should not error

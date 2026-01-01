@@ -227,7 +227,7 @@ mod tests {
 
     fn test_tree_op() -> TreeOp {
         TreeOp {
-            parent_epoch: 0,
+            parent_epoch: Epoch::initial(),
             parent_commitment: [0u8; 32],
             op: crate::tree::TreeOpKind::RotateEpoch { affected: vec![] },
             version: 1,

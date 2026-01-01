@@ -33,7 +33,7 @@ async fn test_authority_lifecycle_end_to_end() -> Result<()> {
         .await?;
 
     // Phase 3: Relational Context Creation
-    let guardian_id = AuthorityId::new();
+    let guardian_id = AuthorityId::new_from_entropy([1u8; 32]);
     let context_id = manager
         .create_context(vec![authority_id, guardian_id], "guardian".to_string())
         .await?;
@@ -84,7 +84,7 @@ async fn test_multi_context_authority() -> Result<()> {
     let mut context_ids = Vec::new();
 
     for (context_type, _description) in contexts {
-        let guardian = AuthorityId::new();
+        let guardian = AuthorityId::new_from_entropy([1u8; 32]);
         let context_id = manager
             .create_context(vec![authority_id, guardian], context_type.to_string())
             .await?;

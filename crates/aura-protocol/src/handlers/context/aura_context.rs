@@ -262,6 +262,6 @@ impl AuraContext {
 
 impl Default for AuraContext {
     fn default() -> Self {
-        Self::for_testing(DeviceId::deterministic_test_id())
+        Self::for_testing(DeviceId::new_from_entropy([3u8; 32]))
     }
 }

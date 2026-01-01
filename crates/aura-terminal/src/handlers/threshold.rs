@@ -132,6 +132,7 @@ async fn execute_threshold_signing(
     use aura_core::effects::ThresholdSigningEffects;
     use aura_core::threshold::{ApprovalContext, SignableOperation, SigningContext};
     use aura_core::tree::{TreeOp, TreeOpKind};
+    use aura_core::Epoch;
 
     output.section("Threshold Signing Operation");
 
@@ -140,7 +141,7 @@ async fn execute_threshold_signing(
 
     // Create a test tree operation for signing
     let test_op = TreeOp {
-        parent_epoch: 0,
+        parent_epoch: Epoch::initial(),
         parent_commitment: [0u8; 32],
         op: TreeOpKind::RotateEpoch { affected: vec![] },
         version: 1,

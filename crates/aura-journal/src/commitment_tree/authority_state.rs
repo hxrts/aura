@@ -81,7 +81,7 @@ impl AuthorityTreeState {
     /// Create a new empty tree state
     pub fn new() -> Self {
         Self {
-            epoch: 0,
+            epoch: Epoch::initial(),
             root_commitment: [0; 32],
             branches: BTreeMap::new(),
             leaves: BTreeMap::new(),
@@ -200,7 +200,7 @@ impl AuthorityTreeState {
 
     /// Rotate epoch (invalidates old shares)
     pub fn rotate_epoch(&mut self) -> Result<(), aura_core::AuraError> {
-        self.epoch += 1;
+        self.epoch = self.epoch.next();
 
         // Invalidate cached key shares on tree changes
         self.invalidate_cached_key_shares();
@@ -217,7 +217,7 @@ impl AuthorityTreeState {
         use aura_core::hash;
 
         let mut hasher = hash::hasher();
-        hasher.update(&self.epoch.to_le_bytes());
+        hasher.update(&u64::from(self.epoch).to_le_bytes());
         hasher.update(&self.threshold.to_le_bytes());
 
         // Hash active leaves
@@ -540,7 +540,7 @@ impl AuthorityTreeState {
     fn mark_key_derivation_stale(&mut self) {
         // Increment epoch to indicate key derivation state has changed
         // This ensures that any derived keys are regenerated
-        self.epoch += 1;
+        self.epoch = self.epoch.next();
 
         // In a full implementation, this would also:
         // - Update cached merkle paths
@@ -562,7 +562,7 @@ impl AuthorityTreeState {
         // This is critical for maintaining security after tree changes
 
         // Increment epoch to trigger new DKG ceremony
-        self.epoch += 1;
+        self.epoch = self.epoch.next();
 
         if !self.pending_dkg_devices.is_empty() {
             self.scheduled_dkg_epochs
@@ -692,7 +692,7 @@ impl AuthorityTreeState {
 
         // Include structural information
         hasher.update(b"TREE_COMMITMENT_V1");
-        hasher.update(&self.epoch.to_le_bytes());
+        hasher.update(&u64::from(self.epoch).to_le_bytes());
         hasher.update(&self.threshold.to_le_bytes());
         hasher.update(&(self.device_mapping.len() as u32).to_le_bytes());
 

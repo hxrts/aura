@@ -249,10 +249,10 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         journal.facts.insert_with_context(
             RecoveryFactEmitter::fact_key(&fact),
             aura_core::FactValue::Bytes(DomainFact::to_bytes(&fact)),
-            fact.context_id().to_string(),
-            timestamp,
+            aura_core::ActorId::synthetic(&fact.context_id().to_string()),
+            aura_core::FactTimestamp::new(timestamp),
             None,
-        );
+        )?;
         self.effect_system().persist_journal(&journal).await?;
         Ok(())
     }

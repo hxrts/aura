@@ -9,6 +9,7 @@ use aura_core::{
     identifiers::AccountId,
     semilattice::{Bottom, CvState, JoinSemilattice},
 };
+use aura_core::crypto::ed25519::Ed25519SigningKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -208,7 +209,10 @@ impl JoinSemilattice for AccountState {
 
 impl Bottom for AccountState {
     fn bottom() -> Self {
-        AccountState::new(AccountId::default(), Ed25519VerifyingKey::default())
+        let verifying_key = Ed25519SigningKey::from_bytes([0u8; 32])
+            .verifying_key()
+            .expect("static signing key should produce a valid verifying key");
+        AccountState::new(AccountId::new_from_entropy([4u8; 32]), verifying_key)
     }
 }
 

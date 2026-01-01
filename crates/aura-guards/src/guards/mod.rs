@@ -246,7 +246,7 @@ impl ProtocolGuard {
         Self {
             root_public_key,
             authority_id,
-            context_id: aura_core::ContextId::default(),
+            context_id: aura_core::ContextId::new_from_entropy([2u8; 32]),
             observable_by: vec![
                 AdversaryClass::External,
                 AdversaryClass::Neighbor,
@@ -315,7 +315,7 @@ impl ProtocolGuard {
         Self {
             root_public_key: keypair.public(),
             authority_id,
-            context_id: aura_core::ContextId::default(),
+            context_id: aura_core::ContextId::new_from_entropy([2u8; 32]),
             observable_by: vec![
                 AdversaryClass::External,
                 AdversaryClass::Neighbor,

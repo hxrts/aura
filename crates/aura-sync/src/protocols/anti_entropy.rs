@@ -899,10 +899,10 @@ impl AntiEntropyProtocol {
             facts.insert_with_context(
                 format!("attested_op:{}", hex::encode(fp)),
                 aura_core::FactValue::Bytes(serialized),
-                "anti-entropy",
-                0,
+                aura_core::ActorId::synthetic("anti-entropy"),
+                aura_core::FactTimestamp::new(0),
                 None,
-            );
+            )?;
             journal_delta.merge_facts(facts);
         }
 
@@ -1024,7 +1024,7 @@ impl AntiEntropyProtocol {
                 .map_err(|e| sync_session_error(format!("Failed to fingerprint op: {e}")))?;
             h.update(&fp);
 
-            let epoch = op.op.parent_epoch;
+            let epoch = u64::from(op.op.parent_epoch);
             last_epoch = Some(match last_epoch {
                 Some(existing) => existing.max(epoch),
                 None => epoch,
@@ -1178,7 +1178,7 @@ pub fn compute_digest(journal: &Journal, operations: &[AttestedOp]) -> SyncResul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{TreeOp, TreeOpKind};
+    use aura_core::{Epoch, TreeOp, TreeOpKind};
 
     fn sample_journal() -> Journal {
         // Minimal journal for digest tests; facts/caps remain default
@@ -1188,7 +1188,7 @@ mod tests {
     fn sample_op(epoch: u64) -> AttestedOp {
         AttestedOp {
             op: TreeOp {
-                parent_epoch: epoch,
+                parent_epoch: Epoch::new(epoch),
                 parent_commitment: [0u8; 32],
                 op: TreeOpKind::RotateEpoch { affected: vec![] },
                 version: 1,

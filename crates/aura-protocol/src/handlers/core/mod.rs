@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn test_config_for_testing() {
-        let device_id = DeviceId::deterministic_test_id();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let config = AuraHandlerConfig::for_testing(device_id);
 
         assert_eq!(config.device_id, device_id);

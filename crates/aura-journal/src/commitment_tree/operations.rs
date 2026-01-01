@@ -8,7 +8,7 @@ use super::{
     reduction::{reduce, ReductionError},
     TreeState,
 };
-use aura_core::{AttestedOp, Hash32, LeafId, NodeIndex, TreeOp};
+use aura_core::{AttestedOp, Epoch, Hash32, LeafId, NodeIndex, TreeOp};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
@@ -30,7 +30,7 @@ pub struct ProcessedOperation {
     /// Hash of the operation for deduplication
     pub operation_hash: Hash32,
     /// Epoch when the operation was processed
-    pub processed_at_epoch: u64,
+    pub processed_at_epoch: Epoch,
     /// Whether the operation was successfully applied
     pub success: bool,
     /// Error message if operation failed
@@ -293,7 +293,7 @@ impl TreeOperationProcessor {
         let mut hasher = aura_core::hash::hasher();
 
         // Hash operation content
-        hasher.update(&attested.op.parent_epoch.to_le_bytes());
+        hasher.update(&u64::from(attested.op.parent_epoch).to_le_bytes());
         hasher.update(&attested.op.parent_commitment);
         hasher.update(&attested.op.version.to_le_bytes());
 
@@ -495,9 +495,10 @@ mod tests {
             aura_core::DeviceId(uuid::Uuid::from_bytes([9u8; 16])),
             vec![id as u8; 32],
         )
+        .expect("valid leaf")
     }
 
-    fn create_test_operation(leaf_id: u32, parent_epoch: u64) -> AttestedOp {
+    fn create_test_operation(leaf_id: u32, parent_epoch: Epoch) -> AttestedOp {
         let tree_op = TreeOp {
             parent_epoch,
             parent_commitment: [0u8; 32],
@@ -526,7 +527,7 @@ mod tests {
     #[test]
     fn test_process_single_operation() {
         let mut processor = TreeOperationProcessor::new();
-        let op = create_test_operation(1, 0);
+        let op = create_test_operation(1, Epoch::initial());
 
         let result = processor.process_operation(&op);
         assert!(result.is_ok());
@@ -540,7 +541,7 @@ mod tests {
     #[test]
     fn test_duplicate_operation_rejection() {
         let mut processor = TreeOperationProcessor::new();
-        let op = create_test_operation(1, 0);
+        let op = create_test_operation(1, Epoch::initial());
 
         // Process first time - should succeed
         let result1 = processor.process_operation(&op);
@@ -560,9 +561,9 @@ mod tests {
         let mut batch_processor = BatchProcessor::new(2, true);
 
         let ops = vec![
-            create_test_operation(1, 0),
-            create_test_operation(2, 0),
-            create_test_operation(3, 0),
+            create_test_operation(1, Epoch::initial()),
+            create_test_operation(2, Epoch::initial()),
+            create_test_operation(3, Epoch::initial()),
         ];
 
         let results = batch_processor.process_batched(&ops);
@@ -578,9 +579,9 @@ mod tests {
         let mut processor = TreeOperationProcessor::new();
 
         let ops = vec![
-            create_test_operation(1, 0),
-            create_test_operation(2, 0),
-            create_test_operation(3, 0),
+            create_test_operation(1, Epoch::initial()),
+            create_test_operation(2, Epoch::initial()),
+            create_test_operation(3, Epoch::initial()),
         ];
 
         let result = processor.sync_from_oplog(&ops);
@@ -591,7 +592,7 @@ mod tests {
     #[test]
     fn test_query_interface() {
         let mut processor = TreeOperationProcessor::new();
-        let op = create_test_operation(1, 0);
+        let op = create_test_operation(1, Epoch::initial());
 
         processor.process_operation(&op).unwrap();
 
@@ -607,8 +608,8 @@ mod tests {
     fn test_processing_stats() {
         let mut processor = TreeOperationProcessor::new();
 
-        let op1 = create_test_operation(1, 0);
-        let op2 = create_test_operation(2, 0);
+        let op1 = create_test_operation(1, Epoch::initial());
+        let op2 = create_test_operation(2, Epoch::initial());
 
         processor.process_operation(&op1).unwrap();
         processor.process_operation(&op2).unwrap();

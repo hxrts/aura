@@ -310,10 +310,10 @@ impl RecoveryProtocolHandler {
         journal.facts.insert_with_context(
             RecoveryFactEmitter::fact_key(&fact),
             aura_core::FactValue::Bytes(DomainFact::to_bytes(&fact)),
-            fact.context_id().to_string(),
-            timestamp,
+            aura_core::ActorId::synthetic(&fact.context_id().to_string()),
+            aura_core::FactTimestamp::new(timestamp),
             None,
-        );
+        )?;
         journal_effects.persist_journal(&journal).await?;
         Ok(())
     }
@@ -592,10 +592,10 @@ impl RecoveryProtocolHandler {
         journal.facts.insert_with_context(
             format!("recovery_state:{recovery_id}"),
             aura_core::journal::FactValue::String(state_data.to_string()),
-            self.protocol.account_authority.to_string(),
-            timestamp,
+            aura_core::ActorId::authority(self.protocol.account_authority),
+            aura_core::FactTimestamp::new(timestamp),
             None,
-        );
+        )?;
         journal_effects.persist_journal(&journal).await?;
 
         Ok(())

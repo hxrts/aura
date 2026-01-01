@@ -125,7 +125,7 @@ impl TestFixture {
     /// This is a convenience method that simply creates a new random DeviceId.
     /// Tests should use this when they need fresh device identifiers.
     pub fn create_device_id(&self) -> DeviceId {
-        DeviceId::new()
+        DeviceId::new_from_entropy([3u8; 32])
     }
 
     /// Get an effect system for testing

@@ -137,10 +137,16 @@ impl NonceToken {
     }
 }
 
-impl Default for NonceToken {
-    fn default() -> Self {
-        // This is only for testing - real tokens must come from FROST generation
-        panic!("NonceToken::default() should not be used in production")
+#[cfg(test)]
+impl NonceToken {
+    pub fn test_token() -> Self {
+        use rand::SeedableRng;
+
+        let share = frost::keys::SigningShare::deserialize([1u8; 32])
+            .expect("valid signing share");
+        let mut rng = rand::rngs::StdRng::from_seed([9u8; 32]);
+        let nonces = frost::round1::SigningNonces::new(&share, &mut rng);
+        NonceToken::from(nonces)
     }
 }
 
@@ -153,13 +159,26 @@ impl Nonce {
     /// # Arguments
     /// * `nonces` - The FROST signing nonces to wrap
     /// * `id` - A 32-byte random ID for tracking, should be generated via RandomEffects
-    pub fn from_frost(nonces: frost::round1::SigningNonces, id: [u8; 32]) -> Self {
+    pub fn from_frost(
+        nonces: frost::round1::SigningNonces,
+        id: [u8; 32],
+    ) -> Result<Self, String> {
         // Serialize nonces for secure persistence or in-memory caching
         let value = nonces
             .serialize()
-            .unwrap_or_else(|_| hash::hash(&id).to_vec());
+            .map_err(|e| format!("Failed to serialize FROST nonces: {e}"))?;
+        let value_bytes = value.as_ref();
+        if value_bytes.len() != MAX_NONCE_BYTES {
+            return Err(format!(
+                "Invalid nonce length: {} (expected {MAX_NONCE_BYTES})",
+                value_bytes.len()
+            ));
+        }
 
-        Self { id, value }
+        Ok(Self {
+            id,
+            value: value_bytes.to_vec(),
+        })
     }
 
     /// Convert to FROST signing nonces
@@ -192,12 +211,23 @@ impl NonceCommitment {
     pub fn from_frost(
         identifier: frost::Identifier,
         commitments: frost::round1::SigningCommitments,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let id_bytes = identifier.serialize();
-        Self {
-            signer: u16::from_be_bytes([0, id_bytes[0]]),
-            commitment: commitments.serialize().unwrap_or_else(|_| Vec::new()), // Handle serialization error gracefully
+        let commitment = commitments
+            .serialize()
+            .map_err(|e| format!("Failed to serialize FROST commitments: {e}"))?;
+        let commitment_bytes = commitment.as_ref();
+        if commitment_bytes.len() != MAX_COMMITMENT_BYTES {
+            return Err(format!(
+                "Invalid commitment length: {} (expected {MAX_COMMITMENT_BYTES})",
+                commitment_bytes.len()
+            ));
         }
+
+        Ok(Self {
+            signer: u16::from_be_bytes([0, id_bytes[0]]),
+            commitment: commitment_bytes.to_vec(),
+        })
     }
 
     /// Convert to FROST signing commitments
@@ -373,7 +403,7 @@ pub fn binding_message(ctx: &TreeSigningContext, op_bytes: &[u8]) -> Vec<u8> {
 /// near the canonical tree types to avoid duplicated hashing code elsewhere.
 pub fn tree_op_binding_message(
     attested: &AttestedOp,
-    current_epoch: u64,
+    current_epoch: crate::Epoch,
     group_public_key: &[u8; 32],
 ) -> Vec<u8> {
     let mut h = hash::hasher();
@@ -382,12 +412,12 @@ pub fn tree_op_binding_message(
     h.update(b"TREE_OP_SIG");
 
     // Parent metadata
-    h.update(&attested.op.parent_epoch.to_le_bytes());
+    h.update(&u64::from(attested.op.parent_epoch).to_le_bytes());
     h.update(&attested.op.parent_commitment);
     h.update(&attested.op.version.to_le_bytes());
 
     // Current epoch
-    h.update(&current_epoch.to_be_bytes());
+    h.update(&u64::from(current_epoch).to_be_bytes());
 
     // Group public key binds signature to signing group
     h.update(group_public_key);
@@ -445,7 +475,7 @@ fn serialize_tree_op_for_binding(op: &TreeOpKind) -> Vec<u8> {
 /// use aura_core::crypto::tree_signing::generate_nonce_with_share;
 ///
 /// // Use generate_nonce_with_share for proper FROST nonces
-/// // let (nonce, commitment) = generate_nonce_with_share(1, &signing_share);
+/// // let (nonce, commitment) = generate_nonce_with_share(1, &signing_share, &mut rng).unwrap();
 /// // Send commitment to coordinator
 /// // Keep nonce secret for signing round
 /// ```
@@ -458,7 +488,7 @@ pub fn generate_nonce_with_share(
     signer_id: u16,
     signing_share: &frost::keys::SigningShare,
     rng: &mut (impl rand::RngCore + rand::CryptoRng),
-) -> (Nonce, NonceCommitment) {
+) -> Result<(Nonce, NonceCommitment), String> {
     // Use valid identifier - if signer_id is invalid, use 1 as fallback
     let identifier = if let Ok(id) = frost::Identifier::try_from(signer_id) {
         id
@@ -476,11 +506,10 @@ pub fn generate_nonce_with_share(
     rng.fill_bytes(&mut nonce_id);
 
     // Serialize signing nonces for secure storage via Nonce::from_frost.
-    let nonce = Nonce::from_frost(frost_nonce, nonce_id);
+    let nonce = Nonce::from_frost(frost_nonce, nonce_id)?;
+    let commitment = NonceCommitment::from_frost(identifier, frost_commitment)?;
 
-    let commitment = NonceCommitment::from_frost(identifier, frost_commitment);
-
-    (nonce, commitment)
+    Ok((nonce, commitment))
 }
 
 /// Generate nonce and persist it using SecureStorageEffects for proper reuse protection
@@ -494,7 +523,8 @@ pub async fn generate_nonce_with_share_secure<E>(
 where
     E: SecureStorageEffects,
 {
-    let (nonce, commitment) = generate_nonce_with_share(signer_id, signing_share, rng);
+    let (nonce, commitment) =
+        generate_nonce_with_share(signer_id, signing_share, rng).map_err(crate::AuraError::crypto)?;
     let location = SecureStorageLocation::frost_nonce(session_id, signer_id);
     storage
         .secure_store(
@@ -979,5 +1009,32 @@ mod tests {
             msg1, msg2,
             "Different policies should produce different bindings"
         );
+    }
+
+    #[test]
+    fn test_nonce_and_commitment_sizes() {
+        use rand::SeedableRng;
+
+        let share =
+            frost::keys::SigningShare::deserialize([1u8; 32]).expect("valid signing share");
+        let mut rng = rand::rngs::StdRng::from_seed([2u8; 32]);
+        let (nonces, commitments) = frost::round1::commit(&share, &mut rng);
+
+        let nonce = Nonce::from_frost(nonces, [3u8; 32]).expect("nonce should serialize");
+        let identifier = frost::Identifier::try_from(1u16).expect("valid identifier");
+        let commitment =
+            NonceCommitment::from_frost(identifier, commitments).expect("commitment should serialize");
+
+        assert_eq!(nonce.value.len(), MAX_NONCE_BYTES);
+        assert_eq!(commitment.commitment.len(), MAX_COMMITMENT_BYTES);
+    }
+
+    #[test]
+    fn test_commitment_invalid_bytes_rejected() {
+        let commitment = NonceCommitment {
+            signer: 1,
+            commitment: vec![0u8; 10],
+        };
+        assert!(commitment.to_frost().is_err());
     }
 }

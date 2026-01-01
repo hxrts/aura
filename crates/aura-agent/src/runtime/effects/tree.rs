@@ -13,7 +13,7 @@ impl aura_protocol::effects::TreeEffects for AuraEffectSystem {
         self.tree_handler.get_current_commitment().await
     }
 
-    async fn get_current_epoch(&self) -> Result<u64, AuraError> {
+    async fn get_current_epoch(&self) -> Result<aura_core::Epoch, AuraError> {
         self.tree_handler.get_current_epoch().await
     }
 

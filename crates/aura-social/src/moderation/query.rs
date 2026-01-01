@@ -265,7 +265,7 @@ mod tests {
 
     /// Create a test context ID
     fn test_context() -> ContextId {
-        ContextId::default()
+        ContextId::new_from_entropy([2u8; 32])
     }
 
     /// Create a test authority ID with a unique identifier

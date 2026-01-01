@@ -9,7 +9,7 @@ use aura_testkit::stateful_effects::random::MockRandomHandler;
 /// Test storage context creation
 #[tokio::test]
 async fn test_storage_context_setup() -> Result<()> {
-    let test_id = AuthorityId::new();
+    let test_id = AuthorityId::new_from_entropy([1u8; 32]);
     let mut manager = AuthorityManager::new(format!("/tmp/aura-storage-test-{}", test_id));
     let random = MockRandomHandler::new_with_seed(50);
 
@@ -22,7 +22,7 @@ async fn test_storage_context_setup() -> Result<()> {
         .await?;
 
     // Create storage access context
-    let storage_authority = AuthorityId::new(); // Represents storage service
+    let storage_authority = AuthorityId::new_from_entropy([1u8; 32]); // Represents storage service
     let context_id = manager
         .create_context(
             vec![authority_id, storage_authority],
@@ -44,7 +44,7 @@ async fn test_storage_context_setup() -> Result<()> {
 /// Test multiple storage contexts
 #[tokio::test]
 async fn test_multiple_storage_contexts() -> Result<()> {
-    let test_id = AuthorityId::new();
+    let test_id = AuthorityId::new_from_entropy([1u8; 32]);
     let mut manager = AuthorityManager::new(format!("/tmp/aura-multi-storage-test-{}", test_id));
     let random = MockRandomHandler::new_with_seed(51);
 
@@ -56,7 +56,7 @@ async fn test_multiple_storage_contexts() -> Result<()> {
     let mut context_ids = Vec::new();
 
     for storage_type in storage_types {
-        let storage_authority = AuthorityId::new();
+        let storage_authority = AuthorityId::new_from_entropy([1u8; 32]);
         let context_id = manager
             .create_context(
                 vec![user_id, storage_authority],
@@ -81,7 +81,7 @@ async fn test_multiple_storage_contexts() -> Result<()> {
 /// Test storage authority with device threshold
 #[tokio::test]
 async fn test_storage_with_threshold() -> Result<()> {
-    let test_id = AuthorityId::new();
+    let test_id = AuthorityId::new_from_entropy([1u8; 32]);
     let mut manager =
         AuthorityManager::new(format!("/tmp/aura-storage-threshold-test-{}", test_id));
     let random = MockRandomHandler::new_with_seed(52);
@@ -98,7 +98,7 @@ async fn test_storage_with_threshold() -> Result<()> {
     manager.update_authority_threshold(&random, authority_id, 2).await?;
 
     // Create storage context
-    let storage_authority = AuthorityId::new();
+    let storage_authority = AuthorityId::new_from_entropy([1u8; 32]);
     let context_id = manager
         .create_context(
             vec![authority_id, storage_authority],

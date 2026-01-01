@@ -861,7 +861,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         let key = format!("ota:initiated:{ceremony_id_hex}");
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())
@@ -897,7 +897,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         );
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())
@@ -940,7 +940,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         let key = format!("ota:threshold:{ceremony_id_hex}");
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())
@@ -977,7 +977,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         let key = format!("ota:committed:{ceremony_id_hex}");
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())
@@ -1007,7 +1007,7 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         let key = format!("ota:aborted:{ceremony_id_hex}");
         let fact_bytes =
             serde_json::to_vec(&fact).map_err(|e| AuraError::serialization(e.to_string()))?;
-        journal.facts.insert(key, FactValue::Bytes(fact_bytes));
+        journal.facts.insert(key, FactValue::Bytes(fact_bytes))?;
         self.effects.persist_journal(&journal).await?;
 
         Ok(())

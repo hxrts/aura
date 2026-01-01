@@ -12,14 +12,16 @@ pub const MAX_LEAF_META_BYTES: usize = 256;
 /// Maximum size for aggregate signatures in bytes (FROST aggregate).
 pub const MAX_AGG_SIG_BYTES: usize = 128;
 
+use crate::AuraError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::ops::Deref;
 
 /// Monotonically increasing epoch counter for key rotation and replay prevention.
 ///
 /// Each tree operation is bound to a parent epoch. After operations are applied,
 /// the epoch may advance, invalidating old signing shares and preventing replay.
-pub type Epoch = u64;
+pub use crate::types::Epoch;
 
 /// 32-byte cryptographic hash for tree commitments.
 ///
@@ -66,6 +68,140 @@ pub enum LeafRole {
     Guardian,
 }
 
+/// Validated public key bytes for a leaf node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeafPublicKey(#[serde(with = "serde_bytes")] Vec<u8>);
+
+impl LeafPublicKey {
+    pub fn try_new(bytes: Vec<u8>) -> Result<Self, AuraError> {
+        if bytes.len() > MAX_LEAF_PUBLIC_KEY_BYTES {
+            return Err(AuraError::invalid(format!(
+                "Leaf public key exceeded MAX_LEAF_PUBLIC_KEY_BYTES ({MAX_LEAF_PUBLIC_KEY_BYTES})"
+            )));
+        }
+        Ok(Self(bytes))
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+impl TryFrom<Vec<u8>> for LeafPublicKey {
+    type Error = AuraError;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::try_new(value)
+    }
+}
+
+impl TryFrom<&[u8]> for LeafPublicKey {
+    type Error = AuraError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::try_new(value.to_vec())
+    }
+}
+
+impl AsRef<[u8]> for LeafPublicKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Deref for LeafPublicKey {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<LeafPublicKey> for Vec<u8> {
+    fn from(value: LeafPublicKey) -> Self {
+        value.0
+    }
+}
+
+impl From<&LeafPublicKey> for Vec<u8> {
+    fn from(value: &LeafPublicKey) -> Self {
+        value.0.clone()
+    }
+}
+
+/// Validated metadata bytes for a leaf node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeafMetadata(#[serde(with = "serde_bytes")] Vec<u8>);
+
+impl LeafMetadata {
+    pub fn try_new(bytes: Vec<u8>) -> Result<Self, AuraError> {
+        if bytes.len() > MAX_LEAF_META_BYTES {
+            return Err(AuraError::invalid(format!(
+                "Leaf metadata exceeded MAX_LEAF_META_BYTES ({MAX_LEAF_META_BYTES})"
+            )));
+        }
+        Ok(Self(bytes))
+    }
+
+    pub fn empty() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+impl TryFrom<Vec<u8>> for LeafMetadata {
+    type Error = AuraError;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::try_new(value)
+    }
+}
+
+impl TryFrom<&[u8]> for LeafMetadata {
+    type Error = AuraError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        Self::try_new(value.to_vec())
+    }
+}
+
+impl AsRef<[u8]> for LeafMetadata {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl Deref for LeafMetadata {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<LeafMetadata> for Vec<u8> {
+    fn from(value: LeafMetadata) -> Self {
+        value.0
+    }
+}
+
+impl From<&LeafMetadata> for Vec<u8> {
+    fn from(value: &LeafMetadata) -> Self {
+        value.0.clone()
+    }
+}
+
 /// Leaf node representing a device or guardian.
 ///
 /// Leaves contain the public key material and metadata needed for
@@ -84,50 +220,67 @@ pub struct LeafNode {
 
     /// Serialized FROST key package or public key
     /// Format is opaque to the tree layer
-    pub public_key: Vec<u8>,
+    pub public_key: LeafPublicKey,
 
     /// Optional opaque metadata (device name, guardian info, etc.)
-    pub meta: Vec<u8>,
+    pub meta: LeafMetadata,
 }
 
 impl LeafNode {
+    /// Create a new leaf node with explicit role.
+    pub fn new(
+        leaf_id: LeafId,
+        device_id: crate::types::identifiers::DeviceId,
+        role: LeafRole,
+        public_key: impl TryInto<LeafPublicKey, Error = AuraError>,
+        meta: impl TryInto<LeafMetadata, Error = AuraError>,
+    ) -> Result<Self, AuraError> {
+        Ok(Self {
+            leaf_id,
+            device_id,
+            role,
+            public_key: public_key.try_into()?,
+            meta: meta.try_into()?,
+        })
+    }
+
     /// Create a new device leaf node
-    #[must_use]
     pub fn new_device(
         leaf_id: LeafId,
         device_id: crate::types::identifiers::DeviceId,
-        public_key: Vec<u8>,
-    ) -> Self {
-        Self {
+        public_key: impl TryInto<LeafPublicKey, Error = AuraError>,
+    ) -> Result<Self, AuraError> {
+        Self::new(
             leaf_id,
             device_id,
-            role: LeafRole::Device,
+            LeafRole::Device,
             public_key,
-            meta: Vec::new(),
-        }
+            LeafMetadata::empty(),
+        )
     }
 
     /// Create a new guardian leaf node
-    #[must_use]
     pub fn new_guardian(
         leaf_id: LeafId,
         device_id: crate::types::identifiers::DeviceId,
-        public_key: Vec<u8>,
-    ) -> Self {
-        Self {
+        public_key: impl TryInto<LeafPublicKey, Error = AuraError>,
+    ) -> Result<Self, AuraError> {
+        Self::new(
             leaf_id,
             device_id,
-            role: LeafRole::Guardian,
+            LeafRole::Guardian,
             public_key,
-            meta: Vec::new(),
-        }
+            LeafMetadata::empty(),
+        )
     }
 
     /// Create a leaf node with metadata
-    #[must_use]
-    pub fn with_meta(mut self, meta: Vec<u8>) -> Self {
-        self.meta = meta;
-        self
+    pub fn with_meta(
+        mut self,
+        meta: impl TryInto<LeafMetadata, Error = AuraError>,
+    ) -> Result<Self, AuraError> {
+        self.meta = meta.try_into()?;
+        Ok(self)
     }
 }
 
@@ -337,5 +490,31 @@ mod tests {
         let idx1 = NodeIndex(5);
         let idx2 = NodeIndex(10);
         assert!(idx1 < idx2);
+    }
+
+    #[test]
+    fn test_leaf_public_key_bounds() {
+        let ok = vec![0u8; MAX_LEAF_PUBLIC_KEY_BYTES];
+        assert!(LeafPublicKey::try_new(ok).is_ok());
+
+        let too_large = vec![0u8; MAX_LEAF_PUBLIC_KEY_BYTES + 1];
+        assert!(LeafPublicKey::try_new(too_large).is_err());
+    }
+
+    #[test]
+    fn test_leaf_metadata_bounds() {
+        let ok = vec![1u8; MAX_LEAF_META_BYTES];
+        assert!(LeafMetadata::try_new(ok).is_ok());
+
+        let too_large = vec![1u8; MAX_LEAF_META_BYTES + 1];
+        assert!(LeafMetadata::try_new(too_large).is_err());
+    }
+
+    #[test]
+    fn test_epoch_conversions() {
+        let epoch = Epoch::new(42);
+        let raw: u64 = epoch.into();
+        assert_eq!(raw, 42);
+        assert_eq!(Epoch::from(raw), Epoch::new(42));
     }
 }

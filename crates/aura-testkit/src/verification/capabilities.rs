@@ -728,7 +728,7 @@ impl CapabilitySoundnessVerifier {
         &self,
         _initial_state: &CapabilityState,
     ) -> Vec<(u32, BTreeMap<DeviceId, u32>, CapabilityOperation)> {
-        let device = DeviceId::new();
+        let device = DeviceId::new_from_entropy([3u8; 32]);
         vec![(
             2,
             [(device, 1)].iter().cloned().collect(),
@@ -954,12 +954,13 @@ mod tests {
     use std::collections::HashSet;
 
     fn create_test_capability_state() -> CapabilityState {
-        let device = DeviceId::new();
+        let device = DeviceId::new_from_entropy([3u8; 32]);
         let caps = Cap::with_permissions(vec!["test:read".to_string(), "test:write".to_string()]);
 
         CapabilityState {
             capabilities: caps,
-            journal_facts: Fact::with_value("test", FactValue::String("value".to_string())),
+            journal_facts: Fact::with_value("test", FactValue::String("value".to_string()))
+                .expect("fact should build"),
             timestamp: 1000,
             active_contexts: ["test_context".to_string()].iter().cloned().collect(),
             auth_levels: [(device, 1)].iter().cloned().collect(),
