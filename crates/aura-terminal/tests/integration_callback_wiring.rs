@@ -53,7 +53,7 @@ use aura_testkit::MockRuntimeBridge;
 
 /// Create a test environment with IoContext and AppCore using MockRuntimeBridge
 async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{}", name));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -67,16 +67,16 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         .expect("Failed to init signals");
 
     let ctx = IoContext::builder()
-        .with_app_core(initialized_app_core.clone())
+        .with_app_core(initialized_app_core)
         .with_existing_account(false)
         .with_base_path(test_dir)
-        .with_device_id(format!("test-device-{}", name))
+        .with_device_id(format!("test-device-{name}"))
         .with_mode(TuiMode::Production)
         .build()
         .expect("IoContext builder should succeed for tests");
 
     // Create account for testing
-    ctx.create_account(&format!("TestUser-{}", name))
+    ctx.create_account(&format!("TestUser-{name}"))
         .await
         .expect("Failed to create account");
 
@@ -90,7 +90,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
 
 /// Cleanup test directory
 fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{}", name));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
@@ -182,7 +182,7 @@ async fn test_settings_nickname_actually_changes() {
     // Phase 1: Get initial nickname (may be empty initially)
     println!("Phase 1: Get initial nickname");
     let initial_name = ctx.get_display_name().await;
-    println!("  Initial display name: '{}'", initial_name);
+    println!("  Initial display name: '{initial_name}'");
     // Note: Initial name may be empty - that's OK, we're testing that UpdateNickname works
 
     // Phase 2: Update nickname
@@ -193,11 +193,7 @@ async fn test_settings_nickname_actually_changes() {
             name: new_nickname.clone(),
         })
         .await;
-    assert!(
-        result.is_ok(),
-        "UpdateNickname should succeed: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "UpdateNickname should succeed: {result:?}");
     println!("  UpdateNickname dispatched successfully");
 
     // Phase 3: Verify IoContext returns new nickname
@@ -205,10 +201,9 @@ async fn test_settings_nickname_actually_changes() {
     let updated_name = ctx.get_display_name().await;
     assert_eq!(
         updated_name, new_nickname,
-        "Display name should be updated to new value. Got '{}', expected '{}'",
-        updated_name, new_nickname
+        "Display name should be updated to new value. Got '{updated_name}', expected '{new_nickname}'"
     );
-    println!("  IoContext.get_display_name() returns: '{}'", updated_name);
+    println!("  IoContext.get_display_name() returns: '{updated_name}'");
 
     // Phase 4: Update again to verify repeated updates work
     println!("\nPhase 4: Verify repeated updates work");
@@ -222,10 +217,9 @@ async fn test_settings_nickname_actually_changes() {
     let final_name = ctx.get_display_name().await;
     assert_eq!(
         final_name, another_name,
-        "Display name should update again. Got '{}', expected '{}'",
-        final_name, another_name
+        "Display name should update again. Got '{final_name}', expected '{another_name}'"
     );
-    println!("  Second update works: '{}'", final_name);
+    println!("  Second update works: '{final_name}'");
 
     cleanup_test_dir("nick-changes");
     println!("\n=== Settings Nickname Actually Changes Test PASSED ===\n");
@@ -247,7 +241,7 @@ async fn test_settings_mfa_policy_actually_changes() {
     // Phase 1: Get initial MFA policy
     println!("Phase 1: Get initial MFA policy");
     let initial_policy = ctx.get_mfa_policy().await;
-    println!("  Initial MFA policy: {:?}", initial_policy);
+    println!("  Initial MFA policy: {initial_policy:?}");
     assert!(
         matches!(initial_policy, MfaPolicy::Disabled),
         "Initial policy should be Disabled"
@@ -258,18 +252,14 @@ async fn test_settings_mfa_policy_actually_changes() {
     let result = ctx
         .dispatch(EffectCommand::UpdateMfaPolicy { require_mfa: true })
         .await;
-    assert!(
-        result.is_ok(),
-        "UpdateMfaPolicy should succeed: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "UpdateMfaPolicy should succeed: {result:?}");
     println!("  UpdateMfaPolicy dispatched successfully");
 
     // Phase 3: Verify IoContext reflects the change
     // Note: The exact policy depends on the implementation - it might go to SensitiveOnly or AlwaysRequired
     println!("\nPhase 3: Verify MFA policy changed");
     let updated_policy = ctx.get_mfa_policy().await;
-    println!("  Updated MFA policy: {:?}", updated_policy);
+    println!("  Updated MFA policy: {updated_policy:?}");
     // When require_mfa=true, policy should NOT be Disabled
     assert!(
         !matches!(updated_policy, MfaPolicy::Disabled),
@@ -283,7 +273,7 @@ async fn test_settings_mfa_policy_actually_changes() {
         .expect("Disable MFA should succeed");
 
     let disabled_policy = ctx.get_mfa_policy().await;
-    println!("  Policy after disable: {:?}", disabled_policy);
+    println!("  Policy after disable: {disabled_policy:?}");
 
     // Phase 5: Re-enable to confirm cycling works
     println!("\nPhase 5: Re-enable MFA to confirm cycling");
@@ -292,7 +282,7 @@ async fn test_settings_mfa_policy_actually_changes() {
         .expect("Re-enable MFA should succeed");
 
     let final_policy = ctx.get_mfa_policy().await;
-    println!("  Final policy: {:?}", final_policy);
+    println!("  Final policy: {final_policy:?}");
 
     cleanup_test_dir("mfa-changes");
     println!("\n=== Settings MFA Policy Actually Changes Test PASSED ===\n");
@@ -382,14 +372,19 @@ async fn test_chat_signal_message_accumulation() {
         );
         assert!(chat.messages[1].is_own, "Second message should be own");
 
-        println!("  Message count: {}", chat.messages.len());
+        let message_count = chat.messages.len();
+        println!("  Message count: {message_count}");
+        let message1 = &chat.messages[0];
         println!(
-            "  Message 1: '{}' from {}",
-            chat.messages[0].content, chat.messages[0].sender_name
+            "  Message 1: '{content}' from {sender}",
+            content = message1.content,
+            sender = message1.sender_name
         );
+        let message2 = &chat.messages[1];
         println!(
-            "  Message 2: '{}' from {}",
-            chat.messages[1].content, chat.messages[1].sender_name
+            "  Message 2: '{content}' from {sender}",
+            content = message2.content,
+            sender = message2.sender_name
         );
     }
 
@@ -401,13 +396,13 @@ async fn test_chat_signal_message_accumulation() {
 
         for i in 3..6 {
             chat.messages.push(Message {
-                id: format!("msg-{}", i),
+                id: format!("msg-{i}"),
                 channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
-                sender_id: format!("user-{}", i)
+                sender_id: format!("user-{i}")
                     .parse::<AuthorityId>()
                     .unwrap_or_default(),
-                sender_name: format!("User{}", i),
-                content: format!("Message number {}", i),
+                sender_name: format!("User{i}"),
+                content: format!("Message number {i}"),
                 timestamp: i as u64 * 1000,
                 is_own: false,
                 is_read: false,
@@ -421,10 +416,8 @@ async fn test_chat_signal_message_accumulation() {
     {
         let chat = wait_for_chat(&app_core, |chat| chat.messages.len() == 5).await;
         assert_eq!(chat.messages.len(), 5, "Should now have 5 messages");
-        println!(
-            "  Total messages after accumulation: {}",
-            chat.messages.len()
-        );
+        let total_messages = chat.messages.len();
+        println!("  Total messages after accumulation: {total_messages}");
     }
 
     cleanup_test_dir("chat-accumulate");
@@ -452,7 +445,8 @@ async fn test_contacts_signal_contact_tracking() {
     println!("Phase 1: Get initial contacts");
     let initial_count = {
         let contacts = wait_for_contacts(&app_core, |_| true).await;
-        println!("  Initial contact count: {}", contacts.contacts.len());
+        let contact_count = contacts.contacts.len();
+        println!("  Initial contact count: {contact_count}");
         contacts.contacts.len()
     };
 
@@ -505,9 +499,9 @@ async fn test_contacts_signal_contact_tracking() {
         assert_eq!(alice.nickname, "Alice (Friend)", "Nickname should match");
         assert!(!alice.is_guardian, "Should not be guardian initially");
 
-        println!("  Contact found: {:?}", alice.suggested_name);
-        println!("  Nickname: {}", alice.nickname);
-        println!("  Is guardian: {}", alice.is_guardian);
+        println!("  Contact found: {suggested_name:?}", suggested_name = alice.suggested_name);
+        println!("  Nickname: {nickname}", nickname = alice.nickname);
+        println!("  Is guardian: {is_guardian}", is_guardian = alice.is_guardian);
     }
 
     // Phase 4: Update contact to be a guardian
@@ -552,8 +546,8 @@ async fn test_contacts_signal_contact_tracking() {
             "Nickname should be updated"
         );
 
-        println!("  Guardian status: {}", alice.is_guardian);
-        println!("  Updated nickname: {}", alice.nickname);
+        println!("  Guardian status: {is_guardian}", is_guardian = alice.is_guardian);
+        println!("  Updated nickname: {nickname}", nickname = alice.nickname);
     }
 
     cleanup_test_dir("contacts-track");
@@ -634,11 +628,10 @@ async fn test_recovery_signal_state_tracking() {
             "Status should be WaitingForApprovals"
         );
 
-        println!("  Session ID: {}", active.id);
-        println!(
-            "  Approvals: {}/{}",
-            active.approvals_received, active.approvals_required
-        );
+        println!("  Session ID: {session_id}", session_id = active.id);
+        let approvals_received = active.approvals_received;
+        let approvals_required = active.approvals_required;
+        println!("  Approvals: {approvals_received}/{approvals_required}");
         println!("  Status: WaitingForApprovals");
     }
 
@@ -676,12 +669,11 @@ async fn test_recovery_signal_state_tracking() {
         );
         assert_eq!(active.progress, 50, "Progress should be 50%");
 
-        println!(
-            "  Approvals: {}/{}",
-            active.approvals_received, active.approvals_required
-        );
-        println!("  Approved by: {:?}", active.approved_by);
-        println!("  Progress: {}%", active.progress);
+        let approvals_received = active.approvals_received;
+        let approvals_required = active.approvals_required;
+        println!("  Approvals: {approvals_received}/{approvals_required}");
+        println!("  Approved by: {approved_by:?}", approved_by = active.approved_by);
+        println!("  Progress: {progress}%", progress = active.progress);
     }
 
     // Phase 6: Complete recovery with second approval
@@ -721,11 +713,10 @@ async fn test_recovery_signal_state_tracking() {
         assert_eq!(active.progress, 100, "Progress should be 100%");
 
         println!("  Final status: Approved");
-        println!(
-            "  Final approvals: {}/{}",
-            active.approvals_received, active.approvals_required
-        );
-        println!("  Approved by: {:?}", active.approved_by);
+        let approvals_received = active.approvals_received;
+        let approvals_required = active.approvals_required;
+        println!("  Final approvals: {approvals_received}/{approvals_required}");
+        println!("  Approved by: {approved_by:?}", approved_by = active.approved_by);
     }
 
     cleanup_test_dir("recovery-track");
@@ -758,7 +749,7 @@ async fn test_neighborhood_position_tracking() {
         })
         .await;
 
-    assert!(result.is_ok(), "MovePosition should succeed: {:?}", result);
+    assert!(result.is_ok(), "MovePosition should succeed: {result:?}");
     println!("  MovePosition dispatched successfully");
 
     // Phase 2: Check neighborhood signal reflects position
@@ -767,9 +758,13 @@ async fn test_neighborhood_position_tracking() {
         let core = app_core.read().await;
         let neighborhood = core.read(&*NEIGHBORHOOD_SIGNAL).await.unwrap();
 
-        println!("  Home: {:?}", neighborhood.home_home_id);
-        println!("  Position: {:?}", neighborhood.position);
-        println!("  Neighbors: {} entries", neighborhood.neighbors.len());
+        println!(
+            "  Home: {home_id:?}",
+            home_id = neighborhood.home_home_id
+        );
+        println!("  Position: {position:?}", position = neighborhood.position);
+        let neighbor_count = neighborhood.neighbors.len();
+        println!("  Neighbors: {neighbor_count} entries");
 
         // Verify some position data exists (exact values depend on impl)
         println!("  Neighborhood signal accessible");
@@ -800,8 +795,7 @@ async fn test_neighborhood_position_tracking() {
         .await;
     assert!(
         result.is_ok(),
-        "MovePosition to home should succeed: {:?}",
-        result
+        "MovePosition to home should succeed: {result:?}"
     );
     println!("  Navigate to home succeeded");
 
@@ -839,7 +833,7 @@ async fn test_context_switching_works() {
             context_id: "home:main".to_string(),
         })
         .await;
-    assert!(result.is_ok(), "SetContext should succeed: {:?}", result);
+    assert!(result.is_ok(), "SetContext should succeed: {result:?}");
     println!("  SetContext dispatched");
 
     // Phase 3: Verify context was set
@@ -850,7 +844,7 @@ async fn test_context_switching_works() {
         Some("home:main".to_string()),
         "Context should be 'home:main'"
     );
-    println!("  Current context: {:?}", current);
+    println!("  Current context: {current:?}");
 
     // Phase 4: Change context to different value
     println!("\nPhase 4: Change context to 'channel:general'");
@@ -866,7 +860,7 @@ async fn test_context_switching_works() {
         Some("channel:general".to_string()),
         "Context should be 'channel:general'"
     );
-    println!("  Updated context: {:?}", updated);
+    println!("  Updated context: {updated:?}");
 
     // Phase 5: Clear context
     println!("\nPhase 5: Clear context (empty string)");
@@ -878,7 +872,7 @@ async fn test_context_switching_works() {
 
     let cleared = ctx.get_current_context().await;
     // Empty string may be stored as None or Some("")
-    println!("  Cleared context: {:?}", cleared);
+    println!("  Cleared context: {cleared:?}");
 
     cleanup_test_dir("context-switch");
     println!("\n=== Context Switching Works Test PASSED ===\n");
@@ -910,8 +904,7 @@ async fn test_dispatch_and_wait_completes() {
 
     assert!(
         result.is_ok(),
-        "dispatch_and_wait should succeed: {:?}",
-        result
+        "dispatch_and_wait should succeed: {result:?}"
     );
     println!("  dispatch_and_wait returned successfully");
 
@@ -922,7 +915,7 @@ async fn test_dispatch_and_wait_completes() {
         name, "WaitedNickname",
         "Name should be updated immediately after dispatch_and_wait"
     );
-    println!("  Name immediately available: '{}'", name);
+    println!("  Name immediately available: '{name}'");
 
     cleanup_test_dir("dispatch-wait");
     println!("\n=== Dispatch And Wait Completes Test PASSED ===\n");
@@ -955,10 +948,8 @@ async fn test_invalid_operations_return_errors() {
 
     // This may succeed (goes to operational) or fail (needs authority)
     // The important thing is it doesn't crash
-    println!(
-        "  SendMessage result: {:?}",
-        result.as_ref().map(|_| "ok").unwrap_or("err")
-    );
+    let send_status = result.as_ref().map(|_| "ok").unwrap_or("err");
+    println!("  SendMessage result: {send_status}");
     println!("  SendMessage handled without crash");
 
     // Phase 2: Try to submit guardian approval without active recovery
@@ -970,7 +961,7 @@ async fn test_invalid_operations_return_errors() {
         .await;
 
     // This should fail gracefully
-    println!("  SubmitGuardianApproval result: {:?}", result);
+    println!("  SubmitGuardianApproval result: {result:?}");
     println!("  SubmitGuardianApproval handled without crash");
 
     // Phase 3: Verify state is not corrupted
@@ -980,11 +971,10 @@ async fn test_invalid_operations_return_errors() {
         let recovery = wait_for_recovery(&app_core, |_recovery| true).await;
 
         // Signals should still be readable
-        println!("  Chat signal readable: {} messages", chat.messages.len());
-        println!(
-            "  Recovery signal readable: active={}",
-            recovery.active_recovery.is_some()
-        );
+        let message_count = chat.messages.len();
+        println!("  Chat signal readable: {message_count} messages");
+        let active_recovery = recovery.active_recovery.is_some();
+        println!("  Recovery signal readable: active={active_recovery}");
     }
 
     cleanup_test_dir("invalid-ops");
@@ -1027,8 +1017,8 @@ async fn test_complete_settings_flow_persists() {
         !matches!(mfa, MfaPolicy::Disabled),
         "MFA should be enabled after require_mfa=true"
     );
-    println!("  Nickname: {}", name);
-    println!("  MFA: {:?}", mfa);
+    println!("  Nickname: {name}");
+    println!("  MFA: {mfa:?}");
 
     cleanup_test_dir("settings-complete");
     println!("\n=== Complete Settings Flow Persists Test PASSED ===\n");
@@ -1045,32 +1035,28 @@ async fn test_snapshot_methods_return_current_state() {
     println!("Phase 1: Get all snapshots");
 
     let chat = ctx.snapshot_chat();
-    println!("  Chat snapshot: {} messages", chat.messages.len());
+    let chat_count = chat.messages.len();
+    println!("  Chat snapshot: {chat_count} messages");
 
     let contacts = ctx.snapshot_contacts();
-    println!("  Contacts snapshot: {} contacts", contacts.contacts.len());
+    let contact_count = contacts.contacts.len();
+    println!("  Contacts snapshot: {contact_count} contacts");
 
     let recovery = ctx.snapshot_recovery();
-    println!(
-        "  Recovery snapshot: in_progress={}",
-        recovery.is_in_progress
-    );
+    let in_progress = recovery.is_in_progress;
+    println!("  Recovery snapshot: in_progress={in_progress}");
 
     let neighborhood = ctx.snapshot_neighborhood();
-    println!(
-        "  Neighborhood snapshot: homes={}",
-        neighborhood.homes.len()
-    );
+    let home_count = neighborhood.homes.len();
+    println!("  Neighborhood snapshot: homes={home_count}");
 
     let home = ctx.snapshot_home();
     println!("  Home snapshot accessible");
     let _ = home; // silence unused warning
 
     let invitations = ctx.snapshot_invitations();
-    println!(
-        "  Invitations snapshot: {} invitations",
-        invitations.invitations.len()
-    );
+    let invitation_count = invitations.invitations.len();
+    println!("  Invitations snapshot: {invitation_count} invitations");
 
     // Phase 2: Verify snapshots are consistent after update
     println!("\nPhase 2: Verify snapshot consistency after update");
@@ -1088,7 +1074,7 @@ async fn test_snapshot_methods_return_current_state() {
         updated_name, "SnapshotTestName",
         "Display name should reflect update"
     );
-    println!("  Display name reflects update: '{}'", updated_name);
+    println!("  Display name reflects update: '{updated_name}'");
 
     cleanup_test_dir("snapshot");
     println!("\n=== Snapshot Methods Return Current State Test PASSED ===\n");

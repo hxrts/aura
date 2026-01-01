@@ -9,7 +9,6 @@
 //! - **EffectRegistry**: Map (EffectType, Operation) → Handler implementation
 //! - **EffectContext**: Per-execution context (authority, epoch, budgets)
 //! - **LifecycleManager**: Service startup/shutdown coordination
-//! - **AuthorityManager**: Multi-authority state management
 //!
 //! **Execution Modes** (per docs/106_effect_system_and_runtime.md):
 //! - **Production**: Real handlers (crypto, storage, network)
@@ -54,13 +53,13 @@ pub mod shared_transport;
 pub mod simulation_factory;
 
 // Cross-cutting concerns
-pub mod migration;
 pub mod reliability;
 
 // Choreography integration
 pub mod choreography_adapter;
 
 // Runtime utilities
+pub mod migration;
 pub mod storage_coordinator;
 pub mod time_handler;
 
@@ -86,9 +85,9 @@ pub use executor::EffectExecutor;
 pub use lifecycle::LifecycleManager;
 #[allow(unused_imports)] // Re-exported for public API
 pub use services::{
-    AuthorityError, AuthorityManager, AuthorityState, AuthorityStatus, FlowBudgetManager,
-    ReceiptManager, RuntimeService, ServiceError, ServiceErrorKind, ServiceHealth,
-    SharedAuthorityManager, SyncManagerConfig, SyncManagerState, SyncServiceManager,
+    AuthorityManager, AuthorityStatus, FlowBudgetManager, ReceiptManager, RuntimeService,
+    ServiceError, ServiceErrorKind, ServiceHealth, SyncManagerConfig, SyncManagerState,
+    SyncServiceManager,
 };
 
 // Simulation factory re-export

@@ -42,11 +42,11 @@ fn test_basic_dkd_derivation() {
     assert_ne!(derived_key, vec![0u8; 32], "Key should not be all zeros");
 
     println!("✓ DKD derivation test passed");
-    println!("  Account: {}", account_id);
-    println!("  Session: {}", session_id);
+    println!("  Account: {account_id}");
+    println!("  Session: {session_id}");
     println!("  Participants: {}", participants.len());
-    println!("  App ID: {}", app_id);
-    println!("  Context: {}", context);
+    println!("  App ID: {app_id}");
+    println!("  Context: {context}");
     println!("  Derived key: {}", hex::encode(&derived_key));
 }
 
@@ -204,9 +204,9 @@ fn test_identifier_uniqueness() {
     assert!(!device_str.is_empty());
 
     println!("✓ Identifier uniqueness test passed");
-    println!("  Account: {}", account_str);
-    println!("  Session: {}", session_str);
-    println!("  Device: {}", device_str);
+    println!("  Account: {account_str}");
+    println!("  Session: {session_str}");
+    println!("  Device: {device_str}");
 }
 
 /// Simulate DKD key derivation using standard cryptographic primitives

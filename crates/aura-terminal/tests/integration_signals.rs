@@ -261,13 +261,13 @@ async fn test_chat_message_accumulation() {
     for i in 0..5 {
         let mut state = core.read(&*CHAT_SIGNAL).await.unwrap();
         state.messages.push(Message {
-            id: format!("msg-{}", i),
+            id: format!("msg-{i}"),
             channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
             sender_id: format!("user-{}", i % 3)
                 .parse::<AuthorityId>()
                 .unwrap_or_default(),
             sender_name: format!("User{}", i % 3),
-            content: format!("Message number {}", i),
+            content: format!("Message number {i}"),
             timestamp: 1234567890 + i as u64,
             is_own: i % 2 == 0,
             is_read: true,

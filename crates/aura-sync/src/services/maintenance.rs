@@ -595,7 +595,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_maintenance_service_lifecycle() {
-        let service = MaintenanceService::new(Default::default()).unwrap();
+        let service = MaintenanceService::new(MaintenanceServiceConfig::default()).unwrap();
 
         let time_effects = aura_effects::time::PhysicalTimeHandler;
         service
@@ -610,7 +610,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_maintenance_service_with_time_effects() {
-        let service = MaintenanceService::new(Default::default()).unwrap();
+        let service = MaintenanceService::new(MaintenanceServiceConfig::default()).unwrap();
         let time_effects = aura_testkit::stateful_effects::SimulatedTimeHandler::new();
 
         service
@@ -625,7 +625,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_propose_upgrade_with_random_effects() {
-        let service = MaintenanceService::new(Default::default()).unwrap();
+        let service = MaintenanceService::new(MaintenanceServiceConfig::default()).unwrap();
         let random_effects = aura_testkit::stateful_effects::MockCryptoHandler::new();
 
         let package_id = Uuid::from_bytes(2u128.to_be_bytes());
@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn test_cache_invalidation() {
-        let service = MaintenanceService::new(Default::default()).unwrap();
+        let service = MaintenanceService::new(MaintenanceServiceConfig::default()).unwrap();
 
         let authority_id = AuthorityId::new_from_entropy([5u8; 32]);
         let result = service

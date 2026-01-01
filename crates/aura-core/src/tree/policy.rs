@@ -239,7 +239,7 @@ mod tests {
         let policies = vec![Policy::Any, Policy::Threshold { m: 2, n: 3 }, Policy::All];
 
         for p in policies {
-            assert_eq!(p.meet(&p), p, "Idempotency failed for {:?}", p);
+            assert_eq!(p.meet(&p), p, "Idempotency failed for {p:?}");
         }
     }
 
@@ -260,9 +260,7 @@ mod tests {
             assert_eq!(
                 a.meet(&b),
                 b.meet(&a),
-                "Commutativity failed for {:?} and {:?}",
-                a,
-                b
+                "Commutativity failed for {a:?} and {b:?}",
             );
         }
     }
@@ -284,8 +282,7 @@ mod tests {
             let right = a.meet(&b.meet(&c));
             assert_eq!(
                 left, right,
-                "Associativity failed for {:?}, {:?}, {:?}",
-                a, b, c
+                "Associativity failed for {a:?}, {b:?}, {c:?}",
             );
         }
     }

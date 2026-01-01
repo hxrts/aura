@@ -19,8 +19,10 @@
 
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
+use aura_core::ceremony::{SupersessionReason, SupersessionRecord};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity};
 use aura_core::DeviceId;
+use aura_core::Hash32;
 use super::state::with_state_mut_validated;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -36,6 +38,8 @@ pub struct CeremonyTracker {
 #[derive(Debug, Default)]
 struct CeremonyTrackerState {
     ceremonies: HashMap<String, CeremonyState>,
+    /// Supersession records for audit trail
+    supersession_records: Vec<SupersessionRecord>,
 }
 
 impl CeremonyTrackerState {
@@ -78,6 +82,12 @@ impl CeremonyTrackerState {
             if state.is_committed && state.has_failed {
                 return Err(format!(
                     "ceremony {} cannot be committed and failed",
+                    ceremony_id
+                ));
+            }
+            if state.is_superseded && state.is_committed {
+                return Err(format!(
+                    "ceremony {} cannot be superseded and committed",
                     ceremony_id
                 ));
             }
@@ -126,6 +136,15 @@ pub struct CeremonyState {
     /// Whether the ceremony has been committed (key rotation activated)
     pub is_committed: bool,
 
+    /// Whether the ceremony has been superseded by another ceremony
+    pub is_superseded: bool,
+
+    /// ID of the ceremony that supersedes this one (if superseded)
+    pub superseded_by: Option<String>,
+
+    /// IDs of ceremonies that this ceremony supersedes
+    pub supersedes: Vec<String>,
+
     /// Agreement mode (A1/A2/A3) for the ceremony lifecycle
     pub agreement_mode: AgreementMode,
 
@@ -134,6 +153,9 @@ pub struct CeremonyState {
 
     /// Timeout duration (30 seconds default)
     pub timeout: Duration,
+
+    /// Prestate hash at ceremony initiation (for supersession detection)
+    pub prestate_hash: Option<Hash32>,
 }
 
 impl CeremonyTracker {
@@ -177,6 +199,32 @@ impl CeremonyTracker {
         new_epoch: u64,
         enrollment_device_id: Option<DeviceId>,
     ) -> Result<(), IntentError> {
+        self.register_with_prestate(
+            ceremony_id,
+            kind,
+            threshold_k,
+            total_n,
+            participants,
+            new_epoch,
+            enrollment_device_id,
+            None, // No prestate hash for backward compatibility
+        )
+        .await
+    }
+
+    /// Register a new ceremony with prestate hash for supersession tracking
+    #[allow(clippy::too_many_arguments)]
+    pub async fn register_with_prestate(
+        &self,
+        ceremony_id: String,
+        kind: CeremonyKind,
+        threshold_k: u16,
+        total_n: u16,
+        participants: Vec<ParticipantIdentity>,
+        new_epoch: u64,
+        enrollment_device_id: Option<DeviceId>,
+        prestate_hash: Option<Hash32>,
+    ) -> Result<(), IntentError> {
         let state = CeremonyState {
             kind,
             threshold_k,
@@ -188,9 +236,13 @@ impl CeremonyTracker {
             started_at: Instant::now(),
             has_failed: false,
             is_committed: false,
+            is_superseded: false,
+            superseded_by: None,
+            supersedes: Vec::new(),
             agreement_mode: Self::initial_mode_for_kind(kind),
             error_message: None,
             timeout: Duration::from_secs(30),
+            prestate_hash,
         };
 
         let result = with_state_mut_validated(
@@ -454,6 +506,173 @@ impl CeremonyTracker {
             |tracker| tracker.validate(),
         )
         .await
+    }
+
+    // =========================================================================
+    // SUPERSESSION METHODS
+    // =========================================================================
+
+    /// Supersede an existing ceremony with a new one.
+    ///
+    /// The old ceremony is marked as superseded and should stop processing.
+    /// Supersession facts should be emitted after calling this method.
+    ///
+    /// # Arguments
+    /// * `old_ceremony_id` - The ceremony being superseded
+    /// * `new_ceremony_id` - The ceremony that supersedes it
+    /// * `reason` - Why the supersession occurred
+    /// * `timestamp_ms` - When the supersession was recorded
+    pub async fn supersede(
+        &self,
+        old_ceremony_id: &str,
+        new_ceremony_id: &str,
+        reason: SupersessionReason,
+        timestamp_ms: u64,
+    ) -> Result<SupersessionRecord, IntentError> {
+        // Create record outside the lock scope
+        let old_ceremony_hash = Hash32::from_bytes(old_ceremony_id.as_bytes());
+        let new_ceremony_hash = Hash32::from_bytes(new_ceremony_id.as_bytes());
+        let record = SupersessionRecord::new(
+            old_ceremony_hash,
+            new_ceremony_hash,
+            reason.clone(),
+            timestamp_ms,
+        );
+
+        with_state_mut_validated(
+            &self.state,
+            |tracker| {
+                // Verify old ceremony exists
+                let old_state = tracker.ceremonies.get_mut(old_ceremony_id).ok_or_else(|| {
+                    IntentError::validation_failed(format!(
+                        "Ceremony {} not found",
+                        old_ceremony_id
+                    ))
+                })?;
+
+                // Check if already in terminal state
+                if old_state.is_committed {
+                    return Err(IntentError::validation_failed(format!(
+                        "Cannot supersede committed ceremony {}",
+                        old_ceremony_id
+                    )));
+                }
+
+                if old_state.is_superseded {
+                    // Already superseded - idempotent
+                    tracing::debug!(
+                        old_ceremony = %old_ceremony_id,
+                        new_ceremony = %new_ceremony_id,
+                        "Ceremony already superseded (idempotent)"
+                    );
+                    return Ok(record.clone());
+                }
+
+                // Mark old ceremony as superseded
+                old_state.is_superseded = true;
+                old_state.superseded_by = Some(new_ceremony_id.to_string());
+                old_state.has_failed = true;
+                old_state.error_message = Some(format!("Superseded: {}", reason.description()));
+
+                // Update new ceremony if it exists (may be registered separately)
+                if let Some(new_state) = tracker.ceremonies.get_mut(new_ceremony_id) {
+                    new_state.supersedes.push(old_ceremony_id.to_string());
+                }
+
+                // Record for audit trail
+                tracker.supersession_records.push(record.clone());
+
+                tracing::info!(
+                    old_ceremony = %old_ceremony_id,
+                    new_ceremony = %new_ceremony_id,
+                    reason = %reason.code(),
+                    "Ceremony superseded"
+                );
+
+                Ok(record.clone())
+            },
+            |tracker| tracker.validate(),
+        )
+        .await
+    }
+
+    /// Check for ceremonies that would be superseded by a new ceremony.
+    ///
+    /// Returns active ceremonies of the same kind that could be superseded
+    /// based on prestate staleness or same-initiator detection.
+    ///
+    /// # Arguments
+    /// * `kind` - The kind of ceremony being initiated
+    /// * `prestate_hash` - Current prestate hash (if available)
+    ///
+    /// # Returns
+    /// Vector of ceremony IDs that are candidates for supersession
+    pub async fn check_supersession_candidates(
+        &self,
+        kind: CeremonyKind,
+        prestate_hash: Option<&Hash32>,
+    ) -> Vec<String> {
+        let state = self.state.read().await;
+
+        state
+            .ceremonies
+            .iter()
+            .filter(|(_, ceremony)| {
+                // Must be same kind
+                if ceremony.kind != kind {
+                    return false;
+                }
+
+                // Skip terminal ceremonies
+                if ceremony.is_committed || ceremony.is_superseded {
+                    return false;
+                }
+
+                // Check for prestate staleness if we have both hashes
+                if let (Some(new_hash), Some(old_hash)) = (prestate_hash, &ceremony.prestate_hash) {
+                    if new_hash != old_hash {
+                        return true; // Prestate changed, candidate for supersession
+                    }
+                }
+
+                // Active ceremony of same kind is always a candidate
+                true
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Get supersession chain for audit trail.
+    ///
+    /// Returns all supersession records involving the given ceremony
+    /// (either as superseded or superseding).
+    ///
+    /// # Arguments
+    /// * `ceremony_id` - The ceremony to get supersession history for
+    pub async fn get_supersession_chain(&self, ceremony_id: &str) -> Vec<SupersessionRecord> {
+        let ceremony_hash = Hash32::from_bytes(ceremony_id.as_bytes());
+        let state = self.state.read().await;
+
+        state
+            .supersession_records
+            .iter()
+            .filter(|record| {
+                record.superseded_id == ceremony_hash || record.superseding_id == ceremony_hash
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Check if a ceremony has been superseded.
+    pub async fn is_superseded(&self, ceremony_id: &str) -> Result<bool, IntentError> {
+        let state = self.get(ceremony_id).await?;
+        Ok(state.is_superseded)
+    }
+
+    /// Get all supersession records (for debugging/auditing).
+    pub async fn all_supersession_records(&self) -> Vec<SupersessionRecord> {
+        let state = self.state.read().await;
+        state.supersession_records.clone()
     }
 }
 

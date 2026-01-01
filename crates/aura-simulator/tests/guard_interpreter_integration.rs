@@ -11,6 +11,7 @@ use aura_core::{
     identifiers::{AuthorityId, ContextId},
     journal::Fact,
     time::{PhysicalTime, TimeStamp},
+    AuraError,
 };
 use aura_simulator::effects::{SimulationEffectInterpreter, SimulationState};
 use std::sync::Arc;
@@ -21,7 +22,8 @@ fn authority(seed: u8) -> AuthorityId {
 
 /// Simulate a multi-party protocol with deterministic replay
 #[tokio::test]
-async fn test_multi_party_protocol_simulation() {
+#[allow(clippy::disallowed_types)]
+async fn test_multi_party_protocol_simulation() -> Result<(), AuraError> {
     let time = TimeStamp::PhysicalClock(PhysicalTime {
         ts_ms: 1000,
         uncertainty: None,
@@ -33,6 +35,7 @@ async fn test_multi_party_protocol_simulation() {
     let carol = authority(3);
 
     // Create interpreters with shared state
+    #[allow(clippy::disallowed_types)]
     let shared_state = Arc::new(std::sync::Mutex::new(SimulationState::new(
         42,
         time.clone(),
@@ -66,15 +69,13 @@ async fn test_multi_party_protocol_simulation() {
             key: "session_id".to_string(),
             value: "threshold_sign_123".to_string(),
         })
-        .await
-        .unwrap();
+        .await?;
 
     alice_interp
         .execute(EffectCommand::RecordLeakage {
             bits: 32, // Session ID leaks some metadata
         })
-        .await
-        .unwrap();
+        .await?;
 
     // 2. Alice sends signing requests to Bob and Carol
     let signing_request = vec![1, 2, 3, 4, 5]; // Mock signing package
@@ -84,8 +85,7 @@ async fn test_multi_party_protocol_simulation() {
             peer_id: None,
             envelope: signing_request.clone(),
         })
-        .await
-        .unwrap();
+        .await?;
 
     alice_interp
         .execute(EffectCommand::SendEnvelope {
@@ -93,8 +93,7 @@ async fn test_multi_party_protocol_simulation() {
             peer_id: None,
             envelope: signing_request,
         })
-        .await
-        .unwrap();
+        .await?;
 
     // 3. Bob and Carol process requests and charge flow budget
     let context = ContextId::new_from_entropy([0u8; 32]);
@@ -105,8 +104,7 @@ async fn test_multi_party_protocol_simulation() {
             peer: alice,
             amount: 50,
         })
-        .await
-        .unwrap();
+        .await?;
 
     carol_interp
         .execute(EffectCommand::ChargeBudget {
@@ -115,14 +113,12 @@ async fn test_multi_party_protocol_simulation() {
             peer: alice,
             amount: 50,
         })
-        .await
-        .unwrap();
+        .await?;
 
     // 4. Bob and Carol generate signature shares (using nonces)
     let bob_nonce = match bob_interp
         .execute(EffectCommand::GenerateNonce { bytes: 32 })
-        .await
-        .unwrap()
+        .await?
     {
         EffectResult::Nonce(n) => n,
         _ => panic!("Expected nonce"),
@@ -130,8 +126,7 @@ async fn test_multi_party_protocol_simulation() {
 
     let carol_nonce = match carol_interp
         .execute(EffectCommand::GenerateNonce { bytes: 32 })
-        .await
-        .unwrap()
+        .await?
     {
         EffectResult::Nonce(n) => n,
         _ => panic!("Expected nonce"),
@@ -147,8 +142,7 @@ async fn test_multi_party_protocol_simulation() {
                 timestamp: time.clone(),
             },
         })
-        .await
-        .unwrap();
+        .await?;
 
     carol_interp
         .execute(EffectCommand::AppendJournal {
@@ -158,8 +152,7 @@ async fn test_multi_party_protocol_simulation() {
                 timestamp: time.clone(),
             },
         })
-        .await
-        .unwrap();
+        .await?;
 
     // 6. Send shares back to Alice
     bob_interp
@@ -168,8 +161,7 @@ async fn test_multi_party_protocol_simulation() {
             peer_id: None,
             envelope: bob_nonce.clone(),
         })
-        .await
-        .unwrap();
+        .await?;
 
     carol_interp
         .execute(EffectCommand::SendEnvelope {
@@ -177,8 +169,7 @@ async fn test_multi_party_protocol_simulation() {
             peer_id: None,
             envelope: carol_nonce.clone(),
         })
-        .await
-        .unwrap();
+        .await?;
 
     // Verify state
     let state = alice_interp.snapshot_state();
@@ -209,13 +200,15 @@ async fn test_multi_party_protocol_simulation() {
     replay_interp.set_initial_budget(carol, 1000);
 
     // Replay should produce identical state
-    replay_interp.replay(events).await.unwrap();
+    replay_interp.replay(events).await?;
 
     let replay_final = replay_interp.snapshot_state();
     assert_eq!(replay_final.metadata, state.metadata);
     assert_eq!(replay_final.total_leakage_bits, state.total_leakage_bits);
     assert_eq!(replay_final.journal.len(), state.journal.len());
     assert_eq!(replay_final.message_queue.len(), state.message_queue.len());
+
+    Ok(())
 }
 
 /// Test guard chain evaluation with simulation

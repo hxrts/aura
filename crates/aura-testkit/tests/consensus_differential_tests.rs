@@ -135,11 +135,11 @@ proptest! {
     ) {
         let proposals: Vec<ShareProposal> = (0..count)
             .map(|i| ShareProposal {
-                witness: format!("w{}", i),
+                witness: format!("w{i}"),
                 result_id: "r1".to_string(),
                 share: ShareData {
-                    share_value: format!("s{}", i),
-                    nonce_binding: format!("n{}", i),
+                    share_value: format!("s{i}"),
+                    nonce_binding: format!("n{i}"),
                     data_binding: "binding".to_string(),
                 },
             })
@@ -155,7 +155,7 @@ proptest! {
         // Test threshold = count + 1 (just above)
         if count < usize::MAX {
             prop_assert_eq!(
-                proposals.len() >= count + 1,
+                proposals.len() > count,
                 check_threshold_ref(&proposals, count + 1),
                 "Above boundary case failed: count={}", count
             );
@@ -188,12 +188,12 @@ proptest! {
                 witness: w.clone(),
                 result_id: result_id.clone(),
                 share: ShareData {
-                    share_value: format!("s{}", i),
-                    nonce_binding: format!("n{}", i),
-                    data_binding: binding.clone(),
-                },
-            })
-            .collect();
+                share_value: format!("s{i}"),
+                nonce_binding: format!("n{i}"),
+                data_binding: binding.clone(),
+            },
+        })
+        .collect();
 
         // All same result_id and binding = consistent
         prop_assert!(
@@ -218,12 +218,12 @@ proptest! {
                 witness: w.clone(),
                 result_id: result_id.to_string(),
                 share: ShareData {
-                    share_value: format!("s{}", i),
-                    nonce_binding: format!("n{}", i),
-                    data_binding: format!("cid:{}:{}", result_id, prestate_hash),
-                },
-            })
-            .collect();
+                share_value: format!("s{i}"),
+                nonce_binding: format!("n{i}"),
+                data_binding: format!("cid:{result_id}:{prestate_hash}"),
+            },
+        })
+        .collect();
 
         // Production checks non-empty values for matching result_id
         prop_assert!(
@@ -243,10 +243,10 @@ proptest! {
             .enumerate()
             .map(|(i, w)| ShareProposal {
                 witness: w.clone(),
-                result_id: format!("r{}", i), // Each has different result_id
+                result_id: format!("r{i}"), // Each has different result_id
                 share: ShareData {
-                    share_value: format!("s{}", i),
-                    nonce_binding: format!("n{}", i),
+                    share_value: format!("s{i}"),
+                    nonce_binding: format!("n{i}"),
                     data_binding: "bind".to_string(),
                 },
             })
@@ -367,8 +367,7 @@ proptest! {
 
         prop_assert!(
             equivocators.contains(&equivocator),
-            "Equivocator '{}' should be detected",
-            equivocator
+            "Equivocator '{equivocator}' should be detected"
         );
     }
 }
@@ -402,7 +401,6 @@ proptest! {
         e2 in arb_evidence(),
     ) {
         // Make consensus IDs match for meaningful merge
-        let e1 = e1;
         let mut e2 = e2;
         e2.consensus_id = e1.consensus_id.clone();
 
@@ -459,7 +457,6 @@ proptest! {
         e3 in arb_evidence(),
     ) {
         // Make consensus IDs match
-        let e1 = e1;
         let mut e2 = e2;
         let mut e3 = e3;
         e2.consensus_id = e1.consensus_id.clone();
@@ -491,7 +488,6 @@ proptest! {
         e2 in arb_evidence(),
     ) {
         // Ensure different consensus IDs
-        let e1 = e1;
         let mut e2 = e2;
         if e1.consensus_id == e2.consensus_id {
             e2.consensus_id = format!("{}_different", e2.consensus_id);

@@ -66,7 +66,7 @@ mod tests {
     fn compute_ops_to_push_only_missing_remote() {
         let op1 = create_test_op(Hash32([1u8; 32]));
         let op2 = create_test_op(Hash32([2u8; 32]));
-        let oplog = vec![op1.clone(), op2.clone()];
+        let oplog = vec![op1, op2];
 
         let local = BloomDigest {
             cids: [Hash32([1u8; 32]), Hash32([2u8; 32])].into_iter().collect(),

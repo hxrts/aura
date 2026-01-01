@@ -6,8 +6,10 @@
 //! enforcement in the guard chain.
 
 use crate::core::AgentConfig;
+use super::state::with_state_mut_validated;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// A flow budget for a context-peer pair
@@ -61,9 +63,28 @@ pub struct FlowBudgetManager {
     #[allow(dead_code)] // Will be used for flow budget configuration
     config: AgentConfig,
     /// Budget storage per (ContextId, AuthorityId) pair
-    budgets: RwLock<HashMap<(ContextId, AuthorityId), FlowBudget>>,
+    state: Arc<RwLock<FlowBudgetState>>,
     /// Default budget limit for new pairs
     default_limit: u32,
+}
+
+#[derive(Debug, Default)]
+struct FlowBudgetState {
+    budgets: HashMap<(ContextId, AuthorityId), FlowBudget>,
+}
+
+impl FlowBudgetState {
+    fn validate(&self) -> Result<(), String> {
+        for ((context_id, peer_id), budget) in &self.budgets {
+            if budget.spent > budget.limit {
+                return Err(format!(
+                    "budget overspent for ({:?}, {:?}): spent {} > limit {}",
+                    context_id, peer_id, budget.spent, budget.limit
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl FlowBudgetManager {
@@ -71,7 +92,7 @@ impl FlowBudgetManager {
     pub fn new(config: &AgentConfig) -> Self {
         Self {
             config: config.clone(),
-            budgets: RwLock::new(HashMap::new()),
+            state: Arc::new(RwLock::new(FlowBudgetState::default())),
             default_limit: 1000, // Default limit per epoch
         }
     }
@@ -82,8 +103,9 @@ impl FlowBudgetManager {
         context: ContextId,
         peer: AuthorityId,
     ) -> Result<FlowBudget, BudgetError> {
-        let budgets = self.budgets.read().await;
-        Ok(budgets
+        let state = self.state.read().await;
+        Ok(state
+            .budgets
             .get(&(context, peer))
             .cloned()
             .unwrap_or_else(|| FlowBudget::new(self.default_limit)))
@@ -96,37 +118,59 @@ impl FlowBudgetManager {
         peer: AuthorityId,
         cost: u32,
     ) -> Result<(), BudgetError> {
-        let mut budgets = self.budgets.write().await;
-        let budget = budgets
-            .entry((context, peer))
-            .or_insert_with(|| FlowBudget::new(self.default_limit));
+        let mut result = Ok(());
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let budget = state
+                    .budgets
+                    .entry((context, peer))
+                    .or_insert_with(|| FlowBudget::new(self.default_limit));
 
-        if !budget.can_charge(cost) {
-            return Err(BudgetError::InsufficientBudget {
-                needed: cost,
-                available: budget.remaining(),
-            });
-        }
+                if !budget.can_charge(cost) {
+                    result = Err(BudgetError::InsufficientBudget {
+                        needed: cost,
+                        available: budget.remaining(),
+                    });
+                    return;
+                }
 
-        budget.spent += cost;
-        Ok(())
+                budget.spent += cost;
+            },
+            |state| state.validate(),
+        )
+        .await;
+        result
     }
 
     /// Replenish budget for a context-peer pair
     pub async fn replenish(&self, context: ContextId, peer: AuthorityId, amount: u32) {
-        let mut budgets = self.budgets.write().await;
-        if let Some(budget) = budgets.get_mut(&(context, peer)) {
-            budget.spent = budget.spent.saturating_sub(amount);
-        }
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                if let Some(budget) = state.budgets.get_mut(&(context, peer)) {
+                    budget.spent = budget.spent.saturating_sub(amount);
+                }
+            },
+            |state| state.validate(),
+        )
+        .await;
     }
 
     /// Set the limit for a context-peer pair
     pub async fn set_limit(&self, context: ContextId, peer: AuthorityId, limit: u32) {
-        let mut budgets = self.budgets.write().await;
-        let budget = budgets
-            .entry((context, peer))
-            .or_insert_with(|| FlowBudget::new(limit));
-        budget.limit = limit;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let budget = state
+                    .budgets
+                    .entry((context, peer))
+                    .or_insert_with(|| FlowBudget::new(limit));
+                budget.limit = limit;
+            },
+            |state| state.validate(),
+        )
+        .await;
     }
 
     /// List all budgets for a context
@@ -134,8 +178,9 @@ impl FlowBudgetManager {
         &self,
         context: ContextId,
     ) -> Result<Vec<(AuthorityId, FlowBudget)>, BudgetError> {
-        let budgets = self.budgets.read().await;
-        Ok(budgets
+        let state = self.state.read().await;
+        Ok(state
+            .budgets
             .iter()
             .filter(|((ctx, _), _)| *ctx == context)
             .map(|((_, peer), budget)| (*peer, budget.clone()))
@@ -144,19 +189,33 @@ impl FlowBudgetManager {
 
     /// Reset all budgets for a new epoch
     pub async fn reset_epoch(&self, new_epoch: u64) {
-        let mut budgets = self.budgets.write().await;
-        for budget in budgets.values_mut() {
-            budget.spent = 0;
-            budget.epoch = new_epoch;
-        }
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                for budget in state.budgets.values_mut() {
+                    budget.spent = 0;
+                    budget.epoch = new_epoch;
+                }
+            },
+            |state| state.validate(),
+        )
+        .await;
     }
 
     /// Remove budget entry for a context-peer pair.
     ///
     /// Call this when a context or peer relationship is no longer active.
     pub async fn remove_budget(&self, context: ContextId, peer: AuthorityId) -> bool {
-        let mut budgets = self.budgets.write().await;
-        budgets.remove(&(context, peer)).is_some()
+        let mut removed = false;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                removed = state.budgets.remove(&(context, peer)).is_some();
+            },
+            |state| state.validate(),
+        )
+        .await;
+        removed
     }
 
     /// Remove all budgets for a context.
@@ -164,10 +223,18 @@ impl FlowBudgetManager {
     /// Call this when a context is deleted or no longer used.
     /// Returns the number of budgets removed.
     pub async fn remove_context(&self, context: ContextId) -> usize {
-        let mut budgets = self.budgets.write().await;
-        let before = budgets.len();
-        budgets.retain(|(ctx, _), _| *ctx != context);
-        before - budgets.len()
+        let mut removed = 0;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let before = state.budgets.len();
+                state.budgets.retain(|(ctx, _), _| *ctx != context);
+                removed = before - state.budgets.len();
+            },
+            |state| state.validate(),
+        )
+        .await;
+        removed
     }
 
     /// Cleanup stale budgets that haven't been used for several epochs.
@@ -176,10 +243,17 @@ impl FlowBudgetManager {
     /// Returns the number of budgets removed.
     pub async fn cleanup_stale(&self, current_epoch: u64, stale_epochs: u64) -> usize {
         let min_epoch = current_epoch.saturating_sub(stale_epochs);
-        let mut budgets = self.budgets.write().await;
-        let before = budgets.len();
-        budgets.retain(|_, budget| budget.epoch >= min_epoch);
-        let removed = before - budgets.len();
+        let mut removed = 0;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let before = state.budgets.len();
+                state.budgets.retain(|_, budget| budget.epoch >= min_epoch);
+                removed = before - state.budgets.len();
+            },
+            |state| state.validate(),
+        )
+        .await;
         if removed > 0 {
             tracing::debug!(
                 removed,
@@ -199,7 +273,6 @@ impl FlowBudgetManager {
 use super::traits::{RuntimeService, ServiceError, ServiceHealth};
 use super::RuntimeTaskRegistry;
 use async_trait::async_trait;
-use std::sync::Arc;
 
 #[async_trait]
 impl RuntimeService for FlowBudgetManager {
@@ -214,8 +287,14 @@ impl RuntimeService for FlowBudgetManager {
 
     async fn stop(&self) -> Result<(), ServiceError> {
         // Clear all budgets on shutdown
-        let mut budgets = self.budgets.write().await;
-        budgets.clear();
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.budgets.clear();
+            },
+            |state| state.validate(),
+        )
+        .await;
         Ok(())
     }
 

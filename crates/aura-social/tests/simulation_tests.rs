@@ -366,7 +366,7 @@ fn test_progressive_social_presence_loss() {
     let (home, steward, _residents) = create_home(1, 3);
 
     // Full social presence
-    let topology_full = SocialTopology::new(steward, Some(home.clone()), vec![]);
+    let topology_full = SocialTopology::new(steward, Some(home), vec![]);
     assert!(topology_full.has_social_presence());
     assert_eq!(topology_full.home_peers().len(), 2);
 
@@ -476,13 +476,13 @@ fn test_cross_neighborhood_routing() {
     let neighborhood2 = create_neighborhood(2, vec![home2.home_id, home3.home_id]);
 
     // Topology for home1 - only in neighborhood1
-    let topology1 = SocialTopology::new(steward1, Some(home1.clone()), vec![neighborhood1.clone()]);
+    let topology1 = SocialTopology::new(steward1, Some(home1), vec![neighborhood1.clone()]);
 
     // Topology for home2 - bridge between neighborhoods
     let topology2 = SocialTopology::new(
         steward2,
         Some(home2),
-        vec![neighborhood1, neighborhood2.clone()],
+        vec![neighborhood1, neighborhood2],
     );
 
     // home1 has social presence through neighborhood1

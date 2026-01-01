@@ -28,10 +28,10 @@ use std::collections::HashMap;
 fn witness_strategy() -> impl Strategy<Value = (Vec<String>, usize)> {
     // 3-7 witnesses, threshold = (n+1)/2 to (n-1)
     (3usize..=7).prop_flat_map(|n| {
-        let min_threshold = (n + 1) / 2;
+        let min_threshold = n.div_ceil(2);
         let max_threshold = n - 1;
         (
-            Just((0..n).map(|i| format!("w{}", i)).collect::<Vec<_>>()),
+            Just((0..n).map(|i| format!("w{i}")).collect::<Vec<_>>()),
             min_threshold..=max_threshold,
         )
     })
@@ -111,7 +111,11 @@ proptest! {
         // Safety property: no conflicting commits
         let has_conflict = result.violations.iter()
             .any(|v| v.invariant == "AgreementOnCommit");
-        prop_assert!(!has_conflict, "Safety violated: {:?}", result.violations);
+        prop_assert!(
+            !has_conflict,
+            "Safety violated: {violations:?}",
+            violations = result.violations
+        );
     }
 
     /// Property: Invariants hold under random network partitions
@@ -334,8 +338,8 @@ fn test_partition_minority_cannot_commit() {
     // No safety violations
     assert!(
         result.is_ok(),
-        "Unexpected violations: {:?}",
-        result.violations
+        "Unexpected violations: {violations:?}",
+        violations = result.violations
     );
 }
 
@@ -366,7 +370,6 @@ fn test_equivocator_handled_safely() {
         .collect();
     assert!(
         safety_violations.is_empty(),
-        "Safety violated: {:?}",
-        safety_violations
+        "Safety violated: {safety_violations:?}"
     );
 }

@@ -64,7 +64,9 @@ fn consensus_share_ordering_is_commutative_for_same_result() {
         let state = base_state();
         let ordered: Vec<ShareProposal> = order.iter().map(|&i| proposals[i].clone()).collect();
         let final_state = apply_sequence(state, &ordered);
-        let commit = final_state.commit_fact.expect("consensus should commit");
+        let commit = final_state
+            .commit_fact
+            .unwrap_or_else(|| panic!("consensus should commit"));
         commit_results.push(commit.result_id);
     }
 

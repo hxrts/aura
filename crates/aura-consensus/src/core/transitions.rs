@@ -331,9 +331,9 @@ mod tests {
             witness: witness.to_string(),
             result_id: result_id.to_string(),
             share: ShareData {
-                share_value: format!("share_{}", witness),
-                nonce_binding: format!("nonce_{}", witness),
-                data_binding: format!("binding_{}", result_id),
+                share_value: format!("share_{witness}"),
+                nonce_binding: format!("nonce_{witness}"),
+                data_binding: format!("binding_{result_id}"),
             },
         }
     }

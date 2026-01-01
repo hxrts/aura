@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn test_dynamic_debug() {
         let d = Dynamic::new(42);
-        let debug_str = format!("{:?}", d);
+        let debug_str = format!("{d:?}");
         assert!(debug_str.contains("Dynamic"));
         assert!(debug_str.contains("42"));
     }

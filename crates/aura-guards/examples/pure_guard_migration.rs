@@ -145,7 +145,7 @@ async fn run_examples() -> AuraResult<()> {
     let executed = run_effects(&interpreter, &outcome.effects).await?;
 
     println!("Authorized: {}", outcome.is_authorized());
-    println!("Effects executed: {}", executed);
+    println!("Effects executed: {executed}");
 
     // Example 2: Migration from SendGuardChain
     println!("\n=== Example 2: Migration Path ===");
@@ -167,7 +167,7 @@ async fn run_examples() -> AuraResult<()> {
     let outcome = guard_chain.evaluate(&snapshot, &request);
     let executed = run_effects(&interpreter, &outcome.effects).await?;
     println!("Migration result - Authorized: {}", outcome.is_authorized());
-    println!("Effects executed: {}", executed);
+    println!("Effects executed: {executed}");
 
     // Example 3: Testing guard logic without I/O
     println!("\n=== Example 3: Pure Testing ===");

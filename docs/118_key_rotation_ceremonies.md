@@ -42,40 +42,66 @@ All key rotation ceremonies follow this common shape:
      - emit an abort fact with a reason,
      - rollback the pending epoch and leave the prior epoch active.
 
-## Lifecycle taxonomy (K/A)
+## Lifecycle Taxonomy
 
 Aura models ceremonies with **two orthogonal axes**:
 
-**Key generation (K)**
-- **K1**: Single‑signer (no DKG)
-- **K2**: Dealer‑based DKG (trusted coordinator)
-- **K3**: Consensus‑finalized DKG (BFT‑DKG + transcript commit)
+### Key Generation (K)
 
-**Agreement (A)**
-- **A1: Provisional** — usable immediately, not final
-- **A2: Coordinator Soft‑Safe** — bounded divergence with convergence cert
-- **A3: Consensus‑Finalized** — unique, durable, non‑forkable
+| Code | Method | Description |
+|------|--------|-------------|
+| K1 | Single-signer | No DKG required; local key generation |
+| K2 | Dealer-based DKG | Trusted coordinator distributes shares |
+| K3 | Consensus-finalized DKG | BFT-DKG with transcript commit |
+| DKD | Distributed key derivation | Multi-party derivation (non-DKG) |
+
+### Agreement Level (A)
+
+| Code | Level | Description |
+|------|-------|-------------|
+| A1 | Provisional | Usable immediately, not final |
+| A2 | Coordinator Soft-Safe | Bounded divergence with convergence cert |
+| A3 | Consensus-Finalized | Unique, durable, non-forkable |
 
 Fast paths (A1/A2) are **provisional**. Durable shared state must be finalized by A3.
 
-## Per‑Ceremony Policy Matrix (Canonical)
+---
 
-| Ceremony / Flow | Key Gen (K) | Agreement (A) | Fallback | Notes |
-|---|---|---|---|---|
-| **Authority bootstrap** | **K1** (Single‑signer) | **A3** (Finalized) | **None** | Local, immediate, no consensus needed. |
-| **Device enrollment (add device)** | **K2** (Dealer‑based DKG) | **A1 → A2 → A3** | **Yes: A1/A2** | Provisional acceptance → soft‑safe convergence → consensus finalize. |
-| **Device MFA rotation** | **K3** (Consensus‑finalized DKG) | **A2 → A3** | **Yes: A2** | Soft‑safe convergence, then consensus finalize; keys are consensus‑finalized. |
-| **Guardian setup / rotation** | **K3** (Consensus‑finalized DKG) | **A2 → A3** | **Yes: A2** | Consensus‑finalized keys and finalization for durability. |
-| **Recovery approval ceremony (guardian approvals)** | N/A | **A2 → A3** | **Yes: A2** | Soft‑safe approvals, then consensus commit. |
-| **Recovery execution ceremony** | N/A | **A2 → A3** | **Yes: A2** | Execute recovery with consensus‑finalized commit. |
-| **AMP channel epoch bump** | N/A | **A1 → A2 → A3** | **Yes: A1/A2** | Proposed bump → convergence cert → consensus bump commit. |
-| **Invitation ceremony (contact / channel / guardian)** | N/A | **A3 only** | **None** | Treat as consensus‑finalized only; no A1/A2 semantics. |
-| **Group / Block creation (new relational context)** | **K3** (Consensus‑finalized DKG) | **A1 → A2 → A3** | **Yes: A1/A2** | Provisional bootstrap channel → consensus‑finalized group key. |
-| **AMP channel bootstrap / provisional channel** | N/A | **A1 → A2 → A3** | **Yes: A1/A2** | Immediate provisional channel, then rotate into group key. |
-| **Rendezvous secure‑channel lifecycle** | N/A | **A1 → A2 → A3** | **Yes: A1/A2** | Provisional rendezvous link → consensus‑finalized secure channel. |
-| **OTA activation ceremony** | N/A | **A2 → A3** | **Yes: A2** | Threshold‑signed activation, then consensus finalize. |
-| **DKD ceremony (distributed key derivation)** | **DKD (non‑DKG)** | **A2 → A3** | **Yes: A2** | Multi‑party derivation with consensus‑finalized commit. |
-| **Device removal (rotation)** | **K3** (Consensus‑finalized DKG) | **A2 → A3** | **Yes: A2** | Remove device via rotation; consensus‑finalized keys. |
+## Per-Ceremony Policy Matrix
+
+### Authority & Device Ceremonies
+
+| Ceremony | Key Gen | Agreement | Fallback | Notes |
+|----------|---------|-----------|----------|-------|
+| Authority bootstrap | K1 | A3 | None | Local, immediate, no consensus needed |
+| Device enrollment | K2 | A1→A2→A3 | A1/A2 | Provisional → soft-safe → finalize |
+| Device MFA rotation | K3 | A2→A3 | A2 | Consensus-finalized keys |
+| Device removal | K3 | A2→A3 | A2 | Remove via rotation; consensus keys |
+
+### Guardian Ceremonies
+
+| Ceremony | Key Gen | Agreement | Fallback | Notes |
+|----------|---------|-----------|----------|-------|
+| Guardian setup/rotation | K3 | A2→A3 | A2 | Consensus-finalized keys for durability |
+| Recovery approval | — | A2→A3 | A2 | Soft-safe approvals → consensus commit |
+| Recovery execution | — | A2→A3 | A2 | Consensus-finalized commit |
+
+### Channel & Group Ceremonies
+
+| Ceremony | Key Gen | Agreement | Fallback | Notes |
+|----------|---------|-----------|----------|-------|
+| AMP channel epoch bump | — | A1→A2→A3 | A1/A2 | Proposed → convergence cert → commit |
+| AMP channel bootstrap | — | A1→A2→A3 | A1/A2 | Provisional channel → group key rotation |
+| Group/Block creation | K3 | A1→A2→A3 | A1/A2 | Provisional bootstrap → consensus group key |
+| Rendezvous secure-channel | — | A1→A2→A3 | A1/A2 | Provisional link → consensus secure channel |
+
+### Other Ceremonies
+
+| Ceremony | Key Gen | Agreement | Fallback | Notes |
+|----------|---------|-----------|----------|-------|
+| Invitation (contact/channel/guardian) | — | A3 | None | Consensus-finalized only; no A1/A2 |
+| OTA activation | — | A2→A3 | A2 | Threshold-signed → consensus finalize |
+| DKD ceremony | DKD | A2→A3 | A2 | Multi-party derivation → consensus commit |
 
 ## Ceremony kinds
 
@@ -128,3 +154,41 @@ Frontends (TUI, mobile, web) should treat ceremonies as first-class operations w
 - On cancellation/failure: show explicit rollback messaging; do not leave UI in a partially-updated state.
 
 The UI must not invent state transitions: ceremony progress should be driven from runtime status + signals.
+
+## Ceremony Supersession
+
+When a new ceremony replaces an old one (e.g., due to prestate changes, explicit cancellation, or concurrent ceremony resolution), Aura emits explicit **supersession facts** that propagate via anti-entropy.
+
+### Supersession Reasons
+
+- **PrestateStale**: The prestate changed while the ceremony was pending, invalidating it.
+- **NewerRequest**: An explicit newer request from the same initiator supersedes the old one.
+- **ExplicitCancel**: Manual cancellation by an authorized participant.
+- **Timeout**: The ceremony exceeded its validity window.
+- **Precedence**: A concurrent ceremony won (conflict resolution).
+
+### Supersession Facts
+
+Each ceremony fact enum includes a `CeremonySuperseded` variant:
+
+```rust
+CeremonySuperseded {
+    superseded_ceremony_id: String,
+    superseding_ceremony_id: String,
+    reason: String,
+    trace_id: Option<String>,  // Correlation with superseding ceremony
+    timestamp_ms: u64,
+}
+```
+
+### Supersession Audit Trail
+
+The `CeremonyTracker` maintains supersession records for auditability:
+
+- `supersede(old_id, new_id, reason)`: Record a supersession event
+- `check_supersession_candidates(prestate_hash, op_type)`: Find ceremonies that would be superseded
+- `get_supersession_chain(ceremony_id)`: Get the full supersession history
+
+### Propagation
+
+Supersession facts propagate via the existing anti-entropy mechanism—no special protocol is required. Peers receiving a `CeremonySuperseded` fact update their local ceremony state accordingly.

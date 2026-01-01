@@ -39,7 +39,7 @@ use aura_terminal::tui::effects::EffectCommand;
 
 /// Create a test environment with IoContext and AppCore
 async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test3-{}", name));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test3-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -54,13 +54,13 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         .with_app_core(app_core.clone())
         .with_existing_account(false)
         .with_base_path(test_dir)
-        .with_device_id(format!("test-device-{}", name))
+        .with_device_id(format!("test-device-{name}"))
         .with_mode(TuiMode::Production)
         .build()
         .expect("IoContext builder should succeed for tests");
 
     // Create account for testing
-    ctx.create_account(&format!("TestUser-{}", name))
+    ctx.create_account(&format!("TestUser-{name}"))
         .await
         .expect("Failed to create account");
 
@@ -69,7 +69,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
 
 /// Cleanup test directory
 fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test3-{}", name));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test3-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
@@ -93,9 +93,12 @@ async fn test_home_signals_initialization() {
         Ok(state) => {
             println!("  HOMES_SIGNAL initialized");
             if let Some(home_state) = state.current_home() {
-                println!("  Home ID: {}", home_state.id);
-                println!("  Home name: {}", home_state.name);
-                println!("  Resident count: {}", home_state.resident_count);
+                println!("  Home ID: {home_id}", home_id = home_state.id);
+                println!("  Home name: {name}", name = home_state.name);
+                println!(
+                    "  Resident count: {resident_count}",
+                    resident_count = home_state.resident_count
+                );
                 // Default state should have empty/default values
                 assert!(
                     home_state.residents.is_empty() || home_state.id == ChannelId::default(),
@@ -106,10 +109,7 @@ async fn test_home_signals_initialization() {
             }
         }
         Err(e) => {
-            println!(
-                "  HOMES_SIGNAL read error (expected for uninitialized): {:?}",
-                e
-            );
+            println!("  HOMES_SIGNAL read error (expected for uninitialized): {e:?}");
         }
     }
 
@@ -120,8 +120,12 @@ async fn test_home_signals_initialization() {
     match homes_state {
         Ok(state) => {
             println!("  HOMES_SIGNAL initialized");
-            println!("  Total homes: {}", state.homes.len());
-            println!("  Current home ID: {:?}", state.current_home_id);
+            let home_count = state.homes.len();
+            println!("  Total homes: {home_count}");
+            println!(
+                "  Current home ID: {current_home_id:?}",
+                current_home_id = state.current_home_id
+            );
             // Should start with no homes
             assert!(
                 state.homes.is_empty(),
@@ -129,10 +133,7 @@ async fn test_home_signals_initialization() {
             );
         }
         Err(e) => {
-            println!(
-                "  HOMES_SIGNAL read error (expected for uninitialized): {:?}",
-                e
-            );
+            println!("  HOMES_SIGNAL read error (expected for uninitialized): {e:?}");
         }
     }
 
@@ -157,7 +158,7 @@ async fn test_create_home_updates_signals() {
         .await
         .map(|s| s.homes.len())
         .unwrap_or(0);
-    println!("  Initial homes count: {}", initial_homes);
+    println!("  Initial homes count: {initial_homes}");
     drop(core);
 
     // Phase 2: Create a home
@@ -171,15 +172,15 @@ async fn test_create_home_updates_signals() {
     // CreateHome requires Sensitive authorization, may fail in test env
     match &result {
         Ok(response) => {
-            println!("  CreateHome succeeded: {:?}", response);
+            println!("  CreateHome succeeded: {response:?}");
         }
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("authorization") || err_msg.contains("Sensitive") {
                 println!("  CreateHome requires elevated authorization (expected)");
                 println!("  Test validates authorization is enforced");
             } else {
-                println!("  CreateHome error: {:?}", e);
+                println!("  CreateHome error: {e:?}");
             }
         }
     }
@@ -190,12 +191,17 @@ async fn test_create_home_updates_signals() {
     let homes_state = core.read(&*HOMES_SIGNAL).await;
 
     if let Ok(state) = homes_state {
-        println!("  Homes count after create: {}", state.homes.len());
+        let home_count = state.homes.len();
+        println!("  Homes count after create: {home_count}");
         if state.homes.len() > initial_homes {
             println!("  New home was created successfully");
             // Find the new home
             for (id, home_state) in &state.homes {
-                println!("    Home: {} ({})", home_state.name, id);
+                println!(
+                    "    Home: {name} ({home_id})",
+                    name = home_state.name,
+                    home_id = id
+                );
             }
         }
     }
@@ -219,13 +225,18 @@ async fn test_home_resident_operations() {
 
     if let Ok(homes_state) = core.read(&*HOMES_SIGNAL).await {
         if let Some(home_state) = homes_state.current_home() {
-            println!("  Home ID: {}", home_state.id);
-            println!("  Initial residents: {}", home_state.residents.len());
-            println!("  My role: {:?}", home_state.my_role);
+            println!("  Home ID: {home_id}", home_id = home_state.id);
+            let resident_count = home_state.residents.len();
+            println!("  Initial residents: {resident_count}");
+            println!("  My role: {role:?}", role = home_state.my_role);
 
             // User should be owner/steward of their own home
             for resident in &home_state.residents {
-                println!("    Resident: {} ({:?})", resident.name, resident.role);
+                println!(
+                    "    Resident: {name} ({role:?})",
+                    name = resident.name,
+                    role = resident.role
+                );
             }
         } else {
             println!("  No current home yet");
@@ -241,13 +252,13 @@ async fn test_home_resident_operations() {
         .await;
 
     match &result {
-        Ok(response) => println!("  GrantSteward response: {:?}", response),
+        Ok(response) => println!("  GrantSteward response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Admin") || err_msg.contains("authorization") {
                 println!("  GrantSteward requires Admin privileges (expected)");
             } else {
-                println!("  GrantSteward error: {:?}", e);
+                println!("  GrantSteward error: {e:?}");
             }
         }
     }
@@ -261,13 +272,13 @@ async fn test_home_resident_operations() {
         .await;
 
     match &result {
-        Ok(response) => println!("  RevokeSteward response: {:?}", response),
+        Ok(response) => println!("  RevokeSteward response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Admin") || err_msg.contains("authorization") {
                 println!("  RevokeSteward requires Admin privileges (expected)");
             } else {
-                println!("  RevokeSteward error: {:?}", e);
+                println!("  RevokeSteward error: {e:?}");
             }
         }
     }
@@ -298,11 +309,12 @@ async fn test_recovery_flow_start() {
         let status = recovery
             .active_recovery
             .as_ref()
-            .map(|r| format!("{:?}", r.status))
+            .map(|r| format!("{status:?}", status = r.status))
             .unwrap_or_else(|| "Idle".to_string());
-        println!("  Initial status: {}", status);
-        println!("  Initial guardians: {}", recovery.guardians.len());
-        println!("  Threshold: {}", recovery.threshold);
+        println!("  Initial status: {status}");
+        let guardian_count = recovery.guardians.len();
+        println!("  Initial guardians: {guardian_count}");
+        println!("  Threshold: {threshold}", threshold = recovery.threshold);
     }
     drop(core);
 
@@ -312,14 +324,14 @@ async fn test_recovery_flow_start() {
 
     match &result {
         Ok(response) => {
-            println!("  StartRecovery response: {:?}", response);
+            println!("  StartRecovery response: {response:?}");
         }
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Sensitive") || err_msg.contains("authorization") {
                 println!("  StartRecovery requires Sensitive authorization (expected)");
             } else {
-                println!("  StartRecovery error: {:?}", e);
+                println!("  StartRecovery error: {e:?}");
             }
         }
     }
@@ -333,9 +345,9 @@ async fn test_recovery_flow_start() {
         let status = recovery
             .active_recovery
             .as_ref()
-            .map(|r| format!("{:?}", r.status))
+            .map(|r| format!("{status:?}", status = r.status))
             .unwrap_or_else(|| "Idle".to_string());
-        println!("  New status: {}", status);
+        println!("  New status: {status}");
 
         // Check if recovery was initiated
         if recovery.active_recovery.is_some() {
@@ -362,17 +374,17 @@ async fn test_recovery_cancel() {
 
     match &result {
         Ok(response) => {
-            println!("  CancelRecovery response: {:?}", response);
+            println!("  CancelRecovery response: {response:?}");
         }
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             // Either authorization error or "no active recovery" is valid
             if err_msg.contains("Sensitive") || err_msg.contains("authorization") {
                 println!("  CancelRecovery requires Sensitive authorization (expected)");
             } else if err_msg.contains("no active") || err_msg.contains("not started") {
                 println!("  No active recovery to cancel (expected)");
             } else {
-                println!("  CancelRecovery error: {:?}", e);
+                println!("  CancelRecovery error: {e:?}");
             }
         }
     }
@@ -384,9 +396,9 @@ async fn test_recovery_cancel() {
         let status = recovery
             .active_recovery
             .as_ref()
-            .map(|r| format!("{:?}", r.status))
+            .map(|r| format!("{status:?}", status = r.status))
             .unwrap_or_else(|| "Idle".to_string());
-        println!("  Recovery status: {}", status);
+        println!("  Recovery status: {status}");
         // After cancel, should be Idle (no active recovery) or Completed
         let is_idle_or_completed = recovery.active_recovery.is_none()
             || recovery
@@ -418,8 +430,9 @@ async fn test_guardian_approval_submission() {
     let core = app_core.read().await;
     if let Ok(recovery) = core.read(&*RECOVERY_SIGNAL).await {
         if let Some(active) = &recovery.active_recovery {
-            println!("  Status: {:?}", active.status);
-            println!("  Approvals: {}", active.approvals.len());
+            println!("  Status: {status:?}", status = active.status);
+            let approval_count = active.approvals.len();
+            println!("  Approvals: {approval_count}");
         } else {
             println!("  No active recovery (status: Idle)");
             println!("  Approvals: 0");
@@ -437,16 +450,16 @@ async fn test_guardian_approval_submission() {
 
     match &result {
         Ok(response) => {
-            println!("  SubmitGuardianApproval response: {:?}", response);
+            println!("  SubmitGuardianApproval response: {response:?}");
         }
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Sensitive") || err_msg.contains("authorization") {
                 println!("  Requires Sensitive authorization (expected)");
             } else if err_msg.contains("no active") || err_msg.contains("not in progress") {
                 println!("  No active recovery to approve (expected)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -475,7 +488,7 @@ async fn test_channel_lifecycle() {
         .await
         .map(|s| s.channels.len())
         .unwrap_or(0);
-    println!("  Initial channels: {}", initial_channels);
+    println!("  Initial channels: {initial_channels}");
     drop(core);
 
     // Phase 2: Create a channel
@@ -490,8 +503,8 @@ async fn test_channel_lifecycle() {
         .await;
 
     match &result {
-        Ok(response) => println!("  CreateChannel response: {:?}", response),
-        Err(e) => println!("  CreateChannel error: {:?}", e),
+        Ok(response) => println!("  CreateChannel response: {response:?}"),
+        Err(e) => println!("  CreateChannel error: {e:?}"),
     }
 
     // Phase 3: Join the channel
@@ -503,8 +516,8 @@ async fn test_channel_lifecycle() {
         .await;
 
     match &result {
-        Ok(response) => println!("  JoinChannel response: {:?}", response),
-        Err(e) => println!("  JoinChannel error: {:?}", e),
+        Ok(response) => println!("  JoinChannel response: {response:?}"),
+        Err(e) => println!("  JoinChannel error: {e:?}"),
     }
 
     // Phase 4: Send a message to the channel
@@ -517,8 +530,8 @@ async fn test_channel_lifecycle() {
         .await;
 
     match &result {
-        Ok(response) => println!("  SendMessage response: {:?}", response),
-        Err(e) => println!("  SendMessage error: {:?}", e),
+        Ok(response) => println!("  SendMessage response: {response:?}"),
+        Err(e) => println!("  SendMessage error: {e:?}"),
     }
 
     // Phase 5: Set channel topic
@@ -531,8 +544,8 @@ async fn test_channel_lifecycle() {
         .await;
 
     match &result {
-        Ok(response) => println!("  SetTopic response: {:?}", response),
-        Err(e) => println!("  SetTopic error: {:?}", e),
+        Ok(response) => println!("  SetTopic response: {response:?}"),
+        Err(e) => println!("  SetTopic error: {e:?}"),
     }
 
     // Phase 6: Leave the channel
@@ -544,8 +557,8 @@ async fn test_channel_lifecycle() {
         .await;
 
     match &result {
-        Ok(response) => println!("  LeaveChannel response: {:?}", response),
-        Err(e) => println!("  LeaveChannel error: {:?}", e),
+        Ok(response) => println!("  LeaveChannel response: {response:?}"),
+        Err(e) => println!("  LeaveChannel error: {e:?}"),
     }
 
     // Phase 7: Close the channel
@@ -557,19 +570,24 @@ async fn test_channel_lifecycle() {
         .await;
 
     match &result {
-        Ok(response) => println!("  CloseChannel response: {:?}", response),
-        Err(e) => println!("  CloseChannel error: {:?}", e),
+        Ok(response) => println!("  CloseChannel response: {response:?}"),
+        Err(e) => println!("  CloseChannel error: {e:?}"),
     }
 
     // Phase 8: Verify final state
     println!("\nPhase 8: Verify final channel state");
     let core = app_core.read().await;
     if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
-        println!("  Final channel count: {}", chat_state.channels.len());
+        let channel_count = chat_state.channels.len();
+        println!("  Final channel count: {channel_count}");
         for channel in &chat_state.channels {
-            println!("    Channel: {} ({})", channel.name, channel.id);
+            println!(
+                "    Channel: {name} ({channel_id})",
+                name = channel.name,
+                channel_id = channel.id
+            );
             if let Some(topic) = &channel.topic {
-                println!("      Topic: {}", topic);
+                println!("      Topic: {topic}");
             }
         }
     }
@@ -606,18 +624,19 @@ async fn test_retry_message() {
         .await;
 
     match &result {
-        Ok(response) => println!("  RetryMessage response: {:?}", response),
-        Err(e) => println!("  RetryMessage error: {:?}", e),
+        Ok(response) => println!("  RetryMessage response: {response:?}"),
+        Err(e) => println!("  RetryMessage error: {e:?}"),
     }
 
     // Phase 3: Verify message appears in chat
     println!("\nPhase 3: Verify message in chat state");
     let core = app_core.read().await;
     if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
-        println!("  Messages in current view: {}", chat_state.messages.len());
+        let message_count = chat_state.messages.len();
+        println!("  Messages in current view: {message_count}");
         for msg in &chat_state.messages {
             if msg.content.contains("Retried") {
-                println!("    Found retried message: {}", msg.content);
+                println!("    Found retried message: {content}", content = msg.content);
             }
         }
     }
@@ -654,7 +673,7 @@ async fn test_update_contact_nickname() {
 
     // If we successfully created an invitation, use that ID
     if let Ok(response) = export_result {
-        println!("  Created invitation: {:?}", response);
+        println!("  Created invitation: {response:?}");
     }
 
     // Phase 2: Update nickname for a contact
@@ -667,22 +686,24 @@ async fn test_update_contact_nickname() {
         .await;
 
     match &result {
-        Ok(response) => println!("  UpdateContactNickname response: {:?}", response),
-        Err(e) => println!("  UpdateContactNickname error: {:?}", e),
+        Ok(response) => println!("  UpdateContactNickname response: {response:?}"),
+        Err(e) => println!("  UpdateContactNickname error: {e:?}"),
     }
 
     // Phase 3: Verify nickname in contacts signal
     println!("\nPhase 3: Verify contacts state");
     let core = app_core.read().await;
     if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-        println!("  Total contacts: {}", contacts_state.contacts.len());
+        let contact_count = contacts_state.contacts.len();
+        println!("  Total contacts: {contact_count}");
 
         // Look for the updated contact
         for contact in &contacts_state.contacts {
             if contact.id.to_string() == contact_id || contact.nickname == "My Friend" {
                 println!(
-                    "    Found contact: {} (nickname: {})",
-                    contact.id, contact.nickname
+                    "    Found contact: {contact_id} (nickname: {nickname})",
+                    contact_id = contact.id,
+                    nickname = contact.nickname
                 );
             }
         }
@@ -712,10 +733,7 @@ async fn test_toggle_contact_guardian() {
     if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
         if let Some(contact) = contacts_state.contact(&contact_authority_id) {
             _was_guardian = contact.is_guardian;
-            println!(
-                "  Contact {} guardian status: {}",
-                contact_id, _was_guardian
-            );
+            println!("  Contact {contact_id} guardian status: {_was_guardian}");
         } else {
             println!("  Contact not found (will attempt to toggle anyway)");
         }
@@ -731,15 +749,15 @@ async fn test_toggle_contact_guardian() {
         .await;
 
     match &result {
-        Ok(response) => println!("  ToggleContactGuardian response: {:?}", response),
+        Ok(response) => println!("  ToggleContactGuardian response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Sensitive") || err_msg.contains("authorization") {
                 println!("  Requires Sensitive authorization (expected)");
             } else if err_msg.contains("not found") {
                 println!("  Contact not found (expected for test contact)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -764,10 +782,10 @@ async fn test_invite_guardian() {
 
     match &result {
         Ok(response) => {
-            println!("  Response: {:?}", response);
+            println!("  Response: {response:?}");
             // Without contact_id, should return Ok to signal "show modal"
         }
-        Err(e) => println!("  Error: {:?}", e),
+        Err(e) => println!("  Error: {e:?}"),
     }
 
     // Phase 2: Invite guardian with contact_id
@@ -779,13 +797,13 @@ async fn test_invite_guardian() {
         .await;
 
     match &result {
-        Ok(response) => println!("  Response: {:?}", response),
+        Ok(response) => println!("  Response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Sensitive") || err_msg.contains("authorization") {
                 println!("  Requires Sensitive authorization (expected)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -813,11 +831,11 @@ async fn test_auxiliary_signals() {
     let error_state = core.read(&*ERROR_SIGNAL).await;
     match error_state {
         Ok(err) => {
-            println!("  ERROR_SIGNAL state: {:?}", err);
+            println!("  ERROR_SIGNAL state: {err:?}");
             // Should be None initially
             assert!(err.is_none(), "Initial error state should be None");
         }
-        Err(e) => println!("  ERROR_SIGNAL read error: {:?}", e),
+        Err(e) => println!("  ERROR_SIGNAL read error: {e:?}"),
     }
 
     // Phase 2: Check UNREAD_COUNT_SIGNAL
@@ -825,11 +843,11 @@ async fn test_auxiliary_signals() {
     let unread_count = core.read(&*UNREAD_COUNT_SIGNAL).await;
     match unread_count {
         Ok(count) => {
-            println!("  UNREAD_COUNT_SIGNAL: {}", count);
+            println!("  UNREAD_COUNT_SIGNAL: {count}");
             // Should be 0 initially
             assert_eq!(count, 0, "Initial unread count should be 0");
         }
-        Err(e) => println!("  UNREAD_COUNT_SIGNAL read error: {:?}", e),
+        Err(e) => println!("  UNREAD_COUNT_SIGNAL read error: {e:?}"),
     }
 
     // Phase 3: Check INVITATIONS_SIGNAL
@@ -837,10 +855,12 @@ async fn test_auxiliary_signals() {
     let invitations = core.read(&*INVITATIONS_SIGNAL).await;
     match invitations {
         Ok(inv_state) => {
-            println!("  Sent invitations: {}", inv_state.sent.len());
-            println!("  Pending invitations: {}", inv_state.pending.len());
+            let sent_count = inv_state.sent.len();
+            let pending_count = inv_state.pending.len();
+            println!("  Sent invitations: {sent_count}");
+            println!("  Pending invitations: {pending_count}");
         }
-        Err(e) => println!("  INVITATIONS_SIGNAL read error: {:?}", e),
+        Err(e) => println!("  INVITATIONS_SIGNAL read error: {e:?}"),
     }
 
     drop(core);
@@ -872,7 +892,7 @@ async fn test_invitation_accept_decline() {
             "test-inv-123".to_string()
         }
         Err(e) => {
-            println!("  Create error: {:?}", e);
+            println!("  Create error: {e:?}");
             "test-inv-123".to_string()
         }
     };
@@ -886,13 +906,13 @@ async fn test_invitation_accept_decline() {
         .await;
 
     match &result {
-        Ok(response) => println!("  AcceptInvitation response: {:?}", response),
+        Ok(response) => println!("  AcceptInvitation response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("not found") || err_msg.contains("invalid") {
                 println!("  Invitation not found (expected for synthetic ID)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -906,13 +926,13 @@ async fn test_invitation_accept_decline() {
         .await;
 
     match &result {
-        Ok(response) => println!("  DeclineInvitation response: {:?}", response),
+        Ok(response) => println!("  DeclineInvitation response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("not found") || err_msg.contains("invalid") {
                 println!("  Invitation not found (expected for synthetic ID)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -947,13 +967,13 @@ async fn test_moderation_commands() {
         .await;
 
     match &result {
-        Ok(response) => println!("  KickUser response: {:?}", response),
+        Ok(response) => println!("  KickUser response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Admin") {
                 println!("  KickUser requires Admin privileges (expected)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -968,13 +988,13 @@ async fn test_moderation_commands() {
         .await;
 
     match &result {
-        Ok(response) => println!("  BanUser response: {:?}", response),
+        Ok(response) => println!("  BanUser response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Admin") {
                 println!("  BanUser requires Admin privileges (expected)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -989,13 +1009,13 @@ async fn test_moderation_commands() {
         .await;
 
     match &result {
-        Ok(response) => println!("  MuteUser response: {:?}", response),
+        Ok(response) => println!("  MuteUser response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Sensitive") {
                 println!("  MuteUser requires Sensitive authorization (expected)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -1009,13 +1029,13 @@ async fn test_moderation_commands() {
         .await;
 
     match &result {
-        Ok(response) => println!("  UnmuteUser response: {:?}", response),
+        Ok(response) => println!("  UnmuteUser response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Sensitive") {
                 println!("  UnmuteUser requires Sensitive authorization (expected)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -1029,13 +1049,13 @@ async fn test_moderation_commands() {
         .await;
 
     match &result {
-        Ok(response) => println!("  UnbanUser response: {:?}", response),
+        Ok(response) => println!("  UnbanUser response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Admin") {
                 println!("  UnbanUser requires Admin privileges (expected)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -1060,7 +1080,7 @@ async fn test_pin_unpin_message() {
             .current_home()
             .map(|home_state| home_state.pinned_messages.len())
             .unwrap_or(0);
-        println!("  Initial pinned messages: {}", pinned_count);
+        println!("  Initial pinned messages: {pinned_count}");
     }
     drop(core);
 
@@ -1074,8 +1094,8 @@ async fn test_pin_unpin_message() {
         .await;
 
     match &result {
-        Ok(response) => println!("  PinMessage response: {:?}", response),
-        Err(e) => println!("  PinMessage error: {:?}", e),
+        Ok(response) => println!("  PinMessage response: {response:?}"),
+        Err(e) => println!("  PinMessage error: {e:?}"),
     }
 
     // Phase 3: Unpin the message
@@ -1087,8 +1107,8 @@ async fn test_pin_unpin_message() {
         .await;
 
     match &result {
-        Ok(response) => println!("  UnpinMessage response: {:?}", response),
-        Err(e) => println!("  UnpinMessage error: {:?}", e),
+        Ok(response) => println!("  UnpinMessage response: {response:?}"),
+        Err(e) => println!("  UnpinMessage error: {e:?}"),
     }
 
     drop(ctx);
@@ -1116,13 +1136,13 @@ async fn test_device_management() {
         .await;
 
     match &result {
-        Ok(response) => println!("  AddDevice response: {:?}", response),
+        Ok(response) => println!("  AddDevice response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Sensitive") {
                 println!("  AddDevice requires Sensitive authorization (expected)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -1136,15 +1156,15 @@ async fn test_device_management() {
         .await;
 
     match &result {
-        Ok(response) => println!("  RemoveDevice response: {:?}", response),
+        Ok(response) => println!("  RemoveDevice response: {response:?}"),
         Err(e) => {
-            let err_msg = format!("{:?}", e);
+            let err_msg = format!("{e:?}");
             if err_msg.contains("Sensitive") {
                 println!("  RemoveDevice requires Sensitive authorization (expected)");
             } else if err_msg.contains("not found") {
                 println!("  Device not found (expected for synthetic ID)");
             } else {
-                println!("  Error: {:?}", e);
+                println!("  Error: {e:?}");
             }
         }
     }
@@ -1170,8 +1190,8 @@ async fn test_lan_discovery() {
     let result = ctx.dispatch(EffectCommand::ListLanPeers).await;
 
     match &result {
-        Ok(response) => println!("  ListLanPeers response: {:?}", response),
-        Err(e) => println!("  ListLanPeers error: {:?}", e),
+        Ok(response) => println!("  ListLanPeers response: {response:?}"),
+        Err(e) => println!("  ListLanPeers error: {e:?}"),
     }
 
     // Phase 2: Invite a LAN peer
@@ -1184,8 +1204,8 @@ async fn test_lan_discovery() {
         .await;
 
     match &result {
-        Ok(response) => println!("  InviteLanPeer response: {:?}", response),
-        Err(e) => println!("  InviteLanPeer error: {:?}", e),
+        Ok(response) => println!("  InviteLanPeer response: {response:?}"),
+        Err(e) => println!("  InviteLanPeer error: {e:?}"),
     }
 
     drop(ctx);
@@ -1214,8 +1234,8 @@ async fn test_send_action_emote() {
         .await;
 
     match &result {
-        Ok(response) => println!("  SendAction response: {:?}", response),
-        Err(e) => println!("  SendAction error: {:?}", e),
+        Ok(response) => println!("  SendAction response: {response:?}"),
+        Err(e) => println!("  SendAction error: {e:?}"),
     }
 
     drop(ctx);
@@ -1299,19 +1319,26 @@ async fn test_complete_contact_to_guardian_flow() {
             .iter()
             .find(|c| c.id.to_string().contains(contact_id) || c.is_dm);
         if let Some(channel) = dm_channel {
-            println!("  DM channel exists: {} ({})", channel.name, channel.id);
+            println!(
+                "  DM channel exists: {name} ({channel_id})",
+                name = channel.name,
+                channel_id = channel.id
+            );
         }
-        println!("  Total messages: {}", chat_state.messages.len());
+        let message_count = chat_state.messages.len();
+        println!("  Total messages: {message_count}");
     }
 
     // Check contacts state
     if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-        println!("  Total contacts: {}", contacts_state.contacts.len());
+        let contact_count = contacts_state.contacts.len();
+        println!("  Total contacts: {contact_count}");
     }
 
     // Check recovery/guardian state
     if let Ok(recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
-        println!("  Total guardians: {}", recovery_state.guardians.len());
+        let guardian_count = recovery_state.guardians.len();
+        println!("  Total guardians: {guardian_count}");
     }
 
     drop(core);

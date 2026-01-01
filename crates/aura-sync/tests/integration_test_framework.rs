@@ -182,7 +182,7 @@ mod integration_tests {
 
         let ota_result = timeout(Duration::from_secs(60), async {
             // Phase 1: Upgrade proposal
-            println!("  Phase 1: Coordinator {} proposing upgrade", _coordinator);
+            println!("  Phase 1: Coordinator {_coordinator} proposing upgrade");
             tokio::time::sleep(Duration::from_millis(200)).await;
 
             // Phase 2: Collect approvals
@@ -448,7 +448,7 @@ mod integration_tests {
             println!("  Phase 1: Initial anti-entropy synchronization");
             for i in 0..devices.len() {
                 for j in (i + 1)..devices.len() {
-                    println!("    Anti-entropy sync: Device {} ↔ Device {}", i, j);
+                    println!("    Anti-entropy sync: Device {i} ↔ Device {j}");
                     tokio::time::sleep(Duration::from_millis(150)).await;
                 }
             }
@@ -471,7 +471,7 @@ mod integration_tests {
             // Phase 3: Journal operations under adversity
             println!("  Phase 3: Journal operations under poor network conditions");
             for round in 1..=3 {
-                println!("    Journal operation round {}/3", round);
+                println!("    Journal operation round {round}/3");
                 tokio::time::sleep(Duration::from_millis(400)).await;
             }
 
@@ -610,7 +610,7 @@ mod framework_documentation {
             }
             Err(e) => {
                 // For testing purposes, we create a mock session
-                println!("Mock session created for testing: {:?}", e);
+                println!("Mock session created for testing: {e:?}");
                 None
             }
         };

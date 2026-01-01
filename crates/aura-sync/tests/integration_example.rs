@@ -135,7 +135,7 @@ mod integration_examples {
 
             println!("  Phase 2: Batch processing");
             for i in 1..=3 {
-                println!("    Processing batch {}/3", i);
+                println!("    Processing batch {i}/3");
                 tokio::time::sleep(Duration::from_millis(60)).await;
             }
 
@@ -244,7 +244,7 @@ mod integration_examples {
             println!("Phase 2: Initial synchronization");
             for i in 0..devices.len() {
                 for j in (i + 1)..devices.len() {
-                    println!("  Sync: Device {} ↔ Device {}", i, j);
+                    println!("  Sync: Device {i} ↔ Device {j}");
                     tokio::time::sleep(Duration::from_millis(80)).await;
                 }
             }
@@ -276,7 +276,7 @@ mod integration_examples {
             // Phase 4: Operations under stress
             println!("Phase 4: Operations under network stress");
             for round in 1..=3 {
-                println!("  Operation round {}/3", round);
+                println!("  Operation round {round}/3");
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
 

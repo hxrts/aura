@@ -10,8 +10,8 @@ use crate::handlers::InvitationServiceApi;
 use crate::runtime::consensus::build_consensus_params;
 use async_trait::async_trait;
 use aura_app::runtime_bridge::{
-    BridgeDeviceInfo, InvitationBridgeStatus, InvitationBridgeType, InvitationInfo, LanPeerInfo,
-    RendezvousStatus, RuntimeBridge, SettingsBridgeState, SyncStatus,
+    BridgeDeviceInfo, InvitationInfo, LanPeerInfo, RendezvousStatus, RuntimeBridge,
+    SettingsBridgeState, SyncStatus,
 };
 use aura_app::signal_defs::INVITATIONS_SIGNAL;
 use aura_app::views::invitations::InvitationStatus;
@@ -26,13 +26,12 @@ use aura_core::effects::{
     reactive::ReactiveEffects,
     task::TaskSpawner,
     time::PhysicalTimeEffects,
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, StorageCoreEffects,
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
     ThresholdSigningEffects, TransportEffects,
 };
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
-use aura_core::threshold::{
-    AgreementMode, ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
-};
+use aura_core::threshold::{AgreementMode, SigningContext, ThresholdConfig, ThresholdSignature};
 use aura_core::tree::{AttestedOp, LeafRole, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
@@ -62,8 +61,7 @@ mod settings;
 use amp::map_amp_error;
 use consensus::{map_consensus_error, persist_consensus_dkg_transcript};
 use invitation::{
-    convert_invitation_status_to_bridge, convert_invitation_to_bridge_info,
-    convert_invitation_type_to_bridge,
+    convert_invitation_to_bridge_info,
 };
 
 fn service_error_to_intent(err: ServiceError) -> IntentError {

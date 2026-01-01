@@ -266,7 +266,7 @@ fn test_identifier_equality_and_ordering() {
         EventNonce::new(50),
     ];
 
-    let mut sorted_nonces = nonces.clone();
+    let mut sorted_nonces = nonces;
     sorted_nonces.sort();
 
     assert_eq!(sorted_nonces[0].value(), 50);
@@ -281,7 +281,7 @@ fn test_identifier_equality_and_ordering() {
         MemberId::new(String::from("bob")),
     ];
 
-    let mut sorted_members = members.clone();
+    let mut sorted_members = members;
     sorted_members.sort();
 
     assert_eq!(sorted_members[0].as_str(), "alice");

@@ -91,6 +91,11 @@ pub mod time;
 /// Tree operation types
 pub mod tree;
 
+/// Ceremony types for Category C operations (supersession, lifecycle)
+pub mod ceremony;
+/// Protocol types for version negotiation and capabilities
+pub mod protocol;
+
 // === Backwards-Compatible Module Re-exports ===
 // These re-exports maintain compatibility with code using aura_core::identifiers::X pattern
 // The canonical location is now aura_core::types::*, but we re-export modules

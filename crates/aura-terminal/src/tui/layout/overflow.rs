@@ -248,7 +248,7 @@ mod tests {
     #[should_panic(expected = "OVERFLOW")]
     #[cfg(debug_assertions)]
     fn test_overflow_panics_in_debug() {
-        MiddleBuilder::new()
+        let _ = MiddleBuilder::new()
             .add(dummy_element(20), 20)
             .add(dummy_element(10), 10); // This should panic: 20 + 10 > max height
     }

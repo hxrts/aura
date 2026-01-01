@@ -105,8 +105,8 @@ impl CliTestHarness {
     pub async fn with_device_id(
         device_id: DeviceId,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let authority_id = ids::authority_id(&format!("cli:test-authority:{}", device_id));
-        let context_id = ids::context_id(&format!("cli:test-context:{}", device_id));
+        let authority_id = ids::authority_id(&format!("cli:test-authority:{device_id}"));
+        let context_id = ids::context_id(&format!("cli:test-context:{device_id}"));
         let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
 
         // Build agent using async builder to avoid runtime-in-runtime issue
@@ -240,9 +240,7 @@ impl CliTestHarness {
         let stdout = self.output.stdout_str();
         assert!(
             stdout.contains(expected),
-            "Expected stdout to contain '{}', but got:\n{}",
-            expected,
-            stdout
+            "Expected stdout to contain '{expected}', but got:\n{stdout}"
         );
     }
 
@@ -251,9 +249,7 @@ impl CliTestHarness {
         let stdout = self.output.stdout_str();
         assert!(
             !stdout.contains(unexpected),
-            "Expected stdout to NOT contain '{}', but got:\n{}",
-            unexpected,
-            stdout
+            "Expected stdout to NOT contain '{unexpected}', but got:\n{stdout}"
         );
     }
 
@@ -262,27 +258,25 @@ impl CliTestHarness {
         let stderr = self.output.stderr_str();
         assert!(
             stderr.contains(expected),
-            "Expected stderr to contain '{}', but got:\n{}",
-            expected,
-            stderr
+            "Expected stderr to contain '{expected}', but got:\n{stderr}"
         );
     }
 
     /// Assert stderr is empty
     pub fn assert_no_stderr(&self) {
+        let stderr = self.output.stderr_str();
         assert!(
             self.output.stderr_is_empty(),
-            "Expected no stderr output, but got:\n{}",
-            self.output.stderr_str()
+            "Expected no stderr output, but got:\n{stderr}"
         );
     }
 
     /// Assert stdout is empty
     pub fn assert_no_stdout(&self) {
+        let stdout = self.output.stdout_str();
         assert!(
             self.output.stdout_is_empty(),
-            "Expected no stdout output, but got:\n{}",
-            self.output.stdout_str()
+            "Expected no stdout output, but got:\n{stdout}"
         );
     }
 
@@ -291,8 +285,7 @@ impl CliTestHarness {
         let actual: Vec<&str> = self.output.stdout.iter().map(|s| s.as_str()).collect();
         assert_eq!(
             actual, expected,
-            "Stdout lines don't match.\nExpected: {:?}\nActual: {:?}",
-            expected, actual
+            "Stdout lines don't match.\nExpected: {expected:?}\nActual: {actual:?}"
         );
     }
 
@@ -300,10 +293,8 @@ impl CliTestHarness {
     pub fn assert_success(&self) {
         // Success means no error output
         if !self.output.stderr_is_empty() {
-            panic!(
-                "Expected success but got stderr:\n{}",
-                self.output.stderr_str()
-            );
+            let stderr = self.output.stderr_str();
+            panic!("Expected success but got stderr:\n{stderr}");
         }
     }
 }

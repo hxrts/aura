@@ -417,7 +417,7 @@ mod tests {
             diverged_field: Some("votes_count".to_string()),
         };
 
-        let display = format!("{}", report);
+        let display = format!("{report}");
         assert!(display.contains("DIVERGENCE"));
         assert!(display.contains("evidence-merge"));
         assert!(display.contains("votes_count"));

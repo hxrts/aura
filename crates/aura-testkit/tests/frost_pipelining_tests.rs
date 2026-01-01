@@ -46,7 +46,7 @@ async fn test_steady_state_single_rtt() {
         // Generate nonce using the key package
         let signing_share = key_package.signing_share();
         let mut rng = rand_chacha::ChaCha20Rng::from_seed([i as u8 + 10; 32]);
-        let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
+        let nonces = frost_ed25519::round1::SigningNonces::new(signing_share, &mut rng);
 
         // Use 1-indexed signer ID (FROST identifiers are 1-based)
         let signer_id = (i + 1) as u16;
@@ -55,8 +55,7 @@ async fn test_steady_state_single_rtt() {
             commitment: nonces
                 .commitments()
                 .serialize()
-                .expect("commitment serialization")
-                .to_vec(),
+                .unwrap_or_else(|err| panic!("commitment serialization failed: {err:?}")),
         };
 
         let token = aura_core::crypto::tree_signing::NonceToken::from(nonces);
@@ -64,7 +63,7 @@ async fn test_steady_state_single_rtt() {
         witness_set
             .update_witness_nonce(witness_id, commitment, token, epoch)
             .await
-            .expect("update nonce");
+            .unwrap_or_else(|err| panic!("update nonce failed: {err:?}"));
     }
 
     // Now should have fast path quorum
@@ -106,16 +105,16 @@ async fn test_epoch_rotation_invalidation() {
     let signing_share = key_packages
         .values()
         .next()
-        .expect("test key share")
+        .unwrap_or_else(|| panic!("test key share"))
         .signing_share();
     let mut rng = rand_chacha::ChaCha20Rng::from_seed([7u8; 32]);
-    let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
+    let nonces = frost_ed25519::round1::SigningNonces::new(signing_share, &mut rng);
     let token = aura_core::crypto::tree_signing::NonceToken::from(nonces);
 
     witness_set
         .update_witness_nonce(witnesses[0], commitment.clone(), token, epoch1)
         .await
-        .expect("update nonce");
+        .unwrap_or_else(|err| panic!("update nonce failed: {err:?}"));
 
     // Verify nonce is cached in epoch 1
     let cached_epoch1 = witness_set.collect_cached_commitments(epoch1).await;
@@ -209,7 +208,8 @@ async fn test_witness_state_lifecycle() {
     };
 
     let signing_share =
-        frost_ed25519::keys::SigningShare::deserialize([5u8; 32]).expect("signing share");
+        frost_ed25519::keys::SigningShare::deserialize([5u8; 32])
+            .unwrap_or_else(|err| panic!("signing share deserialization failed: {err:?}"));
     let mut rng = rand_chacha::ChaCha20Rng::from_seed([5u8; 32]);
     let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
     let token = aura_core::crypto::tree_signing::NonceToken::from(nonces);
@@ -252,7 +252,8 @@ async fn test_witness_state_lifecycle() {
 
     // Invalidation
     let signing_share2 =
-        frost_ed25519::keys::SigningShare::deserialize([6u8; 32]).expect("signing share");
+        frost_ed25519::keys::SigningShare::deserialize([6u8; 32])
+            .unwrap_or_else(|err| panic!("signing share deserialization failed: {err:?}"));
     let mut rng2 = rand_chacha::ChaCha20Rng::from_seed([6u8; 32]);
     let nonces2 = frost_ed25519::round1::SigningNonces::new(&signing_share2, &mut rng2);
     let token2 = aura_core::crypto::tree_signing::NonceToken::from(nonces2);

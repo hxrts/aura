@@ -26,13 +26,13 @@ fn anti_entropy_merge_batch_is_idempotent() {
 
     let first = protocol
         .merge_batch(&mut local_ops, incoming.clone())
-        .expect("first merge succeeds");
+        .unwrap_or_else(|err| panic!("first merge succeeds: {err}"));
     assert_eq!(first.applied, 2);
     assert_eq!(first.duplicates, 0);
 
     let second = protocol
         .merge_batch(&mut local_ops, incoming)
-        .expect("second merge succeeds");
+        .unwrap_or_else(|err| panic!("second merge succeeds: {err}"));
     assert_eq!(second.applied, 0);
     assert_eq!(second.duplicates, 2);
 }

@@ -13,7 +13,6 @@ use uuid::Uuid;
 /// Timeout task information
 #[derive(Debug, Clone)]
 struct TimeoutTask {
-    id: TimeoutHandle,
     expires_at_ms: u64,
     completed: bool,
 }
@@ -51,7 +50,7 @@ struct TimeHandlerState {
 }
 
 impl TimeHandlerState {
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> std::result::Result<(), String> {
         if self.stats.active_contexts != self.contexts.len() as u64 {
             return Err(format!(
                 "active_contexts {} does not match context count {}",
@@ -107,7 +106,6 @@ impl EnhancedTimeHandler {
         let expires_at_ms = current_ms.saturating_add(timeout_ms);
 
         let timeout_task = TimeoutTask {
-            id: timeout_id,
             expires_at_ms,
             completed: false,
         };
@@ -377,7 +375,7 @@ impl EnhancedTimeHandler {
                 let current = self.current_timestamp().await?;
                 with_state_mut_validated(
                     &self.state,
-                    |state| {
+                    |state| -> Result<bool> {
                         if let Some(task) = state.timeouts.get_mut(timeout_id) {
                             if !task.completed && current >= task.expires_at_ms {
                                 task.completed = true;

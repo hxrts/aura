@@ -17,10 +17,10 @@ use aura_core::{AuthorityId, ContextId};
 use aura_guards::executor::{execute_guard_plan, GuardPlan};
 use aura_guards::guards::pure::GuardRequest;
 use aura_guards::guards::traits::GuardContextProvider;
-use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 struct CountingInterpreter {
     send_count: Arc<AtomicUsize>,
@@ -43,7 +43,6 @@ impl EffectInterpreter for CountingInterpreter {
     }
 }
 
-#[derive(Default)]
 struct TestEffects {
     authority_id: AuthorityId,
     storage: Mutex<HashMap<String, Vec<u8>>>,
@@ -113,20 +112,20 @@ impl RandomCoreEffects for TestEffects {
 #[async_trait]
 impl StorageCoreEffects for TestEffects {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        self.storage.lock().insert(key.to_string(), value);
+        self.storage.lock().await.insert(key.to_string(), value);
         Ok(())
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        Ok(self.storage.lock().get(key).cloned())
+        Ok(self.storage.lock().await.get(key).cloned())
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-        Ok(self.storage.lock().remove(key).is_some())
+        Ok(self.storage.lock().await.remove(key).is_some())
     }
 
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        let store = self.storage.lock();
+        let store = self.storage.lock().await;
         let mut keys: Vec<String> = store.keys().cloned().collect();
         if let Some(prefix) = prefix {
             keys.retain(|k| k.starts_with(prefix));
@@ -138,11 +137,11 @@ impl StorageCoreEffects for TestEffects {
 #[async_trait]
 impl StorageExtendedEffects for TestEffects {
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        Ok(self.storage.lock().contains_key(key))
+        Ok(self.storage.lock().await.contains_key(key))
     }
 
     async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-        let mut store = self.storage.lock();
+        let mut store = self.storage.lock().await;
         for (k, v) in pairs {
             store.insert(k, v);
         }
@@ -153,7 +152,7 @@ impl StorageExtendedEffects for TestEffects {
         &self,
         keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-        let store = self.storage.lock();
+        let store = self.storage.lock().await;
         let mut out = HashMap::new();
         for key in keys {
             if let Some(val) = store.get(key) {
@@ -164,12 +163,12 @@ impl StorageExtendedEffects for TestEffects {
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
-        self.storage.lock().clear();
+        self.storage.lock().await.clear();
         Ok(())
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
-        let store = self.storage.lock();
+        let store = self.storage.lock().await;
         let total_size: u64 = store.values().map(|v| v.len() as u64).sum();
         Ok(StorageStats {
             key_count: store.len() as u64,
@@ -199,11 +198,11 @@ impl JournalEffects for TestEffects {
     }
 
     async fn get_journal(&self) -> Result<Journal, AuraError> {
-        Ok(self.journal.lock().clone())
+        Ok(self.journal.lock().await.clone())
     }
 
     async fn persist_journal(&self, journal: &Journal) -> Result<(), AuraError> {
-        *self.journal.lock() = journal.clone();
+        *self.journal.lock().await = journal.clone();
         Ok(())
     }
 
@@ -212,7 +211,7 @@ impl JournalEffects for TestEffects {
         _context: &ContextId,
         _peer: &AuthorityId,
     ) -> Result<FlowBudget, AuraError> {
-        Ok(*self.flow_budget.lock())
+        Ok(*self.flow_budget.lock().await)
     }
 
     async fn update_flow_budget(
@@ -221,7 +220,7 @@ impl JournalEffects for TestEffects {
         _peer: &AuthorityId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, AuraError> {
-        *self.flow_budget.lock() = *budget;
+        *self.flow_budget.lock().await = *budget;
         Ok(*budget)
     }
 
@@ -231,7 +230,7 @@ impl JournalEffects for TestEffects {
         _peer: &AuthorityId,
         cost: u32,
     ) -> Result<FlowBudget, AuraError> {
-        let mut budget = self.flow_budget.lock();
+        let mut budget = self.flow_budget.lock().await;
         match budget.record_charge(cost as u64) {
             Ok(()) => Ok(*budget),
             Err(_) => Err(AuraError::permission_denied("insufficient budget")),
@@ -337,9 +336,10 @@ async fn guard_chain_denies_transport_commands() {
         send_count: send_count.clone(),
     });
 
-    let result = execute_guard_plan(&effects, &plan, interpreter)
-        .await
-        .unwrap();
+    let result = match execute_guard_plan(&effects, &plan, interpreter).await {
+        Ok(result) => result,
+        Err(err) => panic!("execute_guard_plan failed: {err}"),
+    };
     assert!(!result.authorized);
     assert_eq!(send_count.load(Ordering::SeqCst), 0);
 }

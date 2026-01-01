@@ -1211,7 +1211,7 @@ mod tests {
             0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0,
         ]);
-        assert_eq!(format!("{}", id), "deadbeef...");
+        assert_eq!(format!("{id}"), "deadbeef...");
     }
 
     #[test]

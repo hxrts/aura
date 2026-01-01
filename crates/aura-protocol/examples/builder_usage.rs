@@ -31,7 +31,7 @@ fn main() -> AuraResult<()> {
     let seed = 12345u64;
     let _system = EffectRegistry::new(ExecutionMode::Simulation { seed });
 
-    println!("Created simulation system with seed: {}", seed);
+    println!("Created simulation system with seed: {seed}");
 
     // Example 5: Standard configurations
     println!("\nExample 5: Standard configurations");

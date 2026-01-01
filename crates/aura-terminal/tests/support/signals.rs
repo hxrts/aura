@@ -29,7 +29,7 @@ use aura_app::views::{
 };
 use aura_app::{AppCore, AppError};
 use aura_core::effects::reactive::{ReactiveEffects, Signal};
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, DeviceId};
 
 /// Default timeout for signal waits.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(500);
@@ -71,7 +71,7 @@ where
         }
 
         if tokio::time::Instant::now() >= deadline {
-            panic!("Timed out waiting for {}", description);
+            panic!("Timed out waiting for {description}");
         }
 
         tokio::time::sleep(POLL_INTERVAL).await;
@@ -251,24 +251,26 @@ pub async fn wait_for_devices(
 
 /// Wait for a specific device to appear by device ID string.
 pub async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
+    let device_id = DeviceId::from(device_id);
     wait_for_signal(
         app_core,
         &*SETTINGS_SIGNAL,
         |state: &SettingsState| state.devices.iter().any(|d| d.id == device_id),
         EXTENDED_TIMEOUT,
-        &format!("device '{}'", device_id),
+        &format!("device '{device_id}'"),
     )
     .await;
 }
 
 /// Wait for a device to be absent by device ID string.
 pub async fn wait_for_device_absent(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
+    let device_id = DeviceId::from(device_id);
     wait_for_signal(
         app_core,
         &*SETTINGS_SIGNAL,
         |state: &SettingsState| !state.devices.iter().any(|d| d.id == device_id),
         EXTENDED_TIMEOUT,
-        &format!("device '{}' to be removed", device_id),
+        &format!("device '{device_id}' to be removed"),
     )
     .await;
 }

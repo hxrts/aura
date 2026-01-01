@@ -973,9 +973,9 @@ mod tests {
             let collector_clone = collector.clone();
             let handle = thread::spawn(move || {
                 let now = base_now + i as u64;
-                collector_clone.record_sync_start(&format!("session_{}", i), now);
+                collector_clone.record_sync_start(&format!("session_{i}"), now);
                 collector_clone.record_sync_completion(
-                    &format!("session_{}", i),
+                    &format!("session_{i}"),
                     i,
                     i * 100,
                     now + 50,

@@ -44,7 +44,7 @@ impl SimpleTestEnv {
     /// - An IoContext ready for testing
     /// - A test account
     pub async fn new(name: &str) -> Self {
-        let test_dir = unique_test_dir(&format!("aura-test-{}", name));
+        let test_dir = unique_test_dir(&format!("aura-test-{name}"));
 
         let app_core = AppCore::new(AppConfig::default()).expect("Failed to create AppCore");
         let app_core = Arc::new(RwLock::new(app_core));
@@ -53,16 +53,16 @@ impl SimpleTestEnv {
             .expect("Failed to init signals");
 
         let ctx = IoContext::builder()
-            .with_app_core(initialized_app_core.clone())
+            .with_app_core(initialized_app_core)
             .with_existing_account(false)
             .with_base_path(test_dir.clone())
-            .with_device_id(format!("test-device-{}", name))
+            .with_device_id(format!("test-device-{name}"))
             .with_mode(TuiMode::Production)
             .build()
             .expect("IoContext builder should succeed for tests");
 
         // Create account for testing
-        ctx.create_account(&format!("TestUser-{}", name))
+        ctx.create_account(&format!("TestUser-{name}"))
             .await
             .expect("Failed to create account");
 
@@ -130,12 +130,15 @@ impl FullTestEnv {
 
     /// Create a new full test environment with custom configuration.
     pub async fn with_config(config: FullTestEnvConfig) -> Self {
-        let test_dir = unique_test_dir(&format!("aura-full-test-{}", config.name));
+        let FullTestEnvConfig {
+            name,
+            seed,
+            display_name,
+        } = config;
+        let test_dir = unique_test_dir(&format!("aura-full-test-{name}"));
 
-        let device_id_str = format!("test-device-{}", config.name);
-        let display_name = config
-            .display_name
-            .unwrap_or_else(|| format!("TestUser-{}", config.name));
+        let device_id_str = format!("test-device-{name}");
+        let display_name = display_name.unwrap_or_else(|| format!("TestUser-{name}"));
 
         let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &display_name)
             .await
@@ -153,7 +156,7 @@ impl FullTestEnv {
         let effect_ctx = EffectContext::new(
             authority_id,
             context_id,
-            ExecutionMode::Simulation { seed: config.seed },
+            ExecutionMode::Simulation { seed },
         );
 
         let agent = AgentBuilder::new()
@@ -176,7 +179,7 @@ impl FullTestEnv {
             .expect("Failed to init signals");
 
         let ctx = IoContext::builder()
-            .with_app_core(initialized_app_core.clone())
+            .with_app_core(initialized_app_core)
             .with_existing_account(true)
             .with_base_path(test_dir.clone())
             .with_device_id(device_id_str)
@@ -221,6 +224,6 @@ pub async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>
 
 /// Clean up a test directory (legacy compatibility).
 pub fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!("aura-test-{}", name));
+    let test_dir = std::env::temp_dir().join(format!("aura-test-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
 }

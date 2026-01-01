@@ -1,13 +1,14 @@
 use super::{AuraEffectSystem, DEFAULT_WINDOW};
 use async_trait::async_trait;
-use aura_core::effects::{RandomCoreEffects, RandomEffects};
+use aura_core::effects::{
+    AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, ChannelCloseParams,
+    ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
+    RandomCoreEffects, RandomExtendedEffects,
+};
 use aura_core::hash::hash;
 use aura_core::{AuraError, ChannelId, Hash32};
-use aura_protocol::amp::{
-    AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, AmpJournalEffects,
-    ChannelCloseParams, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
-    ChannelMembershipFact, ChannelParticipantEvent, ChannelSendParams,
-};
+use aura_journal::DomainFact;
+use aura_protocol::amp::{AmpJournalEffects, ChannelMembershipFact, ChannelParticipantEvent};
 use aura_protocol::effects::TreeEffects;
 
 #[async_trait]

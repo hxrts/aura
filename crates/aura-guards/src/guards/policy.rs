@@ -304,9 +304,10 @@ mod tests {
     fn test_evaluate_with_metadata() {
         let guard = EffectPolicyGuard::default();
 
-        let result = guard
-            .evaluate_with_metadata(&OperationType::DeleteChannel, None)
-            .unwrap();
+        let result = match guard.evaluate_with_metadata(&OperationType::DeleteChannel, None) {
+            Ok(result) => result,
+            Err(err) => panic!("evaluate_with_metadata failed: {err}"),
+        };
 
         assert_eq!(result.operation, OperationType::DeleteChannel);
         assert!(result.is_deferred());

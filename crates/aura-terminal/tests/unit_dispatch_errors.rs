@@ -40,7 +40,7 @@ async fn test_ctx(
 
     let dir = tempfile::tempdir().expect("Failed to create temp dir");
     let ctx = IoContext::builder()
-        .with_app_core(app_core.clone())
+        .with_app_core(app_core)
         .with_existing_account(has_existing_account)
         .with_base_path(dir.path().to_path_buf())
         .with_device_id("test-device".to_string())

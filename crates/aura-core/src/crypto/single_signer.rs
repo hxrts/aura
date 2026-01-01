@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn test_debug_redacts_signing_key() {
         let pkg = SingleSignerKeyPackage::new(vec![7u8; 32], vec![8u8; 32]);
-        let debug_str = format!("{:?}", pkg);
+        let debug_str = format!("{pkg:?}");
         assert!(debug_str.contains("[REDACTED]"));
         assert!(!debug_str.contains("07070707")); // Signing key bytes should not appear
     }

@@ -723,8 +723,7 @@ mod tests {
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let authority_context = AuthorityContext::new(authority_id);
-        authority_context
+        AuthorityContext::new(authority_id)
     }
 
     #[tokio::test]

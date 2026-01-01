@@ -218,8 +218,8 @@ mod tests {
     #[test]
     fn test_meet_performance() {
         // Test that meet operations are reasonably fast
-        let large_set1: BTreeSet<String> = (0..1000).map(|i| format!("item_{}", i)).collect();
-        let large_set2: BTreeSet<String> = (500..1500).map(|i| format!("item_{}", i)).collect();
+        let large_set1: BTreeSet<String> = (0..1000).map(|i| format!("item_{i}")).collect();
+        let large_set2: BTreeSet<String> = (500..1500).map(|i| format!("item_{i}")).collect();
 
         // Performance test - just ensure it completes without timing specifics
         let _result = large_set1.meet(&large_set2);

@@ -3,9 +3,9 @@
 //! Main runtime system that orchestrates all agent operations.
 
 use super::services::{
-    CeremonyTracker, ContextManager, FlowBudgetManager, ReceiptManager, RendezvousManager,
-    RuntimeService, RuntimeTaskRegistry, ServiceError, SocialManager, SyncServiceManager,
-    ThresholdSigningService,
+    AuthorityManager, AuthorityStatus, CeremonyTracker, ContextManager, FlowBudgetManager,
+    ReceiptManager, RendezvousManager, RuntimeService, RuntimeTaskRegistry, ServiceError,
+    SocialManager, SyncServiceManager, ThresholdSigningService,
 };
 use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
@@ -30,6 +30,9 @@ pub struct RuntimeSystem {
 
     /// Context manager
     context_manager: ContextManager,
+
+    /// Authority manager
+    authority_manager: AuthorityManager,
 
     /// Flow budget manager
     flow_budget_manager: FlowBudgetManager,
@@ -82,6 +85,7 @@ impl RuntimeSystem {
         effect_executor: EffectExecutor,
         effect_system: Arc<AuraEffectSystem>,
         context_manager: ContextManager,
+        authority_manager: AuthorityManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
         choreography_adapter: ChoreographyAdapter,
@@ -94,6 +98,7 @@ impl RuntimeSystem {
             effect_executor,
             effect_system,
             context_manager,
+            authority_manager,
             flow_budget_manager,
             receipt_manager,
             choreography_adapter,
@@ -117,6 +122,7 @@ impl RuntimeSystem {
         effect_executor: EffectExecutor,
         effect_system: Arc<AuraEffectSystem>,
         context_manager: ContextManager,
+        authority_manager: AuthorityManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
         choreography_adapter: ChoreographyAdapter,
@@ -130,6 +136,7 @@ impl RuntimeSystem {
             effect_executor,
             effect_system,
             context_manager,
+            authority_manager,
             flow_budget_manager,
             receipt_manager,
             choreography_adapter,
@@ -153,6 +160,7 @@ impl RuntimeSystem {
         effect_executor: EffectExecutor,
         effect_system: Arc<AuraEffectSystem>,
         context_manager: ContextManager,
+        authority_manager: AuthorityManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
         choreography_adapter: ChoreographyAdapter,
@@ -166,6 +174,7 @@ impl RuntimeSystem {
             effect_executor,
             effect_system,
             context_manager,
+            authority_manager,
             flow_budget_manager,
             receipt_manager,
             choreography_adapter,
@@ -188,6 +197,7 @@ impl RuntimeSystem {
         effect_executor: EffectExecutor,
         effect_system: Arc<AuraEffectSystem>,
         context_manager: ContextManager,
+        authority_manager: AuthorityManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
         choreography_adapter: ChoreographyAdapter,
@@ -203,6 +213,7 @@ impl RuntimeSystem {
             effect_executor,
             effect_system,
             context_manager,
+            authority_manager,
             flow_budget_manager,
             receipt_manager,
             choreography_adapter,
@@ -330,6 +341,22 @@ impl RuntimeSystem {
 
     /// Start runtime services using the RuntimeService trait.
     pub async fn start_services(&self) -> Result<(), ServiceError> {
+        let now_ms = self
+            .effect_system
+            .time_effects()
+            .physical_time()
+            .await
+            .map_err(|e| ServiceError::startup_failed("authority_manager", e.to_string()))?
+            .ts_ms;
+        self.authority_manager
+            .ensure_authority(self.authority_id, now_ms)
+            .await
+            .map_err(|e| ServiceError::startup_failed("authority_manager", e.to_string()))?;
+        self.authority_manager
+            .set_status(self.authority_id, AuthorityStatus::Active, now_ms)
+            .await
+            .map_err(|e| ServiceError::startup_failed("authority_manager", e.to_string()))?;
+
         self.flow_budget_manager
             .start(self.runtime_tasks.clone())
             .await?;
@@ -347,26 +374,41 @@ impl RuntimeSystem {
             social_manager.start(self.runtime_tasks.clone()).await?;
         }
         if let Some(rendezvous_manager) = &self.rendezvous_manager {
-            rendezvous_manager
-                .start(self.runtime_tasks.clone())
-                .await?;
+            RuntimeService::start(rendezvous_manager, self.runtime_tasks.clone()).await?;
         }
         if let Some(sync_manager) = &self.sync_manager {
-            sync_manager.start(self.runtime_tasks.clone()).await?;
+            let time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync> =
+                Arc::new(self.effect_system.time_effects().clone());
+            sync_manager
+                .start(time_effects)
+                .await
+                .map_err(|e| ServiceError::startup_failed("sync_service", e))?;
         }
 
         Ok(())
     }
 
     async fn stop_services(&self) -> Result<(), ServiceError> {
+        let now_ms = self
+            .effect_system
+            .time_effects()
+            .physical_time()
+            .await
+            .map_err(|e| ServiceError::shutdown_failed("authority_manager", e.to_string()))?
+            .ts_ms;
+        self.authority_manager
+            .set_status(self.authority_id, AuthorityStatus::Terminated, now_ms)
+            .await
+            .map_err(|e| ServiceError::shutdown_failed("authority_manager", e.to_string()))?;
+
         if let Some(sync_manager) = &self.sync_manager {
-            sync_manager.stop().await?;
+            RuntimeService::stop(sync_manager).await?;
         }
         if let Some(rendezvous_manager) = &self.rendezvous_manager {
-            rendezvous_manager.stop().await?;
+            RuntimeService::stop(rendezvous_manager).await?;
         }
         if let Some(social_manager) = &self.social_manager {
-            social_manager.stop().await?;
+            RuntimeService::stop(social_manager).await?;
         }
         self.threshold_signing.stop().await?;
         self.ceremony_tracker.stop().await?;
@@ -379,6 +421,11 @@ impl RuntimeSystem {
     /// Get the context manager
     pub fn contexts(&self) -> &ContextManager {
         &self.context_manager
+    }
+
+    /// Get the authority manager
+    pub fn authorities(&self) -> &AuthorityManager {
+        &self.authority_manager
     }
 
     /// Get the flow budget manager

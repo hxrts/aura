@@ -72,9 +72,9 @@ impl CausalOp for DummyOp {
     }
 
     fn ctx(&self) -> &Self::Ctx {
-        use std::sync::LazyLock;
-        static DUMMY_CTX: LazyLock<CausalContext> =
-            LazyLock::new(|| CausalContext::new(DeviceId::deterministic_test_id()));
+        use once_cell::sync::Lazy;
+        static DUMMY_CTX: Lazy<CausalContext> =
+            Lazy::new(|| CausalContext::new(DeviceId::deterministic_test_id()));
         &DUMMY_CTX
     }
 }
@@ -169,7 +169,7 @@ fn test_builder_with_cv_state() {
         DummyMvState,
         DummyOp,
         DummyId,
-    > = CrdtCoordinator::with_cv_state(authority_id, initial_state.clone());
+    > = CrdtCoordinator::with_cv_state(authority_id, initial_state);
 
     assert_eq!(coordinator.authority_id(), authority_id);
     assert!(coordinator.has_handler(CrdtType::Convergent));

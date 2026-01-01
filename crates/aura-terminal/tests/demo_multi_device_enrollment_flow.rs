@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aura_agent::core::{AgentBuilder, AgentConfig};
+use aura_agent::core::config::StorageConfig;
 use aura_agent::{EffectContext, SharedTransport};
 use aura_app::signal_defs::SETTINGS_SIGNAL;
 use aura_app::{AppConfig, AppCore};
@@ -45,7 +46,7 @@ struct TestEnv {
 
 async fn setup_test_env() -> TestEnv {
     let unique = Uuid::new_v4();
-    let test_dir = std::env::temp_dir().join(format!("aura-multi-device-enroll-test-{}", unique));
+    let test_dir = std::env::temp_dir().join(format!("aura-multi-device-enroll-test-{unique}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -60,9 +61,14 @@ async fn setup_test_env() -> TestEnv {
     let effect_ctx =
         EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
-    let mut agent_config = AgentConfig::default();
-    agent_config.device_id = ids::device_id(&device_id_str);
-    agent_config.storage.base_path = test_dir.clone();
+    let agent_config = AgentConfig {
+        device_id: ids::device_id(&device_id_str),
+        storage: StorageConfig {
+            base_path: test_dir.clone(),
+            ..StorageConfig::default()
+        },
+        ..AgentConfig::default()
+    };
 
     let agent_a = AgentBuilder::new()
         .with_config(agent_config)
@@ -103,6 +109,7 @@ async fn setup_test_env() -> TestEnv {
 }
 
 async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
+    let device_id = DeviceId::from(device_id);
     let start = tokio::time::Instant::now();
     loop {
         let state = {
@@ -117,10 +124,9 @@ async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
         }
 
         if start.elapsed() > Duration::from_secs(3) {
+            let device_count = state.devices.len();
             panic!(
-                "Timed out waiting for device {} ({} devices present)",
-                device_id,
-                state.devices.len()
+                "Timed out waiting for device {device_id} ({device_count} devices present)"
             );
         }
 
@@ -152,11 +158,16 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         ExecutionMode::Simulation { seed: seed_b },
     );
 
-    let mut agent_config_b = AgentConfig::default();
-    agent_config_b.device_id = device_b_id;
-    agent_config_b.storage.base_path = env.test_dir.join("device-b");
-    std::fs::create_dir_all(&agent_config_b.storage.base_path)
-        .expect("Failed to create device-b storage dir");
+    let storage_base_path = env.test_dir.join("device-b");
+    std::fs::create_dir_all(&storage_base_path).expect("Failed to create device-b storage dir");
+    let agent_config_b = AgentConfig {
+        device_id: device_b_id,
+        storage: StorageConfig {
+            base_path: storage_base_path,
+            ..StorageConfig::default()
+        },
+        ..AgentConfig::default()
+    };
 
     let agent_b = AgentBuilder::new()
         .with_config(agent_config_b)
@@ -212,11 +223,16 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
         ExecutionMode::Simulation { seed: seed_c },
     );
 
-    let mut agent_config_c = AgentConfig::default();
-    agent_config_c.device_id = device_c_id;
-    agent_config_c.storage.base_path = env.test_dir.join("device-c");
-    std::fs::create_dir_all(&agent_config_c.storage.base_path)
-        .expect("Failed to create device-c storage dir");
+    let storage_base_path = env.test_dir.join("device-c");
+    std::fs::create_dir_all(&storage_base_path).expect("Failed to create device-c storage dir");
+    let agent_config_c = AgentConfig {
+        device_id: device_c_id,
+        storage: StorageConfig {
+            base_path: storage_base_path,
+            ..StorageConfig::default()
+        },
+        ..AgentConfig::default()
+    };
 
     let agent_c = AgentBuilder::new()
         .with_config(agent_config_c)
@@ -276,9 +292,11 @@ async fn demo_multi_device_enrollment_does_not_brick_existing_devices() {
 
     // Confirm device B stored its new-epoch key package (so it is not bricked).
     let effects_b = agent_b.runtime().effects();
+    let pending_epoch = start_c.pending_epoch.value();
+    let authority_id = env.authority_id;
     let location = SecureStorageLocation::with_sub_key(
         "participant_shares",
-        format!("{}/{}", env.authority_id, start_c.pending_epoch.value()),
+        format!("{authority_id}/{pending_epoch}"),
         ParticipantIdentity::device(device_b_id).storage_key(),
     );
 

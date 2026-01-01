@@ -29,6 +29,7 @@
 #[cfg(feature = "simulation")]
 use aura_core::effects::{
     SimulationEnvironmentConfig, SimulationEnvironmentError, SimulationEnvironmentFactory,
+    TransportEnvelope,
 };
 #[cfg(feature = "simulation")]
 use aura_core::hash::hash;
@@ -40,9 +41,9 @@ use std::sync::Arc;
 #[cfg(feature = "simulation")]
 use super::effects::AuraEffectSystem;
 #[cfg(feature = "simulation")]
-use super::shared_transport::SharedTransport;
-#[cfg(feature = "simulation")]
 use crate::core::AgentConfig;
+#[cfg(feature = "simulation")]
+use parking_lot::RwLock;
 
 /// Factory for creating `AuraEffectSystem` instances for simulation
 ///
@@ -129,7 +130,7 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
     async fn create_simulation_environment_with_shared_transport(
         &self,
         config: SimulationEnvironmentConfig,
-        shared_transport: SharedTransport,
+        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     ) -> Result<Arc<Self::EffectSystem>, SimulationEnvironmentError> {
         let agent_config = self.to_agent_config(&config);
 
@@ -146,11 +147,11 @@ impl SimulationEnvironmentFactory for EffectSystemFactory {
             }
         };
 
-        let effect_system = AuraEffectSystem::simulation_with_shared_transport_for_authority(
+        let effect_system = AuraEffectSystem::simulation_with_shared_inbox_for_authority(
             &agent_config,
             config.seed,
             authority_id,
-            shared_transport,
+            shared_inbox,
         )
         .map_err(|e| SimulationEnvironmentError::CreationFailed(e.to_string()))?;
 
@@ -163,6 +164,7 @@ mod tests {
     use super::*;
     use aura_core::effects::RuntimeEffectsBundle;
     use aura_core::DeviceId;
+    use parking_lot::RwLock;
 
     #[tokio::test]
     async fn test_factory_creates_effect_system() {
@@ -185,10 +187,10 @@ mod tests {
         let factory = EffectSystemFactory::new();
         let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let config = SimulationEnvironmentConfig::new(42, device_id);
-        let shared_transport = SharedTransport::new();
+        let shared_inbox = Arc::new(RwLock::new(Vec::new()));
 
         let result = factory
-            .create_simulation_environment_with_shared_transport(config, shared_transport)
+            .create_simulation_environment_with_shared_transport(config, shared_inbox)
             .await;
         assert!(result.is_ok());
     }

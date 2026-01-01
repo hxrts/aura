@@ -2513,7 +2513,7 @@ mod tests {
             Err(e) => {
                 // Conversion failure is acceptable as this indicates a known limitation
                 // in the current ITF format compatibility between fuzzer and trace converter
-                println!("ITF conversion failed as expected: {}", e);
+                println!("ITF conversion failed as expected: {e}");
                 assert!(
                     e.to_string().contains("JSON parsing failed")
                         || e.to_string().contains("TraceConversionError")
@@ -2535,7 +2535,7 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config.clone())
+        let fuzzer = ITFBasedFuzzer::with_config(config)
             .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
 
         // Test configuration
@@ -2631,7 +2631,7 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config.clone())
+        let fuzzer = ITFBasedFuzzer::with_config(config)
             .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
 
         // Test simulation configuration

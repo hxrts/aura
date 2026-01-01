@@ -143,12 +143,14 @@ struct SessionCreatedFact {
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 struct SessionParticipantsFact {
     session_id: String,
     participants: Vec<DeviceId>,
 }
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 struct SessionMetadataFact {
     session_id: String,
     metadata: HashMap<String, serde_json::Value>,
@@ -216,6 +218,7 @@ impl SessionOperations {
             .map_err(|e| AgentError::effects(format!("store session: {e}")))
     }
 
+    #[allow(dead_code)]
     pub(super) async fn load_session_handle(
         &self,
         session_key: &str,
@@ -540,6 +543,7 @@ impl SessionOperations {
 
 /// Internal type for tracking participant responses
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ParticipantResponse {
     participant_id: DeviceId,
     accepted: bool,
@@ -597,6 +601,7 @@ impl SessionOperations {
     // Private implementation methods
 
     /// Create session via effects system
+    #[allow(dead_code)]
     async fn create_session_via_effects(
         &self,
         _effects: &AuraEffectSystem,
@@ -721,7 +726,7 @@ impl SessionOperations {
 mod tests {
     use super::*;
     use crate::core::{AgentConfig, AuthorityContext};
-    use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
+    use aura_core::identifiers::{AccountId, AuthorityId, DeviceId};
     use std::sync::Arc;
 
     #[tokio::test]

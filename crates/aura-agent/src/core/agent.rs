@@ -155,7 +155,7 @@ impl ServiceRegistry {
                     self.account_id,
                 )
             })
-            .map(|svc| svc.clone())
+            .cloned()
     }
 
     fn auth(&self) -> AgentResult<AuthServiceApi> {
@@ -167,13 +167,13 @@ impl ServiceRegistry {
                     self.account_id,
                 )
             })
-            .map(|svc| svc.clone())
+            .cloned()
     }
 
     fn chat(&self) -> AgentResult<ChatServiceApi> {
         self.chat
             .get_or_try_init(|| ChatServiceApi::new(self.effects.clone()))
-            .map(|svc| svc.clone())
+            .cloned()
     }
 
     fn invitations(&self) -> AgentResult<InvitationServiceApi> {
@@ -181,7 +181,7 @@ impl ServiceRegistry {
             .get_or_try_init(|| {
                 InvitationServiceApi::new(self.effects.clone(), self.authority_context.clone())
             })
-            .map(|svc| svc.clone())
+            .cloned()
     }
 
     fn recovery(&self) -> AgentResult<RecoveryServiceApi> {
@@ -189,6 +189,6 @@ impl ServiceRegistry {
             .get_or_try_init(|| {
                 RecoveryServiceApi::new(self.effects.clone(), self.authority_context.clone())
             })
-            .map(|svc| svc.clone())
+            .cloned()
     }
 }

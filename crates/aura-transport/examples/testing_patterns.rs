@@ -243,7 +243,7 @@ fn integration_testing_patterns() {
 
     // Test connection ID generation
     let connection_id = ConnectionId::new();
-    println!("Connection ID generated: {:?}", connection_id);
+    println!("Connection ID generated: {connection_id:?}");
     println!("Connection ID generation test passed");
 
     // Test scoped connection creation

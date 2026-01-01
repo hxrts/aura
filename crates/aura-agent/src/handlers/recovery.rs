@@ -583,12 +583,11 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
-    use aura_core::identifiers::ContextId;
+    use std::sync::Arc;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let authority_context = AuthorityContext::new(authority_id);
-        authority_context
+        AuthorityContext::new(authority_id)
     }
 
     #[tokio::test]

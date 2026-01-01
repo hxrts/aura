@@ -14,7 +14,9 @@
 
 use std::sync::Arc;
 
-use super::services::{ContextManager, FlowBudgetManager, ReceiptManager, ReceiptManagerConfig};
+use super::services::{
+    AuthorityManager, ContextManager, FlowBudgetManager, ReceiptManager, ReceiptManagerConfig,
+};
 use super::shared_transport::SharedTransport;
 use super::system::RuntimeSystem;
 use super::{ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager};
@@ -189,6 +191,7 @@ impl EffectSystemBuilder {
 
         // Create service managers
         let context_manager = ContextManager::new(&config);
+        let authority_manager = AuthorityManager::new();
         let flow_budget_manager = FlowBudgetManager::new(&config);
         let receipt_manager = match self.receipt_config {
             Some(receipt_config) => ReceiptManager::with_config(&config, receipt_config),
@@ -230,6 +233,7 @@ impl EffectSystemBuilder {
             effect_executor,
             effect_system.clone(),
             context_manager,
+            authority_manager,
             flow_budget_manager,
             receipt_manager,
             choreography_adapter,

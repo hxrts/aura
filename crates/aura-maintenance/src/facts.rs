@@ -424,13 +424,16 @@ mod tests {
             Epoch::new(2),
         ));
         let bytes = fact.to_bytes();
-        let restored = MaintenanceFact::from_bytes(&bytes).expect("decode");
+        let restored = match MaintenanceFact::from_bytes(&bytes) {
+            Some(restored) => restored,
+            None => panic!("decode"),
+        };
         assert_eq!(fact, restored);
     }
 
     #[test]
     fn reducer_tracks_counts() {
-        let reducer = MaintenanceFactReducer::default();
+        let reducer = MaintenanceFactReducer;
         let fact = MaintenanceFact::SnapshotProposed(SnapshotProposed::new(
             authority(2),
             Uuid::from_bytes(1u128.to_be_bytes()),

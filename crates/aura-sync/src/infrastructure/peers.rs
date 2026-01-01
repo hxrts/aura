@@ -914,8 +914,7 @@ mod tests {
         // = 0.4 + 0.24 + 0.16 = 0.80
         assert!(
             (score - 0.80).abs() < 0.01,
-            "Expected score ~0.80, got {}",
-            score
+            "Expected score ~0.80, got {score}",
         );
     }
 

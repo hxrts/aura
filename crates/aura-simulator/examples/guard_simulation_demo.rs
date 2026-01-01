@@ -126,7 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     println!("Initial state:");
-    println!("  Authority: {:?}", authority);
+    println!("  Authority: {authority:?}");
     println!("  Budget: 200");
     println!("  User authorized: true\n");
 
@@ -140,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     for (request_type, description) in &requests {
-        println!("Processing: {} - {}", request_type, description);
+        println!("Processing: {request_type} - {description}");
 
         // Create guard snapshot from current state
         let state = interpreter.snapshot_state();
@@ -169,13 +169,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             for effect in outcome.effects {
                 match &effect {
                     EffectCommand::ChargeBudget { amount, .. } => {
-                        println!("  - Charging {} budget", amount);
+                        println!("  - Charging {amount} budget");
                     }
                     EffectCommand::AppendJournal { .. } => {
                         println!("  - Appending to journal");
                     }
                     EffectCommand::StoreMetadata { key, .. } => {
-                        println!("  - Storing metadata: {}", key);
+                        println!("  - Storing metadata: {key}");
                     }
                     _ => {}
                 }
@@ -184,11 +184,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let new_budget = interpreter.state().get_budget(&authority);
-            println!("  - Remaining budget: {}", new_budget);
+            println!("  - Remaining budget: {new_budget}");
         } else {
+            let reason = outcome
+                .decision
+                .denial_reason()
+                .unwrap_or("Unknown reason");
             println!(
-                "  ✗ Denied: {}",
-                outcome.decision.denial_reason().unwrap_or("Unknown reason")
+                "  ✗ Denied: {reason}"
             );
         }
 
@@ -198,24 +201,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Show final state
     println!("=== Final State ===");
     let final_state = interpreter.snapshot_state();
-    println!("Total events recorded: {}", final_state.events.len());
-    println!("Journal entries: {}", final_state.journal.len());
-    println!("Messages queued: {}", final_state.message_queue.len());
-    println!("Total leakage bits: {}", final_state.total_leakage_bits);
-    println!("Final budget: {}", final_state.get_budget(&authority));
+    let total_events = final_state.events.len();
+    let journal_entries = final_state.journal.len();
+    let message_count = final_state.message_queue.len();
+    let total_leakage_bits = final_state.total_leakage_bits;
+    let final_budget = final_state.get_budget(&authority);
+    println!("Total events recorded: {total_events}");
+    println!("Journal entries: {journal_entries}");
+    println!("Messages queued: {message_count}");
+    println!("Total leakage bits: {total_leakage_bits}");
+    println!("Final budget: {final_budget}");
 
     // Demonstrate event analysis
     println!("\n=== Event Analysis ===");
     let budget_events =
         interpreter.events_of_type(|e| matches!(e, SimulationEvent::BudgetCharged { .. }));
-    println!("Budget charges: {}", budget_events.len());
+    let budget_charge_count = budget_events.len();
+    println!("Budget charges: {budget_charge_count}");
 
     for event in &budget_events {
         if let SimulationEvent::BudgetCharged {
             amount, remaining, ..
         } = event
         {
-            println!("  - Charged {}, remaining {}", amount, remaining);
+            println!("  - Charged {amount}, remaining {remaining}");
         }
     }
 
@@ -239,18 +248,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let replay_state = replay_interpreter.snapshot_state();
     println!("Replay successful!");
-    println!(
-        "  Original final budget: {}",
-        final_state.get_budget(&authority)
-    );
-    println!(
-        "  Replayed final budget: {}",
-        replay_state.get_budget(&authority)
-    );
-    println!(
-        "  States match: {}",
-        final_state.get_budget(&authority) == replay_state.get_budget(&authority)
-    );
+    let replay_original_budget = final_state.get_budget(&authority);
+    let replay_final_budget = replay_state.get_budget(&authority);
+    let states_match = replay_original_budget == replay_final_budget;
+    println!("  Original final budget: {replay_original_budget}");
+    println!("  Replayed final budget: {replay_final_budget}");
+    println!("  States match: {states_match}");
 
     Ok(())
 }

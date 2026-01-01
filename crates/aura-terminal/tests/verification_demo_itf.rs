@@ -159,9 +159,9 @@ fn guardian_bidirectionality(agents: &HashMap<String, AgentState>) -> bool {
 /// Load and parse an ITF trace file
 fn load_trace(path: impl AsRef<Path>) -> Result<ITFTrace, String> {
     let content = std::fs::read_to_string(path.as_ref())
-        .map_err(|e| format!("Failed to read ITF file: {}", e))?;
+        .map_err(|e| format!("Failed to read ITF file: {e}"))?;
     let trace: ITFTrace =
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse ITF JSON: {}", e))?;
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse ITF JSON: {e}"))?;
     Ok(trace)
 }
 
@@ -173,8 +173,7 @@ fn test_cli_recovery_demo_invariants() {
     // Skip if trace file doesn't exist
     if !std::path::Path::new(trace_path).exists() {
         eprintln!(
-            "Skipping: trace file not found at {}. Run: nix develop -c quint run --out-itf=verification/traces/cli_recovery_demo.itf.json --max-samples=1 --init=init --step=guardianRequestFlowTest verification/quint/cli_recovery_demo.qnt",
-            trace_path
+            "Skipping: trace file not found at {trace_path}. Run: nix develop -c quint run --out-itf=verification/traces/cli_recovery_demo.itf.json --max-samples=1 --init=init --step=guardianRequestFlowTest verification/quint/cli_recovery_demo.qnt"
         );
         return;
     }
@@ -234,10 +233,9 @@ fn test_cli_recovery_demo_invariants() {
     println!("Validation complete:");
     println!("  States validated: {}", trace.states.len());
     println!(
-        "  Guardian relationships validated: {}",
-        guardian_relationships_found
+        "  Guardian relationships validated: {guardian_relationships_found}"
     );
-    println!("  Max guardians per agent: {}", max_guardians_per_agent);
+    println!("  Max guardians per agent: {max_guardians_per_agent}");
 
     // Ensure we actually found guardian relationships
     assert!(
@@ -319,20 +317,20 @@ fn test_full_demo_flow_trace() {
     let output = match output {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("Skipping: Failed to run Quint: {}", e);
+            eprintln!("Skipping: Failed to run Quint: {e}");
             return;
         }
     };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("Quint run failed: {}", stderr);
+        eprintln!("Quint run failed: {stderr}");
         // Don't fail the test if quint isn't available
         if stderr.contains("command not found") || stderr.contains("No such file") {
             eprintln!("Skipping: Quint not available in test environment");
             return;
         }
-        panic!("Quint run failed: {}", stderr);
+        panic!("Quint run failed: {stderr}");
     }
 
     let trace_path = "../../verification/traces/full_demo.itf.json";
@@ -365,8 +363,7 @@ fn test_full_demo_flow_trace() {
                 for guardian_id in &bob.guardians {
                     assert!(
                         is_contact_guardian(bob, guardian_id),
-                        "Guardian {} should be contact-guardian",
-                        guardian_id
+                        "Guardian {guardian_id} should be contact-guardian"
                     );
                 }
 

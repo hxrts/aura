@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aura_agent::core::{AgentBuilder, AgentConfig};
+use aura_agent::core::config::StorageConfig;
 use aura_agent::{EffectContext, SharedTransport};
 use aura_app::signal_defs::SETTINGS_SIGNAL;
 use aura_app::{AppConfig, AppCore};
@@ -38,7 +39,7 @@ struct TestEnv {
 
 async fn setup_test_env() -> TestEnv {
     let unique = Uuid::new_v4();
-    let test_dir = std::env::temp_dir().join(format!("aura-device-remove-test-{}", unique));
+    let test_dir = std::env::temp_dir().join(format!("aura-device-remove-test-{unique}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -53,9 +54,14 @@ async fn setup_test_env() -> TestEnv {
     let effect_ctx =
         EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
-    let mut agent_config = AgentConfig::default();
-    agent_config.device_id = ids::device_id(&device_id_str);
-    agent_config.storage.base_path = test_dir.clone();
+    let agent_config = AgentConfig {
+        device_id: ids::device_id(&device_id_str),
+        storage: StorageConfig {
+            base_path: test_dir.clone(),
+            ..StorageConfig::default()
+        },
+        ..AgentConfig::default()
+    };
 
     let agent_a = AgentBuilder::new()
         .with_config(agent_config)
@@ -96,6 +102,7 @@ async fn setup_test_env() -> TestEnv {
 }
 
 async fn wait_for_device_present(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
+    let device_id = DeviceId::from_str(device_id).expect("device_id should parse");
     let start = tokio::time::Instant::now();
     loop {
         let state = {
@@ -122,6 +129,7 @@ async fn wait_for_device_present(app_core: &Arc<RwLock<AppCore>>, device_id: &st
 }
 
 async fn wait_for_device_absent(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
+    let device_id = DeviceId::from_str(device_id).expect("device_id should parse");
     let start = tokio::time::Instant::now();
     loop {
         let state = {
@@ -171,11 +179,16 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
         ExecutionMode::Simulation { seed: seed_b },
     );
 
-    let mut agent_config_b = AgentConfig::default();
-    agent_config_b.device_id = new_device_id;
-    agent_config_b.storage.base_path = env.test_dir.join("device-b");
-    std::fs::create_dir_all(&agent_config_b.storage.base_path)
-        .expect("Failed to create device-b storage dir");
+    let storage_base_path = env.test_dir.join("device-b");
+    std::fs::create_dir_all(&storage_base_path).expect("Failed to create device-b storage dir");
+    let agent_config_b = AgentConfig {
+        device_id: new_device_id,
+        storage: StorageConfig {
+            base_path: storage_base_path,
+            ..StorageConfig::default()
+        },
+        ..AgentConfig::default()
+    };
 
     let agent_b = AgentBuilder::new()
         .with_config(agent_config_b)

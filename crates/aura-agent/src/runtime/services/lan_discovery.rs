@@ -21,9 +21,20 @@ pub struct LanDiscoveryService {
     authority_id: AuthorityId,
     time: Arc<dyn PhysicalTimeEffects>,
     socket: Arc<dyn UdpEndpointEffects>,
-    descriptor: Arc<RwLock<Option<RendezvousDescriptor>>>,
+    state: Arc<RwLock<LanDiscoveryState>>,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
+}
+
+#[derive(Debug, Default)]
+struct LanDiscoveryState {
+    descriptor: Option<RendezvousDescriptor>,
+}
+
+impl LanDiscoveryState {
+    fn validate(&self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 impl LanDiscoveryService {
@@ -63,10 +74,23 @@ impl LanDiscoveryService {
             authority_id,
             time,
             socket,
-            descriptor: Arc::new(RwLock::new(None)),
+            state: Arc::new(RwLock::new(LanDiscoveryState::default())),
             shutdown_tx,
             shutdown_rx,
         })
+    }
+
+    async fn with_state_mut<R>(&self, op: impl FnOnce(&mut LanDiscoveryState) -> R) -> R {
+        let mut guard = self.state.write().await;
+        let result = op(&mut guard);
+        #[cfg(debug_assertions)]
+        {
+            if let Err(message) = guard.validate() {
+                tracing::error!(%message, "LanDiscoveryService state invariant violated");
+                debug_assert!(false, "LanDiscoveryService invariant violated: {}", message);
+            }
+        }
+        result
     }
 
     /// Start announcer + listener tasks.
@@ -89,13 +113,19 @@ impl LanDiscoveryService {
 
     /// Set the descriptor to announce.
     pub async fn set_descriptor(&self, descriptor: RendezvousDescriptor) {
-        *self.descriptor.write().await = Some(descriptor);
+        self.with_state_mut(|state| {
+            state.descriptor = Some(descriptor);
+        })
+        .await;
     }
 
     /// Clear the descriptor (stop announcing).
     #[allow(dead_code)]
     pub async fn clear_descriptor(&self) {
-        *self.descriptor.write().await = None;
+        self.with_state_mut(|state| {
+            state.descriptor = None;
+        })
+        .await;
     }
 
     /// Expose the underlying UDP socket (used for ad-hoc LAN invitation sends).
@@ -106,7 +136,7 @@ impl LanDiscoveryService {
     fn start_announcer(&self) -> tokio::task::JoinHandle<()> {
         let socket = self.socket.clone();
         let authority_id = self.authority_id;
-        let descriptor = self.descriptor.clone();
+        let state = self.state.clone();
         let interval_ms = self.config.announce_interval_ms;
         let time = self.time.clone();
         let broadcast_ip: Ipv4Addr = self
@@ -133,8 +163,8 @@ impl LanDiscoveryService {
                             continue;
                         }
 
-                        let desc_guard = descriptor.read().await;
-                        let Some(desc) = desc_guard.as_ref() else {
+                        let desc_guard = state.read().await;
+                        let Some(desc) = desc_guard.descriptor.as_ref() else {
                             continue;
                         };
 

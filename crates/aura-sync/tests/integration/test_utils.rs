@@ -44,7 +44,7 @@ impl MultiDeviceTestFixture {
     /// Create a new multi-device test fixture
     pub async fn new(device_count: usize) -> AuraResult<Self> {
         let device_labels: Vec<String> =
-            (0..device_count).map(|i| format!("device_{}", i)).collect();
+            (0..device_count).map(|i| format!("device_{i}")).collect();
         let device_labels_refs: Vec<&str> = device_labels.iter().map(|s| s.as_str()).collect();
 
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels_refs);
@@ -120,7 +120,7 @@ impl MultiDeviceTestFixture {
         self.harness
             .create_coordinated_session(session_type)
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to create session: {}", e)))
+            .map_err(|e| AuraError::internal(format!("Failed to create session: {e}")))
     }
 
     // REMOVED: wait_for_session_completion
@@ -253,12 +253,12 @@ pub async fn verify_journal_consistency(fixture: &MultiDeviceTestFixture) -> Aur
     let ended = session
         .end()
         .await
-        .map_err(|e| AuraError::internal(format!("Failed to end verification session: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Failed to end verification session: {e}")))?;
 
     ended
         .wait_for_completion(Duration::from_secs(30))
         .await
-        .map_err(|e| AuraError::internal(format!("Verification session timeout: {}", e)))?;
+        .map_err(|e| AuraError::internal(format!("Verification session timeout: {e}")))?;
 
     // In a real implementation, this would check actual journal state equality
     Ok(true)
@@ -280,7 +280,7 @@ pub async fn assert_sync_success<T>(
     timeout(timeout_duration, future)
         .await
         .map_err(|_| AuraError::internal(String::from("Sync operation timeout")))?
-        .map_err(|e| AuraError::internal(format!("Sync failed: {}", e)))
+        .map_err(|e| AuraError::internal(format!("Sync failed: {e}")))
 }
 
 /// Assert that a sync result fails within timeout

@@ -95,7 +95,7 @@ mod tests {
         let budget = HomeFlowBudget::new("test");
 
         // Normal state
-        let view = FlowBudgetView::from_budget(budget.clone());
+        let view = FlowBudgetView::from_budget(budget);
         assert!(!view.is_warning);
         assert!(!view.is_critical);
         assert!(view.usage_percent() == 0);

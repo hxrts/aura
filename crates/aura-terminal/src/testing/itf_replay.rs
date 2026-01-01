@@ -116,9 +116,9 @@ impl ITFTraceReplayer {
     pub fn replay_trace_file(&self, path: impl AsRef<Path>) -> Result<ReplayResult, String> {
         #[allow(clippy::disallowed_methods)] // Test infrastructure reading external trace files
         let content = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| format!("Failed to read ITF file: {}", e))?;
+            .map_err(|e| format!("Failed to read ITF file: {e}"))?;
         let trace: ITFTrace = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse ITF JSON: {}", e))?;
+            .map_err(|e| format!("Failed to parse ITF JSON: {e}"))?;
         self.replay_trace(&trace)
     }
 
@@ -242,7 +242,7 @@ impl ITFTraceReplayer {
             "Settings" => Ok(Screen::Settings),
             "Recovery" => Ok(Screen::Notifications),
             // "Invitations" was removed - functionality moved to Contacts screen
-            _ => Err(format!("Unknown screen: {}", tag)),
+            _ => Err(format!("Unknown screen: {tag}")),
         }
     }
 
@@ -272,7 +272,7 @@ impl ITFTraceReplayer {
             | "TextInputModal"
             | "ThresholdConfigModal"
             | "InvitationCodeModal" => Ok(ModalType::None),
-            _ => Err(format!("Unknown modal: {}", tag)),
+            _ => Err(format!("Unknown modal: {tag}")),
         }
     }
 
@@ -309,7 +309,7 @@ impl ITFTraceReplayer {
                     .as_str()
                     .ok_or("Bigint not a string")?
                     .parse()
-                    .map_err(|e| format!("Invalid bigint: {}", e));
+                    .map_err(|e| format!("Invalid bigint: {e}"));
             }
         }
         // Fall back to regular number
@@ -359,16 +359,15 @@ impl ITFTraceReplayer {
         from: &TuiState,
         expected_to: &TuiITFState,
     ) -> Option<(TerminalEvent, TuiState, Vec<TuiCommand>)> {
-        let mut candidates: Vec<TerminalEvent> = Vec::new();
-
-        // Always allow a tick as a "no-op" witness when toasts are absent.
-        candidates.push(events::tick());
-
-        // Keys modeled by the Quint spec.
-        candidates.push(events::escape());
-        candidates.push(events::char('q'));
-        candidates.push(events::char('?'));
-        candidates.push(events::char('i'));
+        let mut candidates = vec![
+            // Always allow a tick as a "no-op" witness when toasts are absent.
+            events::tick(),
+            // Keys modeled by the Quint spec.
+            events::escape(),
+            events::char('q'),
+            events::char('?'),
+            events::char('i'),
+        ];
 
         for c in ['1', '2', '3', '4', '5'] {
             candidates.push(events::char(c));

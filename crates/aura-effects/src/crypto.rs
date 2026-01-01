@@ -1046,26 +1046,18 @@ mod frost_tests {
             assert_eq!(
                 result.key_packages.len(),
                 max_signers as usize,
-                "Should have {} key packages for {}-of-{}",
-                max_signers,
-                threshold,
-                max_signers
+                "Should have {max_signers} key packages for {threshold}-of-{max_signers}",
             );
             assert!(
                 !result.public_key_package.is_empty(),
-                "Public key package should not be empty for {}-of-{}",
-                threshold,
-                max_signers
+                "Public key package should not be empty for {threshold}-of-{max_signers}",
             );
 
             // Each key package should be non-empty and different
             for (i, key_package) in result.key_packages.iter().enumerate() {
                 assert!(
                     !key_package.is_empty(),
-                    "Key package {} should not be empty for {}-of-{}",
-                    i,
-                    threshold,
-                    max_signers
+                    "Key package {i} should not be empty for {threshold}-of-{max_signers}",
                 );
             }
 
@@ -1074,8 +1066,7 @@ mod frost_tests {
                 for j in (i + 1)..result.key_packages.len() {
                     assert_ne!(
                         result.key_packages[i], result.key_packages[j],
-                        "Key packages {} and {} should be different for {}-of-{}",
-                        i, j, threshold, max_signers
+                        "Key packages {i} and {j} should be different for {threshold}-of-{max_signers}",
                     );
                 }
             }

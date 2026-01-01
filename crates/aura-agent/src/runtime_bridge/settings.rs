@@ -2,22 +2,21 @@ use super::AgentRuntimeBridge;
 use aura_app::IntentError;
 use aura_core::effects::StorageCoreEffects;
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 const ACCOUNT_CONFIG_KEYS: [&str; 2] = ["account.json", "demo-account.json"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(super) struct StoredAccountConfig {
     #[serde(default)]
-    authority_id: Option<String>,
+    pub(super) authority_id: Option<String>,
     #[serde(default)]
-    context_id: Option<String>,
+    pub(super) context_id: Option<String>,
     #[serde(default)]
-    display_name: Option<String>,
+    pub(super) display_name: Option<String>,
     #[serde(default)]
-    mfa_policy: Option<String>,
+    pub(super) mfa_policy: Option<String>,
     #[serde(default)]
-    created_at: Option<u64>,
+    pub(super) created_at: Option<u64>,
 }
 
 impl AgentRuntimeBridge {

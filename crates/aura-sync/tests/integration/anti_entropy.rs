@@ -91,9 +91,7 @@ async fn test_multi_device_anti_entropy_sync() -> AuraResult<()> {
 
             assert!(
                 sync_result.is_ok(),
-                "Anti-entropy sync between device {} and {} should succeed",
-                i,
-                j
+                "Anti-entropy sync between device {i} and {j} should succeed"
             );
         }
     }

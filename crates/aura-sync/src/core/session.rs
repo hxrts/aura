@@ -1116,7 +1116,7 @@ mod tests {
             constraint: "test constraint".to_string(),
         };
         manager
-            .fail_session(session_id, error.clone(), None, &test_time(1000010))
+            .fail_session(session_id, error, None, &test_time(1000010))
             .unwrap();
 
         // Verify failure

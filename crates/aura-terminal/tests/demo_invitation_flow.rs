@@ -60,10 +60,10 @@ struct TestEnv {
 fn generate_demo_invite_code(name: &str, seed: u64) -> String {
     // Create deterministic authority ID using the SAME derivation as SimulatedAgent
     // CRITICAL: Must use ids::authority_id() for domain separation
-    let sender_id = ids::authority_id(&format!("demo:{}:{}:authority", seed, name));
+    let sender_id = ids::authority_id(&format!("demo:{seed}:{name}:authority"));
 
     // Create deterministic invitation ID from seed and name
-    let invitation_id = ids::uuid(&format!("demo:{}:{}:invitation", seed, name));
+    let invitation_id = ids::uuid(&format!("demo:{seed}:{name}:invitation"));
 
     // Create ShareableInvitation-compatible structure
     // Uses Contact type (not Guardian) - guardian requests are sent in-band
@@ -77,24 +77,24 @@ fn generate_demo_invite_code(name: &str, seed: u64) -> String {
             }
         },
         "expires_at": null,
-        "message": format!("Contact invitation from {} (demo)", name)
+        "message": format!("Contact invitation from {name} (demo)")
     });
 
     // Encode as base64 with aura:v1: prefix
     let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
     let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{}", b64)
+    format!("aura:v1:{b64}")
 }
 
 /// Create a test environment with IoContext and AppCore
 async fn setup_test_env(name: &str) -> TestEnv {
     let unique = Uuid::new_v4();
-    let test_dir = std::env::temp_dir().join(format!("aura-demo-test-{}-{}", name, unique));
+    let test_dir = std::env::temp_dir().join(format!("aura-demo-test-{name}-{unique}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
-    let device_id_str = format!("test-device-{}", name);
-    let display_name = format!("DemoUser-{}", name);
+    let device_id_str = format!("test-device-{name}");
+    let display_name = format!("DemoUser-{name}");
 
     let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &display_name)
         .await
@@ -133,7 +133,7 @@ async fn setup_test_env(name: &str) -> TestEnv {
         .expect("Failed to init signals");
 
     let ctx = IoContext::builder()
-        .with_app_core(initialized_app_core.clone())
+        .with_app_core(initialized_app_core)
         .with_existing_account(true)
         .with_base_path(test_dir.clone())
         .with_device_id(device_id_str)
@@ -164,10 +164,9 @@ async fn wait_for_contact(app_core: &Arc<RwLock<AppCore>>, contact_id: Authority
         }
 
         if start.elapsed() > Duration::from_secs(2) {
+            let contact_count = state.contacts.len();
             panic!(
-                "Timed out waiting for contact {} ({} contacts present)",
-                contact_id,
-                state.contacts.len()
+                "Timed out waiting for contact {contact_id} ({contact_count} contacts present)"
             );
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -191,10 +190,7 @@ async fn wait_for_channel_members(
         }
         drop(core);
         if start.elapsed() > Duration::from_secs(2) {
-            panic!(
-                "Timed out waiting for {} members in channel {}",
-                expected_members, channel_name
-            );
+            panic!("Timed out waiting for {expected_members} members in channel {channel_name}");
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -222,8 +218,7 @@ async fn wait_for_message(
         drop(core);
         if start.elapsed() > Duration::from_secs(2) {
             panic!(
-                "Timed out waiting for message containing '{}' in {} channel",
-                content_snippet, channel_name
+                "Timed out waiting for message containing '{content_snippet}' in {channel_name} channel"
             );
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -244,14 +239,12 @@ async fn test_demo_invitation_codes_are_parseable() {
     let alice_code = generate_demo_invite_code("Alice", seed);
     let carol_code = generate_demo_invite_code("Carol", seed + 1);
 
-    println!(
-        "Alice's invite code: {}...",
-        &alice_code[..50.min(alice_code.len())]
-    );
-    println!(
-        "Carol's invite code: {}...",
-        &carol_code[..50.min(carol_code.len())]
-    );
+    let alice_preview_len = 50.min(alice_code.len());
+    let alice_preview = &alice_code[..alice_preview_len];
+    println!("Alice's invite code: {alice_preview}...");
+    let carol_preview_len = 50.min(carol_code.len());
+    let carol_preview = &carol_code[..carol_preview_len];
+    println!("Carol's invite code: {carol_preview}...");
 
     // Phase 1: Parse Alice's code
     println!("\nPhase 1: Parse Alice's invitation code");
@@ -259,14 +252,20 @@ async fn test_demo_invitation_codes_are_parseable() {
     match &alice_result {
         Ok(invitation) => {
             println!("  Success! Alice's invitation:");
-            println!("    Version: {}", invitation.version);
-            println!("    Invitation ID: {}", invitation.invitation_id);
-            println!("    Sender ID: {}", invitation.sender_id);
-            println!("    Type: {:?}", invitation.invitation_type);
-            println!("    Message: {:?}", invitation.message);
+            println!("    Version: {version}", version = invitation.version);
+            println!(
+                "    Invitation ID: {invitation_id}",
+                invitation_id = invitation.invitation_id
+            );
+            println!("    Sender ID: {sender_id}", sender_id = invitation.sender_id);
+            println!(
+                "    Type: {invitation_type:?}",
+                invitation_type = invitation.invitation_type
+            );
+            println!("    Message: {message:?}", message = invitation.message);
         }
         Err(e) => {
-            panic!("Failed to parse Alice's invitation code: {:?}", e);
+            panic!("Failed to parse Alice's invitation code: {e:?}");
         }
     }
     let alice_invitation = alice_result.expect("Alice's code should parse");
@@ -277,14 +276,20 @@ async fn test_demo_invitation_codes_are_parseable() {
     match &carol_result {
         Ok(invitation) => {
             println!("  Success! Carol's invitation:");
-            println!("    Version: {}", invitation.version);
-            println!("    Invitation ID: {}", invitation.invitation_id);
-            println!("    Sender ID: {}", invitation.sender_id);
-            println!("    Type: {:?}", invitation.invitation_type);
-            println!("    Message: {:?}", invitation.message);
+            println!("    Version: {version}", version = invitation.version);
+            println!(
+                "    Invitation ID: {invitation_id}",
+                invitation_id = invitation.invitation_id
+            );
+            println!("    Sender ID: {sender_id}", sender_id = invitation.sender_id);
+            println!(
+                "    Type: {invitation_type:?}",
+                invitation_type = invitation.invitation_type
+            );
+            println!("    Message: {message:?}", message = invitation.message);
         }
         Err(e) => {
-            panic!("Failed to parse Carol's invitation code: {:?}", e);
+            panic!("Failed to parse Carol's invitation code: {e:?}");
         }
     }
     let carol_invitation = carol_result.expect("Carol's code should parse");
@@ -299,24 +304,18 @@ async fn test_demo_invitation_codes_are_parseable() {
     // Both should be Contact type (Guardian requests are sent in-band)
     match &alice_invitation.invitation_type {
         aura_invitation::InvitationType::Contact { nickname } => {
-            println!(
-                "  Alice is a Contact invitation with nickname: {:?}",
-                nickname
-            );
+            println!("  Alice is a Contact invitation with nickname: {nickname:?}");
             assert_eq!(nickname, &Some("Alice".to_string()));
         }
-        other => panic!("Expected Contact type for Alice, got {:?}", other),
+        other => panic!("Expected Contact type for Alice, got {other:?}"),
     }
 
     match &carol_invitation.invitation_type {
         aura_invitation::InvitationType::Contact { nickname } => {
-            println!(
-                "  Carol is a Contact invitation with nickname: {:?}",
-                nickname
-            );
+            println!("  Carol is a Contact invitation with nickname: {nickname:?}");
             assert_eq!(nickname, &Some("Carol".to_string()));
         }
-        other => panic!("Expected Contact type for Carol, got {:?}", other),
+        other => panic!("Expected Contact type for Carol, got {other:?}"),
     }
 
     // They should have different sender IDs
@@ -358,7 +357,7 @@ async fn test_import_invitation_command_with_demo_codes() {
         Ok(()) => {
             println!("  Successfully dispatched Alice's invitation import");
         }
-        Err(e) => panic!("Failed to import Alice's invitation: {:?}", e),
+        Err(e) => panic!("Failed to import Alice's invitation: {e:?}"),
     }
     wait_for_contact(&env.app_core, alice_sender).await;
 
@@ -375,7 +374,7 @@ async fn test_import_invitation_command_with_demo_codes() {
         Ok(()) => {
             println!("  Successfully dispatched Carol's invitation import");
         }
-        Err(e) => panic!("Failed to import Carol's invitation: {:?}", e),
+        Err(e) => panic!("Failed to import Carol's invitation: {e:?}"),
     }
     wait_for_contact(&env.app_core, carol_sender).await;
 
@@ -532,14 +531,17 @@ async fn test_complete_demo_invitation_flow() {
 
     // Check invitations state
     if let Ok(inv_state) = core.read(&*INVITATIONS_SIGNAL).await {
-        println!("  Pending invitations: {}", inv_state.pending.len());
-        println!("  Sent invitations: {}", inv_state.sent.len());
+        let pending_count = inv_state.pending.len();
+        let sent_count = inv_state.sent.len();
+        println!("  Pending invitations: {pending_count}");
+        println!("  Sent invitations: {sent_count}");
     }
 
     // Check recovery/guardians state
     if let Ok(recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
-        println!("  Guardians: {}", recovery_state.guardians.len());
-        println!("  Threshold: {}", recovery_state.threshold);
+        let guardian_count = recovery_state.guardians.len();
+        println!("  Guardians: {guardian_count}");
+        println!("  Threshold: {threshold}", threshold = recovery_state.threshold);
     }
 
     drop(core);
@@ -578,9 +580,11 @@ async fn test_demo_hints_deterministic() {
         "Carol codes should be identical with same seed"
     );
 
-    println!("  Seed {} produces consistent codes:", seed);
-    println!("    Alice: {}...", &alice1[..40]);
-    println!("    Carol (seed + 1): {}...", &carol1[..40]);
+    println!("  Seed {seed} produces consistent codes:");
+    let alice_preview = &alice1[..40];
+    println!("    Alice: {alice_preview}...");
+    let carol_preview = &carol1[..40];
+    println!("    Carol (seed + 1): {carol_preview}...");
 
     // Verify different seeds produce different codes
     let alice_different = generate_demo_invite_code("Alice", 2025);
@@ -590,7 +594,8 @@ async fn test_demo_hints_deterministic() {
     );
 
     println!("\n  Seed 2025 produces different codes:");
-    println!("    Alice: {}...", &alice_different[..40]);
+    let alice_diff_preview = &alice_different[..40];
+    println!("    Alice: {alice_diff_preview}...");
 
     println!("\n=== Demo Hints Determinism Test PASSED ===\n");
 }
@@ -610,7 +615,7 @@ async fn test_invalid_invitation_code_rejection() {
             code: "not-a-valid-code".to_string(),
         })
         .await;
-    println!("  Result: {:?}", result);
+    println!("  Result: {result:?}");
     assert!(result.is_err(), "Invalid format should fail");
 
     // Test 2: Wrong prefix
@@ -621,7 +626,7 @@ async fn test_invalid_invitation_code_rejection() {
             code: "wrong:v1:abc123".to_string(),
         })
         .await;
-    println!("  Result: {:?}", result);
+    println!("  Result: {result:?}");
     assert!(result.is_err(), "Wrong prefix should fail");
 
     // Test 3: Invalid base64
@@ -632,7 +637,7 @@ async fn test_invalid_invitation_code_rejection() {
             code: "aura:v1:not-valid-base64!!!".to_string(),
         })
         .await;
-    println!("  Result: {:?}", result);
+    println!("  Result: {result:?}");
     assert!(result.is_err(), "Invalid base64 should fail");
 
     // Test 4: Valid base64 but invalid JSON
@@ -642,10 +647,10 @@ async fn test_invalid_invitation_code_rejection() {
     let result = env
         .ctx
         .dispatch(EffectCommand::ImportInvitation {
-            code: format!("aura:v1:{}", invalid_json),
+            code: format!("aura:v1:{invalid_json}"),
         })
         .await;
-    println!("  Result: {:?}", result);
+    println!("  Result: {result:?}");
     assert!(result.is_err(), "Invalid JSON should fail");
 
     let _ = std::fs::remove_dir_all(&env.test_dir);
@@ -684,37 +689,35 @@ async fn test_guardian_authority_id_matching() {
     let carol_invitation_authority = carol_invitation.sender_id;
 
     println!("From parsed invitations:");
-    println!("  Alice AuthorityId: {}", alice_invitation_authority);
-    println!("  Carol AuthorityId: {}", carol_invitation_authority);
+    println!("  Alice AuthorityId: {alice_invitation_authority}");
+    println!("  Carol AuthorityId: {carol_invitation_authority}");
 
     // Step 3: Derive AuthorityIds the same way SimulatedAgent does
     // (This mirrors SimulatedAgent::new_with_shared_transport in demo/mod.rs)
-    let alice_simulator_authority =
-        ids::authority_id(&format!("demo:{}:{}:authority", seed, "Alice"));
+    let alice_simulator_authority = ids::authority_id(&format!("demo:{seed}:Alice:authority"));
+    let carol_seed = seed + 1;
     let carol_simulator_authority =
-        ids::authority_id(&format!("demo:{}:{}:authority", seed + 1, "Carol"));
+        ids::authority_id(&format!("demo:{carol_seed}:Carol:authority"));
 
     println!("\nFrom simulator derivation:");
-    println!("  Alice AuthorityId: {}", alice_simulator_authority);
-    println!("  Carol AuthorityId: {}", carol_simulator_authority);
+    println!("  Alice AuthorityId: {alice_simulator_authority}");
+    println!("  Carol AuthorityId: {carol_simulator_authority}");
 
     // Step 4: CRITICAL ASSERTIONS - these must match for guardian display to work
     assert_eq!(
         alice_invitation_authority, alice_simulator_authority,
         "CRITICAL: Alice's invitation AuthorityId must match SimulatedAgent AuthorityId.\n\
          This is required for signal_coordinator to find the contact when setting is_guardian=true.\n\
-         Invitation: {}\n\
-         Simulator:  {}",
-        alice_invitation_authority, alice_simulator_authority
+         Invitation: {alice_invitation_authority}\n\
+         Simulator:  {alice_simulator_authority}"
     );
 
     assert_eq!(
         carol_invitation_authority, carol_simulator_authority,
         "CRITICAL: Carol's invitation AuthorityId must match SimulatedAgent AuthorityId.\n\
          This is required for signal_coordinator to find the contact when setting is_guardian=true.\n\
-         Invitation: {}\n\
-         Simulator:  {}",
-        carol_invitation_authority, carol_simulator_authority
+         Invitation: {carol_invitation_authority}\n\
+         Simulator:  {carol_simulator_authority}"
     );
 
     // Step 5: Verify the two agents have different IDs
@@ -737,20 +740,20 @@ async fn test_derivation_chain_consistency() {
     let seed = 2024u64;
 
     // Test Alice's full derivation chain
-    println!("Alice (seed={}):", seed);
+    println!("Alice (seed={seed}):");
 
     // 1. How ids::authority_id derives it
-    let seed_string = format!("demo:{}:{}:authority", seed, "Alice");
-    println!("  Seed string: \"{}\"", seed_string);
+    let seed_string = format!("demo:{seed}:Alice:authority");
+    println!("  Seed string: \"{seed_string}\"");
 
     let authority = ids::authority_id(&seed_string);
-    println!("  AuthorityId: {}", authority);
-    println!("  UUID: {}", authority.uuid());
+    println!("  AuthorityId: {authority}");
+    println!("  UUID: {uuid}", uuid = authority.uuid());
 
     // 2. Verify it matches what's in the invitation
     let code = generate_demo_invite_code("Alice", seed);
     let invitation = ShareableInvitation::from_code(&code).unwrap();
-    println!("  Invitation sender_id: {}", invitation.sender_id);
+    println!("  Invitation sender_id: {sender_id}", sender_id = invitation.sender_id);
 
     assert_eq!(
         authority, invitation.sender_id,
@@ -758,17 +761,21 @@ async fn test_derivation_chain_consistency() {
     );
 
     // Test Carol's derivation chain (uses seed + 1)
-    println!("\nCarol (seed={}):", seed + 1);
+    let carol_seed = seed + 1;
+    println!("\nCarol (seed={carol_seed}):");
 
-    let carol_seed_string = format!("demo:{}:{}:authority", seed + 1, "Carol");
-    println!("  Seed string: \"{}\"", carol_seed_string);
+    let carol_seed_string = format!("demo:{carol_seed}:Carol:authority");
+    println!("  Seed string: \"{carol_seed_string}\"");
 
     let carol_authority = ids::authority_id(&carol_seed_string);
-    println!("  AuthorityId: {}", carol_authority);
+    println!("  AuthorityId: {carol_authority}");
 
-    let carol_code = generate_demo_invite_code("Carol", seed + 1);
+    let carol_code = generate_demo_invite_code("Carol", carol_seed);
     let carol_invitation = ShareableInvitation::from_code(&carol_code).unwrap();
-    println!("  Invitation sender_id: {}", carol_invitation.sender_id);
+    println!(
+        "  Invitation sender_id: {sender_id}",
+        sender_id = carol_invitation.sender_id
+    );
 
     assert_eq!(
         carol_authority, carol_invitation.sender_id,

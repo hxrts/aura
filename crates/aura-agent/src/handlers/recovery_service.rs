@@ -327,7 +327,6 @@ impl RecoveryServiceApi {
         use crate::core::{default_context_id_for_authority, AgentError};
         use aura_core::effects::ThresholdSigningEffects;
         use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
-        use aura_core::ContextId;
 
         let authority_id = self.handler.authority_context().authority_id();
         let policy = policy_for(CeremonyFlow::GuardianSetupRotation);
@@ -561,7 +560,6 @@ impl RecoveryServiceApi {
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use aura_core::identifiers::ContextId;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);

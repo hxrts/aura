@@ -1004,7 +1004,7 @@ mod global_behavior {
 
             tui.send_char('q');
 
-            assert!(tui.state.should_exit, "q should quit from {:?}", screen);
+            assert!(tui.state.should_exit, "q should quit from {screen:?}");
             assert!(tui.has_exit());
         }
     }
@@ -1052,7 +1052,7 @@ mod global_behavior {
 
             tui.send_char('?');
 
-            assert!(tui.has_modal(), "? should open help from {:?}", screen);
+            assert!(tui.has_modal(), "? should open help from {screen:?}");
             assert_eq!(tui.modal_type(), ModalType::Help);
 
             // Clean up for next iteration

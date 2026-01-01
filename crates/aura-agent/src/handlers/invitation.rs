@@ -10,11 +10,12 @@ use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::services::InvitationManager;
 use crate::runtime::AuraEffectSystem;
+use crate::InvitationServiceApi;
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::effects::{FlowBudgetEffects, TransportEnvelope, TransportEffects, TransportReceipt};
 use aura_core::effects::{
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, TransportEffects,
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
 };
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
@@ -1243,18 +1244,18 @@ async fn execute_record_receipt(
     };
 
     let peer_id = peer.unwrap_or(receipt.dst);
-    let operation_key = operation.replace(' ', \"_\");
+    let operation_key = operation.replace(' ', "_");
     let key = format!(
-        \"invitation/receipts/{}/{}/{}/{}\",
+        "invitation/receipts/{}/{}/{}/{}",
         receipt.ctx, peer_id, operation_key, receipt.nonce
     );
     let bytes = serde_json::to_vec(&receipt).map_err(|e| {
-        AgentError::effects(format!(\"Failed to serialize invitation receipt: {e}\"))
+        AgentError::effects(format!("Failed to serialize invitation receipt: {e}"))
     })?;
     effects
         .store(&key, bytes)
         .await
-        .map_err(|e| AgentError::effects(format!(\"Failed to store invitation receipt: {e}\")))?;
+        .map_err(|e| AgentError::effects(format!("Failed to store invitation receipt: {e}")))?;
     Ok(())
 }
 
@@ -1271,8 +1272,7 @@ mod tests {
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-        let authority_context = AuthorityContext::new(authority_id);
-        authority_context
+        AuthorityContext::new(authority_id)
     }
 
     #[tokio::test]

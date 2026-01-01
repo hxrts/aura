@@ -67,8 +67,8 @@ mod tests {
         let expected = [1; 32];
         let actual = tree_state.root_commitment().0;
         if actual != expected {
-            println!("Expected: {:?}", expected);
-            println!("Actual: {:?}", actual);
+            println!("Expected: {expected:?}");
+            println!("Actual: {actual:?}");
         }
         assert_eq!(actual, expected);
 
@@ -96,7 +96,7 @@ mod tests {
 
         let invalid_op = AttestedOp {
             parent_commitment: Hash32::from_bytes(&[99; 32]), // Wrong parent
-            ..valid_op.clone()
+            ..valid_op
         };
 
         assert!(!invalid_op.validate_against_parent(&tree_state));

@@ -104,19 +104,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for effect in &effects {
                 match effect {
                     AuraEffect::GuardCapability { capability, role } => {
-                        println!("   [+] Guard capability '{}' for {}", capability, role);
+                        println!("   [+] Guard capability '{capability}' for {role}");
                     }
                     AuraEffect::FlowCost { cost, role } => {
-                        println!("   [+] Flow cost {} for {}", cost, role);
+                        println!("   [+] Flow cost {cost} for {role}");
                     }
                     AuraEffect::JournalFacts { facts, role } => {
-                        println!("   [+] Journal facts '{}' for {}", facts, role);
+                        println!("   [+] Journal facts '{facts}' for {role}");
                     }
                     _ => {}
                 }
             }
         }
-        Err(e) => println!("   [ERROR] Annotation extraction error: {}", e),
+        Err(e) => println!("   [ERROR] Annotation extraction error: {e}"),
     }
 
     println!("\n[DONE] Choreography demonstration complete!");

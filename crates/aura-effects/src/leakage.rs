@@ -331,7 +331,7 @@ mod tests {
                 context,
                 100,
                 ObserverClass::External,
-                format!("test_{}", i),
+                format!("test_{i}"),
                 i as u64 * 1000,
             );
             handler.record_leakage(event).await.unwrap();
@@ -391,7 +391,7 @@ mod tests {
                 context,
                 100,
                 ObserverClass::External,
-                format!("test_{}", ts),
+                format!("test_{ts}"),
                 ts,
             );
             handler.record_leakage(event).await.unwrap();

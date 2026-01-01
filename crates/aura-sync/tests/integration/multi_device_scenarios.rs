@@ -139,7 +139,7 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
         println!("Phase 3: Anti-entropy establishing baseline");
         for i in 0..fixture.devices.len() {
             for j in (i + 1)..fixture.devices.len() {
-                println!("  Anti-entropy sync: Device {} ↔ Device {}", i, j);
+                println!("  Anti-entropy sync: Device {i} ↔ Device {j}");
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }
@@ -148,7 +148,8 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
         println!("Phase 4: Journal sync handling operations");
         for i in 0..3 {
             // Simulate some journal operations
-            println!("  Journal operation batch {}", i + 1);
+            let batch = i + 1;
+            println!("  Journal operation batch {batch}");
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
 
@@ -213,22 +214,16 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
     // Test coordination at larger scale
     let large_scale_result = timeout(Duration::from_secs(360), async {
         let device_count = fixture.devices.len();
-        println!(
-            "Phase 1: Large-scale coordination with {} devices",
-            device_count
-        );
+        println!("Phase 1: Large-scale coordination with {device_count} devices");
 
         // Step 1: Mesh anti-entropy sync (all pairs)
         println!("Phase 2: Mesh anti-entropy synchronization");
         let total_pairs = device_count * (device_count - 1) / 2;
         for i in 0..device_count {
             for j in (i + 1)..device_count {
+                let pair_index = i * device_count + j - i * (i + 1) / 2;
                 println!(
-                    "  Sync pair {}/{}: Device {} ↔ Device {}",
-                    (i * device_count + j - i * (i + 1) / 2),
-                    total_pairs,
-                    i,
-                    j
+                    "  Sync pair {pair_index}/{total_pairs}: Device {i} ↔ Device {j}"
                 );
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
@@ -237,28 +232,24 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
         // Step 2: Coordinated journal operations
         println!("Phase 3: Coordinated journal operations");
         for round in 1..=3 {
-            println!("  Operation round {}/3", round);
+            println!("  Operation round {round}/3");
             for device_idx in 0..device_count {
-                println!("    Device {} performing journal operations", device_idx);
+                println!("    Device {device_idx} performing journal operations");
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
             // Sync after each round
-            println!("  Synchronizing after round {}", round);
+            println!("  Synchronizing after round {round}");
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
 
         // Step 3: Threshold operations (need majority approval)
         println!("Phase 4: Threshold operations");
         let majority = device_count / 2 + 1;
-        println!("  Need {}/{} devices for majority", majority, device_count);
+        println!("  Need {majority}/{device_count} devices for majority");
 
         for approver in 0..majority {
-            println!(
-                "  Approval {}/{} from device {}",
-                approver + 1,
-                majority,
-                approver
-            );
+            let approval_idx = approver + 1;
+            println!("  Approval {approval_idx}/{majority} from device {approver}");
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
         println!("  Threshold reached, executing operation");
@@ -266,10 +257,7 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
 
         // Step 4: Final consistency verification
         println!("Phase 5: Final consistency verification");
-        println!(
-            "  Verifying all {} devices have consistent state",
-            device_count
-        );
+        println!("  Verifying all {device_count} devices have consistent state");
         tokio::time::sleep(Duration::from_millis(800)).await;
 
         Ok::<(), AuraError>(())
@@ -344,7 +332,7 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
                     .await;
             }
         }
-        println!("  Device {} completely failed", failed_device);
+        println!("  Device {failed_device} completely failed");
 
         // High latency/packet loss on remaining connections
         let poor_condition = NetworkCondition {
@@ -415,7 +403,7 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
                     .await;
             }
         }
-        println!("  Failed device {} recovered", failed_device);
+        println!("  Failed device {failed_device} recovered");
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
         // Step 5: Full system recovery
@@ -467,9 +455,11 @@ async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
 
     // Test complete end-to-end workflow
     let e2e_result = timeout(Duration::from_secs(420), async {
+        let device_count = fixture.devices.len();
+
         // Phase 1: System initialization
         println!("Phase 1: System initialization");
-        println!("  Initializing {} devices", fixture.devices.len());
+        println!("  Initializing {device_count} devices");
         tokio::time::sleep(Duration::from_millis(400)).await;
 
         println!("  Establishing initial connectivity");
@@ -486,7 +476,7 @@ async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
         // Phase 3: Normal operations
         println!("Phase 3: Normal operations period");
         for operation in 1..=5 {
-            println!("  Operation {}: Journal updates and sync", operation);
+            println!("  Operation {operation}: Journal updates and sync");
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
 
@@ -502,8 +492,8 @@ async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
         println!("Phase 5: Network adversity simulation");
 
         // Introduce poor network conditions
-        for i in 0..fixture.devices.len() {
-            for j in (i + 1)..fixture.devices.len() {
+        for i in 0..device_count {
+            for j in (i + 1)..device_count {
                 let poor_condition = NetworkCondition {
                     latency: Duration::from_millis(200),
                     jitter: Duration::from_millis(50),
@@ -545,8 +535,8 @@ async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
         println!("Phase 7: Network recovery");
 
         // Restore good network conditions
-        for i in 0..fixture.devices.len() {
-            for j in (i + 1)..fixture.devices.len() {
+        for i in 0..device_count {
+            for j in (i + 1)..device_count {
                 fixture
                     .set_network_condition(
                         fixture.devices[i],

@@ -48,7 +48,7 @@ async fn encrypted_storage_fs_round_trip_is_not_plaintext_on_disk() {
     assert_eq!(retrieved, value);
 
     // Ensure the on-disk blob is not the plaintext marker.
-    let raw_path = storage_root.join(format!("{}.dat", key));
+    let raw_path = storage_root.join(format!("{key}.dat"));
     let raw = std::fs::read(&raw_path).expect("read raw blob");
 
     assert!(

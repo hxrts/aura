@@ -405,7 +405,7 @@ mod tests {
         let op = create_test_operation(1, 0);
 
         let cid1 = log.add_operation(op.clone());
-        let cid2 = log.add_operation(op.clone());
+        let cid2 = log.add_operation(op);
 
         assert_eq!(cid1, cid2);
         assert_eq!(log.len(), 1); // Should not add duplicate
@@ -419,9 +419,9 @@ mod tests {
         let op2 = create_test_operation(2, 0);
         let op3 = create_test_operation(3, 0);
 
-        log.add_operation(op3.clone());
-        log.add_operation(op1.clone());
-        log.add_operation(op2.clone());
+        log.add_operation(op3);
+        log.add_operation(op1);
+        log.add_operation(op2);
 
         let operations = log.get_all_operations();
         assert_eq!(operations.len(), 3);
@@ -445,11 +445,11 @@ mod tests {
         let op2 = create_test_operation(2, 0);
         let op3 = create_test_operation(3, 0);
 
-        log1.add_operation(op1.clone());
+        log1.add_operation(op1);
         log1.add_operation(op2.clone());
 
-        log2.add_operation(op2.clone());
-        log2.add_operation(op3.clone());
+        log2.add_operation(op2);
+        log2.add_operation(op3);
 
         // Test join operation
         let joined = log1.join(&log2);
@@ -519,8 +519,8 @@ mod tests {
 
         log1.add_operation(op1.clone());
 
-        log2.add_operation(op1.clone());
-        log2.add_operation(op2.clone());
+        log2.add_operation(op1);
+        log2.add_operation(op2);
 
         // log1 should be less than log2 (subset relationship)
         assert!(log1 < log2);
@@ -538,8 +538,8 @@ mod tests {
         let op1 = create_test_operation(1, 0);
         let op2 = create_test_operation(2, 0);
 
-        log1.add_operation(op1.clone());
-        log2.add_operation(op2.clone());
+        log1.add_operation(op1);
+        log2.add_operation(op2);
 
         let summary1 = log1.create_summary();
         let summary2 = log2.create_summary();

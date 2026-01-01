@@ -49,20 +49,17 @@ fn create_test_state() -> QuintSimulationState {
 fn test_load_consensus_trace_from_file() {
     let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
+        .and_then(|path| path.parent())
+        .expect("missing manifest ancestors")
         .join("traces/consensus.itf.json");
 
     if !trace_path.exists() {
-        println!(
-            "Skipping test: consensus trace not found at {:?}",
-            trace_path
-        );
+        println!("Skipping test: consensus trace not found at {trace_path:?}");
         return;
     }
 
-    let trace = ITFLoader::load_from_file(&trace_path).expect("Failed to load consensus trace");
+    let trace =
+        ITFLoader::load_from_file(&trace_path).expect("Failed to load consensus trace");
 
     assert!(!trace.states.is_empty(), "Trace should have states");
     assert!(
@@ -81,42 +78,35 @@ fn test_load_consensus_trace_from_file() {
 fn test_load_anti_entropy_trace_from_file() {
     let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
+        .and_then(|path| path.parent())
+        .expect("missing manifest ancestors")
         .join("traces/anti_entropy.itf.json");
 
     if !trace_path.exists() {
-        println!(
-            "Skipping test: anti_entropy trace not found at {:?}",
-            trace_path
-        );
+        println!("Skipping test: anti_entropy trace not found at {trace_path:?}");
         return;
     }
 
-    let trace = ITFLoader::load_from_file(&trace_path).expect("Failed to load anti_entropy trace");
+    let trace =
+        ITFLoader::load_from_file(&trace_path).expect("Failed to load anti_entropy trace");
 
     assert!(!trace.states.is_empty());
     assert!(trace.vars.contains(&"nodeStates".to_string()));
     assert!(trace.vars.contains(&"pendingDeltas".to_string()));
 
-    println!(
-        "Loaded anti_entropy trace with {} states",
-        trace.states.len()
-    );
+    println!("Loaded anti_entropy trace with {} states", trace.states.len());
 }
 
 #[test]
 fn test_load_epochs_trace_from_file() {
     let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
+        .and_then(|path| path.parent())
+        .expect("missing manifest ancestors")
         .join("traces/epochs.itf.json");
 
     if !trace_path.exists() {
-        println!("Skipping test: epochs trace not found at {:?}", trace_path);
+        println!("Skipping test: epochs trace not found at {trace_path:?}");
         return;
     }
 
@@ -257,7 +247,7 @@ async fn test_replay_programmatic_trace() {
         }
         Err(e) => {
             // Some actions may fail due to missing handlers - this is expected for NoOp handlers
-            println!("Replay returned error (expected for NoOp): {}", e);
+            println!("Replay returned error (expected for NoOp): {e}");
         }
     }
 }
@@ -279,7 +269,7 @@ async fn test_explore_with_registry() {
 
     assert!(result.is_ok(), "Exploration should succeed");
 
-    let sim_result = result.unwrap();
+    let sim_result = result.expect("exploration should succeed");
     println!(
         "Exploration completed: {} steps, success={}",
         sim_result.step_count, sim_result.success
@@ -294,9 +284,8 @@ async fn test_explore_with_registry() {
 async fn test_load_and_analyze_consensus_trace() {
     let trace_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
+        .and_then(|path| path.parent())
+        .expect("missing manifest ancestors")
         .join("traces/consensus.itf.json");
 
     if !trace_path.exists() {
@@ -328,7 +317,7 @@ async fn test_load_and_analyze_consensus_trace() {
 
     println!("\nAction distribution:");
     for (action, count) in &action_counts {
-        println!("  {}: {}", action, count);
+        println!("  {action}: {count}");
     }
 }
 
@@ -336,9 +325,8 @@ async fn test_load_and_analyze_consensus_trace() {
 async fn test_load_and_analyze_all_traces() {
     let traces_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
+        .and_then(|path| path.parent())
+        .expect("missing manifest ancestors")
         .join("traces");
 
     if !traces_dir.exists() {
@@ -361,7 +349,7 @@ async fn test_load_and_analyze_all_traces() {
     for file in &trace_files {
         let path = traces_dir.join(file);
         if !path.exists() {
-            println!("{}: NOT FOUND", file);
+            println!("{file}: NOT FOUND");
             continue;
         }
 
@@ -369,14 +357,13 @@ async fn test_load_and_analyze_all_traces() {
             Ok(trace) => {
                 let sequence = ITFLoader::to_simulation_sequence(&trace);
                 println!(
-                    "{}: {} states, {} inferred actions",
-                    file,
+                    "{file}: {} states, {} inferred actions",
                     trace.states.len(),
                     sequence.steps.len()
                 );
             }
             Err(e) => {
-                println!("{}: LOAD ERROR - {}", file, e);
+                println!("{file}: LOAD ERROR - {e}");
             }
         }
     }

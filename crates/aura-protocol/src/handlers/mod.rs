@@ -291,8 +291,12 @@ pub mod timeout_coordinator;
 pub use timeout_coordinator::TimeoutCoordinator;
 
 pub mod transport_coordinator;
-
 pub use transport_coordinator::{
     CoordinationResult, RetryingTransportManager, TransportCoordinationConfig,
     TransportCoordinationError, TransportCoordinator,
+};
+
+pub mod version_handshake;
+pub use version_handshake::{
+    PeerVersionInfo, VersionHandshake, VersionHandshakeRequest, VersionHandshakeResponse,
 };

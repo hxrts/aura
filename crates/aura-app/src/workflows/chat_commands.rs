@@ -536,7 +536,7 @@ pub fn parse_chat_command(input: &str) -> Result<ChatCommand, CommandError> {
             let duration = arg_parts
                 .next()
                 .filter(|s| !s.is_empty())
-                .map(|s| parse_duration(s))
+                .map(parse_duration)
                 .transpose()
                 .map_err(|e| CommandError::InvalidArgument {
                     command: "mute".to_string(),

@@ -405,7 +405,7 @@ mod tests {
             DeviceId::new_from_entropy([8u8; 32]),
         ];
 
-        coordinator.record_chunk_placement(chunk_id.clone(), nodes.clone());
+        coordinator.record_chunk_placement(chunk_id.clone(), nodes);
         let locations = coordinator.get_chunk_locations(&chunk_id);
         assert_eq!(locations.len(), 2);
     }

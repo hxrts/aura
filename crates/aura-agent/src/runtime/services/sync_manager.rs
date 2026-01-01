@@ -102,7 +102,6 @@ pub enum SyncManagerState {
     Stopping,
 }
 
-#[derive(Debug)]
 struct SyncState {
     service: Option<Arc<SyncService>>,
     status: SyncManagerState,
@@ -570,6 +569,7 @@ impl SyncServiceManager {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_types)]
 mod tests {
     use super::*;
     use async_trait::async_trait;

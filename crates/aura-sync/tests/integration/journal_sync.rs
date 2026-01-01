@@ -323,7 +323,7 @@ async fn test_concurrent_journal_writers() -> AuraResult<()> {
                 // Simulate journal writes for this device
                 for entry in 0..5 {
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    println!("Device {} writing journal entry {}", i, entry);
+                    println!("Device {i} writing journal entry {entry}");
                 }
                 Ok::<(), AuraError>(())
             };
@@ -393,7 +393,7 @@ async fn test_sync_message_handling() -> AuraResult<()> {
 
         for message_type in messages {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            println!("Processing message type: {}", message_type);
+            println!("Processing message type: {message_type}");
 
             // Simulate message processing
             match message_type {
@@ -479,7 +479,7 @@ async fn test_sync_retry_logic() -> AuraResult<()> {
 
         for attempt in 1..=max_retries {
             tokio::time::sleep(Duration::from_millis(200 * attempt as u64)).await;
-            println!("Sync attempt {} of {}", attempt, max_retries);
+            println!("Sync attempt {attempt} of {max_retries}");
 
             if attempt == max_retries {
                 // Improve conditions on final attempt to allow success

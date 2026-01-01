@@ -1,8 +1,8 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
+use aura_core::effects::indexed;
 use aura_core::effects::{BloomFilter, IndexedJournalEffects, JournalEffects};
 use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, Journal};
-use aura_journal::indexed;
 
 // Implementation of JournalEffects
 #[async_trait]

@@ -222,11 +222,19 @@ impl EffectResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::EffectContext;
     use crate::runtime::registry::EffectRegistry;
     use aura_core::effects::ExecutionMode;
     use aura_core::identifiers::{AuthorityId, ContextId};
     use futures::future::BoxFuture;
     use std::sync::Arc;
+
+    fn double_handler(
+        _context: &EffectContext,
+        value: u64,
+    ) -> BoxFuture<'static, Result<EffectResult, AuraError>> {
+        Box::pin(async move { Ok(EffectResult::Success(format!("ok:{value}"))) })
+    }
 
     #[tokio::test]
     async fn effect_executor_dispatches_registered_handler() {
@@ -238,9 +246,7 @@ mod tests {
             .register_effect_handler::<u64, _>(
                 EffectType::Crypto,
                 EffectOperation::from("double"),
-                |_context, value| -> BoxFuture<'static, Result<EffectResult, AuraError>> {
-                    Box::pin(async move { Ok(EffectResult::Success(format!("ok:{value}"))) })
-                },
+                double_handler,
             )
             .expect("register handler");
 

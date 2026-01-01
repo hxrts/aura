@@ -309,20 +309,20 @@ mod tests {
     #[test]
     fn test_leaf_id_display() {
         let id = LeafId(42);
-        assert_eq!(format!("{}", id), "Leaf#42");
+        assert_eq!(format!("{id}"), "Leaf#42");
     }
 
     #[test]
     fn test_node_index_display() {
         let idx = NodeIndex(7);
-        assert_eq!(format!("{}", idx), "Node#7");
+        assert_eq!(format!("{idx}"), "Node#7");
     }
 
     #[test]
     fn test_tree_commitment_display() {
         let hash = [0u8; 32];
         let commit = TreeCommitment(hash);
-        assert_eq!(format!("{}", commit), "TreeCommit(0000000000000000)");
+        assert_eq!(format!("{commit}"), "TreeCommit(0000000000000000)");
     }
 
     #[test]

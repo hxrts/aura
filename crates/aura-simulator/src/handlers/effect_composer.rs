@@ -839,12 +839,12 @@ mod tests {
     #[test]
     fn test_error_display() {
         let err = SimulationComposerError::EffectSystemCreationFailed("test error".to_string());
-        assert!(format!("{}", err).contains("Effect system creation failed"));
+        assert!(format!("{err}").contains("Effect system creation failed"));
 
         let err = SimulationComposerError::MissingRequiredComponent("handler".to_string());
-        assert!(format!("{}", err).contains("Missing required component"));
+        assert!(format!("{err}").contains("Missing required component"));
 
         let err = SimulationComposerError::EffectOperationFailed("operation failed".to_string());
-        assert!(format!("{}", err).contains("Effect operation failed"));
+        assert!(format!("{err}").contains("Effect operation failed"));
     }
 }

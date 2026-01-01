@@ -268,16 +268,14 @@ mod tests {
 
         // Each should be selected roughly 100 times (33%)
         // Allow wide variance since sample size is small
-        assert!(block_first > 50, "block_first {} too low", block_first);
+        assert!(block_first > 50, "block_first {block_first} too low");
         assert!(
             neighborhood_first > 50,
-            "neighborhood_first {} too low",
-            neighborhood_first
+            "neighborhood_first {neighborhood_first} too low"
         );
         assert!(
             guardian_first > 50,
-            "guardian_first {} too low",
-            guardian_first
+            "guardian_first {guardian_first} too low"
         );
     }
 

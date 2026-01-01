@@ -123,7 +123,6 @@ pub enum RendezvousManagerState {
     Stopping,
 }
 
-#[derive(Debug)]
 struct RendezvousState {
     status: RendezvousManagerState,
     service: Option<Arc<RendezvousService>>,

@@ -19,14 +19,16 @@ fn anti_entropy_digest_is_stable_for_identical_inputs() {
 
     let digest_first = protocol
         .compute_digest(&journal, &ops)
-        .expect("digest computation succeeds");
+        .unwrap_or_else(|e| panic!("digest computation succeeds: {e}"));
     let digest_second = protocol
         .compute_digest(&journal, &ops)
-        .expect("digest computation succeeds");
+        .unwrap_or_else(|e| panic!("digest computation succeeds: {e}"));
 
     assert_eq!(digest_first, digest_second);
 
-    let encoded = serde_json::to_vec(&digest_first).expect("digest serializes");
-    let decoded: JournalDigest = serde_json::from_slice(&encoded).expect("digest deserializes");
+    let encoded = serde_json::to_vec(&digest_first)
+        .unwrap_or_else(|e| panic!("digest serializes: {e}"));
+    let decoded: JournalDigest = serde_json::from_slice(&encoded)
+        .unwrap_or_else(|e| panic!("digest deserializes: {e}"));
     assert_eq!(digest_first, decoded);
 }

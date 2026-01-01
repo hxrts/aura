@@ -507,8 +507,7 @@ mod tests {
         let auth = AuthTag::None;
 
         let message = TypedMessage::new(context1, "payload", version, auth);
-        let validator =
-            MessageValidator::new(context2.clone(), version, AuthStrength::Unauthenticated);
+        let validator = MessageValidator::new(context2, version, AuthStrength::Unauthenticated);
 
         let validation = validator.validate(&message);
         assert!(matches!(

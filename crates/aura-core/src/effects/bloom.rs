@@ -220,20 +220,20 @@ mod tests {
         // Invalid expected_elements
         let invalid_config = BloomConfig {
             expected_elements: 0,
-            ..valid_config.clone()
+            ..valid_config
         };
         assert!(invalid_config.validate().is_err());
 
         // Invalid false_positive_rate
         let invalid_config = BloomConfig {
             false_positive_rate: 0.0,
-            ..valid_config.clone()
+            ..valid_config
         };
         assert!(invalid_config.validate().is_err());
 
         let invalid_config = BloomConfig {
             false_positive_rate: 1.0,
-            ..valid_config.clone()
+            ..valid_config
         };
         assert!(invalid_config.validate().is_err());
     }

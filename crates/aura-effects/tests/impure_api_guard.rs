@@ -18,10 +18,10 @@ fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
 #[test]
 fn test_no_impure_api_usage_outside_handlers() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("repo root");
+    let repo_root = match manifest_dir.parent().and_then(|p| p.parent()) {
+        Some(root) => root,
+        None => panic!("repo root"),
+    };
 
     let crates_dir = repo_root.join("crates");
 
@@ -62,7 +62,7 @@ fn test_no_impure_api_usage_outside_handlers() {
 
         for (pattern, guidance) in patterns {
             if contents.contains(pattern) {
-                violations.push(format!("{}: found '{}' ({} )", rel_str, pattern, guidance));
+                violations.push(format!("{rel_str}: found '{pattern}' ({guidance} )"));
             }
         }
     }

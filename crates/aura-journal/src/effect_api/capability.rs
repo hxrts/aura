@@ -324,7 +324,7 @@ mod tests {
         let cap = CapabilityRef::new(
             CapabilityId::new(test_uuid(3)),
             ResourceRef::recovery(0, 1),
-            expires_at.clone(),
+            expires_at,
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
         );
 
@@ -554,7 +554,7 @@ mod recovery_tests {
         let recovery_cap = RecoveryCapability::new(
             CapabilityId::new(uuid::Uuid::from_bytes([6u8; 16])),
             target,
-            guardians.clone(),
+            guardians,
             2,
             TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
                 ts_ms: 10000,

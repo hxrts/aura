@@ -160,7 +160,7 @@ fn peer_selection_example() {
     println!("  Selection is privacy-preserving by design");
 
     // Select peers using privacy-aware criteria
-    let peer_vec = peers.to_vec();
+    let peer_vec = peers.clone();
     let selection_result = selection_criteria.select_peers(peer_vec);
 
     println!(

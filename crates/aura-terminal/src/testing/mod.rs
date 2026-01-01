@@ -185,8 +185,7 @@ impl TestTui {
         });
         assert!(
             has_toast,
-            "Expected toast containing '{}' to be shown",
-            message_contains
+            "Expected toast containing '{message_contains}' to be shown"
         );
     }
 

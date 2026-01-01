@@ -49,8 +49,8 @@ proptest! {
         prop_assert_eq!(&share1, &share2);
 
         // Debug representation is deterministic
-        let debug1 = format!("{:?}", share1);
-        let debug2 = format!("{:?}", share2);
+        let debug1 = format!("{share1:?}");
+        let debug2 = format!("{share2:?}");
         prop_assert_eq!(debug1, debug2);
     }
 
@@ -227,11 +227,11 @@ proptest! {
 
         let proposals: Vec<ShareProposal> = (0..count)
             .map(|i| ShareProposal {
-                witness: format!("w{}", i),
+                witness: format!("w{i}"),
                 result_id: "r1".to_string(),
                 share: ShareData {
-                    share_value: format!("s{}", i),
-                    nonce_binding: format!("n{}", i),
+                    share_value: format!("s{i}"),
+                    nonce_binding: format!("n{i}"),
                     data_binding: "cns:r1:h1".to_string(),
                 },
             })
@@ -240,9 +240,12 @@ proptest! {
         let result = check_threshold_ref(&proposals, threshold);
         let expected = count >= threshold;
 
-        prop_assert_eq!(result, expected,
+        prop_assert_eq!(
+            result,
+            expected,
             "Threshold check failed: count={}, threshold={}, result={}, expected={}",
-            count, threshold, result, expected);
+            count, threshold, result, expected
+        );
     }
 }
 
@@ -309,7 +312,7 @@ proptest! {
         // Honest witnesses: one vote each
         for i in 0..n_honest {
             votes.push(Vote {
-                witness: format!("honest_{}", i),
+                witness: format!("honest_{i}"),
                 result_id: "r1".to_string(),
                 prestate_hash: "h1".to_string(),
             });
@@ -317,7 +320,7 @@ proptest! {
 
         // Equivocating witnesses: two conflicting votes each
         for i in 0..n_equivocators {
-            let name = format!("equivocator_{}", i);
+            let name = format!("equivocator_{i}");
             expected_equivocators.insert(name.clone());
 
             votes.push(Vote {
@@ -336,15 +339,14 @@ proptest! {
 
         // All expected equivocators should be detected
         for eq in &expected_equivocators {
-            prop_assert!(detected.contains(eq),
-                "Equivocator not detected: {}", eq);
+            prop_assert!(detected.contains(eq), "Equivocator not detected: {eq}");
         }
 
         // No honest witnesses should be detected
         for i in 0..n_honest {
-            let name = format!("honest_{}", i);
+            let name = format!("honest_{i}");
             prop_assert!(!detected.contains(&name),
-                "Honest witness falsely detected: {}", name);
+                "Honest witness falsely detected: {name}");
         }
     }
 }

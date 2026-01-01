@@ -241,7 +241,7 @@ async fn test_rendezvous_channel_established_finalized() -> TestResult {
         fact: fact.clone(),
     }]);
 
-    aura_agent::handlers::rendezvous_bridge::execute_guard_outcome(
+    aura_agent::handlers::rendezvous::execute_guard_outcome(
         outcome,
         &authority_ctx,
         context_id,

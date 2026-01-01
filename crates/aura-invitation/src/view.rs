@@ -60,7 +60,7 @@ pub enum InvitationDelta {
     /// Ceremony status changed
     CeremonyStatusChanged {
         ceremony_id: String,
-        /// Status: "initiated", "acceptance_received", "committed", "aborted"
+        /// Status: "initiated", "acceptance_received", "committed", "aborted", "superseded"
         status: String,
         /// For "aborted" status, the reason
         reason: Option<String>,
@@ -216,6 +216,25 @@ impl ViewDeltaReducer for InvitationViewReducer {
                 agreement_mode: None,
                 timestamp_ms,
             }),
+            InvitationFact::CeremonySuperseded {
+                superseded_ceremony_id,
+                superseding_ceremony_id,
+                reason,
+                timestamp_ms,
+                ..
+            } => {
+                let superseded_reason =
+                    format!("{reason} (superseded by {superseding_ceremony_id})");
+                Some(InvitationDelta::CeremonyStatusChanged {
+                    ceremony_id: superseded_ceremony_id,
+                    status: "superseded".to_string(),
+                    reason: Some(superseded_reason),
+                    relationship_id: None,
+                    reversion_risk: true,
+                    agreement_mode: None,
+                    timestamp_ms,
+                })
+            }
         };
 
         match delta {

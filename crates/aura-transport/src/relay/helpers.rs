@@ -379,8 +379,8 @@ mod tests {
         // Each candidate should be selected roughly 250 times (25%)
         // Allow +/- 10% variance
         for count in counts {
-            assert!(count > 150, "Count {} too low", count);
-            assert!(count < 350, "Count {} too high", count);
+            assert!(count > 150, "Count {count} too low");
+            assert!(count < 350, "Count {count} too high");
         }
     }
 }

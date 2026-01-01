@@ -110,8 +110,9 @@ fn test_channel_membership_fact_serialization_roundtrip() {
     assert!(!bytes.is_empty(), "serialized bytes should not be empty");
 
     // Deserialize back
-    let recovered =
-        ChannelMembershipFact::from_bytes(&bytes).expect("deserialization should succeed");
+    let recovered = ChannelMembershipFact::from_bytes(&bytes).unwrap_or_else(|| {
+        panic!("deserialization should succeed");
+    });
 
     // Verify roundtrip
     assert_eq!(recovered.type_id(), original.type_id());

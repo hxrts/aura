@@ -290,14 +290,10 @@ mod tests {
                 assert!(
                     msg.contains("Runtime bridge not available")
                         || msg.contains("Failed to export"),
-                    "Expected runtime error, got: {}",
-                    msg
+                    "Expected runtime error, got: {msg}"
                 );
             }
-            _ => panic!(
-                "Expected Failed error without RuntimeBridge, got: {:?}",
-                result
-            ),
+            _ => panic!("Expected Failed error without RuntimeBridge, got: {result:?}"),
         }
     }
 
@@ -317,14 +313,10 @@ mod tests {
             Some(Err(OpError::Failed(msg))) => {
                 assert!(
                     msg.contains("Runtime bridge not available"),
-                    "Expected runtime bridge error, got: {}",
-                    msg
+                    "Expected runtime bridge error, got: {msg}"
                 );
             }
-            _ => panic!(
-                "Expected Failed error without RuntimeBridge, got: {:?}",
-                result
-            ),
+            _ => panic!("Expected Failed error without RuntimeBridge, got: {result:?}"),
         }
 
         // Without RuntimeBridge, CreateChannel should also fail gracefully
@@ -340,14 +332,10 @@ mod tests {
             Some(Err(OpError::Failed(msg))) => {
                 assert!(
                     msg.contains("Runtime bridge not available"),
-                    "Expected runtime bridge error, got: {}",
-                    msg
+                    "Expected runtime bridge error, got: {msg}"
                 );
             }
-            _ => panic!(
-                "Expected Failed error without RuntimeBridge, got: {:?}",
-                result
-            ),
+            _ => panic!("Expected Failed error without RuntimeBridge, got: {result:?}"),
         }
     }
 
@@ -371,14 +359,10 @@ mod tests {
                     msg.contains("Runtime bridge not available")
                         || msg.contains("Invalid invitation")
                         || msg.contains("Failed"),
-                    "Expected error message, got: {}",
-                    msg
+                    "Expected error message, got: {msg}"
                 );
             }
-            _ => panic!(
-                "Expected InvalidArgument error without RuntimeBridge, got: {:?}",
-                result
-            ),
+            _ => panic!("Expected InvalidArgument error without RuntimeBridge, got: {result:?}"),
         }
     }
 

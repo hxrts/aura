@@ -395,7 +395,7 @@ mod tests {
         assert_eq!(proof.participant, device_id);
 
         // Verify consensus with self
-        let mut handler_copy = handler.clone();
+        let mut handler_copy = handler;
         handler_copy.receive_consistency_proof(proof);
         assert!(handler_copy.verify_consensus());
     }

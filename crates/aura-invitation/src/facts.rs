@@ -174,6 +174,24 @@ pub enum InvitationFact {
         /// Timestamp in milliseconds
         timestamp_ms: u64,
     },
+
+    /// Ceremony superseded by a newer ceremony
+    ///
+    /// Emitted when a new ceremony replaces an existing one. The old ceremony
+    /// should stop processing immediately. Supersession propagates via anti-entropy.
+    CeremonySuperseded {
+        /// The ceremony being superseded (old ceremony)
+        superseded_ceremony_id: String,
+        /// The ceremony that supersedes it (new ceremony)
+        superseding_ceremony_id: String,
+        /// Reason for supersession (e.g., "prestate_stale", "newer_request", "timeout")
+        reason: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
+        /// Timestamp in milliseconds
+        timestamp_ms: u64,
+    },
 }
 
 impl InvitationFact {
@@ -189,6 +207,10 @@ impl InvitationFact {
             InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => ceremony_id,
             InvitationFact::CeremonyCommitted { ceremony_id, .. } => ceremony_id,
             InvitationFact::CeremonyAborted { ceremony_id, .. } => ceremony_id,
+            InvitationFact::CeremonySuperseded {
+                superseded_ceremony_id,
+                ..
+            } => superseded_ceremony_id,
         }
     }
 
@@ -202,7 +224,8 @@ impl InvitationFact {
             | InvitationFact::CeremonyInitiated { .. }
             | InvitationFact::CeremonyAcceptanceReceived { .. }
             | InvitationFact::CeremonyCommitted { .. }
-            | InvitationFact::CeremonyAborted { .. } => None,
+            | InvitationFact::CeremonyAborted { .. }
+            | InvitationFact::CeremonySuperseded { .. } => None,
         }
     }
 
@@ -231,6 +254,7 @@ impl InvitationFact {
             InvitationFact::CeremonyAcceptanceReceived { timestamp_ms, .. } => *timestamp_ms,
             InvitationFact::CeremonyCommitted { timestamp_ms, .. } => *timestamp_ms,
             InvitationFact::CeremonyAborted { timestamp_ms, .. } => *timestamp_ms,
+            InvitationFact::CeremonySuperseded { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 
@@ -269,6 +293,20 @@ impl InvitationFact {
                 sub_type: "ceremony-aborted",
                 data: ceremony_id.as_bytes().to_vec(),
             },
+            InvitationFact::CeremonySuperseded {
+                superseded_ceremony_id,
+                superseding_ceremony_id,
+                ..
+            } => {
+                // Key includes both IDs for unique identification
+                let mut data = superseded_ceremony_id.as_bytes().to_vec();
+                data.extend_from_slice(b":");
+                data.extend_from_slice(superseding_ceremony_id.as_bytes());
+                InvitationFactKey {
+                    sub_type: "ceremony-superseded",
+                    data,
+                }
+            }
         }
     }
 

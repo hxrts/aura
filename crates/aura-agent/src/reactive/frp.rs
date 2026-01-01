@@ -307,7 +307,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let f = Arc::new(f);
 
         let tasks = {
-            let state = folded.state.read().await;
+            let state = folded.state.blocking_read();
             state.tasks.clone()
         };
         tasks.spawn_cancellable(async move {

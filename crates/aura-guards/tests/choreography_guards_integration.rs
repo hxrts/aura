@@ -8,8 +8,8 @@ use aura_core::{
     effects::guard::{EffectCommand, EffectInterpreter, EffectResult},
     AuthorityId, ContextId, Result,
 };
-use parking_lot::Mutex;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Mock effect interpreter that records executed commands for verification
 #[derive(Debug, Clone)]
@@ -25,8 +25,8 @@ impl MockEffectInterpreter {
         }
     }
 
-    fn get_executed_commands(&self) -> Vec<EffectCommand> {
-        self.executed_commands.lock().clone()
+    async fn get_executed_commands(&self) -> Vec<EffectCommand> {
+        self.executed_commands.lock().await.clone()
     }
 }
 
@@ -35,7 +35,7 @@ impl MockEffectInterpreter {
 impl aura_core::effects::guard::EffectInterpreter for MockEffectInterpreter {
     async fn execute(&self, command: EffectCommand) -> Result<EffectResult> {
         // Record the command
-        self.executed_commands.lock().push(command.clone());
+        self.executed_commands.lock().await.push(command.clone());
 
         // Return appropriate success result
         match command {
@@ -66,7 +66,7 @@ async fn test_guard_capability_annotation() {
     let result = interpreter.execute(command.clone()).await;
     assert!(result.is_ok());
 
-    let executed = interpreter.get_executed_commands();
+    let executed = interpreter.get_executed_commands().await;
     assert_eq!(executed.len(), 1);
     assert!(matches!(
         &executed[0],
@@ -93,7 +93,7 @@ async fn test_flow_cost_annotation() {
     let result = interpreter.execute(command.clone()).await;
     assert!(result.is_ok());
 
-    let executed = interpreter.get_executed_commands();
+    let executed = interpreter.get_executed_commands().await;
     assert_eq!(executed.len(), 1);
     assert!(matches!(
         &executed[0],
@@ -112,7 +112,7 @@ async fn test_leak_annotation() {
     let result = interpreter.execute(command.clone()).await;
     assert!(result.is_ok());
 
-    let executed = interpreter.get_executed_commands();
+    let executed = interpreter.get_executed_commands().await;
     assert_eq!(executed.len(), 1);
     assert!(matches!(
         &executed[0],
@@ -134,7 +134,7 @@ async fn test_journal_facts_annotation() {
     let result = interpreter.execute(command.clone()).await;
     assert!(result.is_ok());
 
-    let executed = interpreter.get_executed_commands();
+    let executed = interpreter.get_executed_commands().await;
     assert_eq!(executed.len(), 1);
     assert!(matches!(
         &executed[0],
@@ -172,7 +172,7 @@ async fn test_multiple_annotations() {
         assert!(result.is_ok());
     }
 
-    let executed = interpreter.get_executed_commands();
+    let executed = interpreter.get_executed_commands().await;
     assert_eq!(executed.len(), 3);
 
     // Verify all three command types were executed
@@ -218,7 +218,7 @@ async fn test_effect_execution_order() {
         assert!(result.is_ok());
     }
 
-    let executed = interpreter.get_executed_commands();
+    let executed = interpreter.get_executed_commands().await;
     assert_eq!(executed.len(), 3);
 
     // Verify execution order
@@ -382,7 +382,7 @@ async fn test_unified_effect_command_system() {
     assert!(interpreter.execute(annotation_effect).await.is_ok());
     assert!(interpreter.execute(runtime_effect).await.is_ok());
 
-    let executed = interpreter.get_executed_commands();
+    let executed = interpreter.get_executed_commands().await;
     assert_eq!(executed.len(), 2);
 
     // Both should be identical (verify by matching structure)

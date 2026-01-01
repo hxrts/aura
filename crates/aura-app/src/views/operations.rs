@@ -82,7 +82,7 @@ impl ImportedInvitation {
     /// Check if the invitation has expired.
     #[must_use]
     pub fn is_expired(&self, now_ms: u64) -> bool {
-        self.expires_at.map_or(false, |exp| now_ms >= exp)
+        self.expires_at.is_some_and(|exp| now_ms >= exp)
     }
 }
 

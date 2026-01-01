@@ -262,7 +262,10 @@ mod tests {
     #[tokio::test]
     async fn test_authority_operation_guard() {
         // Create mock bridge
-        let root_key = PublicKey::from_bytes(&[0u8; 32]).unwrap();
+        let root_key = match PublicKey::from_bytes(&[0u8; 32]) {
+            Ok(key) => key,
+            Err(err) => panic!("invalid root key: {err}"),
+        };
         let bridge =
             BiscuitAuthorizationBridge::new(root_key, AuthorityId::new_from_entropy([1u8; 32]));
 

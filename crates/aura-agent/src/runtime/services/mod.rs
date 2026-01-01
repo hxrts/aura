@@ -5,8 +5,9 @@
 //! All service managers implement the `RuntimeService` trait for unified
 //! lifecycle management. See `traits.rs` for the trait definition.
 
-pub mod authority_manager;
 pub mod auth_manager;
+pub mod authority_manager;
+pub mod authority_state;
 pub mod invitation_manager;
 pub mod recovery_manager;
 pub mod rendezvous_cache_manager;
@@ -26,17 +27,16 @@ pub mod social_manager;
 pub mod sync_manager;
 pub mod threshold_signing;
 
-pub use authority_manager::{
-    AuthorityError, AuthorityManager, AuthorityState, AuthorityStatus, SharedAuthorityManager,
-};
 pub(crate) use auth_manager::AuthManager;
+pub use authority_manager::AuthorityManager;
+pub use authority_state::AuthorityStatus;
 pub(crate) use invitation_manager::InvitationManager;
 pub(crate) use recovery_manager::RecoveryManager;
 pub(crate) use rendezvous_cache_manager::RendezvousCacheManager;
 pub use ceremony_tracker::CeremonyTracker;
 pub use context_manager::ContextManager;
 pub use flow_budget_manager::FlowBudgetManager;
-pub use logical_clock_manager::{LogicalClockManager, LogicalClockState};
+pub use logical_clock_manager::LogicalClockManager;
 pub use ota_manager::UpdateStatus;
 pub use receipt_manager::{ReceiptManager, ReceiptManagerConfig};
 pub use rendezvous_manager::{RendezvousManager, RendezvousManagerConfig};

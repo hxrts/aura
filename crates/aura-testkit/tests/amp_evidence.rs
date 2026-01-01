@@ -129,11 +129,13 @@ fn test_evidence_record_serialization_roundtrip() {
         .insert("witness:xyz789".to_string(), vec![0xCA, 0xFE]);
 
     // Serialize
-    let bytes = serde_json::to_vec(&record).expect("serialization should succeed");
+    let bytes = serde_json::to_vec(&record)
+        .unwrap_or_else(|err| panic!("serialization should succeed: {err}"));
 
     // Deserialize
     let recovered: EvidenceRecord =
-        serde_json::from_slice(&bytes).expect("deserialization should succeed");
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|err| panic!("deserialization should succeed: {err}"));
 
     assert_eq!(recovered.entries.len(), 2);
     assert_eq!(
@@ -173,11 +175,13 @@ fn test_evidence_delta_serialization_roundtrip() {
     delta.entries.insert("evidence:2".to_string(), vec![0x02]);
 
     // Serialize
-    let bytes = serde_json::to_vec(&delta).expect("serialization should succeed");
+    let bytes =
+        serde_json::to_vec(&delta).unwrap_or_else(|err| panic!("serialization should succeed: {err}"));
 
     // Deserialize
     let recovered: EvidenceDelta =
-        serde_json::from_slice(&bytes).expect("deserialization should succeed");
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|err| panic!("deserialization should succeed: {err}"));
 
     assert_eq!(recovered.entries.len(), 2);
 }
@@ -212,13 +216,13 @@ async fn test_merge_evidence_delta_and_retrieve() {
     effects
         .merge_evidence_delta(cid, delta)
         .await
-        .expect("merge should succeed");
+        .unwrap_or_else(|err| panic!("merge should succeed: {err}"));
 
     // Retrieve the evidence
     let result = effects
         .evidence_for(cid)
         .await
-        .expect("retrieval should succeed");
+        .unwrap_or_else(|err| panic!("retrieval should succeed: {err}"));
     assert!(result.is_some());
 
     let record = result.unwrap();
@@ -294,7 +298,7 @@ async fn test_insert_evidence_delta() {
     effects
         .insert_evidence_delta(witness, cid, context)
         .await
-        .expect("insert_evidence_delta should succeed");
+        .unwrap_or_else(|err| panic!("insert_evidence_delta should succeed: {err}"));
 
     // Verify evidence was recorded
     let record = effects.evidence_for(cid).await.unwrap();
@@ -352,10 +356,13 @@ async fn test_evidence_store_accessor() {
     store
         .merge_delta(cid, delta)
         .await
-        .expect("merge via store should succeed");
+        .unwrap_or_else(|err| panic!("merge via store should succeed: {err}"));
 
     // Retrieve via store
-    let record = store.current(cid).await.expect("current should succeed");
+    let record = store
+        .current(cid)
+        .await
+        .unwrap_or_else(|err| panic!("current should succeed: {err}"));
     assert!(record.is_some());
     assert_eq!(record.unwrap().entries.get("test"), Some(&vec![1, 2, 3]));
 }

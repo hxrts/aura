@@ -226,12 +226,16 @@ impl AuraEffectSystem {
     ///
     /// When `shared_transport` is provided (for simulation/demo mode), all agents
     /// share a common in-memory transport network for routing.
+    ///
+    /// When `shared_inbox` is provided, all agents share a single inbox queue and
+    /// filter envelopes by destination on receive.
     fn build_internal(
         config: AgentConfig,
         composite: CompositeHandlerAdapter,
         execution_mode: ExecutionMode,
         crypto_seed: Option<[u8; 32]>,
         shared_transport: Option<SharedTransport>,
+        shared_inbox: Option<Arc<RwLock<Vec<TransportEnvelope>>>>,
         authority_override: Option<AuthorityId>,
     ) -> Self {
         Self::maybe_start_deadlock_detector();
@@ -292,13 +296,20 @@ impl AuraEffectSystem {
         // === Build TransportSubsystem ===
         let transport_handler = aura_effects::transport::RealTransportHandler::default();
         // Use shared transport if provided (simulation mode), otherwise create new local inbox.
+        if shared_transport.is_some() && shared_inbox.is_some() {
+            tracing::warn!(
+                "Shared transport and shared inbox both provided; using shared transport"
+            );
+        }
         if let Some(shared) = &shared_transport {
             shared.register(authority);
         }
-        let transport_inbox = shared_transport
-            .as_ref()
-            .map(|shared| shared.inbox_for(authority))
-            .unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())));
+        let transport_inbox = shared_inbox.unwrap_or_else(|| {
+            shared_transport
+                .as_ref()
+                .map(|shared| shared.inbox_for(authority))
+                .unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())))
+        });
         let transport = TransportSubsystem::from_parts(
             transport_handler,
             transport_inbox,
@@ -360,11 +371,14 @@ impl AuraEffectSystem {
         }
     }
 
-    fn ensure_mock_effect_api(&self, operation: &str) -> Result<(), EffectApiError> {
+    fn ensure_mock_effect_api(
+        &self,
+        operation: &str,
+    ) -> Result<(), aura_protocol::effects::EffectApiError> {
         if self.execution_mode.is_deterministic() {
             Ok(())
         } else {
-            Err(EffectApiError::Backend {
+            Err(aura_protocol::effects::EffectApiError::Backend {
                 error: format!("EffectApi::{operation} not implemented for production"),
             })
         }
@@ -568,6 +582,7 @@ impl AuraEffectSystem {
             ExecutionMode::Testing,
             Some(Self::TEST_CRYPTO_SEED),
             None, // No shared transport
+            None, // No shared inbox
             None, // Derive authority from device_id
         ))
     }
@@ -587,6 +602,7 @@ impl AuraEffectSystem {
             None,
             None,
             None,
+            None,
         ))
     }
 
@@ -599,6 +615,7 @@ impl AuraEffectSystem {
             ExecutionMode::Testing,
             Some(Self::TEST_CRYPTO_SEED),
             None, // No shared transport
+            None, // No shared inbox
             None, // Derive authority from device_id
         ))
     }
@@ -618,6 +635,7 @@ impl AuraEffectSystem {
             ExecutionMode::Testing,
             Some(Self::TEST_CRYPTO_SEED),
             Some(shared_transport),
+            None, // No shared inbox
             None, // Derive authority from device_id
         ))
     }
@@ -634,6 +652,7 @@ impl AuraEffectSystem {
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
             None, // No shared transport
+            None, // No shared inbox
             None, // Derive authority from device_id
         ))
     }
@@ -658,6 +677,30 @@ impl AuraEffectSystem {
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
             Some(shared_transport),
+            None, // No shared inbox
+            None, // Derive authority from device_id
+        ))
+    }
+
+    /// Create effect system for simulation with a shared inbox.
+    ///
+    /// This variant matches the aura-core simulation factory contract and uses
+    /// a single shared inbox for all agents. Receivers filter by destination.
+    pub fn simulation_with_shared_inbox(
+        config: &AgentConfig,
+        seed: u64,
+        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> Result<Self, crate::core::AgentError> {
+        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
+        let mut crypto_seed = [0u8; 32];
+        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
+        Ok(Self::build_internal(
+            config.clone(),
+            composite,
+            ExecutionMode::Simulation { seed },
+            Some(crypto_seed),
+            None, // No shared transport
+            Some(shared_inbox),
             None, // Derive authority from device_id
         ))
     }
@@ -678,6 +721,7 @@ impl AuraEffectSystem {
             ExecutionMode::Production,
             None,
             None,
+            None,
             Some(authority_id),
         ))
     }
@@ -693,6 +737,7 @@ impl AuraEffectSystem {
             composite,
             ExecutionMode::Testing,
             Some(Self::TEST_CRYPTO_SEED),
+            None,
             None,
             Some(authority_id),
         ))
@@ -712,6 +757,7 @@ impl AuraEffectSystem {
             composite,
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
+            None,
             None,
             Some(authority_id),
         ))
@@ -733,6 +779,28 @@ impl AuraEffectSystem {
             ExecutionMode::Simulation { seed },
             Some(crypto_seed),
             Some(shared_transport),
+            None,
+            Some(authority_id),
+        ))
+    }
+
+    /// Create effect system for simulation with a shared inbox, overriding authority.
+    pub fn simulation_with_shared_inbox_for_authority(
+        config: &AgentConfig,
+        seed: u64,
+        authority_id: AuthorityId,
+        shared_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> Result<Self, crate::core::AgentError> {
+        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
+        let mut crypto_seed = [0u8; 32];
+        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
+        Ok(Self::build_internal(
+            config.clone(),
+            composite,
+            ExecutionMode::Simulation { seed },
+            Some(crypto_seed),
+            None,
+            Some(shared_inbox),
             Some(authority_id),
         ))
     }
@@ -837,25 +905,13 @@ impl AuraEffectSystem {
     }
 }
 
-// Manual Debug implementation since some fields don't implement Debug
-impl std::fmt::Debug for AuraEffectSystem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AuraEffectSystem")
-            .field("config", &self.config)
-            .field("authority_id", &self.authority_id)
-            .field("journal_policy", &self.journal.journal_policy().is_some())
-            .field(
-                "journal_verifying_key",
-                &self.journal.journal_verifying_key().is_some(),
-            )
-            .finish_non_exhaustive()
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_core::identifiers::ContextId;
+    use aura_guards::GuardContextProvider;
     use aura_protocol::amp::AmpJournalEffects;
+    use aura_protocol::effects::SyncEffects;
     use aura_protocol::effects::TreeEffects;
 
     #[tokio::test]
@@ -1151,17 +1207,6 @@ struct ThresholdMetadata {
 impl ThresholdMetadata {
     fn resolved_participants(&self) -> Vec<aura_core::threshold::ParticipantIdentity> {
         self.participants.clone()
-    }
-}
-
-fn map_amp_err(e: aura_core::AuraError) -> AmpChannelError {
-    match e {
-        aura_core::AuraError::NotFound { .. } => AmpChannelError::NotFound,
-        aura_core::AuraError::PermissionDenied { .. } => AmpChannelError::Unauthorized,
-        aura_core::AuraError::Storage { message } => AmpChannelError::Storage(message),
-        aura_core::AuraError::Crypto { message } => AmpChannelError::Crypto(message),
-        aura_core::AuraError::Invalid { message } => AmpChannelError::InvalidState(message),
-        other => AmpChannelError::Internal(other.to_string()),
     }
 }
 

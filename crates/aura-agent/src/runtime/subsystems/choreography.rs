@@ -46,6 +46,7 @@ impl Default for ChoreographyState {
     }
 }
 
+#[allow(dead_code)]
 impl ChoreographyState {
     /// Create a new empty state
     pub fn new() -> Self {

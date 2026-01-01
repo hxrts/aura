@@ -48,18 +48,18 @@ proptest! {
         n_proposals in 0usize..=7,
     ) {
         let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{}", i))
+            .map(|i| format!("w{i}"))
             .collect();
-        let threshold = (n_witnesses + 1) / 2;
+        let threshold = n_witnesses.div_ceil(2);
 
         // Create proposals for first n_proposals witnesses, all same result
         let proposals: Vec<ShareProposal> = (0..n_proposals.min(n_witnesses))
             .map(|i| ShareProposal {
-                witness: format!("w{}", i),
+                witness: format!("w{i}"),
                 result_id: "rid1".to_string(),
                 share: ShareData {
-                    share_value: format!("share_{}", i),
-                    nonce_binding: format!("nonce_{}", i),
+                    share_value: format!("share_{i}"),
+                    nonce_binding: format!("nonce_{i}"),
                     data_binding: "cns1:rid1:hash".to_string(),
                 },
             })
@@ -107,12 +107,12 @@ proptest! {
             .map(|i| {
                 let rid = result_ids[i % result_ids.len()];
                 ShareProposal {
-                    witness: format!("w{}", i),
+                    witness: format!("w{i}"),
                     result_id: rid.to_string(),
                     share: ShareData {
-                        share_value: format!("share_{}", i),
-                        nonce_binding: format!("nonce_{}", i),
-                        data_binding: format!("cns1:{}:hash", rid),
+                        share_value: format!("share_{i}"),
+                        nonce_binding: format!("nonce_{i}"),
+                        data_binding: format!("cns1:{rid}:hash"),
                     },
                 }
             })
@@ -173,7 +173,11 @@ proptest! {
                     share: ShareData {
                         share_value: "share".to_string(),
                         nonce_binding: "nonce".to_string(),
-                        data_binding: format!("cns1:{}:{}", v.result_id, v.prestate_hash),
+                        data_binding: format!(
+                            "cns1:{rid}:{hash}",
+                            rid = v.result_id,
+                            hash = v.prestate_hash
+                        ),
                     },
                 })
                 .collect();
@@ -211,11 +215,11 @@ proptest! {
         // All proposals for same result (consistent)
         let proposals: Vec<ShareProposal> = (0..n_proposals)
             .map(|i| ShareProposal {
-                witness: format!("w{}", i),
+                witness: format!("w{i}"),
                 result_id: "rid1".to_string(),
                 share: ShareData {
-                    share_value: format!("share_{}", i),
-                    nonce_binding: format!("nonce_{}", i),
+                    share_value: format!("share_{i}"),
+                    nonce_binding: format!("nonce_{i}"),
                     data_binding: "cns1:rid1:hash".to_string(),
                 },
             })
@@ -251,12 +255,12 @@ proptest! {
         // Create inconsistent proposals (different result_ids)
         let proposals: Vec<ShareProposal> = (0..n_proposals)
             .map(|i| ShareProposal {
-                witness: format!("w{}", i),
-                result_id: format!("rid{}", i), // All different!
+                witness: format!("w{i}"),
+                result_id: format!("rid{i}"), // All different!
                 share: ShareData {
-                    share_value: format!("share_{}", i),
-                    nonce_binding: format!("nonce_{}", i),
-                    data_binding: format!("cns1:rid{}:hash", i),
+                    share_value: format!("share_{i}"),
+                    nonce_binding: format!("nonce_{i}"),
+                    data_binding: format!("cns1:rid{i}:hash"),
                 },
             })
             .collect();
@@ -288,16 +292,16 @@ proptest! {
         new_witness_idx in 0usize..=4,
     ) {
         let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{}", i))
+            .map(|i| format!("w{i}"))
             .collect();
-        let threshold = (n_witnesses + 1) / 2;
+        let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
             "op".to_string(),
             "hash".to_string(),
             threshold,
-            witnesses.clone(),
+            witnesses,
             "w0".to_string(),
             PathSelection::FastPath,
         );
@@ -305,11 +309,11 @@ proptest! {
         // Add some existing proposals
         for i in 0..n_existing_proposals.min(n_witnesses) {
             state.proposals.push(ShareProposal {
-                witness: format!("w{}", i),
+                witness: format!("w{i}"),
                 result_id: "rid1".to_string(),
                 share: ShareData {
-                    share_value: format!("share_{}", i),
-                    nonce_binding: format!("nonce_{}", i),
+                    share_value: format!("share_{i}"),
+                    nonce_binding: format!("nonce_{i}"),
                     data_binding: "cns1:rid1:hash".to_string(),
                 },
             });
@@ -347,9 +351,9 @@ proptest! {
         n_proposals in 0usize..=2,
     ) {
         let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{}", i))
+            .map(|i| format!("w{i}"))
             .collect();
-        let threshold = (n_witnesses + 1) / 2;
+        let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
@@ -364,11 +368,11 @@ proptest! {
         // Add some proposals (not enough to reach threshold)
         for i in 0..n_proposals.min(threshold.saturating_sub(1)) {
             state.proposals.push(ShareProposal {
-                witness: format!("w{}", i),
+                witness: format!("w{i}"),
                 result_id: "rid1".to_string(),
                 share: ShareData {
-                    share_value: format!("share_{}", i),
-                    nonce_binding: format!("nonce_{}", i),
+                    share_value: format!("share_{i}"),
+                    nonce_binding: format!("nonce_{i}"),
                     data_binding: "cns1:rid1:hash".to_string(),
                 },
             });
@@ -396,16 +400,16 @@ proptest! {
         proposal_sequence in prop::collection::vec(0usize..5, 1..=5),
     ) {
         let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{}", i))
+            .map(|i| format!("w{i}"))
             .collect();
-        let threshold = (n_witnesses + 1) / 2;
+        let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
             "op".to_string(),
             "hash".to_string(),
             threshold,
-            witnesses.clone(),
+            witnesses,
             "w0".to_string(),
             PathSelection::FastPath,
         );
@@ -423,8 +427,8 @@ proptest! {
                 witness: witness.clone(),
                 result_id: "rid1".to_string(),
                 share: ShareData {
-                    share_value: format!("share_{}", seq_idx),
-                    nonce_binding: format!("nonce_{}", seq_idx),
+                    share_value: format!("share_{seq_idx}"),
+                    nonce_binding: format!("nonce_{seq_idx}"),
                     data_binding: "cns1:rid1:hash".to_string(),
                 },
             };
@@ -466,16 +470,16 @@ proptest! {
         same_result in prop::bool::ANY,
     ) {
         let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{}", i))
+            .map(|i| format!("w{i}"))
             .collect();
-        let threshold = (n_witnesses + 1) / 2;
+        let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
             "op".to_string(),
             "hash".to_string(),
             threshold,
-            witnesses.clone(),
+            witnesses,
             "w0".to_string(),
             PathSelection::FastPath,
         );
@@ -483,11 +487,11 @@ proptest! {
         // Add some existing proposals
         for i in 0..n_existing.min(n_witnesses) {
             state.proposals.push(ShareProposal {
-                witness: format!("w{}", i),
+                witness: format!("w{i}"),
                 result_id: "rid1".to_string(),
                 share: ShareData {
-                    share_value: format!("share_{}", i),
-                    nonce_binding: format!("nonce_{}", i),
+                    share_value: format!("share_{i}"),
+                    nonce_binding: format!("nonce_{i}"),
                     data_binding: "cns1:rid1:hash".to_string(),
                 },
             });
@@ -502,7 +506,7 @@ proptest! {
             share: ShareData {
                 share_value: "new_share".to_string(),
                 nonce_binding: "new_nonce".to_string(),
-                data_binding: format!("cns1:{}:hash", result_id),
+                data_binding: format!("cns1:{result_id}:hash"),
             },
         };
 
@@ -555,9 +559,9 @@ proptest! {
         start_in_fallback in prop::bool::ANY,
     ) {
         let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{}", i))
+            .map(|i| format!("w{i}"))
             .collect();
-        let threshold = (n_witnesses + 1) / 2;
+        let threshold = n_witnesses.div_ceil(2);
 
         let path = if start_in_fallback {
             PathSelection::SlowPath
@@ -607,9 +611,9 @@ proptest! {
         phase_idx in 0usize..=4,
     ) {
         let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{}", i))
+            .map(|i| format!("w{i}"))
             .collect();
-        let threshold = (n_witnesses + 1) / 2;
+        let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
             "cns1".to_string(),
@@ -661,7 +665,7 @@ proptest! {
         has_invalid_proposal in prop::bool::ANY,
     ) {
         let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{}", i))
+            .map(|i| format!("w{i}"))
             .collect();
 
         let mut state = ConsensusState::new(
@@ -669,7 +673,7 @@ proptest! {
             "op".to_string(),
             "hash".to_string(),
             threshold.min(n_witnesses),
-            witnesses.clone(),
+            witnesses,
             "w0".to_string(),
             PathSelection::FastPath,
         );
@@ -680,11 +684,11 @@ proptest! {
         // Add some proposals
         for i in 0..n_proposals.min(n_witnesses) {
             state.proposals.push(ShareProposal {
-                witness: format!("w{}", i),
+                witness: format!("w{i}"),
                 result_id: "rid1".to_string(),
                 share: ShareData {
-                    share_value: format!("share_{}", i),
-                    nonce_binding: format!("nonce_{}", i),
+                    share_value: format!("share_{i}"),
+                    nonce_binding: format!("nonce_{i}"),
                     data_binding: "cns1:rid1:hash".to_string(),
                 },
             });
@@ -731,17 +735,17 @@ proptest! {
 fn test_threshold_equivalence_exact() {
     let proposals: Vec<ShareProposal> = (0..3)
         .map(|i| ShareProposal {
-            witness: format!("w{}", i),
+            witness: format!("w{i}"),
             result_id: "rid1".to_string(),
             share: ShareData {
-                share_value: format!("share_{}", i),
-                nonce_binding: format!("nonce_{}", i),
+                share_value: format!("share_{i}"),
+                nonce_binding: format!("nonce_{i}"),
                 data_binding: "cns1:rid1:hash".to_string(),
             },
         })
         .collect();
 
-    let witnesses: BTreeSet<_> = (0..5).map(|i| format!("w{}", i)).collect();
+    let witnesses: BTreeSet<_> = (0..5).map(|i| format!("w{i}")).collect();
 
     // threshold = 2: should pass with 3 proposals
     assert!(check_threshold_ref(&proposals, 2));
@@ -751,7 +755,7 @@ fn test_threshold_equivalence_exact() {
         "op".to_string(),
         "hash".to_string(),
         2,
-        witnesses.clone(),
+        witnesses,
         "w0".to_string(),
         PathSelection::FastPath,
     );
@@ -821,17 +825,18 @@ fn test_equivocator_detection_equivalence() {
 fn test_aggregation_bindings() {
     let proposals: Vec<ShareProposal> = (0..3)
         .map(|i| ShareProposal {
-            witness: format!("w{}", i),
+            witness: format!("w{i}"),
             result_id: "rid1".to_string(),
             share: ShareData {
-                share_value: format!("share_{}", i),
-                nonce_binding: format!("nonce_{}", i),
+                share_value: format!("share_{i}"),
+                nonce_binding: format!("nonce_{i}"),
                 data_binding: "cns1:rid1:hash123".to_string(),
             },
         })
         .collect();
 
-    let sig = aggregate_shares_ref(&proposals, 2).expect("Should aggregate");
+    let sig =
+        aggregate_shares_ref(&proposals, 2).unwrap_or_else(|| panic!("Should aggregate"));
 
     // Verify bindings extracted correctly
     assert_eq!(sig.bound_cid, "cns1");

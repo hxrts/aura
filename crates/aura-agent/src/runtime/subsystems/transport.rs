@@ -49,6 +49,7 @@ impl TransportStatsCounters {
         self.send_failures.fetch_add(1, Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
     fn record_receive_failure(&self) {
         self.receive_failures.fetch_add(1, Ordering::Relaxed);
     }
@@ -156,7 +157,7 @@ impl TransportSubsystem {
 
     /// Get shared stats reference
     #[allow(dead_code)]
-    pub fn stats(&self) -> Arc<TransportStatsCounters> {
+    fn stats(&self) -> Arc<TransportStatsCounters> {
         self.stats.clone()
     }
 
@@ -208,6 +209,7 @@ impl TransportSubsystem {
     }
 
     /// Record a receive failure
+    #[allow(dead_code)]
     pub fn record_receive_failure(&self) {
         self.stats.record_receive_failure();
     }

@@ -442,7 +442,7 @@ fn test_unified_session_management() {
     // Test session creation and activation
     let participants = vec![device(6), device(7)];
     let session_id = manager
-        .create_session(participants.clone(), &test_time(1000001))
+        .create_session(participants, &test_time(1000001))
         .unwrap();
 
     let initial_state = TestSyncProtocolState {
@@ -452,15 +452,16 @@ fn test_unified_session_management() {
     };
 
     manager
-        .activate_session(session_id, initial_state.clone(), &test_time(1000001))
+        .activate_session(session_id, initial_state, &test_time(1000001))
         .unwrap();
     assert_eq!(manager.count_active_sessions(), 1);
 
     // Test session state transitions
-    let mut updated_state = initial_state.clone();
-    updated_state.phase = String::from("active");
-    updated_state.operations_pending = 75;
-    updated_state.bytes_transferred = 1024;
+    let updated_state = TestSyncProtocolState {
+        phase: String::from("active"),
+        operations_pending: 75,
+        bytes_transferred: 1024,
+    };
 
     manager
         .update_session(session_id, updated_state, &test_time(1000002))
@@ -616,7 +617,7 @@ fn test_session_statistics() {
         .create_session(vec![device(15)], &test_time(1000002))
         .unwrap();
     manager
-        .activate_session(session2, state.clone(), &test_time(1000002))
+        .activate_session(session2, state, &test_time(1000002))
         .unwrap();
     let error = SessionError::Timeout { duration_ms: 5000 };
     manager

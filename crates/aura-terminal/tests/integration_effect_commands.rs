@@ -6,6 +6,7 @@
     clippy::expect_used,
     clippy::disallowed_methods,
     clippy::disallowed_types,
+    clippy::uninlined_format_args,
     clippy::all
 )]
 //! # Effect Command Propagation Tests
@@ -75,9 +76,9 @@ use uuid::Uuid;
 /// Creates a Contact invitation (not Guardian) so that the workflow auto-accepts
 /// and adds the sender as a contact, which updates the CONTACTS_SIGNAL.
 fn generate_demo_invite_code(name: &str, seed: u64) -> String {
-    let authority_entropy = hash(format!("demo:{}:{}:authority", seed, name).as_bytes());
+    let authority_entropy = hash(format!("demo:{seed}:{name}:authority").as_bytes());
     let sender_id = AuthorityId::new_from_entropy(authority_entropy);
-    let invitation_id_entropy = hash(format!("demo:{}:{}:invitation", seed, name).as_bytes());
+    let invitation_id_entropy = hash(format!("demo:{seed}:{name}:invitation").as_bytes());
     let invitation_id = Uuid::from_bytes(invitation_id_entropy[..16].try_into().unwrap());
 
     let invitation_data = serde_json::json!({
@@ -90,17 +91,17 @@ fn generate_demo_invite_code(name: &str, seed: u64) -> String {
             }
         },
         "expires_at": null,
-        "message": format!("Contact invitation from {} (demo)", name)
+        "message": format!("Contact invitation from {name} (demo)")
     });
 
     let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
     let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{}", b64)
+    format!("aura:v1:{b64}")
 }
 
 /// Create test environment with IoContext and AppCore using MockRuntimeBridge
 async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!("aura-propagation-test-{}", name));
+    let test_dir = std::env::temp_dir().join(format!("aura-propagation-test-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -117,12 +118,12 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         .with_app_core(initialized_app_core.clone())
         .with_existing_account(false)
         .with_base_path(test_dir)
-        .with_device_id(format!("test-device-{}", name))
+        .with_device_id(format!("test-device-{name}"))
         .with_mode(TuiMode::Production)
         .build()
         .expect("IoContext builder should succeed for tests");
 
-    ctx.create_account(&format!("TestUser-{}", name))
+    ctx.create_account(&format!("TestUser-{name}"))
         .await
         .expect("Failed to create account");
 
@@ -135,7 +136,7 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
 }
 
 fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!("aura-propagation-test-{}", name));
+    let test_dir = std::env::temp_dir().join(format!("aura-propagation-test-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 

@@ -714,6 +714,7 @@ fn topological_sort(views: Vec<Arc<dyn AnyView>>) -> Vec<Arc<dyn AnyView>> {
 // Reduction types have been extracted to the `reductions` module for better
 // organization. Re-export them here for backward compatibility.
 
+#[allow(unused_imports)]
 pub use super::reductions::{
     ChatReduction, GuardianDelta, GuardianReduction, HomeDelta, HomeReduction, InvitationReduction,
     RecoveryReduction,

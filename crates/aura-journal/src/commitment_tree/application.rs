@@ -773,7 +773,7 @@ mod tests {
             parent_epoch: 0,
             parent_commitment: [0u8; 32],
             op: TreeOpKind::AddLeaf {
-                leaf: leaf.clone(),
+                leaf,
                 under: NodeIndex(0),
             },
             version: 1,

@@ -1,11 +1,12 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
+use aura_core::effects::{PhysicalTimeEffects, RandomCoreEffects};
 use aura_core::DeviceId;
-use aura_protocol::effects::{EffectApiEffects, EffectApiError, EffectApiEventStream};
+use aura_protocol::effects::{EffectApiError, EffectApiEventStream};
 
 // Implementation of EffectApiEffects
 #[async_trait]
-impl EffectApiEffects for AuraEffectSystem {
+impl aura_protocol::effects::EffectApiEffects for AuraEffectSystem {
     async fn append_event(&self, _event: Vec<u8>) -> Result<(), EffectApiError> {
         self.ensure_mock_effect_api("append_event")?;
         Ok(())
@@ -109,4 +110,3 @@ impl EffectApiEffects for AuraEffectSystem {
         Ok(uuid::Uuid::new_v4())
     }
 }
-

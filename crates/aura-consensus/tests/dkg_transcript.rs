@@ -31,7 +31,7 @@ fn test_transcript_hash_deterministic() {
         cutoff: 10,
         prestate_hash: Hash32([4u8; 32]),
         operation_hash: Hash32([5u8; 32]),
-        participants: participants.clone(),
+        participants,
     };
     let packages = vec![test_package(dealer, 7), test_package(dealer, 9)];
     let hash1 = compute_transcript_hash(&config, &packages).unwrap();
@@ -54,7 +54,7 @@ fn test_finalize_transcript_populates_hash() {
         cutoff: 42,
         prestate_hash: Hash32([6u8; 32]),
         operation_hash: Hash32([7u8; 32]),
-        participants: participants.clone(),
+        participants,
     };
     let packages = vec![test_package(dealer, 3)];
     let transcript = finalize_transcript(&config, packages).unwrap();

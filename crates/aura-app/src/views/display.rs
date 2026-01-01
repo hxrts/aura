@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_format_timestamp_full_single_digits() {
-        let ts = 1 * MS_PER_HOUR + 5 * MS_PER_MINUTE + 9 * MS_PER_SECOND;
+        let ts = MS_PER_HOUR + 5 * MS_PER_MINUTE + 9 * MS_PER_SECOND;
         assert_eq!(format_timestamp_full(ts), "01:05:09");
     }
 }

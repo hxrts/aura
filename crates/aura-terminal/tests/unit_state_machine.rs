@@ -93,14 +93,14 @@ fn test_demo_shortcuts_fill_contacts_import_modal() {
     tui.send(events::ctrl('a'));
     match tui.state().modal_queue.current() {
         Some(QueuedModal::ContactsImport(s)) => assert_eq!(s.code, "ALICECODE"),
-        other => panic!("Expected ContactsImport modal, got {:?}", other),
+        other => panic!("Expected ContactsImport modal, got {other:?}"),
     }
 
     // Ctrl+L fills Carol code
     tui.send(events::ctrl('l'));
     match tui.state().modal_queue.current() {
         Some(QueuedModal::ContactsImport(s)) => assert_eq!(s.code, "CAROLCODE"),
-        other => panic!("Expected ContactsImport modal, got {:?}", other),
+        other => panic!("Expected ContactsImport modal, got {other:?}"),
     }
 }
 
@@ -1018,7 +1018,7 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
     // Replace active modal with ChatMemberSelect (shell normally populates contacts)
     let draft = match tui.current_modal() {
         Some(QueuedModal::ChatCreate(s)) => s.clone(),
-        other => panic!("Expected ChatCreate modal, got {:?}", other),
+        other => panic!("Expected ChatCreate modal, got {other:?}"),
     };
 
     let contacts = vec![
@@ -1044,7 +1044,7 @@ fn test_chat_create_select_members_dispatches_create_channel_with_members() {
             assert!(s.member_ids.contains(&"alice".to_string()));
             assert!(s.member_ids.contains(&"carol".to_string()));
         }
-        other => panic!("Expected ChatCreate modal, got {:?}", other),
+        other => panic!("Expected ChatCreate modal, got {other:?}"),
     }
 
     // Jump to threshold step and seed selected members to simulate wizard progression.

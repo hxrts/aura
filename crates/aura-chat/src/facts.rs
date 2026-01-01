@@ -829,7 +829,7 @@ mod tests {
         assert_eq!(read.timestamp_ms(), 3000);
 
         // 4. Sender acknowledges delivery receipt
-        let acked = ChatFact::delivery_acknowledged_ms(context, channel, message_id.clone(), 4000);
+        let acked = ChatFact::delivery_acknowledged_ms(context, channel, message_id, 4000);
         assert_eq!(acked.timestamp_ms(), 4000);
 
         // All facts should have the same context

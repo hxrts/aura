@@ -828,7 +828,7 @@ mod tests {
     // AuthorizedStorageHandler Tests
     // ========================================================================
 
-    use std::sync::Mutex;
+    use tokio::sync::Mutex;
 
     /// In-memory storage backend for testing
     struct MockStorage {
@@ -846,23 +846,23 @@ mod tests {
     #[async_trait]
     impl StorageCoreEffects for MockStorage {
         async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-            let mut data = self.data.lock().unwrap();
+            let mut data = self.data.lock().await;
             data.insert(key.to_string(), value);
             Ok(())
         }
 
         async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-            let data = self.data.lock().unwrap();
+            let data = self.data.lock().await;
             Ok(data.get(key).cloned())
         }
 
         async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-            let mut data = self.data.lock().unwrap();
+            let mut data = self.data.lock().await;
             Ok(data.remove(key).is_some())
         }
 
         async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-            let data = self.data.lock().unwrap();
+            let data = self.data.lock().await;
             let keys: Vec<String> = match prefix {
                 Some(p) => data.keys().filter(|k| k.starts_with(p)).cloned().collect(),
                 None => data.keys().cloned().collect(),
@@ -874,12 +874,12 @@ mod tests {
     #[async_trait]
     impl StorageExtendedEffects for MockStorage {
         async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-            let data = self.data.lock().unwrap();
+            let data = self.data.lock().await;
             Ok(data.contains_key(key))
         }
 
         async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-            let mut data = self.data.lock().unwrap();
+            let mut data = self.data.lock().await;
             data.extend(pairs);
             Ok(())
         }
@@ -888,7 +888,7 @@ mod tests {
             &self,
             keys: &[String],
         ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-            let data = self.data.lock().unwrap();
+            let data = self.data.lock().await;
             Ok(keys
                 .iter()
                 .filter_map(|k| data.get(k).map(|v| (k.clone(), v.clone())))
@@ -896,13 +896,13 @@ mod tests {
         }
 
         async fn clear_all(&self) -> Result<(), StorageError> {
-            let mut data = self.data.lock().unwrap();
+            let mut data = self.data.lock().await;
             data.clear();
             Ok(())
         }
 
         async fn stats(&self) -> Result<StorageStats, StorageError> {
-            let data = self.data.lock().unwrap();
+            let data = self.data.lock().await;
             Ok(StorageStats {
                 key_count: data.len() as u64,
                 total_size: data.values().map(|v| v.len() as u64).sum(),

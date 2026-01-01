@@ -48,8 +48,7 @@ async fn test_partition_detection() -> AuraResult<()> {
         }
 
         println!(
-            "Created network partition: {:?} | {:?} | {:?}",
-            group1, group2, isolated
+            "Created network partition: {group1:?} | {group2:?} | {isolated:?}"
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -117,10 +116,7 @@ async fn test_split_brain_prevention() -> AuraResult<()> {
         fixture
             .create_partition(partition1.clone(), partition2.clone())
             .await;
-        println!(
-            "Created equal partitions: {:?} vs {:?}",
-            partition1, partition2
-        );
+        println!("Created equal partitions: {partition1:?} vs {partition2:?}");
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         // Step 2: Both partitions detect they don't have majority
@@ -189,8 +185,7 @@ async fn test_majority_partition_operation() -> AuraResult<()> {
             .create_partition(majority_partition.clone(), minority_partition.clone())
             .await;
         println!(
-            "Created asymmetric partition: majority {:?} vs minority {:?}",
-            majority_partition, minority_partition
+            "Created asymmetric partition: majority {majority_partition:?} vs minority {minority_partition:?}"
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -204,7 +199,8 @@ async fn test_majority_partition_operation() -> AuraResult<()> {
         // Simulate sync operations within majority partition
         for i in 0..3 {
             tokio::time::sleep(Duration::from_millis(200)).await;
-            println!("Majority partition: sync operation {} completed", i + 1);
+            let op_idx = i + 1;
+            println!("Majority partition: sync operation {op_idx} completed");
         }
 
         // Step 4: Minority partition should block operations
@@ -341,7 +337,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
                 .set_conditions(*device, isolated1, partition_condition)
                 .await;
         }
-        println!("Device {} isolated (4/5 remaining)", isolated1);
+        println!("Device {isolated1} isolated (4/5 remaining)");
         tokio::time::sleep(Duration::from_millis(600)).await;
 
         // Step 3: Second device becomes isolated
@@ -360,10 +356,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
                 .set_conditions(*device, isolated2, partition_condition)
                 .await;
         }
-        println!(
-            "Device {} isolated (3/5 remaining, still has majority)",
-            isolated2
-        );
+        println!("Device {isolated2} isolated (3/5 remaining, still has majority)");
         tokio::time::sleep(Duration::from_millis(600)).await;
 
         // Step 4: Third device becomes isolated (now 2/5 remaining - no majority)
@@ -382,10 +375,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
                 .set_conditions(*device, isolated3, partition_condition)
                 .await;
         }
-        println!(
-            "Device {} isolated (2/5 remaining, lost majority)",
-            isolated3
-        );
+        println!("Device {isolated3} isolated (2/5 remaining, lost majority)");
         tokio::time::sleep(Duration::from_millis(600)).await;
 
         // Step 5: System should recognize loss of quorum and stop operations
@@ -439,7 +429,7 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
     // Test network that repeatedly partitions and heals
     let flapping_result = timeout(Duration::from_secs(150), async {
         for cycle in 1..=5 {
-            println!("Network flap cycle {}/5", cycle);
+            println!("Network flap cycle {cycle}/5");
 
             // Create partition
             let partition_condition = NetworkCondition {

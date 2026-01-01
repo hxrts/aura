@@ -81,7 +81,9 @@ impl TestAgent {
     async fn new(name: &str) -> Self {
         // Use UUID v4 to ensure unique directories even when tests run concurrently
         let unique_id = uuid::Uuid::new_v4();
-        let test_dir = std::env::temp_dir().join(format!("aura-flow-test-{}-{}", name, unique_id));
+        let test_dir = std::env::temp_dir().join(format!(
+            "aura-flow-test-{name}-{unique_id}"
+        ));
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -92,10 +94,10 @@ impl TestAgent {
             .expect("Failed to init signals");
 
         let ctx = IoContext::builder()
-            .with_app_core(initialized_app_core.clone())
+            .with_app_core(initialized_app_core)
             .with_existing_account(false)
             .with_base_path(test_dir.clone())
-            .with_device_id(format!("test-device-{}", name))
+            .with_device_id(format!("test-device-{name}"))
             .with_mode(TuiMode::Production)
             .build()
             .expect("IoContext builder should succeed for tests");
@@ -134,7 +136,7 @@ impl TestAgent {
 
         // Parse authority_id from hex string
         let authority_bytes: [u8; 16] = hex::decode(&config.authority_id)
-            .map_err(|e| format!("Invalid authority_id hex: {}", e))?
+            .map_err(|e| format!("Invalid authority_id hex: {e}"))?
             .try_into()
             .map_err(|_| "Invalid authority_id length")?;
         let authority_id = AuthorityId::from_uuid(uuid::Uuid::from_bytes(authority_bytes));
@@ -265,7 +267,7 @@ impl FlowTestEnv {
     fn get_agent(&self, name: &str) -> &TestAgent {
         self.agents
             .get(name)
-            .unwrap_or_else(|| panic!("Agent '{}' not found", name))
+            .unwrap_or_else(|| panic!("Agent '{name}' not found"))
     }
 
     fn track_signal(&mut self, signal: &str, phase: &str) {
@@ -301,8 +303,14 @@ async fn test_invitation_flow_creates_contact() {
     println!("\nPhase 2: Verify initial state");
     let alice_contacts = env.get_agent("alice").read_contacts().await;
     let bob_contacts = env.get_agent("bob").read_contacts().await;
-    println!("  Alice contacts: {}", alice_contacts.contacts.len());
-    println!("  Bob contacts: {}", bob_contacts.contacts.len());
+    println!(
+        "  Alice contacts: {count}",
+        count = alice_contacts.contacts.len()
+    );
+    println!(
+        "  Bob contacts: {count}",
+        count = bob_contacts.contacts.len()
+    );
 
     // Phase 3: Generate invitation code for Alice
     // Note: In a full implementation, this would use the invitation system
@@ -331,7 +339,7 @@ async fn test_invitation_flow_creates_contact() {
             env.track_signal("INVITATIONS_SIGNAL", "import");
         }
         Err(e) => {
-            println!("  Import result: {}", e);
+            println!("  Import result: {e}");
             // Import may fail without full authority, but we verify the pattern
         }
     }
@@ -340,21 +348,24 @@ async fn test_invitation_flow_creates_contact() {
     println!("\nPhase 5: Verify signal emissions");
     let bob_inv = env.get_agent("bob").read_invitations().await;
     let bob_contacts_after = env.get_agent("bob").read_contacts().await;
-    println!("  Bob pending invitations: {}", bob_inv.pending.len());
     println!(
-        "  Bob contacts after import: {}",
-        bob_contacts_after.contacts.len()
+        "  Bob pending invitations: {count}",
+        count = bob_inv.pending.len()
+    );
+    println!(
+        "  Bob contacts after import: {count}",
+        count = bob_contacts_after.contacts.len()
     );
 
     // Phase 6: Check signal tracker
     println!("\nSignal emissions recorded:");
     println!(
-        "  CONTACTS_SIGNAL emitted: {}",
-        env.signal_tracker.was_emitted("CONTACTS_SIGNAL")
+        "  CONTACTS_SIGNAL emitted: {emitted}",
+        emitted = env.signal_tracker.was_emitted("CONTACTS_SIGNAL")
     );
     println!(
-        "  INVITATIONS_SIGNAL emitted: {}",
-        env.signal_tracker.was_emitted("INVITATIONS_SIGNAL")
+        "  INVITATIONS_SIGNAL emitted: {emitted}",
+        emitted = env.signal_tracker.was_emitted("INVITATIONS_SIGNAL")
     );
 
     println!("\n=== Invitation Flow Test Complete ===\n");
@@ -381,14 +392,14 @@ async fn test_chat_flow_sends_message() {
         .create_account_with_authority()
         .await
         .expect("Alice account creation");
-    println!("  Alice authority: {}", alice_authority);
+    println!("  Alice authority: {alice_authority}");
 
     let bob_authority = env
         .get_agent("bob")
         .create_account_with_authority()
         .await
         .expect("Bob account creation");
-    println!("  Bob authority: {}", bob_authority);
+    println!("  Bob authority: {bob_authority}");
 
     // Import invitation to establish contact
     let seed = 2024u64;
@@ -399,13 +410,22 @@ async fn test_chat_flow_sends_message() {
             code: alice_code.clone(),
         })
         .await;
-    println!("\nImport invitation: {:?}", import_result.is_ok());
+    println!(
+        "\nImport invitation: {ok}",
+        ok = import_result.is_ok()
+    );
 
     // Read initial chat state
     println!("\nInitial chat state:");
     let bob_chat = env.get_agent("bob").read_chat().await;
-    println!("  Channels: {}", bob_chat.channels.len());
-    println!("  Messages: {}", bob_chat.messages.len());
+    println!(
+        "  Channels: {count}",
+        count = bob_chat.channels.len()
+    );
+    println!(
+        "  Messages: {count}",
+        count = bob_chat.messages.len()
+    );
 
     // Try to start DM (should work - creates channel)
     println!("\nStarting DM with alice...");
@@ -422,13 +442,16 @@ async fn test_chat_flow_sends_message() {
             env.track_signal("CHAT_SIGNAL", "start_dm");
         }
         Err(e) => {
-            println!("  DM result: {}", e);
+            println!("  DM result: {e}");
         }
     }
 
     // Read chat state after DM creation
     let bob_chat_after_dm = env.get_agent("bob").read_chat().await;
-    println!("  Channels after DM: {}", bob_chat_after_dm.channels.len());
+    println!(
+        "  Channels after DM: {count}",
+        count = bob_chat_after_dm.channels.len()
+    );
 
     // Try to send message (requires authority for journaled intent)
     println!("\nSending message (with authority)...");
@@ -447,15 +470,21 @@ async fn test_chat_flow_sends_message() {
         }
         Err(e) => {
             // May still fail if channel doesn't exist or other issue
-            println!("  Message send: {}", e);
+            println!("  Message send: {e}");
         }
     }
 
     // Verify final state
     let bob_chat_final = env.get_agent("bob").read_chat().await;
     println!("\nFinal chat state:");
-    println!("  Channels: {}", bob_chat_final.channels.len());
-    println!("  Messages: {}", bob_chat_final.messages.len());
+    println!(
+        "  Channels: {count}",
+        count = bob_chat_final.channels.len()
+    );
+    println!(
+        "  Messages: {count}",
+        count = bob_chat_final.messages.len()
+    );
 
     // Verify signal tracking
     println!("\nSignal emissions:");
@@ -489,21 +518,21 @@ async fn test_guardian_recovery_flow() {
         .create_account_with_authority()
         .await
         .expect("Bob account creation");
-    println!("  Bob authority: {}", bob_authority);
+    println!("  Bob authority: {bob_authority}");
 
     let alice_authority = env
         .get_agent("alice")
         .create_account_with_authority()
         .await
         .expect("Alice account creation");
-    println!("  Alice authority: {}", alice_authority);
+    println!("  Alice authority: {alice_authority}");
 
     let carol_authority = env
         .get_agent("carol")
         .create_account_with_authority()
         .await
         .expect("Carol account creation");
-    println!("  Carol authority: {}", carol_authority);
+    println!("  Carol authority: {carol_authority}");
 
     // Import Alice as potential guardian
     let seed = 2024u64;
@@ -527,8 +556,11 @@ async fn test_guardian_recovery_flow() {
     // Read recovery state
     println!("\nInitial recovery state:");
     let bob_recovery = env.get_agent("bob").read_recovery().await;
-    println!("  Guardians: {}", bob_recovery.guardians.len());
-    println!("  Threshold: {}", bob_recovery.threshold);
+    println!(
+        "  Guardians: {count}",
+        count = bob_recovery.guardians.len()
+    );
+    println!("  Threshold: {threshold}", threshold = bob_recovery.threshold);
     println!(
         "  Active recovery: {}",
         bob_recovery.active_recovery.is_some()
@@ -550,24 +582,27 @@ async fn test_guardian_recovery_flow() {
             env.track_signal("CONTACTS_SIGNAL", "toggle_guardian");
         }
         Err(e) => {
-            println!("  Toggle result: {}", e);
+            println!("  Toggle result: {e}");
         }
     }
 
     // Verify state
     let bob_recovery_final = env.get_agent("bob").read_recovery().await;
     println!("\nFinal recovery state:");
-    println!("  Guardians: {}", bob_recovery_final.guardians.len());
+    println!(
+        "  Guardians: {count}",
+        count = bob_recovery_final.guardians.len()
+    );
 
     // Check signal emissions
     println!("\nSignal emissions:");
     println!(
-        "  RECOVERY_SIGNAL emitted: {}",
-        env.signal_tracker.was_emitted("RECOVERY_SIGNAL")
+        "  RECOVERY_SIGNAL emitted: {emitted}",
+        emitted = env.signal_tracker.was_emitted("RECOVERY_SIGNAL")
     );
     println!(
-        "  CONTACTS_SIGNAL emitted: {}",
-        env.signal_tracker.was_emitted("CONTACTS_SIGNAL")
+        "  CONTACTS_SIGNAL emitted: {emitted}",
+        emitted = env.signal_tracker.was_emitted("CONTACTS_SIGNAL")
     );
 
     println!("\n=== Guardian Recovery Flow Test Complete ===\n");
@@ -593,9 +628,12 @@ async fn test_home_lifecycle_flow() {
     // Read initial home state
     println!("Initial home state:");
     let bob_home = env.get_agent("bob").read_home().await;
-    println!("  Home ID: {}", bob_home.id);
-    println!("  Home name: {}", bob_home.name);
-    println!("  Residents: {}", bob_home.residents.len());
+    println!("  Home ID: {id}", id = bob_home.id);
+    println!("  Home name: {name}", name = bob_home.name);
+    println!(
+        "  Residents: {count}",
+        count = bob_home.residents.len()
+    );
 
     // Note: Home creation commands would be added here when implemented
     // For now, we verify the signal infrastructure is in place
@@ -623,9 +661,18 @@ async fn test_neighborhood_formation_flow() {
     // Read initial neighborhood state
     println!("Initial neighborhood state:");
     let bob_neighborhood = env.get_agent("bob").read_neighborhood().await;
-    println!("  Home home ID: {}", bob_neighborhood.home_home_id);
-    println!("  Home home name: {}", bob_neighborhood.home_name);
-    println!("  Neighbors: {}", bob_neighborhood.neighbors.len());
+    println!(
+        "  Home home ID: {id}",
+        id = bob_neighborhood.home_home_id
+    );
+    println!(
+        "  Home home name: {name}",
+        name = bob_neighborhood.home_name
+    );
+    println!(
+        "  Neighbors: {count}",
+        count = bob_neighborhood.neighbors.len()
+    );
 
     // Note: Neighborhood commands would be added here when implemented
 
@@ -654,14 +701,14 @@ async fn test_social_graph_flow() {
         .create_account_with_authority()
         .await
         .expect("Bob account creation");
-    println!("  Bob authority: {}", bob_authority);
+    println!("  Bob authority: {bob_authority}");
 
     let alice_authority = env
         .get_agent("alice")
         .create_account_with_authority()
         .await
         .expect("Alice account creation");
-    println!("  Alice authority: {}", alice_authority);
+    println!("  Alice authority: {alice_authority}");
 
     // Phase 2: Import contacts
     println!("\nPhase 2: Importing contacts...");
@@ -683,7 +730,10 @@ async fn test_social_graph_flow() {
         .await;
 
     let bob_contacts = env.get_agent("bob").read_contacts().await;
-    println!("  Bob's contacts: {}", bob_contacts.contacts.len());
+    println!(
+        "  Bob's contacts: {count}",
+        count = bob_contacts.contacts.len()
+    );
     for c in &bob_contacts.contacts {
         let name = if !c.nickname.is_empty() {
             c.nickname.clone()
@@ -692,7 +742,7 @@ async fn test_social_graph_flow() {
         } else {
             c.id.to_string()
         };
-        println!("    - {} (guardian: {})", name, c.is_guardian);
+        println!("    - {name} (guardian: {is_guardian})", is_guardian = c.is_guardian);
     }
     env.track_signal("CONTACTS_SIGNAL", "contact_import");
 
@@ -717,7 +767,7 @@ async fn test_social_graph_flow() {
                 env.track_signal("CONTACTS_SIGNAL", "nickname_update");
             }
             Err(e) => {
-                println!("  Nickname update: {}", e);
+                println!("  Nickname update: {e}");
             }
         }
     }
@@ -732,7 +782,7 @@ async fn test_social_graph_flow() {
         } else {
             c.id.to_string()
         };
-        println!("    - {} (id: {})", name, c.id);
+        println!("    - {name} (id: {id})", id = c.id);
     }
 
     // Phase 4: Create a home for social organization
@@ -750,12 +800,16 @@ async fn test_social_graph_flow() {
             env.track_signal("HOMES_SIGNAL", "home_creation");
         }
         Err(e) => {
-            println!("  Home creation: {}", e);
+            println!("  Home creation: {e}");
         }
     }
 
     let bob_home = env.get_agent("bob").read_home().await;
-    println!("  Home state: id={}, name={}", bob_home.id, bob_home.name);
+    println!(
+        "  Home state: id={id}, name={name}",
+        id = bob_home.id,
+        name = bob_home.name
+    );
 
     // Phase 5: Invite contact to home (SendHomeInvitation)
     println!("\nPhase 5: Inviting contact to home...");
@@ -779,7 +833,7 @@ async fn test_social_graph_flow() {
                 env.track_signal("CONTACTS_SIGNAL", "home_invitation");
             }
             Err(e) => {
-                println!("  Home invitation: {}", e);
+                println!("  Home invitation: {e}");
             }
         }
     }
@@ -787,23 +841,29 @@ async fn test_social_graph_flow() {
     // Phase 6: Verify final home state
     println!("\nPhase 6: Verifying final state...");
     let bob_home_final = env.get_agent("bob").read_home().await;
-    println!("  Home ID: {}", bob_home_final.id);
-    println!("  Home name: {}", bob_home_final.name);
-    println!("  Residents: {}", bob_home_final.residents.len());
-    println!("  My role: {:?}", bob_home_final.my_role);
+    println!("  Home ID: {id}", id = bob_home_final.id);
+    println!("  Home name: {name}", name = bob_home_final.name);
+    println!(
+        "  Residents: {count}",
+        count = bob_home_final.residents.len()
+    );
+    println!("  My role: {role:?}", role = bob_home_final.my_role);
 
     let bob_contacts_final = env.get_agent("bob").read_contacts().await;
-    println!("  Final contacts: {}", bob_contacts_final.contacts.len());
+    println!(
+        "  Final contacts: {count}",
+        count = bob_contacts_final.contacts.len()
+    );
 
     // Summary of signal emissions
     println!("\nSignal emissions recorded:");
     println!(
-        "  CONTACTS_SIGNAL: {} emissions",
-        env.signal_tracker.emission_count("CONTACTS_SIGNAL")
+        "  CONTACTS_SIGNAL: {count} emissions",
+        count = env.signal_tracker.emission_count("CONTACTS_SIGNAL")
     );
     println!(
-        "  HOMES_SIGNAL: {} emissions",
-        env.signal_tracker.emission_count("HOMES_SIGNAL")
+        "  HOMES_SIGNAL: {count} emissions",
+        count = env.signal_tracker.emission_count("HOMES_SIGNAL")
     );
 
     // Verify minimum expected emissions
@@ -853,14 +913,14 @@ async fn test_social_graph_contact_home_view() {
     let bob_contacts = env.get_agent("bob").read_contacts().await;
     println!("Bob's contacts:");
     for c in &bob_contacts.contacts {
-        println!("  - {} (id: {})", c.nickname, c.id);
+        println!("  - {name} (id: {id})", name = c.nickname, id = c.id);
     }
 
     // Read home state
     let bob_home = env.get_agent("bob").read_home().await;
     println!("\nBob's home:");
-    println!("  ID: {}", bob_home.id);
-    println!("  Name: {}", bob_home.name);
+    println!("  ID: {id}", id = bob_home.id);
+    println!("  Name: {name}", name = bob_home.name);
 
     // The contact-home view in UI would filter contacts based on home membership
     // This test verifies the signals are available for such a view
@@ -915,7 +975,7 @@ async fn test_signal_emission_coverage() {
 
     println!("Expected signal emissions:");
     for (cmd, signals) in &expected_signals {
-        println!("  {} → {:?}", cmd, signals);
+        println!("  {cmd} → {signals:?}");
     }
 
     println!("\nNote: Actual emission verification requires authority context.");
@@ -937,11 +997,11 @@ fn generate_demo_invite_code(name: &str, seed: u64) -> String {
     use uuid::Uuid;
 
     // Create deterministic authority ID
-    let authority_entropy = hash(format!("demo:{}:{}:authority", seed, name).as_bytes());
+    let authority_entropy = hash(format!("demo:{seed}:{name}:authority").as_bytes());
     let sender_id = AuthorityId::new_from_entropy(authority_entropy);
 
     // Create deterministic invitation ID
-    let invitation_id_entropy = hash(format!("demo:{}:{}:invitation", seed, name).as_bytes());
+    let invitation_id_entropy = hash(format!("demo:{seed}:{name}:invitation").as_bytes());
     let invitation_id = Uuid::from_bytes(invitation_id_entropy[..16].try_into().unwrap());
 
     // Create ShareableInvitation-compatible structure
@@ -955,11 +1015,11 @@ fn generate_demo_invite_code(name: &str, seed: u64) -> String {
             }
         },
         "expires_at": null,
-        "message": format!("Guardian invitation from {} (demo)", name)
+        "message": format!("Guardian invitation from {name} (demo)")
     });
 
     // Encode as base64 with aura:v1: prefix
     let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
     let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{}", b64)
+    format!("aura:v1:{b64}")
 }

@@ -7,7 +7,7 @@ use aura_core::effects::crypto::{
 };
 use aura_core::effects::{
     CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
-    SecureStorageCapability, SecureStorageLocation, ThresholdSigningEffects,
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
 };
 use aura_core::{AuraError, AuthorityId};
 

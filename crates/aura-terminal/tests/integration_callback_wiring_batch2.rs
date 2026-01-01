@@ -42,7 +42,7 @@ use aura_testkit::MockRuntimeBridge;
 
 /// Helper to create a DM channel ID the same way the messaging workflow does
 fn dm_channel_id(target: &str) -> ChannelId {
-    let descriptor = format!("dm:{}", target);
+    let descriptor = format!("dm:{target}");
     ChannelId::from_bytes(hash(descriptor.as_bytes()))
 }
 
@@ -52,7 +52,7 @@ fn dm_channel_id(target: &str) -> ChannelId {
 
 /// Create a test environment with IoContext and AppCore using MockRuntimeBridge
 async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test2-{}", name));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test2-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -66,16 +66,16 @@ async fn setup_test_env(name: &str) -> (Arc<IoContext>, Arc<RwLock<AppCore>>) {
         .expect("Failed to init signals");
 
     let ctx = IoContext::builder()
-        .with_app_core(initialized_app_core.clone())
+        .with_app_core(initialized_app_core)
         .with_existing_account(false)
         .with_base_path(test_dir)
-        .with_device_id(format!("test-device-{}", name))
+        .with_device_id(format!("test-device-{name}"))
         .with_mode(TuiMode::Production)
         .build()
         .expect("IoContext builder should succeed for tests");
 
     // Create account for testing
-    ctx.create_account(&format!("TestUser-{}", name))
+    ctx.create_account(&format!("TestUser-{name}"))
         .await
         .expect("Failed to create account");
 
@@ -112,7 +112,7 @@ async fn wait_for_chat(
 
 /// Cleanup test directory
 fn cleanup_test_dir(name: &str) {
-    let test_dir = std::env::temp_dir().join(format!("aura-callback-test2-{}", name));
+    let test_dir = std::env::temp_dir().join(format!("aura-callback-test2-{name}"));
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
@@ -139,16 +139,18 @@ async fn test_invitation_export_produces_valid_code() {
 
     assert!(
         result.is_ok(),
-        "ExportInvitation should succeed: {:?}",
-        result
+        "ExportInvitation should succeed: {result:?}"
     );
     let code = result.unwrap();
 
-    println!("  Exported code: {}", &code[..50.min(code.len())]);
+    let preview_len = 50.min(code.len());
+    let preview = &code[..preview_len];
+    println!("  Exported code: {preview}");
+    let prefix_preview_len = 20.min(code.len());
+    let prefix_preview = &code[..prefix_preview_len];
     assert!(
         code.starts_with("aura:v1:"),
-        "Code should have aura:v1: prefix, got: {}",
-        &code[..20.min(code.len())]
+        "Code should have aura:v1: prefix, got: {prefix_preview}"
     );
 
     // Phase 2: Export another invitation to verify consistency
@@ -192,14 +194,15 @@ async fn test_invitation_roundtrip_preserves_data() {
         .export_invitation_code(original_id)
         .await
         .expect("Export should succeed");
-    println!("  Exported code length: {} bytes", code.len());
+    let code_len = code.len();
+    println!("  Exported code length: {code_len} bytes");
 
     // Phase 2: Import the exported code
     println!("\nPhase 2: Import the exported code");
     let result = ctx
         .dispatch(EffectCommand::ImportInvitation { code: code.clone() })
         .await;
-    assert!(result.is_ok(), "Import should succeed: {:?}", result);
+    assert!(result.is_ok(), "Import should succeed: {result:?}");
     println!("  Import dispatched successfully");
 
     // Phase 3: Verify the invitation was added to contacts (sender becomes contact)
@@ -207,7 +210,8 @@ async fn test_invitation_roundtrip_preserves_data() {
     // The import adds the sender as a contact via add_contact_from_invitation
     // Check contacts signal for the new contact
     let contacts = ctx.snapshot_contacts();
-    println!("  Contact count after import: {}", contacts.contacts.len());
+    let contact_count = contacts.contacts.len();
+    println!("  Contact count after import: {contact_count}");
 
     cleanup_test_dir("inv-roundtrip");
     println!("\n=== Invitation Roundtrip Preserves Data Test PASSED ===\n");
@@ -235,8 +239,9 @@ async fn test_start_direct_chat_creates_dm_channel() {
     let initial_count = {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
-        println!("  Initial channel count: {}", chat.channels.len());
-        chat.channels.len()
+        let channel_count = chat.channels.len();
+        println!("  Initial channel count: {channel_count}");
+        channel_count
     };
 
     // Phase 2: Start a direct chat
@@ -249,8 +254,7 @@ async fn test_start_direct_chat_creates_dm_channel() {
         .await;
     assert!(
         result.is_ok(),
-        "StartDirectChat should succeed: {:?}",
-        result
+        "StartDirectChat should succeed: {result:?}"
     );
     println!("  StartDirectChat dispatched");
 
@@ -277,9 +281,9 @@ async fn test_start_direct_chat_creates_dm_channel() {
         matches!(dm.channel_type, ChannelType::DirectMessage),
         "Channel type should be DirectMessage"
     );
-    println!("  DM channel created: {}", dm.id);
-    println!("  Channel name: {}", dm.name);
-    println!("  Is DM: {}", dm.is_dm);
+    println!("  DM channel created: {dm_id}", dm_id = dm.id);
+    println!("  Channel name: {name}", name = dm.name);
+    println!("  Is DM: {is_dm}", is_dm = dm.is_dm);
 
     // Phase 4: Verify channel is selected
     println!("\nPhase 4: Verify channel is selected");
@@ -288,7 +292,10 @@ async fn test_start_direct_chat_creates_dm_channel() {
         Some(&expected_channel_id),
         "DM channel should be selected"
     );
-    println!("  Selected channel: {:?}", chat.selected_channel_id);
+    println!(
+        "  Selected channel: {selected_channel:?}",
+        selected_channel = chat.selected_channel_id
+    );
 
     cleanup_test_dir("dm-start");
     println!("\n=== Start Direct Chat Creates DM Channel Test PASSED ===\n");
@@ -311,9 +318,11 @@ async fn test_send_direct_message_adds_message() {
     let (initial_channel_count, initial_message_count) = {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
-        println!("  Initial channel count: {}", chat.channels.len());
-        println!("  Initial message count: {}", chat.messages.len());
-        (chat.channels.len(), chat.messages.len())
+        let channel_count = chat.channels.len();
+        let message_count = chat.messages.len();
+        println!("  Initial channel count: {channel_count}");
+        println!("  Initial message count: {message_count}");
+        (channel_count, message_count)
     };
 
     // Phase 2: Send a direct message
@@ -328,8 +337,7 @@ async fn test_send_direct_message_adds_message() {
         .await;
     assert!(
         result.is_ok(),
-        "SendDirectMessage should succeed: {:?}",
-        result
+        "SendDirectMessage should succeed: {result:?}"
     );
     println!("  SendDirectMessage dispatched successfully");
 
@@ -348,13 +356,12 @@ async fn test_send_direct_message_adds_message() {
     let dm_channel = chat.channels.iter().find(|c| c.id == expected_channel_id);
     assert!(
         dm_channel.is_some(),
-        "DM channel should be created: {}",
-        expected_channel_id
+        "DM channel should be created: {expected_channel_id}"
     );
     let channel = dm_channel.unwrap();
     assert!(channel.is_dm, "Channel should be marked as DM");
-    println!("  DM channel created: {}", channel.id);
-    println!("  Channel name: {}", channel.name);
+    println!("  DM channel created: {channel_id}", channel_id = channel.id);
+    println!("  Channel name: {name}", name = channel.name);
 
     assert!(
         chat.channels.len() > initial_channel_count,
@@ -377,9 +384,9 @@ async fn test_send_direct_message_adds_message() {
     let msg = message.unwrap();
     assert_eq!(msg.content, content, "Message content should match");
     assert!(msg.is_own, "Message should be marked as own");
-    println!("  Message found: '{}'", msg.content);
-    println!("  Channel: {}", msg.channel_id);
-    println!("  Is own: {}", msg.is_own);
+    println!("  Message found: '{content}'", content = msg.content);
+    println!("  Channel: {channel_id}", channel_id = msg.channel_id);
+    println!("  Is own: {is_own}", is_own = msg.is_own);
 
     cleanup_test_dir("dm-send");
     println!("\n=== Send Direct Message Adds Message Test PASSED ===\n");
@@ -414,20 +421,20 @@ async fn test_set_channel_mode_requires_admin() {
 
     // SetChannelMode requires Admin authorization level
     // In a fresh test account without steward status, this should fail
-    println!("  SetChannelMode result: {:?}", result);
+    println!("  SetChannelMode result: {result:?}");
     // We accept either success (if somehow admin) or permission denied error
     match &result {
         Ok(()) => println!("  (Admin access granted)"),
         Err(e) if e.contains("Permission denied") || e.contains("administrator") => {
             println!("  Correctly denied - requires admin privileges");
         }
-        Err(e) => panic!("Unexpected error: {}", e),
+        Err(e) => panic!("Unexpected error: {e}"),
     }
 
     // Phase 2: Verify get_channel_mode still works (returns default)
     println!("\nPhase 2: Verify get_channel_mode returns default");
     let mode = ctx.get_channel_mode(channel_id).await;
-    println!("  Channel mode (default or set): {:?}", mode);
+    println!("  Channel mode (default or set): {mode:?}");
     // Mode access should always work, even without admin rights
 
     cleanup_test_dir("channel-mode");
@@ -459,7 +466,7 @@ async fn test_peer_management_operations() {
             peer_id: peer_id.to_string(),
         })
         .await;
-    assert!(result.is_ok(), "AddPeer should succeed: {:?}", result);
+    assert!(result.is_ok(), "AddPeer should succeed: {result:?}");
     println!("  AddPeer dispatched");
 
     // Phase 2: Check connection status reflects peer
@@ -467,7 +474,7 @@ async fn test_peer_management_operations() {
     {
         let core = app_core.read().await;
         let status = core.read(&*CONNECTION_STATUS_SIGNAL).await.unwrap();
-        println!("  Connection status: {:?}", status);
+        println!("  Connection status: {status:?}");
         // Status should show Online with peer_count > 0
     }
 
@@ -484,7 +491,7 @@ async fn test_peer_management_operations() {
     // Phase 4: List peers
     println!("\nPhase 4: List peers");
     let result = ctx.dispatch(EffectCommand::ListPeers).await;
-    assert!(result.is_ok(), "ListPeers should succeed: {:?}", result);
+    assert!(result.is_ok(), "ListPeers should succeed: {result:?}");
     println!("  ListPeers dispatched");
 
     // Phase 5: Remove a peer
@@ -494,7 +501,7 @@ async fn test_peer_management_operations() {
             peer_id: peer_id.to_string(),
         })
         .await;
-    assert!(result.is_ok(), "RemovePeer should succeed: {:?}", result);
+    assert!(result.is_ok(), "RemovePeer should succeed: {result:?}");
     println!("  RemovePeer dispatched");
 
     cleanup_test_dir("peer-mgmt");
@@ -522,13 +529,13 @@ async fn test_force_sync_updates_status() {
     {
         let core = app_core.read().await;
         let status = core.read(&*SYNC_STATUS_SIGNAL).await.unwrap();
-        println!("  Initial sync status: {:?}", status);
+        println!("  Initial sync status: {status:?}");
     }
 
     // Phase 2: Trigger force sync
     println!("\nPhase 2: Trigger force sync");
     let result = ctx.dispatch(EffectCommand::ForceSync).await;
-    assert!(result.is_ok(), "ForceSync should succeed: {:?}", result);
+    assert!(result.is_ok(), "ForceSync should succeed: {result:?}");
     println!("  ForceSync dispatched");
 
     // Phase 3: Check sync status after
@@ -536,14 +543,14 @@ async fn test_force_sync_updates_status() {
     {
         let core = app_core.read().await;
         let status = core.read(&*SYNC_STATUS_SIGNAL).await.unwrap();
-        println!("  Sync status after: {:?}", status);
+        println!("  Sync status after: {status:?}");
         // In demo/offline mode, should show Synced (local-only)
     }
 
     // Phase 4: Test is_syncing method
     println!("\nPhase 4: Test is_syncing method");
     let is_syncing = ctx.is_syncing().await;
-    println!("  is_syncing: {}", is_syncing);
+    println!("  is_syncing: {is_syncing}");
     // After sync completes, should be false
 
     cleanup_test_dir("force-sync");
@@ -573,7 +580,7 @@ async fn test_request_state_dispatch() {
 
     // In offline/demo mode (no runtime agent), RequestState will fail
     // because it tries to trigger_sync() which requires a runtime
-    println!("  RequestState result: {:?}", result);
+    println!("  RequestState result: {result:?}");
     match &result {
         Ok(()) => println!("  Request succeeded (runtime available)"),
         Err(e) if e.contains("runtime") || e.contains("agent") || e.contains("sync") => {
@@ -581,7 +588,7 @@ async fn test_request_state_dispatch() {
         }
         Err(e) => {
             // Other errors are also acceptable - the point is the command was handled
-            println!("  Command handled with error: {}", e);
+            println!("  Command handled with error: {e}");
         }
     }
 
@@ -613,14 +620,14 @@ async fn test_connection_status_tracking() {
     // Phase 1: Check initial connection status
     println!("Phase 1: Check initial connection status");
     let is_connected = ctx.is_connected().await;
-    println!("  is_connected: {}", is_connected);
+    println!("  is_connected: {is_connected}");
 
     // Phase 2: Read connection signal directly
     println!("\nPhase 2: Read connection signal");
     {
         let core = app_core.read().await;
         let status = core.read(&*CONNECTION_STATUS_SIGNAL).await.unwrap();
-        println!("  Connection signal: {:?}", status);
+        println!("  Connection signal: {status:?}");
     }
 
     // Phase 3: Add peer to change connection status
@@ -636,7 +643,7 @@ async fn test_connection_status_tracking() {
     {
         let core = app_core.read().await;
         let status = core.read(&*CONNECTION_STATUS_SIGNAL).await.unwrap();
-        println!("  Updated connection signal: {:?}", status);
+        println!("  Updated connection signal: {status:?}");
     }
 
     cleanup_test_dir("conn-status");
@@ -666,7 +673,7 @@ async fn test_steward_grant_revoke_operations() {
             target: "user-to-promote".to_string(),
         })
         .await;
-    println!("  GrantSteward result: {:?}", result);
+    println!("  GrantSteward result: {result:?}");
     // This may fail due to authorization - that's expected behavior
 
     // Phase 2: Try to revoke steward
@@ -676,7 +683,7 @@ async fn test_steward_grant_revoke_operations() {
             target: "user-to-demote".to_string(),
         })
         .await;
-    println!("  RevokeSteward result: {:?}", result);
+    println!("  RevokeSteward result: {result:?}");
     // This may also fail due to authorization
 
     cleanup_test_dir("steward-ops");
@@ -715,7 +722,7 @@ async fn test_command_authorization_levels() {
     println!("\nPhase 3: Admin command (Shutdown)");
     let result = ctx.dispatch(EffectCommand::Shutdown).await;
     // Shutdown might be handled specially, but should complete without crash
-    println!("  Shutdown result: {:?}", result);
+    println!("  Shutdown result: {result:?}");
 
     // Phase 4: Sensitive command
     println!("\nPhase 4: Sensitive command (UpdateMfaPolicy)");
@@ -724,8 +731,7 @@ async fn test_command_authorization_levels() {
         .await;
     assert!(
         result.is_ok(),
-        "UpdateMfaPolicy should succeed: {:?}",
-        result
+        "UpdateMfaPolicy should succeed: {result:?}"
     );
     println!("  UpdateMfaPolicy succeeded");
 
@@ -751,19 +757,20 @@ async fn test_discover_peers_operation() {
     // Phase 1: Trigger peer discovery
     println!("Phase 1: Trigger peer discovery");
     let result = ctx.dispatch(EffectCommand::DiscoverPeers).await;
-    assert!(result.is_ok(), "DiscoverPeers should succeed: {:?}", result);
+    assert!(result.is_ok(), "DiscoverPeers should succeed: {result:?}");
     println!("  DiscoverPeers dispatched");
 
     // Phase 2: Get discovered peers
     println!("\nPhase 2: Get discovered peers");
     let peers = ctx.get_discovered_peers().await;
-    println!("  Discovered peers count: {}", peers.len());
+    let discovered_peers = peers.len();
+    println!("  Discovered peers count: {discovered_peers}");
     // In offline mode, may be empty - that's OK
 
     // Phase 3: Get known peers count
     println!("\nPhase 3: Get known peers count");
     let count = ctx.known_peers_count().await;
-    println!("  Known peers count: {}", count);
+    println!("  Known peers count: {count}");
 
     cleanup_test_dir("discover-peers");
     println!("\n=== Discover Peers Operation Test PASSED ===\n");
@@ -787,9 +794,10 @@ async fn test_account_backup_roundtrip() {
     // Phase 1: Export account backup
     println!("Phase 1: Export account backup");
     let result = ctx.export_account_backup().await;
-    assert!(result.is_ok(), "Export should succeed: {:?}", result);
+    assert!(result.is_ok(), "Export should succeed: {result:?}");
     let backup_code = result.unwrap();
-    println!("  Backup code length: {} bytes", backup_code.len());
+    let backup_len = backup_code.len();
+    println!("  Backup code length: {backup_len} bytes");
     assert!(
         backup_code.starts_with("aura:backup:v1:"),
         "Backup code should have correct prefix"
@@ -802,7 +810,7 @@ async fn test_account_backup_roundtrip() {
     // For now, verify the export produces valid data
     let result = ctx.import_account_backup(&backup_code).await;
     // This should succeed as we're importing into the same location
-    assert!(result.is_ok(), "Import should succeed: {:?}", result);
+    assert!(result.is_ok(), "Import should succeed: {result:?}");
     println!("  Backup import succeeded");
 
     cleanup_test_dir("backup");
@@ -836,21 +844,25 @@ async fn test_all_snapshots_consistent() {
     let devices = ctx.snapshot_devices();
     let guardians = ctx.snapshot_guardians();
 
+    let chat_channels = chat.channels.len();
+    let chat_messages = chat.messages.len();
+    println!("  Chat: {chat_channels} channels, {chat_messages} messages");
+    let contact_count = contacts.contacts.len();
+    println!("  Contacts: {contact_count} contacts");
     println!(
-        "  Chat: {} channels, {} messages",
-        chat.channels.len(),
-        chat.messages.len()
+        "  Recovery: in_progress={in_progress}",
+        in_progress = recovery.is_in_progress
     );
-    println!("  Contacts: {} contacts", contacts.contacts.len());
-    println!("  Recovery: in_progress={}", recovery.is_in_progress);
-    println!("  Neighborhood: {} homes", neighborhood.homes.len());
-    println!("  Home: {} residents", home.residents().len());
-    println!(
-        "  Invitations: {} invitations",
-        invitations.invitations.len()
-    );
-    println!("  Devices: {} devices", devices.devices.len());
-    println!("  Guardians: {} guardians", guardians.guardians.len());
+    let home_count = neighborhood.homes.len();
+    println!("  Neighborhood: {home_count} homes");
+    let resident_count = home.residents().len();
+    println!("  Home: {resident_count} residents");
+    let invitation_count = invitations.invitations.len();
+    println!("  Invitations: {invitation_count} invitations");
+    let device_count = devices.devices.len();
+    println!("  Devices: {device_count} devices");
+    let guardian_count = guardians.guardians.len();
+    println!("  Guardians: {guardian_count} guardians");
 
     // Phase 2: Read again and verify consistency
     println!("\nPhase 2: Verify snapshot consistency");
@@ -945,10 +957,11 @@ async fn test_complete_dm_flow() {
             "Second message should be found"
         );
 
-        println!("  DM channel: {}", dm_channel_id);
-        println!("  Messages in channel: {}", dm_messages.len());
+        println!("  DM channel: {dm_channel_id}");
+        let message_count = dm_messages.len();
+        println!("  Messages in channel: {message_count}");
         for msg in &dm_messages {
-            println!("    - '{}'", msg.content);
+            println!("    - '{content}'", content = msg.content);
         }
     }
 
@@ -982,7 +995,7 @@ async fn test_complete_sync_flow() {
     {
         let core = app_core.read().await;
         let status = core.read(&*CONNECTION_STATUS_SIGNAL).await.unwrap();
-        println!("  Connection status: {:?}", status);
+        println!("  Connection status: {status:?}");
     }
 
     // Phase 3: Force sync
@@ -997,7 +1010,7 @@ async fn test_complete_sync_flow() {
     {
         let core = app_core.read().await;
         let status = core.read(&*SYNC_STATUS_SIGNAL).await.unwrap();
-        println!("  Sync status: {:?}", status);
+        println!("  Sync status: {status:?}");
     }
 
     // Phase 5: Verify IoContext helpers
@@ -1005,9 +1018,9 @@ async fn test_complete_sync_flow() {
     let is_syncing = ctx.is_syncing().await;
     let is_connected = ctx.is_connected().await;
     let peer_count = ctx.known_peers_count().await;
-    println!("  is_syncing: {}", is_syncing);
-    println!("  is_connected: {}", is_connected);
-    println!("  known_peers_count: {}", peer_count);
+    println!("  is_syncing: {is_syncing}");
+    println!("  is_connected: {is_connected}");
+    println!("  known_peers_count: {peer_count}");
 
     cleanup_test_dir("sync-flow");
     println!("\n=== Complete Sync Flow Test PASSED ===\n");

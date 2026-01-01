@@ -304,7 +304,8 @@ mod tests {
         let actor = DeviceId::deterministic_test_id();
 
         let op = create_test_op(1, 5, actor);
-        let msg = OpWithCtx::new(op.clone(), op.causal_ctx.clone());
+        let ctx = op.causal_ctx.clone();
+        let msg = OpWithCtx::new(op, ctx);
 
         handler.on_recv(msg);
         assert_eq!(handler.get_state().sum, 5);
@@ -319,8 +320,10 @@ mod tests {
         let op1 = create_test_op(1, 5, actor);
         let op2 = create_test_op(1, 10, actor); // Same ID, different value
 
-        handler.on_recv(OpWithCtx::new(op1.clone(), op1.causal_ctx.clone()));
-        handler.on_recv(OpWithCtx::new(op2.clone(), op2.causal_ctx.clone()));
+        let ctx1 = op1.causal_ctx.clone();
+        handler.on_recv(OpWithCtx::new(op1, ctx1));
+        let ctx2 = op2.causal_ctx.clone();
+        handler.on_recv(OpWithCtx::new(op2, ctx2));
 
         // Should only apply first operation
         assert_eq!(handler.get_state().sum, 5);
@@ -335,9 +338,12 @@ mod tests {
         let op2 = create_test_op(2, 3, actor);
         let op3 = create_test_op(3, -2, actor);
 
-        handler.on_recv(OpWithCtx::new(op1.clone(), op1.causal_ctx.clone()));
-        handler.on_recv(OpWithCtx::new(op2.clone(), op2.causal_ctx.clone()));
-        handler.on_recv(OpWithCtx::new(op3.clone(), op3.causal_ctx.clone()));
+        let ctx1 = op1.causal_ctx.clone();
+        handler.on_recv(OpWithCtx::new(op1, ctx1));
+        let ctx2 = op2.causal_ctx.clone();
+        handler.on_recv(OpWithCtx::new(op2, ctx2));
+        let ctx3 = op3.causal_ctx.clone();
+        handler.on_recv(OpWithCtx::new(op3, ctx3));
 
         assert_eq!(handler.get_state().sum, 6); // 5 + 3 - 2
         assert!(handler.get_state().seen(&1));
@@ -352,28 +358,29 @@ mod tests {
 
         // Create operations with causal dependencies
         let op1_ctx = CausalContext::new(actor);
-        let op1 = TestOp {
-            id: 1,
-            value: 5,
-            causal_ctx: op1_ctx.clone(),
-        };
-
         // op2 depends on op1 - use explicit dependency
         let op1_id = OperationId::new(actor, 1);
         let op2_ctx = CausalContext::after(actor, &op1_ctx).with_dependency(op1_id);
+        let op1 = TestOp {
+            id: 1,
+            value: 5,
+            causal_ctx: op1_ctx,
+        };
         let op2 = TestOp {
             id: 2,
             value: 3,
-            causal_ctx: op2_ctx.clone(),
+            causal_ctx: op2_ctx,
         };
 
         // Send op2 first (out of order)
-        handler.on_recv(OpWithCtx::new(op2.clone(), op2.causal_ctx.clone()));
+        let op2_ctx = op2.causal_ctx.clone();
+        handler.on_recv(OpWithCtx::new(op2, op2_ctx));
         assert_eq!(handler.get_state().sum, 0); // Should be buffered
         assert_eq!(handler.buffer_len(), 1);
 
         // Send op1
-        handler.on_recv(OpWithCtx::new(op1.clone(), op1.causal_ctx.clone()));
+        let op1_ctx = op1.causal_ctx.clone();
+        handler.on_recv(OpWithCtx::new(op1, op1_ctx));
         assert_eq!(handler.get_state().sum, 8); // Should apply both: 5 + 3
         assert_eq!(handler.buffer_len(), 0); // Buffer should be empty
     }
@@ -383,7 +390,8 @@ mod tests {
         let handler = CmHandler::new(TestState::new());
         let actor = DeviceId::deterministic_test_id();
         let op = create_test_op(1, 5, actor);
-        let msg = handler.create_op_msg(op.clone(), op.causal_ctx.clone());
+        let ctx = op.causal_ctx.clone();
+        let msg = handler.create_op_msg(op, ctx);
 
         assert_eq!(msg.op.id, 1);
         assert_eq!(msg.op.value, 5);

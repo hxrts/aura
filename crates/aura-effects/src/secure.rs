@@ -36,8 +36,8 @@ impl RealSecureStorageHandler {
     /// Create a handler for testing with an ephemeral temp directory.
     #[cfg(test)]
     pub fn for_testing() -> Self {
-        let temp_dir =
-            std::env::temp_dir().join(format!("aura-secure-test-{}", std::process::id()));
+        let suffix = fastrand::u64(..);
+        let temp_dir = std::env::temp_dir().join(format!("aura-secure-test-{suffix}"));
         Self::with_base_path(temp_dir)
     }
 
@@ -244,7 +244,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_real_secure_storage_store_and_retrieve() {
-        let temp = tempdir().expect("create tempdir");
+        let temp = match tempdir() {
+            Ok(dir) => dir,
+            Err(err) => panic!("create tempdir: {err}"),
+        };
         let handler = RealSecureStorageHandler::with_base_path(temp.path().to_path_buf());
         let location = SecureStorageLocation::new("test_namespace", "test_key");
         let capabilities = vec![

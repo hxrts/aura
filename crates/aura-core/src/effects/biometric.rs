@@ -479,7 +479,7 @@ mod tests {
 
         let not_enrolled = BiometricCapability {
             enrolled: false,
-            ..usable.clone()
+            ..usable
         };
         assert!(!not_enrolled.is_usable());
     }

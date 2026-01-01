@@ -19,7 +19,7 @@ use aura_terminal::ids;
 use base64::Engine;
 
 // Re-export portable demo seed from aura-app
-pub use aura_app::workflows::demo_config::DEMO_SEED_2024 as DEFAULT_DEMO_SEED;
+pub use aura_app::ui::workflows::demo_config::DEMO_SEED_2024 as DEFAULT_DEMO_SEED;
 
 /// Demo agent names.
 pub const ALICE: &str = "Alice";
@@ -47,10 +47,10 @@ pub const CAROL: &str = "Carol";
 pub fn generate_demo_invite_code(name: &str, seed: u64) -> String {
     // Create deterministic authority ID using the SAME derivation as SimulatedAgent
     // CRITICAL: Must use ids::authority_id() for domain separation
-    let sender_id = ids::authority_id(&format!("demo:{}:{}:authority", seed, name));
+    let sender_id = ids::authority_id(&format!("demo:{seed}:{name}:authority"));
 
     // Create deterministic invitation ID from seed and name
-    let invitation_id = ids::uuid(&format!("demo:{}:{}:invitation", seed, name));
+    let invitation_id = ids::uuid(&format!("demo:{seed}:{name}:invitation"));
 
     // Create ShareableInvitation-compatible structure
     // Uses Contact type (not Guardian) - guardian requests are sent in-band
@@ -64,13 +64,13 @@ pub fn generate_demo_invite_code(name: &str, seed: u64) -> String {
             }
         },
         "expires_at": null,
-        "message": format!("Contact invitation from {} (demo)", name)
+        "message": format!("Contact invitation from {name} (demo)")
     });
 
     // Encode as base64 with aura:v1: prefix
     let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
     let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{}", b64)
+    format!("aura:v1:{b64}")
 }
 
 /// Generate Alice's invite code with the default demo seed.
@@ -85,16 +85,13 @@ pub fn carol_invite_code() -> String {
 
 /// Get Alice's authority ID for the default demo seed.
 pub fn alice_authority_id() -> aura_core::identifiers::AuthorityId {
-    ids::authority_id(&format!("demo:{}:{}:authority", DEFAULT_DEMO_SEED, ALICE))
+    ids::authority_id(&format!("demo:{DEFAULT_DEMO_SEED}:{ALICE}:authority"))
 }
 
 /// Get Carol's authority ID for the default demo seed.
 pub fn carol_authority_id() -> aura_core::identifiers::AuthorityId {
-    ids::authority_id(&format!(
-        "demo:{}:{}:authority",
-        DEFAULT_DEMO_SEED + 1,
-        CAROL
-    ))
+    let seed = DEFAULT_DEMO_SEED + 1;
+    ids::authority_id(&format!("demo:{seed}:{CAROL}:authority"))
 }
 
 /// Generate a guardian invitation code for demo testing.
@@ -103,8 +100,8 @@ pub fn carol_authority_id() -> aura_core::identifiers::AuthorityId {
 /// sent in-band during the guardian setup flow. This function is
 /// useful for testing guardian invitation parsing.
 pub fn generate_demo_guardian_invite_code(name: &str, seed: u64) -> String {
-    let sender_id = ids::authority_id(&format!("demo:{}:{}:authority", seed, name));
-    let invitation_id = ids::uuid(&format!("demo:{}:{}:guardian-invitation", seed, name));
+    let sender_id = ids::authority_id(&format!("demo:{seed}:{name}:authority"));
+    let invitation_id = ids::uuid(&format!("demo:{seed}:{name}:guardian-invitation"));
 
     let invitation_data = serde_json::json!({
         "version": 1,
@@ -116,12 +113,12 @@ pub fn generate_demo_guardian_invite_code(name: &str, seed: u64) -> String {
             }
         },
         "expires_at": null,
-        "message": format!("Guardian invitation from {} (demo)", name)
+        "message": format!("Guardian invitation from {name} (demo)")
     });
 
     let json_str = serde_json::to_string(&invitation_data).unwrap_or_default();
     let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes());
-    format!("aura:v1:{}", b64)
+    format!("aura:v1:{b64}")
 }
 
 #[cfg(test)]

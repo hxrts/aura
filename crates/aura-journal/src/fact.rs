@@ -517,7 +517,7 @@ mod tests {
         let namespace = JournalNamespace::Authority(auth_id);
 
         let mut journal1 = Journal::new(namespace.clone());
-        let mut journal2 = Journal::new(namespace.clone());
+        let mut journal2 = Journal::new(namespace);
 
         // Add different facts to each journal
         let fact1 = Fact {

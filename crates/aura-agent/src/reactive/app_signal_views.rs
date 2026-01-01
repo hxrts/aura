@@ -215,6 +215,21 @@ impl ReactiveView for InvitationsSignalView {
                         "Invitation ceremony aborted"
                     );
                 }
+                InvitationFact::CeremonySuperseded {
+                    superseded_ceremony_id,
+                    superseding_ceremony_id,
+                    reason,
+                    timestamp_ms,
+                    ..
+                } => {
+                    tracing::warn!(
+                        superseded_ceremony_id,
+                        superseding_ceremony_id,
+                        reason,
+                        timestamp_ms,
+                        "Invitation ceremony superseded"
+                    );
+                }
             }
         }
 

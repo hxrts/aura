@@ -471,8 +471,6 @@ mod tests {
     fn test_demo_threshold_defaults() {
         assert_eq!(DEFAULT_DEMO_THRESHOLD, 2);
         assert_eq!(DEFAULT_DEMO_GUARDIAN_COUNT, 3);
-        // 2-of-3 is a valid threshold
-        assert!(DEFAULT_DEMO_THRESHOLD <= DEFAULT_DEMO_GUARDIAN_COUNT);
     }
 
     #[test]

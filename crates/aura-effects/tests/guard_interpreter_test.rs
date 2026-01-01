@@ -18,7 +18,7 @@ fn test_guard_outcome_creation() {
         EffectCommand::RecordLeakage { bits: 64 },
     ];
 
-    let outcome = GuardOutcome::authorized(effects.clone());
+    let outcome = GuardOutcome::authorized(effects);
     assert!(outcome.is_authorized());
     assert_eq!(outcome.effects.len(), 2);
 

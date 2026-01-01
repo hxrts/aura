@@ -581,7 +581,7 @@ mod tests {
         CryptoCoreEffects, CryptoExtendedEffects, StorageCoreEffects, StorageExtendedEffects,
     };
     use aura_core::time::PhysicalTime;
-    use std::sync::RwLock;
+    use tokio::sync::RwLock;
 
     // Simple mock implementations for testing
 
@@ -599,20 +599,20 @@ mod tests {
     #[async_trait]
     impl StorageCoreEffects for MockStorage {
         async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-            self.data.write().unwrap().insert(key.to_string(), value);
+            self.data.write().await.insert(key.to_string(), value);
             Ok(())
         }
 
         async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-            Ok(self.data.read().unwrap().get(key).cloned())
+            Ok(self.data.read().await.get(key).cloned())
         }
 
         async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-            Ok(self.data.write().unwrap().remove(key).is_some())
+            Ok(self.data.write().await.remove(key).is_some())
         }
 
         async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-            let data = self.data.read().unwrap();
+            let data = self.data.read().await;
             let keys: Vec<String> = match prefix {
                 Some(p) => data.keys().filter(|k| k.starts_with(p)).cloned().collect(),
                 None => data.keys().cloned().collect(),
@@ -624,11 +624,11 @@ mod tests {
     #[async_trait]
     impl StorageExtendedEffects for MockStorage {
         async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-            Ok(self.data.read().unwrap().contains_key(key))
+            Ok(self.data.read().await.contains_key(key))
         }
 
         async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-            self.data.write().unwrap().extend(pairs);
+            self.data.write().await.extend(pairs);
             Ok(())
         }
 
@@ -636,7 +636,7 @@ mod tests {
             &self,
             keys: &[String],
         ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-            let data = self.data.read().unwrap();
+            let data = self.data.read().await;
             Ok(keys
                 .iter()
                 .filter_map(|k| data.get(k).map(|v| (k.clone(), v.clone())))
@@ -644,12 +644,12 @@ mod tests {
         }
 
         async fn clear_all(&self) -> Result<(), StorageError> {
-            self.data.write().unwrap().clear();
+            self.data.write().await.clear();
             Ok(())
         }
 
         async fn stats(&self) -> Result<StorageStats, StorageError> {
-            let data = self.data.read().unwrap();
+            let data = self.data.read().await;
             Ok(StorageStats {
                 key_count: data.len() as u64,
                 total_size: data.values().map(|v| v.len() as u64).sum(),
@@ -919,7 +919,7 @@ mod tests {
         ) -> Result<(), aura_core::AuraError> {
             self.data
                 .write()
-                .unwrap()
+                .await
                 .insert(location.full_path(), data.to_vec());
             Ok(())
         }
@@ -931,7 +931,7 @@ mod tests {
         ) -> Result<Vec<u8>, aura_core::AuraError> {
             self.data
                 .read()
-                .unwrap()
+                .await
                 .get(&location.full_path())
                 .cloned()
                 .ok_or_else(|| aura_core::AuraError::storage("not found"))
@@ -942,7 +942,7 @@ mod tests {
             location: &SecureStorageLocation,
             _caps: &[SecureStorageCapability],
         ) -> Result<(), aura_core::AuraError> {
-            self.data.write().unwrap().remove(&location.full_path());
+            self.data.write().await.remove(&location.full_path());
             Ok(())
         }
 
@@ -953,7 +953,7 @@ mod tests {
             Ok(self
                 .data
                 .read()
-                .unwrap()
+                .await
                 .contains_key(&location.full_path()))
         }
 
@@ -962,11 +962,11 @@ mod tests {
             namespace: &str,
             _caps: &[SecureStorageCapability],
         ) -> Result<Vec<String>, aura_core::AuraError> {
-            let prefix = format!("{}/", namespace);
+            let prefix = format!("{namespace}/");
             Ok(self
                 .data
                 .read()
-                .unwrap()
+                .await
                 .keys()
                 .filter(|k| k.starts_with(&prefix))
                 .cloned()

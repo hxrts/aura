@@ -403,6 +403,30 @@ where
     }
 }
 
+/// Factory for constructing journal handlers with policy and verification hooks.
+pub struct JournalHandlerFactory;
+
+impl JournalHandlerFactory {
+    /// Creates a journal handler with optional Biscuit authorization, flow budget, verifying key, and fact registry.
+    pub fn create<
+        C: CryptoEffects,
+        S: StorageEffects,
+        A: BiscuitAuthorizationEffects + Send + Sync,
+    >(
+        authority_id: AuthorityId,
+        crypto: C,
+        storage: S,
+        authorization: Option<(Vec<u8>, A)>,
+        verifying_key: Option<Vec<u8>>,
+        fact_registry: Option<FactRegistry>,
+    ) -> JournalHandler<C, S, A> {
+        JournalHandler::with_authority(authority_id, crypto, storage)
+            .with_authorization_if(authorization)
+            .with_verifying_key_if(verifying_key)
+            .with_fact_registry_if(fact_registry)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use aura_core::domain::content::Hash32;
@@ -436,29 +460,5 @@ mod tests {
         assert_eq!(updated.spent, 27);
         assert_eq!(updated.limit, 100);
         assert_eq!(updated.epoch, receipt.epoch);
-    }
-}
-
-/// Factory for constructing journal handlers with policy and verification hooks.
-pub struct JournalHandlerFactory;
-
-impl JournalHandlerFactory {
-    /// Creates a journal handler with optional Biscuit authorization, flow budget, verifying key, and fact registry.
-    pub fn create<
-        C: CryptoEffects,
-        S: StorageEffects,
-        A: BiscuitAuthorizationEffects + Send + Sync,
-    >(
-        authority_id: AuthorityId,
-        crypto: C,
-        storage: S,
-        authorization: Option<(Vec<u8>, A)>,
-        verifying_key: Option<Vec<u8>>,
-        fact_registry: Option<FactRegistry>,
-    ) -> JournalHandler<C, S, A> {
-        JournalHandler::with_authority(authority_id, crypto, storage)
-            .with_authorization_if(authorization)
-            .with_verifying_key_if(verifying_key)
-            .with_fact_registry_if(fact_registry)
     }
 }

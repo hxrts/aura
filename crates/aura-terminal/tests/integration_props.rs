@@ -88,8 +88,7 @@ impl PropsTestHarness {
         assert_eq!(
             self.current_screen(),
             screen,
-            "Failed to navigate to {:?}",
-            screen
+            "Failed to navigate to {screen:?}"
         );
     }
 }

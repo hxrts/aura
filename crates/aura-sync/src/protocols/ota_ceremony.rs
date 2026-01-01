@@ -298,10 +298,27 @@ pub enum OTACeremonyFact {
         reason: String,
         timestamp_ms: u64,
     },
+    /// Ceremony superseded by a newer ceremony
+    ///
+    /// Emitted when a new ceremony replaces an existing one. The old ceremony
+    /// should stop processing immediately. Supersession propagates via anti-entropy.
+    CeremonySuperseded {
+        /// The ceremony being superseded (old ceremony)
+        superseded_ceremony_id: String,
+        /// The ceremony that supersedes it (new ceremony)
+        superseding_ceremony_id: String,
+        /// Reason for supersession (e.g., "prestate_stale", "newer_request", "timeout")
+        reason: String,
+        /// Optional trace identifier for ceremony correlation
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace_id: Option<String>,
+        /// Timestamp in milliseconds
+        timestamp_ms: u64,
+    },
 }
 
 impl OTACeremonyFact {
-    /// Get the ceremony ID from any fact variant.
+    /// Get the ceremony ID from any fact variant (returns superseded ID for supersession facts).
     pub fn ceremony_id(&self) -> &str {
         match self {
             OTACeremonyFact::CeremonyInitiated { ceremony_id, .. } => ceremony_id,
@@ -309,6 +326,10 @@ impl OTACeremonyFact {
             OTACeremonyFact::ThresholdReached { ceremony_id, .. } => ceremony_id,
             OTACeremonyFact::CeremonyCommitted { ceremony_id, .. } => ceremony_id,
             OTACeremonyFact::CeremonyAborted { ceremony_id, .. } => ceremony_id,
+            OTACeremonyFact::CeremonySuperseded {
+                superseded_ceremony_id,
+                ..
+            } => superseded_ceremony_id,
         }
     }
 
@@ -320,6 +341,7 @@ impl OTACeremonyFact {
             OTACeremonyFact::ThresholdReached { timestamp_ms, .. } => *timestamp_ms,
             OTACeremonyFact::CeremonyCommitted { timestamp_ms, .. } => *timestamp_ms,
             OTACeremonyFact::CeremonyAborted { timestamp_ms, .. } => *timestamp_ms,
+            OTACeremonyFact::CeremonySuperseded { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 }
@@ -1404,11 +1426,12 @@ mod tests {
         assert_eq!(proposal1.compute_hash(), proposal2.compute_hash());
 
         // Different proposal should have different hash
+        let proposal1_hash = proposal1.compute_hash();
         let proposal3 = UpgradeProposal {
             activation_epoch: Epoch::new(300), // Different epoch
-            ..proposal1.clone()
+            ..proposal1
         };
-        assert_ne!(proposal1.compute_hash(), proposal3.compute_hash());
+        assert_ne!(proposal1_hash, proposal3.compute_hash());
     }
 
     #[test]

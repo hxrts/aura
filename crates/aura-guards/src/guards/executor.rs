@@ -808,7 +808,8 @@ impl SendGuardChain {
 mod tests {
     use super::*;
     use aura_core::effects::guard::EffectCommand;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     struct MockInterpreter {
         executed_commands: Arc<Mutex<Vec<EffectCommand>>>,
@@ -820,16 +821,12 @@ mod tests {
                 executed_commands: Arc::new(Mutex::new(Vec::new())),
             }
         }
-
-        fn get_executed_commands(&self) -> Vec<EffectCommand> {
-            self.executed_commands.lock().unwrap().clone()
-        }
     }
 
     #[async_trait::async_trait]
     impl EffectInterpreter for MockInterpreter {
         async fn execute(&self, cmd: EffectCommand) -> Result<EffectResult> {
-            self.executed_commands.lock().unwrap().push(cmd.clone());
+            self.executed_commands.lock().await.push(cmd.clone());
 
             match cmd {
                 EffectCommand::ChargeBudget { amount, .. } => {
@@ -872,7 +869,10 @@ mod tests {
 
         let guard = SendGuardChain::new(message_authorization.clone(), context, peer, cost);
 
-        let request = convert_send_guard_to_request(&guard, authority).expect("conversion");
+        let request = match convert_send_guard_to_request(&guard, authority) {
+            Ok(request) => request,
+            Err(err) => panic!("conversion: {err}"),
+        };
 
         assert_eq!(request.operation, message_authorization);
         assert_eq!(request.cost, cost);

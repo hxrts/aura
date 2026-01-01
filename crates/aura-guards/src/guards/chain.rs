@@ -436,7 +436,7 @@ mod tests {
         let authorization = "message:send".to_string();
         let context = test_context();
         let peer = test_peer();
-        let guard = SendGuardChain::new(authorization.clone(), context, peer, 100);
+        let guard = SendGuardChain::new(authorization, context, peer, 100);
 
         // Test authorization failure only
         let reason = guard.build_denial_reason(false, true);

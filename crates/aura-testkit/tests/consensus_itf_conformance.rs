@@ -46,14 +46,14 @@ fn test_itf_trace_invariants() {
 
     if !trace_path.exists() {
         eprintln!(
-            "Skipping ITF conformance test: trace file not found at {:?}",
-            trace_path
+            "Skipping ITF conformance test: trace file not found at {trace_path:?}"
         );
         eprintln!("Generate traces with: quint run --out-itf=traces/consensus.itf.json verification/quint/protocol_consensus.qnt");
         return;
     }
 
-    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+    let trace = load_itf_trace(trace_path)
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     println!(
         "Loaded ITF trace: {} states from {}",
@@ -87,7 +87,8 @@ fn test_itf_phase_transitions() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+    let trace = load_itf_trace(trace_path)
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     // Track phase transitions per instance
     for i in 1..trace.states.len() {
@@ -147,7 +148,8 @@ fn test_itf_committed_has_commit_fact() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+    let trace = load_itf_trace(trace_path)
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for state in &trace.states {
         for (cid, inst) in &state.instances {
@@ -180,7 +182,8 @@ fn test_parse_minimal_itf() {
         ]
     }"##;
 
-    let trace = parse_itf_trace(minimal).expect("failed to parse minimal trace");
+    let trace = parse_itf_trace(minimal)
+        .unwrap_or_else(|err| panic!("failed to parse minimal trace: {err}"));
     assert_eq!(trace.meta.format, "ITF");
     assert_eq!(trace.states.len(), 1);
     assert_eq!(trace.states[0].epoch, 0);
@@ -217,13 +220,17 @@ fn test_parse_itf_with_instance() {
         ]
     }"##;
 
-    let trace = parse_itf_trace(with_instance).expect("failed to parse trace with instance");
+    let trace = parse_itf_trace(with_instance)
+        .unwrap_or_else(|err| panic!("failed to parse trace with instance: {err}"));
     assert_eq!(trace.states.len(), 1);
 
     let state = &trace.states[0];
     assert_eq!(state.instances.len(), 1);
 
-    let inst = state.instances.get("cns1").expect("missing instance cns1");
+    let inst = state
+        .instances
+        .get("cns1")
+        .unwrap_or_else(|| panic!("missing instance cns1"));
     assert_eq!(inst.cid, "cns1");
     assert_eq!(inst.operation, "update_policy");
     assert_eq!(inst.threshold, 2);
@@ -240,7 +247,8 @@ fn test_itf_proposal_monotonicity() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+    let trace = load_itf_trace(trace_path)
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -287,22 +295,22 @@ impl fmt::Display for InferredAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             InferredAction::StartConsensus { cid } => {
-                write!(f, "StartConsensus(cid={})", cid)
+                write!(f, "StartConsensus(cid={cid})")
             }
             InferredAction::ApplyShare { cid, witness } => {
-                write!(f, "ApplyShare(cid={}, witness={})", cid, witness)
+                write!(f, "ApplyShare(cid={cid}, witness={witness})")
             }
             InferredAction::TriggerFallback { cid } => {
-                write!(f, "TriggerFallback(cid={})", cid)
+                write!(f, "TriggerFallback(cid={cid})")
             }
             InferredAction::FailConsensus { cid } => {
-                write!(f, "FailConsensus(cid={})", cid)
+                write!(f, "FailConsensus(cid={cid})")
             }
             InferredAction::CompleteConsensus { cid } => {
-                write!(f, "CompleteConsensus(cid={})", cid)
+                write!(f, "CompleteConsensus(cid={cid})")
             }
             InferredAction::EpochAdvance { from, to } => {
-                write!(f, "EpochAdvance({} -> {})", from, to)
+                write!(f, "EpochAdvance({from} -> {to})")
             }
             InferredAction::NoOp => write!(f, "NoOp"),
         }
@@ -381,7 +389,8 @@ fn test_itf_action_inference() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+    let trace = load_itf_trace(trace_path)
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     let mut action_counts: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
@@ -408,7 +417,7 @@ fn test_itf_action_inference() {
 
     println!("Action inference summary:");
     for (action, count) in &action_counts {
-        println!("  {}: {}", action, count);
+        println!("  {action}: {count}");
     }
 
     // Verify at least some meaningful actions were detected
@@ -419,8 +428,7 @@ fn test_itf_action_inference() {
         .sum();
 
     println!(
-        "✓ Inferred {} meaningful actions from {} transitions",
-        meaningful_actions,
+        "✓ Inferred {meaningful_actions} meaningful actions from {} transitions",
         trace.states.len() - 1
     );
 }
@@ -434,7 +442,8 @@ fn test_itf_equivocator_monotonicity() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+    let trace = load_itf_trace(trace_path)
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -446,10 +455,7 @@ fn test_itf_equivocator_monotonicity() {
                 for equivocator in &prev_inst.equivocators {
                     assert!(
                         curr_inst.equivocators.contains(equivocator),
-                        "Equivocator '{}' disappeared at state {} for {}",
-                        equivocator,
-                        i,
-                        cid
+                        "Equivocator '{equivocator}' disappeared at state {i} for {cid}"
                     );
                 }
             }
@@ -468,7 +474,8 @@ fn test_itf_terminal_states_permanent() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+    let trace = load_itf_trace(trace_path)
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -481,8 +488,8 @@ fn test_itf_terminal_states_permanent() {
                 if let Some(curr_inst) = curr_state.instances.get(cid) {
                     assert_eq!(
                         prev_inst.phase, curr_inst.phase,
-                        "Terminal state {:?} changed at state {} for {}",
-                        prev_inst.phase, i, cid
+                        "Terminal state {:?} changed at state {i} for {cid}",
+                        prev_inst.phase
                     );
                 }
             }
@@ -565,7 +572,8 @@ fn test_itf_state_comparison_with_divergence() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+    let trace = load_itf_trace(trace_path)
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     let mut total_divergences = 0;
     let mut unexpected_divergences = Vec::new();
@@ -585,11 +593,9 @@ fn test_itf_state_comparison_with_divergence() {
                     // Check if this is an unexpected divergence
                     if !is_expected_divergence(&actions, &diff) {
                         let report = format!(
-                            "Step {}: Unexpected divergence for instance '{}'\n\
+                            "Step {i}: Unexpected divergence for instance '{cid}'\n\
                              Actions: {:?}\n\
                              {}",
-                            i,
-                            cid,
                             actions,
                             DivergenceReport::for_instance(i, &diff)
                         );
@@ -603,13 +609,13 @@ fn test_itf_state_comparison_with_divergence() {
     // Print summary
     println!("State comparison summary:");
     println!("  Total state transitions: {}", trace.states.len() - 1);
-    println!("  Total divergences observed: {}", total_divergences);
+    println!("  Total divergences observed: {total_divergences}");
     println!("  Unexpected divergences: {}", unexpected_divergences.len());
 
     // If there are unexpected divergences, print them and fail
     if !unexpected_divergences.is_empty() {
         for report in &unexpected_divergences {
-            eprintln!("{}", report);
+            eprintln!("{report}");
         }
         // Note: We don't fail here because all divergences should be from valid actions
         // In a strict conformance test, we would: panic!("Unexpected divergences detected");
@@ -635,7 +641,7 @@ fn test_divergence_report_format() {
         "test_op".to_string(),
         "pre_hash".to_string(),
         2,
-        witnesses.clone(),
+        witnesses,
         "w1".to_string(),
         PathSelection::FastPath,
     );
@@ -687,7 +693,7 @@ fn test_divergence_report_format() {
     );
     assert!(report.contains("phase"), "Report should show phase field");
 
-    println!("Divergence report format test:\n{}", report);
+    println!("Divergence report format test:\n{report}");
 }
 
 /// Test that invariant violations trigger detailed reporting
@@ -750,7 +756,8 @@ fn test_action_inference_with_divergence() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path).expect("failed to load ITF trace");
+    let trace = load_itf_trace(trace_path)
+        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     let mut action_divergence_correlation: HashMap<String, usize> = HashMap::new();
 
@@ -785,7 +792,7 @@ fn test_action_inference_with_divergence() {
 
     println!("Action-Divergence correlation:");
     for (action, count) in &action_divergence_correlation {
-        println!("  {}: {} divergences", action, count);
+        println!("  {action}: {count} divergences");
     }
 
     println!(
@@ -809,7 +816,7 @@ fn discover_traces(dir: &Path) -> Vec<PathBuf> {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "json") {
+            if path.extension().is_some_and(|ext| ext == "json") {
                 traces.push(path);
             }
         }
@@ -848,7 +855,7 @@ impl TraceValidationResult {
 
 /// Validate a single trace comprehensively
 fn validate_trace(path: &Path) -> Result<TraceValidationResult, String> {
-    let trace = load_itf_trace(path).map_err(|e| format!("Failed to load: {}", e))?;
+    let trace = load_itf_trace(path).map_err(|e| format!("Failed to load: {e}"))?;
 
     let mut result = TraceValidationResult {
         path: path.to_path_buf(),
@@ -880,19 +887,17 @@ fn validate_trace(path: &Path) -> Result<TraceValidationResult, String> {
                 // Phase transition validity
                 if !is_valid_phase_transition(prev_inst.phase, curr_inst.phase) {
                     result.phase_violations.push(format!(
-                        "State {}: {:?} -> {:?} for {}",
-                        i, prev_inst.phase, curr_inst.phase, cid
+                        "State {i}: {:?} -> {:?} for {cid}",
+                        prev_inst.phase, curr_inst.phase
                     ));
                 }
 
                 // Proposal monotonicity
                 if curr_inst.proposals.len() < prev_inst.proposals.len() {
                     result.monotonicity_violations.push(format!(
-                        "State {}: proposals {} -> {} for {}",
-                        i,
+                        "State {i}: proposals {} -> {} for {cid}",
                         prev_inst.proposals.len(),
-                        curr_inst.proposals.len(),
-                        cid
+                        curr_inst.proposals.len()
                     ));
                 }
 
@@ -900,8 +905,7 @@ fn validate_trace(path: &Path) -> Result<TraceValidationResult, String> {
                 for eq in &prev_inst.equivocators {
                     if !curr_inst.equivocators.contains(eq) {
                         result.monotonicity_violations.push(format!(
-                            "State {}: equivocator '{}' disappeared for {}",
-                            i, eq, cid
+                            "State {i}: equivocator '{eq}' disappeared for {cid}"
                         ));
                     }
                 }
@@ -911,8 +915,8 @@ fn validate_trace(path: &Path) -> Result<TraceValidationResult, String> {
                 let diff = StateDiff::compare_instances(prev_inst, curr_inst);
                 if !diff.is_empty() && !is_expected_divergence(&actions, &diff) {
                     result.divergences.push(format!(
-                        "State {}: unexpected divergence for {}: {:?}",
-                        i, cid, diff.diffs
+                        "State {i}: unexpected divergence for {cid}: {:?}",
+                        diff.diffs
                     ));
                 }
             }
@@ -926,8 +930,8 @@ fn validate_trace(path: &Path) -> Result<TraceValidationResult, String> {
                 if let Some(curr_inst) = curr_state.instances.get(cid) {
                     if prev_inst.phase != curr_inst.phase {
                         result.phase_violations.push(format!(
-                            "State {}: terminal {:?} changed to {:?} for {}",
-                            i, prev_inst.phase, curr_inst.phase, cid
+                            "State {i}: terminal {:?} changed to {:?} for {cid}",
+                            prev_inst.phase, curr_inst.phase
                         ));
                     }
                 }
@@ -945,7 +949,7 @@ fn test_exhaustive_trace_conformance() {
     let traces = discover_traces(trace_dir);
 
     if traces.is_empty() {
-        eprintln!("No traces found in {:?}", trace_dir);
+        eprintln!("No traces found in {trace_dir:?}");
         eprintln!("Generate traces with: ./scripts/generate-itf-traces.sh");
         return;
     }
@@ -953,7 +957,7 @@ fn test_exhaustive_trace_conformance() {
     println!("========================================");
     println!("Exhaustive ITF Trace Conformance Test");
     println!("========================================");
-    println!("Discovered {} traces in {:?}", traces.len(), trace_dir);
+    println!("Discovered {} traces in {trace_dir:?}", traces.len());
     println!();
 
     let mut total_states = 0;
@@ -974,7 +978,7 @@ fn test_exhaustive_trace_conformance() {
             }
             Err(e) => {
                 failed += 1;
-                eprintln!("  [LOAD ERROR] {:?}: {}", trace_path.file_name(), e);
+                eprintln!("  [LOAD ERROR] {:?}: {e}", trace_path.file_name());
             }
         }
     }
@@ -984,9 +988,9 @@ fn test_exhaustive_trace_conformance() {
     println!("Summary");
     println!("========================================");
     println!("  Traces tested:  {}", traces.len());
-    println!("  Total states:   {}", total_states);
-    println!("  Passed:         {}", passed);
-    println!("  Failed:         {}", failed);
+    println!("  Total states:   {total_states}");
+    println!("  Passed:         {passed}");
+    println!("  Failed:         {failed}");
     println!();
 
     if !failed_traces.is_empty() {
@@ -998,30 +1002,28 @@ fn test_exhaustive_trace_conformance() {
                 result.error_count()
             );
             for v in &result.invariant_violations {
-                println!("    [INVARIANT] {}", v);
+                println!("    [INVARIANT] {v}");
             }
             for v in &result.phase_violations {
-                println!("    [PHASE] {}", v);
+                println!("    [PHASE] {v}");
             }
             for v in &result.monotonicity_violations {
-                println!("    [MONOTONICITY] {}", v);
+                println!("    [MONOTONICITY] {v}");
             }
             for v in &result.divergences {
-                println!("    [DIVERGENCE] {}", v);
+                println!("    [DIVERGENCE] {v}");
             }
         }
     }
 
     assert_eq!(
         failed, 0,
-        "Conformance test failed: {} traces had violations",
-        failed
+        "Conformance test failed: {failed} traces had violations"
     );
 
     println!();
     println!(
-        "✓ All {} traces passed conformance testing ({} total states)",
-        passed, total_states
+        "✓ All {passed} traces passed conformance testing ({total_states} total states)"
     );
 }
 

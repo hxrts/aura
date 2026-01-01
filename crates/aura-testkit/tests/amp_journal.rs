@@ -7,6 +7,7 @@ use aura_amp::AmpJournalEffects;
 use aura_core::effects::time::OrderClockEffects;
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::Hash32;
 use aura_journal::fact::{ChannelCheckpoint, ChannelPolicy, RelationalFact};
 use aura_testkit::mock_effects::MockEffects;
 
@@ -38,7 +39,8 @@ async fn test_fetch_context_journal_empty() {
     let journal = effects.fetch_context_journal(test_context()).await;
     assert!(journal.is_ok());
 
-    let j = journal.unwrap();
+    let j = journal
+        .unwrap_or_else(|err| panic!("fetch context journal failed: {err}"));
     assert!(j.facts.is_empty(), "empty context should have no facts");
 }
 
@@ -52,7 +54,7 @@ async fn test_insert_relational_fact_checkpoint() {
         chan_epoch: 0,
         base_gen: 0,
         window: 1024,
-        ck_commitment: Default::default(),
+        ck_commitment: Hash32::default(),
         skip_window_override: Some(1024),
     };
 
@@ -95,7 +97,7 @@ async fn test_insert_multiple_facts() {
         chan_epoch: 0,
         base_gen: 0,
         window: 1024,
-        ck_commitment: Default::default(),
+        ck_commitment: Hash32::default(),
         skip_window_override: None,
     };
     effects
@@ -103,7 +105,7 @@ async fn test_insert_multiple_facts() {
             aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
         ))
         .await
-        .unwrap();
+        .unwrap_or_else(|err| panic!("insert checkpoint fact failed: {err}"));
 
     // Insert policy
     let policy = ChannelPolicy {
@@ -116,7 +118,7 @@ async fn test_insert_multiple_facts() {
             aura_journal::ProtocolRelationalFact::AmpChannelPolicy(policy),
         ))
         .await
-        .unwrap();
+        .unwrap_or_else(|err| panic!("insert policy fact failed: {err}"));
 
     // Both insertions should succeed without error
 }
@@ -132,7 +134,7 @@ async fn test_insert_facts_for_different_contexts() {
         chan_epoch: 0,
         base_gen: 0,
         window: 1024,
-        ck_commitment: Default::default(),
+        ck_commitment: Hash32::default(),
         skip_window_override: None,
     };
     effects
@@ -140,7 +142,7 @@ async fn test_insert_facts_for_different_contexts() {
             aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint1),
         ))
         .await
-        .unwrap();
+        .unwrap_or_else(|err| panic!("insert checkpoint fact failed: {err}"));
 
     // Insert fact for context 2
     let checkpoint2 = ChannelCheckpoint {
@@ -149,7 +151,7 @@ async fn test_insert_facts_for_different_contexts() {
         chan_epoch: 0,
         base_gen: 0,
         window: 2048,
-        ck_commitment: Default::default(),
+        ck_commitment: Hash32::default(),
         skip_window_override: None,
     };
     effects
@@ -157,7 +159,7 @@ async fn test_insert_facts_for_different_contexts() {
             aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint2),
         ))
         .await
-        .unwrap();
+        .unwrap_or_else(|err| panic!("insert checkpoint fact failed: {err}"));
 
     // Both should succeed
 }
@@ -173,7 +175,7 @@ async fn test_insert_facts_for_different_channels() {
         chan_epoch: 0,
         base_gen: 0,
         window: 1024,
-        ck_commitment: Default::default(),
+        ck_commitment: Hash32::default(),
         skip_window_override: None,
     };
     effects
@@ -181,7 +183,7 @@ async fn test_insert_facts_for_different_channels() {
             aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint1),
         ))
         .await
-        .unwrap();
+        .unwrap_or_else(|err| panic!("insert checkpoint fact failed: {err}"));
 
     // Insert fact for channel 2
     let checkpoint2 = ChannelCheckpoint {
@@ -190,7 +192,7 @@ async fn test_insert_facts_for_different_channels() {
         chan_epoch: 0,
         base_gen: 0,
         window: 512,
-        ck_commitment: Default::default(),
+        ck_commitment: Hash32::default(),
         skip_window_override: None,
     };
     effects
@@ -198,7 +200,7 @@ async fn test_insert_facts_for_different_channels() {
             aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint2),
         ))
         .await
-        .unwrap();
+        .unwrap_or_else(|err| panic!("insert checkpoint fact failed: {err}"));
 
     // Both should succeed
 }
@@ -230,7 +232,7 @@ async fn test_context_store_insert_fact() {
         chan_epoch: 1,
         base_gen: 100,
         window: 256,
-        ck_commitment: Default::default(),
+        ck_commitment: Hash32::default(),
         skip_window_override: Some(256),
     };
 
@@ -251,9 +253,18 @@ async fn test_context_store_insert_fact() {
 async fn test_order_time_generates_unique_values() {
     let effects = MockEffects::deterministic();
 
-    let order1 = effects.order_time().await.unwrap();
-    let order2 = effects.order_time().await.unwrap();
-    let order3 = effects.order_time().await.unwrap();
+    let order1 = effects
+        .order_time()
+        .await
+        .unwrap_or_else(|err| panic!("order_time failed: {err}"));
+    let order2 = effects
+        .order_time()
+        .await
+        .unwrap_or_else(|err| panic!("order_time failed: {err}"));
+    let order3 = effects
+        .order_time()
+        .await
+        .unwrap_or_else(|err| panic!("order_time failed: {err}"));
 
     // Each order time should be unique (since MockEffects uses RNG)
     assert_ne!(order1.0, order2.0);
@@ -265,7 +276,10 @@ async fn test_order_time_generates_unique_values() {
 async fn test_order_time_is_32_bytes() {
     let effects = MockEffects::deterministic();
 
-    let order = effects.order_time().await.unwrap();
+    let order = effects
+        .order_time()
+        .await
+        .unwrap_or_else(|err| panic!("order_time failed: {err}"));
 
     assert_eq!(order.0.len(), 32);
 }
@@ -286,7 +300,10 @@ async fn test_get_journal() {
 async fn test_persist_journal() {
     let effects = MockEffects::deterministic();
 
-    let journal = effects.get_journal().await.unwrap();
+    let journal = effects
+        .get_journal()
+        .await
+        .unwrap_or_else(|err| panic!("get journal failed: {err}"));
     let result = effects.persist_journal(&journal).await;
 
     assert!(result.is_ok());
@@ -296,7 +313,10 @@ async fn test_persist_journal() {
 async fn test_merge_facts() {
     let effects = MockEffects::deterministic();
 
-    let target = effects.get_journal().await.unwrap();
+    let target = effects
+        .get_journal()
+        .await
+        .unwrap_or_else(|err| panic!("get journal failed: {err}"));
     let delta = aura_core::Journal::new();
 
     let result = effects.merge_facts(&target, &delta).await;
@@ -307,7 +327,10 @@ async fn test_merge_facts() {
 async fn test_refine_caps() {
     let effects = MockEffects::deterministic();
 
-    let target = effects.get_journal().await.unwrap();
+    let target = effects
+        .get_journal()
+        .await
+        .unwrap_or_else(|err| panic!("get journal failed: {err}"));
     let refinement = aura_core::Journal::new();
 
     let result = effects.refine_caps(&target, &refinement).await;
@@ -326,7 +349,7 @@ fn test_channel_checkpoint_serialization() {
         chan_epoch: 42,
         base_gen: 100,
         window: 1024,
-        ck_commitment: Default::default(),
+        ck_commitment: Hash32::default(),
         skip_window_override: Some(512),
     };
 
@@ -335,12 +358,13 @@ fn test_channel_checkpoint_serialization() {
     );
 
     // Serialize to JSON
-    let json = serde_json::to_string(&fact).expect("serialization should succeed");
+    let json = serde_json::to_string(&fact)
+        .unwrap_or_else(|err| panic!("serialization should succeed: {err}"));
     assert!(!json.is_empty());
 
     // Deserialize back
-    let recovered: RelationalFact =
-        serde_json::from_str(&json).expect("deserialization should succeed");
+    let recovered: RelationalFact = serde_json::from_str(&json)
+        .unwrap_or_else(|err| panic!("deserialization should succeed: {err}"));
 
     if let RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelCheckpoint(
         cp,
@@ -368,12 +392,13 @@ fn test_channel_policy_serialization() {
     ));
 
     // Serialize to JSON
-    let json = serde_json::to_string(&fact).expect("serialization should succeed");
+    let json = serde_json::to_string(&fact)
+        .unwrap_or_else(|err| panic!("serialization should succeed: {err}"));
     assert!(!json.is_empty());
 
     // Deserialize back
-    let recovered: RelationalFact =
-        serde_json::from_str(&json).expect("deserialization should succeed");
+    let recovered: RelationalFact = serde_json::from_str(&json)
+        .unwrap_or_else(|err| panic!("deserialization should succeed: {err}"));
 
     if let RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelPolicy(p)) =
         recovered
@@ -396,9 +421,10 @@ fn test_channel_policy_none_skip_window() {
         policy,
     ));
 
-    let json = serde_json::to_string(&fact).expect("serialization should succeed");
-    let recovered: RelationalFact =
-        serde_json::from_str(&json).expect("deserialization should succeed");
+    let json = serde_json::to_string(&fact)
+        .unwrap_or_else(|err| panic!("serialization should succeed: {err}"));
+    let recovered: RelationalFact = serde_json::from_str(&json)
+        .unwrap_or_else(|err| panic!("deserialization should succeed: {err}"));
 
     if let RelationalFact::Protocol(aura_journal::ProtocolRelationalFact::AmpChannelPolicy(p)) =
         recovered

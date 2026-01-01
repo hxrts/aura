@@ -659,14 +659,14 @@ mod tests {
             .iter()
             .map(|delta| {
                 let delta = downcast_delta::<RecoveryDelta>(delta).unwrap();
-                format!("{:?}", delta)
+                format!("{delta:?}")
             })
             .collect();
         let mut keys_ba: Vec<String> = deltas_ba
             .iter()
             .map(|delta| {
                 let delta = downcast_delta::<RecoveryDelta>(delta).unwrap();
-                format!("{:?}", delta)
+                format!("{delta:?}")
             })
             .collect();
 

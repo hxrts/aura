@@ -379,7 +379,7 @@ fn test_epoch_confirmation_processing() {
     assert!(!result.unwrap()); // Not ready yet (need both confirmations)
 
     let confirmation2 = aura_sync::protocols::EpochConfirmation {
-        rotation_id: rotation_id.clone(),
+        rotation_id,
         participant_id: participant2,
         current_epoch: Epoch::new(0),
         ready_for_epoch: Epoch::new(1),

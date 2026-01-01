@@ -252,10 +252,24 @@ pub enum RecoveryCeremonyFact {
         reason: String,
         timestamp_ms: u64,
     },
+    /// Ceremony superseded by a newer ceremony
+    ///
+    /// Emitted when a new ceremony replaces an existing one. The old ceremony
+    /// should stop processing immediately. Supersession propagates via anti-entropy.
+    CeremonySuperseded {
+        /// The ceremony being superseded (old ceremony)
+        superseded_ceremony_id: String,
+        /// The ceremony that supersedes it (new ceremony)
+        superseding_ceremony_id: String,
+        /// Reason for supersession (e.g., "prestate_stale", "newer_request", "timeout")
+        reason: String,
+        /// Timestamp in milliseconds
+        timestamp_ms: u64,
+    },
 }
 
 impl RecoveryCeremonyFact {
-    /// Get the ceremony ID from any fact variant.
+    /// Get the ceremony ID from any fact variant (returns superseded ID for supersession facts).
     pub fn ceremony_id(&self) -> &str {
         match self {
             RecoveryCeremonyFact::CeremonyInitiated { ceremony_id, .. } => ceremony_id,
@@ -263,6 +277,10 @@ impl RecoveryCeremonyFact {
             RecoveryCeremonyFact::QuorumReached { ceremony_id, .. } => ceremony_id,
             RecoveryCeremonyFact::CeremonyCommitted { ceremony_id, .. } => ceremony_id,
             RecoveryCeremonyFact::CeremonyAborted { ceremony_id, .. } => ceremony_id,
+            RecoveryCeremonyFact::CeremonySuperseded {
+                superseded_ceremony_id,
+                ..
+            } => superseded_ceremony_id,
         }
     }
 
@@ -274,6 +292,7 @@ impl RecoveryCeremonyFact {
             RecoveryCeremonyFact::QuorumReached { timestamp_ms, .. } => *timestamp_ms,
             RecoveryCeremonyFact::CeremonyCommitted { timestamp_ms, .. } => *timestamp_ms,
             RecoveryCeremonyFact::CeremonyAborted { timestamp_ms, .. } => *timestamp_ms,
+            RecoveryCeremonyFact::CeremonySuperseded { timestamp_ms, .. } => *timestamp_ms,
         }
     }
 

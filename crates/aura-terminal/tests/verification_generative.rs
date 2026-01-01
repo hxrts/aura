@@ -178,9 +178,9 @@ impl FlowTraceReplayer {
     /// Replay a trace from file
     pub fn replay_trace_file(&self, path: impl AsRef<Path>) -> Result<FlowReplayResult, String> {
         let content = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| format!("Failed to read ITF file: {}", e))?;
+            .map_err(|e| format!("Failed to read ITF file: {e}"))?;
         let trace: FlowITFTrace = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse ITF JSON: {}", e))?;
+            .map_err(|e| format!("Failed to parse ITF JSON: {e}"))?;
         self.replay_trace(&trace)
     }
 
@@ -511,7 +511,7 @@ impl FlowTraceReplayer {
         // Try to find action indicator in variables
         if let Some(phase) = vars.get("recoveryFlowPhase") {
             if let Some(tag) = Self::extract_string(Some(phase)) {
-                return format!("recovery:{}", tag);
+                return format!("recovery:{tag}");
             }
         }
         "unknown".to_string()
@@ -525,7 +525,7 @@ impl FlowTraceReplayer {
                     .as_str()
                     .ok_or("Bigint not a string")?
                     .parse()
-                    .map_err(|e| format!("Invalid bigint: {}", e));
+                    .map_err(|e| format!("Invalid bigint: {e}"));
             }
         }
         value.as_i64().ok_or("Not a valid integer".to_string())
@@ -541,8 +541,7 @@ impl FlowTraceReplayer {
                 results.passed_count += 1;
             } else if !agent.contacts.is_empty() || !agent.guardians.is_empty() {
                 results.failures.push(format!(
-                    "Agent {} has contacts/guardians without account",
-                    agent_id
+                    "Agent {agent_id} has contacts/guardians without account"
                 ));
             } else {
                 results.passed_count += 1;
@@ -572,10 +571,9 @@ impl FlowTraceReplayer {
             if all_stewards_are_residents {
                 results.passed_count += 1;
             } else {
-                results.failures.push(format!(
-                    "Home {} has stewards who are not residents",
-                    home_id
-                ));
+                results
+                    .failures
+                    .push(format!("Home {home_id} has stewards who are not residents"));
             }
         }
 
@@ -585,8 +583,8 @@ impl FlowTraceReplayer {
                 results.passed_count += 1;
             } else {
                 results.failures.push(format!(
-                    "Recovery session {} has invalid subject {}",
-                    session_id, session.subject
+                    "Recovery session {session_id} has invalid subject {subject}",
+                    subject = session.subject
                 ));
             }
         }
@@ -598,8 +596,7 @@ impl FlowTraceReplayer {
                     results.passed_count += 1;
                 } else {
                     results.failures.push(format!(
-                        "Agent {} has nickname for {} who is not a contact",
-                        agent_id, contact_id
+                        "Agent {agent_id} has nickname for {contact_id} who is not a contact"
                     ));
                 }
             }
@@ -612,8 +609,7 @@ impl FlowTraceReplayer {
                     results.passed_count += 1;
                 } else {
                     results.failures.push(format!(
-                        "Home {} has resident {} who is not a valid agent",
-                        home_id, resident
+                        "Home {home_id} has resident {resident} who is not a valid agent"
                     ));
                 }
             }
@@ -726,7 +722,7 @@ fn test_home_capacity_invariant() {
     // Add agents for residents
     for i in 0..9 {
         state.agents.insert(
-            format!("user{}", i),
+            format!("user{i}"),
             AgentState {
                 has_account: true,
                 ..Default::default()
@@ -739,7 +735,7 @@ fn test_home_capacity_invariant() {
         "home1".to_string(),
         HomeState {
             owner: "bob".to_string(),
-            residents: (0..8).map(|i| format!("user{}", i)).collect(),
+            residents: (0..8).map(|i| format!("user{i}")).collect(),
             stewards: vec!["user0".to_string()],
         },
     );
@@ -973,7 +969,7 @@ fn test_replay_flow_trace() {
 
     // Skip if trace file doesn't exist
     if !std::path::Path::new(trace_path).exists() {
-        eprintln!("Skipping: trace file not found at {}", trace_path);
+        eprintln!("Skipping: trace file not found at {trace_path}");
         eprintln!("Generate it with: quint run --max-samples=100 --max-steps=50 --out-itf=verification/traces/tui_flows_trace.itf.json verification/quint/tui_flows.qnt");
         return;
     }
@@ -1023,7 +1019,7 @@ fn test_generative_flow_replay() {
             "run",
             "--max-samples=100",
             "--max-steps=30",
-            &format!("--out-itf={}", trace_file),
+            &format!("--out-itf={trace_file}"),
             "verification/quint/tui_flows.qnt",
         ])
         .current_dir("../../")
@@ -1034,18 +1030,18 @@ fn test_generative_flow_replay() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         eprintln!("Quint run failed:");
-        eprintln!("  stderr: {}", stderr);
-        eprintln!("  stdout: {}", stdout);
+        eprintln!("  stderr: {stderr}");
+        eprintln!("  stdout: {stdout}");
         // Don't panic - Quint might not find the init action
         // This is expected if the spec uses different entry points
         println!("Note: Quint simulation may require explicit init/step actions");
         return;
     }
 
-    println!("  Generated trace at {}", trace_file);
+    println!("  Generated trace at {trace_file}");
 
     // Replay the trace
-    let trace_path = format!("../../{}", trace_file);
+    let trace_path = format!("../../{trace_file}");
     let replayer = FlowTraceReplayer::new();
     let result = replayer
         .replay_trace_file(&trace_path)
@@ -1087,7 +1083,7 @@ fn test_multi_scenario_generative() {
     let mut all_passed = true;
 
     for (name, scenario) in scenarios {
-        println!("Testing scenario: {} ({})", name, scenario);
+        println!("Testing scenario: {name} ({scenario})");
 
         // Run the specific scenario test
         let output = Command::new("nix")
@@ -1105,18 +1101,18 @@ fn test_multi_scenario_generative() {
             .expect("Failed to run Quint");
 
         if output.status.success() {
-            println!("  {} scenario: PASSED", name);
+            println!("  {name} scenario: PASSED");
             total_invariants += 1;
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("  {} scenario: FAILED", name);
-            eprintln!("    {}", stderr);
+            eprintln!("  {name} scenario: FAILED");
+            eprintln!("    {stderr}");
             all_passed = false;
         }
     }
 
     println!("\nMulti-scenario results:");
-    println!("  Scenarios passed: {}/4", total_invariants);
+    println!("  Scenarios passed: {total_invariants}/4");
 
     assert!(all_passed, "Some scenarios failed");
 

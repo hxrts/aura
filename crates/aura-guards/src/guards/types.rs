@@ -262,35 +262,41 @@ mod tests {
     #[test]
     fn validate_charge_before_send_accepts_ordered() {
         let cmds = [Cmd::Charge, Cmd::Other, Cmd::Send];
-        validate_charge_before_send(
+        match validate_charge_before_send(
             &cmds,
             |c| matches!(c, Cmd::Charge),
             |c| matches!(c, Cmd::Send),
-        )
-        .unwrap();
+        ) {
+            Ok(()) => {}
+            Err(err) => panic!("expected ok: {err}"),
+        }
     }
 
     #[test]
     fn validate_charge_before_send_rejects_missing_charge() {
         let cmds = [Cmd::Other, Cmd::Send];
-        let err = validate_charge_before_send(
+        let err = match validate_charge_before_send(
             &cmds,
             |c| matches!(c, Cmd::Charge),
             |c| matches!(c, Cmd::Send),
-        )
-        .unwrap_err();
+        ) {
+            Ok(()) => panic!("expected error"),
+            Err(err) => err,
+        };
         assert!(err.contains("without any preceding charge"));
     }
 
     #[test]
     fn validate_charge_before_send_rejects_misordered_charge() {
         let cmds = [Cmd::Send, Cmd::Charge];
-        let err = validate_charge_before_send(
+        let err = match validate_charge_before_send(
             &cmds,
             |c| matches!(c, Cmd::Charge),
             |c| matches!(c, Cmd::Send),
-        )
-        .unwrap_err();
+        ) {
+            Ok(()) => panic!("expected error"),
+            Err(err) => err,
+        };
         assert!(err.contains("after a send"));
     }
 }

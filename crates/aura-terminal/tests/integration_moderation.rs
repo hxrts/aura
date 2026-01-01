@@ -23,12 +23,12 @@ async fn setup_ctx(name: &str) -> (IoContext, TempDir) {
         .with_app_core(app_core)
         .with_existing_account(false)
         .with_base_path(dir.path().to_path_buf())
-        .with_device_id(format!("test-device-{}", name))
+        .with_device_id(format!("test-device-{name}"))
         .with_mode(TuiMode::Production)
         .build()
         .expect("IoContext builder should succeed for tests");
 
-    ctx.create_account(&format!("TestUser-{}", name))
+    ctx.create_account(&format!("TestUser-{name}"))
         .await
         .expect("Failed to create account");
 

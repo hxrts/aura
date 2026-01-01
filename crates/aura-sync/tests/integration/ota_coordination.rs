@@ -54,19 +54,19 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
         };
 
         println!(
-            "Coordinator {} proposing upgrade to {}",
-            coordinator, proposal.version
+            "Coordinator {coordinator} proposing upgrade to {version}",
+            version = proposal.version
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Step 2: Approvers review and approve
-        println!("Approver {} reviewing upgrade proposal", approver1);
+        println!("Approver {approver1} reviewing upgrade proposal");
         tokio::time::sleep(Duration::from_millis(300)).await;
-        println!("Approver {} approved upgrade", approver1);
+        println!("Approver {approver1} approved upgrade");
 
-        println!("Approver {} reviewing upgrade proposal", approver2);
+        println!("Approver {approver2} reviewing upgrade proposal");
         tokio::time::sleep(Duration::from_millis(300)).await;
-        println!("Approver {} approved upgrade", approver2);
+        println!("Approver {approver2} approved upgrade");
 
         // Step 3: Threshold reached, begin upgrade
         println!("Threshold reached (2/2), beginning upgrade");
@@ -132,13 +132,13 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
         };
 
         println!(
-            "Coordinator {} proposing upgrade to {}",
-            coordinator, _proposal.version
+            "Coordinator {coordinator} proposing upgrade to {version}",
+            version = _proposal.version
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Step 2: Only one approver approves
-        println!("Approver {} approved upgrade", approver1);
+        println!("Approver {approver1} approved upgrade");
         tokio::time::sleep(Duration::from_millis(300)).await;
 
         // Step 3: Wait for deadline (second approver never responds)
@@ -243,7 +243,7 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
 
             if ready {
                 let new_epoch = coord1.commit_rotation(&rotation_id)?;
-                println!("Epoch rotation completed, new epoch: {}", new_epoch);
+                println!("Epoch rotation completed, new epoch: {new_epoch}");
 
                 // Now all devices are on same epoch, OTA can proceed
                 println!("All devices synchronized, OTA can now proceed");
@@ -303,8 +303,8 @@ async fn test_ota_rollback() -> AuraResult<()> {
         };
 
         println!(
-            "Initiating emergency rollback to {}",
-            rollback_proposal.version
+            "Initiating emergency rollback to {version}",
+            version = rollback_proposal.version
         );
         tokio::time::sleep(Duration::from_millis(300)).await;
 
@@ -560,7 +560,7 @@ async fn test_ota_device_failures() -> AuraResult<()> {
             }
         }
 
-        println!("Device {} failed (isolated from network)", failed_device);
+        println!("Device {failed_device} failed (isolated from network)");
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         // Step 3: Upgrade should continue with remaining devices

@@ -285,6 +285,20 @@ pub enum CeremonyFact {
         reason: String,
         aborted_at: PhysicalTime,
     },
+    /// Ceremony was superseded by a newer ceremony
+    ///
+    /// Emitted when a new ceremony replaces an existing one. The old ceremony
+    /// should stop processing immediately. Supersession propagates via anti-entropy.
+    Superseded {
+        /// The ceremony being superseded (old ceremony)
+        superseded_ceremony_id: Hash32,
+        /// The ceremony that supersedes it (new ceremony)
+        superseding_ceremony_id: Hash32,
+        /// Reason for supersession (e.g., "prestate_stale", "newer_request", "timeout")
+        reason: String,
+        /// When the supersession was recorded
+        superseded_at: PhysicalTime,
+    },
 }
 
 impl CeremonyFact {
@@ -311,16 +325,31 @@ impl CeremonyFact {
             CeremonyFact::Aborted { ceremony_id, .. } => {
                 format!("ceremony:{}:aborted", hex::encode(&ceremony_id.0[..8]))
             }
+            CeremonyFact::Superseded {
+                superseded_ceremony_id,
+                superseding_ceremony_id,
+                ..
+            } => {
+                format!(
+                    "ceremony:{}:superseded:{}",
+                    hex::encode(&superseded_ceremony_id.0[..8]),
+                    hex::encode(&superseding_ceremony_id.0[..8])
+                )
+            }
         }
     }
 
-    /// Get the ceremony ID
+    /// Get the ceremony ID (returns superseded ceremony ID for supersession facts)
     pub fn ceremony_id(&self) -> Hash32 {
         match self {
             CeremonyFact::Initiated { ceremony_id, .. } => *ceremony_id,
             CeremonyFact::GuardianResponded { ceremony_id, .. } => *ceremony_id,
             CeremonyFact::Committed { ceremony_id, .. } => *ceremony_id,
             CeremonyFact::Aborted { ceremony_id, .. } => *ceremony_id,
+            CeremonyFact::Superseded {
+                superseded_ceremony_id,
+                ..
+            } => *superseded_ceremony_id,
         }
     }
 }

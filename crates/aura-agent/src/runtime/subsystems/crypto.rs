@@ -26,13 +26,13 @@ thread_local! {
 
 #[derive(Debug)]
 pub(crate) enum CryptoRng {
-    Deterministic(Mutex<StdRng>),
+    Deterministic(Box<Mutex<StdRng>>),
     ThreadLocal,
 }
 
 impl CryptoRng {
     pub(crate) fn deterministic(rng: StdRng) -> Self {
-        CryptoRng::Deterministic(Mutex::new(rng))
+        CryptoRng::Deterministic(Box::new(Mutex::new(rng)))
     }
 
     pub(crate) fn thread_local() -> Self {
@@ -73,7 +73,7 @@ impl Clone for CryptoRng {
         match self {
             CryptoRng::Deterministic(rng) => {
                 let rng = rng.lock();
-                CryptoRng::Deterministic(Mutex::new(rng.clone()))
+                CryptoRng::Deterministic(Box::new(Mutex::new(rng.clone())))
             }
             CryptoRng::ThreadLocal => CryptoRng::ThreadLocal,
         }

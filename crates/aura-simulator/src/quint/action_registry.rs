@@ -604,7 +604,7 @@ mod tests {
         registry.register(NoOpHandler::new("action1"));
         registry.register(NoOpHandler::new("action2"));
 
-        let debug_str = format!("{:?}", registry);
+        let debug_str = format!("{registry:?}");
         assert!(debug_str.contains("ActionRegistry"));
         assert!(debug_str.contains("action1") || debug_str.contains("action2"));
     }

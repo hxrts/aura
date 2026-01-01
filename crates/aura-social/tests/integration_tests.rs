@@ -500,7 +500,7 @@ fn test_multi_home_neighborhood_topology() {
     let neighborhood = create_neighborhood(1, vec![home1.home_id, home2.home_id, home3.home_id]);
 
     // Create topology for steward1 in home1
-    let topology = SocialTopology::new(steward1, Some(home1.clone()), vec![neighborhood.clone()]);
+    let topology = SocialTopology::new(steward1, Some(home1), vec![neighborhood.clone()]);
 
     // Should have home presence
     assert!(topology.has_social_presence());
@@ -615,7 +615,7 @@ fn test_guardian_in_relay_candidates() {
 #[test]
 fn test_relay_candidate_relationship_types() {
     let (home, steward, _) = create_home(1, 3);
-    let mut topology = SocialTopology::new(steward, Some(home.clone()), vec![]);
+    let mut topology = SocialTopology::new(steward, Some(home), vec![]);
 
     let guardian = test_authority(88);
     topology.add_peer(guardian, RelayRelationship::Guardian);
