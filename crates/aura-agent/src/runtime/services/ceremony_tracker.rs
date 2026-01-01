@@ -21,7 +21,8 @@ use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity};
 use aura_core::DeviceId;
-use std::collections::HashMap;
+use super::state::with_state_mut_validated;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
@@ -29,7 +30,67 @@ use tokio::time::{Duration, Instant};
 /// Tracks state of guardian ceremonies
 #[derive(Clone)]
 pub struct CeremonyTracker {
-    ceremonies: Arc<RwLock<HashMap<String, CeremonyState>>>,
+    state: Arc<RwLock<CeremonyTrackerState>>,
+}
+
+#[derive(Debug, Default)]
+struct CeremonyTrackerState {
+    ceremonies: HashMap<String, CeremonyState>,
+}
+
+impl CeremonyTrackerState {
+    fn validate(&self) -> Result<(), String> {
+        for (ceremony_id, state) in &self.ceremonies {
+            if state.threshold_k == 0 {
+                return Err(format!("ceremony {} has zero threshold", ceremony_id));
+            }
+            if state.threshold_k > state.total_n {
+                return Err(format!(
+                    "ceremony {} threshold {} exceeds total {}",
+                    ceremony_id, state.threshold_k, state.total_n
+                ));
+            }
+            if state.total_n as usize != state.participants.len() {
+                return Err(format!(
+                    "ceremony {} total_n {} does not match participant count {}",
+                    ceremony_id,
+                    state.total_n,
+                    state.participants.len()
+                ));
+            }
+            let participant_set: HashSet<_> = state.participants.iter().collect();
+            if participant_set.len() != state.participants.len() {
+                return Err(format!("ceremony {} has duplicate participants", ceremony_id));
+            }
+            let accepted_set: HashSet<_> = state.accepted_participants.iter().collect();
+            if accepted_set.len() != state.accepted_participants.len() {
+                return Err(format!(
+                    "ceremony {} has duplicate accepted participants",
+                    ceremony_id
+                ));
+            }
+            if !accepted_set.is_subset(&participant_set) {
+                return Err(format!(
+                    "ceremony {} has accepted participants not in participant list",
+                    ceremony_id
+                ));
+            }
+            if state.is_committed && state.has_failed {
+                return Err(format!(
+                    "ceremony {} cannot be committed and failed",
+                    ceremony_id
+                ));
+            }
+            if state.is_committed && state.accepted_participants.len() < state.threshold_k as usize
+            {
+                return Err(format!(
+                    "ceremony {} committed without reaching threshold",
+                    ceremony_id
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// State of a guardian ceremony
@@ -93,7 +154,7 @@ impl CeremonyTracker {
     /// Create a new ceremony tracker
     pub fn new() -> Self {
         Self {
-            ceremonies: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(RwLock::new(CeremonyTrackerState::default())),
         }
     }
 
@@ -116,15 +177,6 @@ impl CeremonyTracker {
         new_epoch: u64,
         enrollment_device_id: Option<DeviceId>,
     ) -> Result<(), IntentError> {
-        let mut ceremonies = self.ceremonies.write().await;
-
-        if ceremonies.contains_key(&ceremony_id) {
-            return Err(IntentError::validation_failed(format!(
-                "Ceremony {} already registered",
-                ceremony_id
-            )));
-        }
-
         let state = CeremonyState {
             kind,
             threshold_k,
@@ -141,16 +193,32 @@ impl CeremonyTracker {
             timeout: Duration::from_secs(30),
         };
 
-        ceremonies.insert(ceremony_id.clone(), state);
+        let result = with_state_mut_validated(
+            &self.state,
+            |tracker| {
+                if tracker.ceremonies.contains_key(&ceremony_id) {
+                    return Err(IntentError::validation_failed(format!(
+                        "Ceremony {} already registered",
+                        ceremony_id
+                    )));
+                }
+                tracker.ceremonies.insert(ceremony_id.clone(), state);
+                Ok(())
+            },
+            |tracker| tracker.validate(),
+        )
+        .await;
 
-        tracing::info!(
-            ceremony_id = %ceremony_id,
-            threshold_k,
-            total_n,
-            "Ceremony registered"
-        );
+        if result.is_ok() {
+            tracing::info!(
+                ceremony_id = %ceremony_id,
+                threshold_k,
+                total_n,
+                "Ceremony registered"
+            );
+        }
 
-        Ok(())
+        result
     }
 
     /// Get ceremony state
@@ -161,9 +229,9 @@ impl CeremonyTracker {
     /// # Returns
     /// The current ceremony state
     pub async fn get(&self, ceremony_id: &str) -> Result<CeremonyState, IntentError> {
-        let ceremonies = self.ceremonies.read().await;
+        let state = self.state.read().await;
 
-        ceremonies.get(ceremony_id).cloned().ok_or_else(|| {
+        state.ceremonies.get(ceremony_id).cloned().ok_or_else(|| {
             IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
         })
     }
@@ -181,73 +249,84 @@ impl CeremonyTracker {
         ceremony_id: &str,
         participant: ParticipantIdentity,
     ) -> Result<bool, IntentError> {
-        let mut ceremonies = self.ceremonies.write().await;
+        with_state_mut_validated(
+            &self.state,
+            |tracker| {
+                let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
+                    IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+                })?;
 
-        let state = ceremonies.get_mut(ceremony_id).ok_or_else(|| {
-            IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
-        })?;
+                // Check if participant is part of this ceremony
+                if !state.participants.contains(&participant) {
+                    return Err(IntentError::validation_failed(format!(
+                        "Participant {:?} not part of ceremony {}",
+                        participant, ceremony_id
+                    )));
+                }
 
-        // Check if participant is part of this ceremony
-        if !state.participants.contains(&participant) {
-            return Err(IntentError::validation_failed(format!(
-                "Participant {:?} not part of ceremony {}",
-                participant, ceremony_id
-            )));
-        }
+                // Check if already accepted
+                if state.accepted_participants.contains(&participant) {
+                    tracing::debug!(
+                        ceremony_id = %ceremony_id,
+                        "Participant already accepted (idempotent)"
+                    );
+                    return Ok(state.accepted_participants.len() >= state.threshold_k as usize);
+                }
 
-        // Check if already accepted
-        if state.accepted_participants.contains(&participant) {
-            tracing::debug!(
-                ceremony_id = %ceremony_id,
-                "Participant already accepted (idempotent)"
-            );
-            return Ok(state.accepted_participants.len() >= state.threshold_k as usize);
-        }
+                // Add to accepted list
+                state.accepted_participants.push(participant.clone());
 
-        // Add to accepted list
-        state.accepted_participants.push(participant.clone());
+                let threshold_reached =
+                    state.accepted_participants.len() >= state.threshold_k as usize;
+                if threshold_reached {
+                    state.agreement_mode = AgreementMode::CoordinatorSoftSafe;
+                }
 
-        let threshold_reached = state.accepted_participants.len() >= state.threshold_k as usize;
-        if threshold_reached {
-            state.agreement_mode = AgreementMode::CoordinatorSoftSafe;
-        }
+                tracing::info!(
+                    ceremony_id = %ceremony_id,
+                    accepted = state.accepted_participants.len(),
+                    threshold = state.threshold_k,
+                    threshold_reached,
+                    "Participant accepted ceremony"
+                );
 
-        tracing::info!(
-            ceremony_id = %ceremony_id,
-            accepted = state.accepted_participants.len(),
-            threshold = state.threshold_k,
-            threshold_reached,
-            "Participant accepted ceremony"
-        );
-
-        Ok(threshold_reached)
+                Ok(threshold_reached)
+            },
+            |tracker| tracker.validate(),
+        )
+        .await
     }
 
     /// Mark a ceremony as committed (key rotation activated).
     ///
     /// This is only called after threshold is reached and `commit_key_rotation` succeeds.
     pub async fn mark_committed(&self, ceremony_id: &str) -> Result<(), IntentError> {
-        let mut ceremonies = self.ceremonies.write().await;
+        with_state_mut_validated(
+            &self.state,
+            |tracker| {
+                let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
+                    IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+                })?;
 
-        let state = ceremonies.get_mut(ceremony_id).ok_or_else(|| {
-            IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
-        })?;
+                if state.is_committed {
+                    return Ok(());
+                }
 
-        if state.is_committed {
-            return Ok(());
-        }
+                state.is_committed = true;
+                state.agreement_mode = AgreementMode::ConsensusFinalized;
 
-        state.is_committed = true;
-        state.agreement_mode = AgreementMode::ConsensusFinalized;
+                tracing::info!(
+                    ceremony_id = %ceremony_id,
+                    accepted = state.accepted_participants.len(),
+                    threshold = state.threshold_k,
+                    "Ceremony committed"
+                );
 
-        tracing::info!(
-            ceremony_id = %ceremony_id,
-            accepted = state.accepted_participants.len(),
-            threshold = state.threshold_k,
-            "Ceremony committed"
-        );
-
-        Ok(())
+                Ok(())
+            },
+            |tracker| tracker.validate(),
+        )
+        .await
     }
 
     /// Check if ceremony is complete (committed)
@@ -284,22 +363,27 @@ impl CeremonyTracker {
         ceremony_id: &str,
         error_message: Option<String>,
     ) -> Result<(), IntentError> {
-        let mut ceremonies = self.ceremonies.write().await;
+        with_state_mut_validated(
+            &self.state,
+            |tracker| {
+                let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
+                    IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+                })?;
 
-        let state = ceremonies.get_mut(ceremony_id).ok_or_else(|| {
-            IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
-        })?;
+                state.has_failed = true;
+                state.error_message = error_message.clone();
 
-        state.has_failed = true;
-        state.error_message = error_message.clone();
+                tracing::warn!(
+                    ceremony_id = %ceremony_id,
+                    error = ?error_message,
+                    "Ceremony marked as failed"
+                );
 
-        tracing::warn!(
-            ceremony_id = %ceremony_id,
-            error = ?error_message,
-            "Ceremony marked as failed"
-        );
-
-        Ok(())
+                Ok(())
+            },
+            |tracker| tracker.validate(),
+        )
+        .await
     }
 
     /// Remove ceremony from tracker (cleanup after completion/failure)
@@ -307,15 +391,20 @@ impl CeremonyTracker {
     /// # Arguments
     /// * `ceremony_id` - The ceremony identifier
     pub async fn remove(&self, ceremony_id: &str) -> Result<(), IntentError> {
-        let mut ceremonies = self.ceremonies.write().await;
+        with_state_mut_validated(
+            &self.state,
+            |tracker| {
+                tracker.ceremonies.remove(ceremony_id).ok_or_else(|| {
+                    IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+                })?;
 
-        ceremonies.remove(ceremony_id).ok_or_else(|| {
-            IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
-        })?;
+                tracing::debug!(ceremony_id = %ceremony_id, "Ceremony removed from tracker");
 
-        tracing::debug!(ceremony_id = %ceremony_id, "Ceremony removed from tracker");
-
-        Ok(())
+                Ok(())
+            },
+            |tracker| tracker.validate(),
+        )
+        .await
     }
 
     /// Get list of all active ceremonies
@@ -323,8 +412,9 @@ impl CeremonyTracker {
     /// # Returns
     /// Vector of (ceremony_id, state) tuples
     pub async fn list_active(&self) -> Vec<(String, CeremonyState)> {
-        let ceremonies = self.ceremonies.read().await;
-        ceremonies
+        let state = self.state.read().await;
+        state
+            .ceremonies
             .iter()
             .map(|(id, state)| (id.clone(), state.clone()))
             .collect()
@@ -337,24 +427,33 @@ impl CeremonyTracker {
     /// # Returns
     /// Number of ceremonies cleaned up
     pub async fn cleanup_timed_out(&self) -> usize {
-        let mut ceremonies = self.ceremonies.write().await;
-        let mut removed = Vec::new();
+        with_state_mut_validated(
+            &self.state,
+            |tracker| {
+                let mut removed = Vec::new();
 
-        for (id, state) in ceremonies.iter() {
-            if state.started_at.elapsed() > state.timeout && !state.has_failed {
-                removed.push(id.clone());
-            }
-        }
+                for (id, state) in tracker.ceremonies.iter() {
+                    if state.started_at.elapsed() > state.timeout && !state.has_failed {
+                        removed.push(id.clone());
+                    }
+                }
 
-        for id in &removed {
-            if let Some(state) = ceremonies.get_mut(id) {
-                state.has_failed = true;
-                state.error_message = Some("Ceremony timed out".to_string());
-            }
-            tracing::warn!(ceremony_id = %id, "Ceremony timed out and marked as failed");
-        }
+                for id in &removed {
+                    if let Some(state) = tracker.ceremonies.get_mut(id) {
+                        state.has_failed = true;
+                        state.error_message = Some("Ceremony timed out".to_string());
+                    }
+                    tracing::warn!(
+                        ceremony_id = %id,
+                        "Ceremony timed out and marked as failed"
+                    );
+                }
 
-        removed.len()
+                removed.len()
+            },
+            |tracker| tracker.validate(),
+        )
+        .await
     }
 }
 
@@ -379,7 +478,7 @@ impl RuntimeService for CeremonyTracker {
     }
 
     async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
-        // CeremonyTracker is stateless and always ready
+        // CeremonyTracker is in-memory and always ready
         Ok(())
     }
 

@@ -80,6 +80,8 @@ pub enum ServiceErrorKind {
     InvalidConfiguration,
     /// A required dependency is not available
     DependencyUnavailable,
+    /// Service is unavailable or disabled
+    Unavailable,
     /// Service encountered an internal error
     Internal,
     /// Service operation timed out
@@ -125,6 +127,11 @@ impl ServiceError {
     /// Create an internal error
     pub fn internal(service: &'static str, message: impl Into<String>) -> Self {
         Self::new(service, ServiceErrorKind::Internal, message)
+    }
+
+    /// Create an unavailable service error
+    pub fn unavailable(service: &'static str, message: impl Into<String>) -> Self {
+        Self::new(service, ServiceErrorKind::Unavailable, message)
     }
 
     /// Add a cause to this error

@@ -5,15 +5,13 @@
 
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::runtime::services::RecoveryManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_guards::chain::create_send_guard;
 use aura_protocol::effects::EffectApiEffects;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Recovery operation state
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,10 +139,10 @@ pub struct RecoveryResult {
 
 /// Active recovery ceremony
 #[derive(Debug, Clone)]
-struct ActiveRecovery {
-    request: RecoveryRequest,
-    state: RecoveryState,
-    approvals: Vec<GuardianApproval>,
+pub(crate) struct ActiveRecovery {
+    pub(crate) request: RecoveryRequest,
+    pub(crate) state: RecoveryState,
+    pub(crate) approvals: Vec<GuardianApproval>,
 }
 
 /// Recovery handler
@@ -152,7 +150,7 @@ struct ActiveRecovery {
 pub struct RecoveryHandler {
     context: HandlerContext,
     /// Active recovery ceremonies
-    active_recoveries: Arc<RwLock<HashMap<String, ActiveRecovery>>>,
+    recovery_manager: RecoveryManager,
 }
 
 impl RecoveryHandler {
@@ -161,7 +159,7 @@ impl RecoveryHandler {
         HandlerUtilities::validate_authority_context(&authority)?;
         Ok(Self {
             context: HandlerContext::new(authority),
-            active_recoveries: Arc::new(RwLock::new(HashMap::new())),
+            recovery_manager: RecoveryManager::new(),
         })
     }
 
@@ -172,8 +170,7 @@ impl RecoveryHandler {
 
     /// Get current recovery state
     pub async fn get_state(&self, recovery_id: &str) -> Option<RecoveryState> {
-        let recoveries = self.active_recoveries.read().await;
-        recoveries.get(recovery_id).map(|r| r.state.clone())
+        self.recovery_manager.get_state(recovery_id).await
     }
 
     /// Initiate a recovery ceremony
@@ -261,10 +258,9 @@ impl RecoveryHandler {
             approvals: Vec::new(),
         };
 
-        {
-            let mut recoveries = self.active_recoveries.write().await;
-            recoveries.insert(recovery_id, active_recovery);
-        }
+        self.recovery_manager
+            .insert(recovery_id, active_recovery)
+            .await;
 
         Ok(request)
     }
@@ -298,14 +294,16 @@ impl RecoveryHandler {
             }
         }
 
-        let mut recoveries = self.active_recoveries.write().await;
-
-        let recovery = recoveries.get_mut(&approval.recovery_id).ok_or_else(|| {
-            AgentError::runtime(format!(
-                "Recovery ceremony not found: {}",
-                approval.recovery_id
-            ))
-        })?;
+        let recovery = self
+            .recovery_manager
+            .get_recovery(&approval.recovery_id)
+            .await
+            .ok_or_else(|| {
+                AgentError::runtime(format!(
+                    "Recovery ceremony not found: {}",
+                    approval.recovery_id
+                ))
+            })?;
 
         // Verify guardian is in the set
         if !recovery.request.guardians.contains(&approval.guardian_id) {
@@ -341,27 +339,50 @@ impl RecoveryHandler {
         )
         .await?;
 
-        // Add approval
-        recovery.approvals.push(approval.clone());
-        let collected = recovery.approvals.len() as u32;
-        let threshold = recovery.request.threshold;
+        let updated_state = self
+            .recovery_manager
+            .with_recovery_mut(&approval.recovery_id, |recovery| {
+                // Re-check for duplicate approvals in case of concurrent updates.
+                if recovery
+                    .approvals
+                    .iter()
+                    .any(|a| a.guardian_id == approval.guardian_id)
+                {
+                    return Err(AgentError::effects(format!(
+                        "Guardian {} already approved",
+                        approval.guardian_id
+                    )));
+                }
 
-        // Update state
-        if collected >= threshold {
-            recovery.state = RecoveryState::CollectingShares {
-                recovery_id: approval.recovery_id.clone(),
-                collected,
-                required: threshold,
-            };
-        } else {
-            recovery.state = RecoveryState::Initiated {
-                recovery_id: approval.recovery_id.clone(),
-                threshold,
-                collected,
-            };
-        }
+                recovery.approvals.push(approval.clone());
+                let collected = recovery.approvals.len() as u32;
+                let threshold = recovery.request.threshold;
 
-        Ok(recovery.state.clone())
+                if collected >= threshold {
+                    recovery.state = RecoveryState::CollectingShares {
+                        recovery_id: approval.recovery_id.clone(),
+                        collected,
+                        required: threshold,
+                    };
+                } else {
+                    recovery.state = RecoveryState::Initiated {
+                        recovery_id: approval.recovery_id.clone(),
+                        threshold,
+                        collected,
+                    };
+                }
+
+                Ok(recovery.state.clone())
+            })
+            .await
+            .ok_or_else(|| {
+                AgentError::runtime(format!(
+                    "Recovery ceremony not found: {}",
+                    approval.recovery_id
+                ))
+            })??;
+
+        Ok(updated_state)
     }
 
     /// Complete a recovery ceremony (called when threshold is met)
@@ -403,11 +424,13 @@ impl RecoveryHandler {
             }
         }
 
-        let mut recoveries = self.active_recoveries.write().await;
-
-        let recovery = recoveries.get_mut(recovery_id).ok_or_else(|| {
-            AgentError::runtime(format!("Recovery ceremony not found: {}", recovery_id))
-        })?;
+        let recovery = self
+            .recovery_manager
+            .get_recovery(recovery_id)
+            .await
+            .ok_or_else(|| {
+                AgentError::runtime(format!("Recovery ceremony not found: {}", recovery_id))
+            })?;
 
         // Check threshold is met
         let collected = recovery.approvals.len() as u32;
@@ -434,8 +457,7 @@ impl RecoveryHandler {
         )
         .await?;
 
-        // Update state to complete
-        recovery.state = RecoveryState::Complete {
+        let completed_state = RecoveryState::Complete {
             recovery_id: recovery_id.to_string(),
             completed_at: current_time,
         };
@@ -443,14 +465,20 @@ impl RecoveryHandler {
         let result = RecoveryResult {
             success: true,
             recovery_id: recovery_id.to_string(),
-            state: recovery.state.clone(),
+            state: completed_state.clone(),
             key_material: None, // Would be populated from actual key reconstruction
             approvals: recovery.approvals.clone(),
             error: None,
         };
 
-        // Remove completed recovery from active set
-        recoveries.remove(recovery_id);
+        // Update state and remove from active recoveries
+        let _ = self
+            .recovery_manager
+            .with_recovery_mut(recovery_id, |recovery| {
+                recovery.state = completed_state;
+            })
+            .await;
+        let _ = self.recovery_manager.remove(recovery_id).await;
 
         Ok(result)
     }
@@ -485,11 +513,13 @@ impl RecoveryHandler {
             }
         }
 
-        let mut recoveries = self.active_recoveries.write().await;
-
-        let recovery = recoveries.get_mut(recovery_id).ok_or_else(|| {
-            AgentError::runtime(format!("Recovery ceremony not found: {}", recovery_id))
-        })?;
+        let recovery = self
+            .recovery_manager
+            .get_recovery(recovery_id)
+            .await
+            .ok_or_else(|| {
+                AgentError::runtime(format!("Recovery ceremony not found: {}", recovery_id))
+            })?;
 
         // Journal cancellation
         HandlerUtilities::append_relational_fact(
@@ -504,8 +534,7 @@ impl RecoveryHandler {
         )
         .await?;
 
-        // Update state to failed
-        recovery.state = RecoveryState::Failed {
+        let failed_state = RecoveryState::Failed {
             recovery_id: recovery_id.to_string(),
             reason: reason.clone(),
         };
@@ -513,25 +542,27 @@ impl RecoveryHandler {
         let result = RecoveryResult {
             success: false,
             recovery_id: recovery_id.to_string(),
-            state: recovery.state.clone(),
+            state: failed_state.clone(),
             key_material: None,
             approvals: recovery.approvals.clone(),
             error: Some(reason),
         };
 
-        // Remove from active recoveries
-        recoveries.remove(recovery_id);
+        // Update state and remove from active recoveries
+        let _ = self
+            .recovery_manager
+            .with_recovery_mut(recovery_id, |recovery| {
+                recovery.state = failed_state;
+            })
+            .await;
+        let _ = self.recovery_manager.remove(recovery_id).await;
 
         Ok(result)
     }
 
     /// List active recovery ceremonies
     pub async fn list_active(&self) -> Vec<(String, RecoveryState)> {
-        let recoveries = self.active_recoveries.read().await;
-        recoveries
-            .iter()
-            .map(|(id, r)| (id.clone(), r.state.clone()))
-            .collect()
+        self.recovery_manager.list_active().await
     }
 
     /// Cleanup expired recovery ceremonies.
@@ -539,13 +570,7 @@ impl RecoveryHandler {
     /// Removes recoveries that have passed their expiration time.
     /// Returns the number of recoveries removed.
     pub async fn cleanup_expired(&self, current_time: u64) -> usize {
-        let mut recoveries = self.active_recoveries.write().await;
-        let before = recoveries.len();
-        recoveries.retain(|_, r| {
-            // Keep if no expiration or not yet expired
-            r.request.expires_at.map_or(true, |exp| exp > current_time)
-        });
-        let removed = before - recoveries.len();
+        let removed = self.recovery_manager.cleanup_expired(current_time).await;
         if removed > 0 {
             tracing::debug!(removed, "Cleaned up expired recovery ceremonies");
         }

@@ -28,12 +28,11 @@ impl SessionOperations {
         _session_id: &str,
         _metadata: HashMap<String, serde_json::Value>,
     ) -> AgentResult<()> {
-        let mut metadata_registry = self.session_metadata.write().await;
-        let entry = metadata_registry
-            .entry(_session_id.to_string())
-            .or_insert_with(HashMap::new);
-        entry.extend(_metadata);
-        self.persist_metadata(_session_id, entry).await?;
+        let updated = self
+            .session_manager
+            .update_metadata(_session_id, _metadata)
+            .await;
+        self.persist_metadata(_session_id, &updated).await?;
         HandlerUtilities::append_relational_fact(
             &self.authority_context,
             self.effects(),
@@ -41,7 +40,7 @@ impl SessionOperations {
             "session_metadata_updated",
             &SessionMetadataFact {
                 session_id: _session_id.to_string(),
-                metadata: entry.clone(),
+                metadata: updated.clone(),
             },
         )
         .await?;
@@ -55,14 +54,11 @@ impl SessionOperations {
         _session_id: &str,
         _device_id: DeviceId,
     ) -> AgentResult<()> {
-        let mut participant_registry = self.session_participants.write().await;
-        let participants = participant_registry
-            .entry(_session_id.to_string())
-            .or_insert_with(Vec::new);
-        if !participants.contains(&_device_id) {
-            participants.push(_device_id);
-        }
-        self.persist_participants(_session_id, participants).await?;
+        let participants = self
+            .session_manager
+            .add_participant(_session_id, _device_id)
+            .await;
+        self.persist_participants(_session_id, &participants).await?;
         HandlerUtilities::append_relational_fact(
             &self.authority_context,
             self.effects(),
@@ -84,10 +80,12 @@ impl SessionOperations {
         _session_id: &str,
         _device_id: DeviceId,
     ) -> AgentResult<()> {
-        let mut participant_registry = self.session_participants.write().await;
-        if let Some(participants) = participant_registry.get_mut(_session_id) {
-            participants.retain(|id| id != &_device_id);
-            self.persist_participants(_session_id, participants).await?;
+        if let Some(participants) = self
+            .session_manager
+            .remove_participant(_session_id, _device_id)
+            .await
+        {
+            self.persist_participants(_session_id, &participants).await?;
             HandlerUtilities::append_relational_fact(
                 &self.authority_context,
                 self.effects(),

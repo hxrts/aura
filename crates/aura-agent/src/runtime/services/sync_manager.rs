@@ -3,6 +3,7 @@
 //! Wraps `aura_sync::SyncService` for integration with the agent runtime.
 //! Provides lifecycle management and configuration for automatic background sync.
 
+use super::state::{with_state_mut, with_state_mut_validated};
 use super::traits::{RuntimeService, ServiceError, ServiceHealth};
 use super::RuntimeTaskRegistry;
 use async_trait::async_trait;
@@ -101,26 +102,51 @@ pub enum SyncManagerState {
     Stopping,
 }
 
+#[derive(Debug)]
+struct SyncState {
+    service: Option<Arc<SyncService>>,
+    status: SyncManagerState,
+    peers: Vec<DeviceId>,
+    background_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl SyncState {
+    fn new(initial_peers: Vec<DeviceId>) -> Self {
+        Self {
+            service: None,
+            status: SyncManagerState::Stopped,
+            peers: initial_peers,
+            background_task: None,
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if matches!(self.status, SyncManagerState::Running | SyncManagerState::Starting)
+            && self.service.is_none()
+        {
+            return Err("sync state running without service".to_string());
+        }
+        if matches!(self.status, SyncManagerState::Stopped) && self.service.is_some() {
+            return Err("sync state stopped with active service".to_string());
+        }
+        if self.background_task.is_some() && self.status != SyncManagerState::Running {
+            return Err("background task active while not running".to_string());
+        }
+        Ok(())
+    }
+}
+
 /// Manager for background journal synchronization
 ///
 /// Integrates `aura_sync::SyncService` into the agent runtime lifecycle.
 /// Handles startup, shutdown, and coordination with other agent services.
 #[derive(Clone)]
 pub struct SyncServiceManager {
-    /// Inner sync service from aura-sync
-    service: Arc<RwLock<Option<SyncService>>>,
-
     /// Configuration
     config: SyncManagerConfig,
 
-    /// Current state
-    state: Arc<RwLock<SyncManagerState>>,
-
-    /// Known peers for sync (populated via discovery or configuration)
-    peers: Arc<RwLock<Vec<DeviceId>>>,
-
-    /// Handle to background sync task (if auto-sync enabled)
-    background_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+    /// Owned state (service, peers, lifecycle)
+    state: Arc<RwLock<SyncState>>,
 
     /// Optional Merkle verifier for fact sync (requires indexed journal)
     merkle_verifier: Option<Arc<MerkleVerifier>>,
@@ -130,11 +156,8 @@ impl SyncServiceManager {
     /// Create a new sync service manager
     pub fn new(config: SyncManagerConfig) -> Self {
         Self {
-            service: Arc::new(RwLock::new(None)),
             config: config.clone(),
-            state: Arc::new(RwLock::new(SyncManagerState::Stopped)),
-            peers: Arc::new(RwLock::new(config.initial_peers)),
-            background_task: Arc::new(RwLock::new(None)),
+            state: Arc::new(RwLock::new(SyncState::new(config.initial_peers))),
             merkle_verifier: None,
         }
     }
@@ -149,11 +172,8 @@ impl SyncServiceManager {
         time: Arc<dyn PhysicalTimeEffects>,
     ) -> Self {
         Self {
-            service: Arc::new(RwLock::new(None)),
             config: config.clone(),
-            state: Arc::new(RwLock::new(SyncManagerState::Stopped)),
-            peers: Arc::new(RwLock::new(config.initial_peers)),
-            background_task: Arc::new(RwLock::new(None)),
+            state: Arc::new(RwLock::new(SyncState::new(config.initial_peers))),
             merkle_verifier: Some(Arc::new(MerkleVerifier::new(indexed_journal, time))),
         }
     }
@@ -165,12 +185,12 @@ impl SyncServiceManager {
 
     /// Get the current state
     pub async fn state(&self) -> SyncManagerState {
-        *self.state.read().await
+        self.state.read().await.status
     }
 
     /// Check if the service is running
     pub async fn is_running(&self) -> bool {
-        *self.state.read().await == SyncManagerState::Running
+        self.state.read().await.status == SyncManagerState::Running
     }
 
     /// Start the sync service
@@ -181,12 +201,17 @@ impl SyncServiceManager {
         &self,
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
     ) -> Result<(), String> {
-        let current_state = *self.state.read().await;
+        let current_state = self.state.read().await.status;
         if current_state == SyncManagerState::Running {
             return Ok(()); // Already running
         }
 
-        *self.state.write().await = SyncManagerState::Starting;
+        with_state_mut_validated(
+            &self.state,
+            |state| state.status = SyncManagerState::Starting,
+            |state| state.validate(),
+        )
+        .await;
 
         // Build aura-sync service config from our config
         let sync_config = SyncServiceConfig {
@@ -208,8 +233,15 @@ impl SyncServiceManager {
             .await
             .map_err(|e| format!("Failed to start sync service: {}", e))?;
 
-        *self.service.write().await = Some(service);
-        *self.state.write().await = SyncManagerState::Running;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.service = Some(Arc::new(service));
+                state.status = SyncManagerState::Running;
+            },
+            |state| state.validate(),
+        )
+        .await;
 
         tracing::info!("Sync service manager started");
         Ok(())
@@ -217,20 +249,27 @@ impl SyncServiceManager {
 
     /// Stop the sync service
     pub async fn stop(&self) -> Result<(), String> {
-        let current_state = *self.state.read().await;
+        let current_state = self.state.read().await.status;
         if current_state == SyncManagerState::Stopped {
             return Ok(()); // Already stopped
         }
 
-        *self.state.write().await = SyncManagerState::Stopping;
+        with_state_mut_validated(
+            &self.state,
+            |state| state.status = SyncManagerState::Stopping,
+            |state| state.validate(),
+        )
+        .await;
 
         // Cancel background task if running
-        if let Some(handle) = self.background_task.write().await.take() {
+        let background_task = with_state_mut(&self.state, |state| state.background_task.take()).await;
+        if let Some(handle) = background_task {
             handle.abort();
         }
 
         // Stop the underlying service
-        if let Some(service) = self.service.read().await.as_ref() {
+        let service = self.state.read().await.service.clone();
+        if let Some(service) = service.as_ref() {
             let now_instant = SyncService::monotonic_now();
             service
                 .stop(now_instant)
@@ -238,8 +277,15 @@ impl SyncServiceManager {
                 .map_err(|e| format!("Failed to stop sync service: {}", e))?;
         }
 
-        *self.service.write().await = None;
-        *self.state.write().await = SyncManagerState::Stopped;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.service = None;
+                state.status = SyncManagerState::Stopped;
+            },
+            |state| state.validate(),
+        )
+        .await;
 
         tracing::info!("Sync service manager stopped");
         Ok(())
@@ -265,11 +311,8 @@ impl SyncServiceManager {
             let manager = manager.clone();
             let time_effects = time_effects.clone();
             async move {
-                let state = manager.state.read().await;
-                if matches!(
-                    *state,
-                    SyncManagerState::Stopped | SyncManagerState::Stopping
-                ) {
+                let status = manager.state.read().await.status;
+                if matches!(status, SyncManagerState::Stopped | SyncManagerState::Stopping) {
                     return true;
                 }
 
@@ -281,7 +324,7 @@ impl SyncServiceManager {
                     }
                 };
 
-                if let Some(service) = manager.service.read().await.as_ref() {
+                if let Some(service) = manager.state.read().await.service.clone() {
                     if let Err(e) = service
                         .maintenance_cleanup(
                             now_ms,
@@ -312,8 +355,13 @@ impl SyncServiceManager {
             + Send
             + Sync,
     {
-        let service = self.service.read().await;
-        let service = service.as_ref().ok_or("Sync service not started")?;
+        let service = self
+            .state
+            .read()
+            .await
+            .service
+            .clone()
+            .ok_or("Sync service not started")?;
 
         let now_instant = SyncService::monotonic_now();
         service
@@ -324,33 +372,37 @@ impl SyncServiceManager {
 
     /// Add a peer to the known peers list
     pub async fn add_peer(&self, peer: DeviceId) {
-        let mut peers = self.peers.write().await;
-        if !peers.contains(&peer) {
-            peers.push(peer);
-            tracing::debug!("Added peer {} to sync manager", peer);
-        }
+        with_state_mut(&self.state, |state| {
+            if !state.peers.contains(&peer) {
+                state.peers.push(peer);
+                tracing::debug!("Added peer {} to sync manager", peer);
+            }
+        })
+        .await;
     }
 
     /// Remove a peer from the known peers list
     pub async fn remove_peer(&self, peer: &DeviceId) {
-        let mut peers = self.peers.write().await;
-        peers.retain(|p| p != peer);
-        tracing::debug!("Removed peer {} from sync manager", peer);
+        with_state_mut(&self.state, |state| {
+            state.peers.retain(|p| p != peer);
+            tracing::debug!("Removed peer {} from sync manager", peer);
+        })
+        .await;
     }
 
     /// Get the list of known peers
     pub async fn peers(&self) -> Vec<DeviceId> {
-        self.peers.read().await.clone()
+        self.state.read().await.peers.clone()
     }
 
     /// Get service health information
     pub async fn health(&self) -> Option<aura_sync::services::SyncServiceHealth> {
-        self.service.read().await.as_ref().map(|s| s.get_health())
+        self.state.read().await.service.as_ref().map(|s| s.get_health())
     }
 
     /// Get service metrics
     pub async fn metrics(&self) -> Option<aura_sync::services::ServiceMetrics> {
-        self.service.read().await.as_ref().map(|s| s.get_metrics())
+        self.state.read().await.service.as_ref().map(|s| s.get_metrics())
     }
 
     /// Get the configuration

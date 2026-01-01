@@ -6,11 +6,11 @@
 //!
 //! ## Note on Portable Implementation
 //!
-//! The core formatting logic is now in `aura_app::views::recovery::format_recovery_status`.
+//! The core formatting logic is now in `aura_app::ui::types::format_recovery_status`.
 //! This module re-exports it for backwards compatibility with existing terminal code.
 
 // Re-export the portable implementation from aura-app
-pub use aura_app::views::recovery::format_recovery_status;
+pub use aura_app::ui::types::format_recovery_status;
 
 #[cfg(test)]
 mod tests {

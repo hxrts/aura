@@ -6,17 +6,19 @@
 //! This module uses `aura_invitation::InvitationService` internally for
 //! guard chain integration. Types are re-exported from `aura_invitation`.
 
-use super::invitation_bridge::execute_guard_outcome;
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::runtime::services::InvitationManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::RandomExtendedEffects;
+use aura_core::effects::{FlowBudgetEffects, TransportEnvelope, TransportEffects, TransportReceipt};
 use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, TransportEffects,
 };
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
+use aura_core::Receipt;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
@@ -25,8 +27,6 @@ use aura_journal::DomainFact;
 use aura_protocol::effects::EffectApiEffects;
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 // Re-export types from aura_invitation for public API
 pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
@@ -55,7 +55,7 @@ pub struct InvitationHandler {
     /// Core invitation service from aura_invitation
     service: CoreInvitationService,
     /// Cache of pending invitations (for quick lookup)
-    pending_invitations: Arc<RwLock<HashMap<String, Invitation>>>,
+    invitation_cache: InvitationManager,
 }
 
 impl Clone for InvitationHandler {
@@ -67,7 +67,7 @@ impl Clone for InvitationHandler {
         Self {
             context: self.context.clone(),
             service,
-            pending_invitations: self.pending_invitations.clone(),
+            invitation_cache: self.invitation_cache.clone(),
         }
     }
 }
@@ -86,7 +86,7 @@ impl InvitationHandler {
         Ok(Self {
             context: HandlerContext::new(authority),
             service,
-            pending_invitations: Arc::new(RwLock::new(HashMap::new())),
+            invitation_cache: InvitationManager::new(),
         })
     }
 
@@ -329,10 +329,9 @@ impl InvitationHandler {
             .await?;
 
         // Cache the pending invitation (for fast lookup within same service instance)
-        {
-            let mut cache = self.pending_invitations.write().await;
-            cache.insert(invitation_id, invitation.clone());
-        }
+        self.invitation_cache
+            .cache_invitation(invitation.clone())
+            .await;
 
         Ok(invitation)
     }
@@ -507,12 +506,12 @@ impl InvitationHandler {
         }
 
         // Update cache if we have this invitation
-        {
-            let mut cache = self.pending_invitations.write().await;
-            if let Some(inv) = cache.get_mut(invitation_id) {
+        let _ = self
+            .invitation_cache
+            .update_invitation(invitation_id, |inv| {
                 inv.status = InvitationStatus::Accepted;
-            }
-        }
+            })
+            .await;
 
         Ok(InvitationResult {
             success: true,
@@ -530,18 +529,19 @@ impl InvitationHandler {
         let own_id = self.context.authority.authority_id();
 
         // First try the local cache (fast path when the same handler instance is reused).
+        if let Some(inv) = self
+            .invitation_cache
+            .get_invitation(invitation_id)
+            .await
         {
-            let cache = self.pending_invitations.read().await;
-            if let Some(inv) = cache.get(invitation_id) {
-                if let InvitationType::Contact { nickname } = &inv.invitation_type {
-                    let other = if inv.sender_id == own_id {
-                        inv.receiver_id
-                    } else {
-                        inv.sender_id
-                    };
-                    let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
-                    return Ok(Some((other, nickname)));
-                }
+            if let InvitationType::Contact { nickname } = &inv.invitation_type {
+                let other = if inv.sender_id == own_id {
+                    inv.receiver_id
+                } else {
+                    inv.sender_id
+                };
+                let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
+                return Ok(Some((other, nickname)));
             }
         }
 
@@ -631,32 +631,33 @@ impl InvitationHandler {
         let own_id = self.context.authority.authority_id();
 
         // First try the local cache (fast path when the same handler instance is reused).
+        if let Some(inv) = self
+            .invitation_cache
+            .get_invitation(invitation_id)
+            .await
         {
-            let cache = self.pending_invitations.read().await;
-            if let Some(inv) = cache.get(invitation_id) {
-                if let InvitationType::DeviceEnrollment {
-                    subject_authority,
-                    initiator_device_id,
-                    device_id,
-                    device_name: _,
-                    ceremony_id,
-                    pending_epoch,
-                    key_package,
-                    threshold_config,
-                    public_key_package,
-                } = &inv.invitation_type
-                {
-                    return Ok(Some(DeviceEnrollmentInvitation {
-                        subject_authority: *subject_authority,
-                        initiator_device_id: *initiator_device_id,
-                        device_id: *device_id,
-                        ceremony_id: ceremony_id.clone(),
-                        pending_epoch: *pending_epoch,
-                        key_package: key_package.clone(),
-                        threshold_config: threshold_config.clone(),
-                        public_key_package: public_key_package.clone(),
-                    }));
-                }
+            if let InvitationType::DeviceEnrollment {
+                subject_authority,
+                initiator_device_id,
+                device_id,
+                device_name: _,
+                ceremony_id,
+                pending_epoch,
+                key_package,
+                threshold_config,
+                public_key_package,
+            } = &inv.invitation_type
+            {
+                return Ok(Some(DeviceEnrollmentInvitation {
+                    subject_authority: *subject_authority,
+                    initiator_device_id: *initiator_device_id,
+                    device_id: *device_id,
+                    ceremony_id: ceremony_id.clone(),
+                    pending_epoch: *pending_epoch,
+                    key_package: key_package.clone(),
+                    threshold_config: threshold_config.clone(),
+                    public_key_package: public_key_package.clone(),
+                }));
             }
         }
 
@@ -716,11 +717,12 @@ impl InvitationHandler {
         let invitation_id = shareable.invitation_id.clone();
 
         // Fast path: already cached.
+        if let Some(existing) = self
+            .invitation_cache
+            .get_invitation(&invitation_id)
+            .await
         {
-            let cache = self.pending_invitations.read().await;
-            if let Some(existing) = cache.get(&invitation_id) {
-                return Ok(existing.clone());
-            }
+            return Ok(existing);
         }
 
         let now_ms = effects.current_timestamp().await.unwrap_or(0);
@@ -738,8 +740,9 @@ impl InvitationHandler {
             message: shareable.message,
         };
 
-        let mut cache = self.pending_invitations.write().await;
-        cache.insert(invitation_id, invitation.clone());
+        self.invitation_cache
+            .cache_invitation(invitation.clone())
+            .await;
 
         Ok(invitation)
     }
@@ -765,12 +768,12 @@ impl InvitationHandler {
         execute_guard_outcome(outcome, &self.context.authority, effects).await?;
 
         // Update cache if we have this invitation
-        {
-            let mut cache = self.pending_invitations.write().await;
-            if let Some(inv) = cache.get_mut(invitation_id) {
+        let _ = self
+            .invitation_cache
+            .update_invitation(invitation_id, |inv| {
                 inv.status = InvitationStatus::Declined;
-            }
-        }
+            })
+            .await;
 
         Ok(InvitationResult {
             success: true,
@@ -801,10 +804,10 @@ impl InvitationHandler {
         execute_guard_outcome(outcome, &self.context.authority, effects).await?;
 
         // Remove from cache
-        {
-            let mut cache = self.pending_invitations.write().await;
-            cache.remove(invitation_id);
-        }
+        let _ = self
+            .invitation_cache
+            .remove_invitation(invitation_id)
+            .await;
 
         Ok(InvitationResult {
             success: true,
@@ -816,18 +819,14 @@ impl InvitationHandler {
 
     /// List pending invitations (from cache)
     pub async fn list_pending(&self) -> Vec<Invitation> {
-        let cache = self.pending_invitations.read().await;
-        cache
-            .values()
-            .filter(|inv| inv.status == InvitationStatus::Pending)
-            .cloned()
-            .collect()
+        self.invitation_cache
+            .list_pending(|inv| inv.status == InvitationStatus::Pending)
+            .await
     }
 
     /// Get an invitation by ID (from in-memory cache only)
     pub async fn get_invitation(&self, invitation_id: &str) -> Option<Invitation> {
-        let cache = self.pending_invitations.read().await;
-        cache.get(invitation_id).cloned()
+        self.invitation_cache.get_invitation(invitation_id).await
     }
 
     /// Get an invitation by ID, checking both cache and persistent storage
@@ -837,11 +836,12 @@ impl InvitationHandler {
         invitation_id: &str,
     ) -> Option<Invitation> {
         // First check in-memory cache
+        if let Some(inv) = self
+            .invitation_cache
+            .get_invitation(invitation_id)
+            .await
         {
-            let cache = self.pending_invitations.read().await;
-            if let Some(inv) = cache.get(invitation_id) {
-                return Some(inv.clone());
-            }
+            return Some(inv);
         }
 
         // Fall back to persistent storage for created invitations
@@ -1030,12 +1030,241 @@ impl From<&Invitation> for ShareableInvitation {
     }
 }
 
+// =============================================================================
+// Guard Outcome Execution (effect commands)
+// =============================================================================
+
+/// Execute a guard outcome's effect commands.
+///
+/// Takes a `GuardOutcome` from `aura_invitation::InvitationService` and
+/// executes each `EffectCommand` using the agent's effect system.
+pub async fn execute_guard_outcome(
+    outcome: aura_invitation::guards::GuardOutcome,
+    authority: &AuthorityContext,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    if outcome.is_denied() {
+        let reason = outcome
+            .decision
+            .denial_reason()
+            .unwrap_or("Operation denied");
+        return Err(AgentError::effects(format!(
+            "Guard denied operation: {}",
+            reason
+        )));
+    }
+
+    let context_id = authority.default_context_id();
+    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id());
+    let mut pending_receipt: Option<Receipt> = None;
+
+    for command in outcome.effects {
+        execute_effect_command(
+            command,
+            authority,
+            context_id,
+            effects,
+            charge_peer,
+            &mut pending_receipt,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+fn resolve_charge_peer(
+    commands: &[aura_invitation::guards::EffectCommand],
+    fallback: AuthorityId,
+) -> AuthorityId {
+    commands
+        .iter()
+        .find_map(|command| match command {
+            aura_invitation::guards::EffectCommand::NotifyPeer { peer, .. } => Some(*peer),
+            aura_invitation::guards::EffectCommand::RecordReceipt { peer, .. } => *peer,
+            _ => None,
+        })
+        .unwrap_or(fallback)
+}
+
+async fn execute_effect_command(
+    command: aura_invitation::guards::EffectCommand,
+    authority: &AuthorityContext,
+    context_id: ContextId,
+    effects: &AuraEffectSystem,
+    charge_peer: AuthorityId,
+    pending_receipt: &mut Option<Receipt>,
+) -> AgentResult<()> {
+    match command {
+        aura_invitation::guards::EffectCommand::JournalAppend { fact } => {
+            execute_journal_append(fact, authority, context_id, effects).await
+        }
+        aura_invitation::guards::EffectCommand::ChargeFlowBudget { cost } => {
+            *pending_receipt =
+                execute_charge_flow_budget(cost, context_id, charge_peer, effects).await?;
+            Ok(())
+        }
+        aura_invitation::guards::EffectCommand::NotifyPeer {
+            peer,
+            invitation_id,
+        } => execute_notify_peer(
+            peer,
+            invitation_id,
+            authority,
+            pending_receipt.clone(),
+            effects,
+        )
+        .await,
+        aura_invitation::guards::EffectCommand::RecordReceipt { operation, peer } => {
+            execute_record_receipt(
+                operation,
+                peer,
+                context_id,
+                pending_receipt.take(),
+                effects,
+            )
+            .await
+        }
+    }
+}
+
+async fn execute_journal_append(
+    fact: InvitationFact,
+    authority: &AuthorityContext,
+    context_id: ContextId,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    HandlerUtilities::append_generic_fact(
+        authority,
+        effects,
+        context_id,
+        "invitation",
+        &fact.to_bytes(),
+    )
+    .await
+}
+
+async fn execute_charge_flow_budget(
+    cost: u32,
+    context_id: ContextId,
+    peer: AuthorityId,
+    effects: &AuraEffectSystem,
+) -> AgentResult<Option<Receipt>> {
+    if effects.is_testing() {
+        return Ok(None);
+    }
+
+    let receipt = effects
+        .charge_flow(&context_id, &peer, cost)
+        .await
+        .map_err(|e| AgentError::effects(format!("Failed to charge invitation flow: {e}")))?;
+    Ok(Some(receipt))
+}
+
+async fn execute_notify_peer(
+    peer: AuthorityId,
+    invitation_id: String,
+    authority: &AuthorityContext,
+    receipt: Option<Receipt>,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    if effects.is_testing() {
+        return Ok(());
+    }
+
+    let invitation =
+        InvitationHandler::load_created_invitation(effects, authority.authority_id(), &invitation_id)
+            .await
+            .ok_or_else(|| {
+                AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
+            })?;
+
+    let code = InvitationServiceApi::export_invitation(&invitation);
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "content-type".to_string(),
+        "application/aura-invitation".to_string(),
+    );
+    metadata.insert("invitation-id".to_string(), invitation_id.clone());
+    metadata.insert(
+        "invitation-context".to_string(),
+        invitation.context_id.to_string(),
+    );
+
+    let envelope = TransportEnvelope {
+        destination: peer,
+        source: authority.authority_id(),
+        context: invitation.context_id,
+        payload: code.into_bytes(),
+        metadata,
+        receipt: receipt.map(transport_receipt_from_flow),
+    };
+
+    effects
+        .send_envelope(envelope)
+        .await
+        .map_err(|e| AgentError::effects(format!("Failed to notify peer with invitation: {e}")))?;
+
+    Ok(())
+}
+
+fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
+    TransportReceipt {
+        context: receipt.ctx,
+        src: receipt.src,
+        dst: receipt.dst,
+        epoch: receipt.epoch.value(),
+        cost: receipt.cost,
+        nonce: receipt.nonce,
+        prev: receipt.prev.0,
+        sig: receipt.sig,
+    }
+}
+
+async fn execute_record_receipt(
+    operation: String,
+    peer: Option<AuthorityId>,
+    context_id: ContextId,
+    receipt: Option<Receipt>,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    if effects.is_testing() {
+        return Ok(());
+    }
+
+    let Some(receipt) = receipt else {
+        tracing::debug!(
+            operation = %operation,
+            peer = ?peer,
+            context = %context_id,
+            "Invitation receipt recording skipped (no receipt available)"
+        );
+        return Ok(());
+    };
+
+    let peer_id = peer.unwrap_or(receipt.dst);
+    let operation_key = operation.replace(' ', \"_\");
+    let key = format!(
+        \"invitation/receipts/{}/{}/{}/{}\",
+        receipt.ctx, peer_id, operation_key, receipt.nonce
+    );
+    let bytes = serde_json::to_vec(&receipt).map_err(|e| {
+        AgentError::effects(format!(\"Failed to serialize invitation receipt: {e}\"))
+    })?;
+    effects
+        .store(&key, bytes)
+        .await
+        .map_err(|e| AgentError::effects(format!(\"Failed to store invitation receipt: {e}\")))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
     use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_invitation::guards::{EffectCommand, GuardOutcome};
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
     use std::sync::Arc;
@@ -1044,6 +1273,109 @@ mod tests {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
         let authority_context = AuthorityContext::new(authority_id);
         authority_context
+    }
+
+    #[tokio::test]
+    async fn test_execute_allowed_outcome() {
+        let authority = create_test_authority(130);
+        let config = AgentConfig::default();
+        let effects = AuraEffectSystem::testing(&config).unwrap();
+
+        let outcome = GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget { cost: 1 }]);
+
+        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_denied_outcome() {
+        let authority = create_test_authority(131);
+        let config = AgentConfig::default();
+        let effects = AuraEffectSystem::testing(&config).unwrap();
+
+        let outcome = GuardOutcome::denied("Test denial reason");
+
+        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("Test denial reason"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_journal_append() {
+        let authority = create_test_authority(132);
+        let config = AgentConfig::default();
+        let effects = AuraEffectSystem::testing(&config).unwrap();
+
+        let fact = InvitationFact::sent_ms(
+            ContextId::new_from_entropy([232u8; 32]),
+            "inv-test".to_string(),
+            authority.authority_id(),
+            AuthorityId::new_from_entropy([133u8; 32]),
+            "contact".to_string(),
+            1000,
+            Some(2000),
+            None,
+        );
+
+        let outcome = GuardOutcome::allowed(vec![EffectCommand::JournalAppend { fact }]);
+
+        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_notify_peer() {
+        let authority = create_test_authority(134);
+        let config = AgentConfig::default();
+        let effects = AuraEffectSystem::testing(&config).unwrap();
+
+        let peer = AuthorityId::new_from_entropy([135u8; 32]);
+        let outcome = GuardOutcome::allowed(vec![EffectCommand::NotifyPeer {
+            peer,
+            invitation_id: "inv-notify".to_string(),
+        }]);
+
+        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_record_receipt() {
+        let authority = create_test_authority(136);
+        let config = AgentConfig::default();
+        let effects = AuraEffectSystem::testing(&config).unwrap();
+
+        let outcome = GuardOutcome::allowed(vec![EffectCommand::RecordReceipt {
+            operation: "send_invitation".to_string(),
+            peer: Some(AuthorityId::new_from_entropy([137u8; 32])),
+        }]);
+
+        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_multiple_commands() {
+        let authority = create_test_authority(138);
+        let config = AgentConfig::default();
+        let effects = AuraEffectSystem::testing(&config).unwrap();
+
+        let peer = AuthorityId::new_from_entropy([139u8; 32]);
+        let outcome = GuardOutcome::allowed(vec![
+            EffectCommand::ChargeFlowBudget { cost: 1 },
+            EffectCommand::NotifyPeer {
+                peer,
+                invitation_id: "inv-multi".to_string(),
+            },
+            EffectCommand::RecordReceipt {
+                operation: "send_invitation".to_string(),
+                peer: Some(peer),
+            },
+        ]);
+
+        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

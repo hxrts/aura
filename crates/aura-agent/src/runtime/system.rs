@@ -4,7 +4,8 @@
 
 use super::services::{
     CeremonyTracker, ContextManager, FlowBudgetManager, ReceiptManager, RendezvousManager,
-    RuntimeTaskRegistry, SocialManager, SyncServiceManager, ThresholdSigningService,
+    RuntimeService, RuntimeTaskRegistry, ServiceError, SocialManager, SyncServiceManager,
+    ThresholdSigningService,
 };
 use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
@@ -327,6 +328,54 @@ impl RuntimeSystem {
         self.reactive_pipeline.as_ref()
     }
 
+    /// Start runtime services using the RuntimeService trait.
+    pub async fn start_services(&self) -> Result<(), ServiceError> {
+        self.flow_budget_manager
+            .start(self.runtime_tasks.clone())
+            .await?;
+        self.receipt_manager
+            .start(self.runtime_tasks.clone())
+            .await?;
+        self.ceremony_tracker
+            .start(self.runtime_tasks.clone())
+            .await?;
+        self.threshold_signing
+            .start(self.runtime_tasks.clone())
+            .await?;
+
+        if let Some(social_manager) = &self.social_manager {
+            social_manager.start(self.runtime_tasks.clone()).await?;
+        }
+        if let Some(rendezvous_manager) = &self.rendezvous_manager {
+            rendezvous_manager
+                .start(self.runtime_tasks.clone())
+                .await?;
+        }
+        if let Some(sync_manager) = &self.sync_manager {
+            sync_manager.start(self.runtime_tasks.clone()).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn stop_services(&self) -> Result<(), ServiceError> {
+        if let Some(sync_manager) = &self.sync_manager {
+            sync_manager.stop().await?;
+        }
+        if let Some(rendezvous_manager) = &self.rendezvous_manager {
+            rendezvous_manager.stop().await?;
+        }
+        if let Some(social_manager) = &self.social_manager {
+            social_manager.stop().await?;
+        }
+        self.threshold_signing.stop().await?;
+        self.ceremony_tracker.stop().await?;
+        self.receipt_manager.stop().await?;
+        self.flow_budget_manager.stop().await?;
+
+        Ok(())
+    }
+
     /// Get the context manager
     pub fn contexts(&self) -> &ContextManager {
         &self.context_manager
@@ -384,10 +433,15 @@ impl RuntimeSystem {
 
     /// Shutdown the runtime system
     pub async fn shutdown(self, ctx: &EffectContext) -> Result<(), String> {
+        // Stop services (best-effort) before tearing down the runtime.
+        if let Err(e) = self.stop_services().await {
+            tracing::warn!("Failed to stop runtime services during shutdown: {}", e);
+        }
+
         let RuntimeSystem {
             lifecycle_manager,
-            sync_manager,
-            rendezvous_manager,
+            sync_manager: _sync_manager,
+            rendezvous_manager: _rendezvous_manager,
             reactive_pipeline,
             runtime_tasks,
             ..
@@ -400,20 +454,6 @@ impl RuntimeSystem {
 
         // Stop background runtime tasks (invitation monitors, subscriptions).
         runtime_tasks.shutdown();
-
-        // Stop rendezvous service if running
-        if let Some(rendezvous_manager) = &rendezvous_manager {
-            if let Err(e) = rendezvous_manager.stop().await {
-                tracing::warn!("Failed to stop rendezvous service during shutdown: {}", e);
-            }
-        }
-
-        // Stop sync service if running
-        if let Some(sync_manager) = &sync_manager {
-            if let Err(e) = sync_manager.stop().await {
-                tracing::warn!("Failed to stop sync service during shutdown: {}", e);
-            }
-        }
 
         lifecycle_manager.shutdown(ctx).await
     }

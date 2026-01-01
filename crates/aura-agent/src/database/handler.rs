@@ -36,20 +36,35 @@ use std::collections::HashSet;
 ///
 /// # Concurrency Model
 ///
-/// Uses `parking_lot::RwLock` for fine-grained synchronous locking.
-/// Each operation acquires and releases locks in sub-millisecond time.
+/// Uses `parking_lot::RwLock` for synchronous locking of the state bundle.
+/// Each operation acquires and releases the lock in sub-millisecond time.
 /// See module documentation for scale expectations and alternatives.
 pub struct IndexedJournalHandler {
-    /// B-tree indexes protected by RwLock for concurrent access
-    pub(crate) index: RwLock<AuthorityIndex>,
-    /// Bloom filter for fast membership checks
-    pub(crate) bloom_filter: RwLock<BloomFilter>,
-    /// Cached Merkle root (invalidated on mutations)
-    pub(crate) merkle_root_cache: RwLock<Option<[u8; 32]>>,
-    /// Set of fact hashes in the Merkle tree
-    pub(crate) fact_hashes: RwLock<HashSet<[u8; 32]>>,
+    /// Database handler state (index, bloom, merkle cache)
+    state: RwLock<DatabaseState>,
     /// Broadcast channel for streaming fact updates to subscribers
     pub(crate) fact_updates: tokio::sync::broadcast::Sender<Vec<IndexedFact>>,
+}
+
+#[derive(Debug)]
+struct DatabaseState {
+    index: AuthorityIndex,
+    bloom_filter: BloomFilter,
+    merkle_root_cache: Option<[u8; 32]>,
+    fact_hashes: HashSet<[u8; 32]>,
+}
+
+impl DatabaseState {
+    fn validate(&self) -> Result<(), String> {
+        if self.bloom_filter.element_count < self.fact_hashes.len() as u64 {
+            return Err(format!(
+                "bloom filter count {} below fact hash count {}",
+                self.bloom_filter.element_count,
+                self.fact_hashes.len()
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl IndexedJournalHandler {
@@ -67,12 +82,32 @@ impl IndexedJournalHandler {
         let (fact_updates_tx, _) = tokio::sync::broadcast::channel(100);
 
         Self {
-            index: RwLock::new(AuthorityIndex::new()),
-            bloom_filter: RwLock::new(bloom_filter),
-            merkle_root_cache: RwLock::new(None),
-            fact_hashes: RwLock::new(HashSet::new()),
+            state: RwLock::new(DatabaseState {
+                index: AuthorityIndex::new(),
+                bloom_filter,
+                merkle_root_cache: None,
+                fact_hashes: HashSet::new(),
+            }),
             fact_updates: fact_updates_tx,
         }
+    }
+
+    fn with_state<R>(&self, op: impl FnOnce(&DatabaseState) -> R) -> R {
+        let guard = self.state.read();
+        op(&guard)
+    }
+
+    fn with_state_mut<R>(&self, op: impl FnOnce(&mut DatabaseState) -> R) -> R {
+        let mut guard = self.state.write();
+        let result = op(&mut guard);
+        #[cfg(debug_assertions)]
+        {
+            if let Err(message) = guard.validate() {
+                tracing::error!(%message, "IndexedJournalHandler state invariant violated");
+                debug_assert!(false, "IndexedJournalHandler invariant violated: {}", message);
+            }
+        }
+        result
     }
 
     /// Add a fact to the index
@@ -83,18 +118,18 @@ impl IndexedJournalHandler {
         authority: Option<AuthorityId>,
         timestamp: Option<TimeStamp>,
     ) -> FactId {
-        // Insert into B-tree indexes
-        let id = {
-            let mut index = self.index.write();
-            index.insert(predicate.clone(), value.clone(), authority, timestamp)
-        };
-
-        // Insert into Bloom filter
         let element = self.fact_to_bytes(&predicate, &value);
-        {
-            let mut filter = self.bloom_filter.write();
+        let fact_hash = aura_core::hash::hash(&element);
+
+        let (id, fact_to_broadcast) = self.with_state_mut(|state| {
+            // Insert into B-tree indexes
+            let id = state
+                .index
+                .insert(predicate.clone(), value.clone(), authority, timestamp);
+
+            // Insert into Bloom filter
             // Direct bloom filter insertion (synchronous for lock-based access)
-            for i in 0..filter.config.num_hash_functions {
+            for i in 0..state.bloom_filter.config.num_hash_functions {
                 let i = i as u64;
                 let hash_bytes = {
                     let mut hasher = aura_core::hash::hasher();
@@ -106,42 +141,32 @@ impl IndexedJournalHandler {
                 hash_u64_bytes.copy_from_slice(&hash_bytes[..8]);
                 let hash_value = u64::from_le_bytes(hash_u64_bytes);
 
-                let bit_index = hash_value % filter.config.bit_vector_size;
+                let bit_index = hash_value % state.bloom_filter.config.bit_vector_size;
                 let byte_index = (bit_index / 8) as usize;
                 let bit_offset = (bit_index % 8) as u8;
 
-                if byte_index < filter.bits.len() {
-                    filter.bits[byte_index] |= 1u8 << bit_offset;
+                if byte_index < state.bloom_filter.bits.len() {
+                    state.bloom_filter.bits[byte_index] |= 1u8 << bit_offset;
                 }
             }
-            filter.element_count += 1;
-        }
+            state.bloom_filter.element_count += 1;
 
-        // Add to Merkle tree hashes
-        {
-            let fact_hash = aura_core::hash::hash(&element);
-            let mut hashes = self.fact_hashes.write();
-            hashes.insert(fact_hash);
-        }
+            // Add to Merkle tree hashes
+            state.fact_hashes.insert(fact_hash);
 
-        // Invalidate Merkle cache
-        {
-            let mut cache = self.merkle_root_cache.write();
-            *cache = None;
-        }
+            // Invalidate Merkle cache
+            state.merkle_root_cache = None;
 
-        // Broadcast the new fact to stream subscribers
-        // We retrieve the fact we just added to broadcast it
-        let fact_to_broadcast = {
-            let index = self.index.read();
-            index.facts.get(&id).cloned()
-        };
+            // Retrieve the fact we just added for broadcasting.
+            let fact = state.index.facts.get(&id).cloned();
+            (id, fact)
+        });
 
         if let Some(fact) = fact_to_broadcast {
             // Send as a batch of one fact
             // Ignore send errors (happens when there are no subscribers)
             let _ = self.fact_updates.send(vec![fact]);
-        }
+        };
 
         id
     }
@@ -188,63 +213,51 @@ impl IndexedJournalHandler {
     /// Check if a fact might be contained (using Bloom filter)
     pub(crate) fn bloom_check(&self, predicate: &str, value: &FactValue) -> bool {
         let element = self.fact_to_bytes(predicate, value);
-        let filter = self.bloom_filter.read();
+        self.with_state(|state| {
+            let filter = &state.bloom_filter;
+            for i in 0..filter.config.num_hash_functions {
+                let i = i as u64;
+                let hash_bytes = {
+                    let mut hasher = aura_core::hash::hasher();
+                    hasher.update(&i.to_le_bytes());
+                    hasher.update(&element);
+                    hasher.finalize().to_vec()
+                };
+                let mut hash_u64_bytes = [0u8; 8];
+                hash_u64_bytes.copy_from_slice(&hash_bytes[..8]);
+                let hash_value = u64::from_le_bytes(hash_u64_bytes);
 
-        for i in 0..filter.config.num_hash_functions {
-            let i = i as u64;
-            let hash_bytes = {
-                let mut hasher = aura_core::hash::hasher();
-                hasher.update(&i.to_le_bytes());
-                hasher.update(&element);
-                hasher.finalize().to_vec()
-            };
-            let mut hash_u64_bytes = [0u8; 8];
-            hash_u64_bytes.copy_from_slice(&hash_bytes[..8]);
-            let hash_value = u64::from_le_bytes(hash_u64_bytes);
+                let bit_index = hash_value % filter.config.bit_vector_size;
+                let byte_index = (bit_index / 8) as usize;
+                let bit_offset = (bit_index % 8) as u8;
 
-            let bit_index = hash_value % filter.config.bit_vector_size;
-            let byte_index = (bit_index / 8) as usize;
-            let bit_offset = (bit_index % 8) as u8;
-
-            if byte_index >= filter.bits.len()
-                || (filter.bits[byte_index] & (1u8 << bit_offset)) == 0
-            {
-                return false;
+                if byte_index >= filter.bits.len()
+                    || (filter.bits[byte_index] & (1u8 << bit_offset)) == 0
+                {
+                    return false;
+                }
             }
-        }
-
-        true
+            true
+        })
     }
 
     /// Compute or retrieve cached Merkle root
     pub(crate) fn compute_merkle_root(&self) -> [u8; 32] {
-        // Check cache first
-        {
-            let cache = self.merkle_root_cache.read();
-            if let Some(root) = *cache {
+        self.with_state_mut(|state| {
+            if let Some(root) = state.merkle_root_cache {
                 return root;
             }
-        }
 
-        // Compute Merkle root
-        let hashes: Vec<[u8; 32]> = {
-            let fact_hashes = self.fact_hashes.read();
-            fact_hashes.iter().copied().collect()
-        };
+            let hashes: Vec<[u8; 32]> = state.fact_hashes.iter().copied().collect();
+            let root = if let Some(tree) = build_merkle_tree(hashes) {
+                tree.hash
+            } else {
+                [0u8; 32]
+            };
 
-        let root = if let Some(tree) = build_merkle_tree(hashes) {
-            tree.hash
-        } else {
-            [0u8; 32] // Empty tree
-        };
-
-        // Cache the result
-        {
-            let mut cache = self.merkle_root_cache.write();
-            *cache = Some(root);
-        }
-
-        root
+            state.merkle_root_cache = Some(root);
+            root
+        })
     }
 }
 
@@ -256,11 +269,17 @@ impl Default for IndexedJournalHandler {
 
 impl std::fmt::Debug for IndexedJournalHandler {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let index = self.index.read();
+        let (fact_count, predicate_count, authority_count) = self.with_state(|state| {
+            (
+                state.index.facts.len(),
+                state.index.by_predicate.len(),
+                state.index.by_authority.len(),
+            )
+        });
         f.debug_struct("IndexedJournalHandler")
-            .field("fact_count", &index.facts.len())
-            .field("predicate_count", &index.by_predicate.len())
-            .field("authority_count", &index.by_authority.len())
+            .field("fact_count", &fact_count)
+            .field("predicate_count", &predicate_count)
+            .field("authority_count", &authority_count)
             .finish()
     }
 }
@@ -272,16 +291,14 @@ impl IndexedJournalEffects for IndexedJournalHandler {
     }
 
     async fn facts_by_predicate(&self, predicate: &str) -> Result<Vec<IndexedFact>, AuraError> {
-        let index = self.index.read();
-        Ok(index.get_by_predicate(predicate))
+        Ok(self.with_state(|state| state.index.get_by_predicate(predicate)))
     }
 
     async fn facts_by_authority(
         &self,
         authority: &AuthorityId,
     ) -> Result<Vec<IndexedFact>, AuraError> {
-        let index = self.index.read();
-        Ok(index.get_by_authority(authority))
+        Ok(self.with_state(|state| state.index.get_by_authority(authority)))
     }
 
     async fn facts_in_range(
@@ -289,13 +306,11 @@ impl IndexedJournalEffects for IndexedJournalHandler {
         start: TimeStamp,
         end: TimeStamp,
     ) -> Result<Vec<IndexedFact>, AuraError> {
-        let index = self.index.read();
-        Ok(index.get_in_range(&start, &end))
+        Ok(self.with_state(|state| state.index.get_in_range(&start, &end)))
     }
 
     async fn all_facts(&self) -> Result<Vec<IndexedFact>, AuraError> {
-        let index = self.index.read();
-        Ok(index.facts.values().cloned().collect())
+        Ok(self.with_state(|state| state.index.facts.values().cloned().collect()))
     }
 
     fn might_contain(&self, predicate: &str, value: &FactValue) -> bool {
@@ -309,21 +324,16 @@ impl IndexedJournalEffects for IndexedJournalHandler {
     async fn verify_fact_inclusion(&self, fact: &IndexedFact) -> Result<bool, AuraError> {
         let element = self.fact_to_bytes(&fact.predicate, &fact.value);
         let fact_hash = aura_core::hash::hash(&element);
-
-        let hashes = self.fact_hashes.read();
-        Ok(hashes.contains(&fact_hash))
+        Ok(self.with_state(|state| state.fact_hashes.contains(&fact_hash)))
     }
 
     async fn get_bloom_filter(&self) -> Result<BloomFilter, AuraError> {
-        let filter = self.bloom_filter.read();
-        Ok(filter.clone())
+        Ok(self.with_state(|state| state.bloom_filter.clone()))
     }
 
     async fn index_stats(&self) -> Result<IndexStats, AuraError> {
-        let index = self.index.read();
-        let filter = self.bloom_filter.read();
-
-        let mut stats = index.stats();
+        let (stats, filter) = self.with_state(|state| (state.index.stats(), state.bloom_filter.clone()));
+        let mut stats = stats;
         // Estimate false positive rate based on filter fill ratio
         // Note: set_bits could be used for more accurate FP estimation in the future
         let _set_bits: u64 = filter.bits.iter().map(|b| b.count_ones() as u64).sum();

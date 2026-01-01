@@ -25,6 +25,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+use super::state::SchedulerStats;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
 type ApplyFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
@@ -225,14 +226,6 @@ pub struct ReactiveScheduler {
     fact_registry: Arc<FactRegistry>,
     /// Time effects for simulator-controllable sleeps
     time_effects: Arc<dyn PhysicalTimeEffects>,
-}
-
-/// Statistics collected by the scheduler
-#[derive(Debug, Clone, Default)]
-struct SchedulerStats {
-    batch_count: u64,
-    facts_processed: u64,
-    total_batch_latency_ms: f64,
 }
 
 impl ReactiveScheduler {

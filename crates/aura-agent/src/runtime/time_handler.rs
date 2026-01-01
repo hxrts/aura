@@ -4,6 +4,7 @@ use aura_core::effects::{
     PhysicalTimeEffects, RandomExtendedEffects, TimeoutHandle, WakeCondition,
 };
 use aura_core::{AuraError, Result};
+use crate::runtime::services::state::with_state_mut_validated;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -20,14 +21,8 @@ struct TimeoutTask {
 /// Enhanced time handler with scheduling, timeouts, and event-driven waking
 #[derive(Clone)]
 pub struct EnhancedTimeHandler {
-    /// Registered contexts for time events
-    contexts: Arc<RwLock<HashMap<Uuid, ()>>>,
-    /// Active timeout operations
-    timeouts: Arc<RwLock<HashMap<TimeoutHandle, TimeoutTask>>>,
-    /// Event counter for threshold-based waking
-    event_count: Arc<RwLock<u32>>,
-    /// Time handler statistics
-    stats: Arc<RwLock<TimeHandlerStats>>,
+    /// In-memory time handler state (contexts, timeouts, stats)
+    state: Arc<RwLock<TimeHandlerState>>,
     /// Underlying time provider for deterministic/testing overrides
     provider: Arc<dyn PhysicalTimeEffects>,
     /// Random provider for generating unique IDs
@@ -47,6 +42,34 @@ pub struct TimeHandlerStats {
     pub active_timeouts: u64,
 }
 
+#[derive(Debug, Default)]
+struct TimeHandlerState {
+    contexts: HashMap<Uuid, ()>,
+    timeouts: HashMap<TimeoutHandle, TimeoutTask>,
+    event_count: u32,
+    stats: TimeHandlerStats,
+}
+
+impl TimeHandlerState {
+    fn validate(&self) -> Result<(), String> {
+        if self.stats.active_contexts != self.contexts.len() as u64 {
+            return Err(format!(
+                "active_contexts {} does not match context count {}",
+                self.stats.active_contexts,
+                self.contexts.len()
+            ));
+        }
+        if self.stats.active_timeouts > self.timeouts.len() as u64 {
+            return Err(format!(
+                "active_timeouts {} exceeds timeout count {}",
+                self.stats.active_timeouts,
+                self.timeouts.len()
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl EnhancedTimeHandler {
     /// Create a new enhanced time handler
     pub fn new() -> Self {
@@ -64,9 +87,14 @@ impl EnhancedTimeHandler {
 
     /// Sleep for a given number of milliseconds
     pub async fn sleep_ms(&self, ms: u64) {
-        let mut stats = self.stats.write().await;
-        stats.total_sleeps += 1;
-        drop(stats);
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.stats.total_sleeps += 1;
+            },
+            |state| state.validate(),
+        )
+        .await;
 
         // Delegate to the underlying provider
         let _ = self.provider.sleep_ms(ms).await;
@@ -84,51 +112,77 @@ impl EnhancedTimeHandler {
             completed: false,
         };
 
-        {
-            let mut timeouts = self.timeouts.write().await;
-            timeouts.insert(timeout_id, timeout_task);
-        }
-
-        {
-            let mut stats = self.stats.write().await;
-            stats.total_timeouts_set += 1;
-            stats.active_timeouts += 1;
-        }
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.timeouts.insert(timeout_id, timeout_task);
+                state.stats.total_timeouts_set += 1;
+                state.stats.active_timeouts += 1;
+            },
+            |state| state.validate(),
+        )
+        .await;
 
         Ok(timeout_id)
     }
 
     /// Cancel a timeout
     pub async fn cancel_timeout(&self, timeout_handle: TimeoutHandle) -> Result<()> {
-        let mut timeouts = self.timeouts.write().await;
-
-        if timeouts.remove(&timeout_handle).is_some() {
-            let mut stats = self.stats.write().await;
-            stats.total_timeouts_cancelled += 1;
-            stats.active_timeouts = stats.active_timeouts.saturating_sub(1);
-            Ok(())
-        } else {
-            Err(AuraError::not_found("Timeout not found"))
-        }
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                if state.timeouts.remove(&timeout_handle).is_some() {
+                    state.stats.total_timeouts_cancelled += 1;
+                    state.stats.active_timeouts = state.stats.active_timeouts.saturating_sub(1);
+                    Ok(())
+                } else {
+                    Err(AuraError::not_found("Timeout not found"))
+                }
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     /// Register a context for time notifications
     pub async fn register_context(&self, context_id: uuid::Uuid) {
-        let mut contexts_guard = self.contexts.write().await;
-        contexts_guard.insert(context_id, ());
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                if state.contexts.insert(context_id, ()).is_none() {
+                    state.stats.active_contexts += 1;
+                }
+            },
+            |state| state.validate(),
+        )
+        .await;
     }
 
     /// Unregister a context
     pub async fn unregister_context(&self, context_id: uuid::Uuid) {
-        let mut contexts_guard = self.contexts.write().await;
-        contexts_guard.remove(&context_id);
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                if state.contexts.remove(&context_id).is_some() {
+                    state.stats.active_contexts =
+                        state.stats.active_contexts.saturating_sub(1);
+                }
+            },
+            |state| state.validate(),
+        )
+        .await;
     }
 
     /// Yield until a wake condition is met
     pub async fn yield_until(&self, condition: WakeCondition) -> Result<()> {
-        let mut stats = self.stats.write().await;
-        stats.total_yield_operations += 1;
-        drop(stats);
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.stats.total_yield_operations += 1;
+            },
+            |state| state.validate(),
+        )
+        .await;
 
         match condition {
             WakeCondition::Immediate => Ok(()),
@@ -221,10 +275,7 @@ impl EnhancedTimeHandler {
         simulated: bool,
     ) -> Self {
         Self {
-            contexts: Arc::new(RwLock::new(HashMap::new())),
-            timeouts: Arc::new(RwLock::new(HashMap::new())),
-            event_count: Arc::new(RwLock::new(0)),
-            stats: Arc::new(RwLock::new(TimeHandlerStats::default())),
+            state: Arc::new(RwLock::new(TimeHandlerState::default())),
             provider,
             random_provider,
             simulated,
@@ -233,26 +284,38 @@ impl EnhancedTimeHandler {
 
     /// Get current time handler statistics
     pub async fn get_statistics(&self) -> TimeHandlerStats {
-        let mut stats = self.stats.read().await.clone();
-        stats.active_contexts = self.contexts.read().await.len() as u64;
-        stats.active_timeouts = self.timeouts.read().await.len() as u64;
+        let state = self.state.read().await;
+        let mut stats = state.stats.clone();
+        stats.active_contexts = state.contexts.len() as u64;
+        stats.active_timeouts = state.timeouts.len() as u64;
         stats
     }
 
     /// Cleanup expired timeouts
     pub async fn cleanup_expired_timeouts(&self) -> Result<()> {
         let now_ms = self.current_timestamp().await?;
-        let mut timeouts = self.timeouts.write().await;
-
-        let expired_ids: Vec<TimeoutHandle> = timeouts
-            .iter()
-            .filter(|(_, task)| task.expires_at_ms <= now_ms)
-            .map(|(id, _)| *id)
-            .collect();
-
-        for id in expired_ids {
-            timeouts.remove(&id);
-        }
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let expired_ids: Vec<TimeoutHandle> = state
+                    .timeouts
+                    .iter()
+                    .filter(|(_, task)| task.expires_at_ms <= now_ms)
+                    .map(|(id, _)| *id)
+                    .collect();
+                if !expired_ids.is_empty() {
+                    for id in &expired_ids {
+                        state.timeouts.remove(id);
+                    }
+                    state.stats.active_timeouts = state
+                        .stats
+                        .active_timeouts
+                        .saturating_sub(expired_ids.len() as u64);
+                }
+            },
+            |state| state.validate(),
+        )
+        .await;
         Ok(())
     }
 
@@ -269,13 +332,19 @@ impl EnhancedTimeHandler {
 
     /// Increment the global event count
     async fn increment_event_count(&self) {
-        let mut count = self.event_count.write().await;
-        *count = count.saturating_add(1);
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.event_count = state.event_count.saturating_add(1);
+            },
+            |state| state.validate(),
+        )
+        .await;
     }
 
     /// Get current event count
     async fn get_event_count(&self) -> u32 {
-        *self.event_count.read().await
+        self.state.read().await.event_count
     }
 
     /// Process wake condition and return whether it's satisfied
@@ -306,16 +375,22 @@ impl EnhancedTimeHandler {
             }
             WakeCondition::TimeoutExpired { timeout_id } => {
                 let current = self.current_timestamp().await?;
-                let mut timeouts = self.timeouts.write().await;
-                if let Some(task) = timeouts.get_mut(timeout_id) {
-                    if !task.completed && current >= task.expires_at_ms {
-                        task.completed = true;
-                        let mut stats = self.stats.write().await;
-                        stats.active_timeouts = stats.active_timeouts.saturating_sub(1);
-                        return Ok(true);
-                    }
-                }
-                false
+                with_state_mut_validated(
+                    &self.state,
+                    |state| {
+                        if let Some(task) = state.timeouts.get_mut(timeout_id) {
+                            if !task.completed && current >= task.expires_at_ms {
+                                task.completed = true;
+                                state.stats.active_timeouts =
+                                    state.stats.active_timeouts.saturating_sub(1);
+                                return Ok(true);
+                            }
+                        }
+                        Ok(false)
+                    },
+                    |state| state.validate(),
+                )
+                .await?
             }
             WakeCondition::Custom(_) => {
                 // Custom conditions would be handled by external logic

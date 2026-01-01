@@ -228,7 +228,7 @@ impl ContextChanged {
 /// This corresponds to the terminal's `OpError` but is portable across frontends.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OperationError {
-    /// Feature not implemented
+    /// Feature unavailable
     #[error("Not implemented: {0}")]
     NotImplemented(String),
     /// Invalid argument provided
@@ -240,7 +240,7 @@ pub enum OperationError {
 }
 
 impl OperationError {
-    /// Create a not implemented error.
+    /// Create a feature unavailable error.
     pub fn not_implemented(what: impl Into<String>) -> Self {
         Self::NotImplemented(what.into())
     }

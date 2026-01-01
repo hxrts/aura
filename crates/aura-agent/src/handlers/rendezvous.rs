@@ -3,23 +3,28 @@
 //! Handlers for rendezvous operations including descriptor publication,
 //! channel establishment, and relay coordination.
 
-use super::rendezvous_bridge::execute_guard_outcome;
-use super::shared::{HandlerContext, HandlerUtilities};
+use super::shared::{context_commitment_from_journal, HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::runtime::consensus::build_consensus_params;
+use crate::runtime::services::RendezvousCacheManager;
 use crate::runtime::AuraEffectSystem;
+use aura_consensus::protocol::run_consensus;
+use aura_core::effects::{FlowBudgetEffects, TransportEnvelope, TransportEffects, TransportReceipt};
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
+use aura_core::{Hash32, Prestate, Receipt};
 use aura_guards::chain::create_send_guard;
 use aura_journal::DomainFact;
+use aura_protocol::amp::AmpJournalEffects;
+use aura_protocol::effects::TreeEffects;
 use aura_protocol::effects::EffectApiEffects;
 use aura_rendezvous::{
-    EffectCommand, GuardSnapshot, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
-    RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
+    EffectCommand, GuardOutcome, GuardSnapshot, RendezvousConfig, RendezvousDescriptor,
+    RendezvousFact, RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Result of a rendezvous operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,19 +61,8 @@ pub struct RendezvousHandler {
     context: HandlerContext,
     /// Inner rendezvous service for guard chain operations
     service: RendezvousService,
-    /// Cached peer descriptors by (context, authority)
-    descriptor_cache: Arc<RwLock<HashMap<(ContextId, AuthorityId), RendezvousDescriptor>>>,
-    /// Pending channel establishments
-    pending_channels: Arc<RwLock<HashMap<(ContextId, AuthorityId), PendingChannel>>>,
-}
-
-/// Pending channel state
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Used for pending handshake cache; retained for future reconciliation logic
-struct PendingChannel {
-    context_id: ContextId,
-    peer: AuthorityId,
-    initiated_at: u64,
+    /// Rendezvous cache manager (descriptors + pending channels)
+    cache_manager: RendezvousCacheManager,
 }
 
 impl RendezvousHandler {
@@ -82,8 +76,7 @@ impl RendezvousHandler {
         Ok(Self {
             context: HandlerContext::new(authority),
             service,
-            descriptor_cache: Arc::new(RwLock::new(HashMap::new())),
-            pending_channels: Arc::new(RwLock::new(HashMap::new())),
+            cache_manager: RendezvousCacheManager::new(),
         })
     }
 
@@ -155,8 +148,7 @@ impl RendezvousHandler {
                 fact: RendezvousFact::Descriptor(desc),
             } = effect
             {
-                let mut cache = self.descriptor_cache.write().await;
-                cache.insert((desc.context_id, desc.authority_id), desc.clone());
+                self.cache_manager.cache_descriptor(desc.clone()).await;
             }
         }
 
@@ -173,8 +165,7 @@ impl RendezvousHandler {
 
     /// Cache a peer's descriptor received via journal sync
     pub async fn cache_peer_descriptor(&self, descriptor: RendezvousDescriptor) {
-        let mut cache = self.descriptor_cache.write().await;
-        cache.insert((descriptor.context_id, descriptor.authority_id), descriptor);
+        self.cache_manager.cache_descriptor(descriptor).await;
     }
 
     /// Get a peer's cached descriptor
@@ -183,8 +174,7 @@ impl RendezvousHandler {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> Option<RendezvousDescriptor> {
-        let cache = self.descriptor_cache.read().await;
-        cache.get(&(context_id, peer)).cloned()
+        self.cache_manager.get_descriptor(context_id, peer).await
     }
 
     /// Check if our descriptor needs refresh
@@ -194,9 +184,9 @@ impl RendezvousHandler {
         now_ms: u64,
         refresh_window_ms: u64,
     ) -> bool {
-        let cache = self.descriptor_cache.read().await;
-        cache
-            .get(&(context_id, self.context.authority.authority_id()))
+        self.cache_manager
+            .get_descriptor(context_id, self.context.authority.authority_id())
+            .await
             .map(|desc| {
                 let refresh_threshold = desc.valid_until.saturating_sub(refresh_window_ms);
                 now_ms >= refresh_threshold
@@ -247,11 +237,11 @@ impl RendezvousHandler {
         psk[..16].copy_from_slice(psk_uuid.as_bytes());
 
         // Prepare channel establishment
-        let peer_descriptor = {
-            let cache = self.descriptor_cache.read().await;
-            cache.get(&(context_id, peer)).cloned()
-        }
-        .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
+        let peer_descriptor = self
+            .cache_manager
+            .get_descriptor(context_id, peer)
+            .await
+            .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
 
         let outcome = self
             .service
@@ -278,17 +268,9 @@ impl RendezvousHandler {
         }
 
         // Track pending channel
-        {
-            let mut pending = self.pending_channels.write().await;
-            pending.insert(
-                (context_id, peer),
-                PendingChannel {
-                    context_id,
-                    peer,
-                    initiated_at: current_time,
-                },
-            );
-        }
+        self.cache_manager
+            .track_pending_channel(context_id, peer, current_time)
+            .await;
 
         // Execute all effect commands via the bridge (includes SendHandshake)
         execute_guard_outcome(outcome, &self.context.authority, context_id, effects).await?;
@@ -315,10 +297,9 @@ impl RendezvousHandler {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Remove from pending
-        {
-            let mut pending = self.pending_channels.write().await;
-            pending.remove(&(context_id, peer));
-        }
+        self.cache_manager
+            .remove_pending_channel(context_id, peer)
+            .await;
 
         // Create channel established fact
         let fact = self
@@ -436,30 +417,300 @@ impl RendezvousHandler {
         // Maximum age for pending channels before cleanup (5 minutes)
         const PENDING_CHANNEL_MAX_AGE_MS: u64 = 300_000;
 
-        // Cleanup expired descriptors
-        {
-            let mut cache = self.descriptor_cache.write().await;
-            let before = cache.len();
-            cache.retain(|_, descriptor| descriptor.is_valid(now_ms));
-            let removed = before - cache.len();
-            if removed > 0 {
-                tracing::debug!(removed, "Cleaned up expired descriptors");
-            }
+        let (removed_desc, removed_pending) = self
+            .cache_manager
+            .cleanup_expired(now_ms, PENDING_CHANNEL_MAX_AGE_MS)
+            .await;
+        if removed_desc > 0 {
+            tracing::debug!(removed = removed_desc, "Cleaned up expired descriptors");
         }
-
-        // Cleanup stale pending channels
-        {
-            let mut pending = self.pending_channels.write().await;
-            let before = pending.len();
-            pending.retain(|_, channel| {
-                now_ms.saturating_sub(channel.initiated_at) < PENDING_CHANNEL_MAX_AGE_MS
-            });
-            let removed = before - pending.len();
-            if removed > 0 {
-                tracing::debug!(removed, "Cleaned up stale pending channels");
-            }
+        if removed_pending > 0 {
+            tracing::debug!(removed = removed_pending, "Cleaned up stale pending channels");
         }
     }
+}
+
+// =============================================================================
+// Guard Outcome Execution (effect commands)
+// =============================================================================
+
+/// Execute a guard outcome's effect commands.
+pub async fn execute_guard_outcome(
+    outcome: GuardOutcome,
+    authority: &AuthorityContext,
+    context_id: ContextId,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    if outcome.decision.is_denied() {
+        let reason = match &outcome.decision {
+            aura_rendezvous::GuardDecision::Deny { reason } => reason.as_str(),
+            _ => "Operation denied",
+        };
+        return Err(AgentError::effects(format!(
+            "Guard denied operation: {}",
+            reason
+        )));
+    }
+
+    let charge_peer = resolve_charge_peer(&outcome.effects, authority.authority_id());
+    let mut pending_receipt: Option<Receipt> = None;
+
+    for command in outcome.effects {
+        execute_effect_command(
+            command,
+            authority,
+            context_id,
+            effects,
+            charge_peer,
+            &mut pending_receipt,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+fn resolve_charge_peer(commands: &[EffectCommand], fallback: AuthorityId) -> AuthorityId {
+    commands
+        .iter()
+        .find_map(|command| match command {
+            EffectCommand::SendHandshake { peer, .. }
+            | EffectCommand::SendHandshakeResponse { peer, .. }
+            | EffectCommand::RecordReceipt { peer, .. } => Some(*peer),
+            _ => None,
+        })
+        .unwrap_or(fallback)
+}
+
+async fn execute_effect_command(
+    command: EffectCommand,
+    authority: &AuthorityContext,
+    context_id: ContextId,
+    effects: &AuraEffectSystem,
+    charge_peer: AuthorityId,
+    pending_receipt: &mut Option<Receipt>,
+) -> AgentResult<()> {
+    match command {
+        EffectCommand::JournalAppend { fact } => {
+            execute_journal_append(fact, authority, context_id, effects).await
+        }
+        EffectCommand::ChargeFlowBudget { cost } => {
+            *pending_receipt =
+                execute_charge_flow_budget(cost, context_id, charge_peer, effects).await?;
+            Ok(())
+        }
+        EffectCommand::SendHandshake { peer, message } => {
+            let receipt = pending_receipt.take();
+            execute_send_handshake(peer, message, authority, context_id, receipt, effects).await
+        }
+        EffectCommand::SendHandshakeResponse { peer, message } => {
+            let receipt = pending_receipt.take();
+            execute_send_handshake_response(peer, message, authority, context_id, receipt, effects)
+                .await
+        }
+        EffectCommand::RecordReceipt { operation, peer } => {
+            execute_record_receipt(operation, peer, context_id, effects).await
+        }
+    }
+}
+
+async fn execute_journal_append(
+    fact: RendezvousFact,
+    authority: &AuthorityContext,
+    context_id: ContextId,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    let policy = policy_for(CeremonyFlow::RendezvousSecureChannel);
+
+    if matches!(fact, RendezvousFact::ChannelEstablished { .. })
+        && policy.allows_mode(AgreementMode::ConsensusFinalized)
+        && !effects.is_testing()
+    {
+        let tree_state = effects.get_current_state().await.map_err(|e| {
+            AgentError::effects(format!("Failed to read tree state for rendezvous: {e}"))
+        })?;
+        let journal = effects
+            .fetch_context_journal(context_id)
+            .await
+            .map_err(|e| {
+                AgentError::effects(format!("Failed to load rendezvous context journal: {e}"))
+            })?;
+        let context_commitment = context_commitment_from_journal(context_id, &journal)?;
+        let prestate = Prestate::new(
+            vec![(authority.authority_id(), Hash32(tree_state.root_commitment))],
+            context_commitment,
+        );
+        let params = build_consensus_params(effects, authority.authority_id(), effects)
+            .await
+            .map_err(|e| {
+                AgentError::effects(format!("Failed to build rendezvous consensus params: {e}"))
+            })?;
+        let commit = run_consensus(&prestate, &fact, params, effects, effects)
+            .await
+            .map_err(|e| {
+                AgentError::effects(format!("Rendezvous consensus finalization failed: {e}"))
+            })?;
+
+        effects
+            .commit_relational_facts(vec![commit.to_relational_fact()])
+            .await
+            .map_err(|e| AgentError::effects(format!("Commit rendezvous consensus fact: {e}")))?;
+    }
+
+    HandlerUtilities::append_generic_fact(
+        authority,
+        effects,
+        context_id,
+        RENDEZVOUS_FACT_TYPE_ID,
+        &fact.to_bytes(),
+    )
+    .await
+}
+
+async fn execute_charge_flow_budget(
+    cost: u32,
+    context_id: ContextId,
+    peer: AuthorityId,
+    effects: &AuraEffectSystem,
+) -> AgentResult<Option<Receipt>> {
+    if effects.is_testing() {
+        return Ok(None);
+    }
+
+    let receipt = effects
+        .charge_flow(&context_id, &peer, cost)
+        .await
+        .map_err(|e| {
+            AgentError::effects(format!(
+                "Failed to charge rendezvous flow budget: {e}"
+            ))
+        })?;
+
+    Ok(Some(receipt))
+}
+
+fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
+    TransportReceipt {
+        context: receipt.ctx,
+        src: receipt.src,
+        dst: receipt.dst,
+        epoch: receipt.epoch.value(),
+        cost: receipt.cost,
+        nonce: receipt.nonce,
+        prev: receipt.prev.0,
+        sig: receipt.sig,
+    }
+}
+
+async fn execute_send_handshake(
+    peer: AuthorityId,
+    message: aura_rendezvous::protocol::HandshakeInit,
+    authority: &AuthorityContext,
+    context_id: ContextId,
+    receipt: Option<Receipt>,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    if effects.is_testing() {
+        return Ok(());
+    }
+
+    let payload = serde_json::to_vec(&message).map_err(|e| {
+        AgentError::internal(format!("Failed to serialize rendezvous handshake init: {e}"))
+    })?;
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "content-type".to_string(),
+        "application/aura-rendezvous-handshake-init".to_string(),
+    );
+    metadata.insert("protocol-version".to_string(), "1".to_string());
+    metadata.insert(
+        "rendezvous-epoch".to_string(),
+        message.handshake.epoch.to_string(),
+    );
+
+    let envelope = TransportEnvelope {
+        destination: peer,
+        source: authority.authority_id(),
+        context: context_id,
+        payload,
+        metadata,
+        receipt: receipt.map(transport_receipt_from_flow),
+    };
+
+    effects
+        .send_envelope(envelope)
+        .await
+        .map_err(|e| AgentError::effects(format!("Rendezvous handshake send failed: {e}")))?;
+    Ok(())
+}
+
+async fn execute_send_handshake_response(
+    peer: AuthorityId,
+    message: aura_rendezvous::protocol::HandshakeComplete,
+    authority: &AuthorityContext,
+    context_id: ContextId,
+    receipt: Option<Receipt>,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    if effects.is_testing() {
+        return Ok(());
+    }
+
+    let payload = serde_json::to_vec(&message).map_err(|e| {
+        AgentError::internal(format!(
+            "Failed to serialize rendezvous handshake completion: {e}"
+        ))
+    })?;
+
+    let mut metadata = HashMap::new();
+    metadata.insert(
+        "content-type".to_string(),
+        "application/aura-rendezvous-handshake-complete".to_string(),
+    );
+    metadata.insert("protocol-version".to_string(), "1".to_string());
+    metadata.insert(
+        "rendezvous-epoch".to_string(),
+        message.handshake.epoch.to_string(),
+    );
+    metadata.insert(
+        "rendezvous-channel-id".to_string(),
+        hex::encode(message.channel_id),
+    );
+
+    let envelope = TransportEnvelope {
+        destination: peer,
+        source: authority.authority_id(),
+        context: context_id,
+        payload,
+        metadata,
+        receipt: receipt.map(transport_receipt_from_flow),
+    };
+
+    effects
+        .send_envelope(envelope)
+        .await
+        .map_err(|e| AgentError::effects(format!("Rendezvous handshake response failed: {e}")))?;
+    Ok(())
+}
+
+async fn execute_record_receipt(
+    operation: String,
+    peer: AuthorityId,
+    context_id: ContextId,
+    effects: &AuraEffectSystem,
+) -> AgentResult<()> {
+    if effects.is_testing() {
+        return Ok(());
+    }
+
+    tracing::debug!(
+        operation = %operation,
+        peer = %peer,
+        context = %context_id,
+        "Rendezvous receipt recording requested"
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -467,6 +718,7 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
+    use aura_rendezvous::GuardDecision;
     use std::sync::Arc;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
@@ -481,6 +733,114 @@ mod tests {
         let handler = RendezvousHandler::new(authority_context.clone());
 
         assert!(handler.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_allowed_outcome() {
+        let authority = create_test_authority(80);
+        let context_id = ContextId::new_from_entropy([180u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+
+        let outcome = GuardOutcome {
+            decision: GuardDecision::Allow,
+            effects: vec![EffectCommand::ChargeFlowBudget { cost: 1 }],
+        };
+
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_denied_outcome() {
+        let authority = create_test_authority(81);
+        let context_id = ContextId::new_from_entropy([181u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+
+        let outcome = GuardOutcome {
+            decision: GuardDecision::Deny {
+                reason: "Test denial".to_string(),
+            },
+            effects: vec![],
+        };
+
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_execute_journal_append() {
+        let authority = create_test_authority(82);
+        let context_id = ContextId::new_from_entropy([182u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+
+        let descriptor = RendezvousDescriptor {
+            authority_id: authority.authority_id(),
+            context_id,
+            transport_hints: vec![TransportHint::QuicDirect {
+                addr: "127.0.0.1:8443".to_string(),
+            }],
+            handshake_psk_commitment: [0u8; 32],
+            valid_from: 0,
+            valid_until: 10000,
+            nonce: [0u8; 32],
+            display_name: None,
+        };
+
+        let outcome = GuardOutcome {
+            decision: GuardDecision::Allow,
+            effects: vec![EffectCommand::JournalAppend {
+                fact: RendezvousFact::Descriptor(descriptor),
+            }],
+        };
+
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_record_receipt() {
+        let authority = create_test_authority(83);
+        let context_id = ContextId::new_from_entropy([183u8; 32]);
+        let peer = AuthorityId::new_from_entropy([84u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+
+        let outcome = GuardOutcome {
+            decision: GuardDecision::Allow,
+            effects: vec![EffectCommand::RecordReceipt {
+                operation: "test_operation".to_string(),
+                peer,
+            }],
+        };
+
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_multiple_effects() {
+        let authority = create_test_authority(85);
+        let context_id = ContextId::new_from_entropy([185u8; 32]);
+        let peer = AuthorityId::new_from_entropy([86u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+
+        let outcome = GuardOutcome {
+            decision: GuardDecision::Allow,
+            effects: vec![
+                EffectCommand::ChargeFlowBudget { cost: 1 },
+                EffectCommand::RecordReceipt {
+                    operation: "multi_test".to_string(),
+                    peer,
+                },
+            ],
+        };
+
+        let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]

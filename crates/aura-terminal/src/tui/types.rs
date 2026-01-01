@@ -589,7 +589,7 @@ impl From<&AppInvitation> for Invitation {
 
 // Re-export portable timestamp formatter from aura-app.
 // Note: This returns "" for ts=0, treating it as "no timestamp".
-pub use aura_app::views::display::format_timestamp;
+pub use aura_app::ui::types::format_timestamp;
 
 /// Settings section
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

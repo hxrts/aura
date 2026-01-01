@@ -16,10 +16,10 @@ use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
 use crate::database::IndexedJournalHandler;
 use crate::fact_registry::build_fact_registry;
-use crate::handlers::logical_clock_service::LogicalClockService;
 use crate::runtime::subsystems::{
     crypto::CryptoRng, ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem,
 };
+use crate::runtime::services::LogicalClockManager;
 use crate::runtime::time_handler::EnhancedTimeHandler;
 use async_trait::async_trait;
 use aura_app::ReactiveHandler;
@@ -109,7 +109,7 @@ pub struct AuraEffectSystem {
 
     // === Time Services ===
     time_handler: EnhancedTimeHandler,
-    logical_clock: LogicalClockService,
+    logical_clock: LogicalClockManager,
     order_clock: OrderClockHandler,
 
     // === Authorization & Flow Control ===
@@ -164,7 +164,7 @@ impl AuraEffectSystem {
             std::thread::Builder::new()
                 .name("aura-deadlock-detector".to_string())
                 .spawn(|| loop {
-                    std::thread::sleep(Duration::from_secs(10));
+                    std::thread::park_timeout(Duration::from_secs(10));
                     let deadlocks = parking_lot::deadlock::check_deadlock();
                     if !deadlocks.is_empty() {
                         // Note: DeadlockedThread doesn't implement Debug, so we log count only
@@ -328,7 +328,7 @@ impl AuraEffectSystem {
             tree_handler,
             sync_handler,
             time_handler,
-            logical_clock: LogicalClockService::new(Some(device_id)),
+            logical_clock: LogicalClockManager::new(Some(device_id)),
             order_clock: OrderClockHandler,
             authorization_handler,
             leakage_handler,

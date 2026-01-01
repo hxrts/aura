@@ -6,6 +6,7 @@ use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::AuraEffectSystem;
+use crate::runtime::services::SessionManager;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
     RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects,
@@ -17,7 +18,6 @@ use aura_protocol::effects::{ChoreographicRole, EffectApiEffects};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 // Session coordination choreography protocol
 //
@@ -177,10 +177,8 @@ pub struct SessionOperations {
     pub(super) authority_context: AuthorityContext,
     /// Account ID
     _account_id: AccountId,
-    /// In-memory participant registry keyed by session id
-    pub(super) session_participants: Arc<RwLock<HashMap<String, Vec<DeviceId>>>>,
-    /// In-memory metadata registry keyed by session id
-    pub(super) session_metadata: Arc<RwLock<HashMap<String, HashMap<String, serde_json::Value>>>>,
+    /// Session state manager
+    pub(super) session_manager: SessionManager,
 }
 
 impl SessionOperations {
@@ -194,8 +192,7 @@ impl SessionOperations {
             effects,
             authority_context,
             _account_id: account_id,
-            session_participants: Arc::new(RwLock::new(HashMap::new())),
-            session_metadata: Arc::new(RwLock::new(HashMap::new())),
+            session_manager: SessionManager::new(),
         }
     }
 
@@ -340,18 +337,9 @@ impl SessionOperations {
             .await
         {
             Ok(session_handle) => {
-                {
-                    let mut participants_map = self.session_participants.write().await;
-                    participants_map
-                        .entry(session_id.clone())
-                        .or_insert_with(|| participants.clone());
-                }
-                {
-                    let mut metadata_map = self.session_metadata.write().await;
-                    metadata_map
-                        .entry(session_id.clone())
-                        .or_insert_with(HashMap::new);
-                }
+                self.session_manager
+                    .register_session(&session_id, participants.clone())
+                    .await;
                 self.persist_session_handle(&session_handle).await?;
                 HandlerUtilities::append_relational_fact(
                     &self.authority_context,

@@ -50,6 +50,7 @@ use aura_social::moderation::{
 use std::sync::Arc;
 
 use crate::core::default_context_id_for_authority;
+use crate::runtime::services::ServiceError;
 
 mod amp;
 mod consensus;
@@ -64,6 +65,24 @@ use invitation::{
     convert_invitation_status_to_bridge, convert_invitation_to_bridge_info,
     convert_invitation_type_to_bridge,
 };
+
+fn service_error_to_intent(err: ServiceError) -> IntentError {
+    IntentError::service_error(err.to_string())
+}
+
+fn service_unavailable(service: &'static str) -> IntentError {
+    service_error_to_intent(ServiceError::unavailable(
+        service,
+        "service unavailable",
+    ))
+}
+
+fn service_unavailable_with_detail(
+    service: &'static str,
+    detail: impl std::fmt::Display,
+) -> IntentError {
+    service_error_to_intent(ServiceError::unavailable(service, format!("{detail}")))
+}
 
 /// Wrapper to implement RuntimeBridge for AuraAgent
 ///
@@ -580,7 +599,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             // Triggering a manual sync would be a new feature
             Ok(())
         } else {
-            Err(IntentError::no_agent("Sync service not available"))
+            Err(service_unavailable("sync_service"))
         }
     }
 
@@ -600,7 +619,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .await
                 .map_err(|e| IntentError::internal_error(format!("Sync failed: {}", e)))
         } else {
-            Err(IntentError::no_agent("Sync service not available"))
+            Err(service_unavailable("sync_service"))
         }
     }
 
@@ -952,9 +971,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Step 4: Send guardian invitations with key packages
         // This routes through the proper aura-recovery protocol
-        let recovery_service = self.agent.recovery().map_err(|e| {
-            IntentError::service_error(format!("Recovery service unavailable: {}", e))
-        })?;
+        let recovery_service = self
+            .agent
+            .recovery()
+            .map_err(|e| service_unavailable_with_detail("recovery_service", e))?;
 
         for (idx, guardian_id) in guardian_ids.iter().enumerate() {
             let key_package = &key_packages[idx];
@@ -1579,7 +1599,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         // Create a shareable device enrollment invitation (out-of-band transfer).
         let invitation_service = self.agent.invitations().map_err(|e| {
-            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+            service_unavailable_with_detail("invitation_service", e)
         })?;
 
         let invitation = invitation_service
@@ -2086,7 +2106,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn export_invitation(&self, invitation_id: &str) -> Result<String, IntentError> {
         // Get the invitation service from the agent
         let invitation_service = self.agent.invitations().map_err(|e| {
-            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+            service_unavailable_with_detail("invitation_service", e)
         })?;
 
         // Export the invitation code
@@ -2104,7 +2124,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
         let invitation_service = self.agent.invitations().map_err(|e| {
-            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+            service_unavailable_with_detail("invitation_service", e)
         })?;
 
         let invitation = invitation_service
@@ -2125,7 +2145,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
         let invitation_service = self.agent.invitations().map_err(|e| {
-            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+            service_unavailable_with_detail("invitation_service", e)
         })?;
 
         let invitation = invitation_service
@@ -2146,7 +2166,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
         let invitation_service = self.agent.invitations().map_err(|e| {
-            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+            service_unavailable_with_detail("invitation_service", e)
         })?;
 
         let invitation = invitation_service
@@ -2161,7 +2181,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn accept_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
         let invitation_service = self.agent.invitations().map_err(|e| {
-            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+            service_unavailable_with_detail("invitation_service", e)
         })?;
 
         let result = invitation_service
@@ -2182,7 +2202,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
         let invitation_service = self.agent.invitations().map_err(|e| {
-            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+            service_unavailable_with_detail("invitation_service", e)
         })?;
 
         let result = invitation_service
@@ -2203,7 +2223,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
         let invitation_service = self.agent.invitations().map_err(|e| {
-            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+            service_unavailable_with_detail("invitation_service", e)
         })?;
 
         let result = invitation_service
@@ -2237,7 +2257,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError> {
         let invitation_service = self.agent.invitations().map_err(|e| {
-            IntentError::service_error(format!("Invitation service unavailable: {}", e))
+            service_unavailable_with_detail("invitation_service", e)
         })?;
 
         // Import into the agent cache so later operations (accept/decline) can resolve
@@ -2416,7 +2436,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let time = effects
             .physical_time()
             .await
-            .map_err(|e| IntentError::service_error(format!("Physical time unavailable: {e}")))?;
+            .map_err(|e| service_unavailable_with_detail("physical_time", e))?;
         Ok(time.ts_ms)
     }
 

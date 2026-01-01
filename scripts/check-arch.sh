@@ -197,6 +197,12 @@ TEST_ALLOWLIST="crates/aura-testkit/|/tests/|/testing/|/examples/|benches/"
 # Simulator (Layer 6/8) - simulation-specific impurity and test infrastructure (handlers, quint ITF loading)
 SIMULATOR_ALLOWLIST="crates/aura-simulator/src/"
 
+# Handler state allowlist (keep empty; add exact paths for intentional state in handlers)
+HANDLER_STATE_ALLOWLIST=""
+
+# Handler bridge allowlist (keep empty; add exact paths for intentional handler bridges)
+HANDLER_BRIDGE_ALLOWLIST=""
+
 # Runtime assembly (Layer 6) - where effects are composed with real impls
 # Includes runtime/ subdirectory, runtime_bridge_impl.rs, and builder/ (bootstrapping before effects exist)
 RUNTIME_ALLOWLIST="crates/aura-agent/src/runtime/|crates/aura-agent/src/runtime_bridge_impl.rs|crates/aura-agent/src/builder/"
@@ -708,7 +714,7 @@ fi
 if [ "$RUN_ALL" = true ] || [ "$RUN_GUARDS" = true ]; then
   section "Guard chain — all TransportEffects sends must flow through CapGuard → FlowGuard → JournalCoupler (docs/108_transport_and_information_flow.md, docs/001_system_architecture.md §2.1)"
   transport_sends=$(rg --no-heading "TransportEffects::(send|open_channel)" crates -g "*.rs" || true)
-  guard_allowlist="crates/aura-guards/src/guards|crates/aura-protocol/src/handlers/sessions|crates/aura-agent/src/runtime/effects.rs|tests/|crates/aura-testkit/"
+  guard_allowlist="crates/aura-guards/src/guards|crates/aura-protocol/src/handlers/sessions|crates/aura-agent/src/runtime/effects.rs|crates/aura-agent/src/runtime/effects/choreography.rs|tests/|crates/aura-testkit/"
   bypass_hits=$(echo "$transport_sends" | grep -Ev "$guard_allowlist" || true)
   emit_hits "Potential guard-chain bypass (TransportEffects send/open outside guard modules)" "$bypass_hits"
 fi
@@ -1080,6 +1086,32 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     emit_hits "SessionId::new() used outside tests (use SessionId::new_from_entropy / RandomEffects)" "$filtered_session_id"
   else
     info "SessionId::new(): none outside tests"
+  fi
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
+  section "Runtime handler hygiene — handlers are stateless; no bridge modules in aura-agent"
+
+  handler_state_hits=$(rg --no-heading "Arc<.*(RwLock|Mutex)|RwLock<|Mutex<" crates/aura-agent/src/handlers -g "*.rs" || true)
+  filtered_handler_state="$handler_state_hits"
+  if [ -n "$HANDLER_STATE_ALLOWLIST" ]; then
+    filtered_handler_state=$(echo "$filtered_handler_state" | grep -Ev "$HANDLER_STATE_ALLOWLIST" || true)
+  fi
+  emit_hits "Stateful handlers detected (move state into runtime/services managers)" "$filtered_handler_state"
+
+  handler_bridge_files=$(rg --files -g "*bridge*.rs" crates/aura-agent/src/handlers 2>/dev/null || true)
+  if [ -n "$handler_bridge_files" ]; then
+    filtered_handler_bridges="$handler_bridge_files"
+    if [ -n "$HANDLER_BRIDGE_ALLOWLIST" ]; then
+      filtered_handler_bridges=$(echo "$filtered_handler_bridges" | grep -Ev "$HANDLER_BRIDGE_ALLOWLIST" || true)
+    fi
+    if [ -n "$filtered_handler_bridges" ]; then
+      emit_hits "Handler bridge modules present (merge into handler/service)" "$filtered_handler_bridges"
+    else
+      info "Handler bridge modules: none outside allowlist"
+    fi
+  else
+    info "Handler bridge modules: none"
   fi
 fi
 

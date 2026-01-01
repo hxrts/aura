@@ -18,7 +18,7 @@
 use iocraft::prelude::*;
 
 use aura_app::ui::signals::CHAT_SIGNAL;
-use aura_app::views::display::format_timestamp;
+use aura_app::ui::types::format_timestamp;
 
 use crate::tui::callbacks::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,

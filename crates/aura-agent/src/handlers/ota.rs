@@ -6,34 +6,11 @@
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
+use crate::runtime::services::OtaManager;
 use aura_core::effects::CryptoCoreEffects;
 use aura_core::hash::hash;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
-/// Update status for the agent
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UpdateStatus {
-    /// No update available
-    UpToDate,
-    /// Update available but not yet downloaded
-    Available {
-        version: String,
-        release_notes: Option<String>,
-        size_bytes: u64,
-    },
-    /// Update is being downloaded
-    Downloading {
-        version: String,
-        progress_percent: u8,
-    },
-    /// Update downloaded and verified, ready to install
-    Ready { version: String },
-    /// Update is being installed
-    Installing { version: String },
-    /// Update failed
-    Failed { reason: String },
-}
+pub use crate::runtime::services::UpdateStatus;
 
 /// Update metadata from the update server
 #[derive(Debug, Clone)]
@@ -72,8 +49,8 @@ pub struct UpdateResult {
 /// Manages software updates with cryptographic verification.
 pub struct OtaHandler {
     context: HandlerContext,
-    /// Current update status
-    status: Arc<RwLock<UpdateStatus>>,
+    /// Current update status manager
+    manager: OtaManager,
     /// Current version of the agent
     current_version: String,
 }
@@ -84,14 +61,14 @@ impl OtaHandler {
         HandlerUtilities::validate_authority_context(&authority)?;
         Ok(Self {
             context: HandlerContext::new(authority),
-            status: Arc::new(RwLock::new(UpdateStatus::UpToDate)),
+            manager: OtaManager::new(),
             current_version,
         })
     }
 
     /// Get the current update status
     pub async fn get_status(&self) -> UpdateStatus {
-        self.status.read().await.clone()
+        self.manager.status().await
     }
 
     /// Get the current agent version
@@ -156,13 +133,12 @@ impl OtaHandler {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Update status to downloading
-        {
-            let mut status = self.status.write().await;
-            *status = UpdateStatus::Downloading {
+        self.manager
+            .set_status(UpdateStatus::Downloading {
                 version: update.version.clone(),
                 progress_percent: 0,
-            };
-        }
+            })
+            .await;
 
         // MVP: No actual download implementation.
         // Future implementation will:
@@ -171,10 +147,10 @@ impl OtaHandler {
         // 3. Verify integrity
         // 4. Store in staging area
 
-        let mut status = self.status.write().await;
-        *status = UpdateStatus::Failed {
+        let status = UpdateStatus::Failed {
             reason: "OTA downloads not yet implemented".to_string(),
         };
+        self.manager.set_status(status.clone()).await;
 
         Ok(UpdateResult {
             success: false,
@@ -189,17 +165,16 @@ impl OtaHandler {
     pub async fn apply_update(&self, _effects: &AuraEffectSystem) -> AgentResult<UpdateResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        let current_status = self.status.read().await.clone();
+        let current_status = self.manager.status().await;
 
         match current_status {
             UpdateStatus::Ready { version } => {
                 // Update status to installing
-                {
-                    let mut status = self.status.write().await;
-                    *status = UpdateStatus::Installing {
+                self.manager
+                    .set_status(UpdateStatus::Installing {
                         version: version.clone(),
-                    };
-                }
+                    })
+                    .await;
 
                 // MVP: No actual installation implementation.
                 // Future implementation will:
@@ -209,10 +184,10 @@ impl OtaHandler {
                 // 4. Swap versions atomically
                 // 5. Schedule restart
 
-                let mut status = self.status.write().await;
-                *status = UpdateStatus::Failed {
+                let status = UpdateStatus::Failed {
                     reason: "OTA installation not yet implemented".to_string(),
                 };
+                self.manager.set_status(status.clone()).await;
 
                 Ok(UpdateResult {
                     success: false,
@@ -226,14 +201,14 @@ impl OtaHandler {
 
     /// Cancel an in-progress update
     pub async fn cancel_update(&self) -> AgentResult<UpdateResult> {
-        let mut status = self.status.write().await;
+        let current_status = self.manager.status().await;
 
-        match &*status {
+        match current_status {
             UpdateStatus::Downloading { .. } | UpdateStatus::Ready { .. } => {
-                *status = UpdateStatus::UpToDate;
+                self.manager.set_status(UpdateStatus::UpToDate).await;
                 Ok(UpdateResult {
                     success: true,
-                    status: status.clone(),
+                    status: UpdateStatus::UpToDate,
                     error: None,
                 })
             }
@@ -242,7 +217,7 @@ impl OtaHandler {
             )),
             _ => Ok(UpdateResult {
                 success: true,
-                status: status.clone(),
+                status: current_status,
                 error: None,
             }),
         }

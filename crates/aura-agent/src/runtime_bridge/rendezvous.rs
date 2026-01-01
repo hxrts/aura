@@ -1,4 +1,4 @@
-use super::AgentRuntimeBridge;
+use super::{service_unavailable, AgentRuntimeBridge};
 use aura_app::runtime_bridge::{LanPeerInfo, RendezvousStatus};
 use aura_app::IntentError;
 use aura_core::identifiers::AuthorityId;
@@ -28,7 +28,7 @@ pub(super) async fn trigger_discovery(bridge: &AgentRuntimeBridge) -> Result<(),
             IntentError::internal_error(format!("Failed to trigger discovery: {}", e))
         })
     } else {
-        Err(IntentError::no_agent("Rendezvous service not available"))
+        Err(service_unavailable("rendezvous_service"))
     }
 }
 

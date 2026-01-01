@@ -38,8 +38,9 @@ use aura_core::{
     threshold::{ConvergenceCert, ReversionFact},
     AuraError, ContextId, Hash32,
 };
+use super::state::with_state_mut_validated;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -109,6 +110,58 @@ pub struct CoordinatorLease {
     pub issued_at_ms: u64,
 }
 
+#[derive(Debug, Default)]
+struct ThresholdSigningState {
+    contexts: HashMap<AuthorityId, SigningContextState>,
+    leases: HashMap<AuthorityId, CoordinatorLease>,
+}
+
+impl ThresholdSigningState {
+    fn validate(&self) -> Result<(), String> {
+        for (authority, context) in &self.contexts {
+            if context.config.threshold == 0 {
+                return Err(format!("authority {:?} has zero threshold", authority));
+            }
+            if context.config.threshold > context.config.total_participants {
+                return Err(format!(
+                    "authority {:?} threshold {} exceeds total {}",
+                    authority, context.config.threshold, context.config.total_participants
+                ));
+            }
+            if context.participants.len() != context.config.total_participants as usize {
+                return Err(format!(
+                    "authority {:?} participant count {} does not match total {}",
+                    authority,
+                    context.participants.len(),
+                    context.config.total_participants
+                ));
+            }
+            if let Some(index) = context.my_signer_index {
+                if index == 0 || index > context.config.total_participants {
+                    return Err(format!(
+                        "authority {:?} signer index {} out of bounds",
+                        authority, index
+                    ));
+                }
+            }
+            if context.public_key_package.is_empty() {
+                return Err(format!(
+                    "authority {:?} missing public key package",
+                    authority
+                ));
+            }
+            let participant_set: HashSet<_> = context.participants.iter().collect();
+            if participant_set.len() != context.participants.len() {
+                return Err(format!(
+                    "authority {:?} has duplicate participants",
+                    authority
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Unified service for all threshold signing operations
 ///
 /// Handles:
@@ -120,15 +173,14 @@ pub struct ThresholdSigningService {
     /// Effect system for crypto and secure storage operations
     effects: Arc<AuraEffectSystem>,
 
-    /// Known signing contexts (keyed by authority)
-    contexts: Arc<RwLock<HashMap<AuthorityId, SigningContextState>>>,
-    leases: Arc<RwLock<HashMap<AuthorityId, CoordinatorLease>>>,
+    /// In-memory signing state (contexts + leases)
+    state: Arc<RwLock<ThresholdSigningState>>,
 }
 
 impl std::fmt::Debug for ThresholdSigningService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ThresholdSigningService")
-            .field("contexts", &"<RwLock<HashMap>>")
+            .field("state", &"<RwLock<ThresholdSigningState>>")
             .finish()
     }
 }
@@ -137,8 +189,7 @@ impl Clone for ThresholdSigningService {
     fn clone(&self) -> Self {
         Self {
             effects: self.effects.clone(),
-            contexts: self.contexts.clone(),
-            leases: self.leases.clone(),
+            state: self.state.clone(),
         }
     }
 }
@@ -148,8 +199,7 @@ impl ThresholdSigningService {
     pub fn new(effects: Arc<AuraEffectSystem>) -> Self {
         Self {
             effects,
-            contexts: Arc::new(RwLock::new(HashMap::new())),
-            leases: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(RwLock::new(ThresholdSigningState::default())),
         }
     }
 
@@ -178,12 +228,19 @@ impl ThresholdSigningService {
         authority: &AuthorityId,
         mode: AgreementMode,
     ) -> Result<(), AuraError> {
-        let mut contexts = self.contexts.write().await;
-        let state = contexts
-            .get_mut(authority)
-            .ok_or_else(|| AuraError::not_found("authority context not found"))?;
-        state.agreement_mode = mode;
-        Ok(())
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let context = state
+                    .contexts
+                    .get_mut(authority)
+                    .ok_or_else(|| AuraError::not_found("authority context not found"))?;
+                context.agreement_mode = mode;
+                Ok(())
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     /// Acquire or advance the coordinator lease (fencing token) for an authority.
@@ -192,22 +249,28 @@ impl ThresholdSigningService {
         authority: &AuthorityId,
         coord_epoch: u64,
     ) -> Result<CoordinatorLease, AuraError> {
-        let mut leases = self.leases.write().await;
-        if let Some(existing) = leases.get(authority) {
-            if coord_epoch <= existing.coord_epoch {
-                return Err(AuraError::invalid(
-                    "Coordinator lease must advance monotonically",
-                ));
-            }
-        }
-
         let now = self.effects.physical_time().await?;
         let lease = CoordinatorLease {
             coord_epoch,
             issued_at_ms: now.ts_ms,
         };
-        leases.insert(*authority, lease.clone());
-        Ok(lease)
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                if let Some(existing) = state.leases.get(authority) {
+                    if coord_epoch <= existing.coord_epoch {
+                        return Err(AuraError::invalid(
+                            "Coordinator lease must advance monotonically",
+                        ));
+                    }
+                }
+
+                state.leases.insert(*authority, lease.clone());
+                Ok(lease.clone())
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     /// Emit a convergence certificate for a soft-safe operation.
@@ -220,8 +283,9 @@ impl ThresholdSigningService {
         ack_set: Option<BTreeSet<AuthorityId>>,
         window: u64,
     ) -> Result<ConvergenceCert, AuraError> {
-        let leases = self.leases.read().await;
-        let lease = leases
+        let state = self.state.read().await;
+        let lease = state
+            .leases
             .get(coordinator)
             .ok_or_else(|| AuraError::invalid("Coordinator lease missing for convergence cert"))?;
 
@@ -243,8 +307,9 @@ impl ThresholdSigningService {
         op_id: Hash32,
         winner_op_id: Hash32,
     ) -> Result<ReversionFact, AuraError> {
-        let leases = self.leases.read().await;
-        let lease = leases
+        let state = self.state.read().await;
+        let lease = state
+            .leases
             .get(coordinator)
             .ok_or_else(|| AuraError::invalid("Coordinator lease missing for reversion fact"))?;
 
@@ -460,7 +525,14 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         };
 
         // Store in memory cache
-        self.contexts.write().await.insert(*authority, state);
+        with_state_mut_validated(
+            &self.state,
+            |state_map| {
+                state_map.contexts.insert(*authority, state);
+            },
+            |state_map| state_map.validate(),
+        )
+        .await;
 
         tracing::info!(
             ?authority,
@@ -473,9 +545,10 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
     async fn sign(&self, context: SigningContext) -> Result<ThresholdSignature, AuraError> {
         let state = self
-            .contexts
+            .state
             .read()
             .await
+            .contexts
             .get(&context.authority)
             .cloned()
             .ok_or_else(|| {
@@ -552,17 +625,19 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn threshold_config(&self, authority: &AuthorityId) -> Option<ThresholdConfig> {
-        self.contexts
+        self.state
             .read()
             .await
+            .contexts
             .get(authority)
             .map(|s| s.config.clone())
     }
 
     async fn threshold_state(&self, authority: &AuthorityId) -> Option<ThresholdState> {
-        self.contexts
+        self.state
             .read()
             .await
+            .contexts
             .get(authority)
             .map(|state| ThresholdState {
                 epoch: state.epoch,
@@ -574,18 +649,20 @@ impl ThresholdSigningEffects for ThresholdSigningService {
     }
 
     async fn has_signing_capability(&self, authority: &AuthorityId) -> bool {
-        self.contexts
+        self.state
             .read()
             .await
+            .contexts
             .get(authority)
             .map(|s| s.my_signer_index.is_some())
             .unwrap_or(false)
     }
 
     async fn public_key_package(&self, authority: &AuthorityId) -> Option<Vec<u8>> {
-        self.contexts
+        self.state
             .read()
             .await
+            .contexts
             .get(authority)
             .map(|s| s.public_key_package.clone())
     }
@@ -616,9 +693,10 @@ impl ThresholdSigningEffects for ThresholdSigningService {
 
         // Get current state to determine new epoch
         let current_epoch = self
-            .contexts
+            .state
             .read()
             .await
+            .contexts
             .get(authority)
             .map(|s| s.epoch)
             .unwrap_or(0);
@@ -930,57 +1008,66 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             .map_err(|e| AuraError::internal(format!("Invalid threshold config: {}", e)))?;
 
         // Update or create in-memory context to use the new epoch with proper config.
-        let mut contexts = self.contexts.write().await;
         let participants = config_metadata.resolved_participants();
         let agreement_mode = config_metadata.agreement_mode;
+        let mode = config_metadata.mode;
+        let threshold_k = config_metadata.threshold_k;
+        let total_n = config_metadata.total_n;
 
-        if let Some(state) = contexts.get_mut(authority) {
-            let old_epoch = state.epoch;
-            state.epoch = new_epoch;
-            state.public_key_package = public_key_package;
-            state.config = new_config;
-            state.mode = config_metadata.mode;
-            state.participants = participants;
-            state.agreement_mode = agreement_mode;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                if let Some(context) = state.contexts.get_mut(authority) {
+                    let old_epoch = context.epoch;
+                    context.epoch = new_epoch;
+                    context.public_key_package = public_key_package;
+                    context.config = new_config;
+                    context.mode = mode;
+                    context.participants = participants;
+                    context.agreement_mode = agreement_mode;
 
-            tracing::info!(
-                ?authority,
-                old_epoch,
-                new_epoch,
-                threshold_k = config_metadata.threshold_k,
-                total_n = config_metadata.total_n,
-                "Key rotation committed - new epoch is now active"
-            );
-        } else {
-            let device_id = self.effects.device_id();
-            let my_signer_index = participants
-                .iter()
-                .position(|p| match p {
-                    ParticipantIdentity::Device(id) => *id == device_id,
-                    _ => false,
-                })
-                .map(|idx| (idx + 1) as u16);
+                    tracing::info!(
+                        ?authority,
+                        old_epoch,
+                        new_epoch,
+                        threshold_k,
+                        total_n,
+                        "Key rotation committed - new epoch is now active"
+                    );
+                } else {
+                    let device_id = self.effects.device_id();
+                    let my_signer_index = participants
+                        .iter()
+                        .position(|p| match p {
+                            ParticipantIdentity::Device(id) => *id == device_id,
+                            _ => false,
+                        })
+                        .map(|idx| (idx + 1) as u16);
 
-            let state = SigningContextState {
-                config: new_config,
-                my_signer_index,
-                epoch: new_epoch,
-                public_key_package,
-                mode: config_metadata.mode,
-                participants,
-                agreement_mode,
-            };
+                    let context = SigningContextState {
+                        config: new_config,
+                        my_signer_index,
+                        epoch: new_epoch,
+                        public_key_package,
+                        mode,
+                        participants,
+                        agreement_mode,
+                    };
 
-            contexts.insert(*authority, state);
+                    state.contexts.insert(*authority, context);
 
-            tracing::info!(
-                ?authority,
-                new_epoch,
-                threshold_k = config_metadata.threshold_k,
-                total_n = config_metadata.total_n,
-                "Key rotation committed - new authority context loaded"
-            );
-        }
+                    tracing::info!(
+                        ?authority,
+                        new_epoch,
+                        threshold_k,
+                        total_n,
+                        "Key rotation committed - new authority context loaded"
+                    );
+                }
+            },
+            |state| state.validate(),
+        )
+        .await;
 
         Ok(())
     }
@@ -1109,14 +1196,21 @@ impl RuntimeService for ThresholdSigningService {
     }
 
     async fn start(&self, _tasks: Arc<RuntimeTaskRegistry>) -> Result<(), ServiceError> {
-        // ThresholdSigningService is stateless wrapper around effects
+        // ThresholdSigningService is in-memory and always ready
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), ServiceError> {
-        // Clear signing contexts on shutdown
-        let mut contexts = self.contexts.write().await;
-        contexts.clear();
+        // Clear signing contexts + leases on shutdown
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.contexts.clear();
+                state.leases.clear();
+            },
+            |state| state.validate(),
+        )
+        .await;
         Ok(())
     }
 

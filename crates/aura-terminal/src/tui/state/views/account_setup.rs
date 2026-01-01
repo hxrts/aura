@@ -3,7 +3,7 @@
 use aura_app::ui::prelude::*;
 
 // Re-export portable validation for callers that only import this module
-pub use aura_app::workflows::account::{
+pub use aura_app::ui::types::{
     is_valid_display_name, validate_display_name, DisplayNameError,
     MAX_DISPLAY_NAME_LENGTH, MIN_DISPLAY_NAME_LENGTH,
 };

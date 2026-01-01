@@ -5,6 +5,7 @@
 
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::runtime::services::AuthManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::{
     CryptoCoreEffects, CryptoExtendedEffects, RandomCoreEffects, RandomExtendedEffects,
@@ -13,9 +14,6 @@ use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_guards::chain::create_send_guard;
 use aura_protocol::effects::EffectApiEffects;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Extract the group public key (32 bytes) from a serialized FROST PublicKeyPackage
 fn extract_group_public_key(public_key_package: &[u8]) -> AgentResult<Vec<u8>> {
@@ -100,8 +98,8 @@ struct AuthenticatedFact {
 #[derive(Clone)]
 pub struct AuthHandler {
     context: HandlerContext,
-    /// Pending challenges awaiting response
-    pending_challenges: Arc<RwLock<HashMap<String, AuthChallenge>>>,
+    /// Challenge manager (shared cache)
+    challenge_manager: AuthManager,
 }
 
 impl AuthHandler {
@@ -111,7 +109,7 @@ impl AuthHandler {
 
         Ok(Self {
             context: HandlerContext::new(authority),
-            pending_challenges: Arc::new(RwLock::new(HashMap::new())),
+            challenge_manager: AuthManager::new(),
         })
     }
 
@@ -142,10 +140,9 @@ impl AuthHandler {
         };
 
         // Store pending challenge
-        {
-            let mut challenges = self.pending_challenges.write().await;
-            challenges.insert(challenge_id, challenge.clone());
-        }
+        self.challenge_manager
+            .cache_challenge(challenge.clone())
+            .await;
 
         Ok(challenge)
     }
@@ -159,10 +156,10 @@ impl AuthHandler {
         let current_time = effects.current_timestamp().await.unwrap_or(0);
 
         // Look up the challenge
-        let challenge = {
-            let challenges = self.pending_challenges.read().await;
-            challenges.get(&response.challenge_id).cloned()
-        };
+        let challenge = self
+            .challenge_manager
+            .get_challenge(&response.challenge_id)
+            .await;
 
         let challenge = match challenge {
             Some(c) => c,
@@ -180,10 +177,9 @@ impl AuthHandler {
         // Check expiration
         if current_time > challenge.expires_at {
             // Remove expired challenge
-            {
-                let mut challenges = self.pending_challenges.write().await;
-                challenges.remove(&response.challenge_id);
-            }
+            self.challenge_manager
+                .remove_challenge(&response.challenge_id)
+                .await;
             return Ok(AuthResult {
                 authenticated: false,
                 authority_id: None,
@@ -211,10 +207,9 @@ impl AuthHandler {
 
         if verified {
             // Remove used challenge
-            {
-                let mut challenges = self.pending_challenges.write().await;
-                challenges.remove(&response.challenge_id);
-            }
+            self.challenge_manager
+                .remove_challenge(&response.challenge_id)
+                .await;
 
             // Journal authentication fact
             let device_id = self.device_id();

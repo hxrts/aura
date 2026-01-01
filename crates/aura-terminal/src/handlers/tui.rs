@@ -423,7 +423,7 @@ pub async fn import_account_backup(
 }
 
 // Demo seed re-exported from portable aura-app layer
-use aura_app::workflows::demo_config::DEMO_SEED_2024 as DEMO_SEED;
+use aura_app::ui::workflows::demo_config::DEMO_SEED_2024 as DEMO_SEED;
 
 /// Handle TUI launch
 pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {

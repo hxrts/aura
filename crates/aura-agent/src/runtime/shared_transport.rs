@@ -29,16 +29,34 @@ use parking_lot::RwLock;
 /// - `online`: set of authorities currently instantiated in this shared network
 #[derive(Clone, Debug)]
 pub struct SharedTransport {
-    inboxes: Arc<RwLock<HashMap<AuthorityId, Arc<RwLock<Vec<TransportEnvelope>>>>>>,
-    online: Arc<RwLock<HashSet<AuthorityId>>>,
+    state: Arc<RwLock<SharedTransportState>>,
+}
+
+#[derive(Debug, Default)]
+struct SharedTransportState {
+    inboxes: HashMap<AuthorityId, Arc<RwLock<Vec<TransportEnvelope>>>>,
+    online: HashSet<AuthorityId>,
+}
+
+impl SharedTransportState {
+    fn validate(&self) -> Result<(), String> {
+        for authority_id in &self.online {
+            if !self.inboxes.contains_key(authority_id) {
+                return Err(format!(
+                    "online authority {:?} missing inbox",
+                    authority_id
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl SharedTransport {
     /// Create a new empty shared transport network.
     pub fn new() -> Self {
         Self {
-            inboxes: Arc::new(RwLock::new(HashMap::new())),
-            online: Arc::new(RwLock::new(HashSet::new())),
+            state: Arc::new(RwLock::new(SharedTransportState::default())),
         }
     }
 
@@ -49,17 +67,36 @@ impl SharedTransport {
         let mut online = HashSet::new();
         online.insert(authority_id);
         Self {
-            inboxes: Arc::new(RwLock::new(inboxes)),
-            online: Arc::new(RwLock::new(online)),
+            state: Arc::new(RwLock::new(SharedTransportState { inboxes, online })),
         }
     }
 
+    fn with_state<R>(&self, op: impl FnOnce(&SharedTransportState) -> R) -> R {
+        let guard = self.state.read();
+        op(&guard)
+    }
+
+    fn with_state_mut<R>(&self, op: impl FnOnce(&mut SharedTransportState) -> R) -> R {
+        let mut guard = self.state.write();
+        let result = op(&mut guard);
+        #[cfg(debug_assertions)]
+        {
+            if let Err(message) = guard.validate() {
+                tracing::error!(%message, "SharedTransport state invariant violated");
+                debug_assert!(false, "SharedTransport invariant violated: {}", message);
+            }
+        }
+        result
+    }
+
     fn ensure_inbox(&self, authority_id: AuthorityId) -> Arc<RwLock<Vec<TransportEnvelope>>> {
-        let mut inboxes = self.inboxes.write();
-        inboxes
-            .entry(authority_id)
-            .or_insert_with(|| Arc::new(RwLock::new(Vec::new())))
-            .clone()
+        self.with_state_mut(|state| {
+            state
+                .inboxes
+                .entry(authority_id)
+                .or_insert_with(|| Arc::new(RwLock::new(Vec::new())))
+                .clone()
+        })
     }
 
     /// Access the inbox for a specific authority.
@@ -75,20 +112,29 @@ impl SharedTransport {
 
     /// Register an authority as "online" in this shared network.
     pub fn register(&self, authority_id: AuthorityId) {
-        self.online.write().insert(authority_id);
-        let _ = self.ensure_inbox(authority_id);
+        self.with_state_mut(|state| {
+            state.online.insert(authority_id);
+            state
+                .inboxes
+                .entry(authority_id)
+                .or_insert_with(|| Arc::new(RwLock::new(Vec::new())));
+        });
     }
 
     /// Count other authorities currently registered as online.
     pub fn connected_peer_count(&self, self_authority: AuthorityId) -> usize {
-        let online = self.online.read();
-        online.iter().filter(|id| **id != self_authority).count()
+        self.with_state(|state| {
+            state
+                .online
+                .iter()
+                .filter(|id| **id != self_authority)
+                .count()
+        })
     }
 
     /// Check whether a peer authority is online in this shared network.
     pub fn is_peer_online(&self, peer: AuthorityId) -> bool {
-        let online = self.online.read();
-        online.contains(&peer)
+        self.with_state(|state| state.online.contains(&peer))
     }
 }
 

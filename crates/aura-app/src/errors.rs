@@ -36,7 +36,7 @@ pub enum ErrorCategory {
     NotFound,
     /// Network connectivity errors (often transient)
     Network,
-    /// Feature not implemented (development limitation)
+    /// Feature unavailable (development limitation)
     NotImplemented,
     /// General operation failures (catch-all)
     Operation,

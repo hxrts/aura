@@ -4,7 +4,7 @@
 use aura_app::ui::prelude::*;
 
 // Re-export portable wizard step type
-pub use aura_app::views::wizards::CreateChannelStep;
+pub use aura_app::ui::types::CreateChannelStep;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ChatFocus {

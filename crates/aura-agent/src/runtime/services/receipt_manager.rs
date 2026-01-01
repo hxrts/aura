@@ -10,6 +10,7 @@
 //! retention period.
 
 use crate::core::AgentConfig;
+use super::state::with_state_mut_validated;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::{HashMap, HashSet};
@@ -107,8 +108,24 @@ pub enum ReceiptError {
     VerificationFailed,
 }
 
-/// Chain index mapping (ContextId, AuthorityId) to ordered receipt IDs.
-type ChainIndex = Arc<RwLock<HashMap<(ContextId, AuthorityId), Vec<ReceiptId>>>>;
+#[derive(Debug, Default)]
+struct ReceiptState {
+    receipts: HashMap<ReceiptId, Receipt>,
+    chains: HashMap<(ContextId, AuthorityId), Vec<ReceiptId>>,
+}
+
+impl ReceiptState {
+    fn validate(&self) -> Result<(), String> {
+        for (key, chain) in &self.chains {
+            for receipt_id in chain {
+                if !self.receipts.contains_key(receipt_id) {
+                    return Err(format!("chain {:?} references missing receipt {:?}", key, receipt_id));
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 /// Receipt manager service
 ///
@@ -119,10 +136,8 @@ pub struct ReceiptManager {
     agent_config: AgentConfig,
     /// Receipt manager configuration
     config: ReceiptManagerConfig,
-    /// Receipt storage by ID
-    receipts: Arc<RwLock<HashMap<ReceiptId, Receipt>>>,
-    /// Chain index: (ContextId, AuthorityId) -> list of ReceiptIds in order
-    chains: ChainIndex,
+    /// Owned receipt state (receipts + chains)
+    state: Arc<RwLock<ReceiptState>>,
 }
 
 impl ReceiptManager {
@@ -136,8 +151,7 @@ impl ReceiptManager {
         Self {
             agent_config: agent_config.clone(),
             config,
-            receipts: Arc::new(RwLock::new(HashMap::new())),
-            chains: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(RwLock::new(ReceiptState::default())),
         }
     }
 
@@ -158,14 +172,12 @@ impl ReceiptManager {
             return;
         }
 
-        let receipts = self.receipts.clone();
-        let chains = self.chains.clone();
+        let state = self.state.clone();
         let retention_ms = self.config.retention_period.as_millis() as u64;
         let interval = self.config.cleanup_interval;
 
         tasks.spawn_interval_until(time.clone(), interval, move || {
-            let receipts = receipts.clone();
-            let chains = chains.clone();
+            let state = state.clone();
             let time = time.clone();
 
             async move {
@@ -182,37 +194,42 @@ impl ReceiptManager {
                 let cutoff = now_ms.saturating_sub(retention_ms);
 
                 // Prune expired receipts
-                let mut receipts_guard = receipts.write().await;
-                let mut chains_guard = chains.write().await;
+                let count = with_state_mut_validated(
+                    &state,
+                    |state| {
+                        let expired_ids: Vec<ReceiptId> = state
+                            .receipts
+                            .iter()
+                            .filter(|(_, r)| r.timestamp < cutoff)
+                            .map(|(id, _)| *id)
+                            .collect();
+                        let expired_set: HashSet<ReceiptId> =
+                            expired_ids.iter().copied().collect();
+                        let count = expired_ids.len();
 
-                // Find expired receipt IDs
-                let expired_ids: Vec<ReceiptId> = receipts_guard
-                    .iter()
-                    .filter(|(_, r)| r.timestamp < cutoff)
-                    .map(|(id, _)| *id)
-                    .collect();
-                let expired_set: HashSet<ReceiptId> = expired_ids.iter().copied().collect();
+                        if count > 0 {
+                            for id in &expired_ids {
+                                state.receipts.remove(id);
+                            }
 
-                let count = expired_ids.len();
+                            for chain in state.chains.values_mut() {
+                                chain.retain(|id| !expired_set.contains(id));
+                            }
+                            state.chains.retain(|_, chain| !chain.is_empty());
+                        }
+
+                        count
+                    },
+                    |state| state.validate(),
+                )
+                .await;
 
                 if count > 0 {
-                    // Remove from receipts
-                    for id in &expired_ids {
-                        receipts_guard.remove(id);
-                    }
-
-                    // Remove from chains
-                    for chain in chains_guard.values_mut() {
-                        chain.retain(|id| !expired_set.contains(id));
-                    }
-
-                    // Clean up empty chains
-                    chains_guard.retain(|_, chain| !chain.is_empty());
-
+                    let remaining = state.read().await.receipts.len();
                     tracing::debug!(
                         pruned = count,
                         cutoff_ms = cutoff,
-                        remaining = receipts_guard.len(),
+                        remaining,
                         "Pruned expired receipts"
                     );
                 }
@@ -239,25 +256,23 @@ impl ReceiptManager {
         let context_id = receipt.context_id;
         let peer_id = receipt.peer_id;
 
-        // Store the receipt
-        {
-            let mut receipts = self.receipts.write().await;
-            receipts.insert(id, receipt);
-        }
-
-        // Update the chain index
-        {
-            let mut chains = self.chains.write().await;
-            chains.entry((context_id, peer_id)).or_default().push(id);
-        }
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.receipts.insert(id, receipt);
+                state.chains.entry((context_id, peer_id)).or_default().push(id);
+            },
+            |state| state.validate(),
+        )
+        .await;
 
         Ok(id)
     }
 
     /// Get a receipt by ID
     pub async fn get_receipt(&self, id: ReceiptId) -> Result<Option<Receipt>, ReceiptError> {
-        let receipts = self.receipts.read().await;
-        Ok(receipts.get(&id).cloned())
+        let state = self.state.read().await;
+        Ok(state.receipts.get(&id).cloned())
     }
 
     /// Get the receipt chain for a context-peer pair
@@ -266,14 +281,16 @@ impl ReceiptManager {
         context: ContextId,
         peer: AuthorityId,
     ) -> Result<Vec<Receipt>, ReceiptError> {
-        let chains = self.chains.read().await;
-        let receipts = self.receipts.read().await;
-
-        let receipt_ids = chains.get(&(context, peer)).cloned().unwrap_or_default();
+        let state = self.state.read().await;
+        let receipt_ids = state
+            .chains
+            .get(&(context, peer))
+            .cloned()
+            .unwrap_or_default();
 
         Ok(receipt_ids
             .into_iter()
-            .filter_map(|id| receipts.get(&id).cloned())
+            .filter_map(|id| state.receipts.get(&id).cloned())
             .collect())
     }
 
@@ -289,28 +306,35 @@ impl ReceiptManager {
         &self,
         before_timestamp: u64,
     ) -> Result<usize, ReceiptError> {
-        let mut receipts = self.receipts.write().await;
-        let mut chains = self.chains.write().await;
+        let count = with_state_mut_validated(
+            &self.state,
+            |state| {
+                // Find expired receipt IDs
+                let expired_ids: Vec<ReceiptId> = state
+                    .receipts
+                    .iter()
+                    .filter(|(_, r)| r.timestamp < before_timestamp)
+                    .map(|(id, _)| *id)
+                    .collect();
+                let expired_set: HashSet<ReceiptId> =
+                    expired_ids.iter().copied().collect();
 
-        // Find expired receipt IDs
-        let expired_ids: Vec<ReceiptId> = receipts
-            .iter()
-            .filter(|(_, r)| r.timestamp < before_timestamp)
-            .map(|(id, _)| *id)
-            .collect();
-        let expired_set: HashSet<ReceiptId> = expired_ids.iter().copied().collect();
+                let count = expired_ids.len();
 
-        let count = expired_ids.len();
+                for id in &expired_ids {
+                    state.receipts.remove(id);
+                }
 
-        // Remove from receipts
-        for id in &expired_ids {
-            receipts.remove(id);
-        }
+                for chain in state.chains.values_mut() {
+                    chain.retain(|id| !expired_set.contains(id));
+                }
+                state.chains.retain(|_, chain| !chain.is_empty());
 
-        // Remove from chains
-        for chain in chains.values_mut() {
-            chain.retain(|id| !expired_set.contains(id));
-        }
+                count
+            },
+            |state| state.validate(),
+        )
+        .await;
 
         Ok(count)
     }
@@ -341,8 +365,9 @@ impl ReceiptManager {
     ) -> Result<Receipt, ReceiptError> {
         // Get the previous receipt in the chain
         let previous = {
-            let chains = self.chains.read().await;
-            chains
+            let state = self.state.read().await;
+            state
+                .chains
                 .get(&(context_id, peer_id))
                 .and_then(|chain| chain.last().copied())
         };
@@ -404,14 +429,15 @@ impl RuntimeService for ReceiptManager {
 
     async fn stop(&self) -> Result<(), ServiceError> {
         // Clear all receipts on shutdown
-        {
-            let mut receipts = self.receipts.write().await;
-            receipts.clear();
-        }
-        {
-            let mut chains = self.chains.write().await;
-            chains.clear();
-        }
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.receipts.clear();
+                state.chains.clear();
+            },
+            |state| state.validate(),
+        )
+        .await;
         Ok(())
     }
 

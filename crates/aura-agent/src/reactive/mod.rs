@@ -32,11 +32,12 @@
 //! - Type-safe: leverages Rust's type system for correctness guarantees
 //! - Deterministic: reproducible behavior for testing and simulation
 
-pub mod app_signal_views;
-pub mod frp;
-pub mod pipeline;
-pub mod reductions;
-pub mod scheduler;
+pub(crate) mod app_signal_views;
+pub(crate) mod frp;
+pub(crate) mod pipeline;
+pub(crate) mod reductions;
+pub(crate) mod scheduler;
+pub(crate) mod state;
 
 // Re-export main types for convenience
 pub use app_signal_views::{

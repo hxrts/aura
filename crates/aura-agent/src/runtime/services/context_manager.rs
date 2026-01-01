@@ -5,7 +5,9 @@
 
 use crate::core::AgentConfig;
 use aura_core::identifiers::{AuthorityId, ContextId};
+use super::state::with_state_mut_validated;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Context status
@@ -72,10 +74,61 @@ pub enum ContextError {
 pub struct ContextManager {
     #[allow(dead_code)] // Will be used for context configuration
     config: AgentConfig,
-    /// Context storage by ID
-    contexts: RwLock<HashMap<ContextId, Context>>,
-    /// Authority-to-contexts index
-    authority_contexts: RwLock<HashMap<AuthorityId, Vec<ContextId>>>,
+    /// Context storage by ID and authority index
+    state: Arc<RwLock<ContextManagerState>>,
+}
+
+#[derive(Debug, Default)]
+struct ContextManagerState {
+    contexts: HashMap<ContextId, Context>,
+    authority_contexts: HashMap<AuthorityId, Vec<ContextId>>,
+}
+
+impl ContextManagerState {
+    fn validate(&self) -> Result<(), String> {
+        for (authority, contexts) in &self.authority_contexts {
+            let mut seen = std::collections::HashSet::new();
+            for context_id in contexts {
+                if !seen.insert(*context_id) {
+                    return Err(format!(
+                        "authority {:?} has duplicate context entry {:?}",
+                        authority, context_id
+                    ));
+                }
+                let context = self.contexts.get(context_id).ok_or_else(|| {
+                    format!(
+                        "authority {:?} references missing context {:?}",
+                        authority, context_id
+                    )
+                })?;
+                if context.authority_id != *authority {
+                    return Err(format!(
+                        "context {:?} authority mismatch: {:?} vs {:?}",
+                        context_id, context.authority_id, authority
+                    ));
+                }
+            }
+        }
+
+        for (context_id, context) in &self.contexts {
+            let contexts = self
+                .authority_contexts
+                .get(&context.authority_id)
+                .ok_or_else(|| {
+                    format!(
+                        "context {:?} missing authority index for {:?}",
+                        context_id, context.authority_id
+                    )
+                })?;
+            if !contexts.contains(context_id) {
+                return Err(format!(
+                    "context {:?} missing from authority index {:?}",
+                    context_id, context.authority_id
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl ContextManager {
@@ -83,8 +136,7 @@ impl ContextManager {
     pub fn new(config: &AgentConfig) -> Self {
         Self {
             config: config.clone(),
-            contexts: RwLock::new(HashMap::new()),
-            authority_contexts: RwLock::new(HashMap::new()),
+            state: Arc::new(RwLock::new(ContextManagerState::default())),
         }
     }
 
@@ -100,27 +152,29 @@ impl ContextManager {
 
         let context = Context::new(context_id, authority, timestamp);
 
-        // Store the context
-        let mut contexts = self.contexts.write().await;
-        if contexts.contains_key(&context_id) {
-            return Err(ContextError::AlreadyExists(context_id));
-        }
-        contexts.insert(context_id, context);
-
-        // Update the authority index
-        let mut authority_contexts = self.authority_contexts.write().await;
-        authority_contexts
-            .entry(authority)
-            .or_default()
-            .push(context_id);
-
-        Ok(context_id)
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                if state.contexts.contains_key(&context_id) {
+                    return Err(ContextError::AlreadyExists(context_id));
+                }
+                state.contexts.insert(context_id, context);
+                state
+                    .authority_contexts
+                    .entry(authority)
+                    .or_default()
+                    .push(context_id);
+                Ok(context_id)
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     /// Get a context by ID
     pub async fn get_context(&self, id: ContextId) -> Result<Option<Context>, ContextError> {
-        let contexts = self.contexts.read().await;
-        Ok(contexts.get(&id).cloned())
+        let state = self.state.read().await;
+        Ok(state.contexts.get(&id).cloned())
     }
 
     /// List all contexts for an authority
@@ -128,8 +182,9 @@ impl ContextManager {
         &self,
         authority: AuthorityId,
     ) -> Result<Vec<ContextId>, ContextError> {
-        let authority_contexts = self.authority_contexts.read().await;
-        Ok(authority_contexts
+        let state = self.state.read().await;
+        Ok(state
+            .authority_contexts
             .get(&authority)
             .cloned()
             .unwrap_or_default())
@@ -137,47 +192,65 @@ impl ContextManager {
 
     /// Suspend a context
     pub async fn suspend_context(&self, id: ContextId) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().await;
-        let context = contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let context = state.contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
 
-        if context.status != ContextStatus::Active {
-            return Err(ContextError::InvalidStateTransition {
-                from: context.status,
-                to: ContextStatus::Suspended,
-            });
-        }
+                if context.status != ContextStatus::Active {
+                    return Err(ContextError::InvalidStateTransition {
+                        from: context.status,
+                        to: ContextStatus::Suspended,
+                    });
+                }
 
-        context.status = ContextStatus::Suspended;
-        Ok(())
+                context.status = ContextStatus::Suspended;
+                Ok(())
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     /// Resume a suspended context
     pub async fn resume_context(&self, id: ContextId) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().await;
-        let context = contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let context = state.contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
 
-        if context.status != ContextStatus::Suspended {
-            return Err(ContextError::InvalidStateTransition {
-                from: context.status,
-                to: ContextStatus::Active,
-            });
-        }
+                if context.status != ContextStatus::Suspended {
+                    return Err(ContextError::InvalidStateTransition {
+                        from: context.status,
+                        to: ContextStatus::Active,
+                    });
+                }
 
-        context.status = ContextStatus::Active;
-        Ok(())
+                context.status = ContextStatus::Active;
+                Ok(())
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     /// Terminate a context
     pub async fn terminate_context(&self, id: ContextId) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().await;
-        let context = contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let context = state.contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
 
-        if context.status == ContextStatus::Terminated {
-            return Ok(()); // Already terminated
-        }
+                if context.status == ContextStatus::Terminated {
+                    return Ok(()); // Already terminated
+                }
 
-        context.status = ContextStatus::Terminated;
-        Ok(())
+                context.status = ContextStatus::Terminated;
+                Ok(())
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     /// Add a peer to a context
@@ -186,30 +259,44 @@ impl ContextManager {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().await;
-        let context = contexts
-            .get_mut(&context_id)
-            .ok_or(ContextError::NotFound(context_id))?;
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let context = state
+                    .contexts
+                    .get_mut(&context_id)
+                    .ok_or(ContextError::NotFound(context_id))?;
 
-        if !context.peers.contains(&peer) {
-            context.peers.push(peer);
-        }
-        Ok(())
+                if !context.peers.contains(&peer) {
+                    context.peers.push(peer);
+                }
+                Ok(())
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     /// Update last activity timestamp
     pub async fn touch(&self, context_id: ContextId, timestamp: u64) -> Result<(), ContextError> {
-        let mut contexts = self.contexts.write().await;
-        if let Some(context) = contexts.get_mut(&context_id) {
-            context.last_activity = timestamp;
-        }
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                if let Some(context) = state.contexts.get_mut(&context_id) {
+                    context.last_activity = timestamp;
+                }
+            },
+            |state| state.validate(),
+        )
+        .await;
         Ok(())
     }
 
     /// List all active contexts
     pub async fn list_active_contexts(&self) -> Result<Vec<ContextId>, ContextError> {
-        let contexts = self.contexts.read().await;
-        Ok(contexts
+        let state = self.state.read().await;
+        Ok(state
+            .contexts
             .iter()
             .filter(|(_, ctx)| ctx.status == ContextStatus::Active)
             .map(|(id, _)| *id)
