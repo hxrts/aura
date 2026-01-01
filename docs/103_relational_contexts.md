@@ -180,13 +180,13 @@ use aura_core::{AuthorityId, ContextId};
 use aura_relational::RelationalContext;
 
 // Create a new guardian-account relational context
-let account_authority = AuthorityId::new_from_entropy([1u8; 32]);
-let guardian_authority = AuthorityId::new_from_entropy([1u8; 32]);
+let account_authority = AuthorityId::from_entropy([1u8; 32]);
+let guardian_authority = AuthorityId::from_entropy([2u8; 32]);
 
 let context = RelationalContext::new(vec![account_authority, guardian_authority]);
 
 // Or use a specific context ID
-let context_id = ContextId::new_from_entropy([2u8; 32]);
+let context_id = ContextId::from_entropy([3u8; 32]);
 let context = RelationalContext::with_id(
     context_id,
     vec![account_authority, guardian_authority],

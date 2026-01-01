@@ -128,7 +128,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use uuid::Uuid;
 
 // ✅ CORRECT: Deterministic identifiers for tests
-let auth_id = AuthorityId::new_from_entropy([1u8; 32]);  // Deterministic bytes
+let auth_id = AuthorityId::from_entropy([1u8; 32]);  // Deterministic bytes
 let ctx_id = ContextId::from_uuid(Uuid::nil());          // Placeholder
 let ctx_id = ContextId::from_uuid(Uuid::from_bytes([2u8; 16]));  // Unique but deterministic
 
@@ -144,9 +144,9 @@ let ctx_id = ContextId::from_uuid(Uuid::from_bytes([2u8; 16]));  // Unique but d
 
 When tests need multiple distinct identifiers, use incrementing byte patterns:
 ```rust
-let auth1 = AuthorityId::new_from_entropy([1u8; 32]);
-let auth2 = AuthorityId::new_from_entropy([2u8; 32]);
-let auth3 = AuthorityId::new_from_entropy([3u8; 32]);
+let auth1 = AuthorityId::from_entropy([1u8; 32]);
+let auth2 = AuthorityId::from_entropy([2u8; 32]);
+let auth3 = AuthorityId::from_entropy([3u8; 32]);
 ```
 
 ### Effect System Compliance in Tests

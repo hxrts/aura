@@ -55,7 +55,7 @@ pub enum FactContent {
 }
 ```
 
-The `order` field provides an opaque, privacy-preserving total order for deterministic fact ordering in the BTreeSet. The `timestamp` field provides semantic time information for application logic. Facts implement `Ord` via the `OrderTime` field.
+The `order` field provides an opaque, privacy-preserving total order for deterministic fact ordering in the BTreeSet. The `timestamp` field provides semantic time information for application logic. Facts implement `Ord` via the `OrderTime` field. Do not use `TimeStamp` for cross-domain indexing or total ordering; use `OrderTime` or consensus/session sequencing.
 
 This model supports account operations, relational context operations, snapshots, and rendezvous receipts. Each fact is self contained. Facts are validated before insertion into a namespace.
 

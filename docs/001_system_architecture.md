@@ -1,34 +1,3 @@
-Aura Development Environment
-============================
-
-Rust version: rustc 1.90.0 (1159e78c4 2025-09-14)
-Cargo version: cargo 1.90.0 (840b83a10 2025-07-30)
-Quint version: 0.25.1
-Apalache version: 0.45.4
-TLA+ tools: available
-Node.js version: v20.19.5
-Lean version: Lean (version 4.23.0, arm64-apple-darwin, commit v4.23.0, Release)
-Aeneas version: available
-
-Available commands:
-  just --list          Show all available tasks
-  just build           Build all crates
-  just test            Run all tests
-  just check           Run clippy and format check
-  just quint-parse     Parse Quint files to JSON
-  trunk serve          Serve console with hot reload (in console/)
-  quint --help         Formal verification with Quint
-  apalache-mc --help   Model checking with Apalache
-  lean --help          Kernel verification with Lean 4
-  aeneas --help        Rust-to-Lean translation
-  crate2nix --help     Generate hermetic Nix builds
-
-Hermetic builds:
-  nix build            Build with crate2nix (hermetic)
-  nix build .#aura-terminal Build specific package
-  nix run              Run aura CLI hermetically
-  nix flake check      Run hermetic tests
-
 # Aura System Architecture
 
 This document describes the current architecture and implementation patterns for Aura. It focuses on the effect system, authority model, guard chain enforcement, choreographic protocols, consensus integration, and crate layering. Formal definitions live in [Theoretical Model](002_theoretical_model.md) and domain specifications such as [Authority and Identity](100_authority_and_identity.md), [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md), [Journal](102_journal.md), and [Consensus](104_consensus.md).

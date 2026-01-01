@@ -44,7 +44,7 @@ The legacy monolithic `TimeEffects` trait is replaced by domain-specific traits:
 - `LogicalClockEffects` – advances and reads causal vector clocks and Lamport scalars.
 - `OrderClockEffects` – produces opaque, privacy-preserving total order tokens without temporal meaning.
 
-Callers select the domain appropriate to their semantics. Guards and transport use physical time. CRDT operations use logical clocks. Privacy-preserving ordering uses order tokens. Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`.
+Callers select the domain appropriate to their semantics. Guards and transport use physical time. CRDT operations use logical clocks. Privacy-preserving ordering uses order tokens. Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`, but total ordering/indexing across domains must use `OrderTime` or consensus/session sequencing (never raw timestamps).
 
 Direct `SystemTime::now()` or chrono usage is forbidden outside effect implementations. The testkit and simulator provide deterministic handlers for all three traits.
 

@@ -135,6 +135,8 @@ The commit fact is the output of consensus. Every peer merges `CommitFact` into 
 
 The commit fact is inserted into the appropriate journal namespace. This includes account journals for account updates and relational context journals for cross-authority operations.
 
+Ordering of committed facts relies on `OrderTime` (or session/consensus sequencing), not on timestamps. `ProvenancedTime` is semantic metadata and must not be used for cross-domain total ordering or indexing.
+
 ## 5. Prestate Model
 
 Consensus binds operations to explicit prestates. A prestate hash commits to the current reduced state of all participants.
