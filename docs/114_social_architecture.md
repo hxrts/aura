@@ -54,15 +54,17 @@ A home is a relational context with its own journal. The total storage allocatio
 
 ```rust
 pub struct Home {
-    home_id: HomeId,
-    storage_limit: u64,
-    residents: Vec<AuthorityId>,
-    stewards: Vec<AuthorityId>,
-    channels: Vec<String>,
+    pub home_id: HomeId,
+    pub storage_limit: u64,
+    pub max_residents: u8,
+    pub neighborhood_limit: u8,
+    pub residents: Vec<AuthorityId>,
+    pub stewards: Vec<(AuthorityId, StewardCapabilities)>,
+    pub storage_budget: HomeStorageBudget,
 }
 ```
 
-The home structure contains the identifier, storage limit, resident list, steward list, and message channels.
+The home structure contains the identifier, storage limit, configuration limits, resident list, steward list with capabilities, and storage budget tracking.
 
 ### 3.2 Residency
 
@@ -82,9 +84,9 @@ A neighborhood is a relational context linking multiple homes. It contains a com
 
 ```rust
 pub struct Neighborhood {
-    neighborhood_id: NeighborhoodId,
-    homes: Vec<HomeId>,
-    adjacency: Vec<(HomeId, HomeId)>,
+    pub neighborhood_id: NeighborhoodId,
+    pub member_homes: Vec<HomeId>,
+    pub adjacencies: Vec<(HomeId, HomeId)>,
 }
 ```
 
@@ -102,11 +104,11 @@ Position is represented as a structured type.
 
 ```rust
 pub struct TraversalPosition {
-    neighborhood: Option<NeighborhoodId>,
-    home: Option<HomeId>,
-    depth: TraversalDepth,
-    capabilities: BiscuitToken,
-    entered_at: TimeStamp,
+    pub neighborhood: Option<NeighborhoodId>,
+    pub current_home: Option<HomeId>,
+    pub depth: TraversalDepth,
+    pub context_id: ContextId,
+    pub entered_at: TimeStamp,
 }
 
 pub enum TraversalDepth {
@@ -116,7 +118,7 @@ pub enum TraversalDepth {
 }
 ```
 
-The position tracks current neighborhood, current home, traversal depth, capabilities, and entry time. Street depth allows seeing frontage with no interior access. Frontage depth allows limited interaction. Interior depth provides full resident-level access.
+The position tracks current neighborhood, current home, traversal depth, context for capabilities, and entry time. Street depth allows seeing frontage with no interior access. Frontage depth allows limited interaction. Interior depth provides full resident-level access.
 
 ### 5.2 Movement Rules
 
@@ -145,14 +147,16 @@ Storage constraints are enforced via the flow budget system.
 
 ```rust
 pub struct HomeFlowBudget {
-    home_id: HomeId,
-    resident_storage_spent: u64,
-    pinned_storage_spent: u64,
-    neighborhood_donations: u64,
+    pub home_id: String,
+    pub resident_count: u8,
+    pub resident_storage_spent: u64,
+    pub neighborhood_count: u8,
+    pub neighborhood_donations: u64,
+    pub pinned_storage_spent: u64,
 }
 ```
 
-The spent counters are persisted as journal facts. Limits are derived at runtime from home policy and Biscuit capabilities. Resident storage limit is 1.6 MB for 8 residents at 200 KB each.
+The spent counters are persisted as journal facts. The count fields track current membership. Limits are derived at runtime from home policy and Biscuit capabilities. Resident storage limit is 1.6 MB for 8 residents at 200 KB each.
 
 ## 7. Fact Schema
 

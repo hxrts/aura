@@ -18,7 +18,7 @@ Both frontends must respect the guard chain, journaling, and effect system bound
 - Modal. A blocking overlay that captures focus. Modals are queued and only one can be visible at a time.
 - Toast. A transient notification. Toasts are queued and only one can be visible at a time.
 - Signal. A reactive stream of domain values from `aura-app`.
-- Intent. A journaled application command dispatched through `AppCore.dispatch` (legacy in the TUI; most TUI actions are runtime-backed workflows via `IoContext`).
+- Intent. A journaled application command dispatched through `AppCore.dispatch` (legacy in the TUI). Most TUI actions are runtime-backed workflows via `IoContext`.
 
 ## Running
 
@@ -147,7 +147,7 @@ This architecture ensures a single source of truth and eliminates dual-write bug
 
 ### ViewState is internal
 
-`AppCore` contains an internal `ViewState` used for legacy compatibility and non-signal use cases. However, **ViewState changes do not propagate to signals**. The signal forwarding infrastructure was removed in favor of scheduler-driven updates.
+`AppCore` contains an internal `ViewState` used for legacy compatibility and non-signal use cases. ViewState changes do not propagate to signals. The signal forwarding infrastructure was removed in favor of scheduler-driven updates.
 
 For compile-time safety, there are no public methods on `AppCore` to mutate ViewState for UI-affecting state. Code that needs to update what the UI displays must:
 
@@ -190,11 +190,11 @@ Subscriptions should be owned by the component that renders the data. A subscrip
 
 ### Connection status (peer count)
 
-The footer “connected peers” count is a UI convenience signal. It must represent **how many of your contacts are online**, not a seeded or configured peer list.
+The footer "connected peers" count is a UI convenience signal. It must represent how many of your contacts are online, not a seeded or configured peer list.
 
 - Source: `CONNECTION_STATUS_SIGNAL` (emitted by `aura_app::ui::workflows::system::refresh_account()`).
 - Contact set: read from `CONTACTS_SIGNAL` (signal truth), not from `ViewState` snapshots.
-- Online check: `RuntimeBridge::is_peer_online(contact_id)` (best-effort; demo uses a shared in-memory transport, production can use real transport channel health).
+- Online check: `RuntimeBridge::is_peer_online(contact_id)` (best-effort). Demo uses a shared in-memory transport. Production can use real transport channel health.
 
 ## Deterministic UI model
 

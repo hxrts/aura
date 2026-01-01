@@ -22,7 +22,9 @@ pub struct TreeState {
 }
 ```
 
-The `epoch` field is monotonically increasing. The `root_commitment` is the hash of the entire tree structure. The `branches` map stores branch nodes by index. The `leaves` map stores leaf nodes by ID. The `leaf_commitments` map caches leaf commitment hashes. The `tree_topology` tracks parent-child relationships. The `branch_signing_keys` map stores FROST group public keys for verification.
+The `epoch` field is monotonically increasing. The `root_commitment` is the hash of the entire tree structure. The `branches` map stores branch nodes by index. The `leaves` map stores leaf nodes by ID.
+
+The `leaf_commitments` map caches leaf commitment hashes. The `tree_topology` tracks parent-child relationships. The `branch_signing_keys` map stores FROST group public keys for verification.
 
 TreeState is derived state and is never stored directly in the journal. It is computed on-demand from the OpLog via the reduction function.
 
@@ -39,7 +41,7 @@ A `BranchSigningKey` stores the FROST group public key for threshold signing at 
 
 ## 2. Commitment Tree Structure
 
-A commitment tree contains branch nodes and leaf nodes. A leaf node represents a device or guardian inside the account. A branch node represents a subpolicy with threshold requirements. Each node has an index and a commitment. The root node defines the account-level threshold policy.
+A commitment tree contains branch nodes and leaf nodes. A leaf node represents a device or guardian inside the account. A branch node represents a subpolicy with threshold requirements. Each node has an index, a commitment, and the root node defines the account-level threshold policy.
 
 ```rust
 pub enum NodeKind {
@@ -65,7 +67,7 @@ pub enum LeafRole {
 }
 ```
 
-The `LeafNode` structure stores device information required for threshold signing. The `leaf_id` is a stable identifier across tree modifications. The `device_id` identifies the device within the authority. The `role` distinguishes devices from guardians. The `public_key` stores the serialized FROST key package or public key. The `meta` field stores optional opaque metadata.
+The `LeafNode` structure stores device information required for threshold signing. The `leaf_id` is a stable identifier across tree modifications while the `device_id` identifies the device within the authority. The `role` distinguishes devices from guardians. The `public_key` stores the serialized FROST key package and the `meta` field stores optional opaque metadata.
 
 ```rust
 pub struct BranchNode {
@@ -193,7 +195,7 @@ pub fn check_attested_op<S: TreeStateView>(
 ) -> Result<(), CheckError>;
 ```
 
-Check verifies the operation cryptographically. It ensures the signing key exists for the target node. It validates the operation epoch matches state. It confirms the parent commitment matches state. Check is used during reduction and operation acceptance.
+Check verifies the operation cryptographically. It ensures the signing key exists for the target node. It validates that the operation epoch and parent commitment match state. Check is used during reduction and operation acceptance.
 
 ### 6.3 TreeStateView Trait
 
@@ -295,7 +297,7 @@ Conflict resolution uses operation hash as the tie-breaker. When multiple operat
 
 ## 9. Epochs
 
-The epoch is an integer stored in the tree state. The epoch scopes deterministic key derivation. Derived keys depend on the current epoch. Rotation invalidates previous derived keys. The `RotateEpoch` operation updates the epoch for selected subtrees.
+The epoch is an integer stored in the tree state that scopes deterministic key derivation. Derived keys depend on the current epoch. Rotation invalidates previous derived keys. The `RotateEpoch` operation updates the epoch for selected subtrees.
 
 Epochs also scope flow budgets and context presence tickets. All context identities must refresh when the epoch changes.
 

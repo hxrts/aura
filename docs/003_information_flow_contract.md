@@ -246,7 +246,7 @@ async fn create_production_tracker() -> LeakageTracker {
     let now = Utc::now();
 
     // Define budgets for each observer class
-    let neighbor_device = DeviceId::new();
+    let neighbor_device = DeviceId::new_from_entropy([3u8; 32]);
 
     // Neighbor can observe 100 metadata events per hour
     let neighbor_budget = LeakageBudget::with_refresh(

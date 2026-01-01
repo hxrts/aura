@@ -10,26 +10,26 @@ Core traits include `CryptoCoreEffects`, `NetworkCoreEffects`, `StorageCoreEffec
 
 ```rust
 #[async_trait]
-pub trait CryptoCoreEffects: Send + Sync {
+pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
     async fn ed25519_sign(
         &self,
-        private_key: &[u8],
         message: &[u8],
-    ) -> Result<[u8; 64], CryptoError>;
+        private_key: &[u8],
+    ) -> Result<Vec<u8>, CryptoError>;
 
     async fn ed25519_verify(
         &self,
-        public_key: &[u8],
         message: &[u8],
         signature: &[u8],
+        public_key: &[u8],
     ) -> Result<bool, CryptoError>;
 
     async fn hkdf_derive(
         &self,
-        salt: &[u8],
         ikm: &[u8],
+        salt: &[u8],
         info: &[u8],
-        length: usize,
+        output_len: u32,
     ) -> Result<Vec<u8>, CryptoError>;
 }
 ```
@@ -111,7 +111,7 @@ Aura uses `StorageEffects` as the *single* persistence interface in application 
 - `RealSecureStorageHandler` (`SecureStorageEffects` for master-key persistence; Keychain/TPM/Keystore with a filesystem fallback during bring-up)
 - `EncryptedStorage` (implements `StorageEffects` by encrypting/decrypting transparently)
 
-`EncryptedStorage` generates/loads the master key **lazily** on first use, so runtime assembly remains synchronous.
+`EncryptedStorage` generates or loads the master key on first use, so runtime assembly remains synchronous.
 
 In `aura-agent`, the storage behavior is controlled by `StorageConfig`:
 - `encryption_enabled` (default `true`; testing/bring-up only)

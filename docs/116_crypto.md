@@ -28,13 +28,13 @@ pub struct Ed25519Signature(pub Vec<u8>);
 
 These wrappers delegate to `ed25519_dalek` internally. They expose a stable API independent of the underlying library. They enable future algorithm migration without changing application code. They provide type safety across crate boundaries.
 
-Effect trait definitions live in `crates/aura-core/src/effects/`. The `CryptoEffects` trait inherits from `RandomEffects` and provides cryptographic operations.
+Effect trait definitions live in `crates/aura-core/src/effects/`. The `CryptoCoreEffects` trait inherits from `RandomCoreEffects` and provides cryptographic operations.
 
 ```rust
 #[async_trait]
-pub trait CryptoEffects: RandomEffects + Send + Sync {
+pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
     // Key derivation
-    async fn hkdf_derive(&self, ikm: &[u8], salt: &[u8], info: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoError>;
+    async fn hkdf_derive(&self, ikm: &[u8], salt: &[u8], info: &[u8], output_len: u32) -> Result<Vec<u8>, CryptoError>;
     async fn derive_key(&self, master_key: &[u8], context: &KeyDerivationContext) -> Result<Vec<u8>, CryptoError>;
 
     // Ed25519 signatures
@@ -69,11 +69,11 @@ pub trait CryptoEffects: RandomEffects + Send + Sync {
 
 The trait provides key derivation, Ed25519 signatures, unified signing that routes between single-signer and threshold modes, FROST threshold operations, and symmetric encryption. Hashing is not included because it is a pure operation. Use `aura_core::hash::hash()` for synchronous hashing instead.
 
-The `RandomEffects` trait provides cryptographically secure random number generation.
+The `RandomCoreEffects` trait provides cryptographically secure random number generation.
 
 ```rust
 #[async_trait]
-pub trait RandomEffects: Send + Sync {
+pub trait RandomCoreEffects: Send + Sync {
     async fn random_bytes(&self, len: usize) -> Vec<u8>;
     async fn random_bytes_32(&self) -> [u8; 32];
     async fn random_u64(&self) -> u64;
@@ -102,7 +102,7 @@ impl RealCryptoHandler {
     pub fn seeded(seed: [u8; 32]) -> Self { Self { seed: Some(seed) } }
 }
 
-impl CryptoEffects for RealCryptoHandler {
+impl CryptoCoreEffects for RealCryptoHandler {
     async fn ed25519_sign(&self, message: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // Uses ed25519_dalek directly
     }
@@ -110,7 +110,7 @@ impl CryptoEffects for RealCryptoHandler {
 }
 ```
 
-The handler can operate with OS entropy for production or with a seed for deterministic testing. It implements all methods from `CryptoEffects` and `RandomEffects`.
+The handler can operate with OS entropy for production or with a seed for deterministic testing. It implements all methods from `CryptoCoreEffects` and `RandomCoreEffects`.
 
 The following direct imports are allowed in Layer 3:
 
@@ -118,32 +118,35 @@ The following direct imports are allowed in Layer 3:
 - `frost_ed25519`
 - `chacha20poly1305`
 - `aes_gcm`
-
-## 2.3 Threshold Lifecycle (K1/K2/K3) and Transcript Binding
-
-Aura separates **key generation** from **agreement/finality**:
-
-- **K1**: Single‑signer (Ed25519) — no DKG.
-- **K2**: Dealer‑based DKG — trusted coordinator produces dealer packages.
-- **K3**: Consensus‑finalized DKG — BFT‑DKG transcript finalized by consensus.
-
-**Transcript hashing**
-- All DKG transcripts are hashed using **canonical DAG‑CBOR** encoding.
-- `DkgTranscriptCommit` binds `transcript_hash`, `prestate_hash`, and `operation_hash`.
-
-**Dealer packages (K2)**
-- Deterministic dealer packages are acceptable in trusted settings.
-- Dealer packages must include encrypted shares for every participant.
-
-**BFT‑DKG (K3)**
-- A transcript is only usable once **consensus finalizes** the commit fact.
-- All K3 ceremonies must reference the finalized transcript (hash or blob ref).
 - `getrandom`
 - `rand_core::OsRng`
 - `rand_chacha`
 - `hkdf`
 
-### 2.3 Layer 8: aura-testkit
+### 2.3 Threshold Lifecycle (K1/K2/K3) and Transcript Binding
+
+Aura separates key generation from agreement/finality:
+
+- **K1**: Single‑signer (Ed25519) — no DKG.
+- **K2**: Dealer‑based DKG — trusted coordinator produces dealer packages.
+- **K3**: Consensus‑finalized DKG — BFT‑DKG transcript finalized by consensus.
+
+Transcript hashing uses the following rules:
+
+- All DKG transcripts are hashed using canonical DAG‑CBOR encoding.
+- `DkgTranscriptCommit` binds `transcript_hash`, `prestate_hash`, and `operation_hash`.
+
+Dealer packages (K2) follow these rules:
+
+- Deterministic dealer packages are acceptable in trusted settings.
+- Dealer packages must include encrypted shares for every participant.
+
+BFT‑DKG (K3) follows these rules:
+
+- A transcript is only usable once consensus finalizes the commit fact.
+- All K3 ceremonies must reference the finalized transcript (hash or blob ref).
+
+### 2.4 Layer 8: aura-testkit
 
 The `aura-testkit` crate provides mock implementations for deterministic testing.
 
@@ -160,7 +163,7 @@ impl MockCryptoHandler {
     pub fn with_seed(seed: u64) -> Self { Self { seed, counter: Arc::new(Mutex::new(0)) } }
 }
 
-impl CryptoEffects for MockCryptoHandler {
+impl CryptoCoreEffects for MockCryptoHandler {
     async fn ed25519_sign(&self, message: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
         // Deterministic signing for reproducible tests
     }
@@ -176,7 +179,7 @@ The mock handler uses a seed and counter for deterministic behavior. This enable
 Application code should use effect traits.
 
 ```rust
-async fn authenticate<E: CryptoEffects>(effects: &E, private_key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
+async fn authenticate<E: CryptoCoreEffects>(effects: &E, private_key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     effects.ed25519_sign(data, private_key).await
 }
 ```
@@ -212,10 +215,10 @@ Direct imports bypass the effect system and break testability. They also scatter
 
 ### 3.3 Randomness Patterns
 
-All randomness should flow through `RandomEffects`.
+All randomness should flow through `RandomCoreEffects`.
 
 ```rust
-async fn generate_nonce<E: RandomEffects>(effects: &E) -> [u8; 12] {
+async fn generate_nonce<E: RandomCoreEffects>(effects: &E) -> [u8; 12] {
     let bytes = effects.random_bytes(12).await;
     bytes.try_into().expect("12 bytes")
 }
@@ -375,7 +378,7 @@ The handler in `aura-effects/src/crypto.rs` implements FROST key generation and 
 
 ### 7.2 Lifecycle Taxonomy (Key Generation vs Agreement)
 
-Aura separates **key generation** from **agreement/finality**:
+Aura separates key generation from agreement/finality:
 
 - **K1: Local/Single-Signer** (no DKG)
 - **K2: Dealer-Based DKG** (trusted coordinator)
@@ -387,7 +390,7 @@ Agreement modes are orthogonal:
 - **A2: Coordinator Soft-Safe** (bounded divergence + convergence cert)
 - **A3: Consensus-Finalized** (unique, durable, non-forkable)
 
-Leader selection (lottery/round seed/fixed coordinator) and pipelining are **orthogonal optimizations**, not agreement modes.
+Leader selection (lottery/round seed/fixed coordinator) and pipelining are orthogonal optimizations, not agreement modes.
 
 ### 7.3 Usage Pattern
 
@@ -430,7 +433,7 @@ The wrapper pattern enables algorithm migration.
 
 ### 8.2 HSM Integration
 
-Hardware Security Module support would require a new `HsmCryptoHandler` implementing `CryptoEffects`. Runtime selection between `RealCryptoHandler` and `HsmCryptoHandler` would be needed. Application code would require no changes.
+Hardware Security Module support would require a new `HsmCryptoHandler` implementing `CryptoCoreEffects`. Runtime selection between `RealCryptoHandler` and `HsmCryptoHandler` would be needed. Application code would require no changes.
 
 ## See Also
 

@@ -1,6 +1,6 @@
 # Choreography Runtime Audit
 
-This audit tracks every `choreography!` usage in the codebase and whether it is wired into the runtime execution path. Each entry is either **Wired** (executed via the choreographic runtime) or **Spec-only** (definition exists but not yet integrated).
+This audit tracks every `choreography!` usage in the codebase and whether it is wired into the runtime execution path. Each entry is either Wired (executed via the choreographic runtime) or Spec-only (definition exists but not yet integrated).
 
 **Last Updated**: 2026-01-01
 

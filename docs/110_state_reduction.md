@@ -68,7 +68,7 @@ impl FlowBudget {
 **Semantics:**
 - `spent` uses join-semilattice (max) - charges only increase
 - `limit` uses meet-semilattice (min) - most restrictive limit wins
-- `epoch` advances monotonically; spent resets on epoch rotation
+- `epoch` advances monotonically. Spent resets on epoch rotation
 
 Flow budget tracking currently operates at the runtime layer via `FlowBudgetManager`. The `RelationalState` includes a `flow_budgets` map for future CRDT-based replication of budget state across replicas.
 
@@ -118,6 +118,7 @@ Context reduction produces a `RelationalState` capturing cross-authority relatio
 pub struct RelationalState {
     pub bindings: Vec<RelationalBinding>,
     pub flow_budgets: BTreeMap<(AuthorityId, AuthorityId, u64), u64>,
+    pub leakage_budget: LeakageBudget,
     pub channel_epochs: BTreeMap<ChannelId, ChannelEpochState>,
 }
 ```

@@ -19,19 +19,18 @@ This identifier selects the journal namespace for a relational context. It does 
 A relational context has a defined set of participating authorities. This set is not encoded in the `ContextId`. Participation is expressed by writing relational facts to the context journal. Each fact references the commitments of the participating authorities.
 
 ```rust
-/// Canonical relational facts in `aura-journal/src/fact.rs`
+/// Relational facts in `aura-journal/src/fact.rs`
 pub enum RelationalFact {
-    // Protocol-level receipts (handled directly by `reduce_context`)
-    GuardianBinding { account_id: AuthorityId, guardian_id: AuthorityId, binding_hash: Hash32 },
-    RecoveryGrant { account_id: AuthorityId, guardian_id: AuthorityId, grant_hash: Hash32 },
-    Consensus { consensus_id: Hash32, operation_hash: Hash32, threshold_met: bool, participant_count: u16 },
-
-    // Domain-level extensibility (reduced via `FactRegistry`)
+    /// Protocol-level facts with core reduction semantics
+    Protocol(ProtocolRelationalFact),
+    /// Domain-level extensibility facts
     Generic { context_id: ContextId, binding_type: String, binding_data: Vec<u8> },
 }
 ```
 
-The `Generic` variant is the extensibility mechanism for application/domain facts. Domain crates implement the `DomainFact` trait (`aura-journal/src/extensibility.rs`) and store facts as `RelationalFact::Generic` via `DomainFact::to_generic()`. The runtime registers reducers in `crates/aura-agent/src/fact_registry.rs` so `reduce_context()` can turn Generic facts into `RelationalBinding` values.
+The `Protocol` variant wraps core protocol facts that have specialized reduction logic in `reduce_context()`. These include `GuardianBinding`, `RecoveryGrant`, `Consensus`, AMP channel facts, DKG transcript commits, and lifecycle markers. The `Generic` variant provides extensibility for domain-specific facts.
+
+Domain crates implement the `DomainFact` trait from `aura-journal/src/extensibility.rs`. They store facts via `DomainFact::to_generic()`. The runtime registers reducers in `crates/aura-agent/src/fact_registry.rs` so `reduce_context()` can process Generic facts into `RelationalBinding` values.
 
 ## 3. Prestate Model
 
@@ -112,7 +111,7 @@ Generic facts should include enough metadata (`bindings`, optional labels) for i
 
 ## 5. Relational Facts
 
-Relational facts express specific cross-authority operations. A `GuardianBinding` fact defines the guardian authority for an account. A `RecoveryGrant` fact defines an allowed update to the account state. A `Generic` fact covers application defined interactions. Consensus-backed facts include the `consensus_commitment` and aggregated signature so reducers can verify provenance even after witnesses rotate.
+Relational facts express specific cross-authority operations. A `GuardianBinding` fact defines the guardian authority for an account while a `RecoveryGrant` fact defines an allowed update to the account state. A `Generic` fact covers application defined interactions. Consensus-backed facts include the `consensus_commitment` and aggregated signature so reducers can verify provenance even after witnesses rotate.
 
 Reduction applies all relational facts to produce relational state. Reduction verifies that authority commitments in each fact match the current reduced state of each authority.
 
@@ -123,6 +122,8 @@ pub struct RelationalState {
     pub bindings: Vec<RelationalBinding>,
     /// Flow budget state by context
     pub flow_budgets: BTreeMap<(AuthorityId, AuthorityId, u64), u64>,
+    /// Leakage budget totals for privacy accounting
+    pub leakage_budget: LeakageBudget,
     /// AMP channel epoch state keyed by channel id
     pub channel_epochs: BTreeMap<ChannelId, ChannelEpochState>,
 }
@@ -134,7 +135,7 @@ pub struct RelationalBinding {
 }
 ```
 
-This structure represents the reduced relational state. It contains relational bindings, flow budget tracking between authorities, and AMP channel epoch state for message ratcheting. Reduction processes all facts in the context journal to derive this state deterministically.
+This structure represents the reduced relational state. It contains relational bindings, flow budget tracking between authorities, leakage budget totals for privacy accounting, and AMP channel epoch state for message ratcheting. Reduction processes all facts in the context journal to derive this state deterministically.
 
 ## 6. Aura Consensus in Relational Contexts
 
@@ -179,13 +180,13 @@ use aura_core::{AuthorityId, ContextId};
 use aura_relational::RelationalContext;
 
 // Create a new guardian-account relational context
-let account_authority = AuthorityId::new();
-let guardian_authority = AuthorityId::new();
+let account_authority = AuthorityId::new_from_entropy([1u8; 32]);
+let guardian_authority = AuthorityId::new_from_entropy([1u8; 32]);
 
 let context = RelationalContext::new(vec![account_authority, guardian_authority]);
 
 // Or use a specific context ID
-let context_id = ContextId::new();
+let context_id = ContextId::new_from_entropy([2u8; 32]);
 let context = RelationalContext::with_id(
     context_id,
     vec![account_authority, guardian_authority],
@@ -516,7 +517,7 @@ See [Consensus - Operation Categories](104_consensus.md#17-operation-categories)
 
 ## 11. Summary
 
-Relational contexts represent cross-authority relationships in Aura. They provide shared state without revealing authority structure. They support guardian configuration, recovery, and application specific collaboration. Aura Consensus ensures strong agreement where needed. Deterministic reduction ensures consistent relational state. Privacy boundaries isolate each relationship from all others.
+Relational contexts represent cross-authority relationships in Aura. They provide shared state without revealing authority structure and support guardian configuration, recovery, and application specific collaboration. Aura Consensus ensures strong agreement where needed while deterministic reduction ensures consistent relational state. Privacy boundaries isolate each relationship from all others.
 
 The implementation provides concrete types (`RelationalContext`, `GuardianBinding`, `RecoveryGrant`) with builder patterns, query methods, and consensus integration. All relational facts are stored in a CRDT journal with deterministic commitment computation.
 

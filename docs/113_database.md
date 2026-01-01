@@ -8,7 +8,7 @@ This document specifies the architecture for Aura's query system. The journal is
 
 Aura's fact-based journal functions as the database. There is no separate database layer. The equivalence maps traditional database concepts to Aura components.
 
-Aura treats database state as a composite of the **fact journal** and the **capability frontier**. Query execution always combines the reduced fact state with the current capability lattice (the `JournalState` composite) to enforce authorization and isolate contexts.
+Aura treats database state as a composite of the fact journal and the capability frontier. Query execution always combines the reduced fact state with the current capability lattice (the `JournalState` composite) to enforce authorization and isolate contexts.
 
 | Traditional Database | Aura Component |
 |---------------------|----------------|
@@ -260,8 +260,8 @@ let result = effects.query_with_isolation(
 ```rust
 pub struct QueryStats {
     pub execution_time: Duration,
-    pub facts_scanned: usize,
-    pub facts_matched: usize,
+    pub facts_scanned: u32,
+    pub facts_matched: u32,
     pub cache_hit: bool,
     pub isolation_used: QueryIsolation,
     pub consensus_wait_time: Option<Duration>,
@@ -504,11 +504,11 @@ Database operations use two orthogonal dimensions:
 - **Consensus + Single**: Remove device from account (`consensus_single_shot()`)
 - **Consensus + Cross-Authority**: Recovery grant with guardian approval (`federated_consensus()`)
 
-**Important:** Aura Consensus is **NOT linearizable by default**. Each consensus instance independently agrees on a single operation and prestate. To sequence operations, use session types (see [MPST and Choreography](107_mpst_and_choreography.md)).
+Aura Consensus is not linearizable by default. Each consensus instance independently agrees on a single operation and prestate. To sequence operations, use session types (see [MPST and Choreography](107_mpst_and_choreography.md)).
 
 Agreement modes are orthogonal to the coordination matrix: A1 (provisional) and A2 (soft-safe) may provide immediate usability, but any durable shared database state must be A3 (consensus-finalized) with prestate binding. Soft-safe windows should be bounded with convergence certificates and explicit reversion facts.
 
-**BFT‑DKG integration**: When key material is required (K3), the database must bind
+BFT-DKG integration: When key material is required (K3), the database must bind
 operations to a consensus‑finalized `DkgTranscriptCommit`. This ensures the
 transaction prestate and the cryptographic prestate are aligned.
 
@@ -557,13 +557,13 @@ Aura uses a Datomic-inspired immutable database model where all changes are repr
 
 ### 8.1 Core Concepts
 
-**Immutability**: Facts are never deleted - they are either:
+Facts are never deleted. They are either:
 - **Asserted**: Added to a scope
 - **Retracted**: Marked as no longer valid (but remain queryable in history)
 - **Epoch-bumped**: Bulk invalidation of facts in a scope
 - **Checkpointed**: Snapshotted for temporal queries
 
-**Scopes**: Facts are organized in hierarchical scopes:
+Facts are organized in hierarchical scopes:
 
 ```rust
 // Scope path examples
@@ -572,7 +572,7 @@ Aura uses a Datomic-inspired immutable database model where all changes are repr
 "authority:abc123/chat/channel:xyz"   // Typed sub-scope
 ```
 
-**Finality**: Facts progress through finality levels:
+Facts progress through finality levels:
 
 ```rust
 pub enum Finality {
@@ -602,7 +602,7 @@ pub enum FactOp {
 }
 ```
 
-**Monotonic vs Non-monotonic**:
+Monotonic vs non-monotonic:
 - `Assert` and `Checkpoint` are monotonic (no coordination required)
 - `Retract` and `EpochBump` are non-monotonic (may require consensus)
 
@@ -645,7 +645,7 @@ let tx = Transaction::new(ScopeId::authority("abc"))
 let receipt = effects.apply_transaction(tx).await?;
 ```
 
-**Hybrid Transaction Model**:
+Hybrid transaction model:
 - Simple monotonic operations: Direct `apply_op()` (no transaction overhead)
 - Atomic operations: Explicit `Transaction` grouping when needed
 

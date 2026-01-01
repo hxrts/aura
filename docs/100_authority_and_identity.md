@@ -8,7 +8,7 @@ An authority is a cryptographic actor represented by a public key. An authority 
 
 An authority has an internal journal namespace. The journal namespace stores facts relevant to that authority. The authority derives its state from deterministic reduction of that fact set. The authority does not expose any information about its devices or operators.
 
-Devices are not exclusive to a single authority. A single device may hold threshold shares for multiple authorities at the same time, and joining a new authority adds signing capability for that authority without removing any existing authority memberships.
+Devices are not exclusive to a single authority. A single device may hold threshold shares for multiple authorities at the same time. Joining a new authority adds signing capability for that authority without removing any existing authority memberships.
 
 ```rust
 pub struct AuthorityId(Uuid);
@@ -52,7 +52,9 @@ An account authority derives context specific keys using deterministic key deriv
 
 ## 3. Operators and Devices
 
-An operator controls an authority by operating its devices. An operator is not represented in the protocol. Devices are internal to the authority. Devices hold share material required for signing. Devices produce partial signatures during threshold signing.
+An operator controls an authority by operating its devices. An operator is not represented in the protocol. Devices are internal to the authority and hold share material required for signing.
+
+Devices produce partial signatures during threshold signing. The operator coordinates these partial signatures to produce the final signature.
 
 The commitment tree manages device membership. The `AddLeaf` and `RemoveLeaf` operations modify device presence in the authority. Device identifiers do not appear outside the authority. No external party can link devices to authorities.
 
@@ -70,9 +72,9 @@ This leaf type is internal to the commitment tree. It is not visible outside the
 
 ## 4. Relational Identity Model
 
-Aura defines identity as contextual and relational. Identity exists only inside a specific relationship. Identity does not exist globally. Authorities do not represent people. Authorities represent cryptographic actors. Identity emerges when two authorities form a shared context.
+Aura defines identity as contextual and relational. Identity exists only inside a specific relationship and does not exist globally. Authorities represent cryptographic actors rather than people. Identity emerges when two authorities form a shared context.
 
-A shared context exists inside a relational context. A relational context stores relational facts. These facts define how two authorities relate. Profile data may appear in a relational context if both authorities choose to share it. This profile data is scoped to that context and never becomes global.
+A shared context exists inside a relational context. A relational context stores relational facts that define how two authorities relate. Profile data may appear in a relational context if both authorities choose to share it. This profile data is scoped to that context and never becomes global.
 
 ```rust
 pub struct ContextId(Uuid);
@@ -80,11 +82,11 @@ pub struct ContextId(Uuid);
 
 A `ContextId` identifies a relational context. It does not encode membership. It does not reveal which authorities participate. The context stores only the relational facts required by the participants.
 
-Identity inside a context may include display names or other profile attributes. These values are private to that context. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for context isolation mechanisms. No external party can observe them. Nicknames and local mappings allow a device to associate multiple authorities with a single local contact.
+Identity inside a context may include display names or other profile attributes. These values are private to that context and no external party can observe them. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for context isolation mechanisms. Nicknames and local mappings allow a device to associate multiple authorities with a single local contact.
 
 ## 5. Authority Relationships
 
-Authorities interact through relational contexts. Relational contexts allow authorities to create shared state. Relational contexts do not modify authority structure. Each relational context has its own journal. Facts in the relational context reference commitments of participating authorities.
+Authorities interact through relational contexts to create shared state. Relational contexts do not modify authority structure. Each relational context has its own journal. Facts in the relational context reference commitments of participating authorities.
 
 Authorities may form long lived or ephemeral relationships. These relationships do not affect global identity. The authority model ensures that each relationship remains isolated. Each context provides a separate identity boundary.
 
@@ -98,13 +100,13 @@ This diagram shows two authorities interacting through a relational context. The
 
 ## 6. Privacy and Isolation
 
-Authorities reveal no internal structure. Contexts do not reveal participants. Identity exists only where authorities choose to share information. Nicknames remain local to devices. There is no global identifier for people or devices.
+Authorities reveal no internal structure and contexts do not reveal participants. Identity exists only where authorities choose to share information. Nicknames remain local to devices. There is no global identifier for people or devices.
 
 Every relationship is private to its participants. Each relationship forms its own identity layer. Authorities can operate in many contexts without linking those contexts together.
 
 ## 7. Summary
 
-Authorities are cryptographic actors with private internal state. Accounts are authorities with commitment tree based state machines. Operators control devices that implement authority operations. Identity emerges only inside relational contexts. No identifier in Aura encodes global identity. Each context defines its own small scope of identity and relationship meaning.
+Authorities are cryptographic actors with private internal state. Accounts are authorities with commitment tree based state machines where operators control devices that implement authority operations. Identity emerges only inside relational contexts. No identifier in Aura encodes global identity since each context defines its own scope of identity meaning.
 
 ## See Also
 

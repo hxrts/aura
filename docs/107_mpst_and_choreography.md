@@ -35,23 +35,36 @@ This example shows the projected type for role `A`. The type describes that `A` 
 
 ## 3. Runtime Integration
 
-Aura integrates session types with the effect system through `ChoreoHandler`. A handler executes sends and receives using effect traits. The handler manages serialization and deserialization of messages.
+Aura integrates session types with the effect system through `ChoreoHandler` from the rumpsteak library. A handler executes sends and receives using effect traits. The handler manages serialization and deserialization of messages.
 
-`AuraHandler` implements `ChoreoHandler` for Aura runtimes. It maps session operations to effect calls using `NetworkEffects`, `JournalEffects`, and other traits. A handler must be initialized with role mappings and context identifiers.
+`EffectsChoreographicAdapter` implements `ChoreoHandler` for Aura runtimes. It maps session operations to effect calls using `ChoreographicEffects` and other traits. A handler must be initialized with role mappings and context identifiers.
 
 ```rust
 #[async_trait]
 pub trait ChoreoHandler {
-    async fn send<M>(&mut self, msg: &M) -> Result<()> where M: Serialize;
-    async fn recv<M>(&mut self) -> Result<M> where M: DeserializeOwned;
+    type Role;
+    type Endpoint;
+
+    async fn send<M: Serialize + Send + Sync>(
+        &mut self,
+        endpoint: &mut Self::Endpoint,
+        to: Self::Role,
+        msg: &M,
+    ) -> Result<(), ChoreographyError>;
+
+    async fn recv<M: DeserializeOwned + Send>(
+        &mut self,
+        endpoint: &mut Self::Endpoint,
+        from: Self::Role,
+    ) -> Result<M, ChoreographyError>;
 }
 ```
 
-This trait defines the interface for session type execution. Implementations call the underlying effects. They also apply guard chains and journal updates.
+This trait defines the interface for session type execution. The `Role` type identifies participants and the `Endpoint` type provides connection state. Implementations call the underlying effects and apply guard chains.
 
 ## 4. Choreography Annotations and Effect Commands
 
-Choreographies support annotations that modify runtime behavior. The `choreography!` macro extracts these annotations and generates `EffectCommand` sequences. This is the **choreography-first architecture**: choreographic annotations are the canonical source of truth for guard requirements.
+Choreographies support annotations that modify runtime behavior. The `choreography!` macro extracts these annotations and generates `EffectCommand` sequences. This follows the choreography-first architecture where choreographic annotations are the canonical source of truth for guard requirements.
 
 ### Supported Annotations
 
@@ -100,8 +113,8 @@ pub mod effect_bridge {
 
 ### Macro Output Contracts & Stability
 
-The `choreography!` macro emits a **stable, minimal surface** intended for runtime integration.
-Consumers should rely only on the contracts below; all other generated items are internal and
+The `choreography!` macro emits a stable, minimal surface intended for runtime integration.
+Consumers should rely only on the contracts below. All other generated items are internal and
 may change without notice.
 
 **Stable contracts:**

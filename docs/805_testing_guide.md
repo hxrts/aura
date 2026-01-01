@@ -121,6 +121,7 @@ async fn test_with_custom_config() -> aura_core::AuraResult<()> {
 ### Deterministic Identifier Generation
 
 Tests must use deterministic methods for creating identifiers like `AuthorityId`, `ContextId`, and `DeviceId`. Never use methods that consume system entropy.
+Production code should generate identifiers via `RandomEffects` (e.g., `aura-effects::identifiers::new_authority_id`) rather than direct entropy access.
 
 ```rust
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -132,8 +133,8 @@ let ctx_id = ContextId::from_uuid(Uuid::nil());          // Placeholder
 let ctx_id = ContextId::from_uuid(Uuid::from_bytes([2u8; 16]));  // Unique but deterministic
 
 // ❌ FORBIDDEN: Non-deterministic identifiers
-// let auth_id = AuthorityId::new();           // Uses system entropy!
-// let ctx_id = ContextId::from_uuid(Uuid::new_v4());  // Uses system entropy!
+// let auth_id = AuthorityId::from_uuid(Uuid::new_v4());  // Uses system entropy
+// let ctx_id = ContextId::from_uuid(Uuid::new_v4());     // Uses system entropy
 ```
 
 **Why deterministic IDs matter**:

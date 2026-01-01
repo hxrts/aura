@@ -1,6 +1,6 @@
 # Operation Categories
 
-This document defines Aura's three-tier classification system for distributed operations. The core insight is that **not all operations require consensus** - many can proceed optimistically with background reconciliation.
+This document defines Aura's three-tier classification system for distributed operations. The core insight is that not all operations require consensus. Many can proceed optimistically with background reconciliation.
 
 ## Overview
 
@@ -12,7 +12,7 @@ Operations in Aura fall into three categories based on their effect timing and s
 | B | Deferred | Pending until confirmed | Medium-risk policy/membership changes |
 | C | Consensus-Gated | Blocked until ceremony completes | Cryptographic context establishment |
 
-**Agreement modes are orthogonal to categories**: operations can use provisional or soft-safe fast paths, but any **durable shared state** must be consensus-finalized (A3). See `work/bft_dkg_research.md` for the fast-path + finalization taxonomy.
+Agreement modes are orthogonal to categories. Operations can use provisional or soft-safe fast paths, but any durable shared state must be consensus-finalized (A3). See `work/bft_dkg_research.md` for the fast-path + finalization taxonomy.
 
 ## Domain Fact Contract (Applies to Category A/B Facts)
 
@@ -20,7 +20,7 @@ Optimistic and deferred operations emit domain facts. To keep those facts determ
 
 ### The Key Architectural Insight
 
-**Ceremonies establish shared cryptographic context. Operations within that context are cheap.**
+Ceremonies establish shared cryptographic context. Operations within that context are cheap.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -150,7 +150,7 @@ pub enum ApprovalThreshold {
     /// All holders must approve
     Unanimous,
     /// k-of-n approval
-    Threshold { required: usize },
+    Threshold { required: u32 },
     /// Percentage of holders
     Percentage { percent: u8 },
 }
@@ -322,11 +322,11 @@ pub enum SyncStatus {
     /// Fact committed locally, not yet synced
     LocalOnly,
     /// Fact synced to some peers
-    Syncing { peers_synced: usize, peers_total: usize },
+    Syncing { peers_synced: u16, peers_total: u16 },
     /// Fact synced to all known peers
     Synced,
     /// Sync failed, will retry
-    SyncFailed { retry_at: u64 },
+    SyncFailed { retry_at_ms: u64, retry_count: u32, error: Option<String> },
 }
 ```
 
@@ -337,13 +337,13 @@ pub enum DeliveryStatus {
     /// Message queued locally
     Sending,
     /// Message reached at least one recipient
-    Sent,
+    Sent { sent_at_ms: u64 },
     /// Message reached all online recipients
-    Delivered,
+    Delivered { sent_at_ms: u64, delivered_at_ms: u64 },
     /// Recipient viewed message
-    Read,
+    Read { sent_at_ms: u64, delivered_at_ms: u64, read_at_ms: u64 },
     /// Delivery failed
-    Failed { reason: String },
+    Failed { error: String, retry_count: u32 },
 }
 ```
 
@@ -351,16 +351,18 @@ pub enum DeliveryStatus {
 
 ```rust
 pub enum ConfirmationStatus {
-    /// Proposal created, awaiting approvals
-    Pending { approvals: usize, required: usize },
-    /// Threshold approvals received, applying effect
-    Confirming,
-    /// Effect applied successfully
-    Confirmed,
-    /// Some parties approved, others declined
-    PartiallyConfirmed { confirmed: Vec<AuthorityId>, declined: Vec<AuthorityId> },
-    /// Proposal rejected or timed out
-    Rejected { reason: String },
+    /// Applied locally only, no confirmation ceremony started
+    LocalOnly,
+    /// Background confirmation ceremony in progress
+    Confirming { confirmed_count: u16, total_parties: u16, started_at_ms: u64 },
+    /// All required parties confirmed
+    Confirmed { confirmed_at_ms: u64 },
+    /// Some parties confirmed, some declined or unavailable
+    PartiallyConfirmed { confirmed_count: u16, declined_count: u16, unavailable_count: u16 },
+    /// Confirmation failed or was rejected
+    Unconfirmed { reason: String, retry_count: u32, next_retry_at_ms: Option<u64> },
+    /// Operation was rolled back due to conflict or rejection
+    RolledBack { reason: String, rolled_back_at_ms: u64 },
 }
 ```
 
@@ -371,8 +373,8 @@ Operations use configurable policies that reference the capability system:
 ```rust
 pub struct EffectPolicy {
     pub operation: OperationType,
-    pub scope: ResourceScope,
     pub timing: EffectTiming,
+    pub security_level: SecurityLevel,
 }
 
 pub enum EffectTiming {

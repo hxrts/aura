@@ -1,18 +1,18 @@
 # Key Rotation Ceremonies (Category C)
 
-Aura treats *membership changes* and *key rotations* as **Category C ceremonies**: blocking, multi-step operations that must either **commit** atomically or **abort** cleanly. This document describes the shared contract used by production and demo/simulator runtimes.
+Aura treats *membership changes* and *key rotations* as Category C ceremonies: blocking, multi-step operations that must either commit atomically or abort cleanly. This document describes the shared contract used by production and demo/simulator runtimes.
 
 ## Why ceremonies?
 
 Operations like “add a device”, “add/remove guardians”, “change group membership”, or “change home membership” all change who can produce valid signatures (or who is expected to participate in signing). These operations:
 
 - require multi-party participation and explicit consent,
-- must be bound to a **prestate** to avoid TOCTOU / replay,
-- must support **rollback** if the ceremony fails or is cancelled.
+- must be bound to a prestate to avoid TOCTOU / replay,
+- must support rollback if the ceremony fails or is cancelled.
 
 See `docs/117_operation_categories.md` for the Category C requirements.
 
-**Finalization rule**: Provisional or coordinator fast paths may be used to stage intent, but key rotation is only durable once consensus finalizes the ceremony (commit facts + transcript commit).
+Finalization rule: Provisional or coordinator fast paths may be used to stage intent, but key rotation is only durable once consensus finalizes the ceremony (commit facts + transcript commit).
 
 ## Shared contract
 
@@ -27,24 +27,24 @@ All key rotation ceremonies follow this common shape:
    - Compute an operation hash bound to the proposal parameters.
 
 3. **Enter pending epoch (prepare)**
-   - Generate new key material at a **pending epoch** without invalidating the old epoch yet.
+   - Generate new key material at a pending epoch without invalidating the old epoch yet.
    - Store enough metadata to allow either commit or rollback of the pending epoch.
 
 4. **Collect responses**
    - Send invitations/requests to participants (devices, guardians, group members).
-   - Participants respond using their full runtimes; their responses must be authenticated and recorded (facts/messages).
+   - Participants respond using their full runtimes. Their responses must be authenticated and recorded (facts/messages).
 
 5. **Commit or abort**
-   - If acceptance/threshold conditions are met, **commit**:
+   - If acceptance/threshold conditions are met, commit:
      - commit the pending epoch (making it authoritative),
      - emit the resulting facts/tree ops (e.g. binding facts, membership facts, attested ops).
-   - Otherwise **abort**:
+   - Otherwise abort:
      - emit an abort fact with a reason,
      - rollback the pending epoch and leave the prior epoch active.
 
 ## Lifecycle Taxonomy
 
-Aura models ceremonies with **two orthogonal axes**:
+Aura models ceremonies with two orthogonal axes:
 
 ### Key Generation (K)
 
@@ -63,7 +63,7 @@ Aura models ceremonies with **two orthogonal axes**:
 | A2 | Coordinator Soft-Safe | Bounded divergence with convergence cert |
 | A3 | Consensus-Finalized | Unique, durable, non-forkable |
 
-Fast paths (A1/A2) are **provisional**. Durable shared state must be finalized by A3.
+Fast paths (A1/A2) are provisional. Durable shared state must be finalized by A3.
 
 ---
 
@@ -139,10 +139,10 @@ This document defines the *contract*; specific protocol details live in the feat
 
 ## Demo/simulator requirement
 
-Demo mode must use the **same runtime-backed machinery** as production:
+Demo mode must use the same runtime-backed machinery as production:
 
 - The simulator instantiates real agent runtimes (Alice/Carol) and drives them on their behalf.
-- Demo uses an **in-memory transport implementation** that still passes through the guard chain and transport semantics (it is “real transport”, not a side-channel).
+- Demo uses an in-memory transport implementation that still passes through the guard chain and transport semantics (it is "real transport", not a side-channel).
 - The UI must not “seed” ceremony outcomes (e.g. fake peer counts or fake device additions). All state changes must come from facts/signals emitted by the runtime.
 
 ## UI contract
@@ -151,13 +151,13 @@ Frontends (TUI, mobile, web) should treat ceremonies as first-class operations w
 
 - Show a “ceremony started” state and any shareable code needed by the other party.
 - Show progress (accepted vs required), errors, and a clear “cancel” affordance.
-- On cancellation/failure: show explicit rollback messaging; do not leave UI in a partially-updated state.
+- On cancellation/failure: show explicit rollback messaging. Do not leave UI in a partially-updated state.
 
 The UI must not invent state transitions: ceremony progress should be driven from runtime status + signals.
 
 ## Ceremony Supersession
 
-When a new ceremony replaces an old one (e.g., due to prestate changes, explicit cancellation, or concurrent ceremony resolution), Aura emits explicit **supersession facts** that propagate via anti-entropy.
+When a new ceremony replaces an old one (e.g., due to prestate changes, explicit cancellation, or concurrent ceremony resolution), Aura emits explicit supersession facts that propagate via anti-entropy.
 
 ### Supersession Reasons
 

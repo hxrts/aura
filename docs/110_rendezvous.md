@@ -89,7 +89,7 @@ pub struct RendezvousDescriptor {
     pub context_id: ContextId,
     /// Available transport endpoints
     pub transport_hints: Vec<TransportHint>,
-    /// Handshake PSK commitment (hash of PSK)
+    /// Handshake PSK commitment (hash of PSK derived from context)
     pub handshake_psk_commitment: [u8; 32],
     /// Validity window start (ms since epoch)
     pub valid_from: u64,
@@ -97,6 +97,8 @@ pub struct RendezvousDescriptor {
     pub valid_until: u64,
     /// Nonce for uniqueness
     pub nonce: [u8; 32],
+    /// Human-readable display name (optional, for UI purposes)
+    pub display_name: Option<String>,
 }
 ```
 
@@ -336,6 +338,16 @@ pub struct SecureChannel {
     epoch: u64,
     /// Channel state
     state: ChannelState,
+    /// Agreement mode (A1/A2/A3) for the channel lifecycle
+    agreement_mode: AgreementMode,
+    /// Whether reversion is still possible
+    reversion_risk: bool,
+    /// Whether the channel needs key rotation
+    needs_rotation: bool,
+    /// Bytes sent on this channel (for flow budget tracking)
+    bytes_sent: u64,
+    /// Bytes received on this channel
+    bytes_received: u64,
 }
 
 pub enum ChannelState {

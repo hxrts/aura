@@ -20,7 +20,7 @@ This structure identifies a single secure channel. One channel exists per `(Cont
 
 ## 2. Guard Chain
 
-All transport sends pass through the guard chain defined in [Authorization](109_authorization.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes. Guard evaluation runs synchronously over a prepared `GuardSnapshot` and returns `EffectCommand` data; an async interpreter executes those commands so guards never perform I/O directly.
+All transport sends pass through the guard chain defined in [Authorization](109_authorization.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes. Guard evaluation runs synchronously over a prepared `GuardSnapshot` and returns `EffectCommand` data. An async interpreter executes those commands so guards never perform I/O directly.
 
 ## 3. Flow Budget and Receipts
 
@@ -51,14 +51,14 @@ Information flow budgets define limits on metadata leakage. Budgets exist for ex
 Leakage budgets determine if a message can be sent. If the leakage cost exceeds the remaining budget, the message is denied. Enforcement uses padding and batching strategies. Padding hides message size. Batching hides message frequency.
 
 ```rust
-pub struct LeakageCost {
+pub struct LeakageBudget {
     pub external: u32,
     pub neighbor: u32,
-    pub group: u32,
+    pub in_group: u32,
 }
 ```
 
-This structure defines the leakage cost of a message. Leakage costs reduce the corresponding budget on successful send.
+This structure defines the leakage budget for a message. Leakage costs reduce the corresponding budget on successful send.
 
 ## 5. Context Integration
 
@@ -306,7 +306,7 @@ For messages:
 
 ### 9.4 Integration with Operation Categories
 
-Sync status applies to **Category A operations** only:
+Sync status applies to Category A operations only:
 - Send message → delivery status tracking
 - Create channel → sync status to context members
 - Update topic → sync status to channel members

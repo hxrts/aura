@@ -29,12 +29,16 @@ DKG transcript blobs follow the same garbage collection fence: once a snapshot i
 ```rust
 pub struct Snapshot {
     pub epoch: Epoch,
-    pub digest: Hash32,
-    pub blob_cid: Cid,
+    pub commitment: TreeHash32,
+    pub roster: Vec<LeafId>,
+    pub policies: BTreeMap<NodeIndex, Policy>,
+    pub state_cid: Option<TreeHash32>,
+    pub timestamp: u64,
+    pub version: u8,
 }
 ```
 
-This structure identifies a snapshot blob. Devices fetch the blob when restoring state. Devices hydrate journal state and replay the tail of post-snapshot facts.
+This structure defines the snapshot type from `aura_core::tree`. Devices fetch the blob when restoring state. Devices hydrate journal state and replay the tail of post-snapshot facts.
 
 ## 3. Cache Invalidation
 

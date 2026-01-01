@@ -36,10 +36,7 @@ Guard evaluation is pure and synchronous over a prepared `GuardSnapshot`. CapGua
 
 Only after all guards pass does transport emit a packet. Any failure returns locally and leaves no observable side effect.
 
-**DKG payloads and budgets**: Dealer packages and transcript exchanges are large.
-Flow and leakage budgets must be charged **proportionally to payload size** before
-any transport send. This ensures DKG traffic cannot bypass the guard chain and
-prevents unaccounted leakage during fast‑path coordination.
+DKG payloads require special budget handling because dealer packages and transcript exchanges are large. Flow and leakage budgets must be charged proportionally to payload size before any transport send. This ensures DKG traffic cannot bypass the guard chain and prevents unaccounted leakage during fast-path coordination.
 
 ## Failure Handling and Caching
 
@@ -78,7 +75,7 @@ let read_only_token = manager.attenuate_read("storage/public/*")?;
 // 4. Authorization via Bridge
 let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), device_id);
 let resource_scope = ResourceScope::Storage {
-    authority_id: AuthorityId::new(),
+    authority_id: AuthorityId::new_from_entropy([1u8; 32]),
     path: "public/file.txt".to_string(),
 };
 
@@ -211,7 +208,7 @@ Audit Trail: All authorization decisions are logged for security monitoring.
 
 ### Implementation References
 
-Core Cap Type: `aura-core/src/domain/journal.rs` contains the `Cap` type, which wraps serialized Biscuit tokens with optional root key storage. The `Cap::meet()` implementation computes capability intersection: tokens from the same issuer return the more attenuated token (more blocks = less authority); tokens from different issuers return bottom (empty). Use `Cap::from_biscuit_with_key()` to enable proper meet semantics.
+Core Cap Type: `aura-core/src/domain/journal.rs` contains the `Cap` type, which wraps serialized Biscuit tokens with optional root key storage. The `Cap::meet()` implementation computes capability intersection. Tokens from the same issuer return the more attenuated token (more blocks means less authority). Tokens from different issuers return bottom (empty). Use `Cap::from_biscuit_with_key()` to enable proper meet semantics.
 
 Biscuit Authorization Bridge: `crates/aura-guards/src/authorization.rs` contains `BiscuitAuthorizationBridge`.
 

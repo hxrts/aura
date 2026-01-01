@@ -13,7 +13,7 @@ The fact journal is stored and merged as a semilattice. Capabilities are refined
 
 ## 1. Journal Namespaces
 
-Aura maintains a separate journal namespace for each authority and each [relational context](103_relational_contexts.md). A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` (see [Authority and Identity](100_authority_and_identity.md)) or a `ContextId`. No namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](105_identifiers_and_boundaries.md).
+Aura maintains a separate journal namespace for each authority and each [relational context](103_relational_contexts.md). A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` (see [Authority and Identity](100_authority_and_identity.md)) or a `ContextId` and no namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](105_identifiers_and_boundaries.md).
 
 A journal namespace evolves through fact insertion. Facts accumulate monotonically. No fact is removed except through garbage collection rules that preserve logical meaning.
 
@@ -29,7 +29,7 @@ pub enum JournalNamespace {
 }
 ```
 
-This type defines a journal as a namespaced set of facts. The namespace identifies whether this journal tracks an authority's commitment tree or a relational context. The journal is a join semilattice under set union. Merging two journals produces a new journal containing all facts from both inputs. Journals with different namespaces cannot be merged.
+This type defines a journal as a namespaced set of facts. The namespace identifies whether this journal tracks an authority's commitment tree or a relational context. The journal is a join semilattice under set union where merging two journals produces a new journal containing all facts from both inputs. Journals with different namespaces cannot be merged.
 
 ## 2. Fact Model
 
@@ -93,7 +93,7 @@ Lint: run `scripts/check-domain-fact-contract.sh` to validate these requirements
 
 ## 3. Semilattice Structure
 
-Journals use a join semilattice. The semilattice uses set union as the join operator. The partial order is defined by subset inclusion. The journal never removes facts during merge. Every merge operation increases or preserves the fact set.
+Journals use a join semilattice. The semilattice uses set union as the join operator with partial order defined by subset inclusion. The journal never removes facts during merge. Every merge operation increases or preserves the fact set.
 
 The join semilattice ensures convergence across replicas. Any two replicas that exchange facts eventually converge to identical fact sets. All replicas reduce the same fact set to the same state.
 
@@ -162,6 +162,7 @@ Relational contexts store relational facts. These facts reference authority comm
 pub struct RelationalState {
     pub bindings: Vec<RelationalBinding>,
     pub flow_budgets: BTreeMap<(AuthorityId, AuthorityId, u64), u64>,
+    pub leakage_budget: LeakageBudget,
     pub channel_epochs: BTreeMap<ChannelId, ChannelEpochState>,
 }
 
@@ -172,15 +173,22 @@ pub struct RelationalBinding {
 }
 ```
 
-Reduction processes the following relational fact types:
+This structure represents the reduced relational state. It contains relational bindings, flow budget tracking between authorities, leakage budget totals for privacy accounting, and AMP channel epoch state for message ratcheting.
 
-- **GuardianBinding**: Maps to `RelationalBinding` for guardian relationships
-- **RecoveryGrant**: Recovery permission bindings between authorities
-- **Consensus**: Generic bindings with consensus metadata
-- **AmpChannelCheckpoint**: Channel state snapshots for AMP messaging
-- **AmpProposedChannelEpochBump** / **AmpCommittedChannelEpochBump**: Channel epoch transitions
-- **AmpChannelPolicy**: Channel-specific policy overrides (skip windows)
-- **Generic**: Domain-specific extensibility facts
+Reduction processes the following protocol fact types wrapped in `Protocol(...)`:
+
+1. `GuardianBinding` maps to `RelationalBinding` for guardian relationships
+2. `RecoveryGrant` creates recovery permission bindings between authorities
+3. `Consensus` stores generic bindings with consensus metadata
+4. `AmpChannelCheckpoint` anchors channel state snapshots for AMP messaging
+5. `AmpProposedChannelEpochBump` and `AmpCommittedChannelEpochBump` track channel epoch transitions
+6. `AmpChannelPolicy` defines channel-specific policy overrides for skip windows
+7. `DkgTranscriptCommit` stores consensus-finalized DKG transcripts
+8. `ConvergenceCert` records soft-safe convergence certificates
+9. `ReversionFact` tracks explicit reversion events
+10. `RotateFact` marks lifecycle rotation or upgrade events
+
+Domain-specific facts use `Generic { context_id, binding_type, binding_data }` and are reduced by registered `FactReducer` implementations
 
 ```rust
 pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionError> {

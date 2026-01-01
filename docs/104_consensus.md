@@ -10,11 +10,11 @@ Consensus is single-shot. It agrees on a single operation and a single prestate.
 
 A consensus instance uses a context-scoped committee. The committee contains witnesses selected by the authority or relational context. Committee members may be offline. The protocol completes even under partitions.
 
-**Durable truth**: Consensus finalization is the single source of durable shared state. Fast-path coordination (provisional or soft-safe) may run in parallel for liveness, but its outputs must be superseded by commit facts. For BFT-DKG, consensus finalizes a transcript and emits `DkgTranscriptCommit` facts.
+Consensus finalization is the single source of durable shared state. Fast-path coordination (provisional or soft-safe) may run in parallel for liveness, but its outputs must be superseded by commit facts. For BFT-DKG, consensus finalizes a transcript and emits `DkgTranscriptCommit` facts.
 
 ### 1.3 Consensus is NOT Linearizable by Default
 
-**Important:** Aura Consensus is single-shot agreement, not log-based linearization.
+Aura Consensus is single-shot agreement, not log-based linearization.
 
 Each consensus instance independently agrees on:
 - A single operation
@@ -70,7 +70,7 @@ async fn sequential_device_updates<C: EffectContext>(
 
 Aura Consensus has two paths. The fast path completes in one round trip. The fallback path uses epidemic gossip and a threshold race. Both paths produce the same commit fact once enough matching witness shares exist.
 
-The fast path uses direct communication. The initiator broadcasts an execute message. Witnesses run the operation against the prestate. Witnesses return FROST shares. The initiator aggregates shares and produces a threshold signature (via core FROST primitives in `aura-core::crypto::tree_signing`; consensus calls a thin adapter—`aura-frost` is deprecated).
+The fast path uses direct communication. The initiator broadcasts an execute message. Witnesses run the operation against the prestate. Witnesses return FROST shares. The initiator aggregates shares and produces a threshold signature. FROST primitives are in `aura-core::crypto::tree_signing`. The `aura-frost` crate is deprecated.
 
 The fallback path triggers when witnesses disagree or when the initiator stalls. Witnesses exchange share proposals using bounded fanout gossip. Any witness that assembles a valid threshold signature broadcasts a complete commit fact.
 
@@ -116,7 +116,7 @@ This structure identifies consensus instances. The result is identified by `H(Op
 A commit fact contains full consensus evidence including the operation, threshold signature, and participant list. Participants are recorded as `AuthorityId` values to preserve device privacy.
 
 ```rust
-/// From crates/aura-consensus/src/consensus/types.rs
+/// From crates/aura-consensus/src/types.rs
 pub struct CommitFact {
     pub consensus_id: ConsensusId,
     pub prestate_hash: Hash32,
@@ -392,7 +392,7 @@ Consensus is also used for relational context operations. Guardian bindings use 
 Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key stored in the commitment tree. See [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) for details on the `TreeState` structure.
 
 ```rust
-/// From crates/aura-consensus/src/consensus/messages.rs
+/// From crates/aura-consensus/src/messages.rs
 pub enum ConsensusMessage {
     SignShare {
         consensus_id: ConsensusId,
@@ -449,7 +449,7 @@ The FROST pipelining optimization improves consensus performance by bundling nex
 
 ### 12.2 Core Components
 
-**WitnessState** (`consensus/witness.rs`) manages persistent nonce state for each witness:
+`WitnessState` (`aura-consensus/src/witness.rs`) manages persistent nonce state for each witness:
 
 ```rust
 pub struct WitnessState {
@@ -483,20 +483,7 @@ SignShare {
 }
 ```
 
-**PipelinedConsensusOrchestrator** (integrated in `consensus/protocol.rs`) orchestrates the optimization:
-
-```rust
-pub struct PipelinedConsensusOrchestrator {
-    /// Manager for witness nonce states
-    witness_states: WitnessStateManager,
-    
-    /// Current epoch
-    current_epoch: Epoch,
-    
-    /// Threshold required for consensus
-    threshold: u16,
-}
-```
+`ConsensusProtocol` (`aura-consensus/src/protocol.rs`) integrates the pipelining optimization via `FrostConsensusOrchestrator` and `WitnessTracker`. The pipelining logic is distributed across these components rather than isolated in a separate orchestrator.
 
 Key methods:
 - `run_consensus()`: Determines fast path vs slow path based on cached commitments
@@ -792,7 +779,7 @@ These parameters should be tuned per deployment, but the ranges above keep fallb
 
 ### Fanout Adequacy for Slow Path
 
-The slow path requires the gossip network to be connected for evidence propagation. The key question: **how many gossip peers (fanout f) do we need?**
+The slow path requires the gossip network to be connected for evidence propagation. The key question is how many gossip peers (fanout f) are needed.
 
 **Random Graph Connectivity Theory**
 
@@ -941,7 +928,7 @@ Does this operation establish or modify cryptographic relationships?
 
 ### 17.5 Key Insight
 
-**Ceremonies establish shared cryptographic context. Operations within that context are cheap.**
+Ceremonies establish shared cryptographic context. Operations within that context are cheap.
 
 Once a relational context exists (established via Category C invitation ceremony), channels and messages within that context are Category A. The expensive part is establishing WHO is in the relationship. Once established, operations WITHIN the relationship derive keys deterministically from shared state.
 
@@ -949,9 +936,7 @@ See `work/optimistic.md` for detailed design and effect policy integration.
 
 ## 18. BFT‑DKG Transcript Finalization (K3)
 
-Consensus is also used to finalize **BFT‑DKG transcripts**. The output of the DKG
-is a `DkgTranscriptCommit` fact that is **consensus‑finalized** and then merged
-into the relevant journal.
+Consensus is also used to finalize BFT-DKG transcripts. The output of the DKG is a `DkgTranscriptCommit` fact that is consensus-finalized and then merged into the relevant journal.
 
 **Inputs**
 - `DkgConfig`: `epoch`, `threshold`, `max_signers`, `participants`, `membership_hash`.
@@ -963,7 +948,7 @@ into the relevant journal.
 **Transcript formation**
 1. Validate `DkgConfig` and dealer packages (unique dealers, complete share sets).
 2. Assemble the transcript deterministically.
-3. Hash the transcript using **canonical DAG‑CBOR** encoding.
+3. Hash the transcript using canonical DAG-CBOR encoding.
 
 **Finalize with consensus**
 1. Build `DkgTranscriptCommit` with:
@@ -976,15 +961,12 @@ into the relevant journal.
 3. Insert both `CommitFact` evidence and the `DkgTranscriptCommit` fact into the
    authority or context journal.
 
-The transcript commit is the **single durable artifact** used to bootstrap all
-subsequent threshold operations. Any K3 ceremony that depends on keys must bind
+The transcript commit is the single durable artifact used to bootstrap all subsequent threshold operations. Any K3 ceremony that depends on keys must bind
 to this commit by reference (direct hash or blob ref).
 
 ## 19. Decentralized Coordinator Selection (Lottery)
 
-Coordinator‑based fast paths (A2) require a **deterministic, decentralized**
-selection mechanism so every participant can independently derive the same
-leader without extra coordination.
+Coordinator-based fast paths (A2) require a deterministic, decentralized selection mechanism so every participant can independently derive the same leader without extra coordination.
 
 **Round seed**
 - `round_seed` is a 32‑byte value shared by all participants for the round.
@@ -1000,13 +982,13 @@ winner = argmin_i score_i
 ```
 
 **Fencing + safety**
-- The coordinator must hold a **monotonic fencing token** (`coord_epoch`).
+- The coordinator must hold a monotonic fencing token (`coord_epoch`).
 - Proposals are rejected if `coord_epoch` does not advance or if `prestate_hash`
   mismatches local state.
 
 **Convergence**
 - Coordinators emit a `ConvergenceCert` once a quorum acks the proposal.
-- Fast‑path results remain **soft‑safe** until a consensus `CommitFact` is merged.
+- Fast-path results remain soft-safe until a consensus `CommitFact` is merged.
 
 ## 20. Summary
 

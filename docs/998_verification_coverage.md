@@ -37,8 +37,10 @@ Aura uses complementary verification approaches:
 | **Aggregation Threshold** | Need k shares to aggregate | Lean: `Frost.aggregation_threshold` | ✓ proven |
 | **Share Binding** | Shares bound to session/result | Lean: `Frost.share_binding` | ✓ proven |
 | **Commitment Before Signing** | Round 1 before Round 2 | Quint: `InvariantCommitmentBeforeSigning` | ✓ model checked |
-| **Nonce Uniqueness** | Nonces never reused | Quint: `InvariantNonceUniqueness` | ✓ model checked |
+| **Nonce Uniqueness** | Nonces never reused | Rust: affine state machine + session types | ✓ enforced (see note) |
 | **Threshold Unforgeability** | < k cannot forge signature | Lean: `Assumptions.frost_threshold_unforgeability` | axiom |
+
+**Nonce Uniqueness Note**: Nonce reuse prevention is enforced through three mechanisms. Session types in the `AuraConsensus` choreography enforce that `NonceCommit` precedes `SignRequest`, the witness state machine uses `Option::take()` to consume `NonceToken` exactly once, and epoch changes invalidate cached nonces. The Quint model (`InvariantNonceUniquenessNote`) documents this requirement but cannot model-check nonce values due to deterministic test generation.
 
 ### Evidence CRDT
 
