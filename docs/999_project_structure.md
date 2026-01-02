@@ -10,32 +10,42 @@ non-authoritative scratch and may be removed.
 Aura's codebase is organized into 8 clean architectural layers. Each layer builds on the layers below without circular dependencies.
 
 ```
-┌─────────────────────────────────────────────┐
-│ Layer 8: Testing & Development Tools        │
-│         (aura-testkit, aura-quint)          │
-├─────────────────────────────────────────────┤
-│ Layer 7: User Interface                     │
-│         (aura-terminal)                     │
-├─────────────────────────────────────────────┤
-│ Layer 6: Runtime Composition                │
-│    (aura-agent, aura-simulator, aura-app)   │
-├─────────────────────────────────────────────┤
-│ Layer 5: Feature/Protocol Implementation    │
-│    (aura-invitation, etc.)                  │
-├─────────────────────────────────────────────┤
-│ Layer 4: Orchestration                      │
-│ (aura-protocol, aura-guards, aura-consensus,│
-│  aura-amp, aura-anti-entropy)               │
-├─────────────────────────────────────────────┤
-│ Layer 3: Implementation                     │
-│    (aura-effects + aura-composition)        │
-├─────────────────────────────────────────────┤
-│ Layer 2: Specification                      │
-│  (Domain crates + aura-mpst + aura-macros)  │
-├─────────────────────────────────────────────┤
-│ Layer 1: Foundation                         │
-│         (aura-core)                         │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────┐
+│ Layer 8: Testing & Development Tools               │
+│   • aura-testkit                                   │
+│   • aura-quint                                     │
+├────────────────────────────────────────────────────┤
+│ Layer 7: User Interface                            │
+│   • aura-terminal                                  │
+├────────────────────────────────────────────────────┤
+│ Layer 6: Runtime Composition                       │
+│   • aura-agent    • aura-simulator    • aura-app   │
+├────────────────────────────────────────────────────┤
+│ Layer 5: Feature/Protocol Implementation           │
+│   • aura-authentication    • aura-chat             │
+│   • aura-invitation        • aura-recovery         │
+│   • aura-relational        • aura-rendezvous       │
+│   • aura-sync              • aura-social           │
+├────────────────────────────────────────────────────┤
+│ Layer 4: Orchestration                             │
+│   • aura-protocol          • aura-guards           │
+│   • aura-consensus         • aura-amp              │
+│   • aura-anti-entropy                              │
+├────────────────────────────────────────────────────┤
+│ Layer 3: Implementation                            │
+│   • aura-effects           • aura-composition      │
+├────────────────────────────────────────────────────┤
+│ Layer 2: Specification                             │
+│   Domain Crates:                                   │
+│   • aura-journal           • aura-authorization    │
+│   • aura-signature         • aura-store            │
+│   • aura-transport         • aura-maintenance      │
+│   Choreography:                                    │
+│   • aura-mpst              • aura-macros           │
+├────────────────────────────────────────────────────┤
+│ Layer 1: Foundation                                │
+│   • aura-core                                      │
+└────────────────────────────────────────────────────┘
 ```
 
 ## Layer 1: Foundation — `aura-core`
