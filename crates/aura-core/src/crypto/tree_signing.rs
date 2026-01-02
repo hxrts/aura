@@ -35,11 +35,11 @@ use std::collections::BTreeMap;
 /// Maximum size of a FROST signing share (Ed25519 scalar)
 pub const MAX_SHARE_BYTES: usize = 32;
 
-/// Maximum size of a FROST nonce commitment (two compressed points)
-pub const MAX_COMMITMENT_BYTES: usize = 64;
+/// Exact size of postcard-serialized FROST signing commitments (SigningCommitments).
+pub const MAX_COMMITMENT_BYTES: usize = 69;
 
-/// Maximum size of serialized FROST nonces
-pub const MAX_NONCE_BYTES: usize = 64;
+/// Exact size of postcard-serialized FROST signing nonces (SigningNonces).
+pub const MAX_NONCE_BYTES: usize = 138;
 
 /// Maximum size of a FROST partial signature (Ed25519 scalar)
 pub const MAX_PARTIAL_SIGNATURE_BYTES: usize = 32;
@@ -167,7 +167,7 @@ impl Nonce {
         if value_bytes.len() != MAX_NONCE_BYTES {
             return Err(format!(
                 "Invalid nonce length: {} (expected {MAX_NONCE_BYTES})",
-                value_bytes.len()
+                value_bytes.len(),
             ));
         }
 
@@ -216,7 +216,7 @@ impl NonceCommitment {
         if commitment_bytes.len() != MAX_COMMITMENT_BYTES {
             return Err(format!(
                 "Invalid commitment length: {} (expected {MAX_COMMITMENT_BYTES})",
-                commitment_bytes.len()
+                commitment_bytes.len(),
             ));
         }
 
@@ -240,8 +240,11 @@ impl NonceCommitment {
     /// Create from bytes (for testing and mock implementations)
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
         // For mock implementations, create a simple commitment
-        if bytes.len() < 32 {
-            return Err("Commitment too short".to_string());
+        if bytes.len() != MAX_COMMITMENT_BYTES {
+            return Err(format!(
+                "Invalid commitment length: {} (expected {MAX_COMMITMENT_BYTES})",
+                bytes.len(),
+            ));
         }
 
         Ok(Self {

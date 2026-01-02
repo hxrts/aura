@@ -376,7 +376,16 @@ Low-level primitives live in `aura-core/src/crypto/tree_signing.rs`. This module
 
 The handler in `aura-effects/src/crypto.rs` implements FROST key generation and signing. This is the only location with direct `frost_ed25519` library calls.
 
-### 7.2 Lifecycle Taxonomy (Key Generation vs Agreement)
+### 7.2 Serialized Size Invariants (FROST)
+
+Aura treats the postcard serialization of FROST round-one data as **canonical and fixed-size**. This prevents malleability and makes invalid encodings unrepresentable at the boundary.
+
+- `SigningNonces` (secret) **must serialize to exactly 138 bytes**
+- `SigningCommitments` (public) **must serialize to exactly 69 bytes**
+
+These sizes are enforced in `aura-core/src/crypto/tree_signing.rs` and mirrored in `aura-core/src/constants.rs`. If the upstream FROST or postcard encoding changes, update the constants and add/adjust tests to lock in the new canonical sizes.
+
+### 7.3 Lifecycle Taxonomy (Key Generation vs Agreement)
 
 Aura separates key generation from agreement/finality:
 
@@ -392,7 +401,7 @@ Agreement modes are orthogonal:
 
 Leader selection (lottery/round seed/fixed coordinator) and pipelining are orthogonal optimizations, not agreement modes.
 
-### 7.3 Usage Pattern
+### 7.4 Usage Pattern
 
 The recommended pattern uses `AppCore` for high-level operations.
 
@@ -413,11 +422,11 @@ let context = SigningContext::self_tree_op(authority, tree_op);
 let signature = signing_service.sign(context).await?;
 ```
 
-### 7.4 Design Rationale
+### 7.5 Design Rationale
 
 The unified trait abstraction enables a consistent interface across multi-device, guardian, and group scenarios. It provides proper audit context via `ApprovalContext` for UX and logging. It enables testability via mock implementations in `aura-testkit`. It provides key isolation with secure storage integration.
 
-### 7.5 FROST Minimum Threshold
+### 7.6 FROST Minimum Threshold
 
 FROST requires `threshold >= 2`. Calling `frost_generate_keys(1, 1)` returns an error. For single-signer scenarios, use `generate_signing_keys(1, 1)` which routes to Ed25519 automatically.
 

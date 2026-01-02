@@ -370,7 +370,7 @@ pub fn extract_target_node(op: &super::TreeOpKind) -> Option<NodeIndex> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::{LeafId, LeafNode, LeafRole, TreeOp, TreeOpKind};
+    use crate::tree::{LeafId, LeafNode, TreeOp, TreeOpKind};
 
     fn test_signing_key() -> BranchSigningKey {
         BranchSigningKey::new([0xAA; 32], Epoch::new(1))

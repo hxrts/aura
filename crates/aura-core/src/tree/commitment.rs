@@ -63,6 +63,7 @@ const COMMITMENT_VERSION: u16 = 1;
 ///
 /// ```
 /// use aura_core::tree::{commit_branch, Policy, NodeIndex};
+/// use aura_core::Epoch;
 ///
 /// let policy = Policy::Threshold { m: 2, n: 3 };
 /// let node_idx = NodeIndex(1);
@@ -117,6 +118,7 @@ pub fn commit_branch(
 ///
 /// ```
 /// use aura_core::tree::{commit_leaf, LeafId};
+/// use aura_core::Epoch;
 ///
 /// let leaf_id = LeafId(5);
 /// let epoch = Epoch::new(42);

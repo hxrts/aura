@@ -7,7 +7,7 @@
 //! # Usage
 //!
 //! ```rust
-//! use aura_core::constants::{MAX_SIGNATURE_BYTES, MAX_PAYLOAD_BYTES};
+//! use aura_core::constants::{MAX_SIGNATURE_BYTES, MAX_FACT_PAYLOAD_BYTES};
 //! ```
 
 // =============================================================================
@@ -45,11 +45,11 @@ pub const MAX_TREE_AGGREGATE_SIGNATURE_BYTES: usize = 2048;
 /// Maximum size for FROST signing shares.
 pub const MAX_SHARE_BYTES: usize = 32;
 
-/// Maximum size for FROST commitments.
-pub const MAX_COMMITMENT_BYTES: usize = 64;
+/// Exact size for postcard-serialized FROST commitments (SigningCommitments).
+pub const MAX_COMMITMENT_BYTES: usize = 69;
 
-/// Maximum size for FROST nonces.
-pub const MAX_NONCE_BYTES: usize = 64;
+/// Exact size for postcard-serialized FROST nonces (SigningNonces).
+pub const MAX_NONCE_BYTES: usize = 138;
 
 /// Maximum size for FROST partial signatures.
 pub const MAX_PARTIAL_SIGNATURE_BYTES: usize = 32;
