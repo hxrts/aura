@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{error, info, warn};
 
+use super::types::{ComponentId, LogLevel};
+
 /// Stateless monitoring handler.
 #[derive(Debug, Clone)]
 pub struct MonitoringSystemHandler {
@@ -41,7 +43,7 @@ pub enum AlertSeverity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthCheckResult {
     /// Name of the component being checked
-    pub component: String,
+    pub component: ComponentId,
     /// Current health status of the component
     pub status: HealthStatus,
     /// Status message or diagnostic information
@@ -54,7 +56,7 @@ pub struct Alert {
     /// Unique alert identifier (deterministic counter-based for Layer 3 handlers)
     pub id: u64,
     /// Component that triggered the alert
-    pub component: String,
+    pub component: ComponentId,
     /// Alert severity level
     pub severity: AlertSeverity,
     /// Alert title/summary
@@ -107,10 +109,10 @@ impl MonitoringSystemHandler {
     /// Manually trigger a health check for a specific component
     pub async fn check_component_health(
         &self,
-        component: &str,
+        component: ComponentId,
     ) -> Result<HealthCheckResult, SystemError> {
         Ok(HealthCheckResult {
-            component: component.to_string(),
+            component,
             status: HealthStatus::Healthy,
             message: "ok".to_string(),
         })
@@ -119,23 +121,24 @@ impl MonitoringSystemHandler {
     /// Send a custom alert
     pub async fn send_alert(
         &self,
-        component: &str,
+        component: ComponentId,
         severity: AlertSeverity,
         title: &str,
         message: &str,
         metadata: HashMap<String, String>,
     ) -> Result<(), SystemError> {
         let mut material = Vec::new();
-        material.extend_from_slice(component.as_bytes());
+        material.extend_from_slice(component.as_str().as_bytes());
         material.push(severity as u8);
         material.extend_from_slice(title.as_bytes());
         material.extend_from_slice(message.as_bytes());
         let digest = hash::hash(&material);
         let mut id_bytes = [0u8; 8];
         id_bytes.copy_from_slice(&digest[..8]);
+        let component_id = component.clone();
         let alert = Alert {
             id: u64::from_le_bytes(id_bytes),
-            component: component.to_string(),
+            component: component_id,
             severity,
             title: title.to_string(),
             message: message.to_string(),
@@ -144,7 +147,7 @@ impl MonitoringSystemHandler {
         };
         warn!(
             alert_id = alert.id,
-            component,
+            component = %component,
             ?severity,
             title,
             message,
@@ -180,10 +183,12 @@ impl Default for MonitoringSystemHandler {
 #[async_trait]
 impl SystemEffects for MonitoringSystemHandler {
     async fn log(&self, level: &str, component: &str, message: &str) -> Result<(), SystemError> {
-        match level {
-            "error" => error!("{}: {}", component, message),
-            "warn" => warn!("{}: {}", component, message),
-            _ => info!("{}: {}", component, message),
+        let parsed_level = LogLevel::try_from(level).unwrap_or(LogLevel::Info);
+        let component_id = ComponentId::from(component);
+        match parsed_level {
+            LogLevel::Error => error!("{}: {}", component_id, message),
+            LogLevel::Warn => warn!("{}: {}", component_id, message),
+            LogLevel::Info | LogLevel::Debug => info!("{}: {}", component_id, message),
         }
         Ok(())
     }
@@ -206,7 +211,10 @@ impl SystemEffects for MonitoringSystemHandler {
 
     async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {
         let mut info = HashMap::new();
-        info.insert("component".to_string(), "monitoring".to_string());
+        info.insert(
+            "component".to_string(),
+            ComponentId::Monitoring.to_string(),
+        );
         info.insert("max_alerts".to_string(), self.config.max_alerts.to_string());
         info.insert("status".to_string(), "operational".to_string());
         info.insert("total_health_checks".to_string(), "0".to_string());
@@ -296,7 +304,7 @@ mod tests {
 
         handler
             .send_alert(
-                "component",
+                ComponentId::Custom("component".to_string()),
                 AlertSeverity::Warning,
                 "title",
                 "body",
@@ -307,10 +315,13 @@ mod tests {
 
         // Test health check
         let health = handler
-            .check_component_health("test_component")
+            .check_component_health(ComponentId::Custom("test_component".to_string()))
             .await
             .unwrap();
-        assert_eq!(health.component, "test_component");
+        assert_eq!(
+            health.component,
+            ComponentId::Custom("test_component".to_string())
+        );
         assert_eq!(health.status, HealthStatus::Healthy);
     }
 

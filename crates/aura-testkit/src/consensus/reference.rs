@@ -21,15 +21,17 @@
 
 use aura_consensus::core::state::PureCommitFact;
 use aura_consensus::core::{ConsensusPhase, ConsensusState, ShareProposal};
+use aura_consensus::types::ConsensusId;
+use aura_core::{AuthorityId, Hash32};
 use std::collections::BTreeSet;
 
 /// Reference evidence structure for CRDT merge
 /// Lean: Aura.Consensus.Types.Evidence
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Evidence {
-    pub consensus_id: String,
+    pub consensus_id: ConsensusId,
     pub votes: Vec<Vote>,
-    pub equivocators: Vec<String>,
+    pub equivocators: Vec<AuthorityId>,
     pub commit_fact: Option<PureCommitFact>,
 }
 
@@ -37,9 +39,9 @@ pub struct Evidence {
 /// Lean: Aura.Consensus.Types.Vote
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Vote {
-    pub witness: String,
-    pub result_id: String,
-    pub prestate_hash: String,
+    pub witness: AuthorityId,
+    pub result_id: Hash32,
+    pub prestate_hash: Hash32,
 }
 
 /// Reference threshold signature structure
@@ -47,10 +49,10 @@ pub struct Vote {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThresholdSignature {
     pub sig_value: String,
-    pub signer_set: Vec<String>,
-    pub bound_cid: String,
-    pub bound_rid: String,
-    pub bound_phash: String,
+    pub signer_set: Vec<AuthorityId>,
+    pub bound_cid: ConsensusId,
+    pub bound_rid: Hash32,
+    pub bound_phash: Hash32,
 }
 
 // ============================================================================
@@ -68,6 +70,19 @@ fn merge_lists<T: Clone + Eq>(xs: &[T], ys: &[T]) -> Vec<T> {
         }
     }
     result
+}
+
+fn parse_hash32_label(value: &str) -> Hash32 {
+    if value.len() == 64 {
+        Hash32::from_hex(value).unwrap_or_else(|_| Hash32::from_bytes(value.as_bytes()))
+    } else {
+        Hash32::from_bytes(value.as_bytes())
+    }
+}
+
+fn parse_consensus_id_label(value: &str) -> ConsensusId {
+    let raw = value.strip_prefix("consensus:").unwrap_or(value);
+    ConsensusId(parse_hash32_label(raw))
 }
 
 /// Merge two evidence structures
@@ -165,24 +180,17 @@ pub fn aggregate_shares_ref(
         .collect::<Vec<_>>()
         .join("|");
 
+    let mut binding_parts = first.share.data_binding.split(':');
+    let cid_part = binding_parts.next().unwrap_or("");
+    let _rid_part = binding_parts.next().unwrap_or("");
+    let phash_part = binding_parts.next().unwrap_or("");
+
     Some(ThresholdSignature {
         sig_value,
-        signer_set: proposals.iter().map(|p| p.witness.clone()).collect(),
-        bound_cid: first
-            .share
-            .data_binding
-            .split(':')
-            .next()
-            .unwrap_or("")
-            .to_string(),
-        bound_rid: first.result_id.clone(),
-        bound_phash: first
-            .share
-            .data_binding
-            .split(':')
-            .nth(2)
-            .unwrap_or("")
-            .to_string(),
+        signer_set: proposals.iter().map(|p| p.witness).collect(),
+        bound_cid: parse_consensus_id_label(cid_part),
+        bound_rid: first.result_id,
+        bound_phash: parse_hash32_label(phash_part),
     })
 }
 
@@ -197,7 +205,7 @@ pub fn aggregate_shares_ref(
 /// - `detection_soundness`: detected witness has conflicting votes
 /// - `detection_completeness`: all equivocators are detected
 /// - `honest_never_detected`: honest witness never falsely accused
-pub fn detect_equivocators_ref(votes: &[Vote]) -> BTreeSet<String> {
+pub fn detect_equivocators_ref(votes: &[Vote]) -> BTreeSet<AuthorityId> {
     let mut equivocators = BTreeSet::new();
 
     // Check each pair of votes for conflicts
@@ -208,7 +216,7 @@ pub fn detect_equivocators_ref(votes: &[Vote]) -> BTreeSet<String> {
 
             // Same witness, different result_id = equivocation
             if v1.witness == v2.witness && v1.result_id != v2.result_id {
-                equivocators.insert(v1.witness.clone());
+                equivocators.insert(v1.witness);
             }
         }
     }
@@ -328,7 +336,7 @@ pub fn apply_share_ref(state: &ConsensusState, proposal: ShareProposal) -> Trans
 
     // Check if threshold is met after adding proposal
     // Count proposals for each result
-    let mut result_counts: std::collections::HashMap<&str, usize> =
+    let mut result_counts: std::collections::HashMap<&Hash32, usize> =
         std::collections::HashMap::new();
     for p in &new_state.proposals {
         *result_counts.entry(&p.result_id).or_insert(0) += 1;
@@ -337,25 +345,25 @@ pub fn apply_share_ref(state: &ConsensusState, proposal: ShareProposal) -> Trans
     // Check if any result has threshold
     let threshold_met = result_counts
         .values()
-        .any(|&count| count >= new_state.threshold);
+        .any(|&count| count >= new_state.threshold.as_usize());
 
     if threshold_met {
         new_state.phase = ConsensusPhase::Committed;
 
         // Find the winning result
-        let winning_result = result_counts
-            .iter()
-            .find(|(_, &count)| count >= new_state.threshold)
-            .map(|(&rid, _)| rid.to_string());
+    let winning_result = result_counts
+        .iter()
+        .find(|(_, &count)| count >= new_state.threshold.as_usize())
+        .map(|(&rid, _)| *rid);
 
-        if let Some(rid) = winning_result {
-            new_state.commit_fact = Some(PureCommitFact {
-                cid: new_state.cid.clone(),
-                result_id: rid,
-                signature: "ref_agg_sig".to_string(),
-                prestate_hash: new_state.prestate_hash.clone(),
-            });
-        }
+    if let Some(rid) = winning_result {
+        new_state.commit_fact = Some(PureCommitFact {
+            cid: new_state.cid,
+            result_id: rid,
+            signature: "ref_agg_sig".to_string(),
+            prestate_hash: new_state.prestate_hash,
+        });
+    }
     }
 
     TransitionResultRef::Ok(new_state)
@@ -406,16 +414,16 @@ pub fn fail_consensus_ref(state: &ConsensusState) -> TransitionResultRef {
 /// Returns None if valid, Some(error) if invalid
 pub fn check_invariants_ref(state: &ConsensusState) -> Option<String> {
     // Invariant 1: threshold >= 1
-    if state.threshold < 1 {
+    if state.threshold.get() < 1 {
         return Some("threshold must be >= 1".to_string());
     }
 
     // Invariant 2: |witnesses| >= threshold
-    if state.witnesses.len() < state.threshold {
+    if state.witnesses.len() < state.threshold.as_usize() {
         return Some(format!(
             "insufficient witnesses: {} < {}",
             state.witnesses.len(),
-            state.threshold
+            state.threshold.get()
         ));
     }
 
@@ -439,15 +447,15 @@ pub fn check_invariants_ref(state: &ConsensusState) -> Option<String> {
     }
 
     // Invariant 6: no witness has multiple proposals (no duplicate entries)
-    let mut seen_witnesses: BTreeSet<&str> = BTreeSet::new();
+    let mut seen_witnesses: BTreeSet<AuthorityId> = BTreeSet::new();
     for proposal in &state.proposals {
-        if seen_witnesses.contains(proposal.witness.as_str()) {
+        if seen_witnesses.contains(&proposal.witness) {
             return Some(format!(
                 "duplicate proposal from witness: {}",
                 proposal.witness
             ));
         }
-        seen_witnesses.insert(&proposal.witness);
+        seen_witnesses.insert(proposal.witness);
     }
 
     None // All invariants hold
@@ -460,14 +468,14 @@ pub fn check_invariants_ref(state: &ConsensusState) -> Option<String> {
 /// Convert ConsensusState to Evidence for CRDT operations
 pub fn state_to_evidence(state: &ConsensusState) -> Evidence {
     Evidence {
-        consensus_id: state.cid.clone(),
+        consensus_id: state.cid,
         votes: state
             .proposals
             .iter()
             .map(|p| Vote {
-                witness: p.witness.clone(),
-                result_id: p.result_id.clone(),
-                prestate_hash: state.prestate_hash.clone(),
+                witness: p.witness,
+                result_id: p.result_id,
+                prestate_hash: state.prestate_hash,
             })
             .collect(),
         equivocators: state.equivocators.iter().cloned().collect(),
@@ -480,6 +488,18 @@ mod tests {
     use super::*;
     use aura_consensus::core::state::ShareData;
 
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_hash(seed: u8) -> Hash32 {
+        Hash32::new([seed; 32])
+    }
+
+    fn test_consensus_id(seed: u8) -> ConsensusId {
+        ConsensusId(Hash32::new([seed; 32]))
+    }
+
     #[test]
     fn test_merge_lists_dedup() {
         let xs = vec![1, 2, 3];
@@ -491,22 +511,22 @@ mod tests {
     #[test]
     fn test_merge_evidence_comm() {
         let e1 = Evidence {
-            consensus_id: "cns1".to_string(),
+            consensus_id: test_consensus_id(1),
             votes: vec![Vote {
-                witness: "w1".to_string(),
-                result_id: "r1".to_string(),
-                prestate_hash: "h1".to_string(),
+                witness: test_authority(1),
+                result_id: test_hash(1),
+                prestate_hash: test_hash(9),
             }],
             equivocators: vec![],
             commit_fact: None,
         };
 
         let e2 = Evidence {
-            consensus_id: "cns1".to_string(),
+            consensus_id: test_consensus_id(1),
             votes: vec![Vote {
-                witness: "w2".to_string(),
-                result_id: "r1".to_string(),
-                prestate_hash: "h1".to_string(),
+                witness: test_authority(2),
+                result_id: test_hash(1),
+                prestate_hash: test_hash(9),
             }],
             equivocators: vec![],
             commit_fact: None,
@@ -523,11 +543,11 @@ mod tests {
     #[test]
     fn test_merge_evidence_idem() {
         let e = Evidence {
-            consensus_id: "cns1".to_string(),
+            consensus_id: test_consensus_id(1),
             votes: vec![Vote {
-                witness: "w1".to_string(),
-                result_id: "r1".to_string(),
-                prestate_hash: "h1".to_string(),
+                witness: test_authority(1),
+                result_id: test_hash(1),
+                prestate_hash: test_hash(9),
             }],
             equivocators: vec![],
             commit_fact: None,
@@ -541,8 +561,8 @@ mod tests {
     fn test_check_threshold() {
         let proposals = vec![
             ShareProposal {
-                witness: "w1".to_string(),
-                result_id: "r1".to_string(),
+                witness: test_authority(1),
+                result_id: test_hash(1),
                 share: ShareData {
                     share_value: "s1".to_string(),
                     nonce_binding: "n1".to_string(),
@@ -550,8 +570,8 @@ mod tests {
                 },
             },
             ShareProposal {
-                witness: "w2".to_string(),
-                result_id: "r1".to_string(),
+                witness: test_authority(2),
+                result_id: test_hash(1),
                 share: ShareData {
                     share_value: "s2".to_string(),
                     nonce_binding: "n2".to_string(),
@@ -568,8 +588,8 @@ mod tests {
     fn test_shares_consistent() {
         let consistent = vec![
             ShareProposal {
-                witness: "w1".to_string(),
-                result_id: "r1".to_string(),
+                witness: test_authority(1),
+                result_id: test_hash(1),
                 share: ShareData {
                     share_value: "s1".to_string(),
                     nonce_binding: "n1".to_string(),
@@ -577,8 +597,8 @@ mod tests {
                 },
             },
             ShareProposal {
-                witness: "w2".to_string(),
-                result_id: "r1".to_string(),
+                witness: test_authority(2),
+                result_id: test_hash(1),
                 share: ShareData {
                     share_value: "s2".to_string(),
                     nonce_binding: "n2".to_string(),
@@ -589,8 +609,8 @@ mod tests {
 
         let inconsistent = vec![
             ShareProposal {
-                witness: "w1".to_string(),
-                result_id: "r1".to_string(),
+                witness: test_authority(1),
+                result_id: test_hash(1),
                 share: ShareData {
                     share_value: "s1".to_string(),
                     nonce_binding: "n1".to_string(),
@@ -598,8 +618,8 @@ mod tests {
                 },
             },
             ShareProposal {
-                witness: "w2".to_string(),
-                result_id: "r2".to_string(), // Different result!
+                witness: test_authority(2),
+                result_id: test_hash(2), // Different result!
                 share: ShareData {
                     share_value: "s2".to_string(),
                     nonce_binding: "n2".to_string(),
@@ -616,33 +636,33 @@ mod tests {
     fn test_detect_equivocators() {
         let votes = vec![
             Vote {
-                witness: "w1".to_string(),
-                result_id: "r1".to_string(),
-                prestate_hash: "h1".to_string(),
+                witness: test_authority(1),
+                result_id: test_hash(1),
+                prestate_hash: test_hash(9),
             },
             Vote {
-                witness: "w1".to_string(),
-                result_id: "r2".to_string(), // Equivocation!
-                prestate_hash: "h1".to_string(),
+                witness: test_authority(1),
+                result_id: test_hash(2), // Equivocation!
+                prestate_hash: test_hash(9),
             },
             Vote {
-                witness: "w2".to_string(),
-                result_id: "r1".to_string(),
-                prestate_hash: "h1".to_string(),
+                witness: test_authority(2),
+                result_id: test_hash(1),
+                prestate_hash: test_hash(9),
             },
         ];
 
         let equivocators = detect_equivocators_ref(&votes);
-        assert!(equivocators.contains("w1"));
-        assert!(!equivocators.contains("w2"));
+        assert!(equivocators.contains(&test_authority(1)));
+        assert!(!equivocators.contains(&test_authority(2)));
     }
 
     #[test]
     fn test_aggregate_shares() {
         let proposals = vec![
             ShareProposal {
-                witness: "w1".to_string(),
-                result_id: "r1".to_string(),
+                witness: test_authority(1),
+                result_id: test_hash(1),
                 share: ShareData {
                     share_value: "s1".to_string(),
                     nonce_binding: "n1".to_string(),
@@ -650,8 +670,8 @@ mod tests {
                 },
             },
             ShareProposal {
-                witness: "w2".to_string(),
-                result_id: "r1".to_string(),
+                witness: test_authority(2),
+                result_id: test_hash(1),
                 share: ShareData {
                     share_value: "s2".to_string(),
                     nonce_binding: "n2".to_string(),
@@ -664,6 +684,6 @@ mod tests {
         assert!(sig.is_some());
         let sig = sig.unwrap();
         assert_eq!(sig.signer_set.len(), 2);
-        assert_eq!(sig.bound_rid, "r1");
+        assert_eq!(sig.bound_rid, test_hash(1));
     }
 }

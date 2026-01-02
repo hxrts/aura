@@ -72,9 +72,7 @@ impl RendezvousManagerConfig {
             descriptor_validity: Duration::from_secs(300),
             auto_cleanup_enabled: true,
             cleanup_interval: Duration::from_secs(10),
-            default_transport_hints: vec![TransportHint::QuicDirect {
-                addr: "127.0.0.1:0".to_string(),
-            }],
+            default_transport_hints: vec![TransportHint::quic_direct("127.0.0.1:0").unwrap()],
             lan_discovery: LanDiscoveryConfig {
                 enabled: false, // Disabled by default in tests
                 ..Default::default()
@@ -882,6 +880,7 @@ mod tests {
     use super::*;
     use aura_core::FlowCost;
     use aura_effects::time::PhysicalTimeHandler;
+    use aura_guards::types::CapabilityId;
     use aura_rendezvous::GuardSnapshot;
 
     fn test_authority() -> AuthorityId {
@@ -902,8 +901,8 @@ mod tests {
             context_id: context,
             flow_budget_remaining: FlowCost::new(1000),
             capabilities: vec![
-                "rendezvous:publish".to_string(),
-                "rendezvous:connect".to_string(),
+                CapabilityId::from("rendezvous:publish"),
+                CapabilityId::from("rendezvous:connect"),
             ],
             epoch: 1,
         }
@@ -949,9 +948,7 @@ mod tests {
         let descriptor = RendezvousDescriptor {
             authority_id: test_peer(),
             context_id: test_context(),
-            transport_hints: vec![TransportHint::QuicDirect {
-                addr: "127.0.0.1:8443".to_string(),
-            }],
+            transport_hints: vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
@@ -980,9 +977,7 @@ mod tests {
         let outcome = manager
             .publish_descriptor(
                 test_context(),
-                Some(vec![TransportHint::QuicDirect {
-                    addr: "127.0.0.1:8443".to_string(),
-                }]),
+                Some(vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()]),
                 1000,
                 &snapshot,
             )

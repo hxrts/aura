@@ -5,7 +5,8 @@
 use super::coordination::SessionOperations;
 use crate::core::AgentResult;
 use crate::handlers::shared::HandlerUtilities;
-use aura_core::identifiers::DeviceId;
+use aura_core::hash;
+use aura_core::identifiers::{DeviceId, SessionId};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -22,15 +23,22 @@ struct SessionMetadataFact {
 }
 
 impl SessionOperations {
+    fn session_id_from_str(session_id: &str) -> SessionId {
+        session_id
+            .parse::<SessionId>()
+            .unwrap_or_else(|_| SessionId::new_from_entropy(hash::hash(session_id.as_bytes())))
+    }
+
     /// Update session metadata
     pub async fn update_session_metadata(
         &self,
         _session_id: &str,
         _metadata: HashMap<String, serde_json::Value>,
     ) -> AgentResult<()> {
+        let session_id_typed = Self::session_id_from_str(_session_id);
         let updated = self
             .session_manager
-            .update_metadata(_session_id, _metadata)
+            .update_metadata(session_id_typed, _metadata)
             .await;
         self.persist_metadata(_session_id, &updated).await?;
         HandlerUtilities::append_relational_fact(
@@ -54,9 +62,10 @@ impl SessionOperations {
         _session_id: &str,
         _device_id: DeviceId,
     ) -> AgentResult<()> {
+        let session_id_typed = Self::session_id_from_str(_session_id);
         let participants = self
             .session_manager
-            .add_participant(_session_id, _device_id)
+            .add_participant(session_id_typed, _device_id)
             .await;
         self.persist_participants(_session_id, &participants)
             .await?;
@@ -81,9 +90,10 @@ impl SessionOperations {
         _session_id: &str,
         _device_id: DeviceId,
     ) -> AgentResult<()> {
+        let session_id_typed = Self::session_id_from_str(_session_id);
         if let Some(participants) = self
             .session_manager
-            .remove_participant(_session_id, _device_id)
+            .remove_participant(session_id_typed, _device_id)
             .await
         {
             self.persist_participants(_session_id, &participants)

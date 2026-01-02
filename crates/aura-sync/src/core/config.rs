@@ -99,13 +99,13 @@ impl RetryConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchConfig {
     /// Default batch size for operations (default: 128)
-    pub default_batch_size: usize,
+    pub default_batch_size: u32,
     /// Maximum operations per synchronization round (default: 1000)
-    pub max_operations_per_round: usize,
+    pub max_operations_per_round: u32,
     /// Enable compression for large batches (default: true)
     pub enable_compression: bool,
     /// Minimum batch size before forcing processing (default: 10)
-    pub min_batch_size: usize,
+    pub min_batch_size: u32,
     /// Maximum time to wait before processing partial batch (default: 5s)
     pub batch_timeout: Duration,
 }
@@ -126,7 +126,7 @@ impl Default for BatchConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerManagementConfig {
     /// Maximum concurrent synchronization sessions (default: 5)
-    pub max_concurrent_syncs: usize,
+    pub max_concurrent_syncs: u32,
     /// Minimum priority threshold for scheduling (default: 10)
     pub min_priority_threshold: u32,
     /// Priority boost for peers with pending operations (default: 20)
@@ -193,7 +193,7 @@ pub struct VerificationConfig {
     /// Timeout for receipt verification (default: 30s)
     pub verification_timeout: Duration,
     /// Required confirmations for verification (default: 2)
-    pub required_confirmations: usize,
+    pub required_confirmations: u32,
     /// Maximum verification attempts (default: 3)
     pub max_verification_attempts: u32,
 }
@@ -216,7 +216,7 @@ pub struct AntiEntropyConfig {
     /// Digest comparison timeout (default: 10s)
     pub digest_timeout: Duration,
     /// Maximum digest entries per message (default: 1000)
-    pub max_digest_entries: usize,
+    pub max_digest_entries: u32,
 }
 
 impl Default for AntiEntropyConfig {
@@ -239,7 +239,7 @@ pub struct PerformanceConfig {
     /// Enable adaptive scheduling based on system load (default: true)
     pub adaptive_scheduling: bool,
     /// Memory limit for batching operations in bytes (default: 100MB)
-    pub memory_limit: usize,
+    pub memory_limit: u64,
 }
 
 impl Default for PerformanceConfig {
@@ -297,7 +297,7 @@ impl SyncConfig {
                 max_cpu_usage: 100, // No limits in tests
                 max_network_bandwidth: u64::MAX,
                 adaptive_scheduling: false, // Predictable behavior
-                memory_limit: usize::MAX,
+                memory_limit: u64::MAX,
             },
             ..Self::default()
         }
@@ -379,11 +379,11 @@ impl SyncConfig {
             parse_f64("AURA_SYNC_RETRY_JITTER", config.retry.jitter_factor);
 
         // Batching
-        config.batching.default_batch_size = parse_usize(
+        config.batching.default_batch_size = parse_u32(
             "AURA_SYNC_DEFAULT_BATCH_SIZE",
             config.batching.default_batch_size,
         );
-        config.batching.max_operations_per_round = parse_usize(
+        config.batching.max_operations_per_round = parse_u32(
             "AURA_SYNC_MAX_OPS_PER_ROUND",
             config.batching.max_operations_per_round,
         );
@@ -392,12 +392,12 @@ impl SyncConfig {
             config.batching.enable_compression,
         );
         config.batching.min_batch_size =
-            parse_usize("AURA_SYNC_MIN_BATCH_SIZE", config.batching.min_batch_size);
+            parse_u32("AURA_SYNC_MIN_BATCH_SIZE", config.batching.min_batch_size);
         config.batching.batch_timeout =
             duration_millis("AURA_SYNC_BATCH_TIMEOUT_MS", config.batching.batch_timeout);
 
         // Peer management
-        config.peer_management.max_concurrent_syncs = parse_usize(
+        config.peer_management.max_concurrent_syncs = parse_u32(
             "AURA_SYNC_MAX_CONCURRENT_SYNCS",
             config.peer_management.max_concurrent_syncs,
         );
@@ -427,7 +427,7 @@ impl SyncConfig {
             "AURA_SYNC_ANTI_ENTROPY_DIGEST_TIMEOUT_SECS",
             config.protocols.anti_entropy.digest_timeout,
         );
-        config.protocols.anti_entropy.max_digest_entries = parse_usize(
+        config.protocols.anti_entropy.max_digest_entries = parse_u32(
             "AURA_SYNC_ANTI_ENTROPY_MAX_DIGEST_ENTRIES",
             config.protocols.anti_entropy.max_digest_entries,
         );
@@ -436,7 +436,7 @@ impl SyncConfig {
             "AURA_SYNC_VERIFICATION_TIMEOUT_SECS",
             config.protocols.verification.verification_timeout,
         );
-        config.protocols.verification.required_confirmations = parse_usize(
+        config.protocols.verification.required_confirmations = parse_u32(
             "AURA_SYNC_VERIFICATION_CONFIRMATIONS",
             config.protocols.verification.required_confirmations,
         );
@@ -477,7 +477,7 @@ impl SyncConfig {
             "AURA_SYNC_ADAPTIVE_SCHEDULING",
             config.performance.adaptive_scheduling,
         );
-        config.performance.memory_limit = parse_usize(
+        config.performance.memory_limit = parse_u64(
             "AURA_SYNC_MEMORY_LIMIT_BYTES",
             config.performance.memory_limit,
         );
@@ -569,12 +569,6 @@ fn parse_u64(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-fn parse_usize(key: &str, default: usize) -> usize {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(default)
-}
 
 fn parse_f64(key: &str, default: f64) -> f64 {
     env::var(key)

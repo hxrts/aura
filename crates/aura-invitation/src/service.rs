@@ -21,9 +21,10 @@ use crate::facts::InvitationFact;
 use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
 };
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
+use aura_guards::types::CapabilityId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error)]
@@ -126,7 +127,7 @@ pub enum InvitationType {
         /// Optional device label
         device_name: Option<String>,
         /// Key-rotation ceremony identifier
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         /// Pending epoch created during prepare
         pending_epoch: u64,
         /// Encrypted/opaque key package for the invited device
@@ -179,7 +180,7 @@ pub enum InvitationStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Invitation {
     /// Unique invitation identifier
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Context for the invitation
     pub context_id: ContextId,
     /// Sender authority
@@ -216,7 +217,7 @@ pub struct InvitationResult {
     /// Whether the action succeeded
     pub success: bool,
     /// Invitation ID affected
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// New status after the action
     pub new_status: Option<InvitationStatus>,
     /// Error message if action failed
@@ -268,11 +269,14 @@ impl InvitationService {
         invitation_type: InvitationType,
         message: Option<String>,
         expires_in_ms: Option<u64>,
-        invitation_id: String,
+        invitation_id: InvitationId,
     ) -> GuardOutcome {
         let policy = InvitationPolicy::for_snapshot(&self.config, snapshot);
         // Check base capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_INVITATION_SEND) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &CapabilityId::from(costs::CAP_INVITATION_SEND),
+        ) {
             return outcome;
         }
 
@@ -286,7 +290,8 @@ impl InvitationService {
             };
 
             if require_check {
-                if let Some(outcome) = check_capability(snapshot, type_cap) {
+                let type_capability = CapabilityId::from(type_cap);
+                if let Some(outcome) = check_capability(snapshot, &type_capability) {
                     return outcome;
                 }
             }
@@ -300,13 +305,13 @@ impl InvitationService {
         // Validate message length
         if let Some(ref msg) = message {
             if (msg.len() as u32) > policy.max_message_length {
-                return GuardOutcome::denied(
+                return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                     InvitationGuardError::MessageTooLong {
                         length: msg.len() as u32,
                         max: policy.max_message_length,
                     }
                     .to_string(),
-                );
+                ));
             }
         }
 
@@ -319,7 +324,7 @@ impl InvitationService {
             invitation_id: invitation_id.clone(),
             sender_id: snapshot.authority_id,
             receiver_id,
-            invitation_type: invitation_type.as_type_string(),
+            invitation_type: invitation_type.clone(),
             sent_at: PhysicalTime {
                 ts_ms: snapshot.now_ms,
                 uncertainty: None,
@@ -360,10 +365,13 @@ impl InvitationService {
     pub fn prepare_accept_invitation(
         &self,
         snapshot: &GuardSnapshot,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_INVITATION_ACCEPT) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &CapabilityId::from(costs::CAP_INVITATION_ACCEPT),
+        ) {
             return outcome;
         }
 
@@ -374,7 +382,7 @@ impl InvitationService {
 
         // Create acceptance fact
         let fact = InvitationFact::Accepted {
-            invitation_id: invitation_id.to_string(),
+            invitation_id: invitation_id.clone(),
             acceptor_id: snapshot.authority_id,
             accepted_at: PhysicalTime {
                 ts_ms: snapshot.now_ms,
@@ -407,10 +415,13 @@ impl InvitationService {
     pub fn prepare_decline_invitation(
         &self,
         snapshot: &GuardSnapshot,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_INVITATION_DECLINE) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &CapabilityId::from(costs::CAP_INVITATION_DECLINE),
+        ) {
             return outcome;
         }
 
@@ -421,7 +432,7 @@ impl InvitationService {
 
         // Create decline fact
         let fact = InvitationFact::Declined {
-            invitation_id: invitation_id.to_string(),
+            invitation_id: invitation_id.clone(),
             decliner_id: snapshot.authority_id,
             declined_at: PhysicalTime {
                 ts_ms: snapshot.now_ms,
@@ -454,10 +465,13 @@ impl InvitationService {
     pub fn prepare_cancel_invitation(
         &self,
         snapshot: &GuardSnapshot,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_INVITATION_CANCEL) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &CapabilityId::from(costs::CAP_INVITATION_CANCEL),
+        ) {
             return outcome;
         }
 
@@ -468,7 +482,7 @@ impl InvitationService {
 
         // Create cancellation fact
         let fact = InvitationFact::Cancelled {
-            invitation_id: invitation_id.to_string(),
+            invitation_id: invitation_id.clone(),
             canceller_id: snapshot.authority_id,
             cancelled_at: PhysicalTime {
                 ts_ms: snapshot.now_ms,
@@ -513,14 +527,14 @@ mod tests {
         ContextId::new_from_entropy([3u8; 32])
     }
 
-    fn full_capabilities() -> Vec<String> {
+    fn full_capabilities() -> Vec<aura_guards::types::CapabilityId> {
         vec![
-            costs::CAP_INVITATION_SEND.to_string(),
-            costs::CAP_INVITATION_ACCEPT.to_string(),
-            costs::CAP_INVITATION_DECLINE.to_string(),
-            costs::CAP_INVITATION_CANCEL.to_string(),
-            costs::CAP_GUARDIAN_INVITE.to_string(),
-            costs::CAP_CHANNEL_INVITE.to_string(),
+            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_SEND),
+            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_ACCEPT),
+            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_DECLINE),
+            aura_guards::types::CapabilityId::from(costs::CAP_INVITATION_CANCEL),
+            aura_guards::types::CapabilityId::from(costs::CAP_GUARDIAN_INVITE),
+            aura_guards::types::CapabilityId::from(costs::CAP_CHANNEL_INVITE),
         ]
     }
 
@@ -552,7 +566,7 @@ mod tests {
             InvitationType::Contact { nickname: None },
             Some("Hello!".to_string()),
             Some(86400000),
-            "inv-123".to_string(),
+            InvitationId::new("inv-123"),
         );
 
         assert!(outcome.is_allowed());
@@ -571,7 +585,7 @@ mod tests {
             InvitationType::Contact { nickname: None },
             None,
             None,
-            "inv-123".to_string(),
+            InvitationId::new("inv-123"),
         );
 
         assert!(outcome.is_denied());
@@ -589,7 +603,7 @@ mod tests {
             InvitationType::Contact { nickname: None },
             None,
             None,
-            "inv-123".to_string(),
+            InvitationId::new("inv-123"),
         );
 
         assert!(outcome.is_denied());
@@ -610,7 +624,7 @@ mod tests {
             InvitationType::Contact { nickname: None },
             Some("This message is way too long for the limit".to_string()),
             None,
-            "inv-123".to_string(),
+            InvitationId::new("inv-123"),
         );
 
         assert!(outcome.is_denied());
@@ -620,8 +634,9 @@ mod tests {
     fn test_prepare_accept_invitation_success() {
         let service = InvitationService::new(test_authority(), InvitationConfig::default());
         let snapshot = test_snapshot();
+        let invitation_id = InvitationId::new("inv-123");
 
-        let outcome = service.prepare_accept_invitation(&snapshot, "inv-123");
+        let outcome = service.prepare_accept_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 3);
@@ -631,8 +646,9 @@ mod tests {
     fn test_prepare_decline_invitation_success() {
         let service = InvitationService::new(test_authority(), InvitationConfig::default());
         let snapshot = test_snapshot();
+        let invitation_id = InvitationId::new("inv-123");
 
-        let outcome = service.prepare_decline_invitation(&snapshot, "inv-123");
+        let outcome = service.prepare_decline_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 3);
@@ -642,8 +658,9 @@ mod tests {
     fn test_prepare_cancel_invitation_success() {
         let service = InvitationService::new(test_authority(), InvitationConfig::default());
         let snapshot = test_snapshot();
+        let invitation_id = InvitationId::new("inv-123");
 
-        let outcome = service.prepare_cancel_invitation(&snapshot, "inv-123");
+        let outcome = service.prepare_cancel_invitation(&snapshot, &invitation_id);
 
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 3);
@@ -674,7 +691,7 @@ mod tests {
     #[test]
     fn test_invitation_is_expired() {
         let inv = Invitation {
-            invitation_id: "inv-123".to_string(),
+            invitation_id: InvitationId::new("inv-123"),
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),
@@ -693,7 +710,7 @@ mod tests {
     #[test]
     fn test_invitation_no_expiry() {
         let inv = Invitation {
-            invitation_id: "inv-123".to_string(),
+            invitation_id: InvitationId::new("inv-123"),
             context_id: test_context(),
             sender_id: test_authority(),
             receiver_id: test_receiver(),

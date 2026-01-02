@@ -137,26 +137,14 @@ pub fn create_failed_proof(
 /// This ensures the configuration is valid before attempting consensus
 /// operations, providing early error detection.
 pub fn validate_config(config: &ConsensusConfig) -> Result<()> {
-    if config.witness_set.is_empty() {
-        return Err(AuraError::invalid(
-            "Consensus requires at least one witness",
-        ));
-    }
-
-    if !config.has_quorum() {
-        return Err(AuraError::invalid(
-            "Consensus threshold exceeds witness set size",
-        ));
-    }
-
     // Validate reasonable timeout bounds
-    if config.timeout_ms > 300000 {
+    if config.timeout_ms.get() > 300000 {
         return Err(AuraError::invalid(
             "Consensus timeout exceeds maximum (5 minutes)",
         ));
     }
 
-    if config.timeout_ms < 1000 {
+    if config.timeout_ms.get() < 1000 {
         return Err(AuraError::invalid(
             "Consensus timeout below minimum (1 second)",
         ));
@@ -246,7 +234,7 @@ mod tests {
             Epoch::from(1),
         )
         .unwrap();
-        config.timeout_ms = 400000;
+        config.timeout_ms = std::num::NonZero::new(400000).unwrap();
         assert!(validate_config(&config).is_err());
 
         // Test timeout too low
@@ -256,7 +244,7 @@ mod tests {
             Epoch::from(1),
         )
         .unwrap();
-        config.timeout_ms = 500;
+        config.timeout_ms = std::num::NonZero::new(500).unwrap();
         assert!(validate_config(&config).is_err());
     }
 

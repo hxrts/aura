@@ -9,7 +9,7 @@ use super::invitation::{
 };
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::DeviceId;
 use std::sync::Arc;
 
@@ -134,7 +134,7 @@ impl InvitationServiceApi {
         initiator_device_id: DeviceId,
         device_id: DeviceId,
         device_name: Option<String>,
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         pending_epoch: u64,
         key_package: Vec<u8>,
         threshold_config: Vec<u8>,
@@ -169,7 +169,7 @@ impl InvitationServiceApi {
     ///
     /// # Returns
     /// Result of the acceptance
-    pub async fn accept(&self, invitation_id: &str) -> AgentResult<InvitationResult> {
+    pub async fn accept(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
         self.handler
             .accept_invitation(&self.effects, invitation_id)
             .await
@@ -182,7 +182,7 @@ impl InvitationServiceApi {
     ///
     /// # Returns
     /// Result of the decline
-    pub async fn decline(&self, invitation_id: &str) -> AgentResult<InvitationResult> {
+    pub async fn decline(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
         self.handler
             .decline_invitation(&self.effects, invitation_id)
             .await
@@ -195,7 +195,7 @@ impl InvitationServiceApi {
     ///
     /// # Returns
     /// Result of the cancellation
-    pub async fn cancel(&self, invitation_id: &str) -> AgentResult<InvitationResult> {
+    pub async fn cancel(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
         self.handler
             .cancel_invitation(&self.effects, invitation_id)
             .await
@@ -216,7 +216,7 @@ impl InvitationServiceApi {
     ///
     /// # Returns
     /// The invitation if found
-    pub async fn get(&self, invitation_id: &str) -> Option<Invitation> {
+    pub async fn get(&self, invitation_id: &InvitationId) -> Option<Invitation> {
         self.handler.get_invitation(invitation_id).await
     }
 
@@ -227,7 +227,7 @@ impl InvitationServiceApi {
     ///
     /// # Returns
     /// True if the invitation exists and is pending
-    pub async fn is_pending(&self, invitation_id: &str) -> bool {
+    pub async fn is_pending(&self, invitation_id: &InvitationId) -> bool {
         self.handler
             .get_invitation(invitation_id)
             .await
@@ -270,7 +270,7 @@ impl InvitationServiceApi {
     ///
     /// # Errors
     /// Returns an error if the invitation is not found
-    pub async fn export_code(&self, invitation_id: &str) -> AgentResult<String> {
+    pub async fn export_code(&self, invitation_id: &InvitationId) -> AgentResult<String> {
         let invitation = self
             .handler
             .get_invitation_with_storage(&self.effects, invitation_id)
@@ -349,7 +349,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(invitation.invitation_id.starts_with("inv-"));
+        assert!(invitation.invitation_id.as_str().starts_with("inv-"));
         assert_eq!(invitation.receiver_id, receiver_id);
         assert_eq!(invitation.status, InvitationStatus::Pending);
     }
@@ -372,7 +372,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(invitation.invitation_id.starts_with("inv-"));
+        assert!(invitation.invitation_id.as_str().starts_with("inv-"));
         assert!(invitation.expires_at.is_some());
     }
 
@@ -389,7 +389,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(invitation.invitation_id.starts_with("inv-"));
+        assert!(invitation.invitation_id.as_str().starts_with("inv-"));
     }
 
     #[tokio::test]

@@ -4,7 +4,7 @@
 //! Delegates to `RecoveryViewReducer` from the `aura-recovery` crate.
 
 use crate::reactive::scheduler::ViewReduction;
-use aura_composition::{downcast_delta, ViewDeltaReducer};
+use aura_composition::{downcast_delta, ViewDelta, ViewDeltaReducer};
 use aura_core::identifiers::AuthorityId;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_recovery::{RecoveryDelta, RecoveryViewReducer, RECOVERY_FACT_TYPE_ID};
@@ -14,13 +14,20 @@ use aura_recovery::{RecoveryDelta, RecoveryViewReducer, RECOVERY_FACT_TYPE_ID};
 /// Delegates to `RecoveryViewReducer` from `aura-recovery` crate.
 pub struct RecoveryReduction;
 
+fn downcast_recovery_deltas(view_deltas: Vec<ViewDelta>) -> Vec<RecoveryDelta> {
+    view_deltas
+        .into_iter()
+        .filter_map(|vd| downcast_delta::<RecoveryDelta>(&vd).cloned())
+        .collect()
+}
+
 impl ViewReduction<RecoveryDelta> for RecoveryReduction {
     fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<RecoveryDelta> {
         let reducer = RecoveryViewReducer;
 
         facts
             .iter()
-            .filter_map(|fact| match &fact.content {
+            .flat_map(|fact| match &fact.content {
                 FactContent::Relational(RelationalFact::Generic {
                     binding_type,
                     binding_data,
@@ -29,12 +36,9 @@ impl ViewReduction<RecoveryDelta> for RecoveryReduction {
                     // Use the domain reducer and downcast back to RecoveryDelta
                     let view_deltas =
                         reducer.reduce_fact(binding_type, binding_data, own_authority);
-                    view_deltas
-                        .into_iter()
-                        .filter_map(|vd| downcast_delta::<RecoveryDelta>(&vd).cloned())
-                        .next()
+                    downcast_recovery_deltas(view_deltas)
                 }
-                _ => None,
+                _ => Vec::new(),
             })
             .collect()
     }
@@ -43,6 +47,7 @@ impl ViewReduction<RecoveryDelta> for RecoveryReduction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_composition::IntoViewDelta;
     use aura_core::identifiers::{AuthorityId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_journal::DomainFact;
@@ -93,5 +98,26 @@ mod tests {
             &deltas[0],
             RecoveryDelta::GuardianSetupStarted { .. }
         ));
+    }
+
+    #[test]
+    fn test_downcast_preserves_all_deltas() {
+        let view_deltas = vec![
+            RecoveryDelta::GuardianSetupStarted {
+                guardian_count: 2,
+                threshold: 1,
+                started_at: 10,
+            }
+            .into_view_delta(),
+            RecoveryDelta::GuardianResponded {
+                guardian_id: "guardian".to_string(),
+                accepted: true,
+                responded_at: 11,
+            }
+            .into_view_delta(),
+        ];
+
+        let deltas = downcast_recovery_deltas(view_deltas);
+        assert_eq!(deltas.len(), 2);
     }
 }

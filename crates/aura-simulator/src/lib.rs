@@ -111,9 +111,6 @@ pub mod effects;
 // Simulation handlers
 pub mod handlers;
 
-// Compatibility module for legacy handlers
-pub mod compat;
-
 // AMP scenario helpers
 pub mod amp;
 
@@ -153,9 +150,6 @@ pub use handlers::{
 
 // Re-export testkit bridge
 pub use testkit_bridge::{MiddlewareConfig as HandlerConfig, TestkitSimulatorBridge};
-
-// Legacy compatibility re-exports (deprecated - use pure effect handlers instead)
-pub use compat::{PerformanceMetrics, SimulatorHandler};
 
 // Re-export scenario types for convenience
 pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};

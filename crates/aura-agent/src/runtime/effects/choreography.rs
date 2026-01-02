@@ -3,11 +3,11 @@ use async_trait::async_trait;
 use aura_core::effects::transport::{TransportEnvelope, TransportReceipt};
 use aura_core::effects::{PhysicalTimeEffects, TransportEffects};
 use aura_core::hash::hash;
-use aura_core::{AuthorityId, ContextId, FlowCost};
+use aura_core::{AuthorityId, ContextId, DeviceId, FlowCost};
 use aura_guards::prelude::create_send_guard_op;
 use aura_guards::{GuardOperation, JournalCoupler};
 use aura_protocol::effects::{
-    ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
+    ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, RoleIndex,
     ChoreographyMetrics,
 };
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ impl ChoreographicEffects for AuraEffectSystem {
             )
         };
 
-        let peer = AuthorityId::from_uuid(role.device_id);
+        let peer = AuthorityId::from_uuid(role.device_id.0);
         let kb_units = ((message.len() as u32).saturating_add(1023)) / 1024;
         let flow_cost = DEFAULT_CHOREO_FLOW_COST
             .saturating_add(kb_units.saturating_mul(CHOREO_FLOW_COST_PER_KB));
@@ -87,7 +87,7 @@ impl ChoreographicEffects for AuraEffectSystem {
 
         let envelope = TransportEnvelope {
             destination: peer,
-            source: AuthorityId::from_uuid(current_role.device_id),
+            source: AuthorityId::from_uuid(current_role.device_id.0),
             context: context_id,
             payload: message,
             metadata: HashMap::new(),
@@ -120,7 +120,7 @@ impl ChoreographicEffects for AuraEffectSystem {
 
         let envelope = TransportEffects::receive_envelope_from(
             self,
-            AuthorityId::from_uuid(role.device_id),
+            AuthorityId::from_uuid(role.device_id.0),
             context_id,
         )
         .await
@@ -162,7 +162,10 @@ impl ChoreographicEffects for AuraEffectSystem {
         let state = self.choreography_state.read();
         state
             .current_role
-            .unwrap_or_else(|| ChoreographicRole::new(self.authority_id.0, 0))
+            .unwrap_or_else(|| {
+                let role_index = RoleIndex::new(0).expect("role index");
+                ChoreographicRole::new(DeviceId::from_uuid(self.authority_id.0), role_index)
+            })
     }
 
     fn all_roles(&self) -> Vec<ChoreographicRole> {
@@ -186,7 +189,7 @@ impl ChoreographicEffects for AuraEffectSystem {
         TransportEffects::is_channel_established(
             self,
             context_id,
-            AuthorityId::from_uuid(role.device_id),
+            AuthorityId::from_uuid(role.device_id.0),
         )
         .await
     }
@@ -196,12 +199,16 @@ impl ChoreographicEffects for AuraEffectSystem {
         session_id: uuid::Uuid,
         roles: Vec<ChoreographicRole>,
     ) -> Result<(), ChoreographyError> {
+        let current_device = DeviceId::from_uuid(self.authority_id.0);
         let current_role = roles
             .iter()
-            .find(|role| role.device_id == self.authority_id.0)
+            .find(|role| role.device_id == current_device)
             .copied()
-            .ok_or_else(|| ChoreographyError::RoleNotFound {
-                role: ChoreographicRole::new(self.authority_id.0, 0),
+            .ok_or_else(|| {
+                let role_index = RoleIndex::new(0).expect("role index");
+                ChoreographyError::RoleNotFound {
+                    role: ChoreographicRole::new(current_device, role_index),
+                }
             })?;
 
         let context_id = ContextId::new_from_entropy(hash(session_id.as_bytes()));

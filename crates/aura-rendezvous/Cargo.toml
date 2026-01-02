@@ -14,6 +14,7 @@ aura-macros = { path = "../aura-macros" }
 aura-journal = { path = "../aura-journal" }
 aura-guards = { path = "../aura-guards" }
 aura-social = { path = "../aura-social" }
+aura-mpst = { path = "../aura-mpst" }
 
 # Cryptographic dependencies (ChaCha20-Poly1305 via CryptoEffects)
 curve25519-dalek = { workspace = true }
@@ -41,6 +42,7 @@ base64 = { workspace = true }
 tokio = { workspace = true }
 rand = { workspace = true }
 aura-effects = { path = "../aura-effects" }
+proptest = { workspace = true }
 
 [features]
 default = []

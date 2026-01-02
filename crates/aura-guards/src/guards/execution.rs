@@ -13,6 +13,7 @@ use super::{
     GuardedExecutionResult, ProtocolGuard,
 };
 use crate::authorization::BiscuitAuthorizationBridge;
+use crate::guards::types::CapabilityId;
 use aura_authorization::{AuthorityOp, ResourceScope};
 use aura_core::{types::Epoch, AuraError, AuraResult, FlowBudget, FlowCost};
 use std::future::Future;
@@ -41,17 +42,18 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
 
     // Get authorization bridge from effect system for Biscuit token verification
     // Authorization bridge derived from protocol guard context
+    let operation_id = guard.operation_id.to_string();
     let auth_bridge = BiscuitAuthorizationBridge::for_guard(
         guard.root_public_key,
         guard.authority_id,
-        &guard.operation_id,
+        &operation_id,
     );
     let evaluator = BiscuitGuardEvaluator::new(auth_bridge);
     let mut failed_requirements = Vec::new();
     let mut total_flow_consumed = 0;
     let mut max_delegation_depth: Option<u32> = None;
     let mut context = GuardVerificationContext::new(
-        guard.operation_id.clone(),
+        CapabilityId::from(guard.operation_id.to_string()),
         ResourceScope::Authority {
             authority_id: guard.authority_id,
             operation: AuthorityOp::UpdateTree,
@@ -121,7 +123,7 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
 #[derive(Debug, Clone)]
 pub struct GuardVerificationContext {
     /// The capability being exercised (e.g., "send_message", "execute_operation")
-    pub capability: String,
+    pub capability: CapabilityId,
     /// The resource scope for authorization
     pub resource_scope: ResourceScope,
     /// Flow cost for this operation
@@ -133,13 +135,13 @@ pub struct GuardVerificationContext {
 impl GuardVerificationContext {
     /// Create a new verification context
     pub fn new(
-        capability: impl Into<String>,
+        capability: CapabilityId,
         resource_scope: ResourceScope,
         flow_cost: FlowCost,
         flow_budget: FlowBudget,
     ) -> Self {
         Self {
-            capability: capability.into(),
+            capability,
             resource_scope,
             flow_cost,
             flow_budget,
@@ -201,6 +203,7 @@ where
     Fut: Future<Output = AuraResult<T>>,
 {
     debug!("Starting guarded protocol execution");
+    let operation_id = guard.operation_id.to_string();
 
     // Phase 1: Evaluate capability guards (meet-guarded preconditions)
     // Evaluate capability guards using Biscuit authorization
@@ -215,7 +218,7 @@ where
 
         return Err(AuraError::permission_denied(format!(
             "Operation '{}' blocked: {} capability requirements not satisfied",
-            guard.operation_id,
+            operation_id,
             guard_result.failed_requirements.len()
         )));
     }
@@ -237,7 +240,7 @@ where
                         error!(error = %e, "Failed to apply delta facts");
                         AuraError::internal(format!(
                             "Delta application failed for operation '{}': {}",
-                            guard.operation_id, e
+                            operation_id, e
                         ))
                     })?
             } else {
@@ -249,7 +252,7 @@ where
                 guard.context_id,
                 None,
                 &guard.leakage_budget,
-                &guard.operation_id,
+                &operation_id,
                 guard.observable_by.clone(),
                 effect_system,
             )
@@ -298,7 +301,7 @@ where
                 guard.context_id,
                 None,
                 &guard.leakage_budget,
-                &guard.operation_id,
+                &operation_id,
                 guard.observable_by.clone(),
                 effect_system,
             )
@@ -373,7 +376,7 @@ where
                     guard.context_id,
                     None,
                     &guard.leakage_budget,
-                    &guard.operation_id,
+                    &guard.operation_id.to_string(),
                     guard.observable_by.clone(),
                     effect_system,
                 )

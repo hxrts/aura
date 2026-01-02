@@ -14,24 +14,6 @@ use aura_core::FlowCost;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
-#[derive(Debug)]
-enum RendezvousGuardError {
-    InvalidCommandOrdering { reason: String },
-}
-
-impl std::fmt::Display for RendezvousGuardError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RendezvousGuardError::InvalidCommandOrdering { reason } => write!(
-                f,
-                "Internal error: rendezvous guard command ordering invalid: {reason}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for RendezvousGuardError {}
-
 /// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
 fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -84,13 +66,13 @@ pub struct GuardSnapshot {
     /// Current flow budget remaining
     pub flow_budget_remaining: FlowCost,
     /// Capabilities held by the authority
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<types::CapabilityId>,
     /// Current epoch
     pub epoch: u64,
 }
 
 impl types::CapabilitySnapshot for GuardSnapshot {
-    fn has_capability(&self, cap: &str) -> bool {
+    fn has_capability(&self, cap: &types::CapabilityId) -> bool {
         self.capabilities.iter().any(|c| c == cap)
     }
 }
@@ -330,7 +312,10 @@ impl RendezvousService {
         now_ms: u64,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = types::check_capability(snapshot, guards::CAP_RENDEZVOUS_PUBLISH) {
+        if let Some(outcome) = types::check_capability(
+            snapshot,
+            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH),
+        ) {
             return outcome;
         }
 
@@ -370,12 +355,7 @@ impl RendezvousService {
                 )
             },
         ) {
-            return GuardOutcome::denied(
-                RendezvousGuardError::InvalidCommandOrdering {
-                    reason: reason.to_string(),
-                }
-                .to_string(),
-            );
+            return GuardOutcome::denied(reason);
         }
 
         GuardOutcome::allowed(effects)
@@ -413,7 +393,10 @@ impl RendezvousService {
         peer_descriptor: &RendezvousDescriptor,
     ) -> AuraResult<GuardOutcome> {
         // Check capability
-        if let Some(outcome) = types::check_capability(snapshot, guards::CAP_RENDEZVOUS_CONNECT) {
+        if let Some(outcome) = types::check_capability(
+            snapshot,
+            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
+        ) {
             return Ok(outcome);
         }
 
@@ -474,12 +457,7 @@ impl RendezvousService {
                 )
             },
         ) {
-            return Ok(GuardOutcome::denied(
-                RendezvousGuardError::InvalidCommandOrdering {
-                    reason: reason.to_string(),
-                }
-                .to_string(),
-            ));
+            return Ok(GuardOutcome::denied(reason));
         }
 
         Ok(GuardOutcome::allowed(effects))
@@ -501,7 +479,10 @@ impl RendezvousService {
         psk: &[u8; 32],
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = types::check_capability(snapshot, guards::CAP_RENDEZVOUS_CONNECT) {
+        if let Some(outcome) = types::check_capability(
+            snapshot,
+            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
+        ) {
             return outcome;
         }
 
@@ -513,7 +494,7 @@ impl RendezvousService {
         // Verify PSK commitment
         let expected_commitment = compute_psk_commitment(psk);
         if init_message.psk_commitment != expected_commitment {
-            return GuardOutcome::denied("PSK commitment mismatch");
+            return GuardOutcome::denied(types::GuardViolation::other("PSK commitment mismatch"));
         }
 
         // Generate channel ID
@@ -566,12 +547,7 @@ impl RendezvousService {
                 )
             },
         ) {
-            return GuardOutcome::denied(
-                RendezvousGuardError::InvalidCommandOrdering {
-                    reason: reason.to_string(),
-                }
-                .to_string(),
-            );
+            return GuardOutcome::denied(reason);
         }
 
         GuardOutcome::allowed(effects)
@@ -604,12 +580,17 @@ impl RendezvousService {
         snapshot: &GuardSnapshot,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = types::check_capability(snapshot, guards::CAP_RENDEZVOUS_RELAY) {
+        if let Some(outcome) = types::check_capability(
+            snapshot,
+            &types::CapabilityId::from(guards::CAP_RENDEZVOUS_RELAY),
+        ) {
             return outcome;
         }
 
         // Relay support will be added in Phase 2+
-        GuardOutcome::denied("Relay support not yet implemented")
+        GuardOutcome::denied(types::GuardViolation::other(
+            "Relay support not yet implemented",
+        ))
     }
 }
 
@@ -677,8 +658,8 @@ mod tests {
             context_id: test_context(),
             flow_budget_remaining: FlowCost::new(100),
             capabilities: vec![
-                guards::CAP_RENDEZVOUS_PUBLISH.to_string(),
-                guards::CAP_RENDEZVOUS_CONNECT.to_string(),
+                types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH),
+                types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
             ],
             epoch: 1,
         }
@@ -698,9 +679,7 @@ mod tests {
         let outcome = service.prepare_publish_descriptor(
             &snapshot,
             test_context(),
-            vec![TransportHint::TcpDirect {
-                addr: "127.0.0.1:8080".to_string(),
-            }],
+            vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
             1000,
         );
 
@@ -717,9 +696,7 @@ mod tests {
         let outcome = service.prepare_publish_descriptor(
             &snapshot,
             test_context(),
-            vec![TransportHint::TcpDirect {
-                addr: "127.0.0.1:8080".to_string(),
-            }],
+            vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
             1000,
         );
 
@@ -735,9 +712,7 @@ mod tests {
         let outcome = service.prepare_publish_descriptor(
             &snapshot,
             test_context(),
-            vec![TransportHint::TcpDirect {
-                addr: "127.0.0.1:8080".to_string(),
-            }],
+            vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
             1000,
         );
 

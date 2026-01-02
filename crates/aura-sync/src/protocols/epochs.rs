@@ -4,10 +4,10 @@
 //!
 //! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
-use crate::core::{sync_protocol_error, SyncError};
+use crate::core::sync_protocol_error;
 use aura_core::time::PhysicalTime;
 use aura_core::types::Epoch;
-use aura_core::{ContextId, DeviceId};
+use aura_core::{AuraError, ContextId, DeviceId};
 // Note: aura-sync intentionally avoids aura-macros for semantic independence
 // use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
@@ -163,7 +163,7 @@ impl EpochRotationCoordinator {
         participants: Vec<DeviceId>,
         _context_id: ContextId,
         now: &PhysicalTime,
-    ) -> Result<String, SyncError> {
+    ) -> Result<String, AuraError> {
         if participants.len() < self.epoch_config.rotation_threshold {
             return Err(sync_protocol_error(
                 "epochs",
@@ -197,7 +197,7 @@ impl EpochRotationCoordinator {
     pub fn process_confirmation(
         &mut self,
         confirmation: EpochConfirmation,
-    ) -> Result<bool, SyncError> {
+    ) -> Result<bool, AuraError> {
         let rotation = self
             .pending_rotations
             .get_mut(&confirmation.rotation_id)
@@ -235,11 +235,11 @@ impl EpochRotationCoordinator {
     }
 
     /// Commit epoch rotation
-    pub fn commit_rotation(&mut self, rotation_id: &str) -> Result<Epoch, SyncError> {
+    pub fn commit_rotation(&mut self, rotation_id: &str) -> Result<Epoch, AuraError> {
         let rotation = self
             .pending_rotations
             .get_mut(rotation_id)
-            .ok_or_else(|| SyncError::not_found(format!("Rotation not found: {rotation_id}")))?;
+            .ok_or_else(|| AuraError::not_found(format!("Rotation not found: {rotation_id}")))?;
 
         if rotation.status != RotationStatus::Synchronizing {
             return Err(sync_protocol_error(

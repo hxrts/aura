@@ -16,8 +16,42 @@ use aura_core::Result;
 use serde_json::{json, Value};
 
 use super::super::state::{
-    ConsensusPhase, ConsensusState, PathSelection, PureCommitFact, ShareData, ShareProposal,
+    ConsensusPhase, ConsensusState, ConsensusThreshold, PathSelection, PureCommitFact, ShareData,
+    ShareProposal,
 };
+use crate::types::ConsensusId;
+use aura_core::{hash, AuthorityId, Hash32, OperationId};
+use std::str::FromStr;
+
+fn parse_hash32(value: &str) -> Result<Hash32> {
+    if value.len() == 64 {
+        return Hash32::from_hex(value)
+            .map_err(|e| aura_core::AuraError::invalid(format!("invalid Hash32: {e}")));
+    }
+    Ok(Hash32::from_bytes(value.as_bytes()))
+}
+
+fn parse_consensus_id(value: &str) -> Result<ConsensusId> {
+    let raw = value.strip_prefix("consensus:").unwrap_or(value);
+    if raw.len() == 64 {
+        let hash = Hash32::from_hex(raw)
+            .map_err(|e| aura_core::AuraError::invalid(format!("invalid ConsensusId: {e}")))?;
+        return Ok(ConsensusId(hash));
+    }
+    Ok(ConsensusId(Hash32::from_bytes(raw.as_bytes())))
+}
+
+fn parse_authority_id(value: &str) -> Result<AuthorityId> {
+    AuthorityId::from_str(value).or_else(|_| {
+        Ok(AuthorityId::new_from_entropy(hash::hash(value.as_bytes())))
+    })
+}
+
+fn parse_operation_id(value: &str) -> Result<OperationId> {
+    OperationId::from_str(value).or_else(|_| {
+        Ok(OperationId::new_from_entropy(hash::hash(value.as_bytes())))
+    })
+}
 
 impl QuintMappable for ConsensusPhase {
     fn to_quint(&self) -> Value {
@@ -144,8 +178,8 @@ impl QuintMappable for ShareProposal {
     fn to_quint(&self) -> Value {
         // Quint: type ShareProposal = { witness: AuthorityId, resultId: ResultId, prestateHash: PrestateHash, share: ShareData }
         json!({
-            "witness": self.witness,
-            "resultId": self.result_id,
+            "witness": self.witness.to_string(),
+            "resultId": self.result_id.to_hex(),
             "prestateHash": "", // Pure model doesn't track this separately
             "share": self.share.to_quint()
         })
@@ -159,14 +193,14 @@ impl QuintMappable for ShareProposal {
         let witness = obj
             .get("witness")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing witness"))?
-            .to_string();
+            .ok_or_else(|| aura_core::AuraError::invalid("missing witness"))?;
+        let witness = parse_authority_id(witness)?;
 
         let result_id = obj
             .get("resultId")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing resultId"))?
-            .to_string();
+            .ok_or_else(|| aura_core::AuraError::invalid("missing resultId"))?;
+        let result_id = parse_hash32(result_id)?;
 
         let share_value = obj
             .get("share")
@@ -189,14 +223,14 @@ impl QuintMappable for PureCommitFact {
     fn to_quint(&self) -> Value {
         // Quint: type CommitFact = { cid: ConsensusId, rid: ResultId, prestateHash: PrestateHash, signature: ThresholdSignature, attesters: Set[AuthorityId] }
         json!({
-            "cid": self.cid,
-            "rid": self.result_id,
-            "prestateHash": self.prestate_hash,
+            "cid": self.cid.0.to_hex(),
+            "rid": self.result_id.to_hex(),
+            "prestateHash": self.prestate_hash.to_hex(),
             "signature": {
                 "sigValue": self.signature,
-                "boundCid": self.cid,
-                "boundRid": self.result_id,
-                "boundPHash": self.prestate_hash,
+                "boundCid": self.cid.0.to_hex(),
+                "boundRid": self.result_id.to_hex(),
+                "boundPHash": self.prestate_hash.to_hex(),
                 "signerSet": []  // Simplified in pure model
             },
             "attesters": []  // Simplified in pure model
@@ -211,20 +245,20 @@ impl QuintMappable for PureCommitFact {
         let cid = obj
             .get("cid")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing cid"))?
-            .to_string();
+            .ok_or_else(|| aura_core::AuraError::invalid("missing cid"))?;
+        let cid = parse_consensus_id(cid)?;
 
         let result_id = obj
             .get("rid")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing rid"))?
-            .to_string();
+            .ok_or_else(|| aura_core::AuraError::invalid("missing rid"))?;
+        let result_id = parse_hash32(result_id)?;
 
         let prestate_hash = obj
             .get("prestateHash")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing prestateHash"))?
-            .to_string();
+            .ok_or_else(|| aura_core::AuraError::invalid("missing prestateHash"))?;
+        let prestate_hash = parse_hash32(prestate_hash)?;
 
         // Extract signature from nested object
         let signature = if let Some(sig_obj) = obj.get("signature").and_then(|v| v.as_object()) {
@@ -263,12 +297,12 @@ impl QuintMappable for ConsensusState {
         };
 
         json!({
-            "cid": self.cid,
-            "operation": self.operation,
-            "prestateHash": self.prestate_hash,
-            "threshold": self.threshold,
+            "cid": self.cid.0.to_hex(),
+            "operation": self.operation.to_string(),
+            "prestateHash": self.prestate_hash.to_hex(),
+            "threshold": self.threshold.get(),
             "witnesses": witnesses,
-            "initiator": self.initiator,
+            "initiator": self.initiator.to_string(),
             "phase": self.phase.to_quint(),
             "proposals": proposals,
             "commitFact": commit_fact,
@@ -285,40 +319,47 @@ impl QuintMappable for ConsensusState {
         let cid = obj
             .get("cid")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing cid"))?
-            .to_string();
+            .ok_or_else(|| aura_core::AuraError::invalid("missing cid"))?;
+        let cid = parse_consensus_id(cid)?;
 
         let operation = obj
             .get("operation")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing operation"))?
-            .to_string();
+            .ok_or_else(|| aura_core::AuraError::invalid("missing operation"))?;
+        let operation = parse_operation_id(operation)?;
 
         let prestate_hash = obj
             .get("prestateHash")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing prestateHash"))?
-            .to_string();
+            .ok_or_else(|| aura_core::AuraError::invalid("missing prestateHash"))?;
+        let prestate_hash = parse_hash32(prestate_hash)?;
 
-        let threshold = obj
+        let threshold_value = obj
             .get("threshold")
             .and_then(|v| v.as_u64())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing threshold"))?
-            as usize;
+            .ok_or_else(|| aura_core::AuraError::invalid("missing threshold"))?;
+        let threshold_value = u16::try_from(threshold_value).map_err(|_| {
+            aura_core::AuraError::invalid("threshold must fit in u16")
+        })?;
+        let threshold = ConsensusThreshold::new(threshold_value).ok_or_else(|| {
+            aura_core::AuraError::invalid("threshold must be >= 1")
+        })?;
 
-        let witnesses: std::collections::BTreeSet<String> = obj
+        let witnesses: std::collections::BTreeSet<AuthorityId> = obj
             .get("witnesses")
             .and_then(|v| v.as_array())
             .ok_or_else(|| aura_core::AuraError::invalid("missing witnesses"))?
             .iter()
-            .filter_map(|v| v.as_str().map(String::from))
+            .filter_map(|v| v.as_str())
+            .map(parse_authority_id)
+            .collect::<Result<_>>()?;
             .collect();
 
         let initiator = obj
             .get("initiator")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| aura_core::AuraError::invalid("missing initiator"))?
-            .to_string();
+            .ok_or_else(|| aura_core::AuraError::invalid("missing initiator"))?;
+        let initiator = parse_authority_id(initiator)?;
 
         let phase_value = obj
             .get("phase")
@@ -352,13 +393,14 @@ impl QuintMappable for ConsensusState {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let equivocators: std::collections::BTreeSet<String> = obj
+        let equivocators: std::collections::BTreeSet<AuthorityId> = obj
             .get("equivocators")
             .and_then(|v| v.as_array())
             .unwrap_or(&vec![])
             .iter()
-            .filter_map(|v| v.as_str().map(String::from))
-            .collect();
+            .filter_map(|v| v.as_str())
+            .map(parse_authority_id)
+            .collect::<Result<_>>()?;
 
         Ok(ConsensusState {
             cid,
@@ -384,6 +426,22 @@ impl QuintMappable for ConsensusState {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_hash(seed: u8) -> Hash32 {
+        Hash32::new([seed; 32])
+    }
+
+    fn test_consensus_id(seed: u8) -> ConsensusId {
+        ConsensusId(Hash32::new([seed; 32]))
+    }
+
+    fn test_operation(seed: u8) -> OperationId {
+        OperationId::new_from_entropy([seed; 32])
+    }
 
     #[test]
     fn test_consensus_phase_roundtrip() {
@@ -430,8 +488,8 @@ mod tests {
     #[test]
     fn test_share_proposal_roundtrip() {
         let proposal = ShareProposal {
-            witness: "w1".to_string(),
-            result_id: "rid1".to_string(),
+            witness: test_authority(1),
+            result_id: test_hash(9),
             share: ShareData {
                 share_value: "share".to_string(),
                 nonce_binding: "nonce".to_string(),
@@ -448,10 +506,10 @@ mod tests {
     #[test]
     fn test_commit_fact_roundtrip() {
         let cf = PureCommitFact {
-            cid: "cns1".to_string(),
-            result_id: "rid1".to_string(),
+            cid: test_consensus_id(1),
+            result_id: test_hash(9),
             signature: "sig".to_string(),
-            prestate_hash: "pre123".to_string(),
+            prestate_hash: test_hash(3),
         };
 
         let quint = cf.to_quint();
@@ -464,17 +522,17 @@ mod tests {
     #[test]
     fn test_consensus_state_roundtrip() {
         let mut witnesses = BTreeSet::new();
-        witnesses.insert("w1".to_string());
-        witnesses.insert("w2".to_string());
-        witnesses.insert("w3".to_string());
+        witnesses.insert(test_authority(1));
+        witnesses.insert(test_authority(2));
+        witnesses.insert(test_authority(3));
 
         let state = ConsensusState {
-            cid: "cns1".to_string(),
-            operation: "update_policy".to_string(),
-            prestate_hash: "pre123".to_string(),
-            threshold: 2,
+            cid: test_consensus_id(1),
+            operation: test_operation(2),
+            prestate_hash: test_hash(3),
+            threshold: ConsensusThreshold::new(2).expect("threshold"),
             witnesses,
-            initiator: "w1".to_string(),
+            initiator: test_authority(1),
             phase: ConsensusPhase::FastPathActive,
             proposals: vec![],
             commit_fact: None,
@@ -496,23 +554,23 @@ mod tests {
     #[test]
     fn test_consensus_state_with_commit_fact() {
         let mut witnesses = BTreeSet::new();
-        witnesses.insert("w1".to_string());
-        witnesses.insert("w2".to_string());
+        witnesses.insert(test_authority(1));
+        witnesses.insert(test_authority(2));
 
         let state = ConsensusState {
-            cid: "cns1".to_string(),
-            operation: "op".to_string(),
-            prestate_hash: "pre".to_string(),
-            threshold: 2,
+            cid: test_consensus_id(1),
+            operation: test_operation(2),
+            prestate_hash: test_hash(3),
+            threshold: ConsensusThreshold::new(2).expect("threshold"),
             witnesses,
-            initiator: "w1".to_string(),
+            initiator: test_authority(1),
             phase: ConsensusPhase::Committed,
             proposals: vec![],
             commit_fact: Some(PureCommitFact {
-                cid: "cns1".to_string(),
-                result_id: "rid1".to_string(),
+                cid: test_consensus_id(1),
+                result_id: test_hash(9),
                 signature: "sig".to_string(),
-                prestate_hash: "pre".to_string(),
+                prestate_hash: test_hash(3),
             }),
             fallback_timer_active: false,
             equivocators: BTreeSet::new(),

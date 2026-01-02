@@ -697,7 +697,7 @@ async fn test_accept_invitation_propagates_to_signals() {
     // Accept the invitation
     let result = ctx
         .dispatch(EffectCommand::AcceptInvitation {
-            invitation_id: alice_invitation.invitation_id.clone(),
+            invitation_id: alice_invitation.invitation_id.to_string(),
         })
         .await;
 
@@ -760,7 +760,7 @@ async fn test_decline_invitation_propagates_to_signal() {
     // Decline Bob's invitation
     let result = ctx
         .dispatch(EffectCommand::DeclineInvitation {
-            invitation_id: bob_invitation.invitation_id.clone(),
+            invitation_id: bob_invitation.invitation_id.to_string(),
         })
         .await;
 

@@ -14,6 +14,8 @@
 //! - Threshold arithmetic correctness
 
 use aura_consensus::core::state::{ShareData, ShareProposal};
+use aura_consensus::types::ConsensusId;
+use aura_core::{hash, AuthorityId, Hash32};
 use aura_testkit::consensus::{detect_equivocators_ref, merge_evidence_ref, Evidence, Vote};
 use proptest::prelude::*;
 use std::collections::HashSet;
@@ -63,15 +65,15 @@ proptest! {
         prestate_hash in "h[a-f0-9]{4}",
     ) {
         let vote1 = Vote {
-            witness: witness.clone(),
-            result_id: result_id.clone(),
-            prestate_hash: prestate_hash.clone(),
+            witness: authority_from_label(&witness),
+            result_id: hash_from_label(&result_id),
+            prestate_hash: hash_from_label(&prestate_hash),
         };
 
         let vote2 = Vote {
-            witness,
-            result_id,
-            prestate_hash,
+            witness: authority_from_label(&witness),
+            result_id: hash_from_label(&result_id),
+            prestate_hash: hash_from_label(&prestate_hash),
         };
 
         prop_assert_eq!(vote1, vote2);
@@ -85,27 +87,27 @@ proptest! {
 /// Generate a random evidence structure with unique equivocators
 fn arb_evidence() -> impl Strategy<Value = Evidence> {
     (
-        "cns[0-9]{1,2}",
+        arb_consensus_id(),
         prop::collection::vec(arb_vote(), 0..5),
-        prop::collection::hash_set("[a-z]{2,4}", 0..3),
+        prop::collection::hash_set("[a-z]{2,4}", 0..3)
+            .prop_map(|set| set.into_iter().map(|w| authority_from_label(&w)).collect()),
     )
         .prop_map(|(consensus_id, votes, equivocators)| Evidence {
             consensus_id,
             votes,
-            equivocators: equivocators.into_iter().collect(),
+            equivocators,
             commit_fact: None,
         })
 }
 
 /// Generate a random vote
 fn arb_vote() -> impl Strategy<Value = Vote> {
-    ("[a-z]{2,4}", "r[0-9]{1,2}", "h[a-f0-9]{4}").prop_map(|(witness, result_id, prestate_hash)| {
-        Vote {
-            witness,
-            result_id,
-            prestate_hash,
-        }
-    })
+    ("[a-z]{2,4}", "r[0-9]{1,2}", "h[a-f0-9]{4}")
+        .prop_map(|(witness, result_id, prestate_hash)| Vote {
+            witness: authority_from_label(&witness),
+            result_id: hash_from_label(&result_id),
+            prestate_hash: hash_from_label(&prestate_hash),
+        })
 }
 
 proptest! {
@@ -199,9 +201,9 @@ proptest! {
         use aura_consensus::core::state::PureCommitFact;
         e1.commit_fact = Some(PureCommitFact {
             cid: e1.consensus_id.clone(),
-            result_id: "r1".to_string(),
+            result_id: hash_from_label("r1"),
             signature: "sig".to_string(),
-            prestate_hash: "h1".to_string(),
+            prestate_hash: hash_from_label("h1"),
         });
 
         let merged = merge_evidence_ref(&e1, &e2);
@@ -227,12 +229,12 @@ proptest! {
 
         let proposals: Vec<ShareProposal> = (0..count)
             .map(|i| ShareProposal {
-                witness: format!("w{i}"),
-                result_id: "r1".to_string(),
+                witness: authority_from_label(&format!("w{i}")),
+                result_id: hash_from_label("r1"),
                 share: ShareData {
                     share_value: format!("s{i}"),
                     nonce_binding: format!("n{i}"),
-                    data_binding: "cns:r1:h1".to_string(),
+                    data_binding: format!("cns:{}:{}", hash_from_label("r1"), hash_from_label("h1")),
                 },
             })
             .collect();
@@ -263,23 +265,26 @@ proptest! {
         witnesses in prop::collection::hash_set("[a-z]{2,4}", 1..5),
     ) {
         // Convert to vec for indexed access (order doesn't matter for this test)
-        let witnesses: Vec<_> = witnesses.into_iter().collect();
+        let witnesses: Vec<_> = witnesses
+            .into_iter()
+            .map(|w| authority_from_label(&w))
+            .collect();
 
         // Create votes where first witness equivocates
         let mut votes = Vec::new();
         for (i, w) in witnesses.iter().enumerate() {
             votes.push(Vote {
-                witness: w.clone(),
-                result_id: "r1".to_string(),
-                prestate_hash: "h1".to_string(),
+                witness: *w,
+                result_id: hash_from_label("r1"),
+                prestate_hash: hash_from_label("h1"),
             });
 
             // First witness votes for different result (equivocation)
             if i == 0 {
                 votes.push(Vote {
-                    witness: w.clone(),
-                    result_id: "r2".to_string(), // Different!
-                    prestate_hash: "h1".to_string(),
+                    witness: *w,
+                    result_id: hash_from_label("r2"), // Different!
+                    prestate_hash: hash_from_label("h1"),
                 });
             }
         }
@@ -307,31 +312,32 @@ proptest! {
         n_equivocators in 1usize..4,
     ) {
         let mut votes = Vec::new();
-        let mut expected_equivocators: HashSet<String> = HashSet::new();
+        let mut expected_equivocators: HashSet<AuthorityId> = HashSet::new();
 
         // Honest witnesses: one vote each
         for i in 0..n_honest {
             votes.push(Vote {
-                witness: format!("honest_{i}"),
-                result_id: "r1".to_string(),
-                prestate_hash: "h1".to_string(),
+                witness: authority_from_label(&format!("honest_{i}")),
+                result_id: hash_from_label("r1"),
+                prestate_hash: hash_from_label("h1"),
             });
         }
 
         // Equivocating witnesses: two conflicting votes each
         for i in 0..n_equivocators {
             let name = format!("equivocator_{i}");
-            expected_equivocators.insert(name.clone());
+            let authority = authority_from_label(&name);
+            expected_equivocators.insert(authority);
 
             votes.push(Vote {
-                witness: name.clone(),
-                result_id: "r1".to_string(),
-                prestate_hash: "h1".to_string(),
+                witness: authority,
+                result_id: hash_from_label("r1"),
+                prestate_hash: hash_from_label("h1"),
             });
             votes.push(Vote {
-                witness: name,
-                result_id: "r2".to_string(), // Different!
-                prestate_hash: "h1".to_string(),
+                witness: authority,
+                result_id: hash_from_label("r2"), // Different!
+                prestate_hash: hash_from_label("h1"),
             });
         }
 
@@ -344,9 +350,11 @@ proptest! {
 
         // No honest witnesses should be detected
         for i in 0..n_honest {
-            let name = format!("honest_{i}");
-            prop_assert!(!detected.contains(&name),
-                "Honest witness falsely detected: {name}");
+            let authority = authority_from_label(&format!("honest_{i}"));
+            prop_assert!(
+                !detected.contains(&authority),
+                "Honest witness falsely detected: {authority}"
+            );
         }
     }
 }
@@ -358,14 +366,14 @@ proptest! {
 #[test]
 fn test_empty_evidence_merge() {
     let e1 = Evidence {
-        consensus_id: "cns1".to_string(),
+        consensus_id: consensus_id_from_label("cns1"),
         votes: vec![],
         equivocators: vec![],
         commit_fact: None,
     };
 
     let e2 = Evidence {
-        consensus_id: "cns1".to_string(),
+        consensus_id: consensus_id_from_label("cns1"),
         votes: vec![],
         equivocators: vec![],
         commit_fact: None,
@@ -380,22 +388,22 @@ fn test_empty_evidence_merge() {
 #[test]
 fn test_different_cid_merge_is_identity() {
     let e1 = Evidence {
-        consensus_id: "cns1".to_string(),
+        consensus_id: consensus_id_from_label("cns1"),
         votes: vec![Vote {
-            witness: "w1".to_string(),
-            result_id: "r1".to_string(),
-            prestate_hash: "h1".to_string(),
+            witness: authority_from_label("w1"),
+            result_id: hash_from_label("r1"),
+            prestate_hash: hash_from_label("h1"),
         }],
         equivocators: vec![],
         commit_fact: None,
     };
 
     let e2 = Evidence {
-        consensus_id: "cns2".to_string(), // Different!
+        consensus_id: consensus_id_from_label("cns2"), // Different!
         votes: vec![Vote {
-            witness: "w2".to_string(),
-            result_id: "r1".to_string(),
-            prestate_hash: "h1".to_string(),
+            witness: authority_from_label("w2"),
+            result_id: hash_from_label("r1"),
+            prestate_hash: hash_from_label("h1"),
         }],
         equivocators: vec![],
         commit_fact: None,
@@ -404,26 +412,44 @@ fn test_different_cid_merge_is_identity() {
     // Per Lean spec: if cid differs, return e1
     let merged = merge_evidence_ref(&e1, &e2);
     assert_eq!(merged.votes.len(), 1);
-    assert_eq!(merged.votes[0].witness, "w1");
+    assert_eq!(merged.votes[0].witness, authority_from_label("w1"));
 }
 
 #[test]
 fn test_no_equivocation_empty_result() {
     let votes = vec![
         Vote {
-            witness: "w1".to_string(),
-            result_id: "r1".to_string(),
-            prestate_hash: "h1".to_string(),
+            witness: authority_from_label("w1"),
+            result_id: hash_from_label("r1"),
+            prestate_hash: hash_from_label("h1"),
         },
         Vote {
-            witness: "w2".to_string(),
-            result_id: "r1".to_string(),
-            prestate_hash: "h1".to_string(),
+            witness: authority_from_label("w2"),
+            result_id: hash_from_label("r1"),
+            prestate_hash: hash_from_label("h1"),
         },
     ];
 
     let equivocators = detect_equivocators_ref(&votes);
     assert!(equivocators.is_empty());
+}
+
+fn authority_from_label(label: &str) -> AuthorityId {
+    AuthorityId::new_from_entropy(hash::hash(label.as_bytes()))
+}
+
+fn hash_from_label(label: &str) -> Hash32 {
+    Hash32::from_bytes(label.as_bytes())
+}
+
+fn consensus_id_from_label(label: &str) -> ConsensusId {
+    ConsensusId(Hash32::from_bytes(label.as_bytes()))
+}
+
+fn arb_consensus_id() -> impl Strategy<Value = ConsensusId> {
+    "cns[0-9]{1,2}"
+        .prop_map(String::from)
+        .prop_map(|label| consensus_id_from_label(&label))
 }
 
 /// Summary test documenting correspondence coverage

@@ -36,6 +36,7 @@ futures = { workspace = true }
 tokio = { workspace = true }
 aura-testkit = { path = "../aura-testkit" }
 aura-agent = { path = "../aura-agent" }
+proptest = { workspace = true }
 
 [lints]
 workspace = true

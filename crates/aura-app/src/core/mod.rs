@@ -7,9 +7,6 @@
 //! - [`StateSnapshot`]: FFI-safe state snapshot
 //! - [`AppConfig`]: Application configuration
 //! - [`IntentError`]: Error types for intent dispatch
-//!
-//! Note: The legacy "string fact" reducer pipeline has been removed. Journal facts are committed
-//! by the runtime and delivered to UIs via typed reactive signals.
 
 mod app;
 mod error;

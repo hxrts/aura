@@ -40,7 +40,7 @@
 //! where protocol operations atomically update both local state and distributed
 //! journal facts using join-semilattice operations.
 
-use super::{GuardEffects, ProtocolGuard};
+use super::{GuardEffects, GuardOperationId, ProtocolGuard};
 use aura_core::{AuraResult, Journal, TimeEffects};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
@@ -55,7 +55,7 @@ use tracing::{debug, error, info, instrument, warn};
 #[derive(Debug)]
 pub struct JournalCoupler {
     /// Journal annotations for operations
-    pub annotations: HashMap<String, JournalAnnotation>,
+    pub annotations: HashMap<GuardOperationId, JournalAnnotation>,
     /// Whether to apply deltas optimistically or pessimistically
     pub optimistic_application: bool,
     /// Maximum retry attempts for journal operations
@@ -144,17 +144,17 @@ impl JournalCoupler {
     /// Add a journal annotation for an operation
     pub fn add_annotation(
         &mut self,
-        operation_id: String,
+        operation_id: impl Into<GuardOperationId>,
         annotation: JournalAnnotation,
     ) -> &mut Self {
-        self.annotations.insert(operation_id, annotation);
+        self.annotations.insert(operation_id.into(), annotation);
         self
     }
 
     /// Add multiple journal annotations
     pub fn add_annotations(
         &mut self,
-        annotations: HashMap<String, JournalAnnotation>,
+        annotations: HashMap<GuardOperationId, JournalAnnotation>,
     ) -> &mut Self {
         self.annotations.extend(annotations);
         self
@@ -171,7 +171,7 @@ impl JournalCoupler {
     #[instrument(skip(self, effect_system, operation), fields(optimistic = self.optimistic_application))]
     pub async fn execute_with_coupling<E, T, F, Fut>(
         &self,
-        operation_id: &str,
+        operation_id: &GuardOperationId,
         effect_system: &mut E,
         operation: F,
     ) -> AuraResult<JournalCouplingResult<T>>
@@ -188,7 +188,7 @@ impl JournalCoupler {
             .await
             .map_err(|e| {
                 warn!(
-                    operation_id = operation_id,
+                    operation_id = %operation_id,
                     error = %e,
                     "Failed to retrieve current journal state, using empty journal"
                 );
@@ -221,7 +221,7 @@ impl JournalCoupler {
     #[instrument(skip(self, effect_system, operation, initial_journal))]
     async fn execute_optimistic<E, T, F, Fut>(
         &self,
-        operation_id: &str,
+        operation_id: &GuardOperationId,
         effect_system: &mut E,
         operation: F,
         initial_journal: Journal,
@@ -244,7 +244,7 @@ impl JournalCoupler {
                 .await
                 .map_err(|e| {
                     error!(
-                        operation_id = operation_id,
+                        operation_id = %operation_id,
                         error = %e,
                         "Failed to persist optimistic journal changes"
                     );
@@ -254,7 +254,7 @@ impl JournalCoupler {
                 })?;
 
             debug!(
-                operation_id = operation_id,
+                operation_id = %operation_id,
                 journal_ops_applied = journal_ops.len(),
                 "Optimistic journal changes persisted, proceeding with operation"
             );
@@ -266,7 +266,7 @@ impl JournalCoupler {
         match execution_result {
             Ok(result) => {
                 info!(
-                    operation_id = operation_id,
+                    operation_id = %operation_id,
                     journal_ops_applied = journal_ops.len(),
                     "Optimistic journal coupling successful"
                 );
@@ -286,7 +286,7 @@ impl JournalCoupler {
             }
             Err(e) => {
                 warn!(
-                    operation_id = operation_id,
+                    operation_id = %operation_id,
                     error = %e,
                     journal_ops_committed = journal_ops.len(),
                     "Operation failed after optimistic journal application - journal changes remain committed (CRDT monotonicity)"
@@ -307,7 +307,7 @@ impl JournalCoupler {
     #[instrument(skip(self, effect_system, operation, initial_journal))]
     async fn execute_pessimistic<E, T, F, Fut>(
         &self,
-        operation_id: &str,
+        operation_id: &GuardOperationId,
         effect_system: &mut E,
         operation: F,
         initial_journal: Journal,
@@ -333,7 +333,7 @@ impl JournalCoupler {
                 .await
                 .map_err(|e| {
                     error!(
-                        operation_id = operation_id,
+                        operation_id = %operation_id,
                         error = %e,
                         "Failed to persist journal changes - operation succeeded but journal not committed"
                     );
@@ -344,14 +344,14 @@ impl JournalCoupler {
                 })?;
 
             debug!(
-                operation_id = operation_id,
+                operation_id = %operation_id,
                 journal_ops_applied = journal_ops.len(),
                 "Journal changes persisted successfully"
             );
         }
 
         info!(
-            operation_id = operation_id,
+            operation_id = %operation_id,
             journal_ops_applied = journal_ops.len(),
             "Pessimistic journal coupling successful"
         );
@@ -373,7 +373,7 @@ impl JournalCoupler {
     /// Apply journal annotations for an operation
     async fn apply_annotations<E: aura_core::effects::JournalEffects + TimeEffects>(
         &self,
-        operation_id: &str,
+        operation_id: &GuardOperationId,
         effect_system: &E,
         initial_journal: &Journal,
     ) -> AuraResult<(Journal, Vec<JournalOperation>)> {
@@ -382,7 +382,7 @@ impl JournalCoupler {
             Some(annotation) => annotation,
             None => {
                 debug!(
-                    operation_id = operation_id,
+                    operation_id = %operation_id,
                     "No journal annotations for operation"
                 );
                 return Ok((initial_journal.clone(), Vec::new()));
@@ -406,7 +406,7 @@ impl JournalCoupler {
                 Err(e) => {
                     if attempt == self.max_retry_attempts - 1 {
                         error!(
-                            operation_id = operation_id,
+                            operation_id = %operation_id,
                             attempt = attempt + 1,
                             error = %e,
                             "Journal annotation application failed after max retries"
@@ -414,7 +414,7 @@ impl JournalCoupler {
                         return Err(e);
                     } else {
                         warn!(
-                            operation_id = operation_id,
+                            operation_id = %operation_id,
                             attempt = attempt + 1,
                             error = %e,
                             "Journal annotation application failed, retrying"
@@ -446,7 +446,7 @@ impl JournalCoupler {
         effect_system: &E,
         receipt: &Option<aura_core::Receipt>,
     ) -> AuraResult<CouplingMetrics> {
-        let operation_id = "send_coupling";
+        let operation_id = GuardOperationId::Custom("send_coupling".to_string());
 
         debug!("Coupling journal operations with send");
 
@@ -458,7 +458,7 @@ impl JournalCoupler {
 
         // Apply any pending annotations for this send operation
         let (updated_journal, applied_ops) = self
-            .apply_annotations(operation_id, effect_system, &current_journal)
+            .apply_annotations(&operation_id, effect_system, &current_journal)
             .await?;
 
         // Persist the updated journal if changes were made
@@ -696,7 +696,11 @@ impl JournalCouplerBuilder {
     }
 
     /// Add a journal annotation
-    pub fn with_annotation(mut self, operation_id: String, annotation: JournalAnnotation) -> Self {
+    pub fn with_annotation(
+        mut self,
+        operation_id: impl Into<GuardOperationId>,
+        annotation: JournalAnnotation,
+    ) -> Self {
         self.coupler.add_annotation(operation_id, annotation);
         self
     }
@@ -736,14 +740,16 @@ mod tests {
             .optimistic()
             .max_retries(5)
             .with_annotation(
-                "test_op".to_string(),
+                GuardOperationId::Custom("test_op".to_string()),
                 JournalAnnotation::add_facts("Test fact addition"),
             )
             .build();
 
         assert!(coupler.optimistic_application);
         assert_eq!(coupler.max_retry_attempts, 5);
-        assert!(coupler.annotations.contains_key("test_op"));
+        assert!(coupler
+            .annotations
+            .contains_key(&GuardOperationId::Custom("test_op".to_string())));
     }
 
     #[aura_test]
@@ -753,9 +759,11 @@ mod tests {
         let coupler = JournalCoupler::new();
 
         let result = coupler
-            .execute_with_coupling("no_annotation_op", &mut effect_system, |_| async {
-                Ok(42u32)
-            })
+            .execute_with_coupling(
+                &GuardOperationId::Custom("no_annotation_op".to_string()),
+                &mut effect_system,
+                |_| async { Ok(42u32) },
+            )
             .await?;
 
         assert_eq!(result.result, 42);
@@ -774,12 +782,17 @@ mod tests {
             JournalOpType::AddFacts,
             Journal::new(), // Empty journal for testing
         );
-        coupler.add_annotation("test_facts_op".to_string(), annotation);
+        coupler.add_annotation(
+            GuardOperationId::Custom("test_facts_op".to_string()),
+            annotation,
+        );
 
         let result = coupler
-            .execute_with_coupling("test_facts_op", &mut effect_system, |_| async {
-                Ok("facts_applied".to_string())
-            })
+            .execute_with_coupling(
+                &GuardOperationId::Custom("test_facts_op".to_string()),
+                &mut effect_system,
+                |_| async { Ok("facts_applied".to_string()) },
+            )
             .await?;
 
         assert_eq!(result.result, "facts_applied");

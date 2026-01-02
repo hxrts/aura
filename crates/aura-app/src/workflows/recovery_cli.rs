@@ -33,7 +33,8 @@ pub const DISPUTE_WINDOW_HOURS_MAX: u64 = 720;
 
 use crate::workflows::journal::{encode_relational_generic, persist_fact_value};
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects, TimeEffects};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::frost::PublicKeyPackage;
+use aura_core::identifiers::{AuthorityId, ContextId, RecoveryId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::{hash, AuraError, FactValue, Hash32};
 use aura_recovery::guardian_key_recovery::GuardianKeyApproval;
@@ -141,11 +142,11 @@ pub async fn initiate_recovery_protocol<
 pub fn build_protocol_request(
     account_authority: AuthorityId,
     commitment: Hash32,
-    new_public_key: Vec<u8>,
+    new_public_key: PublicKeyPackage,
     justification: String,
 ) -> RecoveryRequest {
     RecoveryRequest {
-        recovery_id: account_authority.to_string(),
+        recovery_id: RecoveryId::new(account_authority.to_string()),
         account_authority,
         new_tree_commitment: commitment,
         operation: aura_recovery::recovery_protocol::RecoveryOperation::ReplaceTree {

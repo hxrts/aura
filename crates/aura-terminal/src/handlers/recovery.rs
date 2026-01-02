@@ -16,9 +16,12 @@ use aura_app::ui::workflows::recovery_cli::{
     self, validate_guardian_set, DISPUTE_WINDOW_HOURS_DEFAULT,
 };
 use aura_core::effects::PhysicalTimeEffects;
+use aura_core::frost::PublicKeyPackage;
 use aura_core::hash;
+use aura_core::identifiers::RecoveryId;
 use aura_core::Hash32;
 use aura_effects::StorageCoreEffects;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::handlers::recovery_status;
@@ -126,12 +129,15 @@ async fn start_recovery(
         guardian_set.iter().map(|g| g.authority_id).collect();
 
     // Create recovery request for serialization (terminal-layer type)
+    let new_public_key_bytes = hash::hash(
+        format!("recovery-new-key:{account_authority}").as_bytes(),
+    )
+    .to_vec();
     let recovery_request = RecoveryRequest {
-        recovery_id: format!("recovery-{account_authority}"),
+        recovery_id: RecoveryId::new(format!("recovery-{account_authority}")),
         account_authority,
         operation: RecoveryOperation::ReplaceTree {
-            new_public_key: hash::hash(format!("recovery-new-key:{account_authority}").as_bytes())
-                .to_vec(),
+            new_public_key: new_public_key_bytes.clone(),
         },
         justification: justification
             .unwrap_or("CLI recovery operation")
@@ -148,8 +154,7 @@ async fn start_recovery(
     let commitment = Hash32::new(hash::hash(
         format!("recovery-commitment:{account_authority}").as_bytes(),
     ));
-    let new_public_key =
-        hash::hash(format!("recovery-new-key:{account_authority}").as_bytes()).to_vec();
+    let new_public_key = PublicKeyPackage::new(new_public_key_bytes, BTreeMap::new(), 1, 1);
 
     let recovery_request_protocol = recovery_cli::build_protocol_request(
         account_authority,

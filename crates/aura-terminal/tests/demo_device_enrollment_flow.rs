@@ -103,7 +103,7 @@ async fn setup_test_env() -> TestEnv {
 }
 
 async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
-    let device_id = DeviceId::from(device_id);
+    let device_id = device_id.parse::<DeviceId>().expect("valid device id");
     let start = tokio::time::Instant::now();
     loop {
         let state = {

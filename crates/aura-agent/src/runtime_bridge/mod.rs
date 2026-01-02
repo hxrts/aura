@@ -831,7 +831,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         use aura_core::hash::hash;
         use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
         use aura_recovery::guardian_ceremony::GuardianState;
-        use aura_recovery::{CeremonyId, GuardianRotationOp};
+        use aura_recovery::{CeremonyId as GuardianCeremonyId, GuardianRotationOp};
 
         // Convert String guardian IDs to AuthorityIds for the ceremony protocol
         let all_guardian_authority_ids: Vec<AuthorityId> = guardian_ids
@@ -943,8 +943,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         use std::sync::atomic::{AtomicU64, Ordering};
         static CEREMONY_NONCE: AtomicU64 = AtomicU64::new(0);
         let nonce = CEREMONY_NONCE.fetch_add(1, Ordering::Relaxed);
-        let ceremony_id_hash = CeremonyId::new(prestate_hash, operation_hash, nonce);
-        let ceremony_id = ceremony_id_hash.to_string();
+        let ceremony_id_hash = GuardianCeremonyId::new(prestate_hash, operation_hash, nonce);
+        let ceremony_id =
+            aura_core::identifiers::CeremonyId::new(ceremony_id_hash.to_string());
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -1012,7 +1013,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             "All guardian invitations sent successfully"
         );
 
-        Ok(ceremony_id)
+        Ok(ceremony_id.to_string())
     }
 
     async fn initiate_device_threshold_ceremony(
@@ -1193,7 +1194,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ceremony_seed.extend_from_slice(op_hash.as_bytes());
         ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
         let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
-        let ceremony_id = format!("ceremony:{}", hex::encode(ceremony_hash.as_bytes()));
+        let ceremony_id = aura_core::identifiers::CeremonyId::new(format!(
+            "ceremony:{}",
+            hex::encode(ceremony_hash.as_bytes())
+        ));
 
         let tracker = self.agent.ceremony_tracker().await;
         tracker
@@ -1221,7 +1225,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let mut h = aura_core::hash::hasher();
             h.update(b"DEVICE_THRESHOLD_CONTEXT");
             h.update(&authority_id.to_bytes());
-            h.update(ceremony_id.as_bytes());
+            h.update(ceremony_id.as_str().as_bytes());
             h.finalize()
         };
         let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
@@ -1255,7 +1259,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 "content-type".to_string(),
                 "application/aura-device-threshold-key-package".to_string(),
             );
-            metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+            metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
             metadata.insert(
                 "pending-epoch".to_string(),
                 pending_epoch.value().to_string(),
@@ -1293,7 +1297,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             })?;
         }
 
-        Ok(ceremony_id)
+        Ok(ceremony_id.to_string())
     }
 
     async fn initiate_device_enrollment_ceremony(
@@ -1495,7 +1499,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ceremony_seed.extend_from_slice(op_hash.as_bytes());
         ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
         let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
-        let ceremony_id = format!("ceremony:{}", hex::encode(ceremony_hash.as_bytes()));
+        let ceremony_id = aura_core::identifiers::CeremonyId::new(format!(
+            "ceremony:{}",
+            hex::encode(ceremony_hash.as_bytes())
+        ));
 
         // Register ceremony (acceptance required from all non-initiator devices).
         let acceptor_device_ids: Vec<aura_core::DeviceId> = other_device_ids
@@ -1544,7 +1551,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 let mut h = aura_core::hash::hasher();
                 h.update(b"DEVICE_ENROLLMENT_CONTEXT");
                 h.update(&authority_id.to_bytes());
-                h.update(ceremony_id.as_bytes());
+                h.update(ceremony_id.as_str().as_bytes());
                 h.finalize()
             };
             let ceremony_context =
@@ -1563,7 +1570,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     "content-type".to_string(),
                     "application/aura-device-enrollment-key-package".to_string(),
                 );
-                metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+                metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
                 metadata.insert(
                     "pending-epoch".to_string(),
                     pending_epoch.value().to_string(),
@@ -1629,7 +1636,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let enrollment_code = InvitationServiceApi::export_invitation(&invitation);
 
         Ok(aura_app::runtime_bridge::DeviceEnrollmentStart {
-            ceremony_id,
+            ceremony_id: ceremony_id.to_string(),
             enrollment_code,
             pending_epoch,
             device_id: new_device_id,
@@ -1846,7 +1853,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         ceremony_seed.extend_from_slice(op_hash.as_bytes());
         ceremony_seed.extend_from_slice(&nonce.to_le_bytes());
         let ceremony_hash = aura_core::Hash32(hash(&ceremony_seed));
-        let ceremony_id = format!("ceremony:{}", hex::encode(ceremony_hash.as_bytes()));
+        let ceremony_id = aura_core::identifiers::CeremonyId::new(format!(
+            "ceremony:{}",
+            hex::encode(ceremony_hash.as_bytes())
+        ));
 
         let tracker = self.agent.ceremony_tracker().await;
         tracker
@@ -1884,7 +1894,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let mut h = aura_core::hash::hasher();
             h.update(b"DEVICE_THRESHOLD_CONTEXT");
             h.update(&authority_id.to_bytes());
-            h.update(ceremony_id.as_bytes());
+            h.update(ceremony_id.as_str().as_bytes());
             h.finalize()
         };
         let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
@@ -1906,7 +1916,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 "content-type".to_string(),
                 "application/aura-device-threshold-key-package".to_string(),
             );
-            metadata.insert("ceremony-id".to_string(), ceremony_id.clone());
+            metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
             metadata.insert(
                 "pending-epoch".to_string(),
                 pending_epoch.value().to_string(),
@@ -2008,7 +2018,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let _ = tracker.mark_committed(&ceremony_id).await;
         }
 
-        Ok(ceremony_id)
+        Ok(ceremony_id.to_string())
     }
     async fn get_ceremony_status(
         &self,
@@ -2023,9 +2033,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         let tracker = self.agent.ceremony_tracker().await;
+        let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id.to_string());
 
         let state = tracker
-            .get(ceremony_id)
+            .get(&ceremony_id)
             .await
             .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
 
@@ -2063,8 +2074,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         let tracker = self.agent.ceremony_tracker().await;
+        let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id.to_string());
         let state = tracker
-            .get(ceremony_id)
+            .get(&ceremony_id)
             .await
             .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
 
@@ -2076,7 +2088,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             threshold: state.threshold_k,
             is_complete: state.is_committed,
             has_failed: state.has_failed,
-            accepted_participants: state.accepted_participants,
+            accepted_participants: state.accepted_participants.iter().cloned().collect(),
             error_message: state.error_message,
             pending_epoch: Some(Epoch::new(state.new_epoch)),
             agreement_mode: state.agreement_mode,
@@ -2091,7 +2103,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         let tracker = self.agent.ceremony_tracker().await;
-        let state = tracker.get(ceremony_id).await?;
+        let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id.to_string());
+        let state = tracker.get(&ceremony_id).await?;
 
         // Best-effort: rollback pending epoch if present and not committed.
         if !state.is_committed {
@@ -2100,7 +2113,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         tracker
-            .mark_failed(ceremony_id, Some("Canceled".to_string()))
+            .mark_failed(&ceremony_id, Some("Canceled".to_string()))
             .await?;
 
         Ok(())
@@ -2118,8 +2131,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         // Export the invitation code
+        let invitation_id = aura_core::identifiers::InvitationId::new(invitation_id.to_string());
         invitation_service
-            .export_code(invitation_id)
+            .export_code(&invitation_id)
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to export invitation: {}", e)))
     }
@@ -2196,8 +2210,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
+        let invitation_id = aura_core::identifiers::InvitationId::new(invitation_id.to_string());
         let result = invitation_service
-            .accept(invitation_id)
+            .accept(&invitation_id)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to accept invitation: {}", e))
@@ -2218,8 +2233,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
+        let invitation_id = aura_core::identifiers::InvitationId::new(invitation_id.to_string());
         let result = invitation_service
-            .decline(invitation_id)
+            .decline(&invitation_id)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to decline invitation: {}", e))
@@ -2240,8 +2256,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
+        let invitation_id = aura_core::identifiers::InvitationId::new(invitation_id.to_string());
         let result = invitation_service
-            .cancel(invitation_id)
+            .cancel(&invitation_id)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to cancel invitation: {}", e))

@@ -32,6 +32,8 @@ use aura_consensus::core::{
     state::{ShareData, ShareProposal},
     validation::{is_equivocator, shares_consistent},
 };
+use aura_consensus::types::ConsensusId;
+use aura_core::{hash, AuthorityId, Hash32};
 use aura_testkit::consensus::{
     check_threshold_ref, detect_equivocators_ref, merge_evidence_ref, shares_consistent_ref,
     Evidence, Vote,
@@ -43,7 +45,7 @@ use std::collections::HashSet;
 // ARBITRARY GENERATORS
 // ============================================================================
 
-/// Generate a valid witness ID (alphanumeric, 1-8 chars)
+/// Generate a valid witness label (alphanumeric, 1-8 chars)
 fn arb_witness() -> impl Strategy<Value = String> {
     "[a-z][a-z0-9]{0,7}".prop_map(String::from)
 }
@@ -56,6 +58,28 @@ fn arb_result_id() -> impl Strategy<Value = String> {
 /// Generate a valid prestate hash
 fn arb_prestate_hash() -> impl Strategy<Value = String> {
     "pre_[a-f0-9]{8}".prop_map(String::from)
+}
+
+fn arb_authority() -> impl Strategy<Value = AuthorityId> {
+    arb_witness().prop_map(|w| authority_from_label(&w))
+}
+
+fn arb_consensus_id() -> impl Strategy<Value = ConsensusId> {
+    "cns[0-9]{1,2}"
+        .prop_map(String::from)
+        .prop_map(|label| consensus_id_from_label(&label))
+}
+
+fn authority_from_label(label: &str) -> AuthorityId {
+    AuthorityId::new_from_entropy(hash::hash(label.as_bytes()))
+}
+
+fn hash_from_label(label: &str) -> Hash32 {
+    Hash32::from_bytes(label.as_bytes())
+}
+
+fn consensus_id_from_label(label: &str) -> ConsensusId {
+    ConsensusId(Hash32::from_bytes(label.as_bytes()))
 }
 
 /// Generate share data with a specific binding
@@ -80,8 +104,8 @@ fn arb_share_proposal() -> impl Strategy<Value = ShareProposal> {
     )
         .prop_flat_map(|(witness, result_id, binding)| {
             arb_share_data(binding).prop_map(move |share| ShareProposal {
-                witness: witness.clone(),
-                result_id: result_id.clone(),
+                witness: authority_from_label(&witness),
+                result_id: hash_from_label(&result_id),
                 share,
             })
         })
@@ -91,16 +115,17 @@ fn arb_share_proposal() -> impl Strategy<Value = ShareProposal> {
 fn arb_vote() -> impl Strategy<Value = Vote> {
     (arb_witness(), arb_result_id(), arb_prestate_hash()).prop_map(
         |(witness, result_id, prestate_hash)| Vote {
-            witness,
-            result_id,
-            prestate_hash,
+            witness: authority_from_label(&witness),
+            result_id: hash_from_label(&result_id),
+            prestate_hash: hash_from_label(&prestate_hash),
         },
     )
 }
 
 /// Generate a list of unique witnesses
-fn arb_unique_witnesses(min: usize, max: usize) -> impl Strategy<Value = Vec<String>> {
-    prop::collection::hash_set(arb_witness(), min..=max).prop_map(|set| set.into_iter().collect())
+fn arb_unique_witnesses(min: usize, max: usize) -> impl Strategy<Value = Vec<AuthorityId>> {
+    prop::collection::hash_set(arb_witness(), min..=max)
+        .prop_map(|set| set.into_iter().map(|w| authority_from_label(&w)).collect())
 }
 
 // ============================================================================
@@ -135,8 +160,8 @@ proptest! {
     ) {
         let proposals: Vec<ShareProposal> = (0..count)
             .map(|i| ShareProposal {
-                witness: format!("w{i}"),
-                result_id: "r1".to_string(),
+                witness: authority_from_label(&format!("w{i}")),
+                result_id: hash_from_label("r1"),
                 share: ShareData {
                     share_value: format!("s{i}"),
                     nonce_binding: format!("n{i}"),
@@ -178,22 +203,22 @@ proptest! {
         witnesses in arb_unique_witnesses(1, 5),
     ) {
         // Create proposals with same result_id and binding
-        let result_id = "r1".to_string();
+        let result_id = hash_from_label("r1");
         let binding = "bind1".to_string();
 
         let proposals: Vec<ShareProposal> = witnesses
             .iter()
             .enumerate()
             .map(|(i, w)| ShareProposal {
-                witness: w.clone(),
-                result_id: result_id.clone(),
+                witness: *w,
+                result_id,
                 share: ShareData {
-                share_value: format!("s{i}"),
-                nonce_binding: format!("n{i}"),
-                data_binding: binding.clone(),
-            },
-        })
-        .collect();
+                    share_value: format!("s{i}"),
+                    nonce_binding: format!("n{i}"),
+                    data_binding: binding.clone(),
+                },
+            })
+            .collect();
 
         // All same result_id and binding = consistent
         prop_assert!(
@@ -208,26 +233,30 @@ proptest! {
         witnesses in arb_unique_witnesses(1, 5),
     ) {
         // Create proposals with same result_id and valid share data
-        let result_id = "r1";
-        let prestate_hash = "prehash1";
+        let result_id = hash_from_label("r1");
+        let prestate_hash = hash_from_label("prehash1");
 
         let proposals: Vec<ShareProposal> = witnesses
             .iter()
             .enumerate()
             .map(|(i, w)| ShareProposal {
-                witness: w.clone(),
-                result_id: result_id.to_string(),
+                witness: *w,
+                result_id,
                 share: ShareData {
-                share_value: format!("s{i}"),
-                nonce_binding: format!("n{i}"),
-                data_binding: format!("cid:{result_id}:{prestate_hash}"),
-            },
-        })
+                    share_value: format!("s{i}"),
+                    nonce_binding: format!("n{i}"),
+                    data_binding: format!("cid:{result_id}:{prestate_hash}"),
+                },
+            })
         .collect();
 
         // Production checks non-empty values for matching result_id
         prop_assert!(
-            shares_consistent(&proposals, result_id, prestate_hash),
+            shares_consistent(
+                &proposals,
+                &result_id,
+                &prestate_hash
+            ),
             "Production should detect consistent proposals"
         );
     }
@@ -242,8 +271,8 @@ proptest! {
             .iter()
             .enumerate()
             .map(|(i, w)| ShareProposal {
-                witness: w.clone(),
-                result_id: format!("r{i}"), // Each has different result_id
+                witness: *w,
+                result_id: hash_from_label(&format!("r{i}")), // Each has different result_id
                 share: ShareData {
                     share_value: format!("s{i}"),
                     nonce_binding: format!("n{i}"),
@@ -274,12 +303,12 @@ proptest! {
         let proposals: Vec<ShareProposal> = votes
             .iter()
             .map(|v| ShareProposal {
-                witness: v.witness.clone(),
-                result_id: v.result_id.clone(),
+                witness: v.witness,
+                result_id: v.result_id,
                 share: ShareData {
                     share_value: "share".to_string(),
                     nonce_binding: "nonce".to_string(),
-                    data_binding: format!("{}:{}:{}", "cid", v.result_id, v.prestate_hash),
+                    data_binding: format!("cid:{}:{}", v.result_id, v.prestate_hash),
                 },
             })
             .collect();
@@ -288,7 +317,7 @@ proptest! {
         let reference_equivocators = detect_equivocators_ref(&votes);
 
         // Check each witness using production implementation
-        let witness_set: HashSet<_> = proposals.iter().map(|p| p.witness.clone()).collect();
+        let witness_set: HashSet<_> = proposals.iter().map(|p| p.witness).collect();
 
         for witness in &witness_set {
             // Production: is_equivocator(proposals, witness)
@@ -315,9 +344,9 @@ proptest! {
         let votes: Vec<Vote> = witnesses
             .iter()
             .map(|w| Vote {
-                witness: w.clone(),
-                result_id: "r1".to_string(), // All vote for same result
-                prestate_hash: "pre1".to_string(),
+                witness: *w,
+                result_id: hash_from_label("r1"), // All vote for same result
+                prestate_hash: hash_from_label("pre1"),
             })
             .collect();
 
@@ -334,7 +363,7 @@ proptest! {
     #[test]
     fn prop_equivocators_always_detected(
         honest_witnesses in arb_unique_witnesses(0, 3),
-        equivocator in arb_witness(),
+        equivocator in arb_authority(),
     ) {
         // Skip if equivocator is in honest set
         if honest_witnesses.contains(&equivocator) {
@@ -345,22 +374,22 @@ proptest! {
         let mut votes: Vec<Vote> = honest_witnesses
             .iter()
             .map(|w| Vote {
-                witness: w.clone(),
-                result_id: "r1".to_string(),
-                prestate_hash: "pre1".to_string(),
+                witness: *w,
+                result_id: hash_from_label("r1"),
+                prestate_hash: hash_from_label("pre1"),
             })
             .collect();
 
         // Add equivocating votes
         votes.push(Vote {
-            witness: equivocator.clone(),
-            result_id: "r1".to_string(),
-            prestate_hash: "pre1".to_string(),
+            witness: equivocator,
+            result_id: hash_from_label("r1"),
+            prestate_hash: hash_from_label("pre1"),
         });
         votes.push(Vote {
-            witness: equivocator.clone(),
-            result_id: "r2".to_string(), // Different result!
-            prestate_hash: "pre1".to_string(),
+            witness: equivocator,
+            result_id: hash_from_label("r2"), // Different result!
+            prestate_hash: hash_from_label("pre1"),
         });
 
         let equivocators = detect_equivocators_ref(&votes);
@@ -379,18 +408,18 @@ proptest! {
 /// Generate random evidence with unique equivocators (no duplicates)
 fn arb_evidence() -> impl Strategy<Value = Evidence> {
     (
-        "cns[0-9]{1,2}".prop_map(String::from),
+        arb_consensus_id(),
         prop::collection::vec(arb_vote(), 0..5),
         // Use hash_set to ensure unique equivocators - duplicates would violate CRDT properties
-        prop::collection::hash_set(arb_witness(), 0..3)
+        prop::collection::hash_set(arb_authority(), 0..3)
             .prop_map(|set| set.into_iter().collect::<Vec<_>>()),
     )
-        .prop_map(|(consensus_id, votes, equivocators)| Evidence {
-            consensus_id,
-            votes,
-            equivocators,
-            commit_fact: None,
-        })
+    .prop_map(|(consensus_id, votes, equivocators)| Evidence {
+        consensus_id,
+        votes,
+        equivocators,
+        commit_fact: None,
+    })
 }
 
 proptest! {
@@ -490,7 +519,7 @@ proptest! {
         // Ensure different consensus IDs
         let mut e2 = e2;
         if e1.consensus_id == e2.consensus_id {
-            e2.consensus_id = format!("{}_different", e2.consensus_id);
+            e2.consensus_id = consensus_id_from_label("cns_other");
         }
 
         let merged = merge_evidence_ref(&e1, &e2);
@@ -519,25 +548,33 @@ fn test_empty_proposals_consistent() {
     // Reference: empty is always consistent
     assert!(shares_consistent_ref(&empty));
     // Production: empty filtered list is consistent
-    assert!(shares_consistent(&empty, "any_rid", "any_hash"));
+    assert!(shares_consistent(
+        &empty,
+        &hash_from_label("any_rid"),
+        &hash_from_label("any_hash")
+    ));
 }
 
 #[test]
 fn test_single_proposal_consistent() {
     let single = vec![ShareProposal {
-        witness: "w1".to_string(),
-        result_id: "r1".to_string(),
+        witness: authority_from_label("w1"),
+        result_id: hash_from_label("r1"),
         share: ShareData {
             share_value: "s1".to_string(),
             nonce_binding: "n1".to_string(),
-            data_binding: "cid:r1:h1".to_string(),
+            data_binding: format!("cid:{}:{}", hash_from_label("r1"), hash_from_label("h1")),
         },
     }];
 
     // Reference: single proposal is always consistent
     assert!(shares_consistent_ref(&single));
     // Production: single proposal with non-empty values is consistent
-    assert!(shares_consistent(&single, "r1", "h1"));
+    assert!(shares_consistent(
+        &single,
+        &hash_from_label("r1"),
+        &hash_from_label("h1")
+    ));
 }
 
 #[test]
@@ -552,14 +589,14 @@ fn test_equivocator_same_result_not_equivocator() {
     // Same witness, same result - not an equivocator
     let votes = vec![
         Vote {
-            witness: "w1".to_string(),
-            result_id: "r1".to_string(),
-            prestate_hash: "h1".to_string(),
+            witness: authority_from_label("w1"),
+            result_id: hash_from_label("r1"),
+            prestate_hash: hash_from_label("h1"),
         },
         Vote {
-            witness: "w1".to_string(),
-            result_id: "r1".to_string(), // Same result
-            prestate_hash: "h1".to_string(),
+            witness: authority_from_label("w1"),
+            result_id: hash_from_label("r1"), // Same result
+            prestate_hash: hash_from_label("h1"),
         },
     ];
 
@@ -572,19 +609,19 @@ fn test_equivocator_different_result_is_equivocator() {
     // Same witness, different result - is an equivocator
     let votes = vec![
         Vote {
-            witness: "w1".to_string(),
-            result_id: "r1".to_string(),
-            prestate_hash: "h1".to_string(),
+            witness: authority_from_label("w1"),
+            result_id: hash_from_label("r1"),
+            prestate_hash: hash_from_label("h1"),
         },
         Vote {
-            witness: "w1".to_string(),
-            result_id: "r2".to_string(), // Different result!
-            prestate_hash: "h1".to_string(),
+            witness: authority_from_label("w1"),
+            result_id: hash_from_label("r2"), // Different result!
+            prestate_hash: hash_from_label("h1"),
         },
     ];
 
     let equivocators = detect_equivocators_ref(&votes);
-    assert!(equivocators.contains("w1"));
+    assert!(equivocators.contains(&authority_from_label("w1")));
 }
 
 #[test]
@@ -592,19 +629,19 @@ fn test_merge_preserves_commit_fact() {
     use aura_consensus::core::state::PureCommitFact;
 
     let e1 = Evidence {
-        consensus_id: "cns1".to_string(),
+        consensus_id: consensus_id_from_label("cns1"),
         votes: vec![],
         equivocators: vec![],
         commit_fact: Some(PureCommitFact {
-            cid: "cns1".to_string(),
-            result_id: "r1".to_string(),
+            cid: consensus_id_from_label("cns1"),
+            result_id: hash_from_label("r1"),
             signature: "sig".to_string(),
-            prestate_hash: "h1".to_string(),
+            prestate_hash: hash_from_label("h1"),
         }),
     };
 
     let e2 = Evidence {
-        consensus_id: "cns1".to_string(),
+        consensus_id: consensus_id_from_label("cns1"),
         votes: vec![],
         equivocators: vec![],
         commit_fact: None,
@@ -613,7 +650,7 @@ fn test_merge_preserves_commit_fact() {
     // Merge should preserve the commit fact from e1
     let merged = merge_evidence_ref(&e1, &e2);
     assert!(merged.commit_fact.is_some());
-    assert_eq!(merged.commit_fact.unwrap().result_id, "r1");
+    assert_eq!(merged.commit_fact.unwrap().result_id, hash_from_label("r1"));
 
     // Reverse merge should also preserve (first wins)
     let merged_rev = merge_evidence_ref(&e2, &e1);

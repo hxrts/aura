@@ -11,13 +11,13 @@ use super::effects::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::storage::StorageEffects;
+use aura_core::identifiers::DeviceId;
 use aura_core::tree::AttestedOp;
 use aura_core::Hash32;
 use aura_journal::commitment_tree::storage as tree_storage;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Persistent sync handler backed by StorageEffects.
 ///
@@ -159,7 +159,7 @@ impl PersistentSyncHandler {
 
 #[async_trait]
 impl SyncEffects for PersistentSyncHandler {
-    async fn sync_with_peer(&self, _peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
+    async fn sync_with_peer(&self, _peer_id: DeviceId) -> Result<SyncMetrics, SyncError> {
         // No-op for local persistent sync; real networking handled by AntiEntropyHandler
         Ok(SyncMetrics::empty())
     }
@@ -195,7 +195,7 @@ impl SyncEffects for PersistentSyncHandler {
 
     async fn request_ops_from_peer(
         &self,
-        _peer_id: Uuid,
+        _peer_id: DeviceId,
         _cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError> {
         // Local handler has no network; return empty
@@ -241,7 +241,7 @@ impl SyncEffects for PersistentSyncHandler {
         Ok(())
     }
 
-    async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
+    async fn request_op(&self, _peer_id: DeviceId, cid: Hash32) -> Result<AttestedOp, SyncError> {
         self.ensure_initialized()
             .await
             .map_err(|e| SyncError::NetworkError(e.to_string()))?;
@@ -258,12 +258,16 @@ impl SyncEffects for PersistentSyncHandler {
         Err(SyncError::OperationNotFound)
     }
 
-    async fn push_op_to_peers(&self, _op: AttestedOp, _peers: Vec<Uuid>) -> Result<(), SyncError> {
+    async fn push_op_to_peers(
+        &self,
+        _op: AttestedOp,
+        _peers: Vec<DeviceId>,
+    ) -> Result<(), SyncError> {
         // Local handler doesn't push to peers; real networking handled by BroadcasterHandler
         Ok(())
     }
 
-    async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
+    async fn get_connected_peers(&self) -> Result<Vec<DeviceId>, SyncError> {
         // Local handler has no network peers
         Ok(Vec::new())
     }

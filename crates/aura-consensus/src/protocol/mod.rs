@@ -88,7 +88,7 @@ pub struct ConsensusProtocol {
 impl ConsensusProtocol {
     /// Evict stale protocol instances that have exceeded the configured timeout.
     pub async fn cleanup_stale_instances(&self, now_ms: u64) -> usize {
-        let timeout_ms = self.config.timeout_ms;
+        let timeout_ms = self.config.timeout_ms.get();
         let mut removed = 0usize;
         let mut instances = self.instances.write().await;
         instances.retain(|_, instance| {

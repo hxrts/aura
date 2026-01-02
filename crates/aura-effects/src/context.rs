@@ -20,13 +20,12 @@
 //!     .create_effect_context(authority_id, context_id, ExecutionMode::Production);
 //! ```
 
-use aura_core::context::EffectContext;
 use aura_core::effects::ExecutionMode;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 
-/// ExecutionContext alias for backwards compatibility within Layer 3.
-pub type ExecutionContext = EffectContext;
+// Re-export EffectContext from aura_core for convenience
+pub use aura_core::context::EffectContext;
 
 /// Standard context handler
 ///

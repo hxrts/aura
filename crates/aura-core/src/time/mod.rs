@@ -656,8 +656,6 @@ impl TimeStamp {
     }
 }
 
-// Legacy current_unix_timestamp() utility removed - use PhysicalTimeEffects trait instead
-
 #[cfg(test)]
 mod tests {
     use super::*;

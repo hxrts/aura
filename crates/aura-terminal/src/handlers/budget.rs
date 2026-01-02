@@ -173,17 +173,24 @@ pub fn check_can_pin(budget: &HomeFlowBudget, size_bytes: u64) -> Result<(), Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::hash;
+    use aura_core::identifiers::HomeId;
+
+    fn test_home_id(label: &str) -> HomeId {
+        HomeId::from_bytes(hash::hash(label.as_bytes()))
+    }
 
     #[test]
     fn test_format_budget_status() {
-        let mut budget = HomeFlowBudget::new("test-home");
+        let home_id = test_home_id("test-home");
+        let mut budget = HomeFlowBudget::new(home_id);
         budget.add_resident().unwrap();
         budget.join_neighborhood().unwrap();
 
         let formatted = format_budget_status(&budget);
 
         // Check that key information is present
-        assert!(formatted.contains("test-home"));
+        assert!(formatted.contains(&home_id.to_string()));
         assert!(formatted.contains("1 residents"));
         assert!(formatted.contains("1 neighborhoods"));
         assert!(formatted.contains("Remaining"));
@@ -191,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_format_budget_compact() {
-        let budget = HomeFlowBudget::new("test");
+        let budget = HomeFlowBudget::new(test_home_id("test"));
         let compact = format_budget_compact(&budget);
 
         assert!(compact.contains("Storage:"));
@@ -200,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_capacity_checks() {
-        let mut budget = HomeFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new(test_home_id("test"));
 
         // Should be able to add resident initially
         assert!(check_can_add_resident(&budget).is_ok());

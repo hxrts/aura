@@ -223,9 +223,7 @@ mod tests {
         RendezvousDescriptor {
             authority_id: authority,
             context_id: context,
-            transport_hints: vec![TransportHint::TcpDirect {
-                addr: "127.0.0.1:8080".to_string(),
-            }],
+            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
             handshake_psk_commitment: [0u8; 32],
             valid_from,
             valid_until,
@@ -248,9 +246,7 @@ mod tests {
     fn test_discovered_peer_validity() {
         let peer = DiscoveredPeer {
             authority_id: test_authority(2),
-            transport_hints: vec![TransportHint::QuicDirect {
-                addr: "10.0.0.1:8443".to_string(),
-            }],
+            transport_hints: vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()],
             valid_until: 10_000,
             context_id: test_context(100),
         };
@@ -265,12 +261,8 @@ mod tests {
         let direct_peer = DiscoveredPeer {
             authority_id: test_authority(2),
             transport_hints: vec![
-                TransportHint::QuicDirect {
-                    addr: "10.0.0.1:8443".to_string(),
-                },
-                TransportHint::WebSocketRelay {
-                    relay_authority: test_authority(99),
-                },
+                TransportHint::quic_direct("10.0.0.1:8443").unwrap(),
+                TransportHint::websocket_relay(test_authority(99)),
             ],
             valid_until: 10_000,
             context_id: test_context(100),
@@ -281,9 +273,7 @@ mod tests {
 
         let relay_only_peer = DiscoveredPeer {
             authority_id: test_authority(3),
-            transport_hints: vec![TransportHint::WebSocketRelay {
-                relay_authority: test_authority(99),
-            }],
+            transport_hints: vec![TransportHint::websocket_relay(test_authority(99))],
             valid_until: 10_000,
             context_id: test_context(100),
         };

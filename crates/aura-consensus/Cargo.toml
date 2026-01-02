@@ -20,6 +20,7 @@ simulation = ["aura-core/simulation"]
 aura-core = { path = "../aura-core" }
 aura-macros = { path = "../aura-macros" }
 aura-journal = { path = "../aura-journal" }
+aura-mpst = { path = "../aura-mpst" }
 
 # Cryptography
 frost-ed25519 = { workspace = true }

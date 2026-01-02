@@ -657,7 +657,7 @@ fn test_cross_module_integration() {
 
     let state = TestSyncProtocolState {
         phase: String::from("starting"),
-        operations_pending: config.batching.default_batch_size,
+        operations_pending: config.batching.default_batch_size as usize,
         bytes_transferred: 0,
     };
 

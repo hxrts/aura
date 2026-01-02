@@ -106,7 +106,7 @@ pub mod udp;
 // NOTE: WotAuthorizationHandler moved to aura-authorization per Layer 2 pattern
 pub use biometric::FallbackBiometricHandler;
 pub use console::RealConsoleHandler;
-pub use context::{ExecutionContext, StandardContextHandler};
+pub use context::{EffectContext, StandardContextHandler};
 pub use crypto::RealCryptoHandler;
 pub use database::query::{AuraQuery, FactTerm, QueryError, QueryResult};
 pub use error::Layer3Error;

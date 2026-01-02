@@ -1063,7 +1063,7 @@ mod tests {
     use aura_core::threshold::{ParticipantIdentity, ThresholdConfig, ThresholdState};
     use aura_core::time::PhysicalTime;
     use aura_core::types::epochs::Epoch;
-    use aura_core::{AuraError, ContextId, FlowBudget, Journal};
+    use aura_core::{AuraError, ContextId, FlowBudget, FlowCost, Journal};
     use std::sync::{Arc, Mutex};
 
     fn test_prestate() -> Hash32 {

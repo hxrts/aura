@@ -112,7 +112,7 @@ pub struct StateDiff {
 impl StateDiff {
     /// Compare two ConsensusState instances and return differences
     pub fn compare_instances(expected: &ConsensusState, actual: &ConsensusState) -> InstanceDiff {
-        let mut diff = InstanceDiff::new(&expected.cid);
+        let mut diff = InstanceDiff::new(expected.cid.to_string());
 
         // Compare scalar fields
         if expected.cid != actual.cid {
@@ -231,10 +231,16 @@ impl StateDiff {
     }
 
     /// Compare two sets and return differences
-    fn compare_sets(expected: &BTreeSet<String>, actual: &BTreeSet<String>) -> Vec<FieldDiff> {
+    fn compare_sets<T>(expected: &BTreeSet<T>, actual: &BTreeSet<T>) -> Vec<FieldDiff>
+    where
+        T: Ord + fmt::Display,
+    {
         let mut diffs = Vec::new();
 
-        let missing: Vec<_> = expected.difference(actual).collect();
+        let missing: Vec<String> = expected
+            .difference(actual)
+            .map(|item| item.to_string())
+            .collect();
         if !missing.is_empty() {
             diffs.push(FieldDiff::from_strings(
                 "  missing",
@@ -243,7 +249,10 @@ impl StateDiff {
             ));
         }
 
-        let extra: Vec<_> = actual.difference(expected).collect();
+        let extra: Vec<String> = actual
+            .difference(expected)
+            .map(|item| item.to_string())
+            .collect();
         if !extra.is_empty() {
             diffs.push(FieldDiff::from_strings(
                 "  extra",
@@ -256,17 +265,13 @@ impl StateDiff {
     }
 
     /// Format a set for display
-    fn format_set(set: &BTreeSet<String>) -> String {
-        let mut items: Vec<_> = set.iter().collect();
+    fn format_set<T>(set: &BTreeSet<T>) -> String
+    where
+        T: Ord + fmt::Display,
+    {
+        let mut items: Vec<String> = set.iter().map(|item| item.to_string()).collect();
         items.sort();
-        format!(
-            "{{{}}}",
-            items
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        format!("{{{}}}", items.join(", "))
     }
 
     /// Compare two proposal lists
@@ -307,8 +312,8 @@ impl StateDiff {
                 if expected_prop.result_id != actual_prop.result_id {
                     diffs.push(FieldDiff::from_strings(
                         format!("proposals[{witness}].result_id"),
-                        &expected_prop.result_id,
-                        &actual_prop.result_id,
+                        format!("{}", expected_prop.result_id),
+                        format!("{}", actual_prop.result_id),
                     ));
                 }
 
@@ -546,17 +551,42 @@ impl<'a> fmt::Display for DivergenceReport<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_consensus::core::state::{ConsensusPhase, PathSelection, ShareData};
+    use aura_consensus::core::state::{
+        ConsensusPhase, ConsensusThreshold, PathSelection, ShareData,
+    };
+    use aura_consensus::types::ConsensusId;
+    use aura_core::{AuthorityId, Hash32, OperationId};
+
+    fn threshold(value: u16) -> ConsensusThreshold {
+        ConsensusThreshold::new(value).expect("threshold")
+    }
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_hash(seed: u8) -> Hash32 {
+        Hash32::new([seed; 32])
+    }
+
+    fn test_consensus_id(seed: u8) -> ConsensusId {
+        ConsensusId(Hash32::new([seed; 32]))
+    }
+
+    fn test_operation(seed: u8) -> OperationId {
+        OperationId::new_from_entropy([seed; 32])
+    }
 
     fn make_test_state() -> ConsensusState {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> =
+            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
         ConsensusState::new(
-            "cns1".to_string(),
-            "update_policy".to_string(),
-            "pre_abc".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         )
     }
@@ -587,8 +617,8 @@ mod tests {
         let mut state2 = make_test_state();
 
         state1.proposals.push(ShareProposal {
-            witness: "w1".to_string(),
-            result_id: "r1".to_string(),
+            witness: test_authority(1),
+            result_id: test_hash(1),
             share: ShareData {
                 share_value: "s1".to_string(),
                 nonce_binding: "n1".to_string(),
@@ -597,8 +627,8 @@ mod tests {
         });
 
         state2.proposals.push(ShareProposal {
-            witness: "w1".to_string(),
-            result_id: "r2".to_string(), // Different result_id
+            witness: test_authority(1),
+            result_id: test_hash(2), // Different result_id
             share: ShareData {
                 share_value: "s1".to_string(),
                 nonce_binding: "n1".to_string(),
@@ -616,7 +646,7 @@ mod tests {
         let mut state1 = make_test_state();
         let state2 = make_test_state();
 
-        state1.equivocators.insert("bad_actor".to_string());
+        state1.equivocators.insert(test_authority(9));
 
         let diff = StateDiff::compare_instances(&state1, &state2);
         assert!(!diff.is_empty());
@@ -628,14 +658,14 @@ mod tests {
         let state1 = make_test_state();
         let mut state2 = make_test_state();
         state2.phase = ConsensusPhase::FallbackActive;
-        state2.threshold = 3;
+        state2.threshold = threshold(3);
 
         let diff = StateDiff::compare_instances(&state1, &state2);
         let report = DivergenceReport::for_instance(5, &diff);
 
         assert!(report.contains("DIVERGENCE DETECTED"));
         assert!(report.contains("step 5"));
-        assert!(report.contains("cns1"));
+        assert!(report.contains("consensus:"));
         assert!(report.contains("phase"));
         assert!(report.contains("threshold"));
     }

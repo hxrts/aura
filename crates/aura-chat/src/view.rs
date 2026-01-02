@@ -21,7 +21,7 @@
 //! registry.register(CHAT_FACT_TYPE_ID, Box::new(ChatViewReducer));
 //! ```
 
-use aura_composition::{IntoViewDelta, ViewDelta, ViewDeltaReducer};
+use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReducer};
 use aura_core::identifiers::AuthorityId;
 use aura_journal::DomainFact;
 
@@ -147,6 +147,232 @@ pub enum ChatDelta {
         /// Unix epoch milliseconds when the acknowledgment was sent.
         acknowledged_at: u64,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ChatDeltaKey {
+    Channel(String),
+    Message(String, String),
+    MessageDelivery(String, String, String),
+    MessageRead(String, String, String),
+    MessageAck(String, String),
+}
+
+impl ComposableDelta for ChatDelta {
+    type Key = ChatDeltaKey;
+
+    fn key(&self) -> Self::Key {
+        match self {
+            ChatDelta::ChannelAdded { channel_id, .. }
+            | ChatDelta::ChannelRemoved { channel_id }
+            | ChatDelta::ChannelUpdated { channel_id, .. } => {
+                ChatDeltaKey::Channel(channel_id.clone())
+            }
+            ChatDelta::MessageAdded {
+                channel_id,
+                message_id,
+                ..
+            }
+            | ChatDelta::MessageUpdated {
+                channel_id,
+                message_id,
+                ..
+            }
+            | ChatDelta::MessageRemoved {
+                channel_id,
+                message_id,
+            } => ChatDeltaKey::Message(channel_id.clone(), message_id.clone()),
+            ChatDelta::MessageDelivered {
+                channel_id,
+                message_id,
+                recipient_id,
+                ..
+            } => ChatDeltaKey::MessageDelivery(
+                channel_id.clone(),
+                message_id.clone(),
+                recipient_id.clone(),
+            ),
+            ChatDelta::MessageRead {
+                channel_id,
+                message_id,
+                reader_id,
+                ..
+            } => ChatDeltaKey::MessageRead(
+                channel_id.clone(),
+                message_id.clone(),
+                reader_id.clone(),
+            ),
+            ChatDelta::DeliveryAcknowledged {
+                channel_id,
+                message_id,
+                ..
+            } => ChatDeltaKey::MessageAck(channel_id.clone(), message_id.clone()),
+        }
+    }
+
+    fn try_merge(&mut self, other: Self) -> bool {
+        match (self, other) {
+            (
+                ChatDelta::ChannelAdded {
+                    name,
+                    topic,
+                    member_count,
+                    ..
+                },
+                ChatDelta::ChannelUpdated {
+                    name: new_name,
+                    topic: new_topic,
+                    member_count: new_count,
+                    ..
+                },
+            ) => {
+                if let Some(new_name) = new_name {
+                    *name = new_name;
+                }
+                if let Some(new_topic) = new_topic {
+                    *topic = Some(new_topic);
+                }
+                if let Some(new_count) = new_count {
+                    *member_count = new_count;
+                }
+                true
+            }
+            (
+                ChatDelta::ChannelUpdated {
+                    name,
+                    topic,
+                    member_count,
+                    ..
+                },
+                ChatDelta::ChannelUpdated {
+                    name: new_name,
+                    topic: new_topic,
+                    member_count: new_count,
+                    ..
+                },
+            ) => {
+                if new_name.is_some() {
+                    *name = new_name;
+                }
+                if new_topic.is_some() {
+                    *topic = new_topic;
+                }
+                if new_count.is_some() {
+                    *member_count = new_count;
+                }
+                true
+            }
+            (
+                ChatDelta::ChannelRemoved { .. },
+                ChatDelta::ChannelRemoved { .. },
+            ) => true,
+            (
+                ChatDelta::MessageAdded {
+                    timestamp,
+                    channel_id: ch,
+                    message_id: msg,
+                    sender_id: sender,
+                    sender_name: name,
+                    content: body,
+                    reply_to: reply,
+                },
+                ChatDelta::MessageAdded {
+                    timestamp: other_ts,
+                    channel_id,
+                    message_id,
+                    sender_id,
+                    sender_name,
+                    content,
+                    reply_to,
+                },
+            ) => {
+                if other_ts >= *timestamp {
+                    *timestamp = other_ts;
+                    *ch = channel_id;
+                    *msg = message_id;
+                    *sender = sender_id;
+                    *name = sender_name;
+                    *body = content;
+                    *reply = reply_to;
+                }
+                true
+            }
+            (
+                ChatDelta::MessageUpdated {
+                    edited_at,
+                    channel_id: ch,
+                    message_id: msg,
+                    editor_id: editor,
+                    new_content: content,
+                },
+                ChatDelta::MessageUpdated {
+                    edited_at: other_ts,
+                    channel_id,
+                    message_id,
+                    editor_id,
+                    new_content,
+                },
+            ) => {
+                if other_ts >= *edited_at {
+                    *edited_at = other_ts;
+                    *ch = channel_id;
+                    *msg = message_id;
+                    *editor = editor_id;
+                    *content = new_content;
+                }
+                true
+            }
+            (
+                ChatDelta::MessageRemoved { .. },
+                ChatDelta::MessageRemoved { .. },
+            ) => true,
+            (
+                ChatDelta::MessageDelivered {
+                    delivered_at,
+                    device_id,
+                    ..
+                },
+                ChatDelta::MessageDelivered {
+                    delivered_at: other_ts,
+                    device_id: other_device,
+                    ..
+                },
+            ) => {
+                if other_ts >= *delivered_at {
+                    *delivered_at = other_ts;
+                    *device_id = other_device;
+                }
+                true
+            }
+            (
+                ChatDelta::MessageRead { read_at, .. },
+                ChatDelta::MessageRead {
+                    read_at: other_ts,
+                    ..
+                },
+            ) => {
+                if other_ts >= *read_at {
+                    *read_at = other_ts;
+                }
+                true
+            }
+            (
+                ChatDelta::DeliveryAcknowledged {
+                    acknowledged_at, ..
+                },
+                ChatDelta::DeliveryAcknowledged {
+                    acknowledged_at: other_ts,
+                    ..
+                },
+            ) => {
+                if other_ts >= *acknowledged_at {
+                    *acknowledged_at = other_ts;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// View reducer for chat facts.
@@ -290,6 +516,7 @@ impl ViewDeltaReducer for ChatViewReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_composition::compact_deltas;
     use aura_composition::downcast_delta;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 
@@ -415,5 +642,42 @@ mod tests {
         let reducer = ChatViewReducer;
         let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, b"invalid json data", None);
         assert!(deltas.is_empty());
+    }
+
+    #[test]
+    fn test_compact_deltas_merges_channel_updates() {
+        let deltas = vec![
+            ChatDelta::ChannelAdded {
+                channel_id: "chan-1".to_string(),
+                name: "general".to_string(),
+                topic: None,
+                is_dm: false,
+                member_count: 2,
+                created_at: 10,
+                creator_id: "creator".to_string(),
+            },
+            ChatDelta::ChannelUpdated {
+                channel_id: "chan-1".to_string(),
+                name: Some("general-chat".to_string()),
+                topic: Some("new topic".to_string()),
+                member_count: Some(3),
+            },
+        ];
+
+        let compacted = compact_deltas(deltas);
+        assert_eq!(compacted.len(), 1);
+        match &compacted[0] {
+            ChatDelta::ChannelAdded {
+                name,
+                topic,
+                member_count,
+                ..
+            } => {
+                assert_eq!(name, "general-chat");
+                assert_eq!(topic, &Some("new topic".to_string()));
+                assert_eq!(*member_count, 3);
+            }
+            _ => panic!("Expected ChannelAdded after compaction"),
+        }
     }
 }

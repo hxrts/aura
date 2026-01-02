@@ -1,4 +1,5 @@
 use crate::authorization::BiscuitAuthorizationBridge;
+use crate::guards::types::CapabilityId;
 use aura_authorization::{BiscuitError, ResourceScope};
 use aura_core::{AuthorityId, FlowBudget, FlowCost};
 use biscuit_auth::Biscuit;
@@ -22,7 +23,7 @@ impl BiscuitGuardEvaluator {
     pub fn evaluate_guard_default_time(
         &self,
         token: &Biscuit,
-        guard_capability: &str,
+        guard_capability: &CapabilityId,
         resource: &ResourceScope,
         flow_cost: FlowCost,
         budget: &mut FlowBudget,
@@ -35,7 +36,7 @@ impl BiscuitGuardEvaluator {
     pub fn check_guard_default_time(
         &self,
         token: &Biscuit,
-        guard_capability: &str,
+        guard_capability: &CapabilityId,
         resource: &ResourceScope,
     ) -> Result<bool, GuardError> {
         self.check_guard(token, guard_capability, resource, 0)
@@ -44,7 +45,7 @@ impl BiscuitGuardEvaluator {
     pub fn evaluate_guard(
         &self,
         token: &Biscuit,
-        guard_capability: &str,
+        guard_capability: &CapabilityId,
         resource: &ResourceScope,
         flow_cost: FlowCost,
         budget: &mut FlowBudget,
@@ -60,9 +61,12 @@ impl BiscuitGuardEvaluator {
             });
         }
 
-        let auth_result =
-            self.bridge
-                .authorize(token, guard_capability, resource, current_time_seconds)?;
+        let auth_result = self.bridge.authorize(
+            token,
+            guard_capability.as_str(),
+            resource,
+            current_time_seconds,
+        )?;
 
         if !auth_result.authorized {
             return Err(GuardError::AuthorizationFailed(format!(
@@ -86,13 +90,16 @@ impl BiscuitGuardEvaluator {
     pub fn check_guard(
         &self,
         token: &Biscuit,
-        guard_capability: &str,
+        guard_capability: &CapabilityId,
         resource: &ResourceScope,
         current_time_seconds: u64,
     ) -> Result<bool, GuardError> {
-        let auth_result =
-            self.bridge
-                .authorize(token, guard_capability, resource, current_time_seconds)?;
+        let auth_result = self.bridge.authorize(
+            token,
+            guard_capability.as_str(),
+            resource,
+            current_time_seconds,
+        )?;
         Ok(auth_result.authorized)
     }
 }

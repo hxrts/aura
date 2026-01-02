@@ -3,7 +3,7 @@
 //! This module provides transport hint selection, descriptor building,
 //! and transport probing for peer discovery.
 
-use crate::facts::{RendezvousDescriptor, TransportHint};
+use crate::facts::{RendezvousDescriptor, TransportAddress, TransportHint};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
 use sha2::{Digest, Sha256};
@@ -64,9 +64,9 @@ impl TransportSelector {
     /// For actual connectivity testing, use `TransportProber`.
     pub fn select(&self, descriptor: &RendezvousDescriptor) -> AuraResult<SelectedTransport> {
         // Priority: QuicDirect > QuicReflexive > TcpDirect > WebSocketRelay
-        let mut best_direct: Option<&str> = None;
-        let mut best_reflexive: Option<&str> = None;
-        let mut best_tcp: Option<&str> = None;
+        let mut best_direct: Option<&TransportAddress> = None;
+        let mut best_reflexive: Option<&TransportAddress> = None;
+        let mut best_tcp: Option<&TransportAddress> = None;
         let mut relay: Option<AuthorityId> = None;
 
         for hint in &descriptor.transport_hints {
@@ -123,22 +123,22 @@ impl TransportSelector {
         for hint in &descriptor.transport_hints {
             match hint {
                 TransportHint::QuicDirect { addr } => {
-                    if prober.probe_endpoint(addr).await.is_ok() {
-                        return Ok(SelectedTransport::Direct(addr.clone()));
+                    if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
+                        return Ok(SelectedTransport::Direct(addr.to_string()));
                     }
                 }
                 TransportHint::QuicReflexive { addr, stun_server } => {
-                    if let Ok(reflexive_addr) = prober.stun_probe(stun_server).await {
+                    if let Ok(reflexive_addr) = prober.stun_probe(&stun_server.to_string()).await {
                         // Use the reflexive address discovered via STUN
                         return Ok(SelectedTransport::Direct(reflexive_addr));
-                    } else if prober.probe_endpoint(addr).await.is_ok() {
+                    } else if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
                         // Fall back to the advertised address
-                        return Ok(SelectedTransport::Direct(addr.clone()));
+                        return Ok(SelectedTransport::Direct(addr.to_string()));
                     }
                 }
                 TransportHint::TcpDirect { addr } => {
-                    if prober.probe_endpoint(addr).await.is_ok() {
-                        return Ok(SelectedTransport::Direct(addr.clone()));
+                    if prober.probe_endpoint(&addr.to_string()).await.is_ok() {
+                        return Ok(SelectedTransport::Direct(addr.to_string()));
                     }
                 }
                 TransportHint::WebSocketRelay { relay_authority } => {
@@ -199,6 +199,15 @@ impl DescriptorBuilder {
     }
 
     /// Build a descriptor with automatic transport hint discovery
+    ///
+    /// # Arguments
+    /// * `context_id` - The context for this descriptor
+    /// * `local_addresses` - Local addresses to advertise (must be valid socket addresses)
+    /// * `now_ms` - Current timestamp in milliseconds
+    /// * `prober` - Transport prober for STUN discovery
+    ///
+    /// # Errors
+    /// Returns an error if any local address is invalid.
     pub async fn build_with_discovery(
         &self,
         context_id: ContextId,
@@ -208,21 +217,30 @@ impl DescriptorBuilder {
     ) -> AuraResult<RendezvousDescriptor> {
         let mut hints = Vec::new();
 
-        // Add direct hints for each local address
-        for addr in &local_addresses {
-            hints.push(TransportHint::TcpDirect { addr: addr.clone() });
+        // Add direct hints for each local address (validated)
+        for addr_str in &local_addresses {
+            let hint = TransportHint::tcp_direct(addr_str).map_err(|e| {
+                AuraError::invalid(format!("Invalid transport address: {e}"))
+            })?;
+            hints.push(hint);
         }
 
         // Try to discover reflexive address via STUN
         if let Some(stun_server) = &self.stun_server {
-            if let Ok(reflexive_addr) = prober.stun_probe(stun_server).await {
-                hints.insert(
-                    0,
-                    TransportHint::QuicReflexive {
-                        addr: reflexive_addr,
-                        stun_server: stun_server.clone(),
-                    },
-                );
+            if let Ok(reflexive_addr_str) = prober.stun_probe(stun_server).await {
+                // Parse both addresses
+                if let (Ok(reflexive_addr), Ok(stun_addr)) = (
+                    TransportAddress::new(&reflexive_addr_str),
+                    TransportAddress::new(stun_server),
+                ) {
+                    hints.insert(
+                        0,
+                        TransportHint::QuicReflexive {
+                            addr: reflexive_addr,
+                            stun_server: stun_addr,
+                        },
+                    );
+                }
             }
         }
 
@@ -311,12 +329,12 @@ impl TransportProber {
         for hint in &descriptor.transport_hints {
             let reachable = match hint {
                 TransportHint::QuicDirect { addr } | TransportHint::TcpDirect { addr } => {
-                    self.probe_endpoint(addr).await.is_ok()
+                    self.probe_endpoint(&addr.to_string()).await.is_ok()
                 }
                 TransportHint::QuicReflexive { addr, stun_server } => {
                     // Try STUN first, then direct
-                    self.stun_probe(stun_server).await.is_ok()
-                        || self.probe_endpoint(addr).await.is_ok()
+                    self.stun_probe(&stun_server.to_string()).await.is_ok()
+                        || self.probe_endpoint(&addr.to_string()).await.is_ok()
                 }
                 TransportHint::WebSocketRelay { .. } => {
                     // Relay is assumed reachable
@@ -386,15 +404,9 @@ mod tests {
             authority_id: test_authority(),
             context_id: test_context(),
             transport_hints: vec![
-                TransportHint::TcpDirect {
-                    addr: "192.168.1.1:8080".to_string(),
-                },
-                TransportHint::QuicDirect {
-                    addr: "192.168.1.1:4433".to_string(),
-                },
-                TransportHint::WebSocketRelay {
-                    relay_authority: AuthorityId::new_from_entropy([3u8; 32]),
-                },
+                TransportHint::tcp_direct("192.168.1.1:8080").unwrap(),
+                TransportHint::quic_direct("192.168.1.1:4433").unwrap(),
+                TransportHint::websocket_relay(AuthorityId::new_from_entropy([3u8; 32])),
             ],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 0,
@@ -420,9 +432,9 @@ mod tests {
         let descriptor = RendezvousDescriptor {
             authority_id: test_authority(),
             context_id: test_context(),
-            transport_hints: vec![TransportHint::WebSocketRelay {
-                relay_authority: AuthorityId::new_from_entropy([3u8; 32]),
-            }],
+            transport_hints: vec![TransportHint::websocket_relay(
+                AuthorityId::new_from_entropy([3u8; 32]),
+            )],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 0,
             valid_until: 10000,
@@ -458,9 +470,7 @@ mod tests {
     fn test_descriptor_builder() {
         let builder = DescriptorBuilder::new(test_authority(), 3_600_000, None);
 
-        let hints = vec![TransportHint::TcpDirect {
-            addr: "127.0.0.1:8080".to_string(),
-        }];
+        let hints = vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()];
 
         let descriptor = builder.build(test_context(), hints, 1000);
 
@@ -476,12 +486,10 @@ mod tests {
         let builder = DescriptorBuilder::new(
             test_authority(),
             3_600_000,
-            Some("stun.example.com:3478".to_string()),
+            Some("1.2.3.4:3478".to_string()),
         );
 
-        let hints = vec![TransportHint::TcpDirect {
-            addr: "127.0.0.1:8080".to_string(),
-        }];
+        let hints = vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()];
 
         let descriptor = builder.build(test_context(), hints, 1000);
         assert_eq!(descriptor.transport_hints.len(), 1);
@@ -541,12 +549,8 @@ mod tests {
             authority_id: test_authority(),
             context_id: test_context(),
             transport_hints: vec![
-                TransportHint::TcpDirect {
-                    addr: "127.0.0.1:8080".to_string(),
-                },
-                TransportHint::WebSocketRelay {
-                    relay_authority: AuthorityId::new_from_entropy([3u8; 32]),
-                },
+                TransportHint::tcp_direct("127.0.0.1:8080").unwrap(),
+                TransportHint::websocket_relay(AuthorityId::new_from_entropy([3u8; 32])),
             ],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 0,

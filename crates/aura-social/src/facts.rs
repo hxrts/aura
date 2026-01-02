@@ -38,100 +38,8 @@ use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-// ============================================================================
-// Social Fact Schemas - Home and Neighborhood Facts
-// ============================================================================
-
-/// Unique identifier for a home
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct HomeId(pub [u8; 32]);
-
-impl HomeId {
-    fn derive_bytes(label: &[u8]) -> [u8; 32] {
-        let mut hasher = aura_core::hash::hasher();
-        hasher.update(b"AURA_HOME_ID");
-        hasher.update(label);
-        let digest = hasher.finalize();
-        let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(&digest);
-        bytes
-    }
-    /// Create a new random HomeId
-    pub fn new() -> Self {
-        Self::from_bytes(Self::derive_bytes(b"home-id"))
-    }
-
-    /// Create a HomeId from raw bytes
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    /// Get the underlying bytes
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-impl Default for HomeId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Display for HomeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Display first 8 bytes as hex
-        for byte in &self.0[..4] {
-            write!(f, "{byte:02x}")?;
-        }
-        write!(f, "...")
-    }
-}
-
-/// Unique identifier for a neighborhood
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct NeighborhoodId(pub [u8; 32]);
-
-impl NeighborhoodId {
-    fn derive_bytes(label: &[u8]) -> [u8; 32] {
-        let mut hasher = aura_core::hash::hasher();
-        hasher.update(b"AURA_NEIGHBORHOOD_ID");
-        hasher.update(label);
-        let digest = hasher.finalize();
-        let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(&digest);
-        bytes
-    }
-    /// Create a new random NeighborhoodId
-    pub fn new() -> Self {
-        Self::from_bytes(Self::derive_bytes(b"neighborhood-id"))
-    }
-
-    /// Create a NeighborhoodId from raw bytes
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    /// Get the underlying bytes
-    pub fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-impl Default for NeighborhoodId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Display for NeighborhoodId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for byte in &self.0[..4] {
-            write!(f, "{byte:02x}")?;
-        }
-        write!(f, "...")
-    }
-}
+// Re-export HomeId and NeighborhoodId from aura-core for backwards compatibility
+pub use aura_core::identifiers::{HomeId, NeighborhoodId};
 
 // ============================================================================
 // Home Facts
@@ -883,11 +791,11 @@ impl SocialFact {
         match self {
             SocialFact::HomeCreated { home_id, .. } => SocialFactKey {
                 sub_type: "home-created",
-                data: home_id.0.to_vec(),
+                data: home_id.as_bytes().to_vec(),
             },
             SocialFact::HomeDeleted { home_id, .. } => SocialFactKey {
                 sub_type: "home-deleted",
-                data: home_id.0.to_vec(),
+                data: home_id.as_bytes().to_vec(),
             },
             SocialFact::ResidentJoined { authority_id, .. } => SocialFactKey {
                 sub_type: "resident-joined",
@@ -907,21 +815,21 @@ impl SocialFact {
             },
             SocialFact::StorageUpdated { home_id, .. } => SocialFactKey {
                 sub_type: "storage-updated",
-                data: home_id.0.to_vec(),
+                data: home_id.as_bytes().to_vec(),
             },
             SocialFact::NeighborhoodCreated {
                 neighborhood_id, ..
             } => SocialFactKey {
                 sub_type: "neighborhood-created",
-                data: neighborhood_id.0.to_vec(),
+                data: neighborhood_id.as_bytes().to_vec(),
             },
             SocialFact::HomeJoinedNeighborhood {
                 home_id,
                 neighborhood_id,
                 ..
             } => {
-                let mut data = home_id.0.to_vec();
-                data.extend_from_slice(&neighborhood_id.0);
+                let mut data = home_id.as_bytes().to_vec();
+                data.extend_from_slice(neighborhood_id.as_bytes());
                 SocialFactKey {
                     sub_type: "home-joined-neighborhood",
                     data,
@@ -932,8 +840,8 @@ impl SocialFact {
                 neighborhood_id,
                 ..
             } => {
-                let mut data = home_id.0.to_vec();
-                data.extend_from_slice(&neighborhood_id.0);
+                let mut data = home_id.as_bytes().to_vec();
+                data.extend_from_slice(neighborhood_id.as_bytes());
                 SocialFactKey {
                     sub_type: "home-left-neighborhood",
                     data,
@@ -1211,7 +1119,11 @@ mod tests {
             0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0,
         ]);
-        assert_eq!(format!("{id}"), "deadbeef...");
+        // HomeId uses hash_id! macro which formats as "home:<full-hex>"
+        assert_eq!(
+            format!("{id}"),
+            "home:deadbeef00000000000000000000000000000000000000000000000000000000"
+        );
     }
 
     #[test]

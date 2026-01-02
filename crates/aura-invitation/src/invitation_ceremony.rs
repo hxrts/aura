@@ -49,7 +49,7 @@
 
 use aura_core::domain::FactValue;
 use aura_core::effects::{JournalEffects, PhysicalTimeEffects, ThresholdSigningEffects};
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ThresholdSignature};
 use aura_core::{AuraError, AuraResult, Hash32};
 use aura_journal::DomainFact;
@@ -95,7 +95,7 @@ impl InvitationCeremonyId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcceptanceProposal {
     /// The invitation being accepted
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// The authority accepting
     pub acceptor: AuthorityId,
     /// Prestate hash at time of acceptance
@@ -638,7 +638,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     ) -> InvitationCeremonyCommand {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyInitiated {
-            ceremony_id: ceremony_id_hex.clone(),
+            ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
             sender: sender.to_string(),
             agreement_mode: None,
             trace_id: Some(ceremony_id_hex.clone()),
@@ -656,7 +656,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     ) -> InvitationCeremonyCommand {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyAcceptanceReceived {
-            ceremony_id: ceremony_id_hex.clone(),
+            ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
             agreement_mode: None,
             trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
@@ -674,7 +674,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     ) -> InvitationCeremonyCommand {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyCommitted {
-            ceremony_id: ceremony_id_hex.clone(),
+            ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
             relationship_id: relationship_id.to_string(),
             agreement_mode: Some(AgreementMode::ConsensusFinalized),
             trace_id: Some(ceremony_id_hex.clone()),
@@ -693,7 +693,7 @@ impl<E: InvitationCeremonyEffects> InvitationCeremonyExecutor<E> {
     ) -> InvitationCeremonyCommand {
         let ceremony_id_hex = Self::ceremony_id_hex(ceremony_id);
         let fact = InvitationFact::CeremonyAborted {
-            ceremony_id: ceremony_id_hex.clone(),
+            ceremony_id: CeremonyId::new(ceremony_id_hex.clone()),
             reason: reason.to_string(),
             trace_id: Some(ceremony_id_hex.clone()),
             timestamp_ms,
@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn test_acceptance_proposal_serialization() {
         let proposal = AcceptanceProposal {
-            invitation_id: "inv-123".to_string(),
+            invitation_id: InvitationId::new("inv-123"),
             acceptor: AuthorityId::new_from_entropy([42u8; 32]),
             prestate_hash: Hash32([0u8; 32]),
             message: Some("Accepting".to_string()),
@@ -814,7 +814,7 @@ mod tests {
         let bytes = serde_json::to_vec(&proposal).unwrap();
         let restored: AcceptanceProposal = serde_json::from_slice(&bytes).unwrap();
 
-        assert_eq!(restored.invitation_id, "inv-123");
+        assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert_eq!(restored.message, Some("Accepting".to_string()));
     }
 }

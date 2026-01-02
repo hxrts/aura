@@ -47,24 +47,17 @@ pub mod effects;
 pub mod flow_budget;
 pub mod proposals;
 
-// Legacy capability system removed - Phase 4 of authorization unification complete
-// Use Biscuit tokens via BiscuitTokenManager instead
-
-// Biscuit-based authorization (new implementation)
-// biscuit module is now consolidated into biscuit_authorization.rs
+// Biscuit-based authorization
 pub mod biscuit_authorization;
 pub mod biscuit_token;
 pub mod facts;
 pub mod resource_scope; // Authority-based resource scopes
-pub mod storage_authorization; // Storage authorization logic (moved from aura-store)
+pub mod storage_authorization; // Storage authorization logic
 
 pub use errors::{WotError, WotResult};
 
 // Application effect handler re-export
 pub use effects::WotAuthorizationHandler;
-
-// Legacy capability types removed - use Biscuit tokens instead
-// Legacy tree policy types removed - use authority-based ResourceScope instead
 
 // Re-export semilattice traits for convenience
 pub use aura_core::semilattice::{MeetSemiLattice, Top};

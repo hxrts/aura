@@ -66,7 +66,7 @@ impl FrostConsensusOrchestrator {
         key_packages: HashMap<AuthorityId, Share>,
         group_public_key: PublicKeyPackage,
     ) -> Result<Self> {
-        let witness_set = WitnessSet::new(config.threshold, config.witness_set.clone())?;
+        let witness_set = config.witness_set.to_runtime()?;
 
         Ok(Self {
             config,
@@ -79,7 +79,7 @@ impl FrostConsensusOrchestrator {
 
     /// Evict stale consensus instances that exceed the configured timeout.
     pub async fn cleanup_stale_instances(&self, now_ms: u64) -> usize {
-        let timeout_ms = self.config.timeout_ms;
+        let timeout_ms = self.config.timeout_ms.get();
         let mut removed = 0usize;
         let mut instances = self.instances.write().await;
         instances.retain(|_, instance| {
@@ -176,7 +176,7 @@ impl FrostConsensusOrchestrator {
             .collect_cached_commitments(self.config.epoch)
             .await;
 
-        if cached_commitments.len() < self.config.threshold as usize {
+        if cached_commitments.len() < self.config.threshold() as usize {
             debug!("Insufficient cached commitments, falling back to slow path");
             return self
                 .run_slow_path(consensus_id, request, random, time)
@@ -278,7 +278,7 @@ impl FrostConsensusOrchestrator {
             }
         }
 
-        if !tracker.has_nonce_threshold(self.config.threshold) {
+        if !tracker.has_nonce_threshold(self.config.threshold()) {
             return Err(AuraError::internal("Insufficient nonce commitments"));
         }
 
@@ -319,7 +319,7 @@ impl FrostConsensusOrchestrator {
         tracker: WitnessTracker,
         time: &(impl PhysicalTimeEffects + ?Sized),
     ) -> Result<CommitFact> {
-        if !tracker.has_signature_threshold(self.config.threshold) {
+        if !tracker.has_signature_threshold(self.config.threshold()) {
             return Err(AuraError::internal("Insufficient signatures"));
         }
 
@@ -358,7 +358,7 @@ impl FrostConsensusOrchestrator {
             threshold_signature,
             Some(self.group_public_key.clone()),
             participants,
-            self.config.threshold,
+            self.config.threshold(),
             instance.fast_path,
             timestamp,
         );
@@ -455,7 +455,7 @@ impl FrostConsensusOrchestrator {
             signing_share,
             verifying_share,
             *frost_group_pkg.verifying_key(),
-            self.config.threshold,
+            self.config.threshold(),
         );
 
         // Convert commitments to FROST format

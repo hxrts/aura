@@ -70,7 +70,7 @@
 //! use aura_guards::{create_send_guard, SendGuardChain};
 //!
 //! let guard = create_send_guard(
-//!     "message:send".to_string(),
+//!     CapabilityId::from("message:send"),
 //!     context_id,
 //!     peer_device,
 //!     100, // flow cost
@@ -131,7 +131,7 @@ pub use journal::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
 pub use traits::GuardContextProvider;
-pub use types::{GuardOperation, GuardOperationId};
+pub use types::{CapabilityId, GuardOperation, GuardOperationId};
 
 use aura_core::effects::{
     AuthorizationEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
@@ -187,7 +187,7 @@ pub struct ProtocolGuard {
     /// Privacy leakage budget for this operation
     pub leakage_budget: LeakageBudget,
     /// Operation identifier for logging and metrics
-    pub operation_id: String,
+    pub operation_id: GuardOperationId,
 }
 
 /// Privacy leakage budget tracking across adversary classes
@@ -241,7 +241,7 @@ impl ProtocolGuard {
     pub fn new(
         root_public_key: PublicKey,
         authority_id: AuthorityId,
-        operation_id: impl Into<String>,
+        operation_id: impl Into<GuardOperationId>,
     ) -> Self {
         Self {
             root_public_key,
@@ -307,7 +307,7 @@ impl ProtocolGuard {
     /// # Security Warning
     /// Production code should use `new()` with real key material from the
     /// authority's Biscuit root key and actual AuthorityId.
-    pub fn new_for_testing(operation_id: impl Into<String>) -> Self {
+    pub fn new_for_testing(operation_id: impl Into<GuardOperationId>) -> Self {
         // Use deterministic seed for reproducible behavior
         let keypair = biscuit_auth::KeyPair::new();
         let authority_id = AuthorityId::new_from_entropy([0u8; 32]);

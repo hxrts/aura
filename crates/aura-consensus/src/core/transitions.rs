@@ -18,7 +18,12 @@
 
 use std::collections::BTreeSet;
 
-use super::state::{ConsensusPhase, ConsensusState, PathSelection, PureCommitFact, ShareProposal};
+use super::state::{
+    ConsensusPhase, ConsensusState, ConsensusThreshold, PathSelection, PureCommitFact,
+    ShareProposal,
+};
+use crate::types::ConsensusId;
+use aura_core::{AuthorityId, Hash32, OperationId};
 
 /// Result of a state transition.
 ///
@@ -58,26 +63,21 @@ impl TransitionResult {
 /// Returns new ConsensusState in FastPathActive or FallbackActive phase
 /// based on path selection.
 pub fn start_consensus(
-    cid: String,
-    operation: String,
-    prestate_hash: String,
-    threshold: usize,
-    witnesses: BTreeSet<String>,
-    initiator: String,
+    cid: ConsensusId,
+    operation: OperationId,
+    prestate_hash: Hash32,
+    threshold: ConsensusThreshold,
+    witnesses: BTreeSet<AuthorityId>,
+    initiator: AuthorityId,
     path: PathSelection,
 ) -> TransitionResult {
     // Quint: witnesses.size() >= threshold
-    if witnesses.len() < threshold {
+    if witnesses.len() < threshold.as_usize() {
         return TransitionResult::NotEnabled(format!(
             "insufficient witnesses: {} < {}",
             witnesses.len(),
-            threshold
+            threshold.get()
         ));
-    }
-
-    // Quint: threshold >= 1
-    if threshold < 1 {
-        return TransitionResult::NotEnabled("threshold must be >= 1".to_string());
     }
 
     let state = ConsensusState::new(
@@ -159,18 +159,18 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
 
         // Create commit fact
         if let Some(rid) = new_state.majority_result() {
-            let attesters: BTreeSet<String> = new_state
+            let attesters: BTreeSet<AuthorityId> = new_state
                 .proposals
                 .iter()
                 .filter(|p| p.result_id == rid)
-                .map(|p| p.witness.clone())
+                .map(|p| p.witness)
                 .collect();
 
             new_state.commit_fact = Some(PureCommitFact {
-                cid: new_state.cid.clone(),
+                cid: new_state.cid,
                 result_id: rid,
                 signature: "agg_sig_placeholder".to_string(),
-                prestate_hash: new_state.prestate_hash.clone(),
+                prestate_hash: new_state.prestate_hash,
             });
         }
     }
@@ -258,7 +258,7 @@ pub fn gossip_shares(state: &ConsensusState, shares: Vec<ShareProposal>) -> Tran
 /// Effects:
 /// - Moves to ConsensusCommitted phase
 /// - Creates commit fact with aggregated signature
-pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &str) -> TransitionResult {
+pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &Hash32) -> TransitionResult {
     // Quint: isFallback = inst.phase == FallbackActive
     if state.phase != ConsensusPhase::FallbackActive {
         return TransitionResult::NotEnabled(format!("not in fallback: {:?}", state.phase));
@@ -266,10 +266,12 @@ pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &str) -> Trans
 
     // Quint: reachedThreshold = matchingCount >= inst.threshold
     let matching_count = state.count_proposals_for_result(winning_rid);
-    if matching_count < state.threshold {
+    if matching_count < state.threshold.as_usize() {
         return TransitionResult::NotEnabled(format!(
             "insufficient shares for {}: {} < {}",
-            winning_rid, matching_count, state.threshold
+            winning_rid,
+            matching_count,
+            state.threshold.get()
         ));
     }
 
@@ -277,18 +279,18 @@ pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &str) -> Trans
     new_state.phase = ConsensusPhase::Committed;
 
     // Create commit fact
-    let attesters: BTreeSet<String> = state
+    let attesters: BTreeSet<AuthorityId> = state
         .proposals
         .iter()
-        .filter(|p| p.result_id == winning_rid)
-        .map(|p| p.witness.clone())
+        .filter(|p| p.result_id == *winning_rid)
+        .map(|p| p.witness)
         .collect();
 
     new_state.commit_fact = Some(PureCommitFact {
-        cid: state.cid.clone(),
-        result_id: winning_rid.to_string(),
+        cid: state.cid,
+        result_id: *winning_rid,
         signature: "agg_sig_fallback".to_string(),
-        prestate_hash: state.prestate_hash.clone(),
+        prestate_hash: state.prestate_hash,
     });
 
     TransitionResult::Ok(new_state)
@@ -326,49 +328,70 @@ mod tests {
     use super::super::state::ShareData;
     use super::*;
 
-    fn make_share(witness: &str, result_id: &str) -> ShareProposal {
+    fn threshold(value: u16) -> ConsensusThreshold {
+        ConsensusThreshold::new(value).expect("threshold")
+    }
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_hash(seed: u8) -> Hash32 {
+        Hash32::new([seed; 32])
+    }
+
+    fn test_operation(seed: u8) -> OperationId {
+        OperationId::new_from_entropy([seed; 32])
+    }
+
+    fn test_consensus_id(seed: u8) -> ConsensusId {
+        ConsensusId(Hash32::new([seed; 32]))
+    }
+
+    fn make_share(witness: AuthorityId, result_id: Hash32) -> ShareProposal {
         ShareProposal {
-            witness: witness.to_string(),
-            result_id: result_id.to_string(),
+            witness,
+            result_id,
             share: ShareData {
-                share_value: format!("share_{witness}"),
-                nonce_binding: format!("nonce_{witness}"),
-                data_binding: format!("binding_{result_id}"),
+                share_value: "share".to_string(),
+                nonce_binding: "nonce".to_string(),
+                data_binding: "binding".to_string(),
             },
         }
     }
 
     #[test]
     fn test_start_consensus() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> =
+            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let result = start_consensus(
-            "cns1".to_string(),
-            "update_policy".to_string(),
-            "pre_abc".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
         assert!(result.is_ok());
         let state = result.state().unwrap();
         assert_eq!(state.phase, ConsensusPhase::FastPathActive);
-        assert_eq!(state.threshold, 2);
+        assert_eq!(state.threshold.get(), 2);
     }
 
     #[test]
     fn test_start_consensus_insufficient_witnesses() {
-        let witnesses: BTreeSet<_> = ["w1"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = [1u8].iter().map(|&s| test_authority(s)).collect();
 
         let result = start_consensus(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
@@ -377,26 +400,27 @@ mod tests {
 
     #[test]
     fn test_apply_share_reaches_threshold() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> =
+            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
         // First share
-        let result = apply_share(&state, make_share("w1", "rid1"));
+        let result = apply_share(&state, make_share(test_authority(1), test_hash(9)));
         assert!(result.is_ok());
         state = result.state().unwrap();
         assert_eq!(state.phase, ConsensusPhase::FastPathActive);
 
         // Second share - threshold met
-        let result = apply_share(&state, make_share("w2", "rid1"));
+        let result = apply_share(&state, make_share(test_authority(2), test_hash(9)));
         assert!(result.is_ok());
         state = result.state().unwrap();
         assert_eq!(state.phase, ConsensusPhase::Committed);
@@ -405,38 +429,40 @@ mod tests {
 
     #[test]
     fn test_apply_share_detects_equivocation() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> =
+            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
         // First share from w1
-        state.proposals.push(make_share("w1", "rid1"));
+        state.proposals.push(make_share(test_authority(1), test_hash(9)));
 
         // w1 tries to vote for different result - equivocation
-        let result = apply_share(&state, make_share("w1", "rid2"));
+        let result = apply_share(&state, make_share(test_authority(1), test_hash(10)));
         // Since w1 already voted, should be NotEnabled
         assert!(!result.is_ok());
     }
 
     #[test]
     fn test_trigger_fallback() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> =
+            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
@@ -449,15 +475,16 @@ mod tests {
 
     #[test]
     fn test_trigger_fallback_not_fast_path() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> =
+            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::SlowPath, // Already in fallback
         );
 
@@ -467,23 +494,25 @@ mod tests {
 
     #[test]
     fn test_complete_via_fallback() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> =
+            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::SlowPath,
         );
 
         // Add shares via gossip
-        state.proposals.push(make_share("w1", "rid1"));
-        state.proposals.push(make_share("w2", "rid1"));
+        let rid = test_hash(9);
+        state.proposals.push(make_share(test_authority(1), rid));
+        state.proposals.push(make_share(test_authority(2), rid));
 
-        let result = complete_via_fallback(&state, "rid1");
+        let result = complete_via_fallback(&state, &rid);
         assert!(result.is_ok());
         let new_state = result.state().unwrap();
         assert_eq!(new_state.phase, ConsensusPhase::Committed);
@@ -492,15 +521,16 @@ mod tests {
 
     #[test]
     fn test_fail_consensus() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> =
+            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
@@ -512,15 +542,15 @@ mod tests {
 
     #[test]
     fn test_fail_consensus_already_committed() {
-        let witnesses: BTreeSet<_> = ["w1", "w2"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 

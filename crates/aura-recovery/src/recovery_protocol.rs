@@ -4,13 +4,15 @@
 //! replacing the device-centric recovery model with authority-based recovery.
 
 use crate::facts::{RecoveryFact, RecoveryFactEmitter};
+use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
-use aura_core::identifiers::ContextId;
+use aura_core::identifiers::{ContextId, RecoveryId};
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::tree::LeafPublicKey;
 use aura_core::types::Epoch;
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
@@ -42,7 +44,7 @@ pub struct RecoveryProtocol {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryRequest {
     /// Unique recovery ceremony ID
-    pub recovery_id: String,
+    pub recovery_id: RecoveryId,
     /// Account authority requesting recovery
     pub account_authority: AuthorityId,
     /// New tree commitment after recovery
@@ -59,12 +61,12 @@ pub enum RecoveryOperation {
     /// Replace the entire tree (device key recovery)
     ReplaceTree {
         /// New public key for the recovered tree
-        new_public_key: Vec<u8>,
+        new_public_key: PublicKeyPackage,
     },
     /// Add a new device to existing tree
     AddDevice {
         /// Public key of the new device
-        device_public_key: Vec<u8>,
+        device_public_key: LeafPublicKey,
     },
     /// Remove a compromised device
     RemoveDevice {
@@ -86,9 +88,9 @@ pub struct GuardianApproval {
     /// Guardian authority ID
     pub guardian_id: AuthorityId,
     /// Recovery request being approved
-    pub recovery_id: String,
+    pub recovery_id: RecoveryId,
     /// Guardian's signature over the recovery grant
-    pub signature: Vec<u8>,
+    pub signature: Ed25519Signature,
     /// Timestamp
     pub timestamp: TimeStamp,
 }
@@ -180,7 +182,7 @@ impl RecoveryProtocol {
                 new_tree_root: request.new_tree_commitment,
             },
             RecoveryOperation::AddDevice { device_public_key } => RecoveryOp::AddDevice {
-                device_public_key: device_public_key.clone(),
+                device_public_key: device_public_key.as_bytes().to_vec(),
             },
             RecoveryOperation::RemoveDevice { leaf_index } => RecoveryOp::RemoveDevice {
                 leaf_index: *leaf_index,
@@ -226,10 +228,6 @@ impl RecoveryProtocol {
         // Verify guardian is in the set
         if !self.guardian_authorities.contains(&approval.guardian_id) {
             return Err(AuraError::permission_denied("Guardian not in recovery set"));
-        }
-
-        if approval.signature.is_empty() {
-            return Err(AuraError::invalid("Missing guardian signature"));
         }
 
         // Record approval if unique
@@ -287,7 +285,7 @@ choreography! {
 /// Recovery protocol handler
 pub struct RecoveryProtocolHandler {
     protocol: Arc<RecoveryProtocol>,
-    approvals: Arc<Mutex<HashMap<String, Vec<GuardianApproval>>>>,
+    approvals: Arc<Mutex<HashMap<RecoveryId, Vec<GuardianApproval>>>>,
 }
 
 impl RecoveryProtocolHandler {
@@ -333,15 +331,17 @@ impl RecoveryProtocolHandler {
         approvals.insert(request.recovery_id.clone(), Vec::new());
 
         // Create context ID for this recovery ceremony
-        let context_id = ContextId::new_from_entropy(hash::hash(request.recovery_id.as_bytes()));
+        let context_id = ContextId::new_from_entropy(hash::hash(
+            request.recovery_id.as_str().as_bytes(),
+        ));
 
         // Emit RecoveryInitiated fact
         let timestamp = time_effects.physical_time().await?.ts_ms;
-        let request_hash = Hash32(hash::hash(request.recovery_id.as_bytes()));
+        let request_hash = Hash32(hash::hash(request.recovery_id.as_str().as_bytes()));
         let initiated_fact = RecoveryFact::RecoveryInitiated {
             context_id,
             account_id: request.account_authority,
-            trace_id: Some(request.recovery_id.clone()),
+            trace_id: Some(request.recovery_id.to_string()),
             request_hash,
             initiated_at: PhysicalTime {
                 ts_ms: timestamp,
@@ -367,15 +367,17 @@ impl RecoveryProtocolHandler {
         journal: &dyn JournalEffects,
     ) -> Result<bool> {
         // Create context ID for this recovery ceremony
-        let context_id = ContextId::new_from_entropy(hash::hash(approval.recovery_id.as_bytes()));
+        let context_id = ContextId::new_from_entropy(hash::hash(
+            approval.recovery_id.as_str().as_bytes(),
+        ));
 
         // Emit RecoveryShareSubmitted fact
         let timestamp = time_effects.physical_time().await?.ts_ms;
-        let share_hash = Hash32(hash::hash(&approval.signature));
+        let share_hash = Hash32(hash::hash(approval.signature.as_bytes()));
         let share_fact = RecoveryFact::RecoveryShareSubmitted {
             context_id,
             guardian_id: approval.guardian_id,
-            trace_id: Some(approval.recovery_id.clone()),
+            trace_id: Some(approval.recovery_id.to_string()),
             share_hash,
             submitted_at: PhysicalTime {
                 ts_ms: timestamp,
@@ -401,7 +403,7 @@ impl RecoveryProtocolHandler {
             let approved_fact = RecoveryFact::RecoveryApproved {
                 context_id,
                 account_id: self.protocol.account_authority,
-                trace_id: Some(approval.recovery_id.clone()),
+                trace_id: Some(approval.recovery_id.to_string()),
                 approvals_hash,
                 approved_at: PhysicalTime {
                     ts_ms: timestamp,
@@ -443,7 +445,7 @@ impl RecoveryProtocolHandler {
         let mut bytes = Vec::new();
         for approval in sorted {
             bytes.extend_from_slice(&approval.guardian_id.to_bytes());
-            bytes.extend_from_slice(&approval.signature);
+            bytes.extend_from_slice(approval.signature.as_bytes());
         }
 
         Hash32(hash::hash(&bytes))
@@ -508,7 +510,7 @@ impl RecoveryProtocolHandler {
     /// Finalize recovery via effects
     async fn finalize_recovery_via_effects(
         &self,
-        recovery_id: &str,
+        recovery_id: &RecoveryId,
         approvals: &[GuardianApproval],
         time_effects: &dyn PhysicalTimeEffects,
         network: &dyn NetworkEffects,
@@ -522,11 +524,12 @@ impl RecoveryProtocolHandler {
         }
 
         // Create context ID for this recovery ceremony
-        let context_id = ContextId::new_from_entropy(hash::hash(recovery_id.as_bytes()));
+        let context_id =
+            ContextId::new_from_entropy(hash::hash(recovery_id.as_str().as_bytes()));
 
         // Emit RecoveryCompleted fact
         let timestamp = time_effects.physical_time().await?.ts_ms;
-        let evidence_hash = Hash32(hash::hash(recovery_id.as_bytes()));
+        let evidence_hash = Hash32(hash::hash(recovery_id.as_str().as_bytes()));
         let completed_fact = RecoveryFact::RecoveryCompleted {
             context_id,
             account_id: self.protocol.account_authority,
@@ -574,7 +577,7 @@ impl RecoveryProtocolHandler {
     /// Update recovery state in journal via JournalEffects
     async fn update_journal_recovery_state_via_effects(
         &self,
-        recovery_id: &str,
+        recovery_id: &RecoveryId,
         state: &str,
         approvals: &[GuardianApproval],
         time_effects: &dyn PhysicalTimeEffects,
@@ -584,7 +587,7 @@ impl RecoveryProtocolHandler {
         let timestamp = time_effects.physical_time().await?.ts_ms / 1000; // Convert milliseconds to seconds
 
         let state_data = serde_json::json!({
-            "recovery_id": recovery_id,
+            "recovery_id": recovery_id.as_str(),
             "state": state,
             "approvals_count": approvals.len(),
             "timestamp": timestamp,
@@ -592,7 +595,7 @@ impl RecoveryProtocolHandler {
 
         let mut journal = journal_effects.get_journal().await?;
         journal.facts.insert_with_context(
-            format!("recovery_state:{recovery_id}"),
+            format!("recovery_state:{}", recovery_id.as_str()),
             aura_core::journal::FactValue::String(state_data.to_string()),
             aura_core::ActorId::authority(self.protocol.account_authority),
             aura_core::FactTimestamp::new(timestamp),

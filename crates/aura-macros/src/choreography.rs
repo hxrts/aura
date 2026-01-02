@@ -12,11 +12,13 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use rumpsteak_aura_choreography::{
+    ast::Protocol,
     compiler::{generate_choreography_code_with_namespacing, parse_choreography_str, project},
     extensions::ExtensionRegistry,
     parse_and_generate_with_extensions,
 };
 use syn::{parse::Parse, Ident, Token};
+use std::collections::BTreeSet;
 
 // Import Biscuit-related types for the updated annotation system
 use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
@@ -118,7 +120,9 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     // Generate the Aura wrapper module with namespace support
     // Extract namespace from the original input - we need to re-parse to get namespace
     let namespace = extract_namespace_from_input(input.clone());
-    let aura_wrapper = generate_aura_wrapper(&parsed_input, namespace.as_deref());
+    let message_type_names = extract_message_type_names(&input);
+    let aura_wrapper =
+        generate_aura_wrapper(&parsed_input, namespace.as_deref(), &message_type_names);
 
     // Extract namespace for uniqueness check (reuse from aura_wrapper if available)
     let namespace = extract_namespace_from_input(input.clone());
@@ -160,8 +164,99 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     })
 }
 
+fn collect_message_type_names(protocol: &Protocol, names: &mut BTreeSet<String>) {
+    match protocol {
+        Protocol::Send {
+            message,
+            continuation,
+            ..
+        } => {
+            names.insert(message.name.to_string());
+            collect_message_type_names(continuation, names);
+        }
+        Protocol::Broadcast {
+            message,
+            continuation,
+            ..
+        } => {
+            names.insert(message.name.to_string());
+            collect_message_type_names(continuation, names);
+        }
+        Protocol::Choice { branches, .. } => {
+            for branch in branches {
+                collect_message_type_names(&branch.protocol, names);
+            }
+        }
+        Protocol::Loop { body, .. } => {
+            collect_message_type_names(body, names);
+        }
+        Protocol::Parallel { protocols } => {
+            for protocol in protocols {
+                collect_message_type_names(protocol, names);
+            }
+        }
+        Protocol::Rec { body, .. } => {
+            collect_message_type_names(body, names);
+        }
+        Protocol::Extension { continuation, .. } => {
+            collect_message_type_names(continuation, names);
+        }
+        Protocol::Var(_) | Protocol::End => {}
+    }
+}
+
+fn extract_message_type_names(input: &TokenStream) -> Vec<String> {
+    let input_str = input.to_string();
+    let choreography = match parse_choreography_str(&input_str) {
+        Ok(choreo) => choreo,
+        Err(_) => return Vec::new(),
+    };
+    let mut names = BTreeSet::new();
+    collect_message_type_names(&choreography.protocol, &mut names);
+    names.into_iter().collect()
+}
+
+fn to_screaming_snake(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 4);
+    let mut chars = value.chars().peekable();
+    let mut prev_is_upper = false;
+    let mut prev_is_lower = false;
+    let mut prev_is_digit = false;
+    while let Some(ch) = chars.next() {
+        if ch == '_' {
+            if !out.ends_with('_') {
+                out.push('_');
+            }
+            prev_is_upper = false;
+            prev_is_lower = false;
+            prev_is_digit = false;
+            continue;
+        }
+        let is_upper = ch.is_ascii_uppercase();
+        let is_lower = ch.is_ascii_lowercase();
+        let is_digit = ch.is_ascii_digit();
+        let next_is_lower = chars.peek().map(|c| c.is_ascii_lowercase()).unwrap_or(false);
+        if !out.is_empty() {
+            if is_upper && (prev_is_lower || (prev_is_upper && next_is_lower) || prev_is_digit) {
+                out.push('_');
+            } else if is_digit && (prev_is_lower || prev_is_upper) {
+                out.push('_');
+            }
+        }
+        out.push(ch.to_ascii_uppercase());
+        prev_is_upper = is_upper;
+        prev_is_lower = is_lower;
+        prev_is_digit = is_digit;
+    }
+    out
+}
+
 /// Generate the Aura wrapper module that integrates with the effects system
-fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> TokenStream {
+fn generate_aura_wrapper(
+    input: &ChoreographyInput,
+    namespace: Option<&str>,
+    message_type_names: &[String],
+) -> TokenStream {
     let roles = &input.roles;
     let annotations = &input.aura_annotations;
 
@@ -198,6 +293,28 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
         quote::format_ident!("aura_choreography")
     };
 
+    let message_type_constants: Vec<_> = message_type_names
+        .iter()
+        .map(|name| {
+            let const_ident = quote::format_ident!("{}", to_screaming_snake(name));
+            quote! {
+                pub const #const_ident: MessageTypeId = MessageTypeId::new_static(#name);
+            }
+        })
+        .collect();
+
+    let message_type_module = if message_type_constants.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            /// Message type identifiers for guard configuration.
+            pub mod message_types {
+                use aura_mpst::MessageTypeId;
+                #(#message_type_constants)*
+            }
+        }
+    };
+
     // Generate leakage integration code
     let leakage_integration = generate_leakage_integration(annotations);
 
@@ -227,6 +344,8 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                     }
                 }
             }
+
+            #message_type_module
 
             /// Aura handler with authorization and flow management hooks
             ///

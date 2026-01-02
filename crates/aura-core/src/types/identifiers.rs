@@ -323,6 +323,30 @@ string_id!(
     prefix: "individual-"
 );
 
+string_id!(
+    /// Invitation identifier for relationship and enrollment invites
+    ///
+    /// Stored as a string to preserve existing prefixed formats (e.g. "inv-...").
+    InvitationId,
+    prefix: ""
+);
+
+string_id!(
+    /// Recovery ceremony identifier for guardian-based recovery flows
+    ///
+    /// Stored as a string to preserve existing prefixed formats (e.g. "recovery-...").
+    RecoveryId,
+    prefix: ""
+);
+
+string_id!(
+    /// Guardian ceremony identifier for key-rotation and enrollment flows
+    ///
+    /// Stored as a string to preserve existing prefixed formats.
+    CeremonyId,
+    prefix: ""
+);
+
 uuid_id!(
     /// Operation identifier for tracking operations
     ///
@@ -472,6 +496,23 @@ hash_id!(
     /// does not reveal membership or topology.
     ChannelId,
     prefix: "channel"
+);
+
+hash_id!(
+    /// Home identifier for social topology homes
+    ///
+    /// Homes are storage/relay containers in the social architecture. Each home
+    /// has storage limits, residents, and neighborhood memberships.
+    HomeId,
+    prefix: "home"
+);
+
+hash_id!(
+    /// Neighborhood identifier for inter-home connections
+    ///
+    /// Neighborhoods connect multiple homes for relay and storage sharing.
+    NeighborhoodId,
+    prefix: "neighborhood"
 );
 
 uuid_id!(

@@ -173,8 +173,7 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 
 // Re-export core types for convenience
 pub use core::{
-    MetricsCollector, SessionManager, SessionResult, SessionState, SyncConfig, SyncError,
-    SyncResult,
+    MetricsCollector, SessionManager, SessionResult, SessionState, SyncConfig, SyncResult,
 };
 
 // Protocol re-exports

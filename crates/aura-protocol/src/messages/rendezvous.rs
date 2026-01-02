@@ -10,7 +10,6 @@
 //! Reference: docs/051_rendezvous.md Section 4.3
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Transport type enumeration for rendezvous
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,112 +26,183 @@ pub enum TransportKind {
     Ble,
 }
 
-/// Transport configuration and metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TransportDescriptor {
-    /// Transport type (QUIC, WebSocket, WebRTC, Tor, or BLE)
-    pub kind: TransportKind,
-    /// Protocol-specific metadata and configuration parameters
-    pub metadata: BTreeMap<String, String>,
+/// Address sets used by direct transports.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AddressSet {
     /// Local addresses (direct connectivity)
-    pub local_addresses: Vec<String>,
+    pub local: Vec<String>,
     /// Reflexive addresses discovered via STUN (NAT traversal)
-    pub reflexive_addresses: Vec<String>,
+    pub reflexive: Vec<String>,
+}
+
+impl AddressSet {
+    pub fn new(local: Vec<String>, reflexive: Vec<String>) -> Self {
+        Self { local, reflexive }
+    }
+
+    pub fn add_reflexive_address(&mut self, reflexive_addr: String) {
+        if !self.reflexive.contains(&reflexive_addr) {
+            self.reflexive.push(reflexive_addr);
+        }
+    }
+
+    pub fn all_addresses(&self) -> Vec<String> {
+        let mut addresses = self.local.clone();
+        addresses.extend(self.reflexive.clone());
+        addresses
+    }
+
+    pub fn priority_addresses(&self) -> Vec<String> {
+        let mut addresses = self.reflexive.clone();
+        addresses.extend(self.local.clone());
+        addresses
+    }
+}
+
+/// QUIC transport descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QuicTransportDescriptor {
+    /// ALPN protocol identifier.
+    pub alpn: String,
+    /// Direct/reflexive address candidates.
+    pub addresses: AddressSet,
+}
+
+/// WebSocket transport descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WebSocketTransportDescriptor {
+    /// Direct/reflexive address candidates.
+    pub addresses: AddressSet,
+}
+
+/// WebRTC transport descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WebRtcTransportDescriptor {
+    /// ICE username fragment.
+    pub ufrag: String,
+    /// ICE password.
+    pub pwd: String,
+    /// ICE candidates.
+    pub candidates: Vec<String>,
+}
+
+/// Tor transport descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TorTransportDescriptor {
+    /// Onion service address.
+    pub onion: String,
+}
+
+/// Bluetooth Low Energy transport descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BleTransportDescriptor {
+    /// BLE service UUID.
+    pub service_uuid: String,
+}
+
+/// Transport configuration and metadata
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data")]
+pub enum TransportDescriptor {
+    /// QUIC protocol transport with ALPN support
+    Quic(QuicTransportDescriptor),
+    /// WebSocket protocol transport
+    WebSocket(WebSocketTransportDescriptor),
+    /// WebRTC data channel transport
+    WebRtc(WebRtcTransportDescriptor),
+    /// Tor onion service transport
+    Tor(TorTransportDescriptor),
+    /// Bluetooth Low Energy transport
+    Ble(BleTransportDescriptor),
 }
 
 impl TransportDescriptor {
+    /// Return the transport kind for this descriptor.
+    pub fn kind(&self) -> TransportKind {
+        match self {
+            TransportDescriptor::Quic(_) => TransportKind::Quic,
+            TransportDescriptor::WebSocket(_) => TransportKind::WebSocket,
+            TransportDescriptor::WebRtc(_) => TransportKind::WebRtc,
+            TransportDescriptor::Tor(_) => TransportKind::Tor,
+            TransportDescriptor::Ble(_) => TransportKind::Ble,
+        }
+    }
+
     /// Create a QUIC transport descriptor with ALPN protocol specification
     pub fn quic(local_addr: String, alpn: String) -> Self {
-        let mut metadata = BTreeMap::new();
-        metadata.insert("alpn".to_string(), alpn);
-        Self {
-            kind: TransportKind::Quic,
-            metadata,
-            local_addresses: vec![local_addr],
-            reflexive_addresses: vec![],
-        }
+        Self::Quic(QuicTransportDescriptor {
+            alpn,
+            addresses: AddressSet::new(vec![local_addr], vec![]),
+        })
     }
 
     /// Create a QUIC transport descriptor with both local and STUN-discovered reflexive addresses
     pub fn quic_with_stun(local_addr: String, reflexive_addr: String, alpn: String) -> Self {
-        let mut metadata = BTreeMap::new();
-        metadata.insert("alpn".to_string(), alpn);
-        Self {
-            kind: TransportKind::Quic,
-            metadata,
-            local_addresses: vec![local_addr],
-            reflexive_addresses: vec![reflexive_addr],
-        }
+        Self::Quic(QuicTransportDescriptor {
+            alpn,
+            addresses: AddressSet::new(vec![local_addr], vec![reflexive_addr]),
+        })
     }
 
     /// Create a WebSocket transport descriptor with endpoint address
     pub fn websocket(local_addr: String) -> Self {
-        let metadata = BTreeMap::new();
-        Self {
-            kind: TransportKind::WebSocket,
-            metadata,
-            local_addresses: vec![local_addr],
-            reflexive_addresses: vec![],
-        }
+        Self::WebSocket(WebSocketTransportDescriptor {
+            addresses: AddressSet::new(vec![local_addr], vec![]),
+        })
     }
 
     /// Create a WebRTC transport descriptor with ICE credentials and candidates
     pub fn webrtc(ufrag: String, pwd: String, candidates: Vec<String>) -> Self {
-        let mut metadata = BTreeMap::new();
-        metadata.insert("ufrag".to_string(), ufrag);
-        metadata.insert("pwd".to_string(), pwd);
-        metadata.insert("candidates".to_string(), candidates.join(","));
-        Self {
-            kind: TransportKind::WebRtc,
-            metadata,
-            local_addresses: vec![],
-            reflexive_addresses: vec![],
-        }
+        Self::WebRtc(WebRtcTransportDescriptor {
+            ufrag,
+            pwd,
+            candidates,
+        })
     }
 
     /// Create a Tor transport descriptor with onion service address
     pub fn tor(onion: String) -> Self {
-        let mut metadata = BTreeMap::new();
-        metadata.insert("onion".to_string(), onion.clone());
-        Self {
-            kind: TransportKind::Tor,
-            metadata,
-            local_addresses: vec![onion],
-            reflexive_addresses: vec![],
-        }
+        Self::Tor(TorTransportDescriptor { onion })
     }
 
     /// Create a Bluetooth Low Energy transport descriptor with service UUID
     pub fn ble(service_uuid: String) -> Self {
-        let mut metadata = BTreeMap::new();
-        metadata.insert("service_uuid".to_string(), service_uuid);
-        Self {
-            kind: TransportKind::Ble,
-            metadata,
-            local_addresses: vec![],
-            reflexive_addresses: vec![],
-        }
+        Self::Ble(BleTransportDescriptor { service_uuid })
     }
 
     /// Add a reflexive address discovered via STUN
     pub fn add_reflexive_address(&mut self, reflexive_addr: String) {
-        if !self.reflexive_addresses.contains(&reflexive_addr) {
-            self.reflexive_addresses.push(reflexive_addr);
+        match self {
+            TransportDescriptor::Quic(descriptor) => {
+                descriptor.addresses.add_reflexive_address(reflexive_addr);
+            }
+            TransportDescriptor::WebSocket(descriptor) => {
+                descriptor.addresses.add_reflexive_address(reflexive_addr);
+            }
+            _ => {}
         }
     }
 
     /// Get all available addresses (local + reflexive) for connection attempts
     pub fn get_all_addresses(&self) -> Vec<String> {
-        let mut addresses = self.local_addresses.clone();
-        addresses.extend(self.reflexive_addresses.clone());
-        addresses
+        match self {
+            TransportDescriptor::Quic(descriptor) => descriptor.addresses.all_addresses(),
+            TransportDescriptor::WebSocket(descriptor) => descriptor.addresses.all_addresses(),
+            TransportDescriptor::Tor(descriptor) => vec![descriptor.onion.clone()],
+            TransportDescriptor::Ble(_) => Vec::new(),
+            TransportDescriptor::WebRtc(_) => Vec::new(),
+        }
     }
 
     /// Get priority-ordered addresses (reflexive first, then local)
     pub fn get_priority_addresses(&self) -> Vec<String> {
-        let mut addresses = self.reflexive_addresses.clone();
-        addresses.extend(self.local_addresses.clone());
-        addresses
+        match self {
+            TransportDescriptor::Quic(descriptor) => descriptor.addresses.priority_addresses(),
+            TransportDescriptor::WebSocket(descriptor) => descriptor.addresses.priority_addresses(),
+            TransportDescriptor::Tor(descriptor) => vec![descriptor.onion.clone()],
+            TransportDescriptor::Ble(_) => Vec::new(),
+            TransportDescriptor::WebRtc(_) => Vec::new(),
+        }
     }
 }
 

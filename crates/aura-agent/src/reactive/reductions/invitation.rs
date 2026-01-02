@@ -4,7 +4,7 @@
 //! Delegates to `InvitationViewReducer` from the `aura-invitation` crate.
 
 use crate::reactive::scheduler::ViewReduction;
-use aura_composition::{downcast_delta, ViewDeltaReducer};
+use aura_composition::{downcast_delta, ViewDelta, ViewDeltaReducer};
 use aura_core::identifiers::AuthorityId;
 use aura_invitation::{InvitationDelta, InvitationViewReducer, INVITATION_FACT_TYPE_ID};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
@@ -14,13 +14,20 @@ use aura_journal::fact::{Fact, FactContent, RelationalFact};
 /// Delegates to `InvitationViewReducer` from `aura-invitation` crate.
 pub struct InvitationReduction;
 
+fn downcast_invitation_deltas(view_deltas: Vec<ViewDelta>) -> Vec<InvitationDelta> {
+    view_deltas
+        .into_iter()
+        .filter_map(|vd| downcast_delta::<InvitationDelta>(&vd).cloned())
+        .collect()
+}
+
 impl ViewReduction<InvitationDelta> for InvitationReduction {
     fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<InvitationDelta> {
         let reducer = InvitationViewReducer;
 
         facts
             .iter()
-            .filter_map(|fact| match &fact.content {
+            .flat_map(|fact| match &fact.content {
                 FactContent::Relational(RelationalFact::Generic {
                     binding_type,
                     binding_data,
@@ -29,12 +36,9 @@ impl ViewReduction<InvitationDelta> for InvitationReduction {
                     // Use the domain reducer and downcast back to InvitationDelta
                     let view_deltas =
                         reducer.reduce_fact(binding_type, binding_data, own_authority);
-                    view_deltas
-                        .into_iter()
-                        .filter_map(|vd| downcast_delta::<InvitationDelta>(&vd).cloned())
-                        .next()
+                    downcast_invitation_deltas(view_deltas)
                 }
-                _ => None,
+                _ => Vec::new(),
             })
             .collect()
     }
@@ -43,7 +47,8 @@ impl ViewReduction<InvitationDelta> for InvitationReduction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_composition::IntoViewDelta;
+    use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_invitation::InvitationFact;
     use aura_journal::DomainFact;
@@ -73,10 +78,10 @@ mod tests {
 
         let sent_fact = InvitationFact::sent_ms(
             test_context_id(),
-            "inv-123".to_string(),
+            InvitationId::new("inv-123"),
             AuthorityId::new_from_entropy([1u8; 32]),
             AuthorityId::new_from_entropy([2u8; 32]),
-            "guardian".to_string(),
+            aura_invitation::InvitationType::Contact { nickname: None },
             1234567890,
             None,
             None,
@@ -98,5 +103,32 @@ mod tests {
             &deltas[0],
             InvitationDelta::InvitationAdded { .. }
         ));
+    }
+
+    #[test]
+    fn test_downcast_preserves_all_deltas() {
+        let view_deltas = vec![
+            InvitationDelta::InvitationAdded {
+                invitation_id: InvitationId::new("inv-1"),
+                direction: "outbound".to_string(),
+                other_party_id: "other".to_string(),
+                other_party_name: "Other".to_string(),
+                invitation_type: aura_invitation::InvitationType::Contact { nickname: None },
+                created_at: 1,
+                expires_at: None,
+                message: None,
+            }
+            .into_view_delta(),
+            InvitationDelta::InvitationStatusChanged {
+                invitation_id: InvitationId::new("inv-1"),
+                old_status: "pending".to_string(),
+                new_status: "accepted".to_string(),
+                changed_at: 2,
+            }
+            .into_view_delta(),
+        ];
+
+        let deltas = downcast_invitation_deltas(view_deltas);
+        assert_eq!(deltas.len(), 2);
     }
 }

@@ -3,21 +3,21 @@
 //! Essential transport utilities using mature libraries.
 //! Target: <200 lines, focus on std/tokio ecosystem.
 
-use super::{TransportError, TransportResult};
-use std::net::{IpAddr, SocketAddr};
+use super::{TransportError, TransportResult, TransportSocketAddr, TransportUrl};
+use std::net::IpAddr;
 use std::time::Duration;
 use tokio::time::timeout;
-use url::Url;
 
 /// Address resolution utilities
 pub struct AddressResolver;
 
 impl AddressResolver {
     /// Resolve hostname to socket addresses
-    pub async fn resolve(host: &str, port: u16) -> TransportResult<Vec<SocketAddr>> {
+    pub async fn resolve(host: &str, port: u16) -> TransportResult<Vec<TransportSocketAddr>> {
         let addresses: Vec<_> = tokio::net::lookup_host((host, port))
             .await
             .map_err(|e| TransportError::ConnectionFailed(format!("DNS resolution failed: {e}")))?
+            .map(TransportSocketAddr::from)
             .collect();
 
         if addresses.is_empty() {
@@ -30,18 +30,19 @@ impl AddressResolver {
     }
 
     /// Parse URL to socket address
-    pub fn url_to_socket_addr(url: &Url) -> TransportResult<SocketAddr> {
-        let host = url
+    pub fn url_to_socket_addr(url: &TransportUrl) -> TransportResult<TransportSocketAddr> {
+        let url_ref = url.as_url();
+        let host = url_ref
             .host_str()
             .ok_or_else(|| TransportError::Protocol("Missing host in URL".to_string()))?;
 
-        let port = url
+        let port = url_ref
             .port_or_known_default()
             .ok_or_else(|| TransportError::Protocol("Missing port in URL".to_string()))?;
 
         // Try parsing as IP address first
         if let Ok(ip) = host.parse::<IpAddr>() {
-            return Ok(SocketAddr::new(ip, port));
+            return Ok(TransportSocketAddr::from(std::net::SocketAddr::new(ip, port)));
         }
 
         // For hostnames, we'd need async resolution
@@ -51,8 +52,8 @@ impl AddressResolver {
     }
 
     /// Check if address is local/loopback
-    pub fn is_local_address(addr: &SocketAddr) -> bool {
-        match addr.ip() {
+    pub fn is_local_address(addr: &TransportSocketAddr) -> bool {
+        match addr.as_socket_addr().ip() {
             IpAddr::V4(ipv4) => ipv4.is_loopback() || ipv4.is_private(),
             IpAddr::V6(ipv6) => ipv6.is_loopback(),
         }
@@ -233,8 +234,9 @@ pub struct UrlValidator;
 
 impl UrlValidator {
     /// Validate WebSocket URL
-    pub fn validate_websocket_url(url: &Url) -> TransportResult<()> {
-        match url.scheme() {
+    pub fn validate_websocket_url(url: &TransportUrl) -> TransportResult<()> {
+        let url_ref = url.as_url();
+        match url_ref.scheme() {
             "ws" | "wss" => {}
             other => {
                 return Err(TransportError::Protocol(format!(
@@ -243,7 +245,7 @@ impl UrlValidator {
             }
         }
 
-        if url.host().is_none() {
+        if url_ref.host().is_none() {
             return Err(TransportError::Protocol(
                 "WebSocket URL missing host".to_string(),
             ));
@@ -253,8 +255,9 @@ impl UrlValidator {
     }
 
     /// Validate TCP connection string
-    pub fn validate_tcp_address(addr: &str) -> TransportResult<SocketAddr> {
-        addr.parse::<SocketAddr>()
+    pub fn validate_tcp_address(addr: &str) -> TransportResult<TransportSocketAddr> {
+        addr.parse::<std::net::SocketAddr>()
+            .map(TransportSocketAddr::from)
             .map_err(|e| TransportError::Protocol(format!("Invalid TCP address: {e}")))
     }
 }

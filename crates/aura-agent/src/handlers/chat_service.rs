@@ -25,7 +25,7 @@ use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{OrderingPolicy, PhysicalTime, TimeOrdering, TimeStamp};
 use aura_core::{Hash32, Prestate};
-use aura_guards::GuardContextProvider;
+use aura_guards::{types::CapabilityId, GuardContextProvider};
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{
@@ -175,8 +175,8 @@ impl ChatServiceApi {
         // The current runtime treats guard capabilities as permissive; we provide the required
         // strings so guards can evolve without breaking call sites.
         let capabilities = vec![
-            aura_chat::guards::costs::CAP_CHAT_CHANNEL_CREATE.to_string(),
-            aura_chat::guards::costs::CAP_CHAT_MESSAGE_SEND.to_string(),
+            CapabilityId::from(aura_chat::guards::costs::CAP_CHAT_CHANNEL_CREATE),
+            CapabilityId::from(aura_chat::guards::costs::CAP_CHAT_MESSAGE_SEND),
         ];
 
         Ok(GuardSnapshot::new(
@@ -193,7 +193,8 @@ impl ChatServiceApi {
             let reason = outcome
                 .decision
                 .denial_reason()
-                .unwrap_or("Operation denied");
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "Operation denied".to_string());
             return Err(AgentError::effects(format!(
                 "Guard denied operation: {reason}"
             )));

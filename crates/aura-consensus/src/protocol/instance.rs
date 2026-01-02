@@ -45,15 +45,18 @@ impl ProtocolInstance {
         // Sync proposals from tracker
         self.core_state.proposals = self
             .tracker
-            .get_signatures()
+            .partial_signatures
             .iter()
-            .map(|sig| core::ShareProposal {
-                witness: format!("{}", sig.signer),
-                result_id: format!("{:?}", self.operation_hash),
+            .map(|(witness, sig)| core::ShareProposal {
+                witness: *witness,
+                result_id: self.operation_hash,
                 share: core::ShareData {
                     share_value: hex::encode(&sig.signature),
-                    nonce_binding: String::new(),
-                    data_binding: format!("{:?}", self.prestate_hash),
+                    nonce_binding: format!("nonce:{}", sig.signer),
+                    data_binding: format!(
+                        "{}:{}:{}",
+                        self.consensus_id, self.operation_hash, self.prestate_hash
+                    ),
                 },
             })
             .collect();

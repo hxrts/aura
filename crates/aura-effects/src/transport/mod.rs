@@ -33,26 +33,308 @@ pub use tcp::TcpTransportHandler;
 pub use utils::{AddressResolver, BufferUtils, ConnectionMetrics, TimeoutHelper, UrlValidator};
 pub use websocket::WebSocketTransportHandler;
 
+use std::num::NonZeroUsize;
+
+/// Non-zero duration wrapper to prevent zero-timeout configurations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NonZeroDuration(std::time::Duration);
+
+impl NonZeroDuration {
+    pub fn from_duration(duration: std::time::Duration) -> Option<Self> {
+        if duration.is_zero() {
+            None
+        } else {
+            Some(Self(duration))
+        }
+    }
+
+    pub fn from_secs(secs: u64) -> Option<Self> {
+        if secs == 0 {
+            None
+        } else {
+            Some(Self(std::time::Duration::from_secs(secs)))
+        }
+    }
+
+    pub fn from_millis(ms: u64) -> Option<Self> {
+        if ms == 0 {
+            None
+        } else {
+            Some(Self(std::time::Duration::from_millis(ms)))
+        }
+    }
+
+    pub fn get(self) -> std::time::Duration {
+        self.0
+    }
+}
+
+impl From<NonZeroDuration> for std::time::Duration {
+    fn from(value: NonZeroDuration) -> Self {
+        value.0
+    }
+}
+
+/// Typed connection identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ConnectionId(String);
+
+impl ConnectionId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for ConnectionId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Typed socket address wrapper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TransportSocketAddr(std::net::SocketAddr);
+
+impl TransportSocketAddr {
+    pub fn new(value: std::net::SocketAddr) -> Self {
+        Self(value)
+    }
+
+    pub fn as_socket_addr(&self) -> &std::net::SocketAddr {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> std::net::SocketAddr {
+        self.0
+    }
+}
+
+impl From<std::net::SocketAddr> for TransportSocketAddr {
+    fn from(value: std::net::SocketAddr) -> Self {
+        Self(value)
+    }
+}
+
+impl From<TransportSocketAddr> for std::net::SocketAddr {
+    fn from(value: TransportSocketAddr) -> Self {
+        value.0
+    }
+}
+
+impl std::fmt::Display for TransportSocketAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Typed URL wrapper for transport endpoints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransportUrl(url::Url);
+
+impl TransportUrl {
+    pub fn new(value: url::Url) -> Self {
+        Self(value)
+    }
+
+    pub fn as_url(&self) -> &url::Url {
+        &self.0
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub fn into_inner(self) -> url::Url {
+        self.0
+    }
+}
+
+impl From<url::Url> for TransportUrl {
+    fn from(value: url::Url) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for TransportUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.as_str())
+    }
+}
+
+/// Typed transport address wrapper.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TransportAddress(String);
+
+impl TransportAddress {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<std::net::SocketAddr> for TransportAddress {
+    fn from(value: std::net::SocketAddr) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<TransportSocketAddr> for TransportAddress {
+    fn from(value: TransportSocketAddr) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<TransportUrl> for TransportAddress {
+    fn from(value: TransportUrl) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<String> for TransportAddress {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl std::fmt::Display for TransportAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Transport protocol classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportProtocol {
+    Tcp,
+    WebSocket,
+    Memory,
+    Unknown,
+}
+
+impl Default for TransportProtocol {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+/// Connection role metadata for bidirectional transports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransportRole {
+    Client,
+    Server,
+}
+
+/// Typed connection metadata.
+#[derive(Debug, Clone)]
+pub struct TransportMetadata {
+    pub protocol: TransportProtocol,
+    pub nodelay: Option<bool>,
+    pub url: Option<TransportUrl>,
+    pub status: Option<u16>,
+    pub role: Option<TransportRole>,
+    pub subprotocol: Option<String>,
+}
+
+impl TransportMetadata {
+    pub fn tcp(nodelay: bool) -> Self {
+        Self {
+            protocol: TransportProtocol::Tcp,
+            nodelay: Some(nodelay),
+            url: None,
+            status: None,
+            role: None,
+            subprotocol: None,
+        }
+    }
+
+    pub fn websocket_client(
+        url: TransportUrl,
+        status: u16,
+        subprotocol: Option<String>,
+    ) -> Self {
+        Self {
+            protocol: TransportProtocol::WebSocket,
+            nodelay: None,
+            url: Some(url),
+            status: Some(status),
+            role: Some(TransportRole::Client),
+            subprotocol,
+        }
+    }
+
+    pub fn websocket_server() -> Self {
+        Self {
+            protocol: TransportProtocol::WebSocket,
+            nodelay: None,
+            url: None,
+            status: None,
+            role: Some(TransportRole::Server),
+            subprotocol: None,
+        }
+    }
+
+    pub fn memory() -> Self {
+        Self {
+            protocol: TransportProtocol::Memory,
+            nodelay: None,
+            url: None,
+            status: None,
+            role: None,
+            subprotocol: None,
+        }
+    }
+}
+
+impl Default for TransportMetadata {
+    fn default() -> Self {
+        Self {
+            protocol: TransportProtocol::default(),
+            nodelay: None,
+            url: None,
+            status: None,
+            role: None,
+            subprotocol: None,
+        }
+    }
+}
+
 /// Transport handler configuration
 #[derive(Debug, Clone)]
 pub struct TransportConfig {
     /// Connection timeout
-    pub connect_timeout: std::time::Duration,
+    pub connect_timeout: NonZeroDuration,
     /// Read timeout
-    pub read_timeout: std::time::Duration,
+    pub read_timeout: NonZeroDuration,
     /// Write timeout
-    pub write_timeout: std::time::Duration,
+    pub write_timeout: NonZeroDuration,
     /// Buffer size
-    pub buffer_size: usize,
+    pub buffer_size: NonZeroUsize,
 }
 
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
-            connect_timeout: std::time::Duration::from_secs(30),
-            read_timeout: std::time::Duration::from_secs(60),
-            write_timeout: std::time::Duration::from_secs(30),
-            buffer_size: 64 * 1024,
+            connect_timeout: NonZeroDuration::from_secs(30)
+                .expect("connect timeout should be non-zero"),
+            read_timeout: NonZeroDuration::from_secs(60)
+                .expect("read timeout should be non-zero"),
+            write_timeout: NonZeroDuration::from_secs(30)
+                .expect("write timeout should be non-zero"),
+            buffer_size: NonZeroUsize::new(64 * 1024)
+                .expect("buffer size should be non-zero"),
         }
     }
 }
@@ -61,13 +343,13 @@ impl Default for TransportConfig {
 #[derive(Debug, Clone)]
 pub struct TransportConnection {
     /// Connection identifier
-    pub connection_id: String,
+    pub connection_id: ConnectionId,
     /// Local address
-    pub local_addr: String,
+    pub local_addr: TransportAddress,
     /// Remote address
-    pub remote_addr: String,
+    pub remote_addr: TransportAddress,
     /// Connection metadata
-    pub metadata: std::collections::HashMap<String, String>,
+    pub metadata: TransportMetadata,
 }
 
 /// Transport error types

@@ -277,9 +277,8 @@ impl AuraEffectSystem {
             if config.storage.opaque_names {
                 cfg = cfg.with_opaque_names();
             }
-            if test_mode {
-                cfg = cfg.with_plaintext_read(true).with_migrate_on_read(true);
-            }
+            // Note: Legacy plaintext migration support removed - all data must be encrypted
+            let _ = test_mode; // Suppress unused warning
             cfg
         };
         let storage_handler = Arc::new(EncryptedStorage::new(

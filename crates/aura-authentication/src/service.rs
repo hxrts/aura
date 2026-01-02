@@ -135,7 +135,10 @@ impl AuthService {
     /// the challenge if allowed.
     pub fn request_challenge(&self, snapshot: &GuardSnapshot, scope: SessionScope) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_REQUEST_AUTH) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &aura_guards::types::CapabilityId::from(costs::CAP_REQUEST_AUTH),
+        ) {
             return outcome;
         }
 
@@ -189,7 +192,10 @@ impl AuthService {
         proof_hash: [u8; 32],
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_SUBMIT_PROOF) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &aura_guards::types::CapabilityId::from(costs::CAP_SUBMIT_PROOF),
+        ) {
             return outcome;
         }
 
@@ -240,7 +246,10 @@ impl AuthService {
     ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         // Check capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_CREATE_SESSION) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &aura_guards::types::CapabilityId::from(costs::CAP_CREATE_SESSION),
+        ) {
             return outcome;
         }
 
@@ -251,13 +260,13 @@ impl AuthService {
 
         // Check duration
         if duration_seconds > policy.max_session_duration_secs {
-            return GuardOutcome::denied(
+            return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                 AuthGuardError::SessionDurationTooLong {
                     requested: duration_seconds,
                     max: policy.max_session_duration_secs,
                 }
                 .to_string(),
-            );
+            ));
         }
 
         let session_id = generate_session_id(snapshot);
@@ -308,7 +317,10 @@ impl AuthService {
     ) -> GuardOutcome {
         let policy = AuthPolicy::for_snapshot(&self.config, snapshot);
         // Check capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_REQUEST_GUARDIAN_APPROVAL) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &aura_guards::types::CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
+        ) {
             return outcome;
         }
 
@@ -321,17 +333,21 @@ impl AuthService {
         if policy.require_recovery_capability {
             match context.operation_type {
                 RecoveryOperationType::GuardianSetModification => {
-                    if !snapshot.has_capability(costs::CAP_APPROVE_RECOVERY) {
-                        return GuardOutcome::denied(
+                    if !snapshot.has_capability(&aura_guards::types::CapabilityId::from(
+                        costs::CAP_APPROVE_RECOVERY,
+                    )) {
+                        return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                             AuthGuardError::GuardianSetRequiresApproveCapability.to_string(),
-                        );
+                        ));
                     }
                 }
                 RecoveryOperationType::EmergencyFreeze if !context.is_emergency => {
-                    if !snapshot.has_capability(costs::CAP_INITIATE_RECOVERY) {
-                        return GuardOutcome::denied(
+                    if !snapshot.has_capability(&aura_guards::types::CapabilityId::from(
+                        costs::CAP_INITIATE_RECOVERY,
+                    )) {
+                        return GuardOutcome::denied(aura_guards::types::GuardViolation::other(
                             AuthGuardError::EmergencyFreezeRequiresInitiateCapability.to_string(),
-                        );
+                        ));
                     }
                 }
                 _ => {}
@@ -389,7 +405,10 @@ impl AuthService {
         signature: Vec<u8>,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_APPROVE_GUARDIAN) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &aura_guards::types::CapabilityId::from(costs::CAP_APPROVE_GUARDIAN),
+        ) {
             return outcome;
         }
 
@@ -450,7 +469,10 @@ impl AuthService {
         reason: String,
     ) -> GuardOutcome {
         // Session revocation uses the create_session capability
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_CREATE_SESSION) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &aura_guards::types::CapabilityId::from(costs::CAP_CREATE_SESSION),
+        ) {
             return outcome;
         }
 
@@ -580,17 +602,18 @@ mod tests {
     }
 
     fn test_snapshot() -> GuardSnapshot {
+        use aura_guards::types::CapabilityId;
         GuardSnapshot::new(
             test_authority(),
             None,
             None,
             FlowCost::new(100),
             vec![
-                costs::CAP_REQUEST_AUTH.to_string(),
-                costs::CAP_SUBMIT_PROOF.to_string(),
-                costs::CAP_CREATE_SESSION.to_string(),
-                costs::CAP_REQUEST_GUARDIAN_APPROVAL.to_string(),
-                costs::CAP_APPROVE_GUARDIAN.to_string(),
+                CapabilityId::from(costs::CAP_REQUEST_AUTH),
+                CapabilityId::from(costs::CAP_SUBMIT_PROOF),
+                CapabilityId::from(costs::CAP_CREATE_SESSION),
+                CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
+                CapabilityId::from(costs::CAP_APPROVE_GUARDIAN),
             ],
             1,
             1000,

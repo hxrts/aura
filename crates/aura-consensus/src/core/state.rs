@@ -17,6 +17,11 @@
 // consensus execution is fully reproducible across replicas and test runs.
 // HashMap is only used for local counting operations within single functions.
 use std::collections::{BTreeSet, HashMap};
+use std::num::NonZeroU16;
+
+use aura_core::{AuthorityId, Hash32, OperationId};
+use aura_core::epochs::Epoch;
+use crate::types::ConsensusId;
 
 /// Consensus phase matching Quint's ConsensusPhase sum type.
 ///
@@ -56,6 +61,30 @@ pub enum PathSelection {
     SlowPath,
 }
 
+/// Non-zero threshold for consensus decisions.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct ConsensusThreshold(NonZeroU16);
+
+impl ConsensusThreshold {
+    /// Create a new non-zero consensus threshold.
+    pub fn new(value: u16) -> Option<Self> {
+        NonZeroU16::new(value).map(Self)
+    }
+
+    /// Get the raw threshold value.
+    pub fn get(self) -> u16 {
+        self.0.get()
+    }
+
+    /// Convert to usize for comparisons.
+    pub fn as_usize(self) -> usize {
+        self.0.get() as usize
+    }
+}
+
 /// Data bound to a signature share.
 ///
 /// Quint: `type ShareData = { shareValue: ShareValue, nonceBinding: NonceCommitment, dataBinding: DataBinding }`
@@ -76,9 +105,9 @@ pub struct ShareData {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShareProposal {
     /// The witness submitting the share
-    pub witness: String,
+    pub witness: AuthorityId,
     /// Result ID this share is for
-    pub result_id: String,
+    pub result_id: Hash32,
     /// The share data
     pub share: ShareData,
 }
@@ -89,7 +118,7 @@ pub struct ShareProposal {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WitnessParticipation {
     /// Witness identifier
-    pub witness: String,
+    pub witness: AuthorityId,
     /// Whether witness is behaving honestly
     pub is_honest: bool,
     /// Whether witness is currently reachable
@@ -108,7 +137,7 @@ pub struct CachedNonce {
     /// Nonce commitment value
     pub commitment: String,
     /// Epoch when cached
-    pub cached_at: u64,
+    pub cached_at: Epoch,
 }
 
 /// Committed fact representing successful consensus.
@@ -117,13 +146,13 @@ pub struct CachedNonce {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PureCommitFact {
     /// Consensus instance ID
-    pub cid: String,
+    pub cid: ConsensusId,
     /// Result ID
-    pub result_id: String,
+    pub result_id: Hash32,
     /// Threshold signature (abstract in pure core)
     pub signature: String,
     /// Prestate hash
-    pub prestate_hash: String,
+    pub prestate_hash: Hash32,
 }
 
 /// Pure consensus instance state.
@@ -137,27 +166,27 @@ pub struct PureCommitFact {
 pub struct ConsensusState {
     /// Consensus instance identifier
     /// Quint: cid: ConsensusId
-    pub cid: String,
+    pub cid: ConsensusId,
 
     /// Operation being agreed upon
     /// Quint: operation: OperationData
-    pub operation: String,
+    pub operation: OperationId,
 
     /// Hash of prestate this operation is bound to
     /// Quint: prestateHash: PrestateHash
-    pub prestate_hash: String,
+    pub prestate_hash: Hash32,
 
     /// Required threshold for agreement
     /// Quint: threshold: int
-    pub threshold: usize,
+    pub threshold: ConsensusThreshold,
 
     /// Set of eligible witnesses
     /// Quint: witnesses: Set[AuthorityId]
-    pub witnesses: BTreeSet<String>,
+    pub witnesses: BTreeSet<AuthorityId>,
 
     /// Initiator of this consensus instance
     /// Quint: initiator: AuthorityId
-    pub initiator: String,
+    pub initiator: AuthorityId,
 
     /// Current phase
     /// Quint: phase: ConsensusPhase
@@ -177,7 +206,7 @@ pub struct ConsensusState {
 
     /// Set of detected equivocators
     /// Quint: equivocators: Set[AuthorityId]
-    pub equivocators: BTreeSet<String>,
+    pub equivocators: BTreeSet<AuthorityId>,
 }
 
 impl ConsensusState {
@@ -185,12 +214,12 @@ impl ConsensusState {
     ///
     /// Quint: startConsensus action initialization
     pub fn new(
-        cid: String,
-        operation: String,
-        prestate_hash: String,
-        threshold: usize,
-        witnesses: BTreeSet<String>,
-        initiator: String,
+        cid: ConsensusId,
+        operation: OperationId,
+        prestate_hash: Hash32,
+        threshold: ConsensusThreshold,
+        witnesses: BTreeSet<AuthorityId>,
+        initiator: AuthorityId,
         path: PathSelection,
     ) -> Self {
         let phase = match path {
@@ -216,17 +245,17 @@ impl ConsensusState {
     /// Check if a witness has already submitted a proposal.
     ///
     /// Quint: hasProposal(proposals, witness)
-    pub fn has_proposal(&self, witness: &str) -> bool {
-        self.proposals.iter().any(|p| p.witness == witness)
+    pub fn has_proposal(&self, witness: &AuthorityId) -> bool {
+        self.proposals.iter().any(|p| p.witness == *witness)
     }
 
     /// Count proposals for a specific result ID.
     ///
     /// Quint: countProposalsForResult(proposals, rid)
-    pub fn count_proposals_for_result(&self, result_id: &str) -> usize {
+    pub fn count_proposals_for_result(&self, result_id: &Hash32) -> usize {
         self.proposals
             .iter()
-            .filter(|p| p.result_id == result_id)
+            .filter(|p| p.result_id == *result_id)
             .count()
     }
 
@@ -234,24 +263,26 @@ impl ConsensusState {
     ///
     /// Quint: part of canCommit predicate
     pub fn threshold_met(&self) -> bool {
-        let mut result_counts: HashMap<&str, usize> = HashMap::new();
+        let mut result_counts: HashMap<&Hash32, usize> = HashMap::new();
         for proposal in &self.proposals {
             *result_counts.entry(&proposal.result_id).or_insert(0) += 1;
         }
-        result_counts.values().any(|&count| count >= self.threshold)
+        result_counts
+            .values()
+            .any(|&count| count >= self.threshold.as_usize())
     }
 
     /// Get the result ID with the most proposals.
-    pub fn majority_result(&self) -> Option<String> {
-        let mut result_counts: HashMap<&str, usize> = HashMap::new();
+    pub fn majority_result(&self) -> Option<Hash32> {
+        let mut result_counts: HashMap<&Hash32, usize> = HashMap::new();
         for proposal in &self.proposals {
             *result_counts.entry(&proposal.result_id).or_insert(0) += 1;
         }
         result_counts
             .into_iter()
-            .filter(|&(_, count)| count >= self.threshold)
+            .filter(|&(_, count)| count >= self.threshold.as_usize())
             .max_by_key(|&(_, count)| count)
-            .map(|(rid, _)| rid.to_string())
+            .map(|(rid, _)| *rid)
     }
 
     /// Check if consensus is in a terminal state.
@@ -279,25 +310,25 @@ impl ConsensusState {
 #[derive(Debug, Clone, Default)]
 pub struct GlobalConsensusState {
     /// Active consensus instances
-    pub instances: HashMap<String, ConsensusState>,
+    pub instances: HashMap<ConsensusId, ConsensusState>,
 
     /// Committed facts (immutable once added)
-    pub committed_facts: HashMap<String, PureCommitFact>,
+    pub committed_facts: HashMap<ConsensusId, PureCommitFact>,
 
     /// Global set of witnesses
-    pub global_witnesses: BTreeSet<String>,
+    pub global_witnesses: BTreeSet<AuthorityId>,
 
     /// Current epoch for nonce validity
-    pub current_epoch: u64,
+    pub current_epoch: Epoch,
 
     /// Cached nonces per witness
-    pub witness_nonces: HashMap<String, Option<CachedNonce>>,
+    pub witness_nonces: HashMap<AuthorityId, Option<CachedNonce>>,
 }
 
 impl GlobalConsensusState {
     /// Create a new empty global state.
-    pub fn new(witnesses: BTreeSet<String>, epoch: u64) -> Self {
-        let witness_nonces = witnesses.iter().map(|w| (w.clone(), None)).collect();
+    pub fn new(witnesses: BTreeSet<AuthorityId>, epoch: Epoch) -> Self {
+        let witness_nonces = witnesses.iter().map(|w| (*w, None)).collect();
 
         Self {
             instances: HashMap::new(),
@@ -314,8 +345,9 @@ impl GlobalConsensusState {
     pub fn is_nonce_valid(&self, nonce: &Option<CachedNonce>, validity_window: u64) -> bool {
         match nonce {
             Some(n) => {
-                self.current_epoch >= n.cached_at
-                    && self.current_epoch - n.cached_at < validity_window
+                let current: u64 = self.current_epoch.into();
+                let cached: u64 = n.cached_at.into();
+                current >= cached && current - cached < validity_window
             }
             None => false,
         }
@@ -324,7 +356,11 @@ impl GlobalConsensusState {
     /// Select path based on nonce availability.
     ///
     /// Quint: selectPath(witnesses, nonces, epoch, validityWindow)
-    pub fn select_path(&self, witnesses: &BTreeSet<String>, validity_window: u64) -> PathSelection {
+    pub fn select_path(
+        &self,
+        witnesses: &BTreeSet<AuthorityId>,
+        validity_window: u64,
+    ) -> PathSelection {
         let all_valid = witnesses.iter().all(|w| {
             self.witness_nonces
                 .get(w)
@@ -344,6 +380,22 @@ impl GlobalConsensusState {
 mod tests {
     use super::*;
 
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_operation(seed: u8) -> OperationId {
+        OperationId::new_from_entropy([seed; 32])
+    }
+
+    fn test_hash(seed: u8) -> Hash32 {
+        Hash32::new([seed; 32])
+    }
+
+    fn test_consensus_id(seed: u8) -> ConsensusId {
+        ConsensusId(Hash32::new([seed; 32]))
+    }
+
     #[test]
     fn test_consensus_phase_equality() {
         assert_eq!(ConsensusPhase::Pending, ConsensusPhase::Pending);
@@ -352,15 +404,15 @@ mod tests {
 
     #[test]
     fn test_consensus_state_new() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let state = ConsensusState::new(
-            "cns1".to_string(),
-            "update_policy".to_string(),
-            "pre_abc".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            ConsensusThreshold::new(2).expect("threshold"),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
@@ -371,23 +423,23 @@ mod tests {
 
     #[test]
     fn test_has_proposal() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            ConsensusThreshold::new(2).expect("threshold"),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
-        assert!(!state.has_proposal("w1"));
+        assert!(!state.has_proposal(&test_authority(1)));
 
         state.proposals.push(ShareProposal {
-            witness: "w1".to_string(),
-            result_id: "rid1".to_string(),
+            witness: test_authority(1),
+            result_id: test_hash(9),
             share: ShareData {
                 share_value: "share".to_string(),
                 nonce_binding: "nonce".to_string(),
@@ -395,21 +447,21 @@ mod tests {
             },
         });
 
-        assert!(state.has_proposal("w1"));
-        assert!(!state.has_proposal("w2"));
+        assert!(state.has_proposal(&test_authority(1)));
+        assert!(!state.has_proposal(&test_authority(2)));
     }
 
     #[test]
     fn test_threshold_met() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            ConsensusThreshold::new(2).expect("threshold"),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
@@ -417,8 +469,8 @@ mod tests {
 
         // Add first proposal
         state.proposals.push(ShareProposal {
-            witness: "w1".to_string(),
-            result_id: "rid1".to_string(),
+            witness: test_authority(1),
+            result_id: test_hash(9),
             share: ShareData {
                 share_value: "s1".to_string(),
                 nonce_binding: "n1".to_string(),
@@ -429,8 +481,8 @@ mod tests {
 
         // Add second proposal with same result_id - now threshold met
         state.proposals.push(ShareProposal {
-            witness: "w2".to_string(),
-            result_id: "rid1".to_string(),
+            witness: test_authority(2),
+            result_id: test_hash(9),
             share: ShareData {
                 share_value: "s2".to_string(),
                 nonce_binding: "n2".to_string(),
@@ -442,15 +494,15 @@ mod tests {
 
     #[test]
     fn test_is_terminal() {
-        let witnesses: BTreeSet<_> = ["w1", "w2"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            ConsensusThreshold::new(2).expect("threshold"),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 

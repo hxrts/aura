@@ -114,18 +114,22 @@ mod tests {
     async fn test_real_transport_handler_creation() {
         let handler = RealTransportHandler::new();
         assert_eq!(
-            handler._config.buffer_size,
-            TransportConfig::default().buffer_size
+            handler._config.buffer_size.get(),
+            TransportConfig::default().buffer_size.get()
         );
     }
 
     #[tokio::test]
     async fn test_real_transport_handler_with_config() {
         let config = TransportConfig {
-            connect_timeout: std::time::Duration::from_millis(5),
-            read_timeout: std::time::Duration::from_millis(5),
-            write_timeout: std::time::Duration::from_millis(5),
-            buffer_size: 4096,
+            connect_timeout: crate::transport::NonZeroDuration::from_millis(5)
+                .expect("non-zero connect timeout"),
+            read_timeout: crate::transport::NonZeroDuration::from_millis(5)
+                .expect("non-zero read timeout"),
+            write_timeout: crate::transport::NonZeroDuration::from_millis(5)
+                .expect("non-zero write timeout"),
+            buffer_size: std::num::NonZeroUsize::new(4096)
+                .expect("non-zero buffer size"),
         };
         let handler = RealTransportHandler::with_config(config.clone());
         assert_eq!(handler._config.buffer_size, config.buffer_size);

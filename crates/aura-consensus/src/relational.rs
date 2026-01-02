@@ -13,7 +13,7 @@ use aura_core::{
     epochs::Epoch,
     frost::{PublicKeyPackage, Share},
     relational::ConsensusProof,
-    AuraError, AuthorityId, Prestate, Result,
+    AuthorityId, Prestate, Result,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -102,19 +102,6 @@ pub async fn run_consensus_with_config<T: Serialize>(
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<ConsensusProof> {
-    // Validate configuration
-    if config.witness_set.is_empty() {
-        return Err(AuraError::invalid(
-            "Consensus requires at least one witness",
-        ));
-    }
-
-    if !config.has_quorum() {
-        return Err(AuraError::invalid(
-            "Consensus threshold exceeds witness set size",
-        ));
-    }
-
     run_consensus_with_effects(
         prestate,
         operation,
@@ -137,18 +124,6 @@ pub async fn run_consensus_with_config_and_commit<T: Serialize>(
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(ConsensusProof, CommitFact)> {
-    if config.witness_set.is_empty() {
-        return Err(AuraError::invalid(
-            "Consensus requires at least one witness",
-        ));
-    }
-
-    if !config.has_quorum() {
-        return Err(AuraError::invalid(
-            "Consensus threshold exceeds witness set size",
-        ));
-    }
-
     run_consensus_with_effects_and_commit(
         prestate,
         operation,
@@ -173,8 +148,8 @@ pub async fn run_consensus_with_effects<T: Serialize>(
 ) -> Result<ConsensusProof> {
     // Run the unified consensus protocol
     let params = crate::protocol::ConsensusParams {
-        witnesses: config.witness_set.clone(),
-        threshold: config.threshold,
+        witnesses: config.witness_set.witnesses().to_vec(),
+        threshold: config.threshold(),
         key_packages,
         group_public_key,
         epoch: config.epoch,
@@ -196,8 +171,8 @@ pub async fn run_consensus_with_effects_and_commit<T: Serialize>(
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(ConsensusProof, CommitFact)> {
     let params = crate::protocol::ConsensusParams {
-        witnesses: config.witness_set.clone(),
-        threshold: config.threshold,
+        witnesses: config.witness_set.witnesses().to_vec(),
+        threshold: config.threshold(),
         key_packages,
         group_public_key,
         epoch: config.epoch,
@@ -226,7 +201,7 @@ fn commit_fact_to_consensus_proof(fact: CommitFact) -> Result<ConsensusProof> {
 pub struct RelationalConsensusBuilder {
     witnesses: Vec<AuthorityId>,
     threshold: Option<u16>,
-    timeout_ms: Option<u64>,
+    timeout_ms: Option<std::num::NonZeroU64>,
     epoch: Epoch,
 }
 
@@ -260,7 +235,7 @@ impl RelationalConsensusBuilder {
     }
 
     /// Set custom timeout
-    pub fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
+    pub fn with_timeout_ms(mut self, timeout_ms: std::num::NonZeroU64) -> Self {
         self.timeout_ms = Some(timeout_ms);
         self
     }
@@ -303,14 +278,14 @@ mod tests {
         .unwrap();
         let config = RelationalConsensusBuilder::from_prestate(&prestate, epoch)
             .with_witnesses(witnesses.clone())
-        .with_threshold(2)
-        .with_timeout_ms(10000)
-        .build()
-        .unwrap();
+            .with_threshold(2)
+            .with_timeout_ms(std::num::NonZeroU64::new(10000).expect("non-zero timeout"))
+            .build()
+            .unwrap();
 
-        assert_eq!(config.witness_set, witnesses);
-        assert_eq!(config.threshold, 2);
-        assert_eq!(config.timeout_ms, 10000);
+        assert_eq!(config.witness_set.witnesses(), witnesses.as_slice());
+        assert_eq!(config.threshold(), 2);
+        assert_eq!(config.timeout_ms.get(), 10000);
         assert_eq!(config.epoch, epoch);
     }
 }

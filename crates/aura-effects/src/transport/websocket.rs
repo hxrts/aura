@@ -4,17 +4,19 @@
 //! NO choreography - single-party effect handler only.
 //! Target: <200 lines, leverage tungstenite ecosystem.
 
-use super::{TransportConfig, TransportConnection, TransportError, TransportResult};
+use super::{
+    ConnectionId, TransportAddress, TransportConfig, TransportConnection, TransportError,
+    TransportMetadata, TransportResult, TransportSocketAddr, TransportUrl,
+};
+use url::Url;
 use async_trait::async_trait;
 use aura_core::effects::{
     NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream,
 };
 use futures_util::{SinkExt, StreamExt};
-use std::collections::HashMap;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
-use url::Url;
 use uuid::Uuid;
 
 /// WebSocket transport handler implementation
@@ -38,34 +40,36 @@ impl WebSocketTransportHandler {
     /// Connect to WebSocket server
     pub async fn connect(
         &self,
-        url: Url,
+        url: TransportUrl,
     ) -> TransportResult<(WebSocketStream<TcpStream>, TransportConnection)> {
+        let url_ref = url.as_url();
         let (ws_stream, response) = timeout(
-            self.config.connect_timeout,
+            self.config.connect_timeout.get(),
             client_async(
                 url.as_str(),
-                TcpStream::connect(url.socket_addrs(|| None)?[0]).await?,
+                TcpStream::connect(url_ref.socket_addrs(|| None)?[0]).await?,
             ),
         )
         .await
         .map_err(|_| TransportError::Timeout("WebSocket connect timeout".to_string()))?
         .map_err(|e| TransportError::ConnectionFailed(format!("WebSocket connect failed: {e}")))?;
 
-        let local_addr = ws_stream.get_ref().local_addr()?.to_string();
-        let remote_addr = ws_stream.get_ref().peer_addr()?.to_string();
-        let connection_id = format!("ws-{local_addr}-{remote_addr}");
+        let local_addr =
+            TransportAddress::from(TransportSocketAddr::from(ws_stream.get_ref().local_addr()?));
+        let remote_addr =
+            TransportAddress::from(TransportSocketAddr::from(ws_stream.get_ref().peer_addr()?));
+        let connection_id = ConnectionId::new(format!("ws-{local_addr}-{remote_addr}"));
 
-        let mut metadata = HashMap::new();
-        metadata.insert("protocol".to_string(), "websocket".to_string());
-        metadata.insert("url".to_string(), url.to_string());
-        metadata.insert("status".to_string(), response.status().to_string());
-
-        if let Some(subprotocol) = response.headers().get("sec-websocket-protocol") {
-            metadata.insert(
-                "subprotocol".to_string(),
-                subprotocol.to_str().unwrap_or("").to_string(),
-            );
-        }
+        let subprotocol = response
+            .headers()
+            .get("sec-websocket-protocol")
+            .and_then(|header| header.to_str().ok())
+            .map(|value| value.to_string());
+        let metadata = TransportMetadata::websocket_client(
+            url.clone(),
+            response.status().as_u16(),
+            subprotocol,
+        );
 
         let connection = TransportConnection {
             connection_id,
@@ -82,21 +86,21 @@ impl WebSocketTransportHandler {
         &self,
         stream: TcpStream,
     ) -> TransportResult<(WebSocketStream<TcpStream>, TransportConnection)> {
-        let local_addr = stream.local_addr()?.to_string();
-        let remote_addr = stream.peer_addr()?.to_string();
+        let local_addr =
+            TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
+        let remote_addr =
+            TransportAddress::from(TransportSocketAddr::from(stream.peer_addr()?));
 
-        let ws_stream = timeout(self.config.connect_timeout, accept_async(stream))
+        let ws_stream = timeout(self.config.connect_timeout.get(), accept_async(stream))
             .await
             .map_err(|_| TransportError::Timeout("WebSocket accept timeout".to_string()))?
             .map_err(|e| {
                 TransportError::ConnectionFailed(format!("WebSocket accept failed: {e}"))
             })?;
 
-        let connection_id = format!("ws-{local_addr}-{remote_addr}");
+        let connection_id = ConnectionId::new(format!("ws-{local_addr}-{remote_addr}"));
 
-        let mut metadata = HashMap::new();
-        metadata.insert("protocol".to_string(), "websocket".to_string());
-        metadata.insert("role".to_string(), "server".to_string());
+        let metadata = TransportMetadata::websocket_server();
 
         let connection = TransportConnection {
             connection_id,
@@ -116,7 +120,7 @@ impl WebSocketTransportHandler {
     ) -> TransportResult<()> {
         let message = Message::Binary(data.to_vec());
 
-        timeout(self.config.write_timeout, ws_stream.send(message))
+        timeout(self.config.write_timeout.get(), ws_stream.send(message))
             .await
             .map_err(|_| TransportError::Timeout("WebSocket send timeout".to_string()))?
             .map_err(|e| TransportError::ConnectionFailed(format!("WebSocket send failed: {e}")))?;
@@ -129,7 +133,7 @@ impl WebSocketTransportHandler {
         &self,
         ws_stream: &mut WebSocketStream<TcpStream>,
     ) -> TransportResult<Vec<u8>> {
-        let message = timeout(self.config.read_timeout, ws_stream.next())
+        let message = timeout(self.config.read_timeout.get(), ws_stream.next())
             .await
             .map_err(|_| TransportError::Timeout("WebSocket receive timeout".to_string()))?
             .ok_or_else(|| {
@@ -174,7 +178,7 @@ impl WebSocketTransportHandler {
     ) -> TransportResult<()> {
         let message = Message::Text(text.to_string());
 
-        timeout(self.config.write_timeout, ws_stream.send(message))
+        timeout(self.config.write_timeout.get(), ws_stream.send(message))
             .await
             .map_err(|_| TransportError::Timeout("WebSocket send text timeout".to_string()))?
             .map_err(|e| {
@@ -215,7 +219,7 @@ impl NetworkExtendedEffects for WebSocketTransportHandler {
             .parse()
             .map_err(|e: url::ParseError| NetworkError::ConnectionFailed(e.to_string()))?;
         let (ws_stream, _connection) = self
-            .connect(url)
+            .connect(TransportUrl::from(url))
             .await
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
         // Track the connection by a deterministic id (hash of endpoint)
@@ -237,7 +241,7 @@ impl NetworkExtendedEffects for WebSocketTransportHandler {
                     reason: e.to_string(),
                 })?;
         let (mut ws_stream, _connection) = self
-            .connect(url)
+            .connect(TransportUrl::from(url))
             .await
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
         WebSocketTransportHandler::send(self, &mut ws_stream, &data)
@@ -261,7 +265,7 @@ impl NetworkExtendedEffects for WebSocketTransportHandler {
             .parse()
             .map_err(|e: url::ParseError| NetworkError::ConnectionFailed(e.to_string()))?;
         let (mut ws_stream, _connection) = self
-            .connect(url)
+            .connect(TransportUrl::from(url))
             .await
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
         WebSocketTransportHandler::close(self, &mut ws_stream, Some("closed".into()))
@@ -304,7 +308,7 @@ impl NetworkCoreEffects for WebSocketTransportHandler {
         })?;
 
         let (mut ws_stream, _connection) = self
-            .connect(url)
+            .connect(TransportUrl::from(url))
             .await
             .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
         self.send(&mut ws_stream, &message)

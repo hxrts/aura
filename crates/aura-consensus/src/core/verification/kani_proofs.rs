@@ -45,10 +45,12 @@
 use std::collections::BTreeSet;
 
 use super::super::state::{
-    ConsensusPhase, ConsensusState, PathSelection, ShareData, ShareProposal,
+    ConsensusPhase, ConsensusState, ConsensusThreshold, PathSelection, ShareData, ShareProposal,
 };
 use super::super::transitions::{apply_share, fail_consensus, trigger_fallback, TransitionResult};
 use super::super::validation::check_invariants;
+use crate::types::ConsensusId;
+use aura_core::{AuthorityId, Hash32, OperationId};
 
 // =============================================================================
 // Helper Functions for Symbolic State Generation
@@ -69,18 +71,22 @@ fn any_bounded_string(max_len: usize) -> String {
     s
 }
 
+fn authority_from_index(idx: u8) -> AuthorityId {
+    AuthorityId::new_from_entropy([idx; 32])
+}
+
 /// Generate a symbolic witness ID (w1, w2, w3, w4, w5)
-fn any_witness_id() -> String {
+fn any_witness_id() -> AuthorityId {
     let idx: u8 = kani::any();
     kani::assume(idx >= 1 && idx <= 5);
-    format!("w{}", idx)
+    authority_from_index(idx)
 }
 
 /// Generate a symbolic result ID (rid1, rid2, rid3)
-fn any_result_id() -> String {
+fn any_result_id() -> Hash32 {
     let idx: u8 = kani::any();
     kani::assume(idx >= 1 && idx <= 3);
-    format!("rid{}", idx)
+    Hash32::new([idx; 32])
 }
 
 /// Generate a symbolic ShareData
@@ -102,26 +108,26 @@ fn any_share_proposal() -> ShareProposal {
 }
 
 /// Generate a symbolic witness set of bounded size
-fn any_witness_set(min_size: usize, max_size: usize) -> BTreeSet<String> {
+fn any_witness_set(min_size: usize, max_size: usize) -> BTreeSet<AuthorityId> {
     let size: usize = kani::any();
     kani::assume(size >= min_size && size <= max_size);
 
     let mut witnesses = BTreeSet::new();
     // Add specific witnesses based on size
     if size >= 1 {
-        witnesses.insert("w1".to_string());
+        witnesses.insert(authority_from_index(1));
     }
     if size >= 2 {
-        witnesses.insert("w2".to_string());
+        witnesses.insert(authority_from_index(2));
     }
     if size >= 3 {
-        witnesses.insert("w3".to_string());
+        witnesses.insert(authority_from_index(3));
     }
     if size >= 4 {
-        witnesses.insert("w4".to_string());
+        witnesses.insert(authority_from_index(4));
     }
     if size >= 5 {
-        witnesses.insert("w5".to_string());
+        witnesses.insert(authority_from_index(5));
     }
 
     witnesses
@@ -130,8 +136,10 @@ fn any_witness_set(min_size: usize, max_size: usize) -> BTreeSet<String> {
 /// Generate a well-formed ConsensusState for testing
 fn any_valid_consensus_state() -> ConsensusState {
     let witnesses = any_witness_set(2, 4);
-    let threshold: usize = kani::any();
-    kani::assume(threshold >= 1 && threshold <= witnesses.len());
+    let threshold_value: u16 = kani::any();
+    kani::assume(threshold_value >= 1);
+    kani::assume((threshold_value as usize) <= witnesses.len());
+    let threshold = ConsensusThreshold::new(threshold_value).expect("threshold");
 
     let initiator = any_witness_id();
     kani::assume(witnesses.contains(&initiator));
@@ -144,9 +152,9 @@ fn any_valid_consensus_state() -> ConsensusState {
     };
 
     let mut state = ConsensusState::new(
-        any_bounded_string(8), // cid
-        any_bounded_string(8), // operation
-        any_bounded_string(8), // prestate_hash
+        ConsensusId(Hash32::new(kani::any::<[u8; 32]>())), // cid
+        OperationId::new_from_entropy(kani::any::<[u8; 32]>()), // operation
+        Hash32::new(kani::any::<[u8; 32]>()), // prestate_hash
         threshold,
         witnesses.clone(),
         initiator,
@@ -439,7 +447,7 @@ fn commit_matches_threshold_result() {
                     // Count proposals for the committed result
                     let count = new_state.count_proposals_for_result(&cf.result_id);
                     kani::assert(
-                        count >= new_state.threshold,
+                        count >= new_state.threshold.as_usize(),
                         "committed result must have threshold proposals",
                     );
                 }
@@ -466,7 +474,9 @@ fn threshold_met_matches_reference() {
     for p in &state.proposals {
         *counts.entry(&p.result_id).or_insert(0usize) += 1;
     }
-    let ref_threshold_met = counts.values().any(|&c| c >= state.threshold);
+    let ref_threshold_met = counts
+        .values()
+        .any(|&c| c >= state.threshold.as_usize());
 
     // Production implementation
     let prod_threshold_met = state.threshold_met();

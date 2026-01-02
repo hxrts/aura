@@ -18,9 +18,59 @@ use aura_effects::{
     time::PhysicalTimeHandler, trace::TraceHandler, TcpTransportHandler as RealTransportHandler,
 };
 use aura_mpst::LocalSessionType;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
+
+/// Typed effect identifier for registry metadata keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EffectId(pub EffectType);
+
+impl From<EffectType> for EffectId {
+    fn from(value: EffectType) -> Self {
+        Self(value)
+    }
+}
+
+impl From<EffectId> for EffectType {
+    fn from(value: EffectId) -> Self {
+        value.0
+    }
+}
+
+/// Typed capability identifier for registry metadata keys.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CapabilityId(String);
+
+impl CapabilityId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for CapabilityId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl From<String> for CapabilityId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+/// Typed metadata keys to prevent registry key collisions.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MetadataKey {
+    Effect(EffectId),
+    Capability(CapabilityId),
+}
 
 /// Simplified context for handler execution
 #[derive(Debug, Clone)]
@@ -30,7 +80,7 @@ pub struct HandlerContext {
     pub execution_mode: ExecutionMode,
     pub session_id: SessionId,
     pub operation_id: Uuid,
-    pub metadata: HashMap<String, String>,
+    pub metadata: HashMap<MetadataKey, String>,
 }
 
 impl HandlerContext {
@@ -119,8 +169,25 @@ impl HandlerContext {
     }
 
     /// Add metadata
-    pub fn with_metadata(mut self, key: String, value: String) -> Self {
+    pub fn with_metadata(mut self, key: MetadataKey, value: String) -> Self {
         self.metadata.insert(key, value);
+        self
+    }
+
+    /// Add effect-scoped metadata
+    pub fn with_effect_metadata(mut self, effect: EffectType, value: String) -> Self {
+        self.metadata.insert(MetadataKey::Effect(effect.into()), value);
+        self
+    }
+
+    /// Add capability-scoped metadata
+    pub fn with_capability_metadata(
+        mut self,
+        capability: impl Into<CapabilityId>,
+        value: String,
+    ) -> Self {
+        self.metadata
+            .insert(MetadataKey::Capability(capability.into()), value);
         self
     }
 }

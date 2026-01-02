@@ -152,3 +152,7 @@ uniffi = { version = "0.25", features = ["build"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

@@ -6,7 +6,7 @@ use aura_agent::{
     AgentBuilder, AuthorityId, EffectContext, ExecutionMode, InvitationStatus, InvitationType,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::ContextId;
+use aura_core::identifiers::{ContextId, InvitationId};
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {
@@ -56,7 +56,7 @@ async fn test_invite_as_contact_via_agent() -> Result<(), Box<dyn std::error::Er
         )
         .await?;
 
-    assert!(invitation.invitation_id.starts_with("inv-"));
+    assert!(invitation.invitation_id.as_str().starts_with("inv-"));
     assert_eq!(invitation.sender_id, authority_id);
     assert_eq!(invitation.receiver_id, receiver_id);
     assert_eq!(invitation.status, InvitationStatus::Pending);
@@ -85,7 +85,7 @@ async fn test_invite_as_guardian_via_agent() -> Result<(), Box<dyn std::error::E
         )
         .await?;
 
-    assert!(invitation.invitation_id.starts_with("inv-"));
+    assert!(invitation.invitation_id.as_str().starts_with("inv-"));
     assert!(invitation.expires_at.is_some());
     match &invitation.invitation_type {
         InvitationType::Guardian { subject_authority } => {
@@ -112,7 +112,7 @@ async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Er
         .invite_to_channel(receiver_id, "channel-123".to_string(), None, None)
         .await?;
 
-    assert!(invitation.invitation_id.starts_with("inv-"));
+    assert!(invitation.invitation_id.as_str().starts_with("inv-"));
     match &invitation.invitation_type {
         InvitationType::Channel { home_id } => {
             assert_eq!(home_id, "channel-123");
@@ -268,7 +268,7 @@ async fn test_get_invitation_via_agent() -> Result<(), Box<dyn std::error::Error
     assert_eq!(retrieved.message, Some("Hello Bob!".to_string()));
 
     // Non-existent invitation should return None
-    let non_existent = invitations.get("non-existent-id").await;
+    let non_existent = invitations.get(&InvitationId::new("non-existent-id")).await;
     assert!(non_existent.is_none());
     Ok(())
 }

@@ -11,6 +11,7 @@ use super::{
 use crate::authorization::BiscuitAuthorizationBridge;
 use crate::guards::biscuit_evaluator::BiscuitGuardEvaluator;
 use crate::guards::traits::{require_biscuit_metadata, GuardContextProvider};
+use crate::guards::types::{CapabilityId, GuardOperationId};
 use aura_core::{
     effects::{
         guard::{
@@ -91,8 +92,8 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
             let reason = outcome
                 .decision
                 .denial_reason()
-                .unwrap_or("Unknown denial reason")
-                .to_string();
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "Unknown denial reason".to_string());
 
             warn!(
                 authority = ?request.authority,
@@ -237,8 +238,9 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
         Ok(ts.ts_ms)
     }
 
-    fn derive_context_id(operation: &str) -> ContextId {
-        let uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, operation.as_bytes());
+    fn derive_context_id(operation: &GuardOperationId) -> ContextId {
+        let op_bytes = operation.to_string();
+        let uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, op_bytes.as_bytes());
         ContextId::from_uuid(uuid)
     }
 
@@ -330,7 +332,8 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
             }
         };
 
-        match evaluator.check_guard(&token, &request.operation, &resource, now_secs) {
+        let capability = CapabilityId::from(request.operation.to_string());
+        match evaluator.check_guard(&token, &capability, &resource, now_secs) {
             Ok(authorized) => authorized,
             Err(err) => {
                 warn!(
@@ -551,7 +554,7 @@ pub fn convert_send_guard_to_request(
     send_guard: &SendGuardChain,
     authority: AuthorityId,
 ) -> Result<GuardRequest> {
-    let operation = send_guard.authorization_requirement().to_string();
+    let operation = GuardOperationId::from(send_guard.authorization_requirement());
     let cost = send_guard.cost();
 
     let request = GuardRequest::new(authority, operation, cost)
@@ -870,17 +873,25 @@ mod tests {
         let context = ContextId::new_from_entropy([74u8; 32]);
         let peer = AuthorityId::new_from_entropy([75u8; 32]);
         let authority = AuthorityId::new_from_entropy([76u8; 32]); // Create once and reuse
-        let message_authorization = "guard:send".to_string();
+        let message_authorization = "guard:send";
         let cost = FlowCost::new(42);
 
-        let guard = SendGuardChain::new(message_authorization.clone(), context, peer, cost);
+        let guard = SendGuardChain::new(
+            CapabilityId::from(message_authorization),
+            context,
+            peer,
+            cost,
+        );
 
         let request = match convert_send_guard_to_request(&guard, authority) {
             Ok(request) => request,
             Err(err) => panic!("conversion: {err}"),
         };
 
-        assert_eq!(request.operation, message_authorization);
+        assert_eq!(
+            request.operation,
+            GuardOperationId::from(message_authorization)
+        );
         assert_eq!(request.cost, cost);
         assert_eq!(request.context, context);
         assert_eq!(request.peer, peer);

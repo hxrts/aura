@@ -4,7 +4,10 @@
 //! the type-erased `AuraHandler` interface.
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
+use aura_core::identifiers::{DeviceId, SessionId};
+
+use crate::types::ProtocolType;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CryptoEffects Parameters
@@ -52,7 +55,7 @@ pub struct Sha256HashParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SendToPeerParams {
     /// ID of the peer to send to
-    pub peer_id: Uuid,
+    pub peer_id: DeviceId,
     /// Message payload
     pub message: Vec<u8>,
 }
@@ -68,25 +71,58 @@ pub struct BroadcastParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiveFromParams {
     /// ID of the peer to receive from
-    pub peer_id: Uuid,
+    pub peer_id: DeviceId,
 }
 
 /// Parameters for checking peer connectivity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IsPeerConnectedParams {
     /// ID of the peer to check
-    pub peer_id: Uuid,
+    pub peer_id: DeviceId,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // StorageEffects Parameters
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Typed storage key for effect parameters.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct StorageKey(String);
+
+impl StorageKey {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for StorageKey {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for StorageKey {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl std::fmt::Display for StorageKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Parameters for storing a key-value pair
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoreParams {
     /// Storage key
-    pub key: String,
+    pub key: StorageKey,
     /// Value to store
     pub value: Vec<u8>,
 }
@@ -95,28 +131,28 @@ pub struct StoreParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetrieveParams {
     /// Storage key to retrieve
-    pub key: String,
+    pub key: StorageKey,
 }
 
 /// Parameters for removing a value from storage
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoveParams {
     /// Storage key to remove
-    pub key: String,
+    pub key: StorageKey,
 }
 
 /// Parameters for listing storage keys
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListKeysParams {
     /// Optional prefix filter for keys
-    pub prefix: Option<String>,
+    pub prefix: Option<StorageKey>,
 }
 
 /// Parameters for checking if a key exists in storage
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExistsParams {
     /// Storage key to check
-    pub key: String,
+    pub key: StorageKey,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -152,16 +188,16 @@ pub struct DelayParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtocolStartedParams {
     /// Unique ID of the protocol instance
-    pub protocol_id: Uuid,
+    pub protocol_id: SessionId,
     /// Type of protocol (e.g., "DKD", "FROST")
-    pub protocol_type: String,
+    pub protocol_type: ProtocolType,
 }
 
 /// Parameters for logging a protocol completion event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtocolCompletedParams {
     /// Unique ID of the protocol instance
-    pub protocol_id: Uuid,
+    pub protocol_id: SessionId,
     /// Duration of protocol execution in milliseconds
     pub duration_ms: u64,
 }
@@ -170,7 +206,7 @@ pub struct ProtocolCompletedParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProtocolFailedParams {
     /// Unique ID of the protocol instance
-    pub protocol_id: Uuid,
+    pub protocol_id: SessionId,
     /// Error description
     pub error: String,
 }
@@ -188,21 +224,21 @@ pub enum ConsoleEvent {
     /// Protocol started event
     ProtocolStarted {
         /// Unique identifier for the protocol instance
-        protocol_id: String,
+        protocol_id: SessionId,
         /// Type of protocol (e.g., "DKD", "FROST")
-        protocol_type: String,
+        protocol_type: ProtocolType,
     },
     /// Protocol completed successfully
     ProtocolCompleted {
         /// Unique identifier for the protocol instance
-        protocol_id: String,
+        protocol_id: SessionId,
         /// Duration of execution in milliseconds
         duration_ms: u64,
     },
     /// Protocol failed with error
     ProtocolFailed {
         /// Unique identifier for the protocol instance
-        protocol_id: String,
+        protocol_id: SessionId,
         /// Error description
         error: String,
     },

@@ -21,9 +21,9 @@ use super::state::with_state_mut_validated;
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
 use aura_core::ceremony::{SupersessionReason, SupersessionRecord};
+use aura_core::identifiers::CeremonyId;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity};
-use aura_core::DeviceId;
-use aura_core::Hash32;
+use aura_core::{DeviceId, Hash32};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -37,7 +37,7 @@ pub struct CeremonyTracker {
 
 #[derive(Debug, Default)]
 struct CeremonyTrackerState {
-    ceremonies: HashMap<String, CeremonyState>,
+    ceremonies: HashMap<CeremonyId, CeremonyState>,
     /// Supersession records for audit trail
     supersession_records: Vec<SupersessionRecord>,
 }
@@ -62,21 +62,10 @@ impl CeremonyTrackerState {
                     state.participants.len()
                 ));
             }
-            let participant_set: HashSet<_> = state.participants.iter().collect();
-            if participant_set.len() != state.participants.len() {
-                return Err(format!(
-                    "ceremony {} has duplicate participants",
-                    ceremony_id
-                ));
-            }
-            let accepted_set: HashSet<_> = state.accepted_participants.iter().collect();
-            if accepted_set.len() != state.accepted_participants.len() {
-                return Err(format!(
-                    "ceremony {} has duplicate accepted participants",
-                    ceremony_id
-                ));
-            }
-            if !accepted_set.is_subset(&participant_set) {
+            if !state
+                .accepted_participants
+                .is_subset(&state.participants)
+            {
                 return Err(format!(
                     "ceremony {} has accepted participants not in participant list",
                     ceremony_id
@@ -94,8 +83,7 @@ impl CeremonyTrackerState {
                     ceremony_id
                 ));
             }
-            if state.is_committed && state.accepted_participants.len() < state.threshold_k as usize
-            {
+            if state.is_committed && state.accepted_participants.len() < state.threshold_k as usize {
                 return Err(format!(
                     "ceremony {} committed without reaching threshold",
                     ceremony_id
@@ -119,10 +107,10 @@ pub struct CeremonyState {
     pub total_n: u16,
 
     /// Participants invited to participate
-    pub participants: Vec<ParticipantIdentity>,
+    pub participants: HashSet<ParticipantIdentity>,
 
     /// Participants who have accepted
-    pub accepted_participants: Vec<ParticipantIdentity>,
+    pub accepted_participants: HashSet<ParticipantIdentity>,
 
     /// New epoch for the key rotation
     pub new_epoch: u64,
@@ -143,10 +131,10 @@ pub struct CeremonyState {
     pub is_superseded: bool,
 
     /// ID of the ceremony that supersedes this one (if superseded)
-    pub superseded_by: Option<String>,
+    pub superseded_by: Option<CeremonyId>,
 
     /// IDs of ceremonies that this ceremony supersedes
-    pub supersedes: Vec<String>,
+    pub supersedes: Vec<CeremonyId>,
 
     /// Agreement mode (A1/A2/A3) for the ceremony lifecycle
     pub agreement_mode: AgreementMode,
@@ -194,7 +182,7 @@ impl CeremonyTracker {
     #[allow(clippy::too_many_arguments)] // Ceremony registration requires all these distinct parameters
     pub async fn register(
         &self,
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         kind: CeremonyKind,
         threshold_k: u16,
         total_n: u16,
@@ -219,7 +207,7 @@ impl CeremonyTracker {
     #[allow(clippy::too_many_arguments)]
     pub async fn register_with_prestate(
         &self,
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         kind: CeremonyKind,
         threshold_k: u16,
         total_n: u16,
@@ -228,12 +216,22 @@ impl CeremonyTracker {
         enrollment_device_id: Option<DeviceId>,
         prestate_hash: Option<Hash32>,
     ) -> Result<(), IntentError> {
+        let participants_set: HashSet<_> = participants.into_iter().collect();
+        if participants_set.len() != total_n as usize {
+            return Err(IntentError::validation_failed(format!(
+                "Ceremony {} participant count {} does not match total_n {}",
+                ceremony_id,
+                participants_set.len(),
+                total_n
+            )));
+        }
+
         let state = CeremonyState {
             kind,
             threshold_k,
             total_n,
-            participants,
-            accepted_participants: Vec::new(),
+            participants: participants_set,
+            accepted_participants: HashSet::new(),
             new_epoch,
             enrollment_device_id,
             started_at: Instant::now(),
@@ -283,7 +281,7 @@ impl CeremonyTracker {
     ///
     /// # Returns
     /// The current ceremony state
-    pub async fn get(&self, ceremony_id: &str) -> Result<CeremonyState, IntentError> {
+    pub async fn get(&self, ceremony_id: &CeremonyId) -> Result<CeremonyState, IntentError> {
         let state = self.state.read().await;
 
         state.ceremonies.get(ceremony_id).cloned().ok_or_else(|| {
@@ -301,7 +299,7 @@ impl CeremonyTracker {
     /// True if threshold is now reached
     pub async fn mark_accepted(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &CeremonyId,
         participant: ParticipantIdentity,
     ) -> Result<bool, IntentError> {
         with_state_mut_validated(
@@ -329,7 +327,7 @@ impl CeremonyTracker {
                 }
 
                 // Add to accepted list
-                state.accepted_participants.push(participant.clone());
+                state.accepted_participants.insert(participant.clone());
 
                 let threshold_reached =
                     state.accepted_participants.len() >= state.threshold_k as usize;
@@ -355,7 +353,7 @@ impl CeremonyTracker {
     /// Mark a ceremony as committed (key rotation activated).
     ///
     /// This is only called after threshold is reached and `commit_key_rotation` succeeds.
-    pub async fn mark_committed(&self, ceremony_id: &str) -> Result<(), IntentError> {
+    pub async fn mark_committed(&self, ceremony_id: &CeremonyId) -> Result<(), IntentError> {
         with_state_mut_validated(
             &self.state,
             |tracker| {
@@ -391,7 +389,7 @@ impl CeremonyTracker {
     ///
     /// # Returns
     /// True if threshold is reached
-    pub async fn is_complete(&self, ceremony_id: &str) -> Result<bool, IntentError> {
+    pub async fn is_complete(&self, ceremony_id: &CeremonyId) -> Result<bool, IntentError> {
         let state = self.get(ceremony_id).await?;
         Ok(state.is_committed)
     }
@@ -403,7 +401,7 @@ impl CeremonyTracker {
     ///
     /// # Returns
     /// True if ceremony has exceeded its timeout
-    pub async fn is_timed_out(&self, ceremony_id: &str) -> Result<bool, IntentError> {
+    pub async fn is_timed_out(&self, ceremony_id: &CeremonyId) -> Result<bool, IntentError> {
         let state = self.get(ceremony_id).await?;
         Ok(state.started_at.elapsed() > state.timeout)
     }
@@ -415,7 +413,7 @@ impl CeremonyTracker {
     /// * `error_message` - Optional error description
     pub async fn mark_failed(
         &self,
-        ceremony_id: &str,
+        ceremony_id: &CeremonyId,
         error_message: Option<String>,
     ) -> Result<(), IntentError> {
         with_state_mut_validated(
@@ -445,7 +443,7 @@ impl CeremonyTracker {
     ///
     /// # Arguments
     /// * `ceremony_id` - The ceremony identifier
-    pub async fn remove(&self, ceremony_id: &str) -> Result<(), IntentError> {
+    pub async fn remove(&self, ceremony_id: &CeremonyId) -> Result<(), IntentError> {
         with_state_mut_validated(
             &self.state,
             |tracker| {
@@ -466,7 +464,7 @@ impl CeremonyTracker {
     ///
     /// # Returns
     /// Vector of (ceremony_id, state) tuples
-    pub async fn list_active(&self) -> Vec<(String, CeremonyState)> {
+    pub async fn list_active(&self) -> Vec<(CeremonyId, CeremonyState)> {
         let state = self.state.read().await;
         state
             .ceremonies
@@ -527,14 +525,14 @@ impl CeremonyTracker {
     /// * `timestamp_ms` - When the supersession was recorded
     pub async fn supersede(
         &self,
-        old_ceremony_id: &str,
-        new_ceremony_id: &str,
+        old_ceremony_id: &CeremonyId,
+        new_ceremony_id: &CeremonyId,
         reason: SupersessionReason,
         timestamp_ms: u64,
     ) -> Result<SupersessionRecord, IntentError> {
         // Create record outside the lock scope
-        let old_ceremony_hash = Hash32::from_bytes(old_ceremony_id.as_bytes());
-        let new_ceremony_hash = Hash32::from_bytes(new_ceremony_id.as_bytes());
+        let old_ceremony_hash = Hash32::from_bytes(old_ceremony_id.as_str().as_bytes());
+        let new_ceremony_hash = Hash32::from_bytes(new_ceremony_id.as_str().as_bytes());
         let record = SupersessionRecord::new(
             old_ceremony_hash,
             new_ceremony_hash,
@@ -573,13 +571,13 @@ impl CeremonyTracker {
 
                 // Mark old ceremony as superseded
                 old_state.is_superseded = true;
-                old_state.superseded_by = Some(new_ceremony_id.to_string());
+                old_state.superseded_by = Some(new_ceremony_id.clone());
                 old_state.has_failed = true;
                 old_state.error_message = Some(format!("Superseded: {}", reason.description()));
 
                 // Update new ceremony if it exists (may be registered separately)
                 if let Some(new_state) = tracker.ceremonies.get_mut(new_ceremony_id) {
-                    new_state.supersedes.push(old_ceremony_id.to_string());
+                    new_state.supersedes.push(old_ceremony_id.clone());
                 }
 
                 // Record for audit trail
@@ -614,7 +612,7 @@ impl CeremonyTracker {
         &self,
         kind: CeremonyKind,
         prestate_hash: Option<&Hash32>,
-    ) -> Vec<String> {
+    ) -> Vec<CeremonyId> {
         let state = self.state.read().await;
 
         state
@@ -652,8 +650,8 @@ impl CeremonyTracker {
     ///
     /// # Arguments
     /// * `ceremony_id` - The ceremony to get supersession history for
-    pub async fn get_supersession_chain(&self, ceremony_id: &str) -> Vec<SupersessionRecord> {
-        let ceremony_hash = Hash32::from_bytes(ceremony_id.as_bytes());
+    pub async fn get_supersession_chain(&self, ceremony_id: &CeremonyId) -> Vec<SupersessionRecord> {
+        let ceremony_hash = Hash32::from_bytes(ceremony_id.as_str().as_bytes());
         let state = self.state.read().await;
 
         state
@@ -667,7 +665,7 @@ impl CeremonyTracker {
     }
 
     /// Check if a ceremony has been superseded.
-    pub async fn is_superseded(&self, ceremony_id: &str) -> Result<bool, IntentError> {
+    pub async fn is_superseded(&self, ceremony_id: &CeremonyId) -> Result<bool, IntentError> {
         let state = self.get(ceremony_id).await?;
         Ok(state.is_superseded)
     }
@@ -718,20 +716,25 @@ impl RuntimeService for CeremonyTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::identifiers::{AuthorityId, CeremonyId};
     use aura_core::DeviceId;
+
+    fn test_ceremony_id(label: &str) -> CeremonyId {
+        CeremonyId::new(label)
+    }
 
     #[tokio::test]
     async fn test_ceremony_registration() {
         let tracker = CeremonyTracker::new();
 
+        let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
         let b = AuthorityId::new_from_entropy([2u8; 32]);
         let c = AuthorityId::new_from_entropy([3u8; 32]);
 
         tracker
             .register(
-                "ceremony-1".to_string(),
+                ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
                 2,
                 3,
@@ -746,7 +749,7 @@ mod tests {
             .await
             .unwrap();
 
-        let state = tracker.get("ceremony-1").await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.threshold_k, 2);
         assert_eq!(state.total_n, 3);
         assert_eq!(state.participants.len(), 3);
@@ -757,13 +760,14 @@ mod tests {
     async fn test_guardian_acceptance() {
         let tracker = CeremonyTracker::new();
 
+        let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
         let b = AuthorityId::new_from_entropy([2u8; 32]);
         let c = AuthorityId::new_from_entropy([3u8; 32]);
 
         tracker
             .register(
-                "ceremony-1".to_string(),
+                ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
                 2,
                 3,
@@ -780,19 +784,19 @@ mod tests {
 
         // First acceptance
         let threshold_reached = tracker
-            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(a))
             .await
             .unwrap();
         assert!(!threshold_reached);
 
         // Second acceptance - threshold reached
         let threshold_reached = tracker
-            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(b))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(b))
             .await
             .unwrap();
         assert!(threshold_reached);
 
-        let state = tracker.get("ceremony-1").await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.accepted_participants.len(), 2);
         assert!(state
             .accepted_participants
@@ -806,13 +810,14 @@ mod tests {
     async fn test_ceremony_completion() {
         let tracker = CeremonyTracker::new();
 
+        let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
         let b = AuthorityId::new_from_entropy([2u8; 32]);
         let c = AuthorityId::new_from_entropy([3u8; 32]);
 
         tracker
             .register(
-                "ceremony-1".to_string(),
+                ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
                 2,
                 3,
@@ -827,36 +832,37 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(!tracker.is_complete("ceremony-1").await.unwrap());
+        assert!(!tracker.is_complete(&ceremony_id).await.unwrap());
 
         tracker
-            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(a))
             .await
             .unwrap();
-        assert!(!tracker.is_complete("ceremony-1").await.unwrap());
+        assert!(!tracker.is_complete(&ceremony_id).await.unwrap());
 
         let threshold_reached = tracker
-            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(b))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(b))
             .await
             .unwrap();
         assert!(threshold_reached);
 
         // Completion is only true once the key rotation is committed.
-        assert!(!tracker.is_complete("ceremony-1").await.unwrap());
-        tracker.mark_committed("ceremony-1").await.unwrap();
-        assert!(tracker.is_complete("ceremony-1").await.unwrap());
+        assert!(!tracker.is_complete(&ceremony_id).await.unwrap());
+        tracker.mark_committed(&ceremony_id).await.unwrap();
+        assert!(tracker.is_complete(&ceremony_id).await.unwrap());
     }
 
     #[tokio::test]
     async fn test_agreement_mode_transitions() {
         let tracker = CeremonyTracker::new();
 
+        let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
         let b = AuthorityId::new_from_entropy([2u8; 32]);
 
         tracker
             .register(
-                "ceremony-1".to_string(),
+                ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
                 2,
                 2,
@@ -870,23 +876,23 @@ mod tests {
             .await
             .unwrap();
 
-        let state = tracker.get("ceremony-1").await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.agreement_mode, AgreementMode::CoordinatorSoftSafe);
 
         tracker
-            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(a))
             .await
             .unwrap();
         tracker
-            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(b))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(b))
             .await
             .unwrap();
 
-        let state = tracker.get("ceremony-1").await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.agreement_mode, AgreementMode::CoordinatorSoftSafe);
 
-        tracker.mark_committed("ceremony-1").await.unwrap();
-        let state = tracker.get("ceremony-1").await.unwrap();
+        tracker.mark_committed(&ceremony_id).await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.agreement_mode, AgreementMode::ConsensusFinalized);
     }
 
@@ -894,13 +900,14 @@ mod tests {
     async fn test_idempotent_acceptance() {
         let tracker = CeremonyTracker::new();
 
+        let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
         let b = AuthorityId::new_from_entropy([2u8; 32]);
         let c = AuthorityId::new_from_entropy([3u8; 32]);
 
         tracker
             .register(
-                "ceremony-1".to_string(),
+                ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
                 2,
                 3,
@@ -917,15 +924,15 @@ mod tests {
 
         // Accept twice
         tracker
-            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(a))
             .await
             .unwrap();
         tracker
-            .mark_accepted("ceremony-1", ParticipantIdentity::guardian(a))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(a))
             .await
             .unwrap();
 
-        let state = tracker.get("ceremony-1").await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.accepted_participants.len(), 1);
     }
 
@@ -933,13 +940,14 @@ mod tests {
     async fn test_ceremony_failure() {
         let tracker = CeremonyTracker::new();
 
+        let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
         let b = AuthorityId::new_from_entropy([2u8; 32]);
         let c = AuthorityId::new_from_entropy([3u8; 32]);
 
         tracker
             .register(
-                "ceremony-1".to_string(),
+                ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
                 2,
                 3,
@@ -955,11 +963,11 @@ mod tests {
             .unwrap();
 
         tracker
-            .mark_failed("ceremony-1", Some("Test failure".to_string()))
+            .mark_failed(&ceremony_id, Some("Test failure".to_string()))
             .await
             .unwrap();
 
-        let state = tracker.get("ceremony-1").await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert!(state.has_failed);
         assert_eq!(state.error_message, Some("Test failure".to_string()));
     }
@@ -968,10 +976,11 @@ mod tests {
     async fn test_device_enrollment_ceremony_acceptance() {
         let tracker = CeremonyTracker::new();
         let device = DeviceId::new_from_entropy([9u8; 32]);
+        let ceremony_id = test_ceremony_id("ceremony-device-1");
 
         tracker
             .register(
-                "ceremony-device-1".to_string(),
+                ceremony_id.clone(),
                 CeremonyKind::DeviceEnrollment,
                 1,
                 1,
@@ -982,19 +991,19 @@ mod tests {
             .await
             .unwrap();
 
-        let state = tracker.get("ceremony-device-1").await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.kind, CeremonyKind::DeviceEnrollment);
         assert_eq!(state.threshold_k, 1);
         assert_eq!(state.total_n, 1);
 
         let threshold_reached = tracker
-            .mark_accepted("ceremony-device-1", ParticipantIdentity::device(device))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::device(device))
             .await
             .unwrap();
         assert!(threshold_reached);
 
-        tracker.mark_committed("ceremony-device-1").await.unwrap();
-        assert!(tracker.is_complete("ceremony-device-1").await.unwrap());
+        tracker.mark_committed(&ceremony_id).await.unwrap();
+        assert!(tracker.is_complete(&ceremony_id).await.unwrap());
     }
 
     #[tokio::test]
@@ -1002,10 +1011,11 @@ mod tests {
         let tracker = CeremonyTracker::new();
         let device_a = DeviceId::new_from_entropy([10u8; 32]);
         let device_b = DeviceId::new_from_entropy([11u8; 32]);
+        let ceremony_id = test_ceremony_id("ceremony-rotate-1");
 
         tracker
             .register(
-                "ceremony-rotate-1".to_string(),
+                ceremony_id.clone(),
                 CeremonyKind::DeviceRotation,
                 2,
                 2,
@@ -1019,20 +1029,20 @@ mod tests {
             .await
             .unwrap();
 
-        let state = tracker.get("ceremony-rotate-1").await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.agreement_mode, AgreementMode::CoordinatorSoftSafe);
 
         tracker
-            .mark_accepted("ceremony-rotate-1", ParticipantIdentity::device(device_a))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::device(device_a))
             .await
             .unwrap();
         tracker
-            .mark_accepted("ceremony-rotate-1", ParticipantIdentity::device(device_b))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::device(device_b))
             .await
             .unwrap();
 
-        tracker.mark_committed("ceremony-rotate-1").await.unwrap();
-        let state = tracker.get("ceremony-rotate-1").await.unwrap();
+        tracker.mark_committed(&ceremony_id).await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.agreement_mode, AgreementMode::ConsensusFinalized);
     }
 
@@ -1041,10 +1051,11 @@ mod tests {
         let tracker = CeremonyTracker::new();
         let device_a = DeviceId::new_from_entropy([12u8; 32]);
         let device_b = DeviceId::new_from_entropy([13u8; 32]);
+        let ceremony_id = test_ceremony_id("ceremony-remove-1");
 
         tracker
             .register(
-                "ceremony-remove-1".to_string(),
+                ceremony_id.clone(),
                 CeremonyKind::DeviceRemoval,
                 2,
                 2,
@@ -1058,20 +1069,383 @@ mod tests {
             .await
             .unwrap();
 
-        let state = tracker.get("ceremony-remove-1").await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.agreement_mode, AgreementMode::CoordinatorSoftSafe);
 
         tracker
-            .mark_accepted("ceremony-remove-1", ParticipantIdentity::device(device_a))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::device(device_a))
             .await
             .unwrap();
         tracker
-            .mark_accepted("ceremony-remove-1", ParticipantIdentity::device(device_b))
+            .mark_accepted(&ceremony_id, ParticipantIdentity::device(device_b))
             .await
             .unwrap();
 
-        tracker.mark_committed("ceremony-remove-1").await.unwrap();
-        let state = tracker.get("ceremony-remove-1").await.unwrap();
+        tracker.mark_committed(&ceremony_id).await.unwrap();
+        let state = tracker.get(&ceremony_id).await.unwrap();
         assert_eq!(state.agreement_mode, AgreementMode::ConsensusFinalized);
+    }
+
+    // =========================================================================
+    // PROPERTY TESTS
+    // =========================================================================
+
+    use proptest::prelude::*;
+
+    /// Strategy to generate a valid CeremonyState
+    fn ceremony_state_strategy() -> impl Strategy<Value = CeremonyState> {
+        (
+            2usize..=8,  // num_participants
+            1u16..=8,    // threshold (will be clamped)
+        )
+            .prop_flat_map(|(num_participants, threshold)| {
+                let threshold = threshold.min(num_participants as u16);
+                let participants: Vec<ParticipantIdentity> = (0..num_participants)
+                    .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                    .collect();
+
+                // Generate a subset of participants to be accepted
+                let num_accepted = 0..=num_participants;
+
+                (Just(participants), Just(threshold), num_accepted)
+            })
+            .prop_map(|(participants, threshold, num_accepted)| {
+                let accepted: HashSet<_> =
+                    participants.iter().take(num_accepted).cloned().collect();
+                let participants_set: HashSet<_> = participants.into_iter().collect();
+
+                CeremonyState {
+                    kind: CeremonyKind::GuardianRotation,
+                    threshold_k: threshold,
+                    total_n: participants_set.len() as u16,
+                    participants: participants_set,
+                    accepted_participants: accepted,
+                    new_epoch: 100,
+                    enrollment_device_id: None,
+                    started_at: Instant::now(),
+                    has_failed: false,
+                    is_committed: false,
+                    is_superseded: false,
+                    superseded_by: None,
+                    supersedes: Vec::new(),
+                    agreement_mode: AgreementMode::CoordinatorSoftSafe,
+                    error_message: None,
+                    timeout: Duration::from_secs(30),
+                    prestate_hash: None,
+                }
+            })
+    }
+
+    proptest! {
+        /// Property: Participants list has no duplicates.
+        /// This invariant is enforced by the validate() function.
+        #[test]
+        fn prop_no_duplicate_participants(
+            num_participants in 2usize..=8,
+        ) {
+            let participants: Vec<ParticipantIdentity> = (0..num_participants)
+                .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                .collect();
+            let participants_set: HashSet<_> = participants.iter().cloned().collect();
+
+            let state = CeremonyTrackerState {
+                ceremonies: {
+                    let mut map = HashMap::new();
+                    map.insert(test_ceremony_id("test"), CeremonyState {
+                        kind: CeremonyKind::GuardianRotation,
+                        threshold_k: 1,
+                        total_n: participants_set.len() as u16,
+                        participants: participants_set,
+                        accepted_participants: HashSet::new(),
+                        new_epoch: 100,
+                        enrollment_device_id: None,
+                        started_at: Instant::now(),
+                        has_failed: false,
+                        is_committed: false,
+                        is_superseded: false,
+                        superseded_by: None,
+                        supersedes: Vec::new(),
+                        agreement_mode: AgreementMode::CoordinatorSoftSafe,
+                        error_message: None,
+                        timeout: Duration::from_secs(30),
+                        prestate_hash: None,
+                    });
+                    map
+                },
+                supersession_records: Vec::new(),
+            };
+
+            // Unique participants should pass validation
+            prop_assert!(state.validate().is_ok());
+
+            // Verify HashSet uniqueness invariant
+            let participant_set: HashSet<_> = participants.iter().collect();
+            prop_assert_eq!(participant_set.len(), participants.len());
+        }
+
+        /// Property: Accepted participants is always a subset of participants.
+        #[test]
+        fn prop_accepted_subset_of_participants(
+            num_participants in 2usize..=8,
+            num_accepted in 0usize..=8
+        ) {
+            let participants: Vec<ParticipantIdentity> = (0..num_participants)
+                .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                .collect();
+            let participants_set: HashSet<_> = participants.iter().cloned().collect();
+
+            // Take a valid subset of participants as accepted
+            let num_accepted = num_accepted.min(num_participants);
+            let accepted: HashSet<_> = participants.iter().take(num_accepted).cloned().collect();
+
+            let state = CeremonyTrackerState {
+                ceremonies: {
+                    let mut map = HashMap::new();
+                    map.insert(test_ceremony_id("test"), CeremonyState {
+                        kind: CeremonyKind::GuardianRotation,
+                        threshold_k: 1,
+                        total_n: num_participants as u16,
+                        participants: participants_set.clone(),
+                        accepted_participants: accepted.clone(),
+                        new_epoch: 100,
+                        enrollment_device_id: None,
+                        started_at: Instant::now(),
+                        has_failed: false,
+                        is_committed: false,
+                        is_superseded: false,
+                        superseded_by: None,
+                        supersedes: Vec::new(),
+                        agreement_mode: AgreementMode::CoordinatorSoftSafe,
+                        error_message: None,
+                        timeout: Duration::from_secs(30),
+                        prestate_hash: None,
+                    });
+                    map
+                },
+                supersession_records: Vec::new(),
+            };
+
+            // Valid subset should pass validation
+            prop_assert!(state.validate().is_ok());
+
+            // Verify subset relationship
+            prop_assert!(accepted.is_subset(&participants_set));
+        }
+
+        /// Property: Threshold must be <= total participants.
+        #[test]
+        fn prop_threshold_within_bounds(
+            num_participants in 1usize..=8,
+            threshold in 1u16..=8
+        ) {
+            let participants: Vec<ParticipantIdentity> = (0..num_participants)
+                .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                .collect();
+            let participants_set: HashSet<_> = participants.iter().cloned().collect();
+
+            let state = CeremonyTrackerState {
+                ceremonies: {
+                    let mut map = HashMap::new();
+                    map.insert(test_ceremony_id("test"), CeremonyState {
+                        kind: CeremonyKind::GuardianRotation,
+                        threshold_k: threshold,
+                        total_n: num_participants as u16,
+                        participants: participants_set,
+                        accepted_participants: HashSet::new(),
+                        new_epoch: 100,
+                        enrollment_device_id: None,
+                        started_at: Instant::now(),
+                        has_failed: false,
+                        is_committed: false,
+                        is_superseded: false,
+                        superseded_by: None,
+                        supersedes: Vec::new(),
+                        agreement_mode: AgreementMode::CoordinatorSoftSafe,
+                        error_message: None,
+                        timeout: Duration::from_secs(30),
+                        prestate_hash: None,
+                    });
+                    map
+                },
+                supersession_records: Vec::new(),
+            };
+
+            let result = state.validate();
+
+            // Should succeed iff threshold <= num_participants
+            if threshold as usize <= num_participants {
+                prop_assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
+            } else {
+                prop_assert!(result.is_err(), "Expected Err for threshold {} > total {}", threshold, num_participants);
+            }
+        }
+
+        /// Property: Committed ceremonies must have threshold met.
+        /// is_committed implies accepted_participants.len() >= threshold_k
+        #[test]
+        fn prop_committed_implies_threshold_met(
+            num_participants in 2usize..=8,
+            threshold in 1u16..=8,
+            num_accepted in 0usize..=8
+        ) {
+            let threshold = threshold.min(num_participants as u16);
+            let num_accepted = num_accepted.min(num_participants);
+
+            let participants: Vec<ParticipantIdentity> = (0..num_participants)
+                .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                .collect();
+            let accepted: HashSet<_> = participants.iter().take(num_accepted).cloned().collect();
+            let participants_set: HashSet<_> = participants.into_iter().collect();
+
+            let threshold_met = num_accepted >= threshold as usize;
+
+            let state = CeremonyTrackerState {
+                ceremonies: {
+                    let mut map = HashMap::new();
+                    map.insert(test_ceremony_id("test"), CeremonyState {
+                        kind: CeremonyKind::GuardianRotation,
+                        threshold_k: threshold,
+                        total_n: num_participants as u16,
+                        participants: participants_set,
+                        accepted_participants: accepted,
+                        new_epoch: 100,
+                        enrollment_device_id: None,
+                        started_at: Instant::now(),
+                        has_failed: false,
+                        is_committed: true, // Mark as committed
+                        is_superseded: false,
+                        superseded_by: None,
+                        supersedes: Vec::new(),
+                        agreement_mode: AgreementMode::ConsensusFinalized,
+                        error_message: None,
+                        timeout: Duration::from_secs(30),
+                        prestate_hash: None,
+                    });
+                    map
+                },
+                supersession_records: Vec::new(),
+            };
+
+            let result = state.validate();
+
+            // Should succeed iff threshold is met
+            if threshold_met {
+                prop_assert!(result.is_ok(), "Expected Ok when threshold met, got: {:?}", result);
+            } else {
+                prop_assert!(result.is_err(), "Expected Err for committed ceremony without threshold");
+            }
+        }
+
+        /// Property: Committed and failed are mutually exclusive.
+        #[test]
+        fn prop_committed_and_failed_mutually_exclusive(
+            is_committed in any::<bool>(),
+            has_failed in any::<bool>()
+        ) {
+            let a = AuthorityId::new_from_entropy([1u8; 32]);
+            let b = AuthorityId::new_from_entropy([2u8; 32]);
+            let participants = vec![
+                ParticipantIdentity::guardian(a),
+                ParticipantIdentity::guardian(b),
+            ];
+            let accepted: HashSet<_> = participants.iter().cloned().collect(); // All accepted for threshold
+            let participants_set: HashSet<_> = participants.into_iter().collect();
+
+            let state = CeremonyTrackerState {
+                ceremonies: {
+                    let mut map = HashMap::new();
+                    map.insert(test_ceremony_id("test"), CeremonyState {
+                        kind: CeremonyKind::GuardianRotation,
+                        threshold_k: 2,
+                        total_n: 2,
+                        participants: participants_set,
+                        accepted_participants: accepted,
+                        new_epoch: 100,
+                        enrollment_device_id: None,
+                        started_at: Instant::now(),
+                        has_failed,
+                        is_committed,
+                        is_superseded: false,
+                        superseded_by: None,
+                        supersedes: Vec::new(),
+                        agreement_mode: if is_committed {
+                            AgreementMode::ConsensusFinalized
+                        } else {
+                            AgreementMode::CoordinatorSoftSafe
+                        },
+                        error_message: if has_failed { Some("test".to_string()) } else { None },
+                        timeout: Duration::from_secs(30),
+                        prestate_hash: None,
+                    });
+                    map
+                },
+                supersession_records: Vec::new(),
+            };
+
+            let result = state.validate();
+
+            // Both true => error
+            if is_committed && has_failed {
+                prop_assert!(result.is_err());
+            }
+        }
+
+        /// Property: Superseded and committed are mutually exclusive.
+        #[test]
+        fn prop_superseded_and_committed_mutually_exclusive(
+            is_committed in any::<bool>(),
+            is_superseded in any::<bool>()
+        ) {
+            let a = AuthorityId::new_from_entropy([1u8; 32]);
+            let b = AuthorityId::new_from_entropy([2u8; 32]);
+            let participants = vec![
+                ParticipantIdentity::guardian(a),
+                ParticipantIdentity::guardian(b),
+            ];
+            let accepted: HashSet<_> = participants.iter().cloned().collect(); // All accepted for threshold
+            let participants_set: HashSet<_> = participants.into_iter().collect();
+
+            let state = CeremonyTrackerState {
+                ceremonies: {
+                    let mut map = HashMap::new();
+                    map.insert(test_ceremony_id("test"), CeremonyState {
+                        kind: CeremonyKind::GuardianRotation,
+                        threshold_k: 2,
+                        total_n: 2,
+                        participants: participants_set,
+                        accepted_participants: accepted,
+                        new_epoch: 100,
+                        enrollment_device_id: None,
+                        started_at: Instant::now(),
+                        has_failed: is_superseded, // Superseded ceremonies are marked failed
+                        is_committed,
+                        is_superseded,
+                        superseded_by: if is_superseded {
+                            Some(test_ceremony_id("other"))
+                        } else {
+                            None
+                        },
+                        supersedes: Vec::new(),
+                        agreement_mode: if is_committed {
+                            AgreementMode::ConsensusFinalized
+                        } else {
+                            AgreementMode::CoordinatorSoftSafe
+                        },
+                        error_message: None,
+                        timeout: Duration::from_secs(30),
+                        prestate_hash: None,
+                    });
+                    map
+                },
+                supersession_records: Vec::new(),
+            };
+
+            let result = state.validate();
+
+            // Both true => error
+            if is_committed && is_superseded {
+                prop_assert!(result.is_err());
+            }
+        }
     }
 }

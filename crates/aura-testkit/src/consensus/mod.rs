@@ -26,7 +26,10 @@ pub mod reference;
 
 // Re-export commonly used items
 pub use divergence::{DivergenceReport, FieldDiff, InstanceDiff, StateDiff};
-pub use itf_loader::{load_itf_trace, parse_itf_trace, ITFMeta, ITFState, ITFTrace};
+pub use itf_loader::{
+    load_itf_trace, parse_authority_id_label, parse_consensus_id_label, parse_hash32_label,
+    parse_itf_trace, parse_operation_id_label, ITFMeta, ITFState, ITFTrace,
+};
 pub use reference::{
     aggregate_shares_ref, apply_share_ref, check_invariants_ref, check_threshold_ref,
     detect_equivocators_ref, fail_consensus_ref, merge_evidence_ref, shares_consistent_ref,

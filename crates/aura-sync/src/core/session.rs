@@ -120,8 +120,8 @@ impl<T> SessionState<T> {
 pub enum SessionResult {
     Success {
         duration_ms: u64,
-        operations_count: usize,
-        bytes_transferred: usize,
+        operations_count: u64,
+        bytes_transferred: u64,
         participants: Vec<DeviceId>,
         metadata: HashMap<String, String>,
     },
@@ -152,7 +152,7 @@ impl SessionResult {
     }
 
     /// Get operations count for successful sessions
-    pub fn operations_count(&self) -> usize {
+    pub fn operations_count(&self) -> u64 {
         match self {
             SessionResult::Success {
                 operations_count, ..
@@ -169,8 +169,8 @@ impl SessionResult {
 /// Partial results for failed sessions
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PartialResults {
-    pub operations_completed: usize,
-    pub bytes_transferred: usize,
+    pub operations_completed: u64,
+    pub bytes_transferred: u64,
     pub completed_participants: Vec<DeviceId>,
     pub last_successful_operation: Option<String>,
 }
@@ -191,7 +191,7 @@ pub enum SessionError {
     ProtocolViolation { constraint: String },
 
     #[error("Session capacity exceeded: {current}/{max}")]
-    CapacityExceeded { current: usize, max: usize },
+    CapacityExceeded { current: u64, max: u64 },
 
     #[error("Invalid session state transition: {from} -> {to}")]
     InvalidStateTransition { from: String, to: String },
@@ -230,7 +230,7 @@ impl From<&SyncConfig> for SessionConfig {
             timeout: sync_config.network.sync_timeout,
             max_participants: 10, // Could be configurable
             cleanup_interval: sync_config.network.cleanup_interval,
-            max_concurrent_sessions: sync_config.peer_management.max_concurrent_syncs,
+            max_concurrent_sessions: sync_config.peer_management.max_concurrent_syncs as usize,
             resource_limits: SessionResourceLimits::from(&sync_config.performance),
         }
     }
@@ -260,7 +260,7 @@ impl Default for SessionResourceLimits {
 impl From<&crate::core::PerformanceConfig> for SessionResourceLimits {
     fn from(perf_config: &crate::core::PerformanceConfig) -> Self {
         Self {
-            max_memory_per_session: perf_config.memory_limit / 10, // 1/10th of total limit
+            max_memory_per_session: (perf_config.memory_limit / 10) as usize, // 1/10th of total limit
             max_session_duration: Duration::from_secs(3600),       // 1 hour
             max_operations_per_session: 10000,
         }
@@ -538,8 +538,8 @@ where
     pub fn complete_session(
         &mut self,
         session_id: SessionId,
-        operations_count: usize,
-        bytes_transferred: usize,
+        operations_count: u64,
+        bytes_transferred: u64,
         metadata: HashMap<String, String>,
         current_time: &PhysicalTime,
     ) -> SyncResult<()> {
@@ -580,8 +580,8 @@ where
     pub fn complete_session_ms(
         &mut self,
         session_id: SessionId,
-        operations_count: usize,
-        bytes_transferred: usize,
+        operations_count: u64,
+        bytes_transferred: u64,
         metadata: HashMap<String, String>,
         current_timestamp_ms: u64,
     ) -> SyncResult<()> {
@@ -813,12 +813,12 @@ where
 
     /// Get session statistics
     pub fn get_statistics(&self) -> SessionManagerStatistics {
-        let mut active_count = 0;
-        let mut completed_count = 0;
-        let mut failed_count = 0;
-        let mut timeout_count = 0;
+        let mut active_count = 0u64;
+        let mut completed_count = 0u64;
+        let mut failed_count = 0u64;
+        let mut timeout_count = 0u64;
         let mut total_duration_ms = 0u64;
-        let mut total_operations = 0usize;
+        let mut total_operations = 0u64;
 
         for session in self.sessions.values() {
             match session {
@@ -854,7 +854,7 @@ where
         };
 
         let average_duration_ms = if total_sessions > 0 {
-            total_duration_ms / total_sessions as u64
+            total_duration_ms / total_sessions
         } else {
             0
         };
@@ -907,14 +907,14 @@ where
 /// Session manager statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionManagerStatistics {
-    pub active_sessions: usize,
-    pub completed_sessions: usize,
-    pub failed_sessions: usize,
-    pub timeout_sessions: usize,
-    pub total_sessions: usize,
+    pub active_sessions: u64,
+    pub completed_sessions: u64,
+    pub failed_sessions: u64,
+    pub timeout_sessions: u64,
+    pub total_sessions: u64,
     pub success_rate_percent: f64,
     pub average_duration_ms: u64,
-    pub total_operations: usize,
+    pub total_operations: u64,
 }
 
 impl Default for SessionManagerStatistics {
@@ -999,7 +999,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SyncError;
+    use aura_core::AuraError;
     use aura_testkit::builders::test_device_id;
 
     /// Helper function to create PhysicalTime for tests
@@ -1164,7 +1164,7 @@ mod tests {
         // Try to exceed limit
         let result = manager.create_session(vec![test_device_id(1)], &now);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SyncError::Internal { .. }));
+        assert!(matches!(result.unwrap_err(), AuraError::Internal { .. }));
     }
 
     #[test]
@@ -1191,7 +1191,7 @@ mod tests {
         let result = manager.activate_session(session_id, state, &future_time);
         assert!(result.is_err());
         // Timeout errors now map to Internal
-        assert!(matches!(result.unwrap_err(), SyncError::Internal { .. }));
+        assert!(matches!(result.unwrap_err(), AuraError::Internal { .. }));
     }
 
     #[test]

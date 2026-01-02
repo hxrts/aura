@@ -1,16 +1,17 @@
 #![allow(missing_docs)]
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::util::test_utils::test_authority_id;
-use aura_invitation::{guards::GuardSnapshot, InvitationConfig, InvitationService, InvitationType};
 use aura_core::FlowCost;
+use aura_guards::types::CapabilityId;
+use aura_invitation::{guards::GuardSnapshot, InvitationConfig, InvitationService, InvitationType};
 
 fn snapshot_with_caps(auth: AuthorityId, ctx: ContextId, caps: &[&str]) -> GuardSnapshot {
     GuardSnapshot::new(
         auth,
         ctx,
         FlowCost::new(10), // flow budget
-        caps.iter().map(|c| c.to_string()).collect(),
+        caps.iter().map(|c| CapabilityId::from(*c)).collect(),
         0,     // epoch
         1_000, // now_ms
     )
@@ -27,7 +28,7 @@ fn invitation_send_and_accept_end_to_end() {
 
     // Sender prepares to send
     let send_snapshot = snapshot_with_caps(sender, ctx, &["invitation:send"]);
-    let invitation_id = "inv-123";
+    let invitation_id = InvitationId::new("inv-123");
     let outcome = sender_service.prepare_send_invitation(
         &send_snapshot,
         receiver,
@@ -36,14 +37,14 @@ fn invitation_send_and_accept_end_to_end() {
         },
         Some("welcome".into()),
         Some(60_000),
-        invitation_id.to_string(),
+        invitation_id.clone(),
     );
     assert!(outcome.is_allowed(), "send should be allowed");
 
     // Receiver prepares to accept
     let accept_snapshot = snapshot_with_caps(receiver, ctx, &["invitation:accept"]);
     let accept_outcome =
-        receiver_service.prepare_accept_invitation(&accept_snapshot, invitation_id);
+        receiver_service.prepare_accept_invitation(&accept_snapshot, &invitation_id);
     assert!(
         accept_outcome.is_allowed(),
         "accept should be allowed for pending invitation"
@@ -57,10 +58,10 @@ fn invitation_decline_flow_marks_status() {
     let ctx = ContextId::new_from_entropy([2u8; 32]);
 
     let svc = InvitationService::new(receiver, InvitationConfig::default());
-    let invitation_id = "inv-decline";
+    let invitation_id = InvitationId::new("inv-decline");
 
     let snapshot = snapshot_with_caps(receiver, ctx, &["invitation:decline"]);
-    let outcome = svc.prepare_decline_invitation(&snapshot, invitation_id);
+    let outcome = svc.prepare_decline_invitation(&snapshot, &invitation_id);
     assert!(
         outcome.is_allowed(),
         "decline should be allowed when pending"

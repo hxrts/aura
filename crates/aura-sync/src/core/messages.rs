@@ -242,7 +242,7 @@ pub struct SyncResult<T> {
     /// Whether the sync operation succeeded
     pub success: bool,
     /// Number of operations/items synchronized
-    pub operations_synced: usize,
+    pub operations_synced: u64,
     /// Optional protocol-specific data
     pub data: Option<T>,
     /// Error message if sync failed
@@ -253,7 +253,7 @@ pub struct SyncResult<T> {
 
 impl<T> SyncResult<T> {
     /// Create a successful sync result
-    pub fn success(operations_synced: usize, data: Option<T>, duration_ms: u64) -> Self {
+    pub fn success(operations_synced: u64, data: Option<T>, duration_ms: u64) -> Self {
         Self {
             success: true,
             operations_synced,
@@ -275,7 +275,7 @@ impl<T> SyncResult<T> {
     }
 
     /// Create a partial success result
-    pub fn partial(operations_synced: usize, error: String, duration_ms: u64) -> Self {
+    pub fn partial(operations_synced: u64, error: String, duration_ms: u64) -> Self {
         Self {
             success: false,
             operations_synced,
@@ -314,9 +314,9 @@ pub struct BatchMessage<T> {
     /// Items in this batch
     pub items: Vec<T>,
     /// Total number of items across all batches
-    pub total_items: usize,
+    pub total_items: u64,
     /// This batch's sequence number (0-indexed)
-    pub sequence: usize,
+    pub sequence: u64,
     /// Whether this is the final batch
     pub is_final: bool,
 }
@@ -326,8 +326,8 @@ impl<T> BatchMessage<T> {
     pub fn new(
         batch_id: Uuid,
         items: Vec<T>,
-        total_items: usize,
-        sequence: usize,
+        total_items: u64,
+        sequence: u64,
         is_final: bool,
     ) -> Self {
         Self {
@@ -344,20 +344,26 @@ impl<T> BatchMessage<T> {
     /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()` and pass them
     pub fn create_batches(
         items: Vec<T>,
-        batch_size: usize,
+        batch_size: u32,
         batch_uuid: Uuid,
     ) -> Vec<BatchMessage<T>>
     where
         T: Clone,
     {
-        let total_items = items.len();
+        if batch_size == 0 {
+            return Vec::new();
+        }
+
+        let total_items = items.len() as u64;
         let batch_id = batch_uuid;
+        let batch_size_usize = batch_size as usize;
 
         items
-            .chunks(batch_size)
+            .chunks(batch_size_usize)
             .enumerate()
             .map(|(sequence, chunk)| {
-                let is_final = (sequence + 1) * batch_size >= total_items;
+                let sequence = sequence as u64;
+                let is_final = (sequence + 1) * batch_size as u64 >= total_items;
                 BatchMessage::new(batch_id, chunk.to_vec(), total_items, sequence, is_final)
             })
             .collect()

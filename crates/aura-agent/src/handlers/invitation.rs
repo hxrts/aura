@@ -17,11 +17,12 @@ use aura_core::effects::{
     FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportReceipt,
 };
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::FlowCost;
 use aura_core::Receipt;
 use aura_invitation::guards::GuardSnapshot;
+use aura_guards::types::CapabilityId;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
 use aura_journal::fact::{FactContent, RelationalFact};
@@ -42,7 +43,7 @@ pub struct InvitationResult {
     /// Whether the action succeeded
     pub success: bool,
     /// Invitation ID affected
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// New status after the action
     pub new_status: Option<InvitationStatus>,
     /// Error message if action failed
@@ -90,21 +91,21 @@ impl InvitationHandler {
         })
     }
 
-    fn imported_invitation_key(authority_id: AuthorityId, invitation_id: &str) -> String {
+    fn imported_invitation_key(authority_id: AuthorityId, invitation_id: &InvitationId) -> String {
         format!(
             "{}/{}/{}",
             Self::IMPORTED_INVITATION_STORAGE_PREFIX,
             authority_id.uuid(),
-            invitation_id
+            invitation_id.as_str()
         )
     }
 
-    fn created_invitation_key(authority_id: AuthorityId, invitation_id: &str) -> String {
+    fn created_invitation_key(authority_id: AuthorityId, invitation_id: &InvitationId) -> String {
         format!(
             "{}/{}/{}",
             Self::CREATED_INVITATION_STORAGE_PREFIX,
             authority_id.uuid(),
-            invitation_id
+            invitation_id.as_str()
         )
     }
 
@@ -127,7 +128,7 @@ impl InvitationHandler {
     pub(crate) async fn load_created_invitation(
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> Option<Invitation> {
         let key = Self::created_invitation_key(authority_id, invitation_id);
         let Ok(Some(bytes)) = effects.retrieve(&key).await else {
@@ -155,7 +156,7 @@ impl InvitationHandler {
     async fn load_imported_invitation(
         effects: &AuraEffectSystem,
         authority_id: AuthorityId,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> Option<ShareableInvitation> {
         let key = Self::imported_invitation_key(authority_id, invitation_id);
         let Ok(Some(bytes)) = effects.retrieve(&key).await else {
@@ -176,23 +177,23 @@ impl InvitationHandler {
         // Build capabilities list - in testing mode, grant all capabilities
         let capabilities = if effects.is_testing() {
             vec![
-                "invitation:send".to_string(),
-                "invitation:accept".to_string(),
-                "invitation:decline".to_string(),
-                "invitation:cancel".to_string(),
-                "invitation:guardian".to_string(),
-                "invitation:channel".to_string(),
-                "invitation:device".to_string(),
+                CapabilityId::from("invitation:send"),
+                CapabilityId::from("invitation:accept"),
+                CapabilityId::from("invitation:decline"),
+                CapabilityId::from("invitation:cancel"),
+                CapabilityId::from("invitation:guardian"),
+                CapabilityId::from("invitation:channel"),
+                CapabilityId::from("invitation:device"),
             ]
         } else {
             // Capabilities will be derived from Biscuit token when integrated.
             // Currently uses default set for non-testing mode.
             vec![
-                "invitation:send".to_string(),
-                "invitation:accept".to_string(),
-                "invitation:decline".to_string(),
-                "invitation:cancel".to_string(),
-                "invitation:device".to_string(),
+                CapabilityId::from("invitation:send"),
+                CapabilityId::from("invitation:accept"),
+                CapabilityId::from("invitation:decline"),
+                CapabilityId::from("invitation:cancel"),
+                CapabilityId::from("invitation:device"),
             ]
         };
 
@@ -209,7 +210,7 @@ impl InvitationHandler {
     async fn validate_cached_invitation_accept(
         &self,
         effects: &AuraEffectSystem,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
         now_ms: u64,
     ) -> AgentResult<()> {
         if let Some(invitation) = self
@@ -237,7 +238,7 @@ impl InvitationHandler {
     async fn validate_cached_invitation_decline(
         &self,
         effects: &AuraEffectSystem,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> AgentResult<()> {
         if let Some(invitation) = self
             .get_invitation_with_storage(effects, invitation_id)
@@ -257,7 +258,7 @@ impl InvitationHandler {
     async fn validate_cached_invitation_cancel(
         &self,
         effects: &AuraEffectSystem,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> AgentResult<()> {
         if let Some(invitation) = self
             .get_invitation_with_storage(effects, invitation_id)
@@ -293,7 +294,7 @@ impl InvitationHandler {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Generate unique invitation ID
-        let invitation_id = format!("inv-{}", effects.random_uuid().await.simple());
+        let invitation_id = InvitationId::new(format!("inv-{}", effects.random_uuid().await.simple()));
         let current_time = effects.current_timestamp().await.unwrap_or(0);
         let expires_at = expires_in_ms.map(|ms| current_time + ms);
 
@@ -344,7 +345,7 @@ impl InvitationHandler {
     pub async fn accept_invitation(
         &self,
         effects: &AuraEffectSystem,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
@@ -474,7 +475,7 @@ impl InvitationHandler {
                 let mut h = aura_core::hash::hasher();
                 h.update(b"DEVICE_ENROLLMENT_CONTEXT");
                 h.update(&enrollment.subject_authority.to_bytes());
-                h.update(enrollment.ceremony_id.as_bytes());
+                h.update(enrollment.ceremony_id.as_str().as_bytes());
                 h.finalize()
             };
             let ceremony_context =
@@ -485,7 +486,7 @@ impl InvitationHandler {
                 "content-type".to_string(),
                 "application/aura-device-enrollment-acceptance".to_string(),
             );
-            metadata.insert("ceremony-id".to_string(), enrollment.ceremony_id.clone());
+            metadata.insert("ceremony-id".to_string(), enrollment.ceremony_id.to_string());
             metadata.insert(
                 "acceptor-device-id".to_string(),
                 enrollment.device_id.to_string(),
@@ -519,7 +520,7 @@ impl InvitationHandler {
 
         Ok(InvitationResult {
             success: true,
-            invitation_id: invitation_id.to_string(),
+            invitation_id: invitation_id.clone(),
             new_status: Some(InvitationStatus::Accepted),
             error: None,
         })
@@ -528,7 +529,7 @@ impl InvitationHandler {
     async fn resolve_contact_invitation(
         &self,
         effects: &AuraEffectSystem,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> AgentResult<Option<(AuthorityId, String)>> {
         let own_id = self.context.authority.authority_id();
 
@@ -596,12 +597,12 @@ impl InvitationHandler {
                 continue;
             };
 
-            if seen_id != invitation_id {
+            if seen_id != *invitation_id {
                 continue;
             }
 
-            // Only treat it as a "contact invitation" if the type string is contact-like.
-            if invitation_type.to_lowercase() != "contact" {
+            // Only treat it as a "contact invitation" if the type is Contact.
+            if !matches!(invitation_type, aura_invitation::InvitationType::Contact { .. }) {
                 return Ok(None);
             }
 
@@ -626,7 +627,7 @@ impl InvitationHandler {
     async fn resolve_device_enrollment_invitation(
         &self,
         effects: &AuraEffectSystem,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> AgentResult<Option<DeviceEnrollmentInvitation>> {
         let own_id = self.context.authority.authority_id();
 
@@ -747,7 +748,7 @@ impl InvitationHandler {
     pub async fn decline_invitation(
         &self,
         effects: &AuraEffectSystem,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
@@ -773,7 +774,7 @@ impl InvitationHandler {
 
         Ok(InvitationResult {
             success: true,
-            invitation_id: invitation_id.to_string(),
+            invitation_id: invitation_id.clone(),
             new_status: Some(InvitationStatus::Declined),
             error: None,
         })
@@ -783,7 +784,7 @@ impl InvitationHandler {
     pub async fn cancel_invitation(
         &self,
         effects: &AuraEffectSystem,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
@@ -804,7 +805,7 @@ impl InvitationHandler {
 
         Ok(InvitationResult {
             success: true,
-            invitation_id: invitation_id.to_string(),
+            invitation_id: invitation_id.clone(),
             new_status: Some(InvitationStatus::Cancelled),
             error: None,
         })
@@ -818,7 +819,7 @@ impl InvitationHandler {
     }
 
     /// Get an invitation by ID (from in-memory cache only)
-    pub async fn get_invitation(&self, invitation_id: &str) -> Option<Invitation> {
+    pub async fn get_invitation(&self, invitation_id: &InvitationId) -> Option<Invitation> {
         self.invitation_cache.get_invitation(invitation_id).await
     }
 
@@ -826,7 +827,7 @@ impl InvitationHandler {
     pub async fn get_invitation_with_storage(
         &self,
         effects: &AuraEffectSystem,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
     ) -> Option<Invitation> {
         // First check in-memory cache
         if let Some(inv) = self.invitation_cache.get_invitation(invitation_id).await {
@@ -875,7 +876,7 @@ struct DeviceEnrollmentInvitation {
     subject_authority: AuthorityId,
     initiator_device_id: aura_core::DeviceId,
     device_id: aura_core::DeviceId,
-    ceremony_id: String,
+    ceremony_id: aura_core::identifiers::CeremonyId,
     pending_epoch: u64,
     key_package: Vec<u8>,
     threshold_config: Vec<u8>,
@@ -935,7 +936,7 @@ pub struct ShareableInvitation {
     /// Version number for forward compatibility
     pub version: u8,
     /// Unique invitation identifier
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Sender authority
     pub sender_id: AuthorityId,
     /// Type of invitation
@@ -1036,7 +1037,8 @@ pub async fn execute_guard_outcome(
         let reason = outcome
             .decision
             .denial_reason()
-            .unwrap_or("Operation denied");
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "Operation denied".to_string());
         return Err(AgentError::effects(format!(
             "Guard denied operation: {}",
             reason
@@ -1148,7 +1150,7 @@ async fn execute_charge_flow_budget(
 
 async fn execute_notify_peer(
     peer: AuthorityId,
-    invitation_id: String,
+    invitation_id: InvitationId,
     authority: &AuthorityContext,
     receipt: Option<Receipt>,
     effects: &AuraEffectSystem,
@@ -1173,7 +1175,7 @@ async fn execute_notify_peer(
         "content-type".to_string(),
         "application/aura-invitation".to_string(),
     );
-    metadata.insert("invitation-id".to_string(), invitation_id.clone());
+    metadata.insert("invitation-id".to_string(), invitation_id.to_string());
     metadata.insert(
         "invitation-context".to_string(),
         invitation.context_id.to_string(),
@@ -1250,7 +1252,7 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
     use aura_invitation::guards::{EffectCommand, GuardOutcome};
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
@@ -1281,7 +1283,9 @@ mod tests {
         let config = AgentConfig::default();
         let effects = AuraEffectSystem::testing(&config).unwrap();
 
-        let outcome = GuardOutcome::denied("Test denial reason");
+        let outcome = GuardOutcome::denied(aura_guards::types::GuardViolation::other(
+            "Test denial reason",
+        ));
 
         let result = execute_guard_outcome(outcome, &authority, &effects).await;
         assert!(result.is_err());
@@ -1297,10 +1301,10 @@ mod tests {
 
         let fact = InvitationFact::sent_ms(
             ContextId::new_from_entropy([232u8; 32]),
-            "inv-test".to_string(),
+            InvitationId::new("inv-test"),
             authority.authority_id(),
             AuthorityId::new_from_entropy([133u8; 32]),
-            "contact".to_string(),
+            InvitationType::Contact { nickname: None },
             1000,
             Some(2000),
             None,
@@ -1321,7 +1325,7 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([135u8; 32]);
         let outcome = GuardOutcome::allowed(vec![EffectCommand::NotifyPeer {
             peer,
-            invitation_id: "inv-notify".to_string(),
+            invitation_id: InvitationId::new("inv-notify"),
         }]);
 
         let result = execute_guard_outcome(outcome, &authority, &effects).await;
@@ -1356,7 +1360,7 @@ mod tests {
             },
             EffectCommand::NotifyPeer {
                 peer,
-                invitation_id: "inv-multi".to_string(),
+                invitation_id: InvitationId::new("inv-multi"),
             },
             EffectCommand::RecordReceipt {
                 operation: "send_invitation".to_string(),
@@ -1390,7 +1394,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(invitation.invitation_id.starts_with("inv-"));
+        assert!(invitation.invitation_id.as_str().starts_with("inv-"));
         assert_eq!(invitation.sender_id, authority_context.authority_id());
         assert_eq!(invitation.receiver_id, receiver_id);
         assert_eq!(invitation.status, InvitationStatus::Pending);
@@ -1473,7 +1477,7 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([121u8; 32]);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
-            invitation_id: "inv-demo-contact-1".to_string(),
+            invitation_id: InvitationId::new("inv-demo-contact-1"),
             sender_id,
             invitation_type: InvitationType::Contact {
                 nickname: Some("Alice".to_string()),
@@ -1554,7 +1558,7 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([123u8; 32]);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
-            invitation_id: "inv-demo-contact-2".to_string(),
+            invitation_id: InvitationId::new("inv-demo-contact-2"),
             sender_id,
             invitation_type: InvitationType::Contact {
                 nickname: Some("Alice".to_string()),
@@ -1747,7 +1751,7 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([42u8; 32]);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
-            invitation_id: "inv-test-123".to_string(),
+            invitation_id: InvitationId::new("inv-test-123"),
             sender_id,
             invitation_type: InvitationType::Contact {
                 nickname: Some("alice".to_string()),
@@ -1773,7 +1777,7 @@ mod tests {
         let subject_authority = AuthorityId::new_from_entropy([44u8; 32]);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
-            invitation_id: "inv-guardian-456".to_string(),
+            invitation_id: InvitationId::new("inv-guardian-456"),
             sender_id,
             invitation_type: InvitationType::Guardian { subject_authority },
             expires_at: None,
@@ -1798,7 +1802,7 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([45u8; 32]);
         let shareable = ShareableInvitation {
             version: ShareableInvitation::CURRENT_VERSION,
-            invitation_id: "inv-channel-789".to_string(),
+            invitation_id: InvitationId::new("inv-channel-789"),
             sender_id,
             invitation_type: InvitationType::Channel {
                 home_id: "home-xyz".to_string(),
@@ -1872,7 +1876,7 @@ mod tests {
     #[test]
     fn shareable_invitation_from_invitation() {
         let invitation = Invitation {
-            invitation_id: "inv-from-full".to_string(),
+            invitation_id: InvitationId::new("inv-from-full"),
             context_id: ContextId::new_from_entropy([50u8; 32]),
             sender_id: AuthorityId::new_from_entropy([51u8; 32]),
             receiver_id: AuthorityId::new_from_entropy([52u8; 32]),

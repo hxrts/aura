@@ -90,6 +90,47 @@ pub trait ViewDeltaReducer: Send + Sync {
     ) -> Vec<ViewDelta>;
 }
 
+/// Trait for deltas that can be losslessly (or intentionally) compacted.
+///
+/// The compaction behavior is defined by `try_merge`, which should preserve
+/// the effective outcome of applying the two deltas in-order.
+pub trait ComposableDelta: Sized {
+    /// Key used to determine whether two deltas are merge candidates.
+    type Key: PartialEq;
+
+    /// Return a key that identifies the logical target of this delta.
+    fn key(&self) -> Self::Key;
+
+    /// Attempt to merge `other` into `self`.
+    ///
+    /// Returns `true` if `other` was merged and can be discarded.
+    /// Returns `false` if the deltas must remain separate.
+    fn try_merge(&mut self, other: Self) -> bool;
+}
+
+/// Compact deltas while preserving relative order.
+///
+/// This is an order-aware compactor: it only merges with the most recent prior
+/// delta for the same key, preserving sequential semantics.
+pub fn compact_deltas<T: ComposableDelta + Clone>(deltas: Vec<T>) -> Vec<T> {
+    let mut output: Vec<T> = Vec::with_capacity(deltas.len());
+
+    for delta in deltas {
+        let key = delta.key();
+        if let Some(pos) = output.iter().rposition(|existing| existing.key() == key) {
+            let mut existing = output.remove(pos);
+            if existing.try_merge(delta.clone()) {
+                output.insert(pos, existing);
+                continue;
+            }
+            output.insert(pos, existing);
+        }
+        output.push(delta);
+    }
+
+    output
+}
+
 /// Registry for domain view reducers.
 ///
 /// The runtime scheduler uses this to dispatch facts to appropriate reducers.
@@ -204,6 +245,30 @@ mod tests {
         ItemRemoved { id: String },
     }
 
+    impl ComposableDelta for TestDelta {
+        type Key = String;
+
+        fn key(&self) -> Self::Key {
+            match self {
+                TestDelta::ItemAdded { id } | TestDelta::ItemRemoved { id } => id.clone(),
+            }
+        }
+
+        fn try_merge(&mut self, other: Self) -> bool {
+            match (self, other) {
+                (TestDelta::ItemAdded { id }, TestDelta::ItemAdded { id: other_id }) => {
+                    *id = other_id;
+                    true
+                }
+                (TestDelta::ItemRemoved { id }, TestDelta::ItemRemoved { id: other_id }) => {
+                    *id = other_id;
+                    true
+                }
+                _ => false,
+            }
+        }
+    }
+
     // Test reducer
     struct TestReducer;
 
@@ -229,6 +294,25 @@ mod tests {
                 vec![]
             }
         }
+    }
+
+    #[test]
+    fn test_compact_deltas_merges_by_key() {
+        let deltas = vec![
+            TestDelta::ItemAdded { id: "a".to_string() },
+            TestDelta::ItemAdded { id: "a".to_string() },
+            TestDelta::ItemRemoved { id: "b".to_string() },
+            TestDelta::ItemRemoved { id: "b".to_string() },
+        ];
+
+        let compacted = compact_deltas(deltas);
+        assert_eq!(
+            compacted,
+            vec![
+                TestDelta::ItemAdded { id: "a".to_string() },
+                TestDelta::ItemRemoved { id: "b".to_string() },
+            ]
+        );
     }
 
     #[test]

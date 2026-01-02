@@ -4,7 +4,7 @@ use super::pure;
 use async_lock::RwLock;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::TransportEffects;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::{tree::AttestedOp, FlowCost, Hash32};
 use aura_guards::chain::create_send_guard_op;
 use aura_guards::traits::GuardContextProvider;
@@ -12,7 +12,6 @@ use aura_guards::GuardEffects;
 use aura_guards::{GuardOperation, GuardOperationId};
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Composite trait bound for guard chain operations
 pub trait GuardChainEffects: GuardEffects + GuardContextProvider + PhysicalTimeEffects {}
@@ -37,7 +36,7 @@ pub struct AntiEntropyHandler {
     config: AntiEntropyConfig,
     // In real implementation, these would be trait objects for Journal and Transport
     oplog: Arc<RwLock<Vec<AttestedOp>>>,
-    peers: Arc<RwLock<BTreeSet<Uuid>>>,
+    peers: Arc<RwLock<BTreeSet<DeviceId>>>,
     /// Context ID for guard chain operations
     context_id: ContextId,
     /// Runtime cost configuration
@@ -66,10 +65,10 @@ impl AntiEntropyHandler {
     /// need("sync:request_digest") ≤ Auth(ctx) ∧ headroom(ctx, 10)
     async fn request_digest_from_peer_guarded<E: AntiEntropyProtocolEffects>(
         &self,
-        peer_id: Uuid,
+        peer_id: DeviceId,
         effect_system: &E,
     ) -> Result<BloomDigest, SyncError> {
-        let peer_authority = AuthorityId::from(peer_id);
+        let peer_authority = AuthorityId::from(peer_id.0);
         let cost = self.runtime.digest_cost;
 
         // Create and evaluate guard chain for digest request
@@ -79,7 +78,7 @@ impl AntiEntropyHandler {
             peer_authority,
             cost,
         )
-        .with_operation_id(GuardOperationId::SyncRequestDigest { peer: peer_id });
+        .with_operation_id(GuardOperationId::SyncRequestDigest { peer: peer_id.0 });
 
         // Evaluate guard chain - this enforces authorization and flow budget
         let guard_result = guard_chain.evaluate(effect_system).await.map_err(|e| {
@@ -145,7 +144,7 @@ impl AntiEntropyHandler {
     }
 
     /// Add peer to known peer set
-    pub async fn add_peer(&self, peer_id: Uuid) {
+    pub async fn add_peer(&self, peer_id: DeviceId) {
         let mut peers = self.peers.write().await;
         peers.insert(peer_id);
     }
@@ -199,7 +198,11 @@ impl AntiEntropyHandler {
     }
 
     /// Request a specific operation by CID.
-    pub async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
+    pub async fn request_op(
+        &self,
+        _peer_id: DeviceId,
+        cid: Hash32,
+    ) -> Result<AttestedOp, SyncError> {
         // Local oplog lookup - no network request needed
         let oplog = self.oplog.read().await;
         oplog
@@ -210,7 +213,7 @@ impl AntiEntropyHandler {
     }
 
     /// Get list of currently connected peers.
-    pub async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
+    pub async fn get_connected_peers(&self) -> Result<Vec<DeviceId>, SyncError> {
         let peers = self.peers.read().await;
         Ok(peers.iter().copied().collect())
     }
@@ -221,11 +224,11 @@ impl AntiEntropyHandler {
     /// need("sync:request_ops") ≤ Auth(ctx) ∧ headroom(ctx, cids.len() * 5)
     async fn request_ops_from_peer_guarded<E: AntiEntropyProtocolEffects>(
         &self,
-        peer_id: Uuid,
+        peer_id: DeviceId,
         cids: Vec<Hash32>,
         effect_system: &E,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        let peer_authority = AuthorityId::from(peer_id);
+        let peer_authority = AuthorityId::from(peer_id.0);
         let cost = FlowCost::new(cids.len() as u32 * self.runtime.request_cost_per_cid.value());
 
         let guard_chain = create_send_guard_op(
@@ -235,7 +238,7 @@ impl AntiEntropyHandler {
             cost,
         )
         .with_operation_id(GuardOperationId::SyncRequestOps {
-            peer: peer_id,
+            peer: peer_id.0,
             count: cids.len() as u32,
         });
 
@@ -290,8 +293,8 @@ impl AntiEntropyHandler {
         let peers = self.peers.read().await;
         let mut failed_peers = Vec::new();
 
-        for &peer_uuid in peers.iter() {
-            let peer_authority = AuthorityId::from(peer_uuid);
+        for &peer_id in peers.iter() {
+            let peer_authority = AuthorityId::from(peer_id.0);
 
             let guard_chain = create_send_guard_op(
                 GuardOperation::SyncAnnounceOp,
@@ -300,7 +303,7 @@ impl AntiEntropyHandler {
                 self.runtime.announce_cost,
             )
             .with_operation_id(GuardOperationId::SyncAnnounceOp {
-                peer: peer_uuid,
+                peer: peer_id.0,
                 cid,
             });
 
@@ -309,7 +312,7 @@ impl AntiEntropyHandler {
                 Ok(result) if result.authorized => {
                     tracing::debug!(
                         cid = ?cid,
-                        peer = ?peer_uuid,
+                        peer = ?peer_id,
                         receipt_nonce = ?result.receipt.as_ref().map(|r| r.nonce),
                         "Guard chain approved announcement to peer"
                     );
@@ -318,20 +321,20 @@ impl AntiEntropyHandler {
                 Ok(result) => {
                     tracing::warn!(
                         cid = ?cid,
-                        peer = ?peer_uuid,
+                        peer = ?peer_id,
                         reason = ?result.denial_reason,
                         "Announcement to peer denied by guard chain"
                     );
-                    failed_peers.push(peer_uuid);
+                    failed_peers.push(peer_id);
                 }
                 Err(e) => {
                     tracing::error!(
                         cid = ?cid,
-                        peer = ?peer_uuid,
+                        peer = ?peer_id,
                         error = %e,
                         "Guard chain evaluation failed for announcement"
                     );
-                    failed_peers.push(peer_uuid);
+                    failed_peers.push(peer_id);
                 }
             }
         }
@@ -355,14 +358,14 @@ impl AntiEntropyHandler {
     pub async fn push_op_to_peers_guarded<E: AntiEntropyProtocolEffects>(
         &self,
         op: AttestedOp,
-        peers: Vec<Uuid>,
+        peers: Vec<DeviceId>,
         effect_system: &E,
     ) -> Result<(), SyncError> {
         let cid = Hash32::from(op.op.parent_commitment);
         let mut failed_peers = Vec::new();
 
-        for peer_uuid in &peers {
-            let peer_authority = AuthorityId::from(*peer_uuid);
+        for peer_id in &peers {
+            let peer_authority = AuthorityId::from(peer_id.0);
             let cost = self.runtime.push_cost;
 
             let guard_chain = create_send_guard_op(
@@ -372,7 +375,7 @@ impl AntiEntropyHandler {
                 cost,
             )
             .with_operation_id(GuardOperationId::SyncPushOp {
-                peer: *peer_uuid,
+                peer: peer_id.0,
                 cid,
             });
 
@@ -381,7 +384,7 @@ impl AntiEntropyHandler {
                 Ok(result) if result.authorized => {
                     tracing::debug!(
                         cid = ?cid,
-                        peer = ?peer_uuid,
+                        peer = ?peer_id,
                         receipt_nonce = ?result.receipt.as_ref().map(|r| r.nonce),
                         "Guard chain approved op push to peer"
                     );
@@ -390,20 +393,20 @@ impl AntiEntropyHandler {
                 Ok(result) => {
                     tracing::warn!(
                         cid = ?cid,
-                        peer = ?peer_uuid,
+                        peer = ?peer_id,
                         reason = ?result.denial_reason,
                         "Op push to peer denied by guard chain"
                     );
-                    failed_peers.push(*peer_uuid);
+                    failed_peers.push(*peer_id);
                 }
                 Err(e) => {
                     tracing::error!(
                         cid = ?cid,
-                        peer = ?peer_uuid,
+                        peer = ?peer_id,
                         error = %e,
                         "Guard chain evaluation failed for op push"
                     );
-                    failed_peers.push(*peer_uuid);
+                    failed_peers.push(*peer_id);
                 }
             }
         }
@@ -426,7 +429,7 @@ impl AntiEntropyHandler {
     /// All operations flow through the guard chain.
     pub async fn sync_with_peer_guarded<E: AntiEntropyProtocolEffects>(
         &self,
-        peer_id: Uuid,
+        peer_id: DeviceId,
         effect_system: &E,
     ) -> Result<(), SyncError> {
         // Step 1: Get local digest (pure, no guard needed)
@@ -583,8 +586,8 @@ mod tests {
         let context_id = ContextId::new_from_entropy([6u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
-        let peer1 = Uuid::from_u128(1);
-        let peer2 = Uuid::from_u128(2);
+        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
+        let peer2 = DeviceId::from_uuid(uuid::Uuid::from_u128(2));
 
         handler.add_peer(peer1).await;
         handler.add_peer(peer2).await;
@@ -603,7 +606,7 @@ mod tests {
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
 
-        let peer_id = Uuid::from_u128(1);
+        let peer_id = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
         let retrieved = handler
             .request_op(peer_id, aura_core::Hash32([1u8; 32]))
             .await
@@ -620,7 +623,7 @@ mod tests {
         let context_id = ContextId::new_from_entropy([8u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
-        let peer_id = Uuid::from_u128(1);
+        let peer_id = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
         let result = handler
             .request_op(peer_id, aura_core::Hash32([99u8; 32]))
             .await;

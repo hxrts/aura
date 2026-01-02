@@ -31,10 +31,11 @@ struct DomainSpecificGuard {
 
 impl Guard for DomainSpecificGuard {
     fn evaluate(&self, _snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
-        if request.operation.len() > self.max_message_size {
+        let operation_len = request.operation.to_string().len();
+        if operation_len > self.max_message_size {
             return GuardOutcome::denied(format!(
                 "Operation size {} exceeds limit {}",
-                request.operation.len(),
+                operation_len,
                 self.max_message_size
             ));
         }

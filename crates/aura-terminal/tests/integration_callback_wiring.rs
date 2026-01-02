@@ -398,9 +398,7 @@ async fn test_chat_signal_message_accumulation() {
             chat.messages.push(Message {
                 id: format!("msg-{i}"),
                 channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
-                sender_id: format!("user-{i}")
-                    .parse::<AuthorityId>()
-                    .unwrap_or_default(),
+                sender_id: AuthorityId::new_from_entropy([i as u8; 32]),
                 sender_name: format!("User{i}"),
                 content: format!("Message number {i}"),
                 timestamp: i as u64 * 1000,

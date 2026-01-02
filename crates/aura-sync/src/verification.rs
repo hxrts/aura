@@ -313,20 +313,22 @@ impl MerkleVerifier {
 
     /// Validate authority presence for an incoming fact
     ///
-    /// Facts should have an associated authority that created them.
+    /// Facts must have an associated authority that created them.
     /// This provides accountability and enables signature verification.
     ///
     /// # Returns
     /// - `Ok(())` if authority is present
-    /// - `Err(reason)` if authority is missing and required
+    /// - `Err(reason)` if authority is missing
     fn validate_authority(fact: &IndexedFact) -> Result<(), String> {
-        // For now, we accept facts without authority for backwards compatibility
-        // In a stricter mode, we could require: fact.authority.is_some()
         if fact.authority.is_none() {
-            tracing::trace!(
+            tracing::warn!(
                 fact_id = ?fact.id,
-                "Fact has no authority (accepted for compatibility)"
+                "Rejecting fact without authority - all facts must have an associated authority"
             );
+            return Err(format!(
+                "Fact {:?} rejected: authority is required for all facts",
+                fact.id
+            ));
         }
         Ok(())
     }

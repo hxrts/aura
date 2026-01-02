@@ -16,15 +16,17 @@ use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use super::types::{AuditAction, ComponentId, LogLevel};
+
 /// Log entry with structured metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LogEntry {
     /// Log level (debug, info, warn, error)
-    pub level: String,
+    pub level: LogLevel,
     /// Log message content
     pub message: String,
     /// Component that generated the log
-    pub component: String,
+    pub component: ComponentId,
     /// Associated session identifier
     pub session_id: Option<SessionId>,
     /// Associated device identifier
@@ -45,7 +47,7 @@ pub struct AuditEntry {
     /// Resource being acted upon
     pub resource: String,
     /// Action performed (e.g., "create", "read", "update", "delete")
-    pub action: String,
+    pub action: AuditAction,
     /// Outcome of the action (success, failure, denied)
     pub outcome: String,
     /// Structured metadata for the audit entry
@@ -62,7 +64,7 @@ pub struct LoggingConfig {
     /// Maximum number of audit entries to retain in memory
     pub max_audit_entries: u32,
     /// Log level filter (debug, info, warn, error)
-    pub log_level: String,
+    pub log_level: LogLevel,
     /// Whether audit logging is enabled
     pub audit_enabled: bool,
 }
@@ -72,7 +74,7 @@ impl Default for LoggingConfig {
         Self {
             max_log_entries: 1024,
             max_audit_entries: 512,
-            log_level: "info".to_string(),
+            log_level: LogLevel::Info,
             audit_enabled: true,
         }
     }
@@ -127,21 +129,20 @@ impl LoggingSystemHandler {
     }
 
     /// Apply log level filtering and emit to tracing
-    fn apply_level(level: &str, component: &str, message: &str) {
+    fn apply_level(level: LogLevel, component: &ComponentId, message: &str) {
         match level {
-            "error" => error!("{}: {}", component, message),
-            "warn" => warn!("{}: {}", component, message),
-            "info" => info!("{}: {}", component, message),
-            "debug" => debug!("{}: {}", component, message),
-            _ => info!("{}: {}", component, message),
+            LogLevel::Error => error!("{}: {}", component, message),
+            LogLevel::Warn => warn!("{}: {}", component, message),
+            LogLevel::Info => info!("{}: {}", component, message),
+            LogLevel::Debug => debug!("{}: {}", component, message),
         }
     }
 
     /// Push log entry (stateless - delegates to external logging service)
     async fn push_log(&self, entry: LogEntry) {
         tracing::debug!(
-            level = entry.level,
-            component = entry.component,
+            level = %entry.level,
+            component = %entry.component,
             message = entry.message,
             "Log entry sent via logging handler"
         );
@@ -154,7 +155,7 @@ impl LoggingSystemHandler {
             event_type = entry.event_type,
             actor = ?entry.actor,
             resource = entry.resource,
-            action = entry.action,
+            action = %entry.action,
             outcome = entry.outcome,
             "Audit entry sent via logging handler"
         );
@@ -164,8 +165,8 @@ impl LoggingSystemHandler {
     /// Log a structured message
     pub async fn log_structured(
         &self,
-        level: &str,
-        component: &str,
+        level: LogLevel,
+        component: ComponentId,
         message: &str,
         metadata: HashMap<String, Value>,
         session_id: Option<SessionId>,
@@ -173,16 +174,16 @@ impl LoggingSystemHandler {
         trace_id: Option<Uuid>,
     ) -> Result<(), SystemError> {
         let entry = LogEntry {
-            level: level.to_string(),
+            level,
             message: message.to_string(),
-            component: component.to_string(),
+            component: component.clone(),
             session_id,
             device_id,
             metadata,
             trace_id,
         };
 
-        Self::apply_level(level, component, message);
+        Self::apply_level(level, &component, message);
         self.push_log(entry).await;
         Ok(())
     }
@@ -193,7 +194,7 @@ impl LoggingSystemHandler {
         event_type: &str,
         actor: Option<DeviceId>,
         resource: &str,
-        action: &str,
+        action: AuditAction,
         outcome: &str,
         metadata: HashMap<String, Value>,
         session_id: Option<SessionId>,
@@ -206,7 +207,7 @@ impl LoggingSystemHandler {
             event_type: event_type.to_string(),
             actor,
             resource: resource.to_string(),
-            action: action.to_string(),
+            action,
             outcome: outcome.to_string(),
             metadata,
             session_id,
@@ -243,8 +244,18 @@ impl Default for LoggingSystemHandler {
 #[async_trait]
 impl SystemEffects for LoggingSystemHandler {
     async fn log(&self, level: &str, component: &str, message: &str) -> Result<(), SystemError> {
-        self.log_structured(level, component, message, HashMap::new(), None, None, None)
-            .await
+        let parsed_level = LogLevel::try_from(level).unwrap_or(LogLevel::Info);
+        let component_id = ComponentId::from(component);
+        self.log_structured(
+            parsed_level,
+            component_id,
+            message,
+            HashMap::new(),
+            None,
+            None,
+            None,
+        )
+        .await
     }
 
     async fn log_with_context(
@@ -258,15 +269,16 @@ impl SystemEffects for LoggingSystemHandler {
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))
             .collect();
-
-        self.log_structured(level, component, message, metadata, None, None, None)
+        let parsed_level = LogLevel::try_from(level).unwrap_or(LogLevel::Info);
+        let component_id = ComponentId::from(component);
+        self.log_structured(parsed_level, component_id, message, metadata, None, None, None)
             .await
     }
 
     async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {
         let mut info = HashMap::new();
         info.insert("component".to_string(), "logging".to_string());
-        info.insert("log_level".to_string(), self.config.log_level.clone());
+        info.insert("log_level".to_string(), self.config.log_level.to_string());
         info.insert(
             "audit_enabled".to_string(),
             self.config.audit_enabled.to_string(),
@@ -279,13 +291,11 @@ impl SystemEffects for LoggingSystemHandler {
         match key {
             "log_level" => {
                 // Validate the value but don't store it (stateless handler)
-                match value {
-                    "error" | "warn" | "info" | "debug" => Ok(()),
-                    _ => Err(SystemError::InvalidConfiguration {
-                        key: key.to_string(),
-                        value: value.to_string(),
-                    }),
-                }
+                LogLevel::try_from(value).map_err(|_| SystemError::InvalidConfiguration {
+                    key: key.to_string(),
+                    value: value.to_string(),
+                })?;
+                Ok(())
             }
             "audit_enabled" => {
                 // Validate the value but don't store it (stateless handler)
@@ -306,7 +316,7 @@ impl SystemEffects for LoggingSystemHandler {
 
     async fn get_config(&self, key: &str) -> Result<String, SystemError> {
         match key {
-            "log_level" => Ok(self.config.log_level.clone()),
+            "log_level" => Ok(self.config.log_level.to_string()),
             "audit_enabled" => Ok(self.config.audit_enabled.to_string()),
             "max_log_entries" => Ok(self.config.max_log_entries.to_string()),
             "max_audit_entries" => Ok(self.config.max_audit_entries.to_string()),
@@ -363,7 +373,7 @@ mod tests {
     async fn test_logging_handler_creation() {
         let handler = LoggingSystemHandler::new(LoggingConfig::default());
         // LoggingSystemHandler should be created successfully
-        assert_eq!(handler.config.log_level, "info");
+        assert_eq!(handler.config.log_level, LogLevel::Info);
         assert!(handler.config.audit_enabled);
     }
 
@@ -399,7 +409,7 @@ mod tests {
                 "authentication",
                 Some(DeviceId::new_from_entropy([3u8; 32])),
                 "resource",
-                "action",
+                AuditAction::Custom("action".to_string()),
                 "success",
                 HashMap::from([("extra".into(), json!("1"))]),
                 None,

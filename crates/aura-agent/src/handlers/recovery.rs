@@ -8,9 +8,10 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::services::RecoveryManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomExtendedEffects;
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, RecoveryId};
 use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard;
+use aura_guards::types::CapabilityId;
 use aura_protocol::effects::EffectApiEffects;
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +23,7 @@ pub enum RecoveryState {
     /// Recovery has been initiated, waiting for guardian approvals
     Initiated {
         /// Unique recovery ceremony ID
-        recovery_id: String,
+        recovery_id: RecoveryId,
         /// Number of approvals required
         threshold: u32,
         /// Approvals collected so far
@@ -31,7 +32,7 @@ pub enum RecoveryState {
     /// Collecting guardian shares
     CollectingShares {
         /// Recovery ceremony ID
-        recovery_id: String,
+        recovery_id: RecoveryId,
         /// Shares collected
         collected: u32,
         /// Shares required
@@ -40,19 +41,19 @@ pub enum RecoveryState {
     /// Reconstructing the key
     Reconstructing {
         /// Recovery ceremony ID
-        recovery_id: String,
+        recovery_id: RecoveryId,
     },
     /// Recovery completed successfully
     Complete {
         /// Recovery ceremony ID
-        recovery_id: String,
+        recovery_id: RecoveryId,
         /// Completion timestamp
         completed_at: u64,
     },
     /// Recovery failed
     Failed {
         /// Recovery ceremony ID
-        recovery_id: String,
+        recovery_id: RecoveryId,
         /// Failure reason
         reason: String,
     },
@@ -89,7 +90,7 @@ pub enum RecoveryOperation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryRequest {
     /// Unique recovery ceremony ID
-    pub recovery_id: String,
+    pub recovery_id: RecoveryId,
     /// Account authority being recovered
     pub account_authority: AuthorityId,
     /// Recovery operation type
@@ -110,7 +111,7 @@ pub struct RecoveryRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianApproval {
     /// Recovery ceremony ID being approved
-    pub recovery_id: String,
+    pub recovery_id: RecoveryId,
     /// Guardian authority providing approval
     pub guardian_id: AuthorityId,
     /// Guardian's signature over the recovery request
@@ -127,7 +128,7 @@ pub struct RecoveryResult {
     /// Whether recovery succeeded
     pub success: bool,
     /// Recovery ceremony ID
-    pub recovery_id: String,
+    pub recovery_id: RecoveryId,
     /// Final state
     pub state: RecoveryState,
     /// Recovered key material (if applicable)
@@ -170,7 +171,7 @@ impl RecoveryHandler {
     }
 
     /// Get current recovery state
-    pub async fn get_state(&self, recovery_id: &str) -> Option<RecoveryState> {
+    pub async fn get_state(&self, recovery_id: &RecoveryId) -> Option<RecoveryState> {
         self.recovery_manager.get_state(recovery_id).await
     }
 
@@ -198,7 +199,7 @@ impl RecoveryHandler {
         // Enforce guard (unless testing)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                "recovery:initiate".to_string(),
+                CapabilityId::from("recovery:initiate"),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
                 FlowCost::new(100), // Higher cost for recovery operations
@@ -217,7 +218,8 @@ impl RecoveryHandler {
         }
 
         // Generate recovery ID
-        let recovery_id = format!("recovery-{}", effects.random_uuid().await.simple());
+        let recovery_id =
+            RecoveryId::new(format!("recovery-{}", effects.random_uuid().await.simple()));
         let current_time = effects.current_timestamp().await.unwrap_or(0);
         let expires_at = expires_in_ms.map(|ms| current_time + ms);
 
@@ -277,7 +279,7 @@ impl RecoveryHandler {
         // Enforce guard (unless testing)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                "recovery:approve".to_string(),
+                CapabilityId::from("recovery:approve"),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
                 FlowCost::new(50),
@@ -390,7 +392,7 @@ impl RecoveryHandler {
     pub async fn complete(
         &self,
         effects: &AuraEffectSystem,
-        recovery_id: &str,
+        recovery_id: &RecoveryId,
     ) -> AgentResult<RecoveryResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
@@ -407,7 +409,7 @@ impl RecoveryHandler {
         // Enforce guard (unless testing)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                "recovery:complete".to_string(),
+                CapabilityId::from("recovery:complete"),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
                 FlowCost::new(100),
@@ -459,13 +461,13 @@ impl RecoveryHandler {
         .await?;
 
         let completed_state = RecoveryState::Complete {
-            recovery_id: recovery_id.to_string(),
+            recovery_id: recovery_id.clone(),
             completed_at: current_time,
         };
 
         let result = RecoveryResult {
             success: true,
-            recovery_id: recovery_id.to_string(),
+            recovery_id: recovery_id.clone(),
             state: completed_state.clone(),
             key_material: None, // Would be populated from actual key reconstruction
             approvals: recovery.approvals.clone(),
@@ -488,7 +490,7 @@ impl RecoveryHandler {
     pub async fn cancel(
         &self,
         effects: &AuraEffectSystem,
-        recovery_id: &str,
+        recovery_id: &RecoveryId,
         reason: String,
     ) -> AgentResult<RecoveryResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
@@ -496,7 +498,7 @@ impl RecoveryHandler {
         // Enforce guard (unless testing)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                "recovery:cancel".to_string(),
+                CapabilityId::from("recovery:cancel"),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
                 FlowCost::new(30),
@@ -536,13 +538,13 @@ impl RecoveryHandler {
         .await?;
 
         let failed_state = RecoveryState::Failed {
-            recovery_id: recovery_id.to_string(),
+            recovery_id: recovery_id.clone(),
             reason: reason.clone(),
         };
 
         let result = RecoveryResult {
             success: false,
-            recovery_id: recovery_id.to_string(),
+            recovery_id: recovery_id.clone(),
             state: failed_state.clone(),
             key_material: None,
             approvals: recovery.approvals.clone(),
@@ -562,7 +564,7 @@ impl RecoveryHandler {
     }
 
     /// List active recovery ceremonies
-    pub async fn list_active(&self) -> Vec<(String, RecoveryState)> {
+    pub async fn list_active(&self) -> Vec<(RecoveryId, RecoveryState)> {
         self.recovery_manager.list_active().await
     }
 
@@ -618,7 +620,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(request.recovery_id.starts_with("recovery-"));
+        assert!(request.recovery_id.as_str().starts_with("recovery-"));
         assert_eq!(request.threshold, 2);
         assert_eq!(request.guardians.len(), 3);
     }

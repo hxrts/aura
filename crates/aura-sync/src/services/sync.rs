@@ -440,12 +440,12 @@ impl SyncService {
         };
 
         // Respect max concurrent limit
-        if active_sessions >= max_concurrent {
+        if active_sessions >= max_concurrent as u64 {
             return Ok(());
         }
 
         // Implement actual peer synchronization via journal_sync
-        let available_sessions = max_concurrent.saturating_sub(active_sessions);
+        let available_sessions = (max_concurrent as u64).saturating_sub(active_sessions) as usize;
 
         if available_sessions == 0 {
             tracing::debug!("No available session slots for auto-sync");
@@ -525,7 +525,7 @@ impl SyncService {
         &self,
         effects: &E,
         peers: &[DeviceId],
-    ) -> SyncResult<Vec<(DeviceId, usize)>>
+    ) -> SyncResult<Vec<(DeviceId, u64)>>
     where
         E: SyncProtocolEffects,
     {
@@ -541,7 +541,7 @@ impl SyncService {
 
             match result {
                 Ok(synced_operations) => {
-                    sync_results.push((peer, synced_operations));
+                    sync_results.push((peer, synced_operations as u64));
                     tracing::info!(
                         "Successfully synced {} operations with peer {}",
                         synced_operations,
@@ -559,7 +559,7 @@ impl SyncService {
     }
 
     /// Update sync metrics based on sync results
-    async fn update_sync_metrics(&self, results: &[(DeviceId, usize)]) -> SyncResult<()> {
+    async fn update_sync_metrics(&self, results: &[(DeviceId, u64)]) -> SyncResult<()> {
         // Get the time first (async) before acquiring the lock
         let now_ms = self
             .time_effects

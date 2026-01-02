@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use aura_core::effects::{
     NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream,
 };
+use aura_effects::transport::{ConnectionId, TransportAddress};
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -41,11 +42,11 @@ impl Default for TransportConfig {
 #[derive(Debug, Clone)]
 pub struct TransportConnection {
     /// Connection identifier
-    pub connection_id: String,
+    pub connection_id: ConnectionId,
     /// Local address
-    pub local_addr: String,
+    pub local_addr: TransportAddress,
     /// Remote address
-    pub remote_addr: String,
+    pub remote_addr: TransportAddress,
     /// Connection metadata
     pub metadata: HashMap<String, String>,
 }
@@ -78,7 +79,7 @@ pub struct TransportRegistry {
     /// Message channels by peer ID
     pub channels: HashMap<String, async_channel::Sender<Vec<u8>>>,
     /// Connection metadata
-    pub connections: HashMap<String, TransportConnection>,
+    pub connections: HashMap<ConnectionId, TransportConnection>,
 }
 
 /// In-memory transport handler for testing
@@ -122,9 +123,9 @@ impl InMemoryTransportHandler {
     ) -> TransportResult<async_channel::Receiver<Vec<u8>>> {
         let (tx, rx) = async_unbounded();
 
-        let connection_id = format!("mem-{connection_uuid}");
-        let local_addr = "memory://local".to_string();
-        let remote_addr = format!("memory://{peer_id}");
+        let connection_id = ConnectionId::new(format!("mem-{connection_uuid}"));
+        let local_addr = TransportAddress::new("memory://local");
+        let remote_addr = TransportAddress::new(format!("memory://{peer_id}"));
 
         let mut metadata = HashMap::new();
         metadata.insert("protocol".to_string(), "memory".to_string());
@@ -150,7 +151,7 @@ impl InMemoryTransportHandler {
         registry.channels.remove(peer_id);
 
         // Remove associated connections
-        let connection_ids_to_remove: Vec<String> = registry
+        let connection_ids_to_remove: Vec<ConnectionId> = registry
             .connections
             .iter()
             .filter(|(_, conn)| conn.metadata.get("peer_id") == Some(&peer_id.to_string()))

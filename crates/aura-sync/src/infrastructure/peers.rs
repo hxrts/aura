@@ -57,6 +57,7 @@ fn test_time_now() -> PhysicalTime {
     }
 }
 use aura_guards::BiscuitGuardEvaluator;
+use aura_guards::types::CapabilityId;
 
 // =============================================================================
 // Configuration
@@ -558,7 +559,8 @@ impl PeerManager {
         };
 
         // Check if the token grants sync capability using the guard evaluator
-        match evaluator.check_guard_default_time(&biscuit_token, "sync:read", &sync_resource) {
+        let capability = CapabilityId::from("sync:read");
+        match evaluator.check_guard_default_time(&biscuit_token, &capability, &sync_resource) {
             Ok(has_permission) => {
                 tracing::debug!(
                     has_sync_capability = has_permission,

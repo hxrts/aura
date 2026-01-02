@@ -11,6 +11,7 @@ use aura_core::{
     identifiers::AuthorityId,
     Cap, Fact, FlowCost,
 };
+use super::types::GuardOperationId;
 use std::fmt::Debug;
 
 /// Request to be evaluated by guards
@@ -23,7 +24,7 @@ pub struct GuardRequest {
     /// Peer the operation targets (if applicable)
     pub peer: AuthorityId,
     /// Operation being requested
-    pub operation: String,
+    pub operation: GuardOperationId,
     /// Cost in flow budget units
     pub cost: FlowCost,
     /// Required capability
@@ -38,7 +39,7 @@ pub struct GuardRequest {
 
 impl GuardRequest {
     /// Create a new guard request
-    pub fn new(authority: AuthorityId, operation: impl Into<String>, cost: FlowCost) -> Self {
+    pub fn new(authority: AuthorityId, operation: impl Into<GuardOperationId>, cost: FlowCost) -> Self {
         Self {
             authority,
             context: aura_core::ContextId::new_from_entropy([2u8; 32]),

@@ -24,11 +24,12 @@
 //!                                                 └─────────────────┘
 //! ```
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::FlowCost;
 use aura_guards::types;
 
 use crate::facts::InvitationFact;
+use crate::InvitationType;
 
 // =============================================================================
 // Guard Cost Constants
@@ -92,7 +93,7 @@ pub struct GuardSnapshot {
     pub flow_budget_remaining: FlowCost,
 
     /// Capabilities held by the authority
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<types::CapabilityId>,
 
     /// Current epoch
     pub epoch: u64,
@@ -107,7 +108,7 @@ impl GuardSnapshot {
         authority_id: AuthorityId,
         context_id: ContextId,
         flow_budget_remaining: FlowCost,
-        capabilities: Vec<String>,
+        capabilities: Vec<types::CapabilityId>,
         epoch: u64,
         now_ms: u64,
     ) -> Self {
@@ -122,7 +123,7 @@ impl GuardSnapshot {
     }
 
     /// Check if snapshot has a specific capability
-    pub fn has_capability(&self, cap: &str) -> bool {
+    pub fn has_capability(&self, cap: &types::CapabilityId) -> bool {
         self.capabilities.iter().any(|c| c == cap)
     }
 
@@ -142,18 +143,18 @@ pub enum GuardRequest {
     /// Sending an invitation
     SendInvitation {
         receiver_id: AuthorityId,
-        invitation_type: String,
+        invitation_type: InvitationType,
         expires_at_ms: Option<u64>,
     },
 
     /// Accepting an invitation
-    AcceptInvitation { invitation_id: String },
+    AcceptInvitation { invitation_id: InvitationId },
 
     /// Declining an invitation
-    DeclineInvitation { invitation_id: String },
+    DeclineInvitation { invitation_id: InvitationId },
 
     /// Cancelling an invitation
-    CancelInvitation { invitation_id: String },
+    CancelInvitation { invitation_id: InvitationId },
 }
 
 /// Decision type shared across Layer 5 feature crates.
@@ -186,7 +187,7 @@ pub enum EffectCommand {
         /// Peer to notify
         peer: AuthorityId,
         /// Invitation ID
-        invitation_id: String,
+        invitation_id: InvitationId,
     },
 
     /// Record receipt for operation
@@ -216,7 +217,7 @@ impl std::fmt::Display for GuardReject {
 }
 
 fn deny(reject: GuardReject) -> GuardOutcome {
-    GuardOutcome::denied(reject.to_string())
+    GuardOutcome::denied(types::GuardViolation::other(reject.to_string()))
 }
 
 // =============================================================================
@@ -224,7 +225,10 @@ fn deny(reject: GuardReject) -> GuardOutcome {
 // =============================================================================
 
 /// Check capability and return denied outcome if missing
-pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<GuardOutcome> {
+pub fn check_capability(
+    snapshot: &GuardSnapshot,
+    required_cap: &types::CapabilityId,
+) -> Option<GuardOutcome> {
     if snapshot.has_capability(required_cap) {
         None
     } else {
@@ -253,7 +257,7 @@ pub fn check_flow_budget(
 }
 
 impl types::CapabilitySnapshot for GuardSnapshot {
-    fn has_capability(&self, cap: &str) -> bool {
+    fn has_capability(&self, cap: &types::CapabilityId) -> bool {
         GuardSnapshot::has_capability(self, cap)
     }
 }
@@ -287,8 +291,8 @@ mod tests {
             test_context(),
             FlowCost::new(100),
             vec![
-                costs::CAP_INVITATION_SEND.to_string(),
-                costs::CAP_INVITATION_ACCEPT.to_string(),
+                types::CapabilityId::from(costs::CAP_INVITATION_SEND),
+                types::CapabilityId::from(costs::CAP_INVITATION_ACCEPT),
             ],
             1,
             1000,
@@ -298,9 +302,15 @@ mod tests {
     #[test]
     fn test_guard_snapshot_has_capability() {
         let snapshot = test_snapshot();
-        assert!(snapshot.has_capability(costs::CAP_INVITATION_SEND));
-        assert!(snapshot.has_capability(costs::CAP_INVITATION_ACCEPT));
-        assert!(!snapshot.has_capability(costs::CAP_GUARDIAN_INVITE));
+        assert!(snapshot.has_capability(&types::CapabilityId::from(
+            costs::CAP_INVITATION_SEND
+        )));
+        assert!(snapshot.has_capability(&types::CapabilityId::from(
+            costs::CAP_INVITATION_ACCEPT
+        )));
+        assert!(!snapshot.has_capability(&types::CapabilityId::from(
+            costs::CAP_GUARDIAN_INVITE
+        )));
     }
 
     #[test]
@@ -321,10 +331,13 @@ mod tests {
 
     #[test]
     fn test_guard_decision_deny() {
-        let decision = GuardDecision::deny("test reason");
+        let decision = GuardDecision::deny(types::GuardViolation::other("test reason"));
         assert!(!decision.is_allowed());
         assert!(decision.is_denied());
-        assert_eq!(decision.denial_reason(), Some("test reason"));
+        assert!(matches!(
+            decision.denial_reason(),
+            Some(types::GuardViolation::Other(reason)) if reason == "test reason"
+        ));
     }
 
     #[test]
@@ -337,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_guard_outcome_denied() {
-        let outcome = GuardOutcome::denied("no budget");
+        let outcome = GuardOutcome::denied(types::GuardViolation::other("no budget"));
         assert!(outcome.is_denied());
         assert!(outcome.effects.is_empty());
     }
@@ -345,14 +358,20 @@ mod tests {
     #[test]
     fn test_check_capability_success() {
         let snapshot = test_snapshot();
-        let result = check_capability(&snapshot, costs::CAP_INVITATION_SEND);
+        let result = check_capability(
+            &snapshot,
+            &types::CapabilityId::from(costs::CAP_INVITATION_SEND),
+        );
         assert!(result.is_none()); // None means check passed
     }
 
     #[test]
     fn test_check_capability_failure() {
         let snapshot = test_snapshot();
-        let result = check_capability(&snapshot, costs::CAP_GUARDIAN_INVITE);
+        let result = check_capability(
+            &snapshot,
+            &types::CapabilityId::from(costs::CAP_GUARDIAN_INVITE),
+        );
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());
     }

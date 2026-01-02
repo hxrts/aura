@@ -10,6 +10,7 @@ use crate::runtime::services::CeremonyTracker;
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
+use aura_core::identifiers::CeremonyId;
 use aura_core::{AuthorityId, DeviceId};
 
 /// Handles device enrollment ceremony messages
@@ -246,11 +247,12 @@ impl<'a> EnrollmentHandler<'a> {
                 return ProcessResult::Skip;
             }
         };
+        let ceremony_id = CeremonyId::new(ceremony_id.clone());
 
         let participant = aura_core::threshold::ParticipantIdentity::device(acceptor_device_id);
         let threshold_reached = match self
             .ceremony_tracker
-            .mark_accepted(ceremony_id, participant)
+            .mark_accepted(&ceremony_id, participant)
             .await
         {
             Ok(reached) => reached,

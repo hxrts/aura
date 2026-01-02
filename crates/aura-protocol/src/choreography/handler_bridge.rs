@@ -7,15 +7,17 @@
 use aura_core::identifiers::{ContextId, DeviceId};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_guards::LeakageBudget;
+pub use aura_mpst::MessageTypeId;
+use aura_mpst::{NonEmptyRoleList, RoleId};
 use biscuit_auth::Biscuit;
 use rumpsteak_aura_choreography::effects::ChoreoHandler;
 use rumpsteak_aura_choreography::{ChoreographyError, Label};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::effects::choreographic::{ChoreographicEffects, ChoreographicRole};
+use crate::effects::choreographic::{ChoreographicEffects, ChoreographicRole, RoleIndex};
 
 type ChoreoResult<T> = Result<T, ChoreographyError>;
 
@@ -58,13 +60,13 @@ pub trait ChoreographicHandler: Send + Sync {
     fn device_id(&self) -> DeviceId;
 
     /// Add role mapping for choreographic protocols
-    fn add_role_mapping(&mut self, role_name: String, device_id: DeviceId);
+    fn add_role_mapping(&mut self, role_name: RoleId, device_id: DeviceId);
 
     /// Set flow context for capability tracking
     fn set_flow_context(&mut self, device_id: DeviceId, context_id: ContextId);
 
     /// Configure guard profile for message types
-    fn configure_guard(&mut self, message_type: &'static str, profile: SendGuardProfile);
+    fn configure_guard(&mut self, message_type: MessageTypeId, profile: SendGuardProfile);
 }
 
 /// Generic endpoint trait for choreographic protocols
@@ -105,10 +107,10 @@ impl ChoreographicEndpoint for DefaultEndpoint {
 pub struct EffectsChoreographicAdapter<E> {
     effects: Arc<E>,
     device_id: DeviceId,
-    role_mappings: HashMap<String, DeviceId>,
-    role_order: Vec<DeviceId>,
+    role_mappings: HashMap<RoleId, DeviceId>,
+    role_order: Option<NonEmptyRoleList<DeviceId>>,
     flow_contexts: HashMap<DeviceId, ContextId>,
-    guard_profiles: HashMap<&'static str, SendGuardProfile>,
+    guard_profiles: HashMap<MessageTypeId, SendGuardProfile>,
 }
 
 impl<E> EffectsChoreographicAdapter<E>
@@ -120,7 +122,7 @@ where
             effects,
             device_id,
             role_mappings: HashMap::new(),
-            role_order: Vec::new(),
+            role_order: None,
             flow_contexts: HashMap::new(),
             guard_profiles: HashMap::new(),
         }
@@ -130,26 +132,39 @@ where
     pub async fn start_session(
         &mut self,
         session_id: uuid::Uuid,
-        roles: Vec<DeviceId>,
+        roles: NonEmptyRoleList<DeviceId>,
     ) -> Result<(), crate::effects::choreographic::ChoreographyError> {
-        self.role_order = roles.clone();
-        let choreo_roles = roles
-            .into_iter()
+        self.role_order = Some(roles.clone());
+        let choreo_roles: Result<Vec<_>, ChoreographyError> = roles
+            .iter()
+            .copied()
             .enumerate()
-            .map(|(idx, device_id)| ChoreographicRole::new(device_id.0, idx as u32))
+            .map(|(idx, device_id)| {
+                let role_index = RoleIndex::new(idx as u32).ok_or_else(|| {
+                    ChoreographyError::Transport(format!(
+                        "Invalid choreography role index {idx}"
+                    ))
+                })?;
+                Ok(ChoreographicRole::new(device_id, role_index))
+            })
             .collect();
-        self.effects.start_session(session_id, choreo_roles).await
+        self.effects.start_session(session_id, choreo_roles?).await
     }
 
     fn role_index(&self, device_id: &DeviceId) -> Option<usize> {
-        self.role_order.iter().position(|id| id == device_id)
+        self.role_order
+            .as_ref()
+            .and_then(|order| order.iter().position(|id| id == device_id))
     }
 
     fn to_choreo_role(&self, device_id: &DeviceId) -> Result<ChoreographicRole, ChoreographyError> {
         let idx = self.role_index(device_id).ok_or_else(|| {
             ChoreographyError::Transport(format!("Unknown role for device {device_id}"))
         })?;
-        Ok(ChoreographicRole::new(device_id.0, idx as u32))
+        let role_index = RoleIndex::new(idx as u32).ok_or_else(|| {
+            ChoreographyError::Transport(format!("Invalid choreography role index {idx}"))
+        })?;
+        Ok(ChoreographicRole::new(*device_id, role_index))
     }
 }
 
@@ -161,10 +176,17 @@ where
         self.device_id
     }
 
-    fn add_role_mapping(&mut self, role_name: String, device_id: DeviceId) {
+    fn add_role_mapping(&mut self, role_name: RoleId, device_id: DeviceId) {
         self.role_mappings.insert(role_name, device_id);
-        if !self.role_order.contains(&device_id) {
-            self.role_order.push(device_id);
+        match &mut self.role_order {
+            Some(order) => {
+                if !order.contains(&device_id) {
+                    order.push(device_id);
+                }
+            }
+            None => {
+                self.role_order = NonEmptyRoleList::from_vec(vec![device_id]);
+            }
         }
     }
 
@@ -172,7 +194,7 @@ where
         self.flow_contexts.insert(device_id, context_id);
     }
 
-    fn configure_guard(&mut self, message_type: &'static str, profile: SendGuardProfile) {
+    fn configure_guard(&mut self, message_type: MessageTypeId, profile: SendGuardProfile) {
         self.guard_profiles.insert(message_type, profile);
     }
 }
@@ -274,7 +296,7 @@ where
 #[cfg(test)]
 pub struct MockChoreographicAdapter {
     device_id: DeviceId,
-    role_mappings: std::collections::HashMap<String, DeviceId>,
+    role_mappings: std::collections::HashMap<RoleId, DeviceId>,
 }
 
 #[cfg(test)]
@@ -293,7 +315,7 @@ impl ChoreographicHandler for MockChoreographicAdapter {
         self.device_id
     }
 
-    fn add_role_mapping(&mut self, role_name: String, device_id: DeviceId) {
+    fn add_role_mapping(&mut self, role_name: RoleId, device_id: DeviceId) {
         self.role_mappings.insert(role_name, device_id);
     }
 
@@ -301,7 +323,7 @@ impl ChoreographicHandler for MockChoreographicAdapter {
         // Mock implementation - no-op
     }
 
-    fn configure_guard(&mut self, _message_type: &'static str, _profile: SendGuardProfile) {
+    fn configure_guard(&mut self, _message_type: MessageTypeId, _profile: SendGuardProfile) {
         // Mock implementation - no-op
     }
 }

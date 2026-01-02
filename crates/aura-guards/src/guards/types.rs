@@ -9,13 +9,93 @@
 use aura_core::FlowCost;
 use serde::{Deserialize, Serialize};
 
+/// Typed identifier for guard capabilities.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CapabilityId(String);
+
+impl CapabilityId {
+    /// Create a new capability identifier.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// Get the underlying string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for CapabilityId {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<&str> for CapabilityId {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl std::fmt::Display for CapabilityId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Structured guard violation reasons.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GuardViolation {
+    MissingCapability { capability: CapabilityId },
+    InsufficientFlowBudget { required: FlowCost, remaining: FlowCost },
+    AuthorizationDenied,
+    MissingAuthorizationDecision,
+    CapabilityCheckFailed,
+    ChargeAfterSend,
+    MissingChargeBeforeSend,
+    Other(String),
+}
+
+impl GuardViolation {
+    pub fn other(reason: impl Into<String>) -> Self {
+        Self::Other(reason.into())
+    }
+}
+
+impl std::fmt::Display for GuardViolation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GuardViolation::MissingCapability { capability } => {
+                write!(f, "Missing capability: {capability}")
+            }
+            GuardViolation::InsufficientFlowBudget { required, remaining } => write!(
+                f,
+                "Insufficient flow budget: need {required}, have {remaining}"
+            ),
+            GuardViolation::AuthorizationDenied => write!(f, "Authorization denied"),
+            GuardViolation::MissingAuthorizationDecision => {
+                write!(f, "Missing authorization decision")
+            }
+            GuardViolation::CapabilityCheckFailed => write!(f, "Capability check failed"),
+            GuardViolation::ChargeAfterSend => {
+                write!(f, "charge command appears after a send command")
+            }
+            GuardViolation::MissingChargeBeforeSend => {
+                write!(f, "send command emitted without any preceding charge command")
+            }
+            GuardViolation::Other(reason) => write!(f, "{reason}"),
+        }
+    }
+}
+
 /// Decision from guard evaluation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GuardDecision {
     /// Operation is allowed.
     Allow,
     /// Operation is denied with a reason.
-    Deny { reason: String },
+    Deny { reason: GuardViolation },
 }
 
 impl GuardDecision {
@@ -25,10 +105,8 @@ impl GuardDecision {
     }
 
     /// Create a deny decision with a reason.
-    pub fn deny(reason: impl Into<String>) -> Self {
-        Self::Deny {
-            reason: reason.into(),
-        }
+    pub fn deny(reason: GuardViolation) -> Self {
+        Self::Deny { reason }
     }
 
     /// Returns `true` if the decision allows the operation.
@@ -42,7 +120,7 @@ impl GuardDecision {
     }
 
     /// Returns the denial reason, if denied.
-    pub fn denial_reason(&self) -> Option<&str> {
+    pub fn denial_reason(&self) -> Option<&GuardViolation> {
         match self {
             Self::Allow => None,
             Self::Deny { reason } => Some(reason),
@@ -72,11 +150,9 @@ impl<C> GuardOutcome<C> {
     }
 
     /// Create a denied outcome with no effects.
-    pub fn denied(reason: impl Into<String>) -> Self {
+    pub fn denied(reason: GuardViolation) -> Self {
         Self {
-            decision: GuardDecision::Deny {
-                reason: reason.into(),
-            },
+            decision: GuardDecision::Deny { reason },
             effects: Vec::new(),
         }
     }
@@ -95,7 +171,7 @@ impl<C> GuardOutcome<C> {
 /// Minimal capability query contract required by `check_capability`.
 pub trait CapabilitySnapshot {
     /// Returns `true` if the snapshot contains `cap`.
-    fn has_capability(&self, cap: &str) -> bool;
+    fn has_capability(&self, cap: &CapabilityId) -> bool;
 }
 
 /// Minimal budget query contract required by `check_flow_budget`.
@@ -105,16 +181,19 @@ pub trait FlowBudgetSnapshot {
 }
 
 /// Check capability and return denied outcome if missing.
-pub fn check_capability<S, C>(snapshot: &S, required_cap: &str) -> Option<GuardOutcome<C>>
+pub fn check_capability<S, C>(
+    snapshot: &S,
+    required_cap: &CapabilityId,
+) -> Option<GuardOutcome<C>>
 where
     S: CapabilitySnapshot,
 {
     if snapshot.has_capability(required_cap) {
         None
     } else {
-        Some(GuardOutcome::denied(format!(
-            "Missing capability: {required_cap}"
-        )))
+        Some(GuardOutcome::denied(GuardViolation::MissingCapability {
+            capability: required_cap.clone(),
+        }))
     }
 }
 
@@ -127,9 +206,10 @@ where
     if remaining >= required_cost {
         None
     } else {
-        Some(GuardOutcome::denied(format!(
-            "Insufficient flow budget: need {required_cost}, have {remaining}"
-        )))
+        Some(GuardOutcome::denied(GuardViolation::InsufficientFlowBudget {
+            required: required_cost,
+            remaining,
+        }))
     }
 }
 
@@ -141,7 +221,7 @@ pub fn validate_charge_before_send<C>(
     cmds: &[C],
     is_charge: impl Fn(&C) -> bool,
     is_send: impl Fn(&C) -> bool,
-) -> Result<(), String> {
+) -> Result<(), GuardViolation> {
     let mut saw_send = false;
     let mut saw_charge = false;
 
@@ -152,13 +232,13 @@ pub fn validate_charge_before_send<C>(
         if is_charge(cmd) {
             saw_charge = true;
             if saw_send {
-                return Err("charge command appears after a send command".to_string());
+                return Err(GuardViolation::ChargeAfterSend);
             }
         }
     }
 
     if saw_send && !saw_charge {
-        return Err("send command emitted without any preceding charge command".to_string());
+        return Err(GuardViolation::MissingChargeBeforeSend);
     }
 
     Ok(())
@@ -231,6 +311,24 @@ impl std::fmt::Display for GuardOperationId {
     }
 }
 
+impl GuardOperationId {
+    pub fn is_empty(&self) -> bool {
+        matches!(self, GuardOperationId::Custom(value) if value.is_empty())
+    }
+}
+
+impl From<String> for GuardOperationId {
+    fn from(value: String) -> Self {
+        GuardOperationId::Custom(value)
+    }
+}
+
+impl From<&str> for GuardOperationId {
+    fn from(value: &str) -> Self {
+        GuardOperationId::Custom(value.to_string())
+    }
+}
+
 impl From<GuardOperationId> for String {
     fn from(value: GuardOperationId) -> Self {
         value.to_string()
@@ -284,7 +382,7 @@ mod tests {
             Ok(()) => panic!("expected error"),
             Err(err) => err,
         };
-        assert!(err.contains("without any preceding charge"));
+        assert!(matches!(err, GuardViolation::MissingChargeBeforeSend));
     }
 
     #[test]
@@ -298,6 +396,6 @@ mod tests {
             Ok(()) => panic!("expected error"),
             Err(err) => err,
         };
-        assert!(err.contains("after a send"));
+        assert!(matches!(err, GuardViolation::ChargeAfterSend));
     }
 }

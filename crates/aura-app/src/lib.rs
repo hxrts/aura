@@ -166,7 +166,7 @@ pub use crate::bridge::callback::StateObserver;
 pub use crate::reactive_state::{ReactiveState, ReactiveVec};
 
 // Re-export error types
-pub use crate::errors::{AppError, AuthFailure, NetworkErrorCode, SyncStage, ToastSeverity};
+pub use crate::errors::{AppError, AuthFailure, NetworkErrorCode, SyncStage, ToastLevel};
 
 // Re-export stateful effect handlers hosted in aura-app (Layer 6)
 pub use crate::effects::query::QueryHandler;

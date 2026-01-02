@@ -6,7 +6,7 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
-use aura_guards::types;
+pub use aura_guards::types;
 
 use crate::facts::ChatFact;
 
@@ -48,7 +48,7 @@ pub struct GuardSnapshot {
     pub flow_budget_remaining: FlowCost,
 
     /// Capabilities held by the authority.
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<types::CapabilityId>,
 
     /// Current timestamp in milliseconds.
     pub now_ms: u64,
@@ -60,7 +60,7 @@ impl GuardSnapshot {
         authority_id: AuthorityId,
         context_id: ContextId,
         flow_budget_remaining: FlowCost,
-        capabilities: Vec<String>,
+        capabilities: Vec<types::CapabilityId>,
         now_ms: u64,
     ) -> Self {
         Self {
@@ -72,14 +72,14 @@ impl GuardSnapshot {
         }
     }
 
-    /// Returns `true` if the snapshot contains the given capability string.
-    pub fn has_capability(&self, cap: &str) -> bool {
+    /// Returns `true` if the snapshot contains the given capability.
+    pub fn has_capability(&self, cap: &types::CapabilityId) -> bool {
         self.capabilities.iter().any(|c| c == cap)
     }
 }
 
 impl types::CapabilitySnapshot for GuardSnapshot {
-    fn has_capability(&self, cap: &str) -> bool {
+    fn has_capability(&self, cap: &types::CapabilityId) -> bool {
         GuardSnapshot::has_capability(self, cap)
     }
 }
@@ -121,7 +121,10 @@ pub type GuardOutcome = types::GuardOutcome<EffectCommand>;
 // =============================================================================
 
 /// Check capability and return a denied outcome if missing.
-pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<GuardOutcome> {
+pub fn check_capability(
+    snapshot: &GuardSnapshot,
+    required_cap: &types::CapabilityId,
+) -> Option<GuardOutcome> {
     types::check_capability(snapshot, required_cap)
 }
 

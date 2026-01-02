@@ -23,20 +23,22 @@ pub use simulation::{FaultInjectionSettings, PropertyCheckingConfig, SimulationC
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::choreographic::ChoreographicRole;
+    use crate::effects::choreographic::{ChoreographicRole, RoleIndex};
     use crate::handlers::ExecutionMode;
     use aura_core::identifiers::DeviceId;
     use aura_core::SessionId;
     use std::time::Duration;
-    use uuid::Uuid;
 
     #[test]
     fn test_immutable_choreographic_context() {
         let digest = aura_core::hash::hash(b"handler-choreo-role-0");
         let mut uuid_bytes = [0u8; 16];
         uuid_bytes.copy_from_slice(&digest[..16]);
-        let role_id = Uuid::from_bytes(uuid_bytes);
-        let role = ChoreographicRole::new(role_id, 0);
+        let role_id = uuid::Uuid::from_bytes(uuid_bytes);
+        let role = ChoreographicRole::new(
+            DeviceId::from_uuid(role_id),
+            RoleIndex::new(0).expect("role index"),
+        );
         let participants = vec![role];
         let ctx = ChoreographicContext::new(role, participants, 1);
 
@@ -140,7 +142,7 @@ mod tests {
         assert_eq!(ctx3.session_id, Some(session_id));
 
         // Test child operation
-        let new_op_id = Uuid::from_bytes([1u8; 16]);
+        let new_op_id = uuid::Uuid::from_bytes([1u8; 16]);
         let ctx4 = ctx3.child_operation(new_op_id);
         assert_ne!(ctx3.operation_id, new_op_id); // Original unchanged
         assert_eq!(ctx4.operation_id, new_op_id);

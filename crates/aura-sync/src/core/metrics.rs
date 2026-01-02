@@ -399,8 +399,8 @@ impl MetricsCollector {
     pub fn record_sync_completion(
         &self,
         session_id: &str,
-        ops_transferred: usize,
-        bytes_transferred: usize,
+        ops_transferred: u64,
+        bytes_transferred: u64,
         now: u64,
     ) {
         let duration = if let Ok(mut timers) = self.registry.active_timers.lock() {
@@ -424,10 +424,10 @@ impl MetricsCollector {
                 .fetch_sub(1, Ordering::Relaxed);
             operational
                 .sync_operations_transferred_total
-                .fetch_add(ops_transferred as u64, Ordering::Relaxed);
+                .fetch_add(ops_transferred, Ordering::Relaxed);
             operational
                 .sync_bytes_transferred_total
-                .fetch_add(bytes_transferred as u64, Ordering::Relaxed);
+                .fetch_add(bytes_transferred, Ordering::Relaxed);
         }
 
         if let Ok(performance) = self.registry.performance.lock() {
@@ -540,7 +540,7 @@ impl MetricsCollector {
     }
 
     /// Update peer connection count
-    pub fn update_peer_count(&self, count: usize) {
+    pub fn update_peer_count(&self, count: u64) {
         if let Ok(operational) = self.registry.operational.lock() {
             operational
                 .connected_peers
@@ -549,7 +549,7 @@ impl MetricsCollector {
     }
 
     /// Update queue depth
-    pub fn update_queue_depth(&self, depth: usize) {
+    pub fn update_queue_depth(&self, depth: u64) {
         if let Ok(operational) = self.registry.operational.lock() {
             operational
                 .queue_depth
@@ -585,11 +585,11 @@ impl MetricsCollector {
     }
 
     /// Add synced operations count for a peer
-    pub fn add_synced_operations(&self, _peer: DeviceId, ops_count: usize) {
+    pub fn add_synced_operations(&self, _peer: DeviceId, ops_count: u64) {
         if let Ok(operational) = self.registry.operational.lock() {
             operational
                 .sync_operations_transferred_total
-                .fetch_add(ops_count as u64, Ordering::Relaxed);
+                .fetch_add(ops_count, Ordering::Relaxed);
         }
     }
 
@@ -610,11 +610,11 @@ impl MetricsCollector {
     }
 
     /// Add auto sync results
-    pub fn add_auto_sync_results(&self, results: &[(DeviceId, usize)]) {
+    pub fn add_auto_sync_results(&self, results: &[(DeviceId, u64)]) {
         if let Ok(operational) = self.registry.operational.lock() {
             let mut total_ops = 0u64;
             for &(_, ops) in results {
-                total_ops += ops as u64;
+                total_ops += ops;
             }
             operational
                 .sync_operations_transferred_total

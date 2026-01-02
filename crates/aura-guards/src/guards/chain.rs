@@ -5,7 +5,7 @@
 //! that enforces both authorization and budget constraints at every protocol send site.
 
 use super::traits::GuardContextProvider;
-use super::types::GuardOperation;
+use super::types::{CapabilityId, GuardOperation, GuardOperationId};
 use super::GuardEffects;
 use crate::guards::executor::{execute_guard_plan, BorrowedEffectInterpreter, GuardPlan};
 use crate::guards::{
@@ -20,7 +20,7 @@ use tracing::{debug, warn};
 #[derive(Debug)]
 pub struct SendGuardChain {
     /// Message type authorization requirement
-    message_authorization: String,
+    message_authorization: CapabilityId,
     /// Target peer authority
     peer: AuthorityId,
     /// Flow cost for this send
@@ -32,12 +32,12 @@ pub struct SendGuardChain {
     /// Optional journal coupler to atomically apply annotated facts
     journal_coupler: Option<JournalCoupler>,
     /// Optional operation ID for logging
-    operation_id: Option<String>,
+    operation_id: Option<GuardOperationId>,
 }
 
 impl SendGuardChain {
     pub fn authorization_requirement(&self) -> &str {
-        &self.message_authorization
+        self.message_authorization.as_str()
     }
 
     pub fn cost(&self) -> FlowCost {
@@ -50,20 +50,6 @@ impl SendGuardChain {
 
     pub fn peer(&self) -> AuthorityId {
         self.peer
-    }
-
-    /// Legacy sync wrapper for callers still on the blocking path.
-    /// For production use, prefer the async `evaluate` method above.
-    pub fn evaluate_noop(&self) -> SendGuardResult {
-        SendGuardResult {
-            authorized: false,
-            authorization_satisfied: false,
-            flow_authorized: false,
-            receipt: None,
-            authorization_level: Some(self.message_authorization.clone()),
-            metrics: SendGuardMetrics::default(),
-            denial_reason: Some("legacy sync evaluation is disabled; call evaluate_async".into()),
-        }
     }
 }
 
@@ -108,7 +94,7 @@ impl SendGuardChain {
     /// - `peer`: Target device for the send
     /// - `cost`: Flow budget cost for this operation
     pub fn new(
-        message_authorization: String,
+        message_authorization: CapabilityId,
         context: ContextId,
         peer: AuthorityId,
         cost: FlowCost,
@@ -125,7 +111,7 @@ impl SendGuardChain {
     }
 
     /// Set operation ID for logging and metrics
-    pub fn with_operation_id(mut self, operation_id: impl Into<String>) -> Self {
+    pub fn with_operation_id(mut self, operation_id: impl Into<GuardOperationId>) -> Self {
         self.operation_id = Some(operation_id.into());
         self
     }
@@ -162,10 +148,14 @@ impl SendGuardChain {
         &self,
         effect_system: &E,
     ) -> AuraResult<SendGuardResult> {
-        let operation_id = self.operation_id.as_deref().unwrap_or("unnamed_send");
+        let operation_id = self
+            .operation_id
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "unnamed_send".to_string());
 
         debug!(
-            operation_id = operation_id,
+            operation_id = operation_id.as_str(),
             peer = ?self.peer,
             cost = ?self.cost,
             authorization = %self.message_authorization,
@@ -179,7 +169,7 @@ impl SendGuardChain {
                 self.context,
                 Some(self.peer),
                 budget,
-                operation_id,
+                operation_id.as_str(),
                 config.default_observers.clone(),
                 effect_system,
             )
@@ -196,7 +186,7 @@ impl SendGuardChain {
             authorization_satisfied: pure_result.authorized,
             flow_authorized: pure_result.authorized,
             receipt: pure_result.receipt,
-            authorization_level: Some(self.message_authorization.clone()),
+            authorization_level: Some(self.message_authorization.to_string()),
             metrics: SendGuardMetrics::default(),
             denial_reason: if pure_result.authorized {
                 None
@@ -355,11 +345,11 @@ impl SendGuardChain {
 /// use aura_guards::send_guard::create_send_guard;
 ///
 /// let guard = create_send_guard(
-///     "message:send".to_string(), // authorization requirement
+///     CapabilityId::from("message:send"), // authorization requirement
 ///     context_id,
 ///     peer_device,
 ///     100, // flow cost
-/// ).with_operation_id("ping_send");
+/// ).with_operation_id(GuardOperationId::from("ping_send"));
 ///
 /// let result = guard.evaluate(&effect_system).await?;
 /// if result.authorized {
@@ -368,7 +358,7 @@ impl SendGuardChain {
 /// }
 /// ```
 pub fn create_send_guard(
-    message_authorization: String,
+    message_authorization: CapabilityId,
     context: ContextId,
     peer: AuthorityId,
     cost: FlowCost,
@@ -383,7 +373,7 @@ pub fn create_send_guard_op(
     peer: AuthorityId,
     cost: FlowCost,
 ) -> SendGuardChain {
-    SendGuardChain::new(operation.into(), context, peer, cost)
+    SendGuardChain::new(CapabilityId::from(operation.as_str()), context, peer, cost)
 }
 
 #[cfg(test)]
@@ -401,7 +391,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_guard_chain_creation() {
-        let authorization = "message:send".to_string();
+        let authorization = CapabilityId::from("message:send");
         let context = test_context();
         let peer = test_peer();
         let cost: FlowCost = 100.into();
@@ -413,12 +403,15 @@ mod tests {
         assert_eq!(guard.context, context);
         assert_eq!(guard.peer, peer);
         assert_eq!(guard.cost, cost);
-        assert_eq!(guard.operation_id.as_deref(), Some("test_send"));
+        assert_eq!(
+            guard.operation_id,
+            Some(GuardOperationId::from("test_send"))
+        );
     }
 
     #[tokio::test]
     async fn test_create_send_guard_convenience() {
-        let authorization = "message:send".to_string();
+        let authorization = CapabilityId::from("message:send");
         let context = test_context();
         let peer = test_peer();
         let cost: FlowCost = 50.into();
@@ -433,7 +426,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_denial_reason_formatting() {
-        let authorization = "message:send".to_string();
+        let authorization = CapabilityId::from("message:send");
         let context = test_context();
         let peer = test_peer();
         let guard = SendGuardChain::new(authorization, context, peer, 100.into());

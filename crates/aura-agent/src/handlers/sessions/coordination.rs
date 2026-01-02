@@ -12,10 +12,10 @@ use aura_core::effects::{
     RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects,
 };
 use aura_core::hash;
-use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
+use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
 use aura_core::FlowCost;
 use aura_macros::choreography;
-use aura_protocol::effects::{ChoreographicRole, EffectApiEffects};
+use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, RoleIndex};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -282,7 +282,7 @@ impl SessionOperations {
             return Ok(());
         }
         let guard = aura_guards::chain::create_send_guard(
-            operation.to_string(),
+            aura_guards::types::CapabilityId::from(operation),
             self.guard_context(),
             self.authority_context.authority_id(),
             cost,
@@ -324,14 +324,15 @@ impl SessionOperations {
 
         // Generate unique session ID
         let session_uuid = self.effects.random_uuid().await;
-        let session_id = format!("session-{}", session_uuid.simple());
+        let session_id = SessionId::from_uuid(session_uuid);
+        let session_id_string = session_id.to_string();
 
         // Create session request message for choreography
         let session_request = SessionRequest {
             session_type: session_type.clone(),
             participants: participants.clone(),
             initiator_id: device_id,
-            session_id: session_id.clone(),
+            session_id: session_id_string.clone(),
             metadata: HashMap::new(),
         };
 
@@ -342,7 +343,7 @@ impl SessionOperations {
         {
             Ok(session_handle) => {
                 self.session_manager
-                    .register_session(&session_id, participants.clone())
+                    .register_session(session_id, participants.clone())
                     .await;
                 self.persist_session_handle(&session_handle).await?;
                 HandlerUtilities::append_relational_fact(
@@ -351,7 +352,7 @@ impl SessionOperations {
                     self.guard_context(),
                     "session_created",
                     &SessionCreatedFact {
-                        session_id: session_id.clone(),
+                        session_id: session_id_string.clone(),
                         session_type,
                         participants: participants.clone(),
                         initiator: device_id,
@@ -523,7 +524,8 @@ impl SessionOperations {
     ) -> AgentResult<SessionHandle> {
         let device_id = self.device_id();
         let timestamp_millis = self.effects.current_timestamp().await.unwrap_or(0);
-        let my_role = ChoreographicRole::new(device_id.0, 0);
+        let role_index = RoleIndex::new(0).expect("role index");
+        let my_role = ChoreographicRole::new(device_id, role_index);
 
         let session_handle = SessionHandle {
             session_id: request.session_id.clone(),
@@ -665,7 +667,7 @@ impl SessionOperations {
             session_id: session_id.to_string(),
             session_type: SessionType::Coordination,
             participants: vec![device_id],
-            my_role: ChoreographicRole::new(device_id.0, 0),
+            my_role: ChoreographicRole::new(device_id, RoleIndex::new(0).expect("role index")),
             epoch: 0,
             start_time: current_time,
             metadata: {
@@ -750,7 +752,7 @@ mod tests {
 
         assert!(!handle.session_id.is_empty());
         assert_eq!(handle.participants, participants);
-        assert_eq!(DeviceId(handle.my_role.device_id), device_id);
+        assert_eq!(handle.my_role.device_id, device_id);
     }
 
     #[tokio::test]

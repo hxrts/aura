@@ -26,6 +26,7 @@ aura-transport = { path = "../aura-transport" }
 aura-consensus = { path = "../aura-consensus" }
 aura-guards = { path = "../aura-guards" }
 aura-macros = { path = "../aura-macros" }
+aura-mpst = { path = "../aura-mpst" }
 
 # Serialization
 serde = { workspace = true }

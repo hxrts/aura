@@ -11,11 +11,11 @@
 //! - **Verification**: All received operations verified before storage
 
 use async_trait::async_trait;
-use aura_core::{AttestedOp, Hash32};
+use aura_core::{identifiers::DeviceId, AttestedOp, Hash32};
 use aura_journal::algebra::OpLog;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use uuid::Uuid;
+use std::num::{NonZeroU32, NonZeroU64};
 
 // Re-export SyncMetrics from aura_core to ensure consistent type across crates
 pub use aura_core::effects::sync::SyncMetrics;
@@ -69,7 +69,7 @@ impl BloomDigest {
 pub enum SyncError {
     /// Peer not found or unreachable
     #[error("Peer {0} not reachable")]
-    PeerUnreachable(Uuid),
+    PeerUnreachable(DeviceId),
 
     /// Operation verification failed
     #[error("Operation verification failed: {0}")]
@@ -81,11 +81,11 @@ pub enum SyncError {
 
     /// Rate limit exceeded
     #[error("Rate limit exceeded for peer {0}")]
-    RateLimitExceeded(Uuid),
+    RateLimitExceeded(DeviceId),
 
     /// Invalid digest received
     #[error("Invalid digest from peer {0}")]
-    InvalidDigest(Uuid),
+    InvalidDigest(DeviceId),
 
     /// Operation not found in local store
     #[error("Operation not found")]
@@ -146,7 +146,7 @@ pub trait SyncEffects: Send + Sync {
     /// 5. Merge operations into local OpLog via join
     ///
     /// Returns metrics about the sync operation including applied changes.
-    async fn sync_with_peer(&self, peer_id: Uuid) -> Result<SyncMetrics, SyncError>;
+    async fn sync_with_peer(&self, peer_id: DeviceId) -> Result<SyncMetrics, SyncError>;
 
     /// Get digest of local OpLog
     ///
@@ -172,7 +172,7 @@ pub trait SyncEffects: Send + Sync {
     /// operations they want by CID.
     async fn request_ops_from_peer(
         &self,
-        peer_id: Uuid,
+        peer_id: DeviceId,
         cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError>;
 
@@ -196,7 +196,7 @@ pub trait SyncEffects: Send + Sync {
     /// Request a specific operation by CID
     ///
     /// Used in response to announcements or when filling OpLog gaps.
-    async fn request_op(&self, peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError>;
+    async fn request_op(&self, peer_id: DeviceId, cid: Hash32) -> Result<AttestedOp, SyncError>;
 
     /// Push an operation to specific peers
     ///
@@ -204,37 +204,45 @@ pub trait SyncEffects: Send + Sync {
     /// Used for immediate neighbors or high-priority operations.
     ///
     /// **Note**: This should be rate-limited to prevent flooding.
-    async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError>;
+    async fn push_op_to_peers(
+        &self,
+        op: AttestedOp,
+        peers: Vec<DeviceId>,
+    ) -> Result<(), SyncError>;
 
     /// Get list of currently connected peers
     ///
     /// Returns peers that are reachable for sync operations.
-    async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError>;
+    async fn get_connected_peers(&self) -> Result<Vec<DeviceId>, SyncError>;
 }
 
 /// Anti-entropy configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AntiEntropyConfig {
     /// Minimum interval between sync attempts with same peer (milliseconds)
-    pub min_sync_interval_ms: u64,
+    pub min_sync_interval_ms: NonZeroU64,
 
     /// Maximum number of operations to send in one batch
-    pub max_ops_per_batch: u32,
+    pub max_ops_per_batch: NonZeroU32,
 
     /// Maximum number of peers to sync with concurrently
-    pub max_concurrent_syncs: u32,
+    pub max_concurrent_syncs: NonZeroU32,
 
     /// Timeout for sync operations (milliseconds)
-    pub sync_timeout_ms: u64,
+    pub sync_timeout_ms: NonZeroU64,
 }
 
 impl Default for AntiEntropyConfig {
     fn default() -> Self {
         Self {
-            min_sync_interval_ms: 30_000, // 30 seconds
-            max_ops_per_batch: 100,
-            max_concurrent_syncs: 5,
-            sync_timeout_ms: 10_000, // 10 seconds
+            min_sync_interval_ms: NonZeroU64::new(30_000)
+                .expect("min sync interval should be non-zero"),
+            max_ops_per_batch: NonZeroU32::new(100)
+                .expect("max ops per batch should be non-zero"),
+            max_concurrent_syncs: NonZeroU32::new(5)
+                .expect("max concurrent syncs should be non-zero"),
+            sync_timeout_ms: NonZeroU64::new(10_000)
+                .expect("sync timeout should be non-zero"),
         }
     }
 }
@@ -263,9 +271,9 @@ mod tests {
     #[test]
     fn test_anti_entropy_config_default() {
         let config = AntiEntropyConfig::default();
-        assert_eq!(config.min_sync_interval_ms, 30_000);
-        assert_eq!(config.max_ops_per_batch, 100);
-        assert_eq!(config.max_concurrent_syncs, 5);
-        assert_eq!(config.sync_timeout_ms, 10_000);
+        assert_eq!(config.min_sync_interval_ms.get(), 30_000);
+        assert_eq!(config.max_ops_per_batch.get(), 100);
+        assert_eq!(config.max_concurrent_syncs.get(), 5);
+        assert_eq!(config.sync_timeout_ms.get(), 10_000);
     }
 }

@@ -80,16 +80,11 @@ pub trait TimeComparison: Send + Sync {
     ) -> Result<TimeOrdering, TimeError>;
 }
 
-/// Compatibility shim for legacy time accessors.
+/// Convenience trait for common timestamp accessors.
 ///
-/// New code should prefer the domain-specific traits above, but many callers
-/// still expect helper methods like `current_timestamp()`.
-/// This trait delegates to `PhysicalTimeEffects` and should be blanket
-/// implemented for any physical clock provider.
-///
-/// NOTE: The legacy `now_instant()` method has been removed as it violated
-/// the effect system architecture by exposing `std::time::Instant` in the
-/// trait signature. Use `physical_time()` instead for all time operations.
+/// Delegates to `PhysicalTimeEffects` for underlying time operations.
+/// New code should prefer the domain-specific traits above, but this trait
+/// provides helper methods like `current_timestamp()` for simpler use cases.
 #[async_trait]
 pub trait TimeEffects: PhysicalTimeEffects {
     /// Current Unix timestamp in seconds.

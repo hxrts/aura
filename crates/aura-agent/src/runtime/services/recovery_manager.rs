@@ -2,25 +2,18 @@
 
 use super::state::with_state_mut_validated;
 use crate::handlers::recovery::{ActiveRecovery, RecoveryState};
+use aura_core::identifiers::RecoveryId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
 struct RecoveryStateCache {
-    recoveries: HashMap<String, ActiveRecovery>,
+    recoveries: HashMap<RecoveryId, ActiveRecovery>,
 }
 
 impl RecoveryStateCache {
     fn validate(&self) -> Result<(), String> {
-        for (id, recovery) in &self.recoveries {
-            if id != &recovery.request.recovery_id {
-                return Err(format!(
-                    "recovery id mismatch: key {} vs value {}",
-                    id, recovery.request.recovery_id
-                ));
-            }
-        }
         Ok(())
     }
 }
@@ -40,7 +33,7 @@ impl RecoveryManager {
     }
 
     /// Insert a new active recovery.
-    pub async fn insert(&self, recovery_id: String, recovery: ActiveRecovery) {
+    pub async fn insert(&self, recovery_id: RecoveryId, recovery: ActiveRecovery) {
         with_state_mut_validated(
             &self.state,
             |state| {
@@ -52,7 +45,7 @@ impl RecoveryManager {
     }
 
     /// Get the state of a recovery.
-    pub async fn get_state(&self, recovery_id: &str) -> Option<RecoveryState> {
+    pub async fn get_state(&self, recovery_id: &RecoveryId) -> Option<RecoveryState> {
         self.state
             .read()
             .await
@@ -62,14 +55,14 @@ impl RecoveryManager {
     }
 
     /// Get a cloned recovery.
-    pub async fn get_recovery(&self, recovery_id: &str) -> Option<ActiveRecovery> {
+    pub async fn get_recovery(&self, recovery_id: &RecoveryId) -> Option<ActiveRecovery> {
         self.state.read().await.recoveries.get(recovery_id).cloned()
     }
 
     /// Mutate a recovery if present.
     pub async fn with_recovery_mut<R>(
         &self,
-        recovery_id: &str,
+        recovery_id: &RecoveryId,
         f: impl FnOnce(&mut ActiveRecovery) -> R,
     ) -> Option<R> {
         with_state_mut_validated(
@@ -81,7 +74,7 @@ impl RecoveryManager {
     }
 
     /// Remove a recovery.
-    pub async fn remove(&self, recovery_id: &str) -> Option<ActiveRecovery> {
+    pub async fn remove(&self, recovery_id: &RecoveryId) -> Option<ActiveRecovery> {
         with_state_mut_validated(
             &self.state,
             |state| state.recoveries.remove(recovery_id),
@@ -91,7 +84,7 @@ impl RecoveryManager {
     }
 
     /// List active recoveries as (id, state).
-    pub async fn list_active(&self) -> Vec<(String, RecoveryState)> {
+    pub async fn list_active(&self) -> Vec<(RecoveryId, RecoveryState)> {
         self.state
             .read()
             .await

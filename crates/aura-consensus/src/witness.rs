@@ -11,10 +11,104 @@ use aura_core::{
     frost::{NonceCommitment, PartialSignature},
     AuthorityId, Hash32, Result,
 };
+use serde::{Deserialize, Serialize};
 // use rand_chacha::rand_core::SeedableRng; // Used in tests
 use async_lock::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Set of witnesses participating in consensus
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "NonEmptyWitnessSetSerde")]
+pub struct NonEmptyWitnessSet {
+    threshold: u16,
+    witnesses: Vec<AuthorityId>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct NonEmptyWitnessSetSerde {
+    threshold: u16,
+    witnesses: Vec<AuthorityId>,
+}
+
+impl TryFrom<NonEmptyWitnessSetSerde> for NonEmptyWitnessSet {
+    type Error = aura_core::AuraError;
+
+    fn try_from(value: NonEmptyWitnessSetSerde) -> std::result::Result<Self, Self::Error> {
+        Self::new(value.threshold, value.witnesses)
+    }
+}
+
+impl NonEmptyWitnessSet {
+    /// Create a new non-empty witness set with threshold validation
+    pub fn new(threshold: u16, witnesses: Vec<AuthorityId>) -> Result<Self> {
+        if witnesses.is_empty() {
+            return Err(aura_core::AuraError::invalid(
+                "Consensus requires at least one witness",
+            ));
+        }
+
+        if threshold == 0 {
+            return Err(aura_core::AuraError::invalid(
+                "Consensus threshold must be >= 1",
+            ));
+        }
+
+        if witnesses.len() < threshold as usize {
+            return Err(aura_core::AuraError::invalid(
+                "Consensus threshold exceeds witness set size",
+            ));
+        }
+
+        Ok(Self {
+            threshold,
+            witnesses,
+        })
+    }
+
+    /// Required threshold for consensus
+    pub fn threshold(&self) -> u16 {
+        self.threshold
+    }
+
+    /// Borrow witnesses as a slice
+    pub fn witnesses(&self) -> &[AuthorityId] {
+        &self.witnesses
+    }
+
+    /// Consume into the witness vector
+    pub fn into_witnesses(self) -> Vec<AuthorityId> {
+        self.witnesses
+    }
+
+    /// Iterate over witnesses
+    pub fn iter(&self) -> std::slice::Iter<'_, AuthorityId> {
+        self.witnesses.iter()
+    }
+
+    /// Number of witnesses
+    pub fn len(&self) -> usize {
+        self.witnesses.len()
+    }
+
+    /// Check if we have sufficient witnesses for the threshold
+    pub fn has_quorum(&self) -> bool {
+        self.witnesses.len() >= self.threshold as usize
+    }
+
+    /// Build a runtime witness set with cached state
+    pub fn to_runtime(&self) -> Result<WitnessSet> {
+        WitnessSet::new(self.threshold, self.witnesses.clone())
+    }
+}
+
+impl TryFrom<&NonEmptyWitnessSet> for WitnessSet {
+    type Error = aura_core::AuraError;
+
+    fn try_from(value: &NonEmptyWitnessSet) -> std::result::Result<Self, Self::Error> {
+        WitnessSet::new(value.threshold, value.witnesses.clone())
+    }
+}
 
 /// Set of witnesses participating in consensus
 #[derive(Debug, Clone)]

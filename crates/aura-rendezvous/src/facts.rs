@@ -10,6 +10,10 @@ use aura_journal::DomainFact;
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::fmt;
+use std::str::FromStr;
+
+const CHANNEL_CONTEXT_DOMAIN: &[u8] = b"AURA_RENDEZVOUS_CHANNEL_CONTEXT";
 
 /// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
 /// AuthorityId is 16 bytes (UUID), so we hash it to get a canonical 32-byte representation.
@@ -20,6 +24,26 @@ fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
     let mut out = [0u8; 32];
     out.copy_from_slice(&result);
     out
+}
+
+/// Derive a deterministic context id for a rendezvous channel between two authorities.
+///
+/// The derivation is commutative so initiator/responder ordering does not matter.
+fn channel_context_id(initiator: &AuthorityId, responder: &AuthorityId) -> ContextId {
+    let mut a = initiator.to_bytes();
+    let mut b = responder.to_bytes();
+    if a > b {
+        std::mem::swap(&mut a, &mut b);
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(CHANNEL_CONTEXT_DOMAIN);
+    hasher.update(a);
+    hasher.update(b);
+    let result = hasher.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&result);
+    ContextId::new_from_entropy(out)
 }
 
 /// Type identifier for rendezvous facts
@@ -91,8 +115,14 @@ impl RendezvousFact {
     pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
         match self {
             RendezvousFact::Descriptor(descriptor) => descriptor.context_id == context_id,
-            RendezvousFact::ChannelEstablished { .. }
-            | RendezvousFact::DescriptorRevoked { .. } => true,
+            RendezvousFact::ChannelEstablished {
+                initiator,
+                responder,
+                ..
+            } => context_id == channel_context_id(initiator, responder),
+            RendezvousFact::DescriptorRevoked { authority_id, .. } => {
+                context_id == ContextId::new_from_entropy(authority_hash_bytes(authority_id))
+            }
         }
     }
 }
@@ -133,27 +163,291 @@ impl RendezvousDescriptor {
     }
 }
 
+// =============================================================================
+// Transport Address Types
+// =============================================================================
+
+/// Error type for transport address parsing/validation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransportAddressError {
+    /// The invalid address string
+    pub input: String,
+    /// Description of what went wrong
+    pub reason: String,
+}
+
+impl fmt::Display for TransportAddressError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid transport address '{}': {}",
+            self.input, self.reason
+        )
+    }
+}
+
+impl std::error::Error for TransportAddressError {}
+
+/// A validated transport address (IP:port format).
+///
+/// This type ensures that transport addresses are always valid socket addresses.
+/// It stores the address as a string and serializes as a string for backwards
+/// compatibility with existing fact storage.
+///
+/// # Example
+///
+/// ```
+/// use aura_rendezvous::facts::TransportAddress;
+///
+/// let addr = TransportAddress::new("127.0.0.1:8080").unwrap();
+/// assert_eq!(addr.to_string(), "127.0.0.1:8080");
+///
+/// // Invalid addresses are rejected
+/// assert!(TransportAddress::new("not-an-address").is_err());
+/// assert!(TransportAddress::new("127.0.0.1").is_err()); // missing port
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TransportAddress {
+    address: String,
+    port: u16,
+}
+
+impl TransportAddress {
+    /// Create a new transport address from a string.
+    ///
+    /// The string must be a valid socket address in the format "IP:port".
+    /// Both IPv4 and IPv6 addresses are supported.
+    pub fn new(addr: &str) -> Result<Self, TransportAddressError> {
+        let trimmed = addr.trim();
+        if trimmed != addr {
+            return Err(TransportAddressError {
+                input: addr.to_string(),
+                reason: "address contains leading/trailing whitespace".to_string(),
+            });
+        }
+
+        let port = parse_transport_port(trimmed)?;
+
+        Ok(Self {
+            address: trimmed.to_string(),
+            port,
+        })
+    }
+
+    /// Get the address as a string slice.
+    pub fn as_str(&self) -> &str {
+        &self.address
+    }
+
+    /// Get the port number.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+impl fmt::Display for TransportAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.address)
+    }
+}
+
+impl FromStr for TransportAddress {
+    type Err = TransportAddressError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        TransportAddress::new(s)
+    }
+}
+
+impl Serialize for TransportAddress {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Serialize as string for backwards compatibility
+        serializer.serialize_str(&self.address)
+    }
+}
+
+impl<'de> Deserialize<'de> for TransportAddress {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        TransportAddress::new(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+fn parse_transport_port(addr: &str) -> Result<u16, TransportAddressError> {
+    if addr.is_empty() {
+        return Err(TransportAddressError {
+            input: addr.to_string(),
+            reason: "address is empty".to_string(),
+        });
+    }
+
+    if addr.chars().any(|c| c.is_whitespace()) {
+        return Err(TransportAddressError {
+            input: addr.to_string(),
+            reason: "address contains whitespace".to_string(),
+        });
+    }
+
+    if addr.contains("://") {
+        return Err(TransportAddressError {
+            input: addr.to_string(),
+            reason: "address must not include a scheme".to_string(),
+        });
+    }
+
+    let (host, port_str) = if let Some(remainder) = addr.strip_prefix('[') {
+        let end = remainder.find(']').ok_or_else(|| TransportAddressError {
+            input: addr.to_string(),
+            reason: "IPv6 address missing closing ']'".to_string(),
+        })?;
+
+        let host = &remainder[..end];
+        let after = &remainder[end + 1..];
+        let port_str = after.strip_prefix(':').ok_or_else(|| TransportAddressError {
+            input: addr.to_string(),
+            reason: "missing port separator ':'".to_string(),
+        })?;
+
+        if host.is_empty() {
+            return Err(TransportAddressError {
+                input: addr.to_string(),
+                reason: "IPv6 host is empty".to_string(),
+            });
+        }
+
+        (host, port_str)
+    } else {
+        let idx = addr.rfind(':').ok_or_else(|| TransportAddressError {
+            input: addr.to_string(),
+            reason: "missing port separator ':'".to_string(),
+        })?;
+
+        let host = &addr[..idx];
+        let port_str = &addr[idx + 1..];
+
+        if host.is_empty() {
+            return Err(TransportAddressError {
+                input: addr.to_string(),
+                reason: "host is empty".to_string(),
+            });
+        }
+
+        if host.contains(':') {
+            return Err(TransportAddressError {
+                input: addr.to_string(),
+                reason: "IPv6 addresses must be enclosed in brackets".to_string(),
+            });
+        }
+
+        (host, port_str)
+    };
+
+    if host.contains('/') {
+        return Err(TransportAddressError {
+            input: addr.to_string(),
+            reason: "host must not contain '/'".to_string(),
+        });
+    }
+
+    if port_str.is_empty() {
+        return Err(TransportAddressError {
+            input: addr.to_string(),
+            reason: "port is empty".to_string(),
+        });
+    }
+
+    let port = port_str.parse::<u16>().map_err(|_| TransportAddressError {
+        input: addr.to_string(),
+        reason: "port must be a valid u16 value".to_string(),
+    })?;
+
+    Ok(port)
+}
+
+// =============================================================================
+// Transport Hint
+// =============================================================================
+
 /// Transport endpoint hint
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TransportHint {
     /// Direct QUIC connection
-    QuicDirect { addr: String },
+    QuicDirect { addr: TransportAddress },
     /// QUIC via STUN-discovered reflexive address
-    QuicReflexive { addr: String, stun_server: String },
+    QuicReflexive {
+        addr: TransportAddress,
+        stun_server: TransportAddress,
+    },
     /// WebSocket relay through a relay authority
     WebSocketRelay { relay_authority: AuthorityId },
     /// TCP direct connection
-    TcpDirect { addr: String },
+    TcpDirect { addr: TransportAddress },
+}
+
+impl TransportHint {
+    /// Create a QuicDirect hint, validating the address.
+    pub fn quic_direct(addr: &str) -> Result<Self, TransportAddressError> {
+        Ok(TransportHint::QuicDirect {
+            addr: TransportAddress::new(addr)?,
+        })
+    }
+
+    /// Create a QuicReflexive hint, validating both addresses.
+    pub fn quic_reflexive(
+        addr: &str,
+        stun_server: &str,
+    ) -> Result<Self, TransportAddressError> {
+        Ok(TransportHint::QuicReflexive {
+            addr: TransportAddress::new(addr)?,
+            stun_server: TransportAddress::new(stun_server)?,
+        })
+    }
+
+    /// Create a TcpDirect hint, validating the address.
+    pub fn tcp_direct(addr: &str) -> Result<Self, TransportAddressError> {
+        Ok(TransportHint::TcpDirect {
+            addr: TransportAddress::new(addr)?,
+        })
+    }
+
+    /// Create a WebSocketRelay hint.
+    pub fn websocket_relay(relay_authority: AuthorityId) -> Self {
+        TransportHint::WebSocketRelay { relay_authority }
+    }
+
+    /// Get the primary address for this hint, if any.
+    pub fn primary_address(&self) -> Option<&TransportAddress> {
+        match self {
+            TransportHint::QuicDirect { addr } => Some(addr),
+            TransportHint::QuicReflexive { addr, .. } => Some(addr),
+            TransportHint::TcpDirect { addr } => Some(addr),
+            TransportHint::WebSocketRelay { .. } => None,
+        }
+    }
+
+    /// Get the address as a string, if this hint has an address.
+    pub fn address_string(&self) -> Option<String> {
+        self.primary_address().map(|a| a.to_string())
+    }
 }
 
 impl RendezvousFact {
     pub fn context_id_for_fact(&self) -> ContextId {
         match self {
             RendezvousFact::Descriptor(d) => d.context_id,
-            RendezvousFact::ChannelEstablished { .. } => {
-                // Channel facts are global (no specific context)
-                // Use a deterministic context derived from initiator+responder
-                ContextId::new_from_entropy([0u8; 32])
+            RendezvousFact::ChannelEstablished {
+                initiator,
+                responder,
+                ..
+            } => {
+                // Channel facts are scoped to a deterministic pairwise context.
+                channel_context_id(initiator, responder)
             }
             RendezvousFact::DescriptorRevoked { authority_id, .. } => {
                 // Revocation context derived from authority
@@ -221,6 +515,7 @@ impl FactReducer for RendezvousFactReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -235,9 +530,7 @@ mod tests {
         let descriptor = RendezvousDescriptor {
             authority_id: test_authority(),
             context_id: test_context(),
-            transport_hints: vec![TransportHint::TcpDirect {
-                addr: "127.0.0.1:8080".to_string(),
-            }],
+            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 1000,
             valid_until: 2000,
@@ -315,6 +608,41 @@ mod tests {
                 assert_eq!(epoch, 5);
             }
             _ => panic!("Expected ChannelEstablished variant"),
+        }
+    }
+
+    #[test]
+    fn test_channel_context_is_commutative() {
+        let a = test_authority();
+        let b = AuthorityId::new_from_entropy([9u8; 32]);
+        assert_eq!(channel_context_id(&a, &b), channel_context_id(&b, &a));
+    }
+
+    proptest! {
+        #[test]
+        fn prop_channel_context_deterministic(seed_a in any::<[u8; 32]>(), seed_b in any::<[u8; 32]>()) {
+            let a = AuthorityId::new_from_entropy(seed_a);
+            let b = AuthorityId::new_from_entropy(seed_b);
+            let ctx1 = channel_context_id(&a, &b);
+            let ctx2 = channel_context_id(&a, &b);
+            prop_assert_eq!(ctx1, ctx2);
+        }
+
+        #[test]
+        fn prop_channel_context_distinct_for_pairs(
+            seed_a in any::<[u8; 32]>(),
+            seed_b in any::<[u8; 32]>(),
+            seed_c in any::<[u8; 32]>()
+        ) {
+            prop_assume!(seed_a != seed_b);
+            prop_assume!(seed_a != seed_c);
+            prop_assume!(seed_b != seed_c);
+            let a = AuthorityId::new_from_entropy(seed_a);
+            let b = AuthorityId::new_from_entropy(seed_b);
+            let c = AuthorityId::new_from_entropy(seed_c);
+            let ctx_ab = channel_context_id(&a, &b);
+            let ctx_ac = channel_context_id(&a, &c);
+            prop_assert_ne!(ctx_ab, ctx_ac);
         }
     }
 

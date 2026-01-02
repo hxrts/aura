@@ -64,7 +64,9 @@ where
         };
 
         let config = AmpRuntimeConfig::default();
-        let window = params.skip_window.unwrap_or(config.default_skip_window);
+        let window = params
+            .skip_window
+            .unwrap_or_else(|| config.default_skip_window.get());
 
         let checkpoint = ChannelCheckpoint {
             context: params.context,

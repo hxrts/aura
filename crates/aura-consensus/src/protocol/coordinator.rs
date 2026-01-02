@@ -35,7 +35,10 @@ impl ConsensusProtocol {
                 instance.tracker.add_nonce(sender, commitment);
 
                 // Check if we have threshold
-                if instance.tracker.has_nonce_threshold(self.config.threshold) {
+                if instance
+                    .tracker
+                    .has_nonce_threshold(self.config.threshold())
+                {
                     instance.phase = ConsensusPhase::Sign;
                     instance.sync_core_state();
                     instance.assert_invariants();
@@ -70,7 +73,7 @@ impl ConsensusProtocol {
                 // Check if we have threshold
                 if instance
                     .tracker
-                    .has_signature_threshold(self.config.threshold)
+                    .has_signature_threshold(self.config.threshold())
                 {
                     return self.finalize_consensus(consensus_id).await;
                 }
@@ -145,7 +148,7 @@ impl ConsensusProtocol {
             threshold_signature,
             None, // Would include group public key
             participants,
-            self.config.threshold,
+            self.config.threshold(),
             instance.phase == ConsensusPhase::Execute, // Fast path if we skipped nonce phase
             timestamp,
         );
@@ -160,7 +163,7 @@ impl ConsensusProtocol {
         ProtocolStats {
             active_instances: instances.len(),
             epoch: self.config.epoch,
-            threshold: self.config.threshold,
+            threshold: self.config.threshold(),
             witness_count: self.config.witness_set.len(),
         }
     }

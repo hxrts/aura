@@ -56,6 +56,7 @@ use aura_core::scope::ResourceScope;
 use aura_core::types::Epoch;
 use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, FlowCost, Journal};
 use aura_guards::{BiscuitGuardEvaluator, GuardError};
+use aura_guards::types::CapabilityId;
 
 // =============================================================================
 // Types
@@ -449,9 +450,10 @@ impl AntiEntropyProtocol {
 
             let mut flow_budget = FlowBudget::new(1000, Epoch::new(0)); // Standard sync budget
 
+            let capability = CapabilityId::from("sync_journal");
             match evaluator.evaluate_guard_default_time(
                 token,
-                "sync_journal",
+                &capability,
                 &resource,
                 FlowCost::new(100),
                 &mut flow_budget,
@@ -476,12 +478,15 @@ impl AntiEntropyProtocol {
                 }
             }
         } else {
-            // No Biscuit authorization configured - allow by default for backward compatibility
-            tracing::debug!(
-                "No Biscuit authorization configured for peer {} - allowing sync",
+            // No Biscuit authorization configured - deny access (authorization is required)
+            tracing::error!(
+                "Sync denied: no authorization configured for peer {}",
                 peer
             );
-            Ok(())
+            Err(AuraError::permission_denied(format!(
+                "Authorization required for sync with peer {}. Configure Biscuit token manager and guard evaluator.",
+                peer
+            )))
         }
     }
 

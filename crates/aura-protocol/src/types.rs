@@ -187,7 +187,48 @@ pub enum ProtocolSessionStatus {
     /// Session completed successfully
     Completed,
     /// Session failed with error
-    Failed(String),
+    Failed(ProtocolSessionError),
     /// Session was terminated
     Terminated,
+}
+
+/// Structured errors for protocol session failures.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProtocolSessionError {
+    /// Session timed out
+    Timeout,
+    /// Authorization or capability failure
+    Authorization(String),
+    /// Guard chain failure
+    GuardChain(String),
+    /// Network transport failure
+    Network(String),
+    /// Storage or persistence failure
+    Storage(String),
+    /// Cryptographic failure
+    Crypto(String),
+    /// Consensus failure
+    Consensus(String),
+    /// Validation failure
+    Validation(String),
+    /// Internal error
+    Internal(String),
+}
+
+impl fmt::Display for ProtocolSessionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProtocolSessionError::Timeout => write!(f, "timeout"),
+            ProtocolSessionError::Authorization(reason) => {
+                write!(f, "authorization: {reason}")
+            }
+            ProtocolSessionError::GuardChain(reason) => write!(f, "guard_chain: {reason}"),
+            ProtocolSessionError::Network(reason) => write!(f, "network: {reason}"),
+            ProtocolSessionError::Storage(reason) => write!(f, "storage: {reason}"),
+            ProtocolSessionError::Crypto(reason) => write!(f, "crypto: {reason}"),
+            ProtocolSessionError::Consensus(reason) => write!(f, "consensus: {reason}"),
+            ProtocolSessionError::Validation(reason) => write!(f, "validation: {reason}"),
+            ProtocolSessionError::Internal(reason) => write!(f, "internal: {reason}"),
+        }
+    }
 }

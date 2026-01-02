@@ -4,7 +4,10 @@
 //! NO choreography - single-party effect handler only.
 //! Target: <200 lines, leverage tokio ecosystem.
 
-use super::{TransportConfig, TransportConnection, TransportError, TransportResult};
+use super::{
+    ConnectionId, TransportAddress, TransportConfig, TransportConnection, TransportError,
+    TransportMetadata, TransportResult, TransportSocketAddr,
+};
 use async_trait::async_trait;
 use aura_core::{
     effects::{
@@ -12,7 +15,6 @@ use aura_core::{
     },
     hash,
 };
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -38,20 +40,23 @@ impl TcpTransportHandler {
     }
 
     /// Connect to remote peer via TCP
-    pub async fn connect(&self, addr: SocketAddr) -> TransportResult<TransportConnection> {
-        let stream = timeout(self.config.connect_timeout, TcpStream::connect(addr))
+    pub async fn connect(&self, addr: TransportSocketAddr) -> TransportResult<TransportConnection> {
+        let stream = timeout(
+            self.config.connect_timeout.get(),
+            TcpStream::connect(*addr.as_socket_addr()),
+        )
             .await
             .map_err(|_| TransportError::Timeout("TCP connect timeout".to_string()))?
             .map_err(|e| TransportError::ConnectionFailed(format!("TCP connect failed: {e}")))?;
 
-        let local_addr = stream.local_addr()?.to_string();
-        let remote_addr = stream.peer_addr()?.to_string();
+        let local_addr =
+            TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
+        let remote_addr =
+            TransportAddress::from(TransportSocketAddr::from(stream.peer_addr()?));
 
-        let connection_id = format!("tcp-{local_addr}-{remote_addr}");
+        let connection_id = ConnectionId::new(format!("tcp-{local_addr}-{remote_addr}"));
 
-        let mut metadata = HashMap::new();
-        metadata.insert("protocol".to_string(), "tcp".to_string());
-        metadata.insert("nodelay".to_string(), "true".to_string());
+        let metadata = TransportMetadata::tcp(true);
 
         // Configure TCP socket
         stream.set_nodelay(true)?;
@@ -65,8 +70,8 @@ impl TcpTransportHandler {
     }
 
     /// Listen for incoming TCP connections
-    pub async fn listen(&self, bind_addr: SocketAddr) -> TransportResult<TcpListener> {
-        let listener = TcpListener::bind(bind_addr)
+    pub async fn listen(&self, bind_addr: TransportSocketAddr) -> TransportResult<TcpListener> {
+        let listener = TcpListener::bind(*bind_addr.as_socket_addr())
             .await
             .map_err(|e| TransportError::ConnectionFailed(format!("TCP bind failed: {e}")))?;
 
@@ -83,13 +88,13 @@ impl TcpTransportHandler {
             .await
             .map_err(|e| TransportError::ConnectionFailed(format!("TCP accept failed: {e}")))?;
 
-        let local_addr = stream.local_addr()?.to_string();
-        let remote_addr = peer_addr.to_string();
-        let connection_id = format!("tcp-{local_addr}-{remote_addr}");
+        let local_addr =
+            TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
+        let remote_addr =
+            TransportAddress::from(TransportSocketAddr::from(peer_addr));
+        let connection_id = ConnectionId::new(format!("tcp-{local_addr}-{remote_addr}"));
 
-        let mut metadata = HashMap::new();
-        metadata.insert("protocol".to_string(), "tcp".to_string());
-        metadata.insert("nodelay".to_string(), "true".to_string());
+        let metadata = TransportMetadata::tcp(true);
 
         // Configure TCP socket
         stream.set_nodelay(true)?;
@@ -106,7 +111,7 @@ impl TcpTransportHandler {
 
     /// Send data over TCP stream
     pub async fn send(&self, stream: &mut TcpStream, data: &[u8]) -> TransportResult<usize> {
-        timeout(self.config.write_timeout, stream.write_all(data))
+        timeout(self.config.write_timeout.get(), stream.write_all(data))
             .await
             .map_err(|_| TransportError::Timeout("TCP write timeout".to_string()))?
             .map_err(TransportError::Io)?;
@@ -117,9 +122,9 @@ impl TcpTransportHandler {
 
     /// Receive data from TCP stream
     pub async fn receive(&self, stream: &mut TcpStream) -> TransportResult<Vec<u8>> {
-        let mut buffer = vec![0u8; self.config.buffer_size];
+        let mut buffer = vec![0u8; self.config.buffer_size.get()];
 
-        let bytes_read = timeout(self.config.read_timeout, stream.read(&mut buffer))
+        let bytes_read = timeout(self.config.read_timeout.get(), stream.read(&mut buffer))
             .await
             .map_err(|_| TransportError::Timeout("TCP read timeout".to_string()))?
             .map_err(TransportError::Io)?;
@@ -151,7 +156,7 @@ impl TcpTransportHandler {
     pub async fn receive_framed(&self, stream: &mut TcpStream) -> TransportResult<Vec<u8>> {
         // Read 4-byte length prefix
         let mut len_bytes = [0u8; 4];
-        timeout(self.config.read_timeout, stream.read_exact(&mut len_bytes))
+        timeout(self.config.read_timeout.get(), stream.read_exact(&mut len_bytes))
             .await
             .map_err(|_| TransportError::Timeout("TCP read length timeout".to_string()))?
             .map_err(TransportError::Io)?;
@@ -159,16 +164,17 @@ impl TcpTransportHandler {
         let len = u32::from_be_bytes(len_bytes) as usize;
 
         // Validate message length
-        if len > self.config.buffer_size {
+        if len > self.config.buffer_size.get() {
             return Err(TransportError::Protocol(format!(
                 "Message too large: {} > {}",
-                len, self.config.buffer_size
+                len,
+                self.config.buffer_size.get()
             )));
         }
 
         // Read message data
         let mut data = vec![0u8; len];
-        timeout(self.config.read_timeout, stream.read_exact(&mut data))
+        timeout(self.config.read_timeout.get(), stream.read_exact(&mut data))
             .await
             .map_err(|_| TransportError::Timeout("TCP read data timeout".to_string()))?
             .map_err(TransportError::Io)?;
@@ -228,7 +234,7 @@ impl NetworkCoreEffects for TcpTransportHandler {
                     reason: format!("Failed to bind listener: {e}"),
                 })?;
 
-        let accept_result = timeout(self.config.read_timeout, listener.accept())
+        let accept_result = timeout(self.config.read_timeout.get(), listener.accept())
             .await
             .map_err(|_| NetworkError::ReceiveFailed {
                 reason: "TCP receive timed out waiting for connection".to_string(),
@@ -242,8 +248,8 @@ impl NetworkCoreEffects for TcpTransportHandler {
         let (mut stream, peer_addr) = accept_result;
         let peer_id = uuid_from_addr(&peer_addr);
 
-        let mut buffer = vec![0u8; self.config.buffer_size];
-        let bytes_read = timeout(self.config.read_timeout, stream.read(&mut buffer))
+        let mut buffer = vec![0u8; self.config.buffer_size.get()];
+        let bytes_read = timeout(self.config.read_timeout.get(), stream.read(&mut buffer))
             .await
             .map_err(|_| NetworkError::ReceiveFailed {
                 reason: "TCP receive timed out while reading".to_string(),

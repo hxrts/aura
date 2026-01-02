@@ -9,6 +9,7 @@ use aura_core::{
     Hash32,
 };
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroU64;
 
 /// Messages exchanged during consensus protocol
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,7 +126,7 @@ pub struct ConsensusRequest {
     /// Hash of the operation
     pub operation_hash: Hash32,
     /// Optional timeout override (milliseconds)
-    pub timeout_ms: Option<u64>,
+    pub timeout_ms: Option<NonZeroU64>,
 }
 
 /// Response from consensus operation

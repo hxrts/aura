@@ -1,7 +1,15 @@
 //! Core simulator handler implementation
 
-use crate::compat::SimulatorHandler;
 use crate::types::{Result, SimulatorContext, SimulatorOperation};
+
+/// Handler trait for simulator operations (internal use only)
+trait SimulatorHandler: Send + Sync {
+    /// Handle a simulator operation
+    fn handle(&self, operation: SimulatorOperation, context: &SimulatorContext) -> Result<serde_json::Value>;
+
+    /// Get the name of this handler
+    fn name(&self) -> &str;
+}
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;

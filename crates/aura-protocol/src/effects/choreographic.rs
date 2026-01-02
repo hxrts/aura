@@ -3,6 +3,8 @@
 //! Pure trait definitions for choreographic protocol operations.
 
 use async_trait::async_trait;
+use aura_core::DeviceId;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// Choreographic effects for distributed protocol coordination
@@ -57,20 +59,47 @@ pub trait ChoreographicEffects: Send + Sync {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
+#[serde(transparent)]
+pub struct RoleIndex(NonZeroU32);
+
+impl RoleIndex {
+    /// Create a new role index from a 0-based index.
+    pub fn new(index: u32) -> Option<Self> {
+        index
+            .checked_add(1)
+            .and_then(NonZeroU32::new)
+            .map(Self)
+    }
+
+    /// Return the 0-based index value.
+    pub fn get(self) -> u32 {
+        self.0.get().saturating_sub(1)
+    }
+}
+
+/// Role in a choreographic protocol
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ChoreographicRole {
     /// Device ID for this role
-    pub device_id: Uuid,
+    pub device_id: DeviceId,
     /// Role index in the protocol (0-based)
-    pub role_index: u32,
+    pub role_index: RoleIndex,
 }
 
 impl ChoreographicRole {
     /// Create a new choreographic role
-    pub fn new(device_id: Uuid, role_index: u32) -> Self {
+    pub fn new(device_id: DeviceId, role_index: RoleIndex) -> Self {
         Self {
             device_id,
             role_index,
         }
+    }
+
+    /// Create a new role from a 0-based index.
+    pub fn from_index(device_id: DeviceId, role_index: u32) -> Option<Self> {
+        RoleIndex::new(role_index).map(|idx| Self::new(device_id, idx))
     }
 }
 
@@ -156,6 +185,14 @@ pub enum ChoreographyError {
         /// Error message
         message: String,
     },
+}
+
+impl From<rumpsteak_aura_choreography::ChoreographyError> for ChoreographyError {
+    fn from(e: rumpsteak_aura_choreography::ChoreographyError) -> Self {
+        ChoreographyError::InternalError {
+            message: e.to_string(),
+        }
+    }
 }
 
 impl aura_core::ProtocolErrorCode for ChoreographyError {

@@ -14,7 +14,7 @@ use aura_agent::handlers::{InvitationServiceApi, InvitationType, ShareableInvita
 use aura_agent::{AgentBuilder, AuraAgent, EffectContext, ExecutionMode};
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::threshold::ParticipantIdentity;
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_journal::ProtocolRelationalFact;
@@ -62,7 +62,7 @@ async fn test_invitation_code_roundtrip() -> TestResult {
     let sender_id = AuthorityId::new_from_entropy([1u8; 32]);
     let shareable = ShareableInvitation {
         version: 1,
-        invitation_id: "inv-test-123".to_string(),
+        invitation_id: InvitationId::new("inv-test-123"),
         sender_id,
         invitation_type: InvitationType::Contact {
             nickname: Some("alice".to_string()),
@@ -77,7 +77,7 @@ async fn test_invitation_code_roundtrip() -> TestResult {
 
     // Decode back
     let decoded = ShareableInvitation::from_code(&code)?;
-    assert_eq!(decoded.invitation_id, "inv-test-123");
+    assert_eq!(decoded.invitation_id.as_str(), "inv-test-123");
     assert_eq!(decoded.sender_id, sender_id);
     assert_eq!(decoded.message, Some("Hello from Alice!".to_string()));
 
@@ -112,7 +112,7 @@ async fn test_two_agent_invitation_flow() -> TestResult {
         )
         .await?;
 
-    assert!(invitation.invitation_id.starts_with("inv-"));
+    assert!(invitation.invitation_id.as_str().starts_with("inv-"));
 
     // User A exports invitation as shareable code
     let code = invitation_service_a
@@ -374,7 +374,7 @@ async fn test_guardian_invitation() -> TestResult {
         )
         .await?;
 
-    assert!(invitation.invitation_id.starts_with("inv-"));
+    assert!(invitation.invitation_id.as_str().starts_with("inv-"));
     assert!(invitation.expires_at.is_some());
 
     // Export and verify

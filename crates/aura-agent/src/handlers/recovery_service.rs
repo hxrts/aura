@@ -10,7 +10,7 @@ use super::recovery::{
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomCoreEffects;
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, RecoveryId};
 use std::sync::Arc;
 
 /// Recovery service API
@@ -185,7 +185,7 @@ impl RecoveryServiceApi {
     ///
     /// # Returns
     /// The recovery result
-    pub async fn complete(&self, recovery_id: &str) -> AgentResult<RecoveryResult> {
+    pub async fn complete(&self, recovery_id: &RecoveryId) -> AgentResult<RecoveryResult> {
         self.handler.complete(&self.effects, recovery_id).await
     }
 
@@ -197,7 +197,11 @@ impl RecoveryServiceApi {
     ///
     /// # Returns
     /// The recovery result
-    pub async fn cancel(&self, recovery_id: &str, reason: String) -> AgentResult<RecoveryResult> {
+    pub async fn cancel(
+        &self,
+        recovery_id: &RecoveryId,
+        reason: String,
+    ) -> AgentResult<RecoveryResult> {
         self.handler
             .cancel(&self.effects, recovery_id, reason)
             .await
@@ -210,7 +214,7 @@ impl RecoveryServiceApi {
     ///
     /// # Returns
     /// The recovery state if found
-    pub async fn get_state(&self, recovery_id: &str) -> Option<RecoveryState> {
+    pub async fn get_state(&self, recovery_id: &RecoveryId) -> Option<RecoveryState> {
         self.handler.get_state(recovery_id).await
     }
 
@@ -218,7 +222,7 @@ impl RecoveryServiceApi {
     ///
     /// # Returns
     /// List of (recovery_id, state) pairs
-    pub async fn list_active(&self) -> Vec<(String, RecoveryState)> {
+    pub async fn list_active(&self) -> Vec<(RecoveryId, RecoveryState)> {
         self.handler.list_active().await
     }
 
@@ -229,7 +233,7 @@ impl RecoveryServiceApi {
     ///
     /// # Returns
     /// True if the recovery is in Initiated or CollectingShares state
-    pub async fn is_pending(&self, recovery_id: &str) -> bool {
+    pub async fn is_pending(&self, recovery_id: &RecoveryId) -> bool {
         matches!(
             self.handler.get_state(recovery_id).await,
             Some(RecoveryState::Initiated { .. })
@@ -599,7 +603,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(request.recovery_id.starts_with("recovery-"));
+        assert!(request.recovery_id.as_str().starts_with("recovery-"));
         assert_eq!(request.threshold, 2);
     }
 
@@ -617,7 +621,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(request.recovery_id.starts_with("recovery-"));
+        assert!(request.recovery_id.as_str().starts_with("recovery-"));
     }
 
     #[tokio::test]
@@ -644,7 +648,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(request.recovery_id.starts_with("recovery-"));
+        assert!(request.recovery_id.as_str().starts_with("recovery-"));
         assert!(request.expires_at.is_some());
     }
 
@@ -673,7 +677,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(request.recovery_id.starts_with("recovery-"));
+        assert!(request.recovery_id.as_str().starts_with("recovery-"));
     }
 
     #[tokio::test]

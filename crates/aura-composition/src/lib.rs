@@ -74,6 +74,6 @@ pub use adapters::{
 };
 
 pub use view_delta::{
-    downcast_delta, downcast_delta_owned, IntoViewDelta, ViewDelta, ViewDeltaReducer,
-    ViewDeltaRegistry,
+    compact_deltas, downcast_delta, downcast_delta_owned, ComposableDelta, IntoViewDelta,
+    ViewDelta, ViewDeltaReducer, ViewDeltaRegistry,
 };

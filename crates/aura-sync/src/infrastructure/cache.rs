@@ -286,47 +286,48 @@ pub struct CacheStatistics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::types::epochs::Epoch;
 
     #[test]
     fn test_cache_floor_monotonic() {
         let mut tracker = CacheEpochTracker::new();
 
         // Apply invalidation at epoch 5
-        tracker.apply_invalidation(&CacheInvalidation::new(vec!["foo".into()], 5_u64));
+        tracker.apply_invalidation(&CacheInvalidation::new(vec!["foo".into()], Epoch::from(5)));
 
         // Key is not fresh before epoch 5
-        assert!(!tracker.is_fresh("foo", 4_u64));
+        assert!(!tracker.is_fresh("foo", Epoch::from(4)));
 
         // Key is fresh at epoch 5 and beyond
-        assert!(tracker.is_fresh("foo", 5_u64));
-        assert!(tracker.is_fresh("foo", 6_u64));
+        assert!(tracker.is_fresh("foo", Epoch::from(5)));
+        assert!(tracker.is_fresh("foo", Epoch::from(6)));
 
         // Higher floor overrides
-        tracker.apply_invalidation(&CacheInvalidation::new(vec!["foo".into()], 7_u64));
-        assert!(!tracker.is_fresh("foo", 6_u64));
-        assert!(tracker.is_fresh("foo", 7_u64));
+        tracker.apply_invalidation(&CacheInvalidation::new(vec!["foo".into()], Epoch::from(7)));
+        assert!(!tracker.is_fresh("foo", Epoch::from(6)));
+        assert!(tracker.is_fresh("foo", Epoch::from(7)));
     }
 
     #[test]
     fn test_cache_floor_multiple_keys() {
         let mut tracker = CacheEpochTracker::new();
 
-        tracker.invalidate_keys(&["key1", "key2", "key3"], 10_u64);
+        tracker.invalidate_keys(&["key1", "key2", "key3"], Epoch::from(10));
 
-        assert!(!tracker.is_fresh("key1", 9_u64));
-        assert!(tracker.is_fresh("key1", 10_u64));
-        assert!(!tracker.is_fresh("key2", 9_u64));
-        assert!(tracker.is_fresh("key2", 10_u64));
-        assert!(!tracker.is_fresh("key3", 9_u64));
-        assert!(tracker.is_fresh("key3", 10_u64));
+        assert!(!tracker.is_fresh("key1", Epoch::from(9)));
+        assert!(tracker.is_fresh("key1", Epoch::from(10)));
+        assert!(!tracker.is_fresh("key2", Epoch::from(9)));
+        assert!(tracker.is_fresh("key2", Epoch::from(10)));
+        assert!(!tracker.is_fresh("key3", Epoch::from(9)));
+        assert!(tracker.is_fresh("key3", Epoch::from(10)));
     }
 
     #[test]
     fn test_cache_manager_statistics() {
         let mut manager = CacheManager::new();
 
-        manager.invalidate_keys(&["a", "b", "c"], 5_u64);
-        manager.invalidate_keys(&["d", "e"], 10_u64);
+        manager.invalidate_keys(&["a", "b", "c"], Epoch::from(5));
+        manager.invalidate_keys(&["d", "e"], Epoch::from(10));
 
         let stats = manager.statistics();
         assert_eq!(stats.total_invalidations, 2);
@@ -335,7 +336,7 @@ mod tests {
 
     #[test]
     fn test_cache_invalidation_with_reason() {
-        let invalidation = CacheInvalidation::new(vec!["test".into()], 5_u64)
+        let invalidation = CacheInvalidation::new(vec!["test".into()], Epoch::from(5))
             .with_reason("OTA upgrade to version 2.0");
 
         assert_eq!(
@@ -349,7 +350,7 @@ mod tests {
         let tracker = CacheEpochTracker::new();
 
         // Keys that have never been invalidated are always fresh
-        assert!(tracker.is_fresh("never_seen", 0_u64));
-        assert!(tracker.is_fresh("never_seen", 100_u64));
+        assert!(tracker.is_fresh("never_seen", Epoch::from(0)));
+        assert!(tracker.is_fresh("never_seen", Epoch::from(100)));
     }
 }

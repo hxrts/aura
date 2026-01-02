@@ -125,3 +125,7 @@ aura-testkit = { path = "../aura-testkit" }
 tracing-subscriber = { workspace = true }
 futures = { workspace = true }
 trybuild = { workspace = true }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

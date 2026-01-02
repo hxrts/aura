@@ -1808,3 +1808,143 @@ lean-verify-translated jobs="2" crate="all": (lean-translate jobs crate) lean-in
         echo -e "${YELLOW}⚠ Some translated code has errors${NC}"
         echo "  Run 'cd verification/lean && lake build Generated' for details"
     fi
+
+# =============================================================================
+# On-Demand Verification Commands (matches conditional CI jobs)
+# =============================================================================
+# These commands mirror the verification jobs in GitHub CI that only run
+# on main push, specific labels, or when verification files change.
+# Use these when working on verification code or before major releases.
+
+# Lean formal verification (matches CI lean-proofs job)
+verify-lean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    RED='\033[0;31m'
+    NC='\033[0m'
+
+    echo "Lean Formal Verification"
+    echo "========================"
+    echo ""
+
+    echo "[1/2] Building Lean proofs..."
+    cd verification/lean
+    if lake build; then
+        echo -e "${GREEN}[OK]${NC} Lean proofs build successfully"
+    else
+        echo -e "${RED}[FAIL]${NC} Lean proofs failed to build"
+        exit 1
+    fi
+    echo ""
+
+    echo "[2/2] Checking for incomplete proofs (sorry usage)..."
+    cd ../..
+    if grep -r "sorry" verification/lean/Aura --include="*.lean" 2>/dev/null; then
+        echo -e "${YELLOW}[WARNING]${NC} Found incomplete proofs (sorry). These should be resolved."
+    else
+        echo -e "${GREEN}[OK]${NC} All proofs complete (no sorry found)"
+    fi
+    echo ""
+
+    echo -e "${GREEN}Lean verification complete${NC}"
+
+# Quint model checking with invariant verification (matches CI quint-model-checking job)
+quint-verify-models:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    GREEN='\033[0;32m'
+    RED='\033[0;31m'
+    NC='\033[0m'
+
+    echo "Quint Model Checking"
+    echo "===================="
+    echo ""
+
+    cd verification/quint
+
+    echo "[1/2] Typechecking all Quint specifications..."
+    for spec in *.qnt; do
+        echo "  Checking $spec..."
+        if ! quint typecheck "$spec"; then
+            echo -e "${RED}[FAIL]${NC} Typecheck failed for $spec"
+            exit 1
+        fi
+    done
+    echo -e "${GREEN}[OK]${NC} All Quint specs typecheck"
+    echo ""
+
+    echo "[2/2] Running Quint invariant verification..."
+
+    echo "  Verifying protocol_consensus.qnt..."
+    if ! quint verify --invariant=AllInvariants protocol_consensus.qnt --max-samples=1000; then
+        echo -e "${RED}[FAIL]${NC} protocol_consensus.qnt invariants failed"
+        exit 1
+    fi
+
+    echo "  Verifying protocol_consensus_adversary.qnt..."
+    if ! quint verify --invariant=InvariantByzantineThreshold protocol_consensus_adversary.qnt --max-samples=500; then
+        echo -e "${RED}[FAIL]${NC} protocol_consensus_adversary.qnt invariants failed"
+        exit 1
+    fi
+
+    echo "  Verifying protocol_consensus_liveness.qnt..."
+    if ! quint verify --invariant=InvariantProgressUnderSynchrony protocol_consensus_liveness.qnt --max-samples=500; then
+        echo -e "${RED}[FAIL]${NC} protocol_consensus_liveness.qnt invariants failed"
+        exit 1
+    fi
+
+    echo -e "${GREEN}[OK]${NC} All Quint invariants pass model checking"
+    echo ""
+    echo -e "${GREEN}Quint verification complete${NC}"
+
+# Consensus conformance tests (matches CI consensus-conformance job)
+verify-conformance:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    GREEN='\033[0;32m'
+    RED='\033[0;31m'
+    NC='\033[0m'
+
+    echo "Consensus Conformance Tests"
+    echo "==========================="
+    echo ""
+
+    echo "[1/3] Generating fresh ITF traces from Quint spec..."
+    mkdir -p traces
+    if ! quint run --out-itf=traces/consensus.itf.json verification/quint/protocol_consensus.qnt --max-steps=30 --max-samples=5; then
+        echo -e "${RED}[FAIL]${NC} Failed to generate ITF traces"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK]${NC} Generated fresh ITF traces"
+    echo ""
+
+    echo "[2/3] Running ITF conformance tests..."
+    if ! cargo test -p aura-protocol --test consensus_itf_conformance -- --nocapture; then
+        echo -e "${RED}[FAIL]${NC} ITF conformance tests failed"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK]${NC} ITF conformance tests passed"
+    echo ""
+
+    echo "[3/3] Running differential tests (production vs reference)..."
+    if ! cargo test -p aura-protocol --test consensus_differential -- --nocapture; then
+        echo -e "${RED}[FAIL]${NC} Differential tests failed"
+        exit 1
+    fi
+    echo -e "${GREEN}[OK]${NC} Differential tests passed"
+    echo ""
+
+    echo -e "${GREEN}Consensus conformance complete${NC}"
+
+# Run all verification (Lean + Quint + Conformance)
+verify-all: verify-lean quint-verify-models verify-conformance
+    #!/usr/bin/env bash
+    echo ""
+    echo "========================================"
+    echo "ALL VERIFICATION COMPLETE"
+    echo "========================================"

@@ -118,8 +118,7 @@ pub fn derive_message_key(
     Ok(Hash32::from(output))
 }
 
-// XOR cipher function removed - was insecure and deprecated
-// Use AES-GCM via CryptoEffects for production encryption
+// For encryption, use AES-GCM via CryptoEffects (Layer 3)
 
 #[cfg(test)]
 mod tests {

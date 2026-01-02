@@ -13,10 +13,14 @@
 //! This catches subtle bugs that ITF traces might miss due to limited coverage.
 
 use aura_consensus::core::{
-    state::{ConsensusPhase, ConsensusState, PathSelection, ShareData, ShareProposal},
+    state::{
+        ConsensusPhase, ConsensusState, ConsensusThreshold, PathSelection, ShareData, ShareProposal,
+    },
     transitions::{apply_share, fail_consensus, trigger_fallback, TransitionResult},
     validation::{check_invariants, is_equivocator, shares_consistent},
 };
+use aura_consensus::types::ConsensusId;
+use aura_core::{AuthorityId, Hash32, OperationId};
 use aura_testkit::consensus::{
     aggregate_shares_ref, apply_share_ref, check_invariants_ref, check_threshold_ref,
     detect_equivocators_ref, fail_consensus_ref, shares_consistent_ref, trigger_fallback_ref,
@@ -24,6 +28,31 @@ use aura_testkit::consensus::{
 };
 use proptest::prelude::*;
 use std::collections::BTreeSet;
+
+fn threshold(value: u16) -> ConsensusThreshold {
+    ConsensusThreshold::new(value).expect("threshold")
+}
+
+fn threshold_from_usize(value: usize) -> ConsensusThreshold {
+    ConsensusThreshold::new(u16::try_from(value).expect("threshold fits in u16"))
+        .expect("threshold")
+}
+
+fn authority_for_index(idx: usize) -> AuthorityId {
+    AuthorityId::new_from_entropy([idx as u8; 32])
+}
+
+fn hash_for_label(label: &str) -> Hash32 {
+    Hash32::from_bytes(label.as_bytes())
+}
+
+fn consensus_id_for_label(label: &str) -> ConsensusId {
+    ConsensusId(Hash32::from_bytes(label.as_bytes()))
+}
+
+fn operation_for_index(idx: usize) -> OperationId {
+    OperationId::new_from_entropy([idx as u8; 32])
+}
 
 // ============================================================================
 // PROPTEST STRATEGIES
@@ -47,16 +76,16 @@ proptest! {
         n_witnesses in 3usize..=7,
         n_proposals in 0usize..=7,
     ) {
-        let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{i}"))
+        let witnesses: BTreeSet<AuthorityId> = (0..n_witnesses)
+            .map(authority_for_index)
             .collect();
         let threshold = n_witnesses.div_ceil(2);
 
         // Create proposals for first n_proposals witnesses, all same result
         let proposals: Vec<ShareProposal> = (0..n_proposals.min(n_witnesses))
             .map(|i| ShareProposal {
-                witness: format!("w{i}"),
-                result_id: "rid1".to_string(),
+                witness: authority_for_index(i),
+                result_id: hash_for_label("rid1"),
                 share: ShareData {
                     share_value: format!("share_{i}"),
                     nonce_binding: format!("nonce_{i}"),
@@ -72,12 +101,12 @@ proptest! {
         // Note: check_threshold_met() has different semantics (checks commit fact)
         // The correct equivalent to check_threshold_ref is state.threshold_met()
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "hash".to_string(),
-            threshold,
+            consensus_id_for_label("cns1"),
+            operation_for_index(1),
+            hash_for_label("hash"),
+            threshold_from_usize(threshold),
             witnesses,
-            "w0".to_string(),
+            authority_for_index(0),
             PathSelection::FastPath,
         );
         state.proposals = proposals;
@@ -107,8 +136,8 @@ proptest! {
             .map(|i| {
                 let rid = result_ids[i % result_ids.len()];
                 ShareProposal {
-                    witness: format!("w{i}"),
-                    result_id: rid.to_string(),
+                    witness: authority_for_index(i),
+                    result_id: hash_for_label(rid),
                     share: ShareData {
                         share_value: format!("share_{i}"),
                         nonce_binding: format!("nonce_{i}"),
@@ -123,7 +152,7 @@ proptest! {
 
         // Production: checks specific result_id proposals have valid shares
         // Note: different semantics - production filters by result_id
-        let prod_result = shares_consistent(&proposals, "rid1", "hash");
+        let prod_result = shares_consistent(&proposals, &hash_for_label("rid1"), &hash_for_label("hash"));
 
         // For single-result case, both should agree
         if !mix_results {
@@ -145,9 +174,9 @@ proptest! {
         // Create votes, possibly with one equivocator
         let mut votes: Vec<Vote> = (0..n_votes)
             .map(|i| Vote {
-                witness: format!("w{}", i % 5),
-                result_id: "rid1".to_string(),
-                prestate_hash: "hash".to_string(),
+                witness: authority_for_index(i % 5),
+                result_id: hash_for_label("rid1"),
+                prestate_hash: hash_for_label("hash"),
             })
             .collect();
 
@@ -156,9 +185,9 @@ proptest! {
             let target_witness = votes[equivocator_index].witness.clone();
             // Add conflicting vote
             votes.push(Vote {
-                witness: target_witness.clone(),
-                result_id: "rid2".to_string(), // Different result!
-                prestate_hash: "hash".to_string(),
+                witness: target_witness,
+                result_id: hash_for_label("rid2"), // Different result!
+                prestate_hash: hash_for_label("hash"),
             });
 
             // Reference: detect all equivocators
@@ -168,15 +197,15 @@ proptest! {
             let proposals: Vec<ShareProposal> = votes
                 .iter()
                 .map(|v| ShareProposal {
-                    witness: v.witness.clone(),
-                    result_id: v.result_id.clone(),
+                    witness: v.witness,
+                    result_id: v.result_id,
                     share: ShareData {
                         share_value: "share".to_string(),
                         nonce_binding: "nonce".to_string(),
                         data_binding: format!(
                             "cns1:{rid}:{hash}",
-                            rid = v.result_id,
-                            hash = v.prestate_hash
+                            rid = v.result_id.to_hex(),
+                            hash = v.prestate_hash.to_hex()
                         ),
                     },
                 })
@@ -215,8 +244,8 @@ proptest! {
         // All proposals for same result (consistent)
         let proposals: Vec<ShareProposal> = (0..n_proposals)
             .map(|i| ShareProposal {
-                witness: format!("w{i}"),
-                result_id: "rid1".to_string(),
+                witness: authority_for_index(i),
+                result_id: hash_for_label("rid1"),
                 share: ShareData {
                     share_value: format!("share_{i}"),
                     nonce_binding: format!("nonce_{i}"),
@@ -237,7 +266,7 @@ proptest! {
 
             let sig = result.unwrap();
             prop_assert_eq!(sig.signer_set.len(), n_proposals);
-            prop_assert_eq!(sig.bound_rid, "rid1");
+            prop_assert_eq!(sig.bound_rid, hash_for_label("rid1"));
         } else {
             prop_assert!(
                 result.is_none(),
@@ -255,8 +284,8 @@ proptest! {
         // Create inconsistent proposals (different result_ids)
         let proposals: Vec<ShareProposal> = (0..n_proposals)
             .map(|i| ShareProposal {
-                witness: format!("w{i}"),
-                result_id: format!("rid{i}"), // All different!
+                witness: authority_for_index(i),
+                result_id: hash_for_label(&format!("rid{i}")), // All different!
                 share: ShareData {
                     share_value: format!("share_{i}"),
                     nonce_binding: format!("nonce_{i}"),
@@ -291,26 +320,26 @@ proptest! {
         n_existing_proposals in 0usize..=2,
         new_witness_idx in 0usize..=4,
     ) {
-        let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{i}"))
+        let witnesses: BTreeSet<AuthorityId> = (0..n_witnesses)
+            .map(authority_for_index)
             .collect();
         let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "hash".to_string(),
-            threshold,
+            consensus_id_for_label("cns1"),
+            operation_for_index(1),
+            hash_for_label("hash"),
+            threshold_from_usize(threshold),
             witnesses,
-            "w0".to_string(),
+            authority_for_index(0),
             PathSelection::FastPath,
         );
 
         // Add some existing proposals
         for i in 0..n_existing_proposals.min(n_witnesses) {
             state.proposals.push(ShareProposal {
-                witness: format!("w{i}"),
-                result_id: "rid1".to_string(),
+                witness: authority_for_index(i),
+                result_id: hash_for_label("rid1"),
                 share: ShareData {
                     share_value: format!("share_{i}"),
                     nonce_binding: format!("nonce_{i}"),
@@ -323,10 +352,10 @@ proptest! {
         prop_assert!(check_invariants(&state).is_ok(), "Initial state invalid");
 
         // Apply new share
-        let new_witness = format!("w{}", new_witness_idx % n_witnesses);
+        let new_witness = authority_for_index(new_witness_idx % n_witnesses);
         let proposal = ShareProposal {
             witness: new_witness,
-            result_id: "rid1".to_string(),
+            result_id: hash_for_label("rid1"),
             share: ShareData {
                 share_value: "new_share".to_string(),
                 nonce_binding: "new_nonce".to_string(),
@@ -350,26 +379,26 @@ proptest! {
         n_witnesses in 3usize..=5,
         n_proposals in 0usize..=2,
     ) {
-        let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{i}"))
+        let witnesses: BTreeSet<AuthorityId> = (0..n_witnesses)
+            .map(authority_for_index)
             .collect();
         let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "hash".to_string(),
-            threshold,
+            consensus_id_for_label("cns1"),
+            operation_for_index(1),
+            hash_for_label("hash"),
+            threshold_from_usize(threshold),
             witnesses,
-            "w0".to_string(),
+            authority_for_index(0),
             PathSelection::FastPath,
         );
 
         // Add some proposals (not enough to reach threshold)
         for i in 0..n_proposals.min(threshold.saturating_sub(1)) {
             state.proposals.push(ShareProposal {
-                witness: format!("w{i}"),
-                result_id: "rid1".to_string(),
+                witness: authority_for_index(i),
+                result_id: hash_for_label("rid1"),
                 share: ShareData {
                     share_value: format!("share_{i}"),
                     nonce_binding: format!("nonce_{i}"),
@@ -399,33 +428,33 @@ proptest! {
         n_witnesses in 3usize..=5,
         proposal_sequence in prop::collection::vec(0usize..5, 1..=5),
     ) {
-        let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{i}"))
+        let witnesses: BTreeSet<AuthorityId> = (0..n_witnesses)
+            .map(authority_for_index)
             .collect();
         let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "hash".to_string(),
-            threshold,
+            consensus_id_for_label("cns1"),
+            operation_for_index(1),
+            hash_for_label("hash"),
+            threshold_from_usize(threshold),
             witnesses,
-            "w0".to_string(),
+            authority_for_index(0),
             PathSelection::FastPath,
         );
 
         let mut prev_count = 0;
 
         for (seq_idx, witness_idx) in proposal_sequence.iter().enumerate() {
-            let witness = format!("w{}", witness_idx % n_witnesses);
+            let witness = authority_for_index(witness_idx % n_witnesses);
 
             if !state.is_active() {
                 break; // Consensus committed or failed
             }
 
             let proposal = ShareProposal {
-                witness: witness.clone(),
-                result_id: "rid1".to_string(),
+                witness,
+                result_id: hash_for_label("rid1"),
                 share: ShareData {
                     share_value: format!("share_{seq_idx}"),
                     nonce_binding: format!("nonce_{seq_idx}"),
@@ -469,26 +498,26 @@ proptest! {
         new_witness_idx in 0usize..=4,
         same_result in prop::bool::ANY,
     ) {
-        let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{i}"))
+        let witnesses: BTreeSet<AuthorityId> = (0..n_witnesses)
+            .map(authority_for_index)
             .collect();
         let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "hash".to_string(),
-            threshold,
+            consensus_id_for_label("cns1"),
+            operation_for_index(1),
+            hash_for_label("hash"),
+            threshold_from_usize(threshold),
             witnesses,
-            "w0".to_string(),
+            authority_for_index(0),
             PathSelection::FastPath,
         );
 
         // Add some existing proposals
         for i in 0..n_existing.min(n_witnesses) {
             state.proposals.push(ShareProposal {
-                witness: format!("w{i}"),
-                result_id: "rid1".to_string(),
+                witness: authority_for_index(i),
+                result_id: hash_for_label("rid1"),
                 share: ShareData {
                     share_value: format!("share_{i}"),
                     nonce_binding: format!("nonce_{i}"),
@@ -498,11 +527,11 @@ proptest! {
         }
 
         // Create new proposal
-        let new_witness = format!("w{}", new_witness_idx % n_witnesses);
+        let new_witness = authority_for_index(new_witness_idx % n_witnesses);
         let result_id = if same_result { "rid1" } else { "rid2" };
         let proposal = ShareProposal {
             witness: new_witness,
-            result_id: result_id.to_string(),
+            result_id: hash_for_label(result_id),
             share: ShareData {
                 share_value: "new_share".to_string(),
                 nonce_binding: "new_nonce".to_string(),
@@ -558,8 +587,8 @@ proptest! {
         n_witnesses in 3usize..=5,
         start_in_fallback in prop::bool::ANY,
     ) {
-        let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{i}"))
+        let witnesses: BTreeSet<AuthorityId> = (0..n_witnesses)
+            .map(authority_for_index)
             .collect();
         let threshold = n_witnesses.div_ceil(2);
 
@@ -570,12 +599,12 @@ proptest! {
         };
 
         let state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "hash".to_string(),
-            threshold,
+            consensus_id_for_label("cns1"),
+            operation_for_index(1),
+            hash_for_label("hash"),
+            threshold_from_usize(threshold),
             witnesses,
-            "w0".to_string(),
+            authority_for_index(0),
             path,
         );
 
@@ -610,18 +639,18 @@ proptest! {
         n_witnesses in 3usize..=5,
         phase_idx in 0usize..=4,
     ) {
-        let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{i}"))
+        let witnesses: BTreeSet<AuthorityId> = (0..n_witnesses)
+            .map(authority_for_index)
             .collect();
         let threshold = n_witnesses.div_ceil(2);
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "hash".to_string(),
-            threshold,
+            consensus_id_for_label("cns1"),
+            operation_for_index(1),
+            hash_for_label("hash"),
+            threshold_from_usize(threshold),
             witnesses,
-            "w0".to_string(),
+            authority_for_index(0),
             PathSelection::FastPath,
         );
 
@@ -664,28 +693,28 @@ proptest! {
         n_proposals in 0usize..=3,
         has_invalid_proposal in prop::bool::ANY,
     ) {
-        let witnesses: BTreeSet<String> = (0..n_witnesses)
-            .map(|i| format!("w{i}"))
+        let witnesses: BTreeSet<AuthorityId> = (0..n_witnesses)
+            .map(authority_for_index)
             .collect();
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "hash".to_string(),
-            threshold.min(n_witnesses),
+            consensus_id_for_label("cns1"),
+            operation_for_index(1),
+            hash_for_label("hash"),
+            threshold_from_usize(threshold.min(n_witnesses)),
             witnesses,
-            "w0".to_string(),
+            authority_for_index(0),
             PathSelection::FastPath,
         );
 
         // Override threshold to test threshold invariant
-        state.threshold = threshold;
+        state.threshold = threshold_from_usize(threshold);
 
         // Add some proposals
         for i in 0..n_proposals.min(n_witnesses) {
             state.proposals.push(ShareProposal {
-                witness: format!("w{i}"),
-                result_id: "rid1".to_string(),
+                witness: authority_for_index(i),
+                result_id: hash_for_label("rid1"),
                 share: ShareData {
                     share_value: format!("share_{i}"),
                     nonce_binding: format!("nonce_{i}"),
@@ -697,8 +726,8 @@ proptest! {
         // Optionally add invalid proposal (from non-witness)
         if has_invalid_proposal {
             state.proposals.push(ShareProposal {
-                witness: "invalid_witness".to_string(),
-                result_id: "rid1".to_string(),
+                witness: authority_for_index(99),
+                result_id: hash_for_label("rid1"),
                 share: ShareData {
                     share_value: "share".to_string(),
                     nonce_binding: "nonce".to_string(),
@@ -735,8 +764,8 @@ proptest! {
 fn test_threshold_equivalence_exact() {
     let proposals: Vec<ShareProposal> = (0..3)
         .map(|i| ShareProposal {
-            witness: format!("w{i}"),
-            result_id: "rid1".to_string(),
+            witness: authority_for_index(i),
+            result_id: hash_for_label("rid1"),
             share: ShareData {
                 share_value: format!("share_{i}"),
                 nonce_binding: format!("nonce_{i}"),
@@ -745,18 +774,18 @@ fn test_threshold_equivalence_exact() {
         })
         .collect();
 
-    let witnesses: BTreeSet<_> = (0..5).map(|i| format!("w{i}")).collect();
+    let witnesses: BTreeSet<_> = (0..5).map(authority_for_index).collect();
 
     // threshold = 2: should pass with 3 proposals
     assert!(check_threshold_ref(&proposals, 2));
 
     let mut state = ConsensusState::new(
-        "cns1".to_string(),
-        "op".to_string(),
-        "hash".to_string(),
-        2,
+        consensus_id_for_label("cns1"),
+        operation_for_index(1),
+        hash_for_label("hash"),
+        threshold(2),
         witnesses,
-        "w0".to_string(),
+        authority_for_index(0),
         PathSelection::FastPath,
     );
     state.proposals = proposals.clone();
@@ -766,7 +795,7 @@ fn test_threshold_equivalence_exact() {
     // threshold = 4: should fail with 3 proposals
     assert!(!check_threshold_ref(&proposals, 4));
 
-    state.threshold = 4;
+    state.threshold = threshold(4);
     assert!(!state.threshold_met());
 }
 
@@ -775,39 +804,39 @@ fn test_equivocator_detection_equivalence() {
     // Create votes with one equivocator (w1 votes for both rid1 and rid2)
     let votes = vec![
         Vote {
-            witness: "w0".to_string(),
-            result_id: "rid1".to_string(),
-            prestate_hash: "h".to_string(),
+            witness: authority_for_index(0),
+            result_id: hash_for_label("rid1"),
+            prestate_hash: hash_for_label("h"),
         },
         Vote {
-            witness: "w1".to_string(),
-            result_id: "rid1".to_string(),
-            prestate_hash: "h".to_string(),
+            witness: authority_for_index(1),
+            result_id: hash_for_label("rid1"),
+            prestate_hash: hash_for_label("h"),
         },
         Vote {
-            witness: "w1".to_string(),
-            result_id: "rid2".to_string(), // Equivocation!
-            prestate_hash: "h".to_string(),
+            witness: authority_for_index(1),
+            result_id: hash_for_label("rid2"), // Equivocation!
+            prestate_hash: hash_for_label("h"),
         },
         Vote {
-            witness: "w2".to_string(),
-            result_id: "rid1".to_string(),
-            prestate_hash: "h".to_string(),
+            witness: authority_for_index(2),
+            result_id: hash_for_label("rid1"),
+            prestate_hash: hash_for_label("h"),
         },
     ];
 
     // Reference: should detect w1
     let equivocators = detect_equivocators_ref(&votes);
-    assert!(equivocators.contains("w1"));
-    assert!(!equivocators.contains("w0"));
-    assert!(!equivocators.contains("w2"));
+    assert!(equivocators.contains(&authority_for_index(1)));
+    assert!(!equivocators.contains(&authority_for_index(0)));
+    assert!(!equivocators.contains(&authority_for_index(2)));
 
     // Production: convert to proposals and check
     let proposals: Vec<ShareProposal> = votes
         .iter()
         .map(|v| ShareProposal {
-            witness: v.witness.clone(),
-            result_id: v.result_id.clone(),
+            witness: v.witness,
+            result_id: v.result_id,
             share: ShareData {
                 share_value: "s".to_string(),
                 nonce_binding: "n".to_string(),
@@ -816,17 +845,17 @@ fn test_equivocator_detection_equivalence() {
         })
         .collect();
 
-    assert!(is_equivocator(&proposals, "w1"));
-    assert!(!is_equivocator(&proposals, "w0"));
-    assert!(!is_equivocator(&proposals, "w2"));
+    assert!(is_equivocator(&proposals, &authority_for_index(1)));
+    assert!(!is_equivocator(&proposals, &authority_for_index(0)));
+    assert!(!is_equivocator(&proposals, &authority_for_index(2)));
 }
 
 #[test]
 fn test_aggregation_bindings() {
     let proposals: Vec<ShareProposal> = (0..3)
         .map(|i| ShareProposal {
-            witness: format!("w{i}"),
-            result_id: "rid1".to_string(),
+            witness: authority_for_index(i),
+            result_id: hash_for_label("rid1"),
             share: ShareData {
                 share_value: format!("share_{i}"),
                 nonce_binding: format!("nonce_{i}"),
@@ -838,8 +867,8 @@ fn test_aggregation_bindings() {
     let sig = aggregate_shares_ref(&proposals, 2).unwrap_or_else(|| panic!("Should aggregate"));
 
     // Verify bindings extracted correctly
-    assert_eq!(sig.bound_cid, "cns1");
-    assert_eq!(sig.bound_rid, "rid1");
-    assert_eq!(sig.bound_phash, "hash123");
+    assert_eq!(sig.bound_cid, consensus_id_for_label("cns1"));
+    assert_eq!(sig.bound_rid, hash_for_label("rid1"));
+    assert_eq!(sig.bound_phash, hash_for_label("hash123"));
     assert_eq!(sig.signer_set.len(), 3);
 }

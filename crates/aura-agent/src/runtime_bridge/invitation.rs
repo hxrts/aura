@@ -6,7 +6,7 @@ pub(super) fn convert_invitation_to_bridge_info(
     invitation: &crate::handlers::invitation::Invitation,
 ) -> InvitationInfo {
     InvitationInfo {
-        invitation_id: invitation.invitation_id.clone(),
+        invitation_id: invitation.invitation_id.to_string(),
         sender_id: invitation.sender_id,
         receiver_id: invitation.receiver_id,
         invitation_type: convert_invitation_type_to_bridge(&invitation.invitation_type),
@@ -52,7 +52,7 @@ pub(super) fn convert_invitation_type_to_bridge(
             initiator_device_id: *initiator_device_id,
             device_id: *device_id,
             device_name: device_name.clone(),
-            ceremony_id: ceremony_id.clone(),
+            ceremony_id: ceremony_id.to_string(),
             pending_epoch: Epoch::new(*pending_epoch),
         },
     }

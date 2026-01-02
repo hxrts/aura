@@ -20,10 +20,10 @@
 //! // Create an invitation fact using backward-compatible constructor
 //! let fact = InvitationFact::sent_ms(
 //!     context_id,
-//!     "inv-123".to_string(),
+//!     InvitationId::new("inv-123"),
 //!     sender_id,
 //!     receiver_id,
-//!     "guardian".to_string(),
+//!     InvitationType::Contact { nickname: None },
 //!     1234567890,
 //!     Some(1234567890 + 86400000),
 //!     Some("Please be my guardian".to_string()),
@@ -36,7 +36,7 @@
 //! registry.register::<InvitationFact>("invitation", Box::new(InvitationFactReducer));
 //! ```
 
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId, InvitationId};
 use aura_core::threshold::AgreementMode;
 use aura_core::time::PhysicalTime;
 use aura_journal::{
@@ -45,6 +45,7 @@ use aura_journal::{
 };
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
+use crate::InvitationType;
 
 /// Type identifier for invitation facts
 pub const INVITATION_FACT_TYPE_ID: &str = "invitation";
@@ -71,13 +72,13 @@ pub enum InvitationFact {
         /// Relational context for the invitation
         context_id: ContextId,
         /// Unique invitation identifier
-        invitation_id: String,
+        invitation_id: InvitationId,
         /// Authority sending the invitation
         sender_id: AuthorityId,
         /// Authority receiving the invitation
         receiver_id: AuthorityId,
         /// Type of invitation: "guardian", "channel", "contact", "device"
-        invitation_type: String,
+        invitation_type: InvitationType,
         /// Timestamp when invitation was sent (uses unified time system)
         sent_at: PhysicalTime,
         /// Optional expiration timestamp (uses unified time system)
@@ -88,7 +89,7 @@ pub enum InvitationFact {
     /// Invitation accepted
     Accepted {
         /// Invitation being accepted
-        invitation_id: String,
+        invitation_id: InvitationId,
         /// Authority accepting the invitation
         acceptor_id: AuthorityId,
         /// Timestamp when invitation was accepted (uses unified time system)
@@ -97,7 +98,7 @@ pub enum InvitationFact {
     /// Invitation declined
     Declined {
         /// Invitation being declined
-        invitation_id: String,
+        invitation_id: InvitationId,
         /// Authority declining the invitation
         decliner_id: AuthorityId,
         /// Timestamp when invitation was declined (uses unified time system)
@@ -106,7 +107,7 @@ pub enum InvitationFact {
     /// Invitation cancelled by sender
     Cancelled {
         /// Invitation being cancelled
-        invitation_id: String,
+        invitation_id: InvitationId,
         /// Authority cancelling the invitation (must be sender)
         canceller_id: AuthorityId,
         /// Timestamp when invitation was cancelled (uses unified time system)
@@ -119,7 +120,7 @@ pub enum InvitationFact {
     /// Ceremony initiated by sender
     CeremonyInitiated {
         /// Unique ceremony identifier
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         /// Authority initiating the ceremony
         sender: String,
         /// Agreement mode at initiation (A1)
@@ -135,7 +136,7 @@ pub enum InvitationFact {
     /// Acceptance received from acceptor
     CeremonyAcceptanceReceived {
         /// Ceremony identifier
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         /// Agreement mode after acceptance (A2)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agreement_mode: Option<AgreementMode>,
@@ -149,7 +150,7 @@ pub enum InvitationFact {
     /// Ceremony committed (relationship established)
     CeremonyCommitted {
         /// Ceremony identifier
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         /// Resulting relationship identifier
         relationship_id: String,
         /// Agreement mode after commit (A3)
@@ -165,7 +166,7 @@ pub enum InvitationFact {
     /// Ceremony aborted
     CeremonyAborted {
         /// Ceremony identifier
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         /// Reason for abortion
         reason: String,
         /// Optional trace identifier for ceremony correlation
@@ -181,9 +182,9 @@ pub enum InvitationFact {
     /// should stop processing immediately. Supersession propagates via anti-entropy.
     CeremonySuperseded {
         /// The ceremony being superseded (old ceremony)
-        superseded_ceremony_id: String,
+        superseded_ceremony_id: CeremonyId,
         /// The ceremony that supersedes it (new ceremony)
-        superseding_ceremony_id: String,
+        superseding_ceremony_id: CeremonyId,
         /// Reason for supersession (e.g., "prestate_stale", "newer_request", "timeout")
         reason: String,
         /// Optional trace identifier for ceremony correlation
@@ -195,22 +196,29 @@ pub enum InvitationFact {
 }
 
 impl InvitationFact {
-    /// Extract the invitation_id from any variant (returns empty for ceremony facts)
-    pub fn invitation_id(&self) -> &str {
+    /// Extract the invitation_id for invitation-scoped facts.
+    pub fn invitation_id(&self) -> Option<&InvitationId> {
         match self {
-            InvitationFact::Sent { invitation_id, .. } => invitation_id,
-            InvitationFact::Accepted { invitation_id, .. } => invitation_id,
-            InvitationFact::Declined { invitation_id, .. } => invitation_id,
-            InvitationFact::Cancelled { invitation_id, .. } => invitation_id,
-            // Ceremony facts use ceremony_id, not invitation_id
-            InvitationFact::CeremonyInitiated { ceremony_id, .. } => ceremony_id,
-            InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => ceremony_id,
-            InvitationFact::CeremonyCommitted { ceremony_id, .. } => ceremony_id,
-            InvitationFact::CeremonyAborted { ceremony_id, .. } => ceremony_id,
+            InvitationFact::Sent { invitation_id, .. }
+            | InvitationFact::Accepted { invitation_id, .. }
+            | InvitationFact::Declined { invitation_id, .. }
+            | InvitationFact::Cancelled { invitation_id, .. } => Some(invitation_id),
+            _ => None,
+        }
+    }
+
+    /// Extract the ceremony_id for ceremony-scoped facts.
+    pub fn ceremony_id(&self) -> Option<&CeremonyId> {
+        match self {
+            InvitationFact::CeremonyInitiated { ceremony_id, .. }
+            | InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. }
+            | InvitationFact::CeremonyCommitted { ceremony_id, .. }
+            | InvitationFact::CeremonyAborted { ceremony_id, .. } => Some(ceremony_id),
             InvitationFact::CeremonySuperseded {
                 superseded_ceremony_id,
                 ..
-            } => superseded_ceremony_id,
+            } => Some(superseded_ceremony_id),
+            _ => None,
         }
     }
 
@@ -263,35 +271,35 @@ impl InvitationFact {
         match self {
             InvitationFact::Sent { invitation_id, .. } => InvitationFactKey {
                 sub_type: "invitation-sent",
-                data: invitation_id.as_bytes().to_vec(),
+                data: invitation_id.as_str().as_bytes().to_vec(),
             },
             InvitationFact::Accepted { invitation_id, .. } => InvitationFactKey {
                 sub_type: "invitation-accepted",
-                data: invitation_id.as_bytes().to_vec(),
+                data: invitation_id.as_str().as_bytes().to_vec(),
             },
             InvitationFact::Declined { invitation_id, .. } => InvitationFactKey {
                 sub_type: "invitation-declined",
-                data: invitation_id.as_bytes().to_vec(),
+                data: invitation_id.as_str().as_bytes().to_vec(),
             },
             InvitationFact::Cancelled { invitation_id, .. } => InvitationFactKey {
                 sub_type: "invitation-cancelled",
-                data: invitation_id.as_bytes().to_vec(),
+                data: invitation_id.as_str().as_bytes().to_vec(),
             },
             InvitationFact::CeremonyInitiated { ceremony_id, .. } => InvitationFactKey {
                 sub_type: "ceremony-initiated",
-                data: ceremony_id.as_bytes().to_vec(),
+                data: ceremony_id.as_str().as_bytes().to_vec(),
             },
             InvitationFact::CeremonyAcceptanceReceived { ceremony_id, .. } => InvitationFactKey {
                 sub_type: "ceremony-acceptance-received",
-                data: ceremony_id.as_bytes().to_vec(),
+                data: ceremony_id.as_str().as_bytes().to_vec(),
             },
             InvitationFact::CeremonyCommitted { ceremony_id, .. } => InvitationFactKey {
                 sub_type: "ceremony-committed",
-                data: ceremony_id.as_bytes().to_vec(),
+                data: ceremony_id.as_str().as_bytes().to_vec(),
             },
             InvitationFact::CeremonyAborted { ceremony_id, .. } => InvitationFactKey {
                 sub_type: "ceremony-aborted",
-                data: ceremony_id.as_bytes().to_vec(),
+                data: ceremony_id.as_str().as_bytes().to_vec(),
             },
             InvitationFact::CeremonySuperseded {
                 superseded_ceremony_id,
@@ -299,9 +307,9 @@ impl InvitationFact {
                 ..
             } => {
                 // Key includes both IDs for unique identification
-                let mut data = superseded_ceremony_id.as_bytes().to_vec();
+                let mut data = superseded_ceremony_id.as_str().as_bytes().to_vec();
                 data.extend_from_slice(b":");
-                data.extend_from_slice(superseding_ceremony_id.as_bytes());
+                data.extend_from_slice(superseding_ceremony_id.as_str().as_bytes());
                 InvitationFactKey {
                     sub_type: "ceremony-superseded",
                     data,
@@ -314,10 +322,10 @@ impl InvitationFact {
     #[allow(clippy::too_many_arguments)]
     pub fn sent_ms(
         context_id: ContextId,
-        invitation_id: String,
+        invitation_id: InvitationId,
         sender_id: AuthorityId,
         receiver_id: AuthorityId,
-        invitation_type: String,
+        invitation_type: InvitationType,
         sent_at_ms: u64,
         expires_at_ms: Option<u64>,
         message: Option<String>,
@@ -342,7 +350,7 @@ impl InvitationFact {
 
     /// Create an Accepted fact with millisecond timestamp (backward compatibility)
     pub fn accepted_ms(
-        invitation_id: String,
+        invitation_id: InvitationId,
         acceptor_id: AuthorityId,
         accepted_at_ms: u64,
     ) -> Self {
@@ -358,7 +366,7 @@ impl InvitationFact {
 
     /// Create a Declined fact with millisecond timestamp (backward compatibility)
     pub fn declined_ms(
-        invitation_id: String,
+        invitation_id: InvitationId,
         decliner_id: AuthorityId,
         declined_at_ms: u64,
     ) -> Self {
@@ -374,7 +382,7 @@ impl InvitationFact {
 
     /// Create a Cancelled fact with millisecond timestamp (backward compatibility)
     pub fn cancelled_ms(
-        invitation_id: String,
+        invitation_id: InvitationId,
         canceller_id: AuthorityId,
         cancelled_at_ms: u64,
     ) -> Self {
@@ -440,10 +448,12 @@ mod tests {
     fn test_invitation_fact_serialization() {
         let fact = InvitationFact::sent_ms(
             test_context_id(),
-            "inv-123".to_string(),
+            InvitationId::new("inv-123"),
             test_authority_id(1),
             test_authority_id(2),
-            "guardian".to_string(),
+            InvitationType::Guardian {
+                subject_authority: test_authority_id(9),
+            },
             1234567890,
             Some(1234567890 + 86400000),
             Some("Please be my guardian".to_string()),
@@ -457,8 +467,11 @@ mod tests {
 
     #[test]
     fn test_invitation_fact_to_generic() {
-        let fact =
-            InvitationFact::accepted_ms("inv-456".to_string(), test_authority_id(3), 1234567899);
+        let fact = InvitationFact::accepted_ms(
+            InvitationId::new("inv-456"),
+            test_authority_id(3),
+            1234567899,
+        );
 
         let generic = fact.to_generic();
 
@@ -483,10 +496,10 @@ mod tests {
 
         let fact = InvitationFact::sent_ms(
             test_context_id(),
-            "inv-789".to_string(),
+            InvitationId::new("inv-789"),
             test_authority_id(4),
             test_authority_id(5),
-            "contact".to_string(),
+            InvitationType::Contact { nickname: None },
             0,
             None,
             None,
@@ -509,10 +522,10 @@ mod tests {
 
         let fact = InvitationFact::sent_ms(
             test_context_id(),
-            "inv-789".to_string(),
+            InvitationId::new("inv-789"),
             test_authority_id(4),
             test_authority_id(5),
-            "contact".to_string(),
+            InvitationType::Contact { nickname: None },
             0,
             None,
             None,
@@ -525,7 +538,8 @@ mod tests {
 
     #[test]
     fn test_binding_key_derivation() {
-        let fact = InvitationFact::declined_ms("inv-42".to_string(), test_authority_id(4), 1234);
+        let fact =
+            InvitationFact::declined_ms(InvitationId::new("inv-42"), test_authority_id(4), 1234);
 
         let key = fact.binding_key();
         assert_eq!(key.sub_type, "invitation-declined");
@@ -538,10 +552,10 @@ mod tests {
         let context_id = test_context_id();
         let fact = InvitationFact::sent_ms(
             context_id,
-            "inv-100".to_string(),
+            InvitationId::new("inv-100"),
             test_authority_id(1),
             test_authority_id(2),
-            "contact".to_string(),
+            InvitationType::Contact { nickname: None },
             0,
             None,
             None,
@@ -564,23 +578,25 @@ mod tests {
         let facts = [
             InvitationFact::sent_ms(
                 test_context_id(),
-                "inv-1".to_string(),
+                InvitationId::new("inv-1"),
                 test_authority_id(1),
                 test_authority_id(2),
-                "guardian".to_string(),
+                InvitationType::Guardian {
+                    subject_authority: test_authority_id(9),
+                },
                 0,
                 None,
                 None,
             ),
-            InvitationFact::accepted_ms("inv-2".to_string(), test_authority_id(3), 0),
-            InvitationFact::declined_ms("inv-3".to_string(), test_authority_id(4), 0),
-            InvitationFact::cancelled_ms("inv-4".to_string(), test_authority_id(5), 0),
+            InvitationFact::accepted_ms(InvitationId::new("inv-2"), test_authority_id(3), 0),
+            InvitationFact::declined_ms(InvitationId::new("inv-3"), test_authority_id(4), 0),
+            InvitationFact::cancelled_ms(InvitationId::new("inv-4"), test_authority_id(5), 0),
         ];
 
-        assert_eq!(facts[0].invitation_id(), "inv-1");
-        assert_eq!(facts[1].invitation_id(), "inv-2");
-        assert_eq!(facts[2].invitation_id(), "inv-3");
-        assert_eq!(facts[3].invitation_id(), "inv-4");
+        assert_eq!(facts[0].invitation_id().unwrap().as_str(), "inv-1");
+        assert_eq!(facts[1].invitation_id().unwrap().as_str(), "inv-2");
+        assert_eq!(facts[2].invitation_id().unwrap().as_str(), "inv-3");
+        assert_eq!(facts[3].invitation_id().unwrap().as_str(), "inv-4");
     }
 
     #[test]
@@ -588,17 +604,17 @@ mod tests {
         let facts = [
             InvitationFact::sent_ms(
                 test_context_id(),
-                "x".to_string(),
+                InvitationId::new("x"),
                 test_authority_id(1),
                 test_authority_id(2),
-                "t".to_string(),
+                InvitationType::Contact { nickname: None },
                 0,
                 None,
                 None,
             ),
-            InvitationFact::accepted_ms("x".to_string(), test_authority_id(3), 0),
-            InvitationFact::declined_ms("x".to_string(), test_authority_id(4), 0),
-            InvitationFact::cancelled_ms("x".to_string(), test_authority_id(5), 0),
+            InvitationFact::accepted_ms(InvitationId::new("x"), test_authority_id(3), 0),
+            InvitationFact::declined_ms(InvitationId::new("x"), test_authority_id(4), 0),
+            InvitationFact::cancelled_ms(InvitationId::new("x"), test_authority_id(5), 0),
         ];
 
         for fact in facts {
@@ -610,10 +626,12 @@ mod tests {
     fn test_timestamp_ms_backward_compat() {
         let sent = InvitationFact::sent_ms(
             test_context_id(),
-            "inv".to_string(),
+            InvitationId::new("inv"),
             test_authority_id(1),
             test_authority_id(2),
-            "guardian".to_string(),
+            InvitationType::Guardian {
+                subject_authority: test_authority_id(9),
+            },
             1234567890,
             None,
             None,
@@ -621,15 +639,18 @@ mod tests {
         assert_eq!(sent.timestamp_ms(), 1234567890);
 
         let accepted =
-            InvitationFact::accepted_ms("inv".to_string(), test_authority_id(1), 1111111111);
+            InvitationFact::accepted_ms(InvitationId::new("inv"), test_authority_id(1), 1111111111);
         assert_eq!(accepted.timestamp_ms(), 1111111111);
 
         let declined =
-            InvitationFact::declined_ms("inv".to_string(), test_authority_id(1), 2222222222);
+            InvitationFact::declined_ms(InvitationId::new("inv"), test_authority_id(1), 2222222222);
         assert_eq!(declined.timestamp_ms(), 2222222222);
 
-        let cancelled =
-            InvitationFact::cancelled_ms("inv".to_string(), test_authority_id(1), 3333333333);
+        let cancelled = InvitationFact::cancelled_ms(
+            InvitationId::new("inv"),
+            test_authority_id(1),
+            3333333333,
+        );
         assert_eq!(cancelled.timestamp_ms(), 3333333333);
     }
 }

@@ -21,7 +21,7 @@
 //! registry.register(RECOVERY_FACT_TYPE_ID, Box::new(RecoveryViewReducer));
 //! ```
 
-use aura_composition::{IntoViewDelta, ViewDelta, ViewDeltaReducer};
+use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReducer};
 use aura_core::identifiers::AuthorityId;
 use aura_journal::DomainFact;
 use hex;
@@ -190,6 +190,337 @@ pub enum RecoveryDelta {
         /// Timestamp when failed
         failed_at: u64,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RecoveryDeltaKey {
+    GuardianSetup,
+    GuardianResponse(String),
+    GuardianProgress,
+    MembershipProposal(String),
+    MembershipVote(String, String),
+    MembershipResult(String),
+    Recovery(String),
+    RecoveryShare(String),
+    RecoveryDispute,
+}
+
+impl ComposableDelta for RecoveryDelta {
+    type Key = RecoveryDeltaKey;
+
+    fn key(&self) -> Self::Key {
+        match self {
+            RecoveryDelta::GuardianSetupStarted { .. }
+            | RecoveryDelta::GuardianSetupCompleted { .. }
+            | RecoveryDelta::GuardianSetupFailed { .. } => RecoveryDeltaKey::GuardianSetup,
+            RecoveryDelta::GuardianResponded { guardian_id, .. } => {
+                RecoveryDeltaKey::GuardianResponse(guardian_id.clone())
+            }
+            RecoveryDelta::GuardianSetupProgress { .. } => RecoveryDeltaKey::GuardianProgress,
+            RecoveryDelta::MembershipProposalCreated { proposal_hash, .. } => {
+                RecoveryDeltaKey::MembershipProposal(proposal_hash.clone())
+            }
+            RecoveryDelta::MembershipVoteReceived {
+                proposal_hash,
+                voter_id,
+                ..
+            } => RecoveryDeltaKey::MembershipVote(proposal_hash.clone(), voter_id.clone()),
+            RecoveryDelta::MembershipChangeApplied { proposal_hash, .. }
+            | RecoveryDelta::MembershipChangeRejected { proposal_hash, .. } => {
+                RecoveryDeltaKey::MembershipResult(proposal_hash.clone())
+            }
+            RecoveryDelta::RecoveryStarted { account_id, .. }
+            | RecoveryDelta::RecoveryApproved { account_id, .. }
+            | RecoveryDelta::RecoverySucceeded { account_id, .. }
+            | RecoveryDelta::RecoveryFailed { account_id, .. } => {
+                RecoveryDeltaKey::Recovery(account_id.clone())
+            }
+            RecoveryDelta::RecoveryShareReceived { guardian_id, .. } => {
+                RecoveryDeltaKey::RecoveryShare(guardian_id.clone())
+            }
+            RecoveryDelta::RecoveryDisputeWindow { .. } => RecoveryDeltaKey::RecoveryDispute,
+        }
+    }
+
+    fn try_merge(&mut self, other: Self) -> bool {
+        match (self, other) {
+            (
+                RecoveryDelta::GuardianSetupStarted {
+                    started_at,
+                    guardian_count: count,
+                    threshold: thresh,
+                },
+                RecoveryDelta::GuardianSetupStarted {
+                    started_at: other_ts,
+                    guardian_count,
+                    threshold,
+                },
+            ) => {
+                if other_ts >= *started_at {
+                    *started_at = other_ts;
+                    *count = guardian_count;
+                    *thresh = threshold;
+                }
+                true
+            }
+            (
+                RecoveryDelta::GuardianResponded {
+                    responded_at,
+                    guardian_id: id,
+                    accepted: acc,
+                },
+                RecoveryDelta::GuardianResponded {
+                    responded_at: other_ts,
+                    guardian_id,
+                    accepted,
+                },
+            ) => {
+                if other_ts >= *responded_at {
+                    *responded_at = other_ts;
+                    *id = guardian_id;
+                    *acc = accepted;
+                }
+                true
+            }
+            (
+                RecoveryDelta::GuardianSetupProgress {
+                    accepted_count: acc,
+                    total_count: total,
+                    threshold: thresh,
+                },
+                RecoveryDelta::GuardianSetupProgress {
+                    accepted_count,
+                    total_count,
+                    threshold,
+                },
+            ) => {
+                *acc = accepted_count;
+                *total = total_count;
+                *thresh = threshold;
+                true
+            }
+            (
+                RecoveryDelta::GuardianSetupCompleted {
+                    completed_at,
+                    guardian_ids: ids,
+                    threshold: thresh,
+                },
+                RecoveryDelta::GuardianSetupCompleted {
+                    completed_at: other_ts,
+                    guardian_ids,
+                    threshold,
+                },
+            ) => {
+                if other_ts >= *completed_at {
+                    *completed_at = other_ts;
+                    *ids = guardian_ids;
+                    *thresh = threshold;
+                }
+                true
+            }
+            (
+                RecoveryDelta::GuardianSetupFailed {
+                    failed_at,
+                    reason: r,
+                },
+                RecoveryDelta::GuardianSetupFailed {
+                    failed_at: other_ts,
+                    reason,
+                },
+            ) => {
+                if other_ts >= *failed_at {
+                    *failed_at = other_ts;
+                    *r = reason;
+                }
+                true
+            }
+            (
+                RecoveryDelta::MembershipProposalCreated {
+                    proposed_at,
+                    proposal_hash: hash,
+                    change_description: desc,
+                },
+                RecoveryDelta::MembershipProposalCreated {
+                    proposed_at: other_ts,
+                    proposal_hash,
+                    change_description,
+                },
+            ) => {
+                if other_ts >= *proposed_at {
+                    *proposed_at = other_ts;
+                    *hash = proposal_hash;
+                    *desc = change_description;
+                }
+                true
+            }
+            (
+                RecoveryDelta::MembershipVoteReceived {
+                    proposal_hash: hash,
+                    voter_id: voter,
+                    approved: ok,
+                    votes_for: vf,
+                    votes_against: va,
+                },
+                RecoveryDelta::MembershipVoteReceived {
+                    proposal_hash,
+                    voter_id,
+                    approved,
+                    votes_for,
+                    votes_against,
+                },
+            ) => {
+                *hash = proposal_hash;
+                *voter = voter_id;
+                *ok = approved;
+                *vf = votes_for;
+                *va = votes_against;
+                true
+            }
+            (
+                RecoveryDelta::MembershipChangeApplied {
+                    proposal_hash: hash,
+                    new_guardian_count: count,
+                    new_threshold: thresh,
+                    applied_at: ts,
+                },
+                RecoveryDelta::MembershipChangeApplied {
+                    proposal_hash,
+                    new_guardian_count,
+                    new_threshold,
+                    applied_at,
+                },
+            ) => {
+                *hash = proposal_hash;
+                *count = new_guardian_count;
+                *thresh = new_threshold;
+                *ts = applied_at;
+                true
+            }
+            (
+                RecoveryDelta::MembershipChangeRejected {
+                    rejected_at,
+                    proposal_hash: hash,
+                    reason: r,
+                },
+                RecoveryDelta::MembershipChangeRejected {
+                    rejected_at: other_ts,
+                    proposal_hash,
+                    reason,
+                },
+            ) => {
+                if other_ts >= *rejected_at {
+                    *rejected_at = other_ts;
+                    *hash = proposal_hash;
+                    *r = reason;
+                }
+                true
+            }
+            (
+                RecoveryDelta::RecoveryStarted {
+                    started_at,
+                    account_id: id,
+                    shares_needed: shares,
+                },
+                RecoveryDelta::RecoveryStarted {
+                    started_at: other_ts,
+                    account_id,
+                    shares_needed,
+                },
+            ) => {
+                if other_ts >= *started_at {
+                    *started_at = other_ts;
+                    *id = account_id;
+                    *shares = shares_needed;
+                }
+                true
+            }
+            (
+                RecoveryDelta::RecoveryShareReceived {
+                    guardian_id: id,
+                    shares_received: recv,
+                    shares_needed: need,
+                },
+                RecoveryDelta::RecoveryShareReceived {
+                    guardian_id,
+                    shares_received,
+                    shares_needed,
+                },
+            ) => {
+                *id = guardian_id;
+                *recv = shares_received;
+                *need = shares_needed;
+                true
+            }
+            (
+                RecoveryDelta::RecoveryApproved {
+                    approved_at,
+                    account_id: id,
+                },
+                RecoveryDelta::RecoveryApproved {
+                    approved_at: other_ts,
+                    account_id,
+                },
+            ) => {
+                if other_ts >= *approved_at {
+                    *approved_at = other_ts;
+                    *id = account_id;
+                }
+                true
+            }
+            (
+                RecoveryDelta::RecoveryDisputeWindow {
+                    dispute_end_ms,
+                    disputes_filed: filed,
+                },
+                RecoveryDelta::RecoveryDisputeWindow {
+                    dispute_end_ms: other_end,
+                    disputes_filed,
+                },
+            ) => {
+                if other_end >= *dispute_end_ms {
+                    *dispute_end_ms = other_end;
+                    *filed = disputes_filed;
+                }
+                true
+            }
+            (
+                RecoveryDelta::RecoverySucceeded {
+                    completed_at,
+                    account_id: id,
+                },
+                RecoveryDelta::RecoverySucceeded {
+                    completed_at: other_ts,
+                    account_id,
+                },
+            ) => {
+                if other_ts >= *completed_at {
+                    *completed_at = other_ts;
+                    *id = account_id;
+                }
+                true
+            }
+            (
+                RecoveryDelta::RecoveryFailed {
+                    failed_at,
+                    account_id: id,
+                    reason: r,
+                },
+                RecoveryDelta::RecoveryFailed {
+                    failed_at: other_ts,
+                    account_id,
+                    reason,
+                },
+            ) => {
+                if other_ts >= *failed_at {
+                    *failed_at = other_ts;
+                    *id = account_id;
+                    *r = reason;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Helper to format an AuthorityId for display
@@ -410,6 +741,7 @@ impl ViewDeltaReducer for RecoveryViewReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_composition::compact_deltas;
     use aura_composition::downcast_delta;
     use aura_core::{identifiers::ContextId, time::PhysicalTime, Hash32};
 
@@ -673,5 +1005,36 @@ mod tests {
         keys_ab.sort();
         keys_ba.sort();
         assert_eq!(keys_ab, keys_ba);
+    }
+
+    #[test]
+    fn test_compact_deltas_merges_progress() {
+        let deltas = vec![
+            RecoveryDelta::GuardianSetupProgress {
+                accepted_count: 1,
+                total_count: 3,
+                threshold: 2,
+            },
+            RecoveryDelta::GuardianSetupProgress {
+                accepted_count: 2,
+                total_count: 3,
+                threshold: 2,
+            },
+        ];
+
+        let compacted = compact_deltas(deltas);
+        assert_eq!(compacted.len(), 1);
+        match &compacted[0] {
+            RecoveryDelta::GuardianSetupProgress {
+                accepted_count,
+                total_count,
+                threshold,
+            } => {
+                assert_eq!(*accepted_count, 2);
+                assert_eq!(*total_count, 3);
+                assert_eq!(*threshold, 2);
+            }
+            _ => panic!("Expected GuardianSetupProgress after compaction"),
+        }
     }
 }

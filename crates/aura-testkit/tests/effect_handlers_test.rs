@@ -1,5 +1,5 @@
 #![allow(warnings)]
-#![cfg(any())]
+#![cfg(any())]  // Test file disabled - requires significant API updates to match refactored crates
 #![allow(missing_docs)]
 //! Tests for effect handlers
 //!
@@ -232,13 +232,16 @@ async fn test_console_effects() -> AuraResult<()> {
     let _ = real_handler.log_debug("Debug message").await;
 
     // Test event emission
+    use aura_core::identifiers::SessionId;
     use aura_protocol::effects::ConsoleEvent;
+    use aura_protocol::types::ProtocolType;
+    use uuid::Uuid;
 
     let fixture = DeviceTestFixture::new(0);
     let _device_id = fixture.device_id();
     let _event = ConsoleEvent::ProtocolStarted {
-        protocol_id: String::from("test_protocol"),
-        protocol_type: String::from("DKD"),
+        protocol_id: SessionId::from_uuid(Uuid::from_u128(0)),
+        protocol_type: ProtocolType::Dkd,
     };
     // Note: emit_event method not available on RealConsoleHandler - skip for now
     Ok(())
@@ -256,22 +259,25 @@ async fn test_effect_api_effects() -> AuraResult<()> {
 /// Test choreographic effects
 #[aura_test]
 async fn test_choreographic_effects() -> AuraResult<()> {
-    use aura_protocol::effects::{ChoreographicRole, ChoreographyEvent};
+    use aura_protocol::effects::{ChoreographicRole, ChoreographyEvent, RoleIndex};
     use uuid::Uuid;
 
     let fixture = DeviceTestFixture::new(1);
-    let device_id = fixture.device_id().0; // Convert to Uuid
-    let memory_handler = MemoryChoreographicHandler::new(device_id);
+    let device_id = fixture.device_id();
+    let memory_handler = MemoryChoreographicHandler::new(device_id.0);
 
     // Test role information
     let current_role = memory_handler.current_role();
-    assert_eq!(current_role.device_id, device_id);
+    assert_eq!(current_role.device_id, device_id.0);
 
     // Test session management - roles are populated after session starts
     let session_id = Uuid::from_u128(12345);
-    let role1 = ChoreographicRole::new(device_id, 0);
+    let role1 = ChoreographicRole::new(device_id, RoleIndex::new(0).expect("role index"));
     let fixture2 = DeviceTestFixture::new(2);
-    let role2 = ChoreographicRole::new(fixture2.device_id().0, 1);
+    let role2 = ChoreographicRole::new(
+        fixture2.device_id(),
+        RoleIndex::new(1).expect("role index"),
+    );
     let participants = vec![role1, role2];
 
     memory_handler

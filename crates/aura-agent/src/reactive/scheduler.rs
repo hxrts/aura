@@ -726,7 +726,7 @@ mod tests {
     use crate::fact_registry::build_fact_registry;
     use aura_chat::{ChatDelta, ChatFact, CHAT_FACT_TYPE_ID};
     use aura_core::{
-        identifiers::{AuthorityId, ChannelId, ContextId},
+        identifiers::{AuthorityId, ChannelId, ContextId, InvitationId},
         time::{OrderTime, PhysicalTime, TimeStamp},
     };
     use aura_invitation::{InvitationDelta, InvitationFact, INVITATION_FACT_TYPE_ID};
@@ -1084,17 +1084,17 @@ mod tests {
         // Create proper InvitationFact instances using backward-compatible constructors
         let sent_fact = InvitationFact::sent_ms(
             test_context_id(),
-            "inv-123".to_string(),
+            InvitationId::new("inv-123"),
             AuthorityId::new_from_entropy([1u8; 32]),
             AuthorityId::new_from_entropy([2u8; 32]),
-            "guardian".to_string(),
+            aura_invitation::InvitationType::Contact { nickname: None },
             1234567890,
             None,
             None,
         );
 
         let accepted_fact = InvitationFact::accepted_ms(
-            "inv-123".to_string(),
+            InvitationId::new("inv-123"),
             AuthorityId::new_from_entropy([2u8; 32]),
             1234567900,
         );

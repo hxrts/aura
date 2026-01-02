@@ -80,7 +80,7 @@ pub mod types {
         AppConfig, AppCore, Intent, IntentError, InvitationType, Screen, StateSnapshot,
     };
     pub use crate::errors::{
-        AppError, AuthFailure, ErrorCategory, NetworkErrorCode, SyncStage, ToastSeverity,
+        AppError, AuthFailure, ErrorCategory, NetworkErrorCode, SyncStage, ToastLevel,
     };
     pub use crate::runtime_bridge::{
         BoxedRuntimeBridge, CeremonyKind, InvitationBridgeType, LanPeerInfo, RendezvousStatus,
@@ -141,7 +141,7 @@ pub mod types {
     // Toast and modal lifecycle types
     pub use crate::views::notifications::{
         duration_ticks, modal_can_user_dismiss, ms_to_ticks, should_auto_dismiss,
-        should_interrupt_modal, ticks_to_ms, will_auto_dismiss, ModalPriority, ToastLevel,
+        should_interrupt_modal, ticks_to_ms, will_auto_dismiss, ModalPriority,
         DEFAULT_TOAST_DURATION_MS, DEFAULT_TOAST_TICKS, MAX_PENDING_MODALS, MAX_PENDING_TOASTS,
         NO_AUTO_DISMISS, TOAST_TICK_RATE_MS,
     };

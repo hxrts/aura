@@ -15,8 +15,9 @@
 
 use aura_core::effects::{NetworkEffects, NetworkError, PhysicalTimeEffects, StorageEffects};
 use aura_core::{identifiers::DeviceId, ContextId};
-use aura_effects::transport::{TransportConfig, TransportError};
+use aura_effects::transport::{NonZeroDuration, TransportConfig, TransportError};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 
 /// Transport coordination configuration
 #[derive(Debug, Clone)]
@@ -177,10 +178,14 @@ where
     /// Create new transport coordinator
     pub fn new(config: TransportCoordinationConfig, effects: E) -> Self {
         let transport_config = TransportConfig {
-            connect_timeout: config.connection_timeout,
-            read_timeout: std::time::Duration::from_secs(60),
-            write_timeout: std::time::Duration::from_secs(30),
-            buffer_size: 64 * 1024,
+            connect_timeout: NonZeroDuration::from_duration(config.connection_timeout)
+                .unwrap_or_else(|| NonZeroDuration::from_secs(1).expect("non-zero timeout")),
+            read_timeout: NonZeroDuration::from_secs(60)
+                .expect("read timeout should be non-zero"),
+            write_timeout: NonZeroDuration::from_secs(30)
+                .expect("write timeout should be non-zero"),
+            buffer_size: NonZeroUsize::new(64 * 1024)
+                .expect("buffer size should be non-zero"),
         };
 
         let transport_manager = RetryingTransportManager::new(transport_config, config.max_retries);

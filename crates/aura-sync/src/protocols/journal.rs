@@ -69,7 +69,7 @@ pub enum SyncState {
         last_sync: PhysicalTime,
 
         /// Operations synced in last round
-        operations: usize,
+        operations: u64,
     },
 
     /// Synchronization failed
@@ -100,7 +100,7 @@ impl SyncState {
     }
 
     /// Create a Synced state from milliseconds timestamp
-    pub fn synced_from_ms(timestamp_ms: u64, operations: usize) -> Self {
+    pub fn synced_from_ms(timestamp_ms: u64, operations: u64) -> Self {
         SyncState::Synced {
             last_sync: PhysicalTime {
                 ts_ms: timestamp_ms,
@@ -132,7 +132,7 @@ pub enum SyncMessage {
     DigestResponse { digest: JournalDigest },
 
     /// Request operations starting from index
-    OperationsRequest { from_index: usize, max_ops: usize },
+    OperationsRequest { from_index: u64, max_ops: u64 },
 
     /// Response with operations
     OperationsResponse {
@@ -141,14 +141,14 @@ pub enum SyncMessage {
     },
 
     /// Acknowledge successful sync
-    SyncComplete { operations_applied: usize },
+    SyncComplete { operations_applied: u64 },
 }
 
 /// Journal synchronization result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JournalSyncResult {
     /// Number of operations synchronized
-    pub operations_synced: usize,
+    pub operations_synced: u64,
 
     /// Peers successfully synchronized
     pub peers_synced: Vec<DeviceId>,
@@ -174,10 +174,10 @@ pub struct JournalSyncConfig {
     pub account_id: AccountId,
 
     /// Maximum operations per batch
-    pub batch_size: usize,
+    pub batch_size: u32,
 
     /// Maximum concurrent peer syncs
-    pub max_concurrent_syncs: usize,
+    pub max_concurrent_syncs: u32,
 
     /// Timeout for sync operations
     pub sync_timeout: Duration,
@@ -273,7 +273,7 @@ impl JournalSyncProtocol {
     where
         E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
     {
-        let mut operations_synced = 0;
+        let mut operations_synced = 0u64;
         let mut peers_synced = Vec::new();
         let mut peers_failed = Vec::new();
 
@@ -288,7 +288,7 @@ impl JournalSyncProtocol {
         }
 
         // Limit concurrent syncs to prevent overwhelming the system
-        let chunks = peers.chunks(self.config.max_concurrent_syncs);
+        let chunks = peers.chunks(self.config.max_concurrent_syncs as usize);
 
         for chunk in chunks {
             // Create futures for this batch of peers
@@ -349,7 +349,7 @@ impl JournalSyncProtocol {
             }
 
             // Small delay between batches to prevent overwhelming network
-            if chunk.len() == self.config.max_concurrent_syncs {
+            if chunk.len() == self.config.max_concurrent_syncs as usize {
                 let _ = effects.sleep_ms(100).await;
             }
         }
@@ -372,7 +372,7 @@ impl JournalSyncProtocol {
     }
 
     /// Synchronize with a single peer
-    pub async fn sync_with_peer<E>(&mut self, effects: &E, peer: DeviceId) -> SyncResult<usize>
+    pub async fn sync_with_peer<E>(&mut self, effects: &E, peer: DeviceId) -> SyncResult<u64>
     where
         E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
     {
@@ -381,7 +381,7 @@ impl JournalSyncProtocol {
     }
 
     /// Internal implementation of peer synchronization
-    async fn sync_with_peer_impl<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<usize>
+    async fn sync_with_peer_impl<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<u64>
     where
         E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
     {
@@ -415,7 +415,7 @@ impl JournalSyncProtocol {
                     );
                 }
 
-                Ok(result.applied as usize)
+                Ok(result.applied)
             };
 
         // Execute without runtime-specific timeout; external callers should enforce via PhysicalTimeEffects.
@@ -439,22 +439,22 @@ impl JournalSyncProtocol {
 
     /// Get statistics about synchronization
     pub fn statistics(&self) -> JournalSyncStatistics {
-        let total = self.peer_states.len();
+        let total = self.peer_states.len() as u64;
         let syncing = self
             .peer_states
             .values()
             .filter(|s| matches!(s, SyncState::Syncing))
-            .count();
+            .count() as u64;
         let synced = self
             .peer_states
             .values()
             .filter(|s| matches!(s, SyncState::Synced { .. }))
-            .count();
+            .count() as u64;
         let failed = self
             .peer_states
             .values()
             .filter(|s| matches!(s, SyncState::Failed { .. }))
-            .count();
+            .count() as u64;
 
         JournalSyncStatistics {
             total_peers: total,
@@ -530,16 +530,16 @@ impl Default for JournalSyncProtocol {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JournalSyncStatistics {
     /// Total tracked peers
-    pub total_peers: usize,
+    pub total_peers: u64,
 
     /// Peers currently syncing
-    pub syncing_peers: usize,
+    pub syncing_peers: u64,
 
     /// Successfully synced peers
-    pub synced_peers: usize,
+    pub synced_peers: u64,
 
     /// Failed peers
-    pub failed_peers: usize,
+    pub failed_peers: u64,
 }
 
 // =============================================================================

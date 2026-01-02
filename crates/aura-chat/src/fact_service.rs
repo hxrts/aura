@@ -29,7 +29,10 @@ impl ChatFactService {
         topic: Option<String>,
         is_dm: bool,
     ) -> GuardOutcome {
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_CHAT_CHANNEL_CREATE) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &crate::guards::types::CapabilityId::from(costs::CAP_CHAT_CHANNEL_CREATE),
+        ) {
             return outcome;
         }
         if let Some(outcome) = check_flow_budget(snapshot, costs::CHAT_CHANNEL_CREATE_COST) {
@@ -65,7 +68,10 @@ impl ChatFactService {
         payload: Vec<u8>,
         reply_to: Option<String>,
     ) -> GuardOutcome {
-        if let Some(outcome) = check_capability(snapshot, costs::CAP_CHAT_MESSAGE_SEND) {
+        if let Some(outcome) = check_capability(
+            snapshot,
+            &crate::guards::types::CapabilityId::from(costs::CAP_CHAT_MESSAGE_SEND),
+        ) {
             return outcome;
         }
         if let Some(outcome) = check_flow_budget(snapshot, costs::CHAT_MESSAGE_SEND_COST) {
@@ -129,7 +135,9 @@ mod tests {
             AuthorityId::new_from_entropy([1u8; 32]),
             ContextId::new_from_entropy([2u8; 32]),
             FlowCost::new(10),
-            vec![costs::CAP_CHAT_MESSAGE_SEND.to_string()],
+            vec![crate::guards::types::CapabilityId::from(
+                costs::CAP_CHAT_MESSAGE_SEND,
+            )],
             123,
         );
 

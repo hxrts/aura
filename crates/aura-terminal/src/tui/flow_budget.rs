@@ -9,6 +9,12 @@
 //! For shared CLI + TUI logic, see `crate::handlers::budget`.
 
 use aura_app::ui::prelude::*;
+use aura_core::hash;
+use aura_core::identifiers::HomeId;
+
+fn home_id_from_label(label: &str) -> HomeId {
+    HomeId::from_bytes(hash::hash(label.as_bytes()))
+}
 
 /// Flow budget view state for TUI rendering
 ///
@@ -76,7 +82,8 @@ pub fn example_budget_table() -> Vec<(u8, HomeFlowBudget)> {
     let mut table = Vec::new();
 
     for n in 1..=MAX_NEIGHBORHOODS {
-        let mut budget = HomeFlowBudget::new(format!("example_{n}_neighborhoods"));
+        let mut budget =
+            HomeFlowBudget::new(home_id_from_label(&format!("example_{n}_neighborhoods")));
         for _ in 0..n {
             budget.join_neighborhood().unwrap();
         }
@@ -92,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_flow_budget_view() {
-        let budget = HomeFlowBudget::new("test");
+        let budget = HomeFlowBudget::new(home_id_from_label("test"));
 
         // Normal state
         let view = FlowBudgetView::from_budget(budget);

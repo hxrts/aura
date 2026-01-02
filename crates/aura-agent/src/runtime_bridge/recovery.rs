@@ -1,5 +1,6 @@
 use super::AgentRuntimeBridge;
 use aura_app::IntentError;
+use aura_core::identifiers::CeremonyId;
 
 pub(super) async fn respond_to_guardian_ceremony(
     bridge: &AgentRuntimeBridge,
@@ -9,8 +10,9 @@ pub(super) async fn respond_to_guardian_ceremony(
 ) -> Result<(), IntentError> {
     // Verify the ceremony exists and get tracker
     let tracker = bridge.agent.ceremony_tracker().await;
+    let ceremony_id = CeremonyId::new(ceremony_id.to_string());
     let _state = tracker
-        .get(ceremony_id)
+        .get(&ceremony_id)
         .await
         .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
 
@@ -18,7 +20,7 @@ pub(super) async fn respond_to_guardian_ceremony(
         // Record acceptance in ceremony tracker
         tracker
             .mark_accepted(
-                ceremony_id,
+                &ceremony_id,
                 aura_core::threshold::ParticipantIdentity::guardian(bridge.agent.authority_id()),
             )
             .await
@@ -29,10 +31,7 @@ pub(super) async fn respond_to_guardian_ceremony(
     } else {
         // Mark ceremony as failed due to decline
         tracker
-            .mark_failed(
-                ceremony_id,
-                Some("Guardian declined invitation".to_string()),
-            )
+            .mark_failed(&ceremony_id, Some("Guardian declined invitation".to_string()))
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to record guardian decline: {}", e))

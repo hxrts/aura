@@ -481,7 +481,7 @@ impl NamespacedAntiEntropy {
                 .iter_facts()
                 .map(|f| f.order.clone())
                 .collect(),
-            max_facts: self.config.protocols.anti_entropy.max_digest_entries,
+            max_facts: self.config.protocols.anti_entropy.max_digest_entries as usize,
         };
 
         // Send request to peer and get response

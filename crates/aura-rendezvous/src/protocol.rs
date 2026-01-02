@@ -363,9 +363,7 @@ mod tests {
         let descriptor = RendezvousDescriptor {
             authority_id: AuthorityId::new_from_entropy([1u8; 32]),
             context_id: ContextId::new_from_entropy([2u8; 32]),
-            transport_hints: vec![TransportHint::TcpDirect {
-                addr: "127.0.0.1:8080".to_string(),
-            }],
+            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 1000,
             valid_until: 2000,

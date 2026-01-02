@@ -21,8 +21,8 @@
 //! registry.register(INVITATION_FACT_TYPE_ID, Box::new(InvitationViewReducer));
 //! ```
 
-use aura_composition::{IntoViewDelta, ViewDelta, ViewDeltaReducer};
-use aura_core::identifiers::AuthorityId;
+use aura_composition::{ComposableDelta, IntoViewDelta, ViewDelta, ViewDeltaReducer};
+use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::threshold::AgreementMode;
 use aura_journal::DomainFact;
 
@@ -36,30 +36,30 @@ use crate::{InvitationFact, INVITATION_FACT_TYPE_ID};
 pub enum InvitationDelta {
     /// A new invitation was created or received
     InvitationAdded {
-        invitation_id: String,
+        invitation_id: InvitationId,
         /// Direction: "inbound" or "outbound"
         direction: String,
         other_party_id: String,
         other_party_name: String,
         /// Type: "guardian", "channel", "contact", "device"
-        invitation_type: String,
+        invitation_type: crate::InvitationType,
         created_at: u64,
         expires_at: Option<u64>,
         message: Option<String>,
     },
     /// Invitation status changed
     InvitationStatusChanged {
-        invitation_id: String,
+        invitation_id: InvitationId,
         old_status: String,
         /// Status: "pending", "accepted", "declined", "expired", "cancelled"
         new_status: String,
         changed_at: u64,
     },
     /// Invitation was removed/deleted
-    InvitationRemoved { invitation_id: String },
+    InvitationRemoved { invitation_id: InvitationId },
     /// Ceremony status changed
     CeremonyStatusChanged {
-        ceremony_id: String,
+        ceremony_id: CeremonyId,
         /// Status: "initiated", "acceptance_received", "committed", "aborted", "superseded"
         status: String,
         /// For "aborted" status, the reason
@@ -72,6 +72,126 @@ pub enum InvitationDelta {
         reversion_risk: bool,
         timestamp_ms: u64,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum InvitationDeltaKey {
+    Invitation(InvitationId),
+    Ceremony(CeremonyId),
+}
+
+impl ComposableDelta for InvitationDelta {
+    type Key = InvitationDeltaKey;
+
+    fn key(&self) -> Self::Key {
+        match self {
+            InvitationDelta::InvitationAdded { invitation_id, .. }
+            | InvitationDelta::InvitationStatusChanged { invitation_id, .. }
+            | InvitationDelta::InvitationRemoved { invitation_id } => {
+                InvitationDeltaKey::Invitation(invitation_id.clone())
+            }
+            InvitationDelta::CeremonyStatusChanged { ceremony_id, .. } => {
+                InvitationDeltaKey::Ceremony(ceremony_id.clone())
+            }
+        }
+    }
+
+    fn try_merge(&mut self, other: Self) -> bool {
+        match (self, other) {
+            (
+                InvitationDelta::InvitationAdded {
+                    created_at,
+                    invitation_id: id,
+                    direction: dir,
+                    other_party_id: other_id,
+                    other_party_name: other_name,
+                    invitation_type: inv_type,
+                    expires_at: exp,
+                    message: msg,
+                },
+                InvitationDelta::InvitationAdded {
+                    created_at: other_ts,
+                    invitation_id,
+                    direction,
+                    other_party_id,
+                    other_party_name,
+                    invitation_type,
+                    expires_at,
+                    message,
+                },
+            ) => {
+                if other_ts >= *created_at {
+                    *created_at = other_ts;
+                    *id = invitation_id;
+                    *dir = direction;
+                    *other_id = other_party_id;
+                    *other_name = other_party_name;
+                    *inv_type = invitation_type;
+                    *exp = expires_at;
+                    *msg = message;
+                }
+                true
+            }
+            (
+                InvitationDelta::InvitationStatusChanged {
+                    changed_at,
+                    invitation_id: id,
+                    old_status: old,
+                    new_status: new,
+                },
+                InvitationDelta::InvitationStatusChanged {
+                    changed_at: other_ts,
+                    invitation_id,
+                    old_status,
+                    new_status,
+                },
+            ) => {
+                if other_ts >= *changed_at {
+                    *changed_at = other_ts;
+                    *id = invitation_id;
+                    *old = old_status;
+                    *new = new_status;
+                }
+                true
+            }
+            (
+                InvitationDelta::InvitationRemoved { .. },
+                InvitationDelta::InvitationRemoved { .. },
+            ) => true,
+            (
+                InvitationDelta::CeremonyStatusChanged {
+                    timestamp_ms,
+                    ceremony_id: id,
+                    status: st,
+                    reason: rsn,
+                    relationship_id: rel,
+                    agreement_mode: mode,
+                    reversion_risk: risk,
+                },
+                InvitationDelta::CeremonyStatusChanged {
+                    timestamp_ms: other_ts,
+                    ceremony_id,
+                    status,
+                    reason,
+                    relationship_id,
+                    agreement_mode,
+                    reversion_risk,
+                },
+            ) => {
+                if other_ts >= *timestamp_ms {
+                    *timestamp_ms = other_ts;
+                    *id = ceremony_id;
+                    *st = status;
+                    *rsn = reason;
+                    *rel = relationship_id;
+                    *mode = agreement_mode;
+                    *risk = reversion_risk;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// View reducer for invitation facts.
@@ -247,8 +367,9 @@ impl ViewDeltaReducer for InvitationViewReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_composition::compact_deltas;
     use aura_composition::downcast_delta;
-    use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])
@@ -266,10 +387,10 @@ mod tests {
 
         let fact = InvitationFact::sent_ms(
             test_context_id(),
-            "inv-123".to_string(),
+            InvitationId::new("inv-123"),
             sender,
             receiver,
-            "guardian".to_string(),
+            crate::InvitationType::Contact { nickname: None },
             1234567890,
             Some(1234567890 + 86400000),
             Some("Please be my guardian".to_string()),
@@ -289,9 +410,12 @@ mod tests {
                 message,
                 ..
             } => {
-                assert_eq!(invitation_id, "inv-123");
+                assert_eq!(invitation_id.as_str(), "inv-123");
                 assert_eq!(direction, "outbound");
-                assert_eq!(invitation_type, "guardian");
+                assert!(matches!(
+                    invitation_type,
+                    crate::InvitationType::Contact { nickname: None }
+                ));
                 assert_eq!(message, &Some("Please be my guardian".to_string()));
             }
             _ => panic!("Expected InvitationAdded delta"),
@@ -306,10 +430,10 @@ mod tests {
 
         let fact = InvitationFact::sent_ms(
             test_context_id(),
-            "inv-124".to_string(),
+            InvitationId::new("inv-124"),
             sender,
             receiver,
-            "guardian".to_string(),
+            crate::InvitationType::Contact { nickname: None },
             1234567890,
             Some(1234567890 + 86400000),
             Some("Please be my guardian".to_string()),
@@ -327,7 +451,7 @@ mod tests {
                 direction,
                 ..
             } => {
-                assert_eq!(invitation_id, "inv-124");
+                assert_eq!(invitation_id.as_str(), "inv-124");
                 assert_eq!(direction, "inbound");
             }
             _ => panic!("Expected InvitationAdded delta"),
@@ -338,8 +462,11 @@ mod tests {
     fn test_invitation_accepted_reduction() {
         let reducer = InvitationViewReducer;
 
-        let fact =
-            InvitationFact::accepted_ms("inv-456".to_string(), test_authority_id(3), 1234567899);
+        let fact = InvitationFact::accepted_ms(
+            InvitationId::new("inv-456"),
+            test_authority_id(3),
+            1234567899,
+        );
 
         let bytes = fact.to_bytes();
         let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, None);
@@ -353,7 +480,7 @@ mod tests {
                 new_status,
                 ..
             } => {
-                assert_eq!(invitation_id, "inv-456");
+                assert_eq!(invitation_id.as_str(), "inv-456");
                 assert_eq!(old_status, "pending");
                 assert_eq!(new_status, "accepted");
             }
@@ -365,8 +492,11 @@ mod tests {
     fn test_invitation_cancelled_reduction() {
         let reducer = InvitationViewReducer;
 
-        let fact =
-            InvitationFact::cancelled_ms("inv-789".to_string(), test_authority_id(4), 1234567900);
+        let fact = InvitationFact::cancelled_ms(
+            InvitationId::new("inv-789"),
+            test_authority_id(4),
+            1234567900,
+        );
 
         let bytes = fact.to_bytes();
         let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, &bytes, None);
@@ -375,7 +505,7 @@ mod tests {
         let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
         match delta {
             InvitationDelta::InvitationRemoved { invitation_id } => {
-                assert_eq!(invitation_id, "inv-789");
+                assert_eq!(invitation_id.as_str(), "inv-789");
             }
             _ => panic!("Expected InvitationRemoved delta"),
         }
@@ -393,5 +523,33 @@ mod tests {
         let reducer = InvitationViewReducer;
         let deltas = reducer.reduce_fact(INVITATION_FACT_TYPE_ID, b"invalid json data", None);
         assert!(deltas.is_empty());
+    }
+
+    #[test]
+    fn test_compact_deltas_merges_status_updates() {
+        let deltas = vec![
+            InvitationDelta::InvitationStatusChanged {
+                invitation_id: InvitationId::new("inv-1"),
+                old_status: "pending".to_string(),
+                new_status: "accepted".to_string(),
+                changed_at: 100,
+            },
+            InvitationDelta::InvitationStatusChanged {
+                invitation_id: InvitationId::new("inv-1"),
+                old_status: "accepted".to_string(),
+                new_status: "cancelled".to_string(),
+                changed_at: 200,
+            },
+        ];
+
+        let compacted = compact_deltas(deltas);
+        assert_eq!(compacted.len(), 1);
+        match &compacted[0] {
+            InvitationDelta::InvitationStatusChanged { new_status, changed_at, .. } => {
+                assert_eq!(new_status, "cancelled");
+                assert_eq!(*changed_at, 200);
+            }
+            _ => panic!("Expected InvitationStatusChanged after compaction"),
+        }
     }
 }

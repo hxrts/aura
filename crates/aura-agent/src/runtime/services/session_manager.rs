@@ -1,7 +1,7 @@
 //! Runtime-owned session state manager.
 
 use super::state::with_state_mut_validated;
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::{DeviceId, SessionId};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,8 +9,8 @@ use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
 struct SessionState {
-    participants: HashMap<String, Vec<DeviceId>>,
-    metadata: HashMap<String, HashMap<String, Value>>,
+    participants: HashMap<SessionId, Vec<DeviceId>>,
+    metadata: HashMap<SessionId, HashMap<String, Value>>,
 }
 
 impl SessionState {
@@ -34,17 +34,17 @@ impl SessionManager {
         Self::default()
     }
 
-    pub(crate) async fn register_session(&self, session_id: &str, participants: Vec<DeviceId>) {
+    pub(crate) async fn register_session(&self, session_id: SessionId, participants: Vec<DeviceId>) {
         with_state_mut_validated(
             &self.state,
             |state| {
                 state
                     .participants
-                    .entry(session_id.to_string())
+                    .entry(session_id)
                     .or_insert_with(|| participants);
                 state
                     .metadata
-                    .entry(session_id.to_string())
+                    .entry(session_id)
                     .or_insert_with(HashMap::new);
             },
             |state| state.validate(),
@@ -54,7 +54,7 @@ impl SessionManager {
 
     pub(crate) async fn update_metadata(
         &self,
-        session_id: &str,
+        session_id: SessionId,
         metadata: HashMap<String, Value>,
     ) -> HashMap<String, Value> {
         with_state_mut_validated(
@@ -62,7 +62,7 @@ impl SessionManager {
             |state| {
                 let entry = state
                     .metadata
-                    .entry(session_id.to_string())
+                    .entry(session_id)
                     .or_insert_with(HashMap::new);
                 entry.extend(metadata);
                 entry.clone()
@@ -74,7 +74,7 @@ impl SessionManager {
 
     pub(crate) async fn add_participant(
         &self,
-        session_id: &str,
+        session_id: SessionId,
         device_id: DeviceId,
     ) -> Vec<DeviceId> {
         with_state_mut_validated(
@@ -82,14 +82,14 @@ impl SessionManager {
             |state| {
                 let participants = state
                     .participants
-                    .entry(session_id.to_string())
+                    .entry(session_id)
                     .or_insert_with(Vec::new);
                 if !participants.contains(&device_id) {
                     participants.push(device_id);
                 }
                 state
                     .metadata
-                    .entry(session_id.to_string())
+                    .entry(session_id)
                     .or_insert_with(HashMap::new);
                 participants.clone()
             },
@@ -100,13 +100,13 @@ impl SessionManager {
 
     pub(crate) async fn remove_participant(
         &self,
-        session_id: &str,
+        session_id: SessionId,
         device_id: DeviceId,
     ) -> Option<Vec<DeviceId>> {
         with_state_mut_validated(
             &self.state,
             |state| {
-                if let Some(participants) = state.participants.get_mut(session_id) {
+                if let Some(participants) = state.participants.get_mut(&session_id) {
                     participants.retain(|id| id != &device_id);
                     return Some(participants.clone());
                 }

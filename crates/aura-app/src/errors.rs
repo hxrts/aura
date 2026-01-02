@@ -10,12 +10,6 @@ use std::fmt;
 // Re-export ToastLevel from views/notifications (single source of truth)
 pub use crate::views::notifications::ToastLevel;
 
-/// Type alias for backwards compatibility.
-///
-/// `ToastSeverity` is now unified with `ToastLevel` from notifications.
-/// Note: `ToastLevel::Success` variant is not used for error severity mapping.
-pub type ToastSeverity = ToastLevel;
-
 // ============================================================================
 // Error Categories (Terminal-compatible)
 // ============================================================================
@@ -62,15 +56,15 @@ impl ErrorCategory {
 
     /// Get the appropriate toast severity for this category.
     #[must_use]
-    pub fn toast_severity(&self) -> ToastSeverity {
+    pub fn toast_severity(&self) -> ToastLevel {
         match self {
-            Self::Input => ToastSeverity::Info,
-            Self::Config => ToastSeverity::Warning,
-            Self::Capability => ToastSeverity::Error,
-            Self::NotFound => ToastSeverity::Warning,
-            Self::Network => ToastSeverity::Warning,
-            Self::NotImplemented => ToastSeverity::Info,
-            Self::Operation => ToastSeverity::Error,
+            Self::Input => ToastLevel::Info,
+            Self::Config => ToastLevel::Warning,
+            Self::Capability => ToastLevel::Error,
+            Self::NotFound => ToastLevel::Warning,
+            Self::Network => ToastLevel::Warning,
+            Self::NotImplemented => ToastLevel::Info,
+            Self::Operation => ToastLevel::Error,
         }
     }
 
@@ -273,19 +267,19 @@ impl AppError {
     }
 
     /// Get the appropriate toast severity for this error
-    pub fn toast_level(&self) -> ToastSeverity {
+    pub fn toast_level(&self) -> ToastLevel {
         match self {
             Self::Network { recoverable, .. } => {
                 if *recoverable {
-                    ToastSeverity::Warning
+                    ToastLevel::Warning
                 } else {
-                    ToastSeverity::Error
+                    ToastLevel::Error
                 }
             }
-            Self::Auth { .. } => ToastSeverity::Error,
-            Self::Sync { .. } => ToastSeverity::Warning,
-            Self::UserAction { .. } => ToastSeverity::Info,
-            Self::Internal { .. } => ToastSeverity::Error,
+            Self::Auth { .. } => ToastLevel::Error,
+            Self::Sync { .. } => ToastLevel::Warning,
+            Self::UserAction { .. } => ToastLevel::Info,
+            Self::Internal { .. } => ToastLevel::Error,
         }
     }
 
@@ -370,7 +364,7 @@ mod tests {
         );
         assert_eq!(err.code(), "NET_TIMEOUT");
         assert!(err.is_recoverable());
-        assert_eq!(err.toast_level(), ToastSeverity::Warning);
+        assert_eq!(err.toast_level(), ToastLevel::Warning);
     }
 
     #[test]
@@ -382,7 +376,7 @@ mod tests {
         );
         assert_eq!(err.code(), "AUTH_EXPIRED");
         assert!(err.is_recoverable());
-        assert_eq!(err.toast_level(), ToastSeverity::Error);
+        assert_eq!(err.toast_level(), ToastLevel::Error);
     }
 
     #[test]
@@ -394,7 +388,7 @@ mod tests {
         );
         assert_eq!(err.code(), "USER_ACTION");
         assert!(err.is_recoverable());
-        assert_eq!(err.toast_level(), ToastSeverity::Info);
+        assert_eq!(err.toast_level(), ToastLevel::Info);
     }
 
     #[test]
@@ -403,7 +397,7 @@ mod tests {
         assert_eq!(err.to_string(), "reducer: unexpected state transition");
         assert_eq!(err.code(), "INTERNAL");
         assert!(!err.is_recoverable());
-        assert_eq!(err.toast_level(), ToastSeverity::Error);
+        assert_eq!(err.toast_level(), ToastLevel::Error);
     }
 
     // ========================================================================
@@ -434,30 +428,30 @@ mod tests {
 
     #[test]
     fn test_error_category_toast_severity() {
-        assert_eq!(ErrorCategory::Input.toast_severity(), ToastSeverity::Info);
+        assert_eq!(ErrorCategory::Input.toast_severity(), ToastLevel::Info);
         assert_eq!(
             ErrorCategory::Config.toast_severity(),
-            ToastSeverity::Warning
+            ToastLevel::Warning
         );
         assert_eq!(
             ErrorCategory::Capability.toast_severity(),
-            ToastSeverity::Error
+            ToastLevel::Error
         );
         assert_eq!(
             ErrorCategory::NotFound.toast_severity(),
-            ToastSeverity::Warning
+            ToastLevel::Warning
         );
         assert_eq!(
             ErrorCategory::Network.toast_severity(),
-            ToastSeverity::Warning
+            ToastLevel::Warning
         );
         assert_eq!(
             ErrorCategory::NotImplemented.toast_severity(),
-            ToastSeverity::Info
+            ToastLevel::Info
         );
         assert_eq!(
             ErrorCategory::Operation.toast_severity(),
-            ToastSeverity::Error
+            ToastLevel::Error
         );
     }
 

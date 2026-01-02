@@ -447,14 +447,14 @@ async fn test_complete_demo_invitation_flow() {
 
     env.ctx
         .dispatch(EffectCommand::AcceptInvitation {
-            invitation_id: alice_invitation.invitation_id.clone(),
+            invitation_id: alice_invitation.invitation_id.to_string(),
         })
         .await
         .expect("Accept Alice should succeed (idempotent)");
 
     env.ctx
         .dispatch(EffectCommand::AcceptInvitation {
-            invitation_id: carol_invitation.invitation_id.clone(),
+            invitation_id: carol_invitation.invitation_id.to_string(),
         })
         .await
         .expect("Accept Carol should succeed (idempotent)");

@@ -9,9 +9,11 @@ use aura_core::{
     time::ProvenancedTime,
     AuraError, AuthorityId, Hash32, Result,
 };
+use crate::witness::NonEmptyWitnessSet;
 use frost_ed25519;
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::num::NonZeroU64;
 
 /// Unique identifier for a consensus instance
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -157,14 +159,11 @@ impl CommitFact {
 /// Consensus configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConsensusConfig {
-    /// Minimum number of witnesses required
-    pub threshold: u16,
-
-    /// Set of eligible witnesses
-    pub witness_set: Vec<AuthorityId>,
+    /// Validated witness set with threshold invariants
+    pub witness_set: NonEmptyWitnessSet,
 
     /// Timeout for consensus operations in milliseconds
-    pub timeout_ms: u64,
+    pub timeout_ms: NonZeroU64,
 
     /// Enable fast path optimization (1 RTT pipelining)
     pub enable_pipelining: bool,
@@ -176,25 +175,10 @@ pub struct ConsensusConfig {
 impl ConsensusConfig {
     /// Create a new consensus configuration
     pub fn new(threshold: u16, witness_set: Vec<AuthorityId>, epoch: Epoch) -> Result<Self> {
-        if witness_set.is_empty() {
-            return Err(AuraError::invalid(
-                "Consensus requires at least one witness",
-            ));
-        }
-
-        if threshold == 0 {
-            return Err(AuraError::invalid("Consensus threshold must be >= 1"));
-        }
-
-        if witness_set.len() < threshold as usize {
-            return Err(AuraError::invalid(
-                "Consensus threshold exceeds witness set size",
-            ));
-        }
+        let witness_set = NonEmptyWitnessSet::new(threshold, witness_set)?;
 
         let runtime = crate::config::ConsensusRuntimeConfig::default();
         Ok(Self {
-            threshold,
             witness_set,
             timeout_ms: runtime.default_timeout_ms,
             enable_pipelining: runtime.enable_pipelining,
@@ -202,14 +186,29 @@ impl ConsensusConfig {
         })
     }
 
+    /// Required threshold for consensus
+    pub fn threshold(&self) -> u16 {
+        self.witness_set.threshold()
+    }
+
+    /// Borrow witnesses as a slice
+    pub fn witnesses(&self) -> &[AuthorityId] {
+        self.witness_set.witnesses()
+    }
+
+    /// Number of witnesses
+    pub fn witness_count(&self) -> usize {
+        self.witness_set.len()
+    }
+
     /// Check if we have sufficient witnesses for the threshold
     pub fn has_quorum(&self) -> bool {
-        self.witness_set.len() >= self.threshold as usize
+        self.witness_set.has_quorum()
     }
 
     /// Get the minimum number of witnesses needed for fast path
     pub fn fast_path_threshold(&self) -> usize {
-        self.threshold as usize
+        self.threshold() as usize
     }
 }
 
@@ -272,8 +271,8 @@ mod tests {
         let config = ConsensusConfig::new(2, witnesses, Epoch::from(1)).unwrap();
 
         assert!(config.has_quorum());
-        assert_eq!(config.threshold, 2);
-        assert_eq!(config.timeout_ms, 30000);
+        assert_eq!(config.threshold(), 2);
+        assert_eq!(config.timeout_ms.get(), 30000);
         assert!(config.enable_pipelining);
     }
 }

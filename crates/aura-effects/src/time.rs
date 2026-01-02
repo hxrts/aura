@@ -26,7 +26,6 @@ pub fn monotonic_now() -> Instant {
 /// Production physical clock handler backed by the system clock.
 #[derive(Debug, Clone, Default)]
 pub struct PhysicalTimeHandler;
-// Legacy RealTimeHandler alias removed - use PhysicalTimeHandler directly
 
 impl PhysicalTimeHandler {
     /// Create a new physical clock handler.

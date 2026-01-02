@@ -21,8 +21,8 @@ pub use epochs::*;
 pub use flow::{FlowBudget, FlowCost, FlowNonce, Receipt, ReceiptSig};
 pub use identifiers::{
     AccountId, AuthorityId, ChannelId, ContextId, DataId, DeviceId, DkdContextId, EventId,
-    EventNonce, GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext,
-    OperationId, RelayId, SessionId,
+    EventNonce, GroupId, GuardianId, HomeId, IndividualId, IndividualIdExt, MemberId,
+    MessageContext, NeighborhoodId, OperationId, RelayId, SessionId,
 };
 pub use participants::{
     FrostThreshold, InvalidThresholdError, NetworkAddress, NetworkAddressError, ParticipantEndpoint,

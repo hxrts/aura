@@ -10,8 +10,10 @@ use aura_core::effects::amp::{
 };
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{OrderTime, TimeStamp};
+use aura_core::FlowCost;
 use aura_journal::extensibility::DomainFact;
 use aura_testkit::mock_effects::MockEffects;
+use std::num::NonZeroU32;
 
 fn test_context() -> ContextId {
     ContextId::from_uuid(uuid::Uuid::from_bytes([1u8; 16]))
@@ -33,26 +35,26 @@ fn test_authority() -> AuthorityId {
 fn test_amp_runtime_config_defaults() {
     let config = AmpRuntimeConfig::default();
 
-    assert_eq!(config.default_skip_window, 1024);
-    assert_eq!(config.default_flow_cost, 1);
+    assert_eq!(config.default_skip_window.get(), 1024);
+    assert_eq!(config.default_flow_cost, FlowCost::new(1));
 }
 
 #[test]
 fn test_amp_runtime_config_custom() {
     let config = AmpRuntimeConfig {
-        default_skip_window: 2048,
-        default_flow_cost: 5,
+        default_skip_window: NonZeroU32::new(2048).expect("non-zero skip window"),
+        default_flow_cost: FlowCost::new(5),
     };
 
-    assert_eq!(config.default_skip_window, 2048);
-    assert_eq!(config.default_flow_cost, 5);
+    assert_eq!(config.default_skip_window.get(), 2048);
+    assert_eq!(config.default_flow_cost, FlowCost::new(5));
 }
 
 #[test]
 fn test_amp_runtime_config_clone() {
     let config1 = AmpRuntimeConfig {
-        default_skip_window: 512,
-        default_flow_cost: 10,
+        default_skip_window: NonZeroU32::new(512).expect("non-zero skip window"),
+        default_flow_cost: FlowCost::new(10),
     };
     let config2 = config1.clone();
 

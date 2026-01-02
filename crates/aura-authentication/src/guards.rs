@@ -113,7 +113,7 @@ pub struct GuardSnapshot {
     pub flow_budget_remaining: FlowCost,
 
     /// Capabilities held by the authority
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<types::CapabilityId>,
 
     /// Current epoch
     pub epoch: u64,
@@ -132,7 +132,7 @@ impl GuardSnapshot {
         context_id: Option<ContextId>,
         device_id: Option<DeviceId>,
         flow_budget_remaining: FlowCost,
-        capabilities: Vec<String>,
+        capabilities: Vec<types::CapabilityId>,
         epoch: u64,
         now_ms: u64,
     ) -> Self {
@@ -155,7 +155,7 @@ impl GuardSnapshot {
     }
 
     /// Check if snapshot has a specific capability
-    pub fn has_capability(&self, cap: &str) -> bool {
+    pub fn has_capability(&self, cap: &types::CapabilityId) -> bool {
         self.capabilities.iter().any(|c| c == cap)
     }
 
@@ -402,7 +402,7 @@ impl std::fmt::Display for GuardReject {
 }
 
 fn deny(reject: GuardReject) -> GuardOutcome {
-    GuardOutcome::denied(reject.to_string())
+    GuardOutcome::denied(types::GuardViolation::other(reject.to_string()))
 }
 
 // =============================================================================
@@ -410,7 +410,7 @@ fn deny(reject: GuardReject) -> GuardOutcome {
 // =============================================================================
 
 impl types::CapabilitySnapshot for GuardSnapshot {
-    fn has_capability(&self, cap: &str) -> bool {
+    fn has_capability(&self, cap: &types::CapabilityId) -> bool {
         GuardSnapshot::has_capability(self, cap)
     }
 }
@@ -422,7 +422,10 @@ impl types::FlowBudgetSnapshot for GuardSnapshot {
 }
 
 /// Check capability and return denied outcome if missing
-pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<GuardOutcome> {
+pub fn check_capability(
+    snapshot: &GuardSnapshot,
+    required_cap: &types::CapabilityId,
+) -> Option<GuardOutcome> {
     if snapshot.has_capability(required_cap) {
         None
     } else {
@@ -494,7 +497,7 @@ pub fn check_recovery_operation(
     match operation_type {
         RecoveryOperationType::GuardianSetModification => {
             // Guardian set modifications require explicit capability
-            if !snapshot.has_capability(costs::CAP_APPROVE_RECOVERY) {
+            if !snapshot.has_capability(&types::CapabilityId::from(costs::CAP_APPROVE_RECOVERY)) {
                 return Some(deny(GuardReject {
                     code: "guardian-set-approval-required",
                     category: "auth",
@@ -504,7 +507,7 @@ pub fn check_recovery_operation(
         }
         RecoveryOperationType::EmergencyFreeze => {
             // Emergency freeze requires emergency flag or explicit capability
-            if !snapshot.has_capability(costs::CAP_INITIATE_RECOVERY) {
+            if !snapshot.has_capability(&types::CapabilityId::from(costs::CAP_INITIATE_RECOVERY)) {
                 return Some(deny(GuardReject {
                     code: "emergency-freeze-requires-capability",
                     category: "auth",
@@ -529,7 +532,10 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
     match request {
         GuardRequest::ChallengeRequest { scope: _ } => {
             // Check capability
-            if let Some(outcome) = check_capability(snapshot, costs::CAP_REQUEST_AUTH) {
+            if let Some(outcome) = check_capability(
+                snapshot,
+                &types::CapabilityId::from(costs::CAP_REQUEST_AUTH),
+            ) {
                 return outcome;
             }
 
@@ -558,7 +564,10 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             proof_hash,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(snapshot, costs::CAP_SUBMIT_PROOF) {
+            if let Some(outcome) = check_capability(
+                snapshot,
+                &types::CapabilityId::from(costs::CAP_SUBMIT_PROOF),
+            ) {
                 return outcome;
             }
 
@@ -585,7 +594,10 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
 
         GuardRequest::ProofVerification { session_id } => {
             // Check capability
-            if let Some(outcome) = check_capability(snapshot, costs::CAP_VERIFY_PROOF) {
+            if let Some(outcome) = check_capability(
+                snapshot,
+                &types::CapabilityId::from(costs::CAP_VERIFY_PROOF),
+            ) {
                 return outcome;
             }
 
@@ -610,7 +622,10 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             duration_seconds,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(snapshot, costs::CAP_CREATE_SESSION) {
+            if let Some(outcome) = check_capability(
+                snapshot,
+                &types::CapabilityId::from(costs::CAP_CREATE_SESSION),
+            ) {
                 return outcome;
             }
 
@@ -645,7 +660,10 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             required_guardians,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(snapshot, costs::CAP_REQUEST_GUARDIAN_APPROVAL)
+            if let Some(outcome) = check_capability(
+                snapshot,
+                &types::CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
+            )
             {
                 return outcome;
             }
@@ -689,7 +707,10 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             approved,
         } => {
             // Check capability
-            if let Some(outcome) = check_capability(snapshot, costs::CAP_APPROVE_GUARDIAN) {
+            if let Some(outcome) = check_capability(
+                snapshot,
+                &types::CapabilityId::from(costs::CAP_APPROVE_GUARDIAN),
+            ) {
                 return outcome;
             }
 
@@ -743,10 +764,10 @@ mod tests {
             None,
             FlowCost::new(100),
             vec![
-                costs::CAP_REQUEST_AUTH.to_string(),
-                costs::CAP_SUBMIT_PROOF.to_string(),
-                costs::CAP_VERIFY_PROOF.to_string(),
-                costs::CAP_CREATE_SESSION.to_string(),
+                types::CapabilityId::from(costs::CAP_REQUEST_AUTH),
+                types::CapabilityId::from(costs::CAP_SUBMIT_PROOF),
+                types::CapabilityId::from(costs::CAP_VERIFY_PROOF),
+                types::CapabilityId::from(costs::CAP_CREATE_SESSION),
             ],
             1,
             1000,
@@ -756,9 +777,11 @@ mod tests {
     #[test]
     fn test_guard_snapshot_has_capability() {
         let snapshot = test_snapshot();
-        assert!(snapshot.has_capability(costs::CAP_REQUEST_AUTH));
-        assert!(snapshot.has_capability(costs::CAP_SUBMIT_PROOF));
-        assert!(!snapshot.has_capability(costs::CAP_REQUEST_GUARDIAN_APPROVAL));
+        assert!(snapshot.has_capability(&types::CapabilityId::from(costs::CAP_REQUEST_AUTH)));
+        assert!(snapshot.has_capability(&types::CapabilityId::from(costs::CAP_SUBMIT_PROOF)));
+        assert!(!snapshot.has_capability(&types::CapabilityId::from(
+            costs::CAP_REQUEST_GUARDIAN_APPROVAL
+        )));
     }
 
     #[test]
@@ -779,10 +802,13 @@ mod tests {
 
     #[test]
     fn test_guard_decision_deny() {
-        let decision = GuardDecision::deny("test reason");
+        let decision = GuardDecision::deny(types::GuardViolation::other("test reason"));
         assert!(!decision.is_allowed());
         assert!(decision.is_denied());
-        assert_eq!(decision.denial_reason(), Some("test reason"));
+        assert!(matches!(
+            decision.denial_reason(),
+            Some(types::GuardViolation::Other(reason)) if reason == "test reason"
+        ));
     }
 
     #[test]
@@ -795,7 +821,7 @@ mod tests {
 
     #[test]
     fn test_guard_outcome_denied() {
-        let outcome = GuardOutcome::denied("no budget");
+        let outcome = GuardOutcome::denied(types::GuardViolation::other("no budget"));
         assert!(outcome.is_denied());
         assert!(outcome.effects.is_empty());
     }
@@ -803,14 +829,20 @@ mod tests {
     #[test]
     fn test_check_capability_success() {
         let snapshot = test_snapshot();
-        let result = check_capability(&snapshot, costs::CAP_REQUEST_AUTH);
+        let result = check_capability(
+            &snapshot,
+            &types::CapabilityId::from(costs::CAP_REQUEST_AUTH),
+        );
         assert!(result.is_none());
     }
 
     #[test]
     fn test_check_capability_failure() {
         let snapshot = test_snapshot();
-        let result = check_capability(&snapshot, costs::CAP_REQUEST_GUARDIAN_APPROVAL);
+        let result = check_capability(
+            &snapshot,
+            &types::CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
+        );
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());
     }

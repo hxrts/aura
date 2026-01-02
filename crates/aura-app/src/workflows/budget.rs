@@ -20,8 +20,9 @@
 //!
 //! ```rust,ignore
 //! use aura_app::workflows::budget::{HomeFlowBudget, BudgetError};
+//! use aura_core::identifiers::HomeId;
 //!
-//! let mut budget = HomeFlowBudget::new("home-123");
+//! let mut budget = HomeFlowBudget::new(HomeId::default());
 //!
 //! // Check capacity
 //! if budget.can_add_resident() {
@@ -42,6 +43,7 @@ use crate::signal_defs::{BUDGET_SIGNAL, BUDGET_SIGNAL_NAME};
 use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use crate::AppCore;
 use async_lock::RwLock;
+use aura_core::identifiers::HomeId;
 use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -82,8 +84,8 @@ pub const MAX_NEIGHBORHOODS: u8 = 4;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct HomeFlowBudget {
-    /// Home ID
-    pub home_id: String,
+    /// Home ID (typed identifier from aura-core)
+    pub home_id: HomeId,
     /// Current number of residents
     pub resident_count: u8,
     /// Storage used by residents (spent counter as fact)
@@ -98,9 +100,9 @@ pub struct HomeFlowBudget {
 
 impl HomeFlowBudget {
     /// Create a new empty budget for a home
-    pub fn new(home_id: impl Into<String>) -> Self {
+    pub fn new(home_id: HomeId) -> Self {
         Self {
-            home_id: home_id.into(),
+            home_id,
             resident_count: 0,
             resident_storage_spent: 0,
             neighborhood_count: 0,
@@ -266,7 +268,7 @@ impl HomeFlowBudget {
 
 impl Default for HomeFlowBudget {
     fn default() -> Self {
-        Self::new("default")
+        Self::new(HomeId::default())
     }
 }
 
@@ -562,8 +564,9 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
 ///
 /// ```rust
 /// use aura_app::ui::workflows::budget::{HomeFlowBudget, format_budget_compact};
+/// use aura_core::identifiers::HomeId;
 ///
-/// let budget = HomeFlowBudget::new("home-123");
+/// let budget = HomeFlowBudget::new(HomeId::default());
 /// let compact = format_budget_compact(&budget);
 /// assert!(compact.contains("Storage:"));
 /// assert!(compact.contains("%"));
@@ -588,8 +591,9 @@ pub fn format_budget_compact(budget: &HomeFlowBudget) -> String {
 ///
 /// ```rust
 /// use aura_app::ui::workflows::budget::{HomeFlowBudget, check_can_add_resident};
+/// use aura_core::identifiers::HomeId;
 ///
-/// let budget = HomeFlowBudget::new("home");
+/// let budget = HomeFlowBudget::new(HomeId::default());
 /// assert!(check_can_add_resident(&budget).is_ok());
 /// ```
 pub fn check_can_add_resident(budget: &HomeFlowBudget) -> Result<(), String> {
@@ -644,14 +648,22 @@ mod tests {
     use crate::AppConfig;
     use aura_core::effects::reactive::ReactiveEffects;
 
+    /// Create a test HomeId from a label string (for testing only)
+    fn test_home_id(label: &str) -> HomeId {
+        use aura_core::crypto::hash;
+        let bytes = hash::hash(label.as_bytes());
+        HomeId::from_bytes(bytes)
+    }
+
     // -------------------------------------------------------------------------
     // Domain type tests
     // -------------------------------------------------------------------------
 
     #[test]
     fn test_new_budget() {
-        let budget = HomeFlowBudget::new("test_home");
-        assert_eq!(budget.home_id, "test_home");
+        let home_id = test_home_id("test_home");
+        let budget = HomeFlowBudget::new(home_id);
+        assert_eq!(budget.home_id, home_id);
         assert_eq!(budget.resident_count, 0);
         assert_eq!(budget.neighborhood_count, 0);
         assert_eq!(budget.total_used(), 0);
@@ -672,7 +684,7 @@ mod tests {
 
     #[test]
     fn test_add_resident() {
-        let mut budget = HomeFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new(test_home_id("test"));
         assert!(budget.can_add_resident());
 
         budget.add_resident().unwrap();
@@ -696,7 +708,7 @@ mod tests {
 
     #[test]
     fn test_remove_resident() {
-        let mut budget = HomeFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new(test_home_id("test"));
         budget.add_resident().unwrap();
         budget.add_resident().unwrap();
 
@@ -712,7 +724,7 @@ mod tests {
 
     #[test]
     fn test_join_neighborhood() {
-        let mut budget = HomeFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new(test_home_id("test"));
         assert!(budget.can_join_neighborhood());
 
         budget.join_neighborhood().unwrap();
@@ -735,7 +747,7 @@ mod tests {
 
     #[test]
     fn test_pinned_storage() {
-        let mut budget = HomeFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new(test_home_id("test"));
 
         // With no neighborhoods, pinned limit = 10 MB - 1.6 MB = 8.4 MB
         let initial_limit = budget.pinned_storage_limit();
@@ -765,7 +777,7 @@ mod tests {
     #[test]
     fn test_storage_arithmetic_v1() {
         // Verify Section 8.3 table: 4 neighborhoods case
-        let mut budget = HomeFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new(test_home_id("test"));
 
         // Join 4 neighborhoods
         for _ in 0..4 {
@@ -785,7 +797,7 @@ mod tests {
 
     #[test]
     fn test_usage_fraction() {
-        let mut budget = HomeFlowBudget::new("test");
+        let mut budget = HomeFlowBudget::new(test_home_id("test"));
         assert_eq!(budget.usage_fraction(), 0.0);
 
         budget.add_resident().unwrap();
@@ -858,7 +870,7 @@ mod tests {
         }
 
         // Update budget
-        let mut new_budget = HomeFlowBudget::new("test-home");
+        let mut new_budget = HomeFlowBudget::new(test_home_id("test-home"));
         new_budget.add_resident().unwrap();
         new_budget.add_resident().unwrap();
 
@@ -868,5 +880,368 @@ mod tests {
         let budget = get_current_budget(&app_core).await;
         assert_eq!(budget.resident_count, 2);
         assert_eq!(budget.resident_storage_spent, 2 * RESIDENT_ALLOCATION);
+    }
+
+    // -------------------------------------------------------------------------
+    // Property tests for budget invariants
+    // -------------------------------------------------------------------------
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Generate a sequence of budget operations
+        #[derive(Debug, Clone)]
+        enum BudgetOp {
+            AddResident,
+            RemoveResident,
+            JoinNeighborhood,
+            LeaveNeighborhood,
+            PinContent(u64),
+            UnpinContent(u64),
+        }
+
+        /// Strategy for generating budget operations
+        fn budget_op_strategy() -> impl Strategy<Value = BudgetOp> {
+            prop_oneof![
+                Just(BudgetOp::AddResident),
+                Just(BudgetOp::RemoveResident),
+                Just(BudgetOp::JoinNeighborhood),
+                Just(BudgetOp::LeaveNeighborhood),
+                // Pin/unpin reasonable amounts (0 to 1 MB)
+                (0u64..MB).prop_map(BudgetOp::PinContent),
+                (0u64..MB).prop_map(BudgetOp::UnpinContent),
+            ]
+        }
+
+        proptest! {
+            /// Property: resident_count never exceeds MAX_RESIDENTS
+            #[test]
+            fn prop_resident_count_never_exceeds_max(
+                ops in prop::collection::vec(budget_op_strategy(), 0..100)
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                for op in ops {
+                    match op {
+                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
+                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
+                        BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
+                        BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
+                        BudgetOp::UnpinContent(size) => { budget.unpin_content(size); }
+                    }
+
+                    // Invariant: resident_count is always within bounds
+                    prop_assert!(
+                        budget.resident_count <= MAX_RESIDENTS,
+                        "resident_count {} exceeded max {}",
+                        budget.resident_count, MAX_RESIDENTS
+                    );
+                }
+            }
+
+            /// Property: neighborhood_count never exceeds MAX_NEIGHBORHOODS
+            #[test]
+            fn prop_neighborhood_count_never_exceeds_max(
+                ops in prop::collection::vec(budget_op_strategy(), 0..100)
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                for op in ops {
+                    match op {
+                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
+                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
+                        BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
+                        BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
+                        BudgetOp::UnpinContent(size) => { budget.unpin_content(size); }
+                    }
+
+                    // Invariant: neighborhood_count is always within bounds
+                    prop_assert!(
+                        budget.neighborhood_count <= MAX_NEIGHBORHOODS,
+                        "neighborhood_count {} exceeded max {}",
+                        budget.neighborhood_count, MAX_NEIGHBORHOODS
+                    );
+                }
+            }
+
+            /// Property: resident_storage_spent never exceeds resident_storage_limit
+            #[test]
+            fn prop_resident_storage_never_exceeds_limit(
+                ops in prop::collection::vec(budget_op_strategy(), 0..100)
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                for op in ops {
+                    match op {
+                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
+                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
+                        BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
+                        BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
+                        BudgetOp::UnpinContent(size) => { budget.unpin_content(size); }
+                    }
+
+                    // Invariant: resident storage never exceeds limit
+                    prop_assert!(
+                        budget.resident_storage_spent <= budget.resident_storage_limit(),
+                        "resident_storage_spent {} exceeded limit {}",
+                        budget.resident_storage_spent, budget.resident_storage_limit()
+                    );
+                }
+            }
+
+            /// Property: pinned_storage_spent never exceeds pinned_storage_limit
+            #[test]
+            fn prop_pinned_storage_never_exceeds_limit(
+                ops in prop::collection::vec(budget_op_strategy(), 0..100)
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                for op in ops {
+                    match op {
+                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
+                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
+                        BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
+                        BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
+                        BudgetOp::UnpinContent(size) => { budget.unpin_content(size); }
+                    }
+
+                    // Invariant: pinned storage never exceeds limit
+                    prop_assert!(
+                        budget.pinned_storage_spent <= budget.pinned_storage_limit(),
+                        "pinned_storage_spent {} exceeded limit {}",
+                        budget.pinned_storage_spent, budget.pinned_storage_limit()
+                    );
+                }
+            }
+
+            /// Property: total_used never exceeds HOME_TOTAL_SIZE
+            #[test]
+            fn prop_total_used_never_exceeds_total(
+                ops in prop::collection::vec(budget_op_strategy(), 0..100)
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                for op in ops {
+                    match op {
+                        BudgetOp::AddResident => { let _ = budget.add_resident(); }
+                        BudgetOp::RemoveResident => { let _ = budget.remove_resident(); }
+                        BudgetOp::JoinNeighborhood => { let _ = budget.join_neighborhood(); }
+                        BudgetOp::LeaveNeighborhood => { let _ = budget.leave_neighborhood(); }
+                        BudgetOp::PinContent(size) => { let _ = budget.pin_content(size); }
+                        BudgetOp::UnpinContent(size) => { budget.unpin_content(size); }
+                    }
+
+                    // Invariant: total used never exceeds total allocation
+                    prop_assert!(
+                        budget.total_used() <= HOME_TOTAL_SIZE,
+                        "total_used {} exceeded HOME_TOTAL_SIZE {}",
+                        budget.total_used(), HOME_TOTAL_SIZE
+                    );
+                }
+            }
+
+            /// Property: add_resident monotonically increases resident_count by 1
+            #[test]
+            fn prop_add_resident_monotone(
+                initial_residents in 0u8..MAX_RESIDENTS
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                // Set up initial state
+                for _ in 0..initial_residents {
+                    budget.add_resident().unwrap();
+                }
+
+                let count_before = budget.resident_count;
+                let storage_before = budget.resident_storage_spent;
+
+                if budget.can_add_resident() {
+                    budget.add_resident().unwrap();
+                    // Monotone: count increased by exactly 1
+                    prop_assert_eq!(budget.resident_count, count_before + 1);
+                    // Storage increased by exactly RESIDENT_ALLOCATION
+                    prop_assert_eq!(
+                        budget.resident_storage_spent,
+                        storage_before + RESIDENT_ALLOCATION
+                    );
+                }
+            }
+
+            /// Property: remove_resident monotonically decreases resident_count by 1
+            #[test]
+            fn prop_remove_resident_monotone(
+                initial_residents in 1u8..=MAX_RESIDENTS
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                // Set up initial state
+                for _ in 0..initial_residents {
+                    budget.add_resident().unwrap();
+                }
+
+                let count_before = budget.resident_count;
+                let storage_before = budget.resident_storage_spent;
+
+                budget.remove_resident().unwrap();
+                // Monotone: count decreased by exactly 1
+                prop_assert_eq!(budget.resident_count, count_before - 1);
+                // Storage decreased by exactly RESIDENT_ALLOCATION
+                prop_assert_eq!(
+                    budget.resident_storage_spent,
+                    storage_before - RESIDENT_ALLOCATION
+                );
+            }
+
+            /// Property: join_neighborhood monotonically increases neighborhood_count by 1
+            #[test]
+            fn prop_join_neighborhood_monotone(
+                initial_neighborhoods in 0u8..MAX_NEIGHBORHOODS
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                // Set up initial state
+                for _ in 0..initial_neighborhoods {
+                    budget.join_neighborhood().unwrap();
+                }
+
+                let count_before = budget.neighborhood_count;
+                let donations_before = budget.neighborhood_donations;
+
+                if budget.can_join_neighborhood() {
+                    budget.join_neighborhood().unwrap();
+                    // Monotone: count increased by exactly 1
+                    prop_assert_eq!(budget.neighborhood_count, count_before + 1);
+                    // Donations increased by exactly NEIGHBORHOOD_DONATION
+                    prop_assert_eq!(
+                        budget.neighborhood_donations,
+                        donations_before + NEIGHBORHOOD_DONATION
+                    );
+                }
+            }
+
+            /// Property: leave_neighborhood monotonically decreases neighborhood_count by 1
+            #[test]
+            fn prop_leave_neighborhood_monotone(
+                initial_neighborhoods in 1u8..=MAX_NEIGHBORHOODS
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                // Set up initial state
+                for _ in 0..initial_neighborhoods {
+                    budget.join_neighborhood().unwrap();
+                }
+
+                let count_before = budget.neighborhood_count;
+                let donations_before = budget.neighborhood_donations;
+
+                budget.leave_neighborhood().unwrap();
+                // Monotone: count decreased by exactly 1
+                prop_assert_eq!(budget.neighborhood_count, count_before - 1);
+                // Donations decreased by exactly NEIGHBORHOOD_DONATION
+                prop_assert_eq!(
+                    budget.neighborhood_donations,
+                    donations_before - NEIGHBORHOOD_DONATION
+                );
+            }
+
+            /// Property: pin_content monotonically increases pinned_storage_spent
+            #[test]
+            fn prop_pin_content_monotone(
+                pin_size in 1u64..KB  // Small sizes to stay within limits
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                let storage_before = budget.pinned_storage_spent;
+
+                if budget.can_pin(pin_size) {
+                    budget.pin_content(pin_size).unwrap();
+                    // Monotone: pinned storage increased by exactly pin_size
+                    prop_assert_eq!(
+                        budget.pinned_storage_spent,
+                        storage_before + pin_size
+                    );
+                }
+            }
+
+            /// Property: unpin_content monotonically decreases pinned_storage_spent
+            #[test]
+            fn prop_unpin_content_monotone(
+                initial_pinned in KB..MB,
+                unpin_size in 1u64..KB
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                // Set up initial pinned state
+                if budget.can_pin(initial_pinned) {
+                    budget.pin_content(initial_pinned).unwrap();
+                }
+
+                let storage_before = budget.pinned_storage_spent;
+
+                budget.unpin_content(unpin_size);
+                // Monotone: pinned storage decreased (saturating)
+                prop_assert!(
+                    budget.pinned_storage_spent <= storage_before,
+                    "pinned_storage_spent {} should be <= {} after unpin",
+                    budget.pinned_storage_spent, storage_before
+                );
+            }
+
+            /// Property: capacity checks are consistent with operations
+            #[test]
+            fn prop_can_add_resident_consistency(
+                initial_residents in 0u8..=MAX_RESIDENTS
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                for _ in 0..initial_residents {
+                    let _ = budget.add_resident();
+                }
+
+                let can_add = budget.can_add_resident();
+                let result = budget.add_resident();
+
+                // Consistency: can_add_resident() correctly predicts success/failure
+                prop_assert_eq!(can_add, result.is_ok());
+            }
+
+            /// Property: capacity checks are consistent with join_neighborhood
+            #[test]
+            fn prop_can_join_neighborhood_consistency(
+                initial_neighborhoods in 0u8..=MAX_NEIGHBORHOODS
+            ) {
+                let mut budget = HomeFlowBudget::new(HomeId::default());
+
+                for _ in 0..initial_neighborhoods {
+                    let _ = budget.join_neighborhood();
+                }
+
+                let can_join = budget.can_join_neighborhood();
+                let result = budget.join_neighborhood();
+
+                // Consistency: can_join_neighborhood() correctly predicts success/failure
+                prop_assert_eq!(can_join, result.is_ok());
+            }
+
+            /// Property: capacity checks are consistent with pin_content
+            #[test]
+            fn prop_can_pin_consistency(
+                content_size in 0u64..(2 * MB)
+            ) {
+                let budget = HomeFlowBudget::new(HomeId::default());
+                let mut budget_copy = budget.clone();
+
+                let can_pin = budget.can_pin(content_size);
+                let result = budget_copy.pin_content(content_size);
+
+                // Consistency: can_pin() correctly predicts success/failure
+                prop_assert_eq!(can_pin, result.is_ok());
+            }
+        }
     }
 }

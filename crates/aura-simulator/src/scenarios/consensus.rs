@@ -34,8 +34,11 @@
 //! - **Byzantine Witness**: Inject equivocating or invalid votes
 
 use aura_consensus::core::state::{
-    ConsensusPhase, ConsensusState, PathSelection, PureCommitFact, ShareData, ShareProposal,
+    ConsensusPhase, ConsensusState, ConsensusThreshold, PathSelection, PureCommitFact, ShareData,
+    ShareProposal,
 };
+use aura_consensus::types::ConsensusId;
+use aura_core::{hash, AuthorityId, Hash32, OperationId};
 use aura_consensus::core::transitions::{apply_share, trigger_fallback};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
@@ -276,13 +279,36 @@ pub struct ConsensusSimulation {
 }
 
 impl ConsensusSimulation {
+    fn authority_for_label(label: &str) -> AuthorityId {
+        AuthorityId::new_from_entropy(hash::hash(label.as_bytes()))
+    }
+
+    fn hash_for_label(label: &str) -> Hash32 {
+        Hash32::from_bytes(label.as_bytes())
+    }
+
+    fn consensus_id_for_label(label: &str) -> ConsensusId {
+        ConsensusId(Hash32::from_bytes(label.as_bytes()))
+    }
+
+    fn operation_for_label(label: &str) -> OperationId {
+        OperationId::new_from_entropy(hash::hash(label.as_bytes()))
+    }
+
     /// Create a new simulation with n witnesses and threshold k
     pub fn new(witnesses: Vec<&str>, threshold: usize, seed: u64) -> Self {
-        let cid = "sim_consensus".to_string();
-        let prestate = "sim_prestate".to_string();
-        let operation = "sim_operation".to_string();
+        let cid = Self::consensus_id_for_label("sim_consensus");
+        let prestate = Self::hash_for_label("sim_prestate");
+        let operation = Self::operation_for_label("sim_operation");
+        let consensus_threshold = ConsensusThreshold::new(
+            u16::try_from(threshold).expect("threshold fits in u16"),
+        )
+        .expect("threshold");
 
-        let witness_set: BTreeSet<String> = witnesses.iter().map(|w| w.to_string()).collect();
+        let witness_set: BTreeSet<AuthorityId> = witnesses
+            .iter()
+            .map(|w| Self::authority_for_label(w))
+            .collect();
 
         let states: HashMap<String, ConsensusState> = witnesses
             .iter()
@@ -290,12 +316,12 @@ impl ConsensusSimulation {
                 (
                     w.to_string(),
                     ConsensusState::new(
-                        cid.clone(),
-                        operation.clone(),
-                        prestate.clone(),
-                        threshold,
+                        cid,
+                        operation,
+                        prestate,
+                        consensus_threshold,
                         witness_set.clone(),
-                        w.to_string(), // Each witness is initiator of their own view
+                        Self::authority_for_label(w), // Each witness is initiator of their own view
                         PathSelection::FastPath,
                     ),
                 )
@@ -333,8 +359,8 @@ impl ConsensusSimulation {
     /// Simulate a witness proposing a share
     pub fn propose_share(&mut self, witness: &str, result_id: &str) {
         let proposal = ShareProposal {
-            witness: witness.to_string(),
-            result_id: result_id.to_string(),
+            witness: Self::authority_for_label(witness),
+            result_id: Self::hash_for_label(result_id),
             share: ShareData {
                 share_value: format!("share_{witness}"),
                 nonce_binding: format!("nonce_{witness}"),
@@ -349,7 +375,8 @@ impl ConsensusSimulation {
                     ByzantineBehavior::Equivocate => {
                         // Send conflicting proposal to half the witnesses
                         let mut alt_proposal = proposal.clone();
-                        alt_proposal.result_id = format!("{result_id}_alt");
+                        alt_proposal.result_id =
+                            Self::hash_for_label(&format!("{result_id}_alt"));
 
                         let witnesses: Vec<_> = self.states.keys().cloned().collect();
                         for (i, to) in witnesses.iter().enumerate() {
@@ -452,14 +479,16 @@ impl ConsensusSimulation {
             }
 
             // Check threshold consistency
-            if state.commit_fact.is_some() && state.proposals.len() < state.threshold {
+            if state.commit_fact.is_some()
+                && state.proposals.len() < state.threshold.as_usize()
+            {
                 violations.push(InvariantViolation {
                     witness: witness.clone(),
                     invariant: "CommitRequiresThreshold".to_string(),
                     message: format!(
                         "Commit with {} proposals but threshold is {}",
                         state.proposals.len(),
-                        state.threshold
+                        state.threshold.get()
                     ),
                 });
             }

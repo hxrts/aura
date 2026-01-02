@@ -5,7 +5,7 @@
 
 use crate::reactive::scheduler::ViewReduction;
 use aura_chat::{ChatDelta, ChatViewReducer, CHAT_FACT_TYPE_ID};
-use aura_composition::{downcast_delta, ViewDeltaReducer};
+use aura_composition::{downcast_delta, ViewDelta, ViewDeltaReducer};
 use aura_core::identifiers::AuthorityId;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 
@@ -14,13 +14,20 @@ use aura_journal::fact::{Fact, FactContent, RelationalFact};
 /// Delegates to `ChatViewReducer` from `aura-chat` crate.
 pub struct ChatReduction;
 
+fn downcast_chat_deltas(view_deltas: Vec<ViewDelta>) -> Vec<ChatDelta> {
+    view_deltas
+        .into_iter()
+        .filter_map(|vd| downcast_delta::<ChatDelta>(&vd).cloned())
+        .collect()
+}
+
 impl ViewReduction<ChatDelta> for ChatReduction {
     fn reduce(&self, facts: &[Fact], own_authority: Option<AuthorityId>) -> Vec<ChatDelta> {
         let reducer = ChatViewReducer;
 
         facts
             .iter()
-            .filter_map(|fact| match &fact.content {
+            .flat_map(|fact| match &fact.content {
                 FactContent::Relational(RelationalFact::Generic {
                     binding_type,
                     binding_data,
@@ -29,12 +36,9 @@ impl ViewReduction<ChatDelta> for ChatReduction {
                     // Use the domain reducer and downcast back to ChatDelta
                     let view_deltas =
                         reducer.reduce_fact(binding_type, binding_data, own_authority);
-                    view_deltas
-                        .into_iter()
-                        .filter_map(|vd| downcast_delta::<ChatDelta>(&vd).cloned())
-                        .next()
+                    downcast_chat_deltas(view_deltas)
                 }
-                _ => None,
+                _ => Vec::new(),
             })
             .collect()
     }
@@ -43,6 +47,7 @@ impl ViewReduction<ChatDelta> for ChatReduction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_composition::IntoViewDelta;
     use aura_chat::ChatFact;
     use aura_core::identifiers::{ChannelId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
@@ -94,5 +99,34 @@ mod tests {
         let deltas = reduction.reduce(&facts, test_authority);
         assert_eq!(deltas.len(), 1);
         assert!(matches!(&deltas[0], ChatDelta::ChannelAdded { name, .. } if name == "general"));
+    }
+
+    #[test]
+    fn test_downcast_preserves_all_deltas() {
+        let view_deltas = vec![
+            ChatDelta::ChannelAdded {
+                channel_id: "chan".to_string(),
+                name: "general".to_string(),
+                topic: None,
+                is_dm: false,
+                member_count: 1,
+                created_at: 1,
+                creator_id: "creator".to_string(),
+            }
+            .into_view_delta(),
+            ChatDelta::MessageAdded {
+                channel_id: "chan".to_string(),
+                message_id: "msg".to_string(),
+                sender_id: "sender".to_string(),
+                sender_name: "Alice".to_string(),
+                content: "Hello".to_string(),
+                timestamp: 2,
+                reply_to: None,
+            }
+            .into_view_delta(),
+        ];
+
+        let deltas = downcast_chat_deltas(view_deltas);
+        assert_eq!(deltas.len(), 2);
     }
 }

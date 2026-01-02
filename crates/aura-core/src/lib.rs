@@ -132,9 +132,9 @@ pub use semilattice::{
 pub use context::{ContextSnapshot, EffectContext};
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{
-    AccountId, AuthorityId, ChannelId, ContextId, DataId, DeviceId, DkdContextId, EventId,
-    EventNonce, GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext,
-    OperationId, RelayId, SessionId,
+    AccountId, AuthorityId, CeremonyId, ChannelId, ContextId, DataId, DeviceId, DkdContextId,
+    EventId, EventNonce, GroupId, GuardianId, HomeId, IndividualId, IndividualIdExt, InvitationId,
+    MemberId, MessageContext, NeighborhoodId, OperationId, RecoveryId, RelayId, SessionId,
 };
 #[doc = "unstable: Context derivation system is under active development"]
 pub use util::context::{

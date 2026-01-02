@@ -4,7 +4,7 @@
 //! (bans, mutes, kicks) that were previously in TUI-only demo code.
 
 use crate::workflows::budget::HomeFlowBudget;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -196,7 +196,9 @@ impl HomeState {
         };
 
         // Initialize budget with one resident (the creator)
-        let mut budget = HomeFlowBudget::new(id.to_string());
+        // Convert ChannelId to HomeId using shared byte representation
+        let home_id = HomeId::from_bytes(*id.as_bytes());
+        let mut budget = HomeFlowBudget::new(home_id);
         let _ = budget.add_resident(); // Creator is first resident
 
         Self {

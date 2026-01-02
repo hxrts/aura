@@ -40,9 +40,9 @@ fn test_snapshot(authority: AuthorityId, context: ContextId) -> GuardSnapshot {
         context_id: context,
         flow_budget_remaining: FlowCost::new(1000),
         capabilities: vec![
-            guards::CAP_RENDEZVOUS_PUBLISH.to_string(),
-            guards::CAP_RENDEZVOUS_CONNECT.to_string(),
-            guards::CAP_RENDEZVOUS_RELAY.to_string(),
+            aura_guards::types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH),
+            aura_guards::types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
+            aura_guards::types::CapabilityId::from(guards::CAP_RENDEZVOUS_RELAY),
         ],
         epoch: 1,
     }
@@ -52,9 +52,7 @@ fn test_descriptor(authority: AuthorityId, context: ContextId) -> RendezvousDesc
     RendezvousDescriptor {
         authority_id: authority,
         context_id: context,
-        transport_hints: vec![TransportHint::QuicDirect {
-            addr: "192.168.1.1:8443".to_string(),
-        }],
+        transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
         handshake_psk_commitment: [42u8; 32],
         valid_from: 0,
         valid_until: 10_000,
@@ -77,9 +75,7 @@ fn test_descriptor_publication_flow() {
     let service = RendezvousService::new(alice, config);
 
     let snapshot = test_snapshot(alice, context);
-    let hints = vec![TransportHint::QuicDirect {
-        addr: "10.0.0.1:8443".to_string(),
-    }];
+    let hints = vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()];
 
     // Act: Prepare descriptor publication
     let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, 1000);
@@ -359,16 +355,17 @@ fn test_insufficient_flow_budget_blocks_publish() {
     let mut snapshot = test_snapshot(alice, context);
     snapshot.flow_budget_remaining = FlowCost::new(0); // No budget
 
-    let hints = vec![TransportHint::QuicDirect {
-        addr: "10.0.0.1:8443".to_string(),
-    }];
+    let hints = vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()];
 
     let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, 1000);
 
     // Should be denied
     assert!(matches!(outcome.decision, GuardDecision::Deny { .. }));
     if let GuardDecision::Deny { reason } = outcome.decision {
-        assert!(reason.contains("flow budget"));
+        assert!(matches!(
+            reason,
+            aura_guards::types::GuardViolation::InsufficientFlowBudget { .. }
+        ));
     }
 }
 
@@ -385,7 +382,8 @@ fn test_missing_capability_blocks_connect() {
 
     // Snapshot WITHOUT connect capability
     let mut snapshot = test_snapshot(alice, context);
-    snapshot.capabilities = vec![guards::CAP_RENDEZVOUS_PUBLISH.to_string()]; // Only publish
+    snapshot.capabilities =
+        vec![aura_guards::types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH)]; // Only publish
 
     let result =
         service.prepare_establish_channel(&snapshot, context, bob, &psk, 1000, &bob_descriptor);
@@ -395,7 +393,10 @@ fn test_missing_capability_blocks_connect() {
     let outcome = result.unwrap();
     assert!(matches!(outcome.decision, GuardDecision::Deny { .. }));
     if let GuardDecision::Deny { reason } = outcome.decision {
-        assert!(reason.contains("capability"));
+        assert!(matches!(
+            reason,
+            aura_guards::types::GuardViolation::MissingCapability { .. }
+        ));
     }
 }
 
@@ -419,9 +420,7 @@ fn test_complete_discovery_to_channel_flow() {
 
     // Step 1: Bob publishes his descriptor
     let bob_snapshot = test_snapshot(bob, context);
-    let bob_hints = vec![TransportHint::QuicDirect {
-        addr: "10.0.0.2:8443".to_string(),
-    }];
+    let bob_hints = vec![TransportHint::quic_direct("10.0.0.2:8443").unwrap()];
     let publish_outcome =
         bob_service.prepare_publish_descriptor(&bob_snapshot, context, bob_hints, 1000);
     assert!(matches!(publish_outcome.decision, GuardDecision::Allow));
@@ -492,9 +491,7 @@ fn test_complete_discovery_to_channel_flow() {
 fn test_transport_hint_serialization() {
     use aura_journal::DomainFact;
 
-    let hint = TransportHint::QuicDirect {
-        addr: "192.168.1.1:8443".to_string(),
-    };
+    let hint = TransportHint::quic_direct("192.168.1.1:8443").unwrap();
 
     let descriptor = RendezvousDescriptor {
         authority_id: test_authority(1),
@@ -524,9 +521,7 @@ fn test_transport_hint_serialization() {
 #[test]
 fn test_relay_transport_hint() {
     let relay = test_authority(99);
-    let hint = TransportHint::WebSocketRelay {
-        relay_authority: relay,
-    };
+    let hint = TransportHint::websocket_relay(relay);
 
     let descriptor = RendezvousDescriptor {
         authority_id: test_authority(1),

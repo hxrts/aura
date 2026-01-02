@@ -13,6 +13,7 @@ use aura_core::effects::{
 use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard;
+use aura_guards::types::CapabilityId;
 use aura_protocol::effects::EffectApiEffects;
 use serde::{Deserialize, Serialize};
 
@@ -439,7 +440,7 @@ impl AuthHandler {
         }
 
         let guard = create_send_guard(
-            "auth:authenticate".to_string(),
+            CapabilityId::from("auth:authenticate"),
             self.context.effect_context.context_id(),
             self.context.authority.authority_id(),
             FlowCost::new(50),

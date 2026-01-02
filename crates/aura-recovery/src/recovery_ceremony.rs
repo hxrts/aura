@@ -1126,4 +1126,271 @@ mod tests {
         assert!(state.has_rejection());
         assert_eq!(state.rejected_count(), 1);
     }
+
+    // =========================================================================
+    // PROPERTY TESTS
+    // =========================================================================
+
+    use proptest::prelude::*;
+
+    /// Strategy to generate a valid ceremony state with configurable parameters
+    fn ceremony_state_strategy(
+        num_guardians: usize,
+        threshold: u16,
+    ) -> impl Strategy<Value = RecoveryCeremonyState> {
+        prop::collection::vec(any::<[u8; 32]>(), num_guardians).prop_map(move |seeds| {
+            let guardians: Vec<AuthorityId> = seeds
+                .into_iter()
+                .map(AuthorityId::new_from_entropy)
+                .collect();
+
+            RecoveryCeremonyState {
+                ceremony_id: RecoveryCeremonyId::new(&test_prestate(), &test_request_hash(), 1),
+                request: CeremonyRecoveryRequest {
+                    account_authority: test_authority(0),
+                    operation: CeremonyRecoveryOperation::EmergencyFreeze,
+                    justification: "Test".to_string(),
+                    prestate_hash: test_prestate(),
+                    requested_at_ms: 0,
+                },
+                status: RecoveryCeremonyStatus::CollectingApprovals,
+                approvals: HashMap::new(),
+                guardians,
+                threshold,
+                started_at_ms: 0,
+                timeout_ms: 1000,
+                agreement_mode: AgreementMode::CoordinatorSoftSafe,
+            }
+        })
+    }
+
+    proptest! {
+        /// Property: Duplicate approvals from the same guardian don't advance threshold.
+        /// Inserting the same guardian's approval twice should only count once.
+        #[test]
+        fn prop_duplicate_approvals_dont_advance_threshold(
+            seed in any::<[u8; 32]>(),
+            threshold in 1u16..=5u16
+        ) {
+            let guardian = AuthorityId::new_from_entropy(seed);
+            let mut state = RecoveryCeremonyState {
+                ceremony_id: RecoveryCeremonyId::new(&test_prestate(), &test_request_hash(), 1),
+                request: CeremonyRecoveryRequest {
+                    account_authority: test_authority(0),
+                    operation: CeremonyRecoveryOperation::EmergencyFreeze,
+                    justification: "Test".to_string(),
+                    prestate_hash: test_prestate(),
+                    requested_at_ms: 0,
+                },
+                status: RecoveryCeremonyStatus::CollectingApprovals,
+                approvals: HashMap::new(),
+                guardians: vec![guardian], // Only one guardian
+                threshold,
+                started_at_ms: 0,
+                timeout_ms: 1000,
+                agreement_mode: AgreementMode::CoordinatorSoftSafe,
+            };
+
+            let approval = RecoveryApproval {
+                ceremony_id: state.ceremony_id,
+                guardian,
+                approved: true,
+                rejection_reason: None,
+                prestate_hash: test_prestate(),
+                signature: ThresholdSignature::single_signer(vec![], vec![], 0),
+                approved_at_ms: 0,
+            };
+
+            // Insert approval once
+            state.approvals.insert(guardian, approval.clone());
+            let count_after_first = state.approved_count();
+
+            // Insert same approval again (simulating duplicate)
+            state.approvals.insert(guardian, approval);
+            let count_after_second = state.approved_count();
+
+            // Count should not increase due to HashMap semantics
+            prop_assert_eq!(count_after_first, count_after_second);
+            prop_assert_eq!(count_after_first, 1);
+        }
+
+        /// Property: Threshold is only met when approved_count >= threshold.
+        /// This verifies the threshold_met() invariant holds.
+        #[test]
+        fn prop_threshold_requires_sufficient_approvals(
+            num_guardians in 2usize..=5usize,
+            threshold in 1u16..=5u16
+        ) {
+            // Ensure threshold doesn't exceed guardians
+            let threshold = threshold.min(num_guardians as u16);
+
+            let guardians: Vec<AuthorityId> = (0..num_guardians)
+                .map(|i| AuthorityId::new_from_entropy([i as u8; 32]))
+                .collect();
+
+            let mut state = RecoveryCeremonyState {
+                ceremony_id: RecoveryCeremonyId::new(&test_prestate(), &test_request_hash(), 1),
+                request: CeremonyRecoveryRequest {
+                    account_authority: test_authority(0),
+                    operation: CeremonyRecoveryOperation::EmergencyFreeze,
+                    justification: "Test".to_string(),
+                    prestate_hash: test_prestate(),
+                    requested_at_ms: 0,
+                },
+                status: RecoveryCeremonyStatus::CollectingApprovals,
+                approvals: HashMap::new(),
+                guardians: guardians.clone(),
+                threshold,
+                started_at_ms: 0,
+                timeout_ms: 1000,
+                agreement_mode: AgreementMode::CoordinatorSoftSafe,
+            };
+
+            // Add approvals one by one and verify threshold_met invariant
+            for (i, guardian) in guardians.iter().enumerate() {
+                let approval = RecoveryApproval {
+                    ceremony_id: state.ceremony_id,
+                    guardian: *guardian,
+                    approved: true,
+                    rejection_reason: None,
+                    prestate_hash: test_prestate(),
+                    signature: ThresholdSignature::single_signer(vec![], vec![], 0),
+                    approved_at_ms: 0,
+                };
+                state.approvals.insert(*guardian, approval);
+
+                let current_count = state.approved_count();
+                let threshold_met = state.threshold_met();
+
+                // Invariant: threshold_met iff approved_count >= threshold
+                prop_assert_eq!(
+                    threshold_met,
+                    current_count >= threshold as usize,
+                    "threshold_met={} but approved_count={}, threshold={}",
+                    threshold_met, current_count, threshold
+                );
+
+                // Also verify: before threshold, should not be met
+                if i + 1 < threshold as usize {
+                    prop_assert!(!threshold_met);
+                }
+            }
+        }
+
+        /// Property: Unknown guardians cannot contribute to approved_count().
+        /// The approved_count() only counts guardians whose approval is approved=true,
+        /// but the real protection is in process_approval() which rejects unknown guardians
+        /// before they can be added to the approvals map.
+        ///
+        /// This test verifies that if we only add approvals from known guardians,
+        /// the approved_count matches the expected count.
+        #[test]
+        fn prop_approved_count_matches_known_approvals(
+            num_guardians in 2usize..=5usize,
+            approval_indices in prop::collection::vec(any::<usize>(), 0..=5)
+        ) {
+            let guardians: Vec<AuthorityId> = (0..num_guardians)
+                .map(|i| AuthorityId::new_from_entropy([i as u8; 32]))
+                .collect();
+
+            let mut state = RecoveryCeremonyState {
+                ceremony_id: RecoveryCeremonyId::new(&test_prestate(), &test_request_hash(), 1),
+                request: CeremonyRecoveryRequest {
+                    account_authority: test_authority(0),
+                    operation: CeremonyRecoveryOperation::EmergencyFreeze,
+                    justification: "Test".to_string(),
+                    prestate_hash: test_prestate(),
+                    requested_at_ms: 0,
+                },
+                status: RecoveryCeremonyStatus::CollectingApprovals,
+                approvals: HashMap::new(),
+                guardians: guardians.clone(),
+                threshold: 1,
+                started_at_ms: 0,
+                timeout_ms: 1000,
+                agreement_mode: AgreementMode::CoordinatorSoftSafe,
+            };
+
+            // Track which unique guardians we've added
+            let mut added_guardians = std::collections::HashSet::new();
+
+            // Add approvals only from known guardians (using modulo to stay in bounds)
+            for idx in &approval_indices {
+                let guardian_idx = idx % num_guardians;
+                let guardian = guardians[guardian_idx];
+
+                // Only count if we haven't added this guardian yet
+                if added_guardians.insert(guardian) {
+                    let approval = RecoveryApproval {
+                        ceremony_id: state.ceremony_id,
+                        guardian,
+                        approved: true,
+                        rejection_reason: None,
+                        prestate_hash: test_prestate(),
+                        signature: ThresholdSignature::single_signer(vec![], vec![], 0),
+                        approved_at_ms: 0,
+                    };
+                    state.approvals.insert(guardian, approval);
+                }
+            }
+
+            // Verify approved_count matches unique guardians we added
+            prop_assert_eq!(state.approved_count(), added_guardians.len());
+            // Verify all approved guardians are in our guardians list
+            for ag in state.approved_guardians() {
+                prop_assert!(guardians.contains(&ag));
+            }
+        }
+
+        /// Property: Approved guardians is always a subset of ceremony guardians.
+        #[test]
+        fn prop_approved_subset_of_guardians(
+            num_guardians in 2usize..=5usize,
+            num_approvals in 0usize..=5usize
+        ) {
+            let guardians: Vec<AuthorityId> = (0..num_guardians)
+                .map(|i| AuthorityId::new_from_entropy([i as u8; 32]))
+                .collect();
+
+            let mut state = RecoveryCeremonyState {
+                ceremony_id: RecoveryCeremonyId::new(&test_prestate(), &test_request_hash(), 1),
+                request: CeremonyRecoveryRequest {
+                    account_authority: test_authority(0),
+                    operation: CeremonyRecoveryOperation::EmergencyFreeze,
+                    justification: "Test".to_string(),
+                    prestate_hash: test_prestate(),
+                    requested_at_ms: 0,
+                },
+                status: RecoveryCeremonyStatus::CollectingApprovals,
+                approvals: HashMap::new(),
+                guardians: guardians.clone(),
+                threshold: 1,
+                started_at_ms: 0,
+                timeout_ms: 1000,
+                agreement_mode: AgreementMode::CoordinatorSoftSafe,
+            };
+
+            // Add approvals from guardians (bounded by actual guardian count)
+            for i in 0..num_approvals.min(num_guardians) {
+                let guardian = guardians[i];
+                let approval = RecoveryApproval {
+                    ceremony_id: state.ceremony_id,
+                    guardian,
+                    approved: true,
+                    rejection_reason: None,
+                    prestate_hash: test_prestate(),
+                    signature: ThresholdSignature::single_signer(vec![], vec![], 0),
+                    approved_at_ms: 0,
+                };
+                state.approvals.insert(guardian, approval);
+            }
+
+            // Verify approved_guardians is subset of guardians
+            let approved = state.approved_guardians();
+            let guardian_set: std::collections::HashSet<_> = guardians.iter().collect();
+            for ag in &approved {
+                prop_assert!(guardian_set.contains(ag));
+            }
+        }
+    }
 }

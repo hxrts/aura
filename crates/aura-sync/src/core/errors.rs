@@ -13,9 +13,6 @@ use std::time::Duration;
 /// Unified result type for all sync operations using core error system
 pub type SyncResult<T> = Result<T, AuraError>;
 
-/// Convenience type alias for backward compatibility
-pub type SyncError = AuraError;
-
 /// Convenience functions for sync-specific error types.
 /// These now map to unified AuraError variants.
 ///

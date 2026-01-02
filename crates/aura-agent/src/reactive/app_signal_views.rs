@@ -31,7 +31,7 @@ use tokio::sync::Mutex;
 use super::scheduler::ReactiveView;
 
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
-use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
+use aura_invitation::{InvitationFact, InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID};
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use aura_social::moderation::facts::{
@@ -71,13 +71,13 @@ impl InvitationsSignalView {
         }
     }
 
-    fn map_invitation_type(inv_type: &str) -> InvitationType {
-        match inv_type.to_lowercase().as_str() {
+    fn map_invitation_type(inv_type: &DomainInvitationType) -> InvitationType {
+        match inv_type {
             // Legacy mapping: the TUI maps aura-app Home → "Contact".
-            "contact" => InvitationType::Home,
-            "guardian" => InvitationType::Guardian,
-            "channel" | "chat" => InvitationType::Chat,
-            _ => InvitationType::Home,
+            DomainInvitationType::Contact { .. } => InvitationType::Home,
+            DomainInvitationType::Guardian { .. } => InvitationType::Guardian,
+            DomainInvitationType::Channel { .. } => InvitationType::Chat,
+            DomainInvitationType::DeviceEnrollment { .. } => InvitationType::Home,
         }
     }
 }
@@ -131,7 +131,7 @@ impl ReactiveView for InvitationsSignalView {
                     };
 
                     let invitation = Invitation {
-                        id: invitation_id,
+                        id: invitation_id.to_string(),
                         invitation_type: Self::map_invitation_type(&invitation_type),
                         status: InvitationStatus::Pending,
                         direction,
@@ -151,15 +151,15 @@ impl ReactiveView for InvitationsSignalView {
                     changed = true;
                 }
                 InvitationFact::Accepted { invitation_id, .. } => {
-                    state.accept_invitation(&invitation_id);
+                    state.accept_invitation(invitation_id.as_str());
                     changed = true;
                 }
                 InvitationFact::Declined { invitation_id, .. } => {
-                    state.reject_invitation(&invitation_id);
+                    state.reject_invitation(invitation_id.as_str());
                     changed = true;
                 }
                 InvitationFact::Cancelled { invitation_id, .. } => {
-                    state.revoke_invitation(&invitation_id);
+                    state.revoke_invitation(invitation_id.as_str());
                     changed = true;
                 }
                 InvitationFact::CeremonyInitiated {
@@ -172,8 +172,8 @@ impl ReactiveView for InvitationsSignalView {
                     // They track the consensus-based invitation exchange protocol.
                     // For RecoveryState updates, use RecoveryFacts or the ceremony tracker.
                     tracing::debug!(
-                        ceremony_id,
-                        sender,
+                        ceremony_id = %ceremony_id,
+                        sender = %sender,
                         timestamp_ms,
                         "Invitation ceremony initiated"
                     );
@@ -184,7 +184,7 @@ impl ReactiveView for InvitationsSignalView {
                     ..
                 } => {
                     tracing::debug!(
-                        ceremony_id,
+                        ceremony_id = %ceremony_id,
                         timestamp_ms,
                         "Invitation ceremony acceptance received"
                     );
@@ -196,7 +196,7 @@ impl ReactiveView for InvitationsSignalView {
                     ..
                 } => {
                     tracing::info!(
-                        ceremony_id,
+                        ceremony_id = %ceremony_id,
                         relationship_id,
                         timestamp_ms,
                         "Invitation ceremony committed - relationship established"
@@ -209,7 +209,7 @@ impl ReactiveView for InvitationsSignalView {
                     ..
                 } => {
                     tracing::warn!(
-                        ceremony_id,
+                        ceremony_id = %ceremony_id,
                         reason,
                         timestamp_ms,
                         "Invitation ceremony aborted"
@@ -223,8 +223,8 @@ impl ReactiveView for InvitationsSignalView {
                     ..
                 } => {
                     tracing::warn!(
-                        superseded_ceremony_id,
-                        superseding_ceremony_id,
+                        superseded_ceremony_id = %superseded_ceremony_id,
+                        superseding_ceremony_id = %superseding_ceremony_id,
                         reason,
                         timestamp_ms,
                         "Invitation ceremony superseded"

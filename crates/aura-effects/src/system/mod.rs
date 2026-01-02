@@ -16,7 +16,9 @@
 pub mod logging;
 pub mod metrics;
 pub mod monitoring;
+pub mod types;
 
 pub use logging::LoggingSystemHandler;
 pub use metrics::MetricsSystemHandler;
 pub use monitoring::MonitoringSystemHandler;
+pub use types::{AuditAction, ComponentId, LogLevel};

@@ -27,16 +27,23 @@
 //! ```
 
 use aura_consensus::core::{
-    state::{ConsensusPhase, ConsensusState},
+    state::{ConsensusPhase, ConsensusState, ConsensusThreshold},
     validation::check_invariants,
 };
+use aura_consensus::types::ConsensusId;
+use aura_core::{AuthorityId, Hash32, OperationId};
 use aura_testkit::consensus::{
-    load_itf_trace, parse_itf_trace, DivergenceReport, ITFState, InstanceDiff, StateDiff,
+    load_itf_trace, parse_consensus_id_label, parse_itf_trace, parse_operation_id_label,
+    DivergenceReport, ITFState, InstanceDiff, StateDiff,
 };
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+fn threshold(value: u16) -> ConsensusThreshold {
+    ConsensusThreshold::new(value).expect("threshold")
+}
 
 /// Test that all states in an ITF trace satisfy invariants
 #[test]
@@ -225,13 +232,15 @@ fn test_parse_itf_with_instance() {
     let state = &trace.states[0];
     assert_eq!(state.instances.len(), 1);
 
+    let expected_cid = parse_consensus_id_label("cns1");
     let inst = state
         .instances
-        .get("cns1")
+        .get(&expected_cid)
         .unwrap_or_else(|| panic!("missing instance cns1"));
-    assert_eq!(inst.cid, "cns1");
-    assert_eq!(inst.operation, "update_policy");
-    assert_eq!(inst.threshold, 2);
+    assert_eq!(inst.cid, expected_cid);
+    let expected_op = parse_operation_id_label("update_policy");
+    assert_eq!(inst.operation, expected_op);
+    assert_eq!(inst.threshold.get(), 2);
     assert_eq!(inst.witnesses.len(), 3);
     assert_eq!(inst.phase, ConsensusPhase::FastPathActive);
 }
@@ -274,15 +283,15 @@ fn test_itf_proposal_monotonicity() {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum InferredAction {
     /// New consensus instance created
-    StartConsensus { cid: String },
+    StartConsensus { cid: ConsensusId },
     /// Share proposal added
-    ApplyShare { cid: String, witness: String },
+    ApplyShare { cid: ConsensusId, witness: AuthorityId },
     /// Phase transitioned to fallback
-    TriggerFallback { cid: String },
+    TriggerFallback { cid: ConsensusId },
     /// Phase transitioned to failed
-    FailConsensus { cid: String },
+    FailConsensus { cid: ConsensusId },
     /// Phase transitioned to committed
-    CompleteConsensus { cid: String },
+    CompleteConsensus { cid: ConsensusId },
     /// Epoch advanced
     EpochAdvance { from: u64, to: u64 },
     /// No change detected
@@ -330,7 +339,7 @@ fn infer_action(prev: &ITFState, curr: &ITFState) -> Vec<InferredAction> {
     // Check for new instances
     for cid in curr.instances.keys() {
         if !prev.instances.contains_key(cid) {
-            actions.push(InferredAction::StartConsensus { cid: cid.clone() });
+            actions.push(InferredAction::StartConsensus { cid: *cid });
         }
     }
 
@@ -346,8 +355,8 @@ fn infer_action(prev: &ITFState, curr: &ITFState) -> Vec<InferredAction> {
                         .any(|p| p.witness == prop.witness);
                     if !prop_exists {
                         actions.push(InferredAction::ApplyShare {
-                            cid: cid.clone(),
-                            witness: prop.witness.clone(),
+                            cid: *cid,
+                            witness: prop.witness,
                         });
                     }
                 }
@@ -357,13 +366,13 @@ fn infer_action(prev: &ITFState, curr: &ITFState) -> Vec<InferredAction> {
             if prev_inst.phase != curr_inst.phase {
                 match curr_inst.phase {
                     ConsensusPhase::FallbackActive => {
-                        actions.push(InferredAction::TriggerFallback { cid: cid.clone() });
+                        actions.push(InferredAction::TriggerFallback { cid: *cid });
                     }
                     ConsensusPhase::Failed => {
-                        actions.push(InferredAction::FailConsensus { cid: cid.clone() });
+                        actions.push(InferredAction::FailConsensus { cid: *cid });
                     }
                     ConsensusPhase::Committed => {
-                        actions.push(InferredAction::CompleteConsensus { cid: cid.clone() });
+                        actions.push(InferredAction::CompleteConsensus { cid: *cid });
                     }
                     _ => {}
                 }
@@ -509,7 +518,7 @@ fn compare_trace_states_with_divergence(
     _step_index: usize,
     prev_state: &ITFState,
     curr_state: &ITFState,
-) -> Vec<(String, InstanceDiff, Vec<InferredAction>)> {
+) -> Vec<(ConsensusId, InstanceDiff, Vec<InferredAction>)> {
     let mut divergences = Vec::new();
     let actions = infer_action(prev_state, curr_state);
 
@@ -521,7 +530,7 @@ fn compare_trace_states_with_divergence(
                 // Only report unexpected divergences (not from valid transitions)
                 let is_expected = is_expected_divergence(&actions, &diff);
                 if !is_expected {
-                    divergences.push((cid.clone(), diff, actions.clone()));
+                    divergences.push((*cid, diff, actions.clone()));
                 }
             }
         }
@@ -632,15 +641,18 @@ fn test_divergence_report_format() {
     use std::collections::BTreeSet;
 
     // Create two states with known differences
-    let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+    let witnesses: BTreeSet<_> = [1u8, 2, 3]
+        .iter()
+        .map(|&s| AuthorityId::new_from_entropy([s; 32]))
+        .collect();
 
     let state1 = ConsensusState::new(
-        "cns_test".to_string(),
-        "test_op".to_string(),
-        "pre_hash".to_string(),
-        2,
+        ConsensusId(Hash32::from_bytes(b"cns_test")),
+        OperationId::new_from_entropy([1u8; 32]),
+        Hash32::from_bytes(b"pre_hash"),
+        threshold(2),
         witnesses,
-        "w1".to_string(),
+        AuthorityId::new_from_entropy([1u8; 32]),
         PathSelection::FastPath,
     );
 
@@ -650,8 +662,8 @@ fn test_divergence_report_format() {
     state2.phase = ConsensusPhase::FallbackActive;
     state2.fallback_timer_active = true;
     state2.proposals.push(ShareProposal {
-        witness: "w1".to_string(),
-        result_id: "result_1".to_string(),
+        witness: AuthorityId::new_from_entropy([1u8; 32]),
+        result_id: Hash32::from_bytes(b"result_1"),
         share: ShareData {
             share_value: "share_val".to_string(),
             nonce_binding: "nonce_bind".to_string(),
@@ -685,10 +697,7 @@ fn test_divergence_report_format() {
         "Report should have header"
     );
     assert!(report.contains("step 5"), "Report should show step index");
-    assert!(
-        report.contains("cns_test"),
-        "Report should show instance id"
-    );
+    assert!(report.contains("consensus:"), "Report should show instance id");
     assert!(report.contains("phase"), "Report should show phase field");
 
     println!("Divergence report format test:\n{report}");
@@ -700,23 +709,26 @@ fn test_invariant_violation_with_divergence() {
     use aura_consensus::core::state::{PathSelection, ShareData, ShareProposal};
     use std::collections::BTreeSet;
 
-    let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+    let witnesses: BTreeSet<_> = [1u8, 2, 3]
+        .iter()
+        .map(|&s| AuthorityId::new_from_entropy([s; 32]))
+        .collect();
 
     // Create a valid state
     let mut state = ConsensusState::new(
-        "cns_inv".to_string(),
-        "op".to_string(),
-        "pre".to_string(),
-        2,
+        ConsensusId(Hash32::from_bytes(b"cns_inv")),
+        OperationId::new_from_entropy([2u8; 32]),
+        Hash32::from_bytes(b"pre"),
+        threshold(2),
         witnesses,
-        "w1".to_string(),
+        AuthorityId::new_from_entropy([1u8; 32]),
         PathSelection::FastPath,
     );
 
     // Add a proposal
     state.proposals.push(ShareProposal {
-        witness: "w1".to_string(),
-        result_id: "r1".to_string(),
+        witness: AuthorityId::new_from_entropy([1u8; 32]),
+        result_id: Hash32::from_bytes(b"r1"),
         share: ShareData {
             share_value: "s1".to_string(),
             nonce_binding: "n1".to_string(),
@@ -732,7 +744,7 @@ fn test_invariant_violation_with_divergence() {
 
     // Modify actual to have a violation (threshold > witnesses, for example)
     let mut actual = state.clone();
-    actual.threshold = 10; // More than witnesses
+    actual.threshold = threshold(10); // More than witnesses
 
     let diff = StateDiff::compare_instances(&expected, &actual);
     assert!(!diff.is_empty());

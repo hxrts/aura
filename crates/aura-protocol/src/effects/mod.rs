@@ -75,7 +75,7 @@ pub mod tree;
 // Protocol effect re-exports
 pub use choreographic::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
-    ChoreographyMetrics,
+    ChoreographyMetrics, RoleIndex,
 };
 
 // Core effect re-exports (convenience - prefer importing from aura_core::effects directly)

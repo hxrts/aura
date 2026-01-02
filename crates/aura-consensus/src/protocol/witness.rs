@@ -7,7 +7,7 @@ use super::{
     ConsensusProtocol,
 };
 use crate::{
-    core::{ConsensusPhase as CorePhase, ConsensusState as CoreState},
+    core::{ConsensusState as CoreState, PathSelection},
     messages::{ConsensusMessage, ConsensusPhase},
     witness::WitnessTracker,
     ConsensusId,
@@ -16,10 +16,11 @@ use aura_core::{
     crypto::tree_signing::NonceToken,
     effects::{PhysicalTimeEffects, RandomEffects},
     frost::{NonceCommitment, Share},
-    AuraError, AuthorityId, Result,
+    AuraError, AuthorityId, OperationId, Result,
 };
 use frost_ed25519;
 use rand::SeedableRng;
+use std::collections::BTreeSet;
 use tracing::info;
 
 impl ConsensusProtocol {
@@ -44,26 +45,23 @@ impl ConsensusProtocol {
                 operation_bytes,
                 cached_commitments: _,
             } => {
+                let threshold = crate::core::state::ConsensusThreshold::new(self.config.threshold())
+                    .ok_or_else(|| AuraError::invalid("Consensus threshold must be >= 1"))?;
+                let witnesses: BTreeSet<_> =
+                    self.config.witness_set.iter().copied().collect();
+                let operation_id = OperationId::new_from_entropy(operation_hash.0);
+
                 // Initialize pure core state for invariant validation
                 // Quint: startConsensus action / Lean: Consensus.Agreement
-                let core_state = CoreState {
-                    cid: format!("{consensus_id}"),
-                    operation: String::new(), // Set from operation_bytes if needed
-                    prestate_hash: format!("{prestate_hash:?}"),
-                    threshold: self.config.threshold as usize,
-                    witnesses: self
-                        .config
-                        .witness_set
-                        .iter()
-                        .map(|w| format!("{w}"))
-                        .collect(),
-                    initiator: format!("{coordinator}"),
-                    phase: CorePhase::FastPathActive,
-                    proposals: Vec::new(),
-                    commit_fact: None,
-                    fallback_timer_active: false,
-                    equivocators: std::collections::BTreeSet::new(),
-                };
+                let core_state = CoreState::new(
+                    consensus_id,
+                    operation_id,
+                    prestate_hash,
+                    threshold,
+                    witnesses,
+                    coordinator,
+                    PathSelection::FastPath,
+                );
 
                 // Initialize witness instance
                 let instance = ProtocolInstance {

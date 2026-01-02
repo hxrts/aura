@@ -6,7 +6,7 @@
 //! `CapabilityGuard` provides high-level typed operations (AuthorityOp, ContextOp)
 //! and delegates to `BiscuitGuardEvaluator` for low-level capability evaluation.
 
-use super::{BiscuitGuardEvaluator, GuardResult};
+use super::{BiscuitGuardEvaluator, CapabilityId, GuardResult};
 use crate::authorization::BiscuitAuthorizationBridge;
 use aura_authorization::{AuthorityOp, ContextOp, ResourceScope};
 use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, FlowCost, Result};
@@ -92,9 +92,10 @@ impl CapabilityGuard {
         })?;
 
         // Delegate to evaluator for authorization and budget management
+        let capability = CapabilityId::from(operation.as_str());
         match self.evaluator.evaluate_guard(
             token,
-            operation.as_str(),
+            &capability,
             &scope,
             flow_cost,
             flow_budget,
@@ -143,9 +144,10 @@ impl CapabilityGuard {
         })?;
 
         // Delegate to evaluator for authorization and budget management
+        let capability = CapabilityId::from(operation.as_str());
         match self.evaluator.evaluate_guard(
             token,
-            operation.as_str(),
+            &capability,
             &scope,
             flow_cost,
             flow_budget,
@@ -187,9 +189,10 @@ impl CapabilityGuard {
         })?;
 
         // Delegate to evaluator for authorization and budget management
+        let capability = CapabilityId::from(operation.as_str());
         match self.evaluator.evaluate_guard(
             token,
-            operation.as_str(),
+            &capability,
             &scope,
             flow_cost,
             flow_budget,

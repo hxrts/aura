@@ -9,7 +9,7 @@ use aura_agent::{
     RecoveryState,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::ContextId;
+use aura_core::identifiers::{ContextId, RecoveryId};
 
 /// Create a test effect context for async tests
 fn test_context(authority_id: AuthorityId) -> EffectContext {
@@ -64,7 +64,7 @@ async fn test_add_device_recovery_via_agent() -> Result<(), Box<dyn std::error::
         )
         .await?;
 
-    assert!(request.recovery_id.starts_with("recovery-"));
+    assert!(request.recovery_id.as_str().starts_with("recovery-"));
     assert_eq!(request.threshold, 2);
     Ok(())
 }
@@ -86,7 +86,7 @@ async fn test_remove_device_recovery_via_agent() -> Result<(), Box<dyn std::erro
         .remove_device(0, guardians, 1, "Device compromised".to_string(), None)
         .await?;
 
-    assert!(request.recovery_id.starts_with("recovery-"));
+    assert!(request.recovery_id.as_str().starts_with("recovery-"));
     Ok(())
 }
 
@@ -117,7 +117,7 @@ async fn test_replace_tree_recovery_via_agent() -> Result<(), Box<dyn std::error
         )
         .await?;
 
-    assert!(request.recovery_id.starts_with("recovery-"));
+    assert!(request.recovery_id.as_str().starts_with("recovery-"));
     assert!(request.expires_at.is_some());
     Ok(())
 }
@@ -150,7 +150,7 @@ async fn test_update_guardians_recovery_via_agent() -> Result<(), Box<dyn std::e
         )
         .await?;
 
-    assert!(request.recovery_id.starts_with("recovery-"));
+    assert!(request.recovery_id.as_str().starts_with("recovery-"));
     Ok(())
 }
 
@@ -301,7 +301,7 @@ async fn test_get_state_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Non-existent recovery should return None
-    let non_existent = recovery.get_state("non-existent-id").await;
+    let non_existent = recovery.get_state(&RecoveryId::new("non-existent-id")).await;
     assert!(non_existent.is_none());
     Ok(())
 }
@@ -319,7 +319,7 @@ async fn test_recovery_execution_requires_consensus_in_production(
     let handler = RecoveryHandler::new(AuthorityContext::new(authority_id))?;
 
     let err = handler
-        .complete(&effects, "recovery-missing")
+        .complete(&effects, &RecoveryId::new("recovery-missing"))
         .await
         .unwrap_err();
 

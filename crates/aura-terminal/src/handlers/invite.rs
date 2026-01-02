@@ -14,7 +14,7 @@ use crate::error::{TerminalError, TerminalResult};
 use crate::handlers::{CliOutput, HandlerContext};
 use crate::InvitationAction;
 use aura_app::ui::types::{parse_invitation_role, InvitationRoleValue};
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, InvitationId};
 use std::str::FromStr;
 
 // CLI handlers use direct agent service access (more efficient for CLI context)
@@ -53,7 +53,8 @@ pub async fn handle_invitation(
         InvitationAction::Accept { invitation_id } => {
             let mut output = CliOutput::new();
             let service = agent.invitations()?;
-            let result = service.accept(invitation_id).await?;
+            let invitation_id = InvitationId::new(invitation_id.clone());
+            let result = service.accept(&invitation_id).await?;
             if result.success {
                 output.println(format!("Invitation {invitation_id} accepted"));
             } else if let Some(err) = result.error {
@@ -64,7 +65,8 @@ pub async fn handle_invitation(
         InvitationAction::Decline { invitation_id } => {
             let mut output = CliOutput::new();
             let service = agent.invitations()?;
-            let result = service.decline(invitation_id).await?;
+            let invitation_id = InvitationId::new(invitation_id.clone());
+            let result = service.decline(&invitation_id).await?;
             if result.success {
                 output.println(format!("Invitation {invitation_id} declined"));
             } else if let Some(err) = result.error {
@@ -75,7 +77,8 @@ pub async fn handle_invitation(
         InvitationAction::Cancel { invitation_id } => {
             let mut output = CliOutput::new();
             let service = agent.invitations()?;
-            let result = service.cancel(invitation_id).await?;
+            let invitation_id = InvitationId::new(invitation_id.clone());
+            let result = service.cancel(&invitation_id).await?;
             if result.success {
                 output.println(format!("Invitation {invitation_id} canceled"));
             } else if let Some(err) = result.error {
@@ -107,7 +110,8 @@ pub async fn handle_invitation(
         InvitationAction::Export { invitation_id } => {
             let mut output = CliOutput::new();
             let service = agent.invitations()?;
-            let code = service.export_code(invitation_id).await?;
+            let invitation_id = InvitationId::new(invitation_id.clone());
+            let code = service.export_code(&invitation_id).await?;
             output.section("Shareable Invitation Code");
             output.println(&code);
             output.blank();
@@ -227,11 +231,12 @@ async fn create_invitation(
 mod tests {
     use super::*;
     use aura_agent::handlers::InvitationType;
+    use aura_core::identifiers::InvitationId;
 
     fn test_shareable(invitation_type: InvitationType) -> ShareableInvitation {
         ShareableInvitation {
             version: 1,
-            invitation_id: "test-invitation-123".to_string(),
+            invitation_id: InvitationId::new("test-invitation-123"),
             sender_id: AuthorityId::new_from_entropy([42u8; 32]),
             invitation_type,
             message: None,

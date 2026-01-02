@@ -17,6 +17,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::{FlowCost, Hash32, Prestate, Receipt};
 use aura_guards::chain::create_send_guard;
+use aura_guards::types::CapabilityId;
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::EffectApiEffects;
@@ -105,7 +106,7 @@ impl RendezvousHandler {
         // Enforce guard (unless testing)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                "rendezvous:publish_descriptor".to_string(),
+                CapabilityId::from("rendezvous:publish_descriptor"),
                 context_id,
                 self.context.authority.authority_id(),
                 FlowCost::new(1), // Low cost for descriptor publication
@@ -212,7 +213,7 @@ impl RendezvousHandler {
         // Enforce guard (unless testing)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                "rendezvous:initiate_channel".to_string(),
+                CapabilityId::from("rendezvous:initiate_channel"),
                 context_id,
                 self.context.authority.authority_id(),
                 FlowCost::new(2), // Handshake cost
@@ -345,7 +346,7 @@ impl RendezvousHandler {
         // Enforce guard (unless testing)
         if !effects.is_testing() {
             let guard = create_send_guard(
-                "rendezvous:relay_request".to_string(),
+                CapabilityId::from("rendezvous:relay_request"),
                 context_id,
                 self.context.authority.authority_id(),
                 FlowCost::new(2), // Relay request cost
@@ -403,9 +404,9 @@ impl RendezvousHandler {
             context_id,
             flow_budget_remaining: FlowCost::new(1000), // Default budget
             capabilities: vec![
-                "rendezvous:publish".to_string(),
-                "rendezvous:connect".to_string(),
-                "rendezvous:relay".to_string(),
+                CapabilityId::from("rendezvous:publish"),
+                CapabilityId::from("rendezvous:connect"),
+                CapabilityId::from("rendezvous:relay"),
             ],
             epoch: effects.current_timestamp().await.unwrap_or(0) / 1000, // Epoch in seconds
         })
@@ -448,8 +449,8 @@ pub async fn execute_guard_outcome(
 ) -> AgentResult<()> {
     if outcome.decision.is_denied() {
         let reason = match &outcome.decision {
-            aura_rendezvous::GuardDecision::Deny { reason } => reason.as_str(),
-            _ => "Operation denied",
+            aura_rendezvous::GuardDecision::Deny { reason } => reason.to_string(),
+            _ => "Operation denied".to_string(),
         };
         return Err(AgentError::effects(format!(
             "Guard denied operation: {}",
@@ -767,7 +768,7 @@ mod tests {
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Deny {
-                reason: "Test denial".to_string(),
+                reason: aura_guards::types::GuardViolation::other("Test denial"),
             },
             effects: vec![],
         };
@@ -786,9 +787,7 @@ mod tests {
         let descriptor = RendezvousDescriptor {
             authority_id: authority.authority_id(),
             context_id,
-            transport_hints: vec![TransportHint::QuicDirect {
-                addr: "127.0.0.1:8443".to_string(),
-            }],
+            transport_hints: vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 0,
             valid_until: 10000,
@@ -865,9 +864,7 @@ mod tests {
             .publish_descriptor(
                 &effects,
                 context_id,
-                vec![TransportHint::QuicDirect {
-                    addr: "127.0.0.1:8443".to_string(),
-                }],
+                vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()],
                 [0u8; 32],
                 3600000, // 1 hour
             )
@@ -889,9 +886,7 @@ mod tests {
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
             context_id,
-            transport_hints: vec![TransportHint::QuicDirect {
-                addr: "192.168.1.1:8443".to_string(),
-            }],
+            transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
@@ -921,9 +916,7 @@ mod tests {
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
             context_id,
-            transport_hints: vec![TransportHint::QuicDirect {
-                addr: "192.168.1.1:8443".to_string(),
-            }],
+            transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,

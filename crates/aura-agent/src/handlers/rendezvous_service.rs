@@ -75,13 +75,10 @@ impl RendezvousServiceApi {
         listen_addr: String,
         psk_commitment: [u8; 32],
     ) -> AgentResult<RendezvousResult> {
-        self.publish_descriptor(
-            context_id,
-            vec![TransportHint::QuicDirect { addr: listen_addr }],
-            psk_commitment,
-            3600000, // 1 hour default
-        )
-        .await
+        let hint = TransportHint::quic_direct(&listen_addr)
+            .map_err(|e| crate::core::AgentError::invalid(format!("Invalid address: {}", e)))?;
+        self.publish_descriptor(context_id, vec![hint], psk_commitment, 3600000)
+            .await
     }
 
     /// Cache a peer's descriptor received via journal sync
@@ -266,9 +263,7 @@ mod tests {
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
             context_id,
-            transport_hints: vec![TransportHint::QuicDirect {
-                addr: "10.0.0.1:8443".to_string(),
-            }],
+            transport_hints: vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
@@ -298,9 +293,7 @@ mod tests {
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
             context_id,
-            transport_hints: vec![TransportHint::QuicDirect {
-                addr: "10.0.0.2:8443".to_string(),
-            }],
+            transport_hints: vec![TransportHint::quic_direct("10.0.0.2:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,

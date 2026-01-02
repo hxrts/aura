@@ -16,7 +16,11 @@
 
 use std::collections::HashMap;
 
-use super::state::{ConsensusPhase, ConsensusState, PureCommitFact, ShareData, ShareProposal};
+use super::state::{
+    ConsensusPhase, ConsensusState, ConsensusThreshold, PureCommitFact, ShareData, ShareProposal,
+};
+use crate::types::ConsensusId;
+use aura_core::{AuthorityId, Hash32, OperationId};
 
 /// Validation error types for detailed diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,9 +98,9 @@ impl aura_core::ProtocolErrorCode for ValidationError {
 /// Lean: Aura.Consensus.Frost.share_binding
 pub fn validate_share(
     share: &ShareData,
-    expected_cid: &str,
-    expected_rid: &str,
-    expected_prestate_hash: &str,
+    expected_cid: &ConsensusId,
+    expected_rid: &Hash32,
+    expected_prestate_hash: &Hash32,
 ) -> Result<(), ValidationError> {
     // Quint: share.dataBinding.bindCid == cid
     // Note: In pure core, we use string comparison on data_binding field
@@ -126,7 +130,10 @@ pub fn validate_share(
 /// - Attesters count >= threshold
 ///
 /// Lean: Aura.Consensus.Validity.validity
-pub fn validate_commit(commit: &PureCommitFact, threshold: usize) -> Result<(), ValidationError> {
+pub fn validate_commit(
+    commit: &PureCommitFact,
+    threshold: ConsensusThreshold,
+) -> Result<(), ValidationError> {
     // Quint: cf.signature.sigValue != ""
     if commit.signature.is_empty() {
         return Err(ValidationError::SignatureBindingMismatch);
@@ -145,8 +152,8 @@ pub fn validate_commit(commit: &PureCommitFact, threshold: usize) -> Result<(), 
 /// Equivocation occurs when a witness has proposals for different result IDs.
 ///
 /// Lean: Aura.Consensus.Equivocation.detection_soundness
-pub fn is_equivocator(proposals: &[ShareProposal], witness: &str) -> bool {
-    let witness_proposals: Vec<_> = proposals.iter().filter(|p| p.witness == witness).collect();
+pub fn is_equivocator(proposals: &[ShareProposal], witness: &AuthorityId) -> bool {
+    let witness_proposals: Vec<_> = proposals.iter().filter(|p| p.witness == *witness).collect();
 
     if witness_proposals.len() < 2 {
         return false;
@@ -166,12 +173,12 @@ pub fn is_equivocator(proposals: &[ShareProposal], witness: &str) -> bool {
 /// Lean: Aura.Consensus.Frost.share_session_consistency
 pub fn shares_consistent(
     proposals: &[ShareProposal],
-    result_id: &str,
-    prestate_hash: &str,
+    result_id: &Hash32,
+    prestate_hash: &Hash32,
 ) -> bool {
     proposals
         .iter()
-        .filter(|p| p.result_id == result_id)
+        .filter(|p| p.result_id == *result_id)
         .all(|p| {
             // Simplified: check share has non-empty values
             !p.share.share_value.is_empty() && !p.share.nonce_binding.is_empty()
@@ -189,19 +196,19 @@ pub fn shares_consistent(
 /// - Commit fact valid if present
 pub fn check_invariants(state: &ConsensusState) -> Result<(), ValidationError> {
     // Quint: inst.threshold >= 1
-    if state.threshold < 1 {
+    if state.threshold.get() < 1 {
         return Err(ValidationError::MalformedInstance {
             reason: "threshold must be >= 1".to_string(),
         });
     }
 
     // Quint: inst.witnesses.size() >= inst.threshold
-    if state.witnesses.len() < state.threshold {
+    if state.witnesses.len() < state.threshold.as_usize() {
         return Err(ValidationError::MalformedInstance {
             reason: format!(
                 "insufficient witnesses: {} < {}",
                 state.witnesses.len(),
-                state.threshold
+                state.threshold.get()
             ),
         });
     }
@@ -246,15 +253,15 @@ pub fn check_invariants(state: &ConsensusState) -> Result<(), ValidationError> {
 ///
 /// Lean: Aura.Consensus.Agreement.agreement
 pub fn check_agreement(committed_facts: &[PureCommitFact]) -> bool {
-    let mut cid_to_rid: HashMap<&str, &str> = HashMap::new();
+    let mut cid_to_rid: HashMap<ConsensusId, Hash32> = HashMap::new();
 
     for cf in committed_facts {
-        if let Some(existing_rid) = cid_to_rid.get(cf.cid.as_str()) {
-            if *existing_rid != cf.result_id.as_str() {
+        if let Some(existing_rid) = cid_to_rid.get(&cf.cid) {
+            if *existing_rid != cf.result_id {
                 return false; // Agreement violation!
             }
         } else {
-            cid_to_rid.insert(&cf.cid, &cf.result_id);
+            cid_to_rid.insert(cf.cid, cf.result_id);
         }
     }
 
@@ -284,10 +291,30 @@ mod tests {
     use super::*;
     use crate::core::state::PathSelection;
 
-    fn make_share(witness: &str, result_id: &str) -> ShareProposal {
+    fn threshold(value: u16) -> ConsensusThreshold {
+        ConsensusThreshold::new(value).expect("threshold")
+    }
+
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_hash(seed: u8) -> Hash32 {
+        Hash32::new([seed; 32])
+    }
+
+    fn test_consensus_id(seed: u8) -> ConsensusId {
+        ConsensusId(Hash32::new([seed; 32]))
+    }
+
+    fn test_operation(seed: u8) -> OperationId {
+        OperationId::new_from_entropy([seed; 32])
+    }
+
+    fn make_share(witness: u8, result_id: u8) -> ShareProposal {
         ShareProposal {
-            witness: witness.to_string(),
-            result_id: result_id.to_string(),
+            witness: test_authority(witness),
+            result_id: test_hash(result_id),
             share: ShareData {
                 share_value: format!("share_{witness}"),
                 nonce_binding: format!("nonce_{witness}"),
@@ -304,7 +331,7 @@ mod tests {
             data_binding: "cid:rid:phash".to_string(),
         };
 
-        let result = validate_share(&share, "cid", "rid", "phash");
+        let result = validate_share(&share, &test_consensus_id(1), &test_hash(2), &test_hash(3));
         assert!(result.is_ok());
     }
 
@@ -316,54 +343,51 @@ mod tests {
             data_binding: "binding".to_string(),
         };
 
-        let result = validate_share(&share, "cid", "rid", "phash");
+        let result = validate_share(&share, &test_consensus_id(1), &test_hash(2), &test_hash(3));
         assert!(matches!(result, Err(ValidationError::EmptyShareValue)));
     }
 
     #[test]
     fn test_is_equivocator_true() {
-        let proposals = vec![make_share("w1", "rid1"), make_share("w1", "rid2")];
+        let proposals = vec![make_share(1, 1), make_share(1, 2)];
 
-        assert!(is_equivocator(&proposals, "w1"));
+        assert!(is_equivocator(&proposals, &test_authority(1)));
     }
 
     #[test]
     fn test_is_equivocator_false_consistent() {
-        let proposals = vec![make_share("w1", "rid1"), make_share("w2", "rid1")];
+        let proposals = vec![make_share(1, 1), make_share(2, 1)];
 
-        assert!(!is_equivocator(&proposals, "w1"));
-        assert!(!is_equivocator(&proposals, "w2"));
+        assert!(!is_equivocator(&proposals, &test_authority(1)));
+        assert!(!is_equivocator(&proposals, &test_authority(2)));
     }
 
     #[test]
     fn test_is_equivocator_false_single_vote() {
-        let proposals = vec![make_share("w1", "rid1")];
+        let proposals = vec![make_share(1, 1)];
 
-        assert!(!is_equivocator(&proposals, "w1"));
+        assert!(!is_equivocator(&proposals, &test_authority(1)));
     }
 
     #[test]
     fn test_shares_consistent() {
-        let proposals = vec![
-            make_share("w1", "rid1"),
-            make_share("w2", "rid1"),
-            make_share("w3", "rid2"), // Different rid
-        ];
+        let proposals = vec![make_share(1, 1), make_share(2, 1), make_share(3, 2)];
 
-        assert!(shares_consistent(&proposals, "rid1", "phash"));
+        assert!(shares_consistent(&proposals, &test_hash(1), &test_hash(2)));
     }
 
     #[test]
     fn test_check_invariants_valid() {
-        let witnesses: BTreeSet<_> = ["w1", "w2", "w3"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> =
+            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            2,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(2),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
@@ -372,20 +396,20 @@ mod tests {
 
     #[test]
     fn test_check_invariants_insufficient_witnesses() {
-        let witnesses: BTreeSet<_> = ["w1"].iter().map(|s| s.to_string()).collect();
+        let witnesses: BTreeSet<_> = [1u8].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
-            "cns1".to_string(),
-            "op".to_string(),
-            "pre".to_string(),
-            1,
+            test_consensus_id(1),
+            test_operation(2),
+            test_hash(3),
+            threshold(1),
             witnesses,
-            "w1".to_string(),
+            test_authority(1),
             PathSelection::FastPath,
         );
 
         // Manually set invalid threshold
-        state.threshold = 2;
+        state.threshold = threshold(2);
 
         let result = check_invariants(&state);
         assert!(matches!(
@@ -398,16 +422,16 @@ mod tests {
     fn test_check_agreement_valid() {
         let facts = vec![
             PureCommitFact {
-                cid: "cns1".to_string(),
-                result_id: "rid1".to_string(),
+                cid: test_consensus_id(1),
+                result_id: test_hash(1),
                 signature: "sig".to_string(),
-                prestate_hash: "pre".to_string(),
+                prestate_hash: test_hash(2),
             },
             PureCommitFact {
-                cid: "cns2".to_string(),
-                result_id: "rid2".to_string(),
+                cid: test_consensus_id(2),
+                result_id: test_hash(3),
                 signature: "sig".to_string(),
-                prestate_hash: "pre".to_string(),
+                prestate_hash: test_hash(2),
             },
         ];
 
@@ -418,16 +442,16 @@ mod tests {
     fn test_check_agreement_violation() {
         let facts = vec![
             PureCommitFact {
-                cid: "cns1".to_string(),
-                result_id: "rid1".to_string(),
+                cid: test_consensus_id(1),
+                result_id: test_hash(1),
                 signature: "sig1".to_string(),
-                prestate_hash: "pre".to_string(),
+                prestate_hash: test_hash(2),
             },
             PureCommitFact {
-                cid: "cns1".to_string(),       // Same cid
-                result_id: "rid2".to_string(), // Different rid - violation!
+                cid: test_consensus_id(1), // Same cid
+                result_id: test_hash(3),   // Different rid - violation!
                 signature: "sig2".to_string(),
-                prestate_hash: "pre".to_string(),
+                prestate_hash: test_hash(2),
             },
         ];
 

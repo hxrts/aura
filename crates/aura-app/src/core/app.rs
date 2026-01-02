@@ -684,7 +684,7 @@ impl AppCore {
 // =============================================================================
 // ViewState Notes
 // =============================================================================
-// ViewState is now read-only for external consumers. UI updates flow through:
+// ViewState is read-only for external consumers. UI updates flow through:
 //
 //   Facts → ReactiveScheduler → SignalViews → Signals (CONTACTS_SIGNAL, etc.)
 //
@@ -692,17 +692,6 @@ impl AppCore {
 // displays must either:
 // 1. Commit facts through the runtime (production path)
 // 2. Emit directly to signals via ReactiveEffects::emit() (demo/test path)
-//
-// The legacy ViewState mutation methods (add_contact, set_contact_guardian_status,
-// add_guardian, add_chat_message, add_recovery_approval) have been removed because
-// ViewState changes no longer propagate to signals (signal forwarding was removed
-// in work/002.md C2.5).
-//
-// See work/reactive_unify.md and work/002.md for architectural history.
-
-// Legacy: AppCore async dispatch + local pending-fact commit pipeline removed.
-//
-// The canonical pipeline is now: runtime typed fact commit → ReactiveScheduler → typed signals.
 
 // =============================================================================
 // Agent-backed operations (sync, services, network)

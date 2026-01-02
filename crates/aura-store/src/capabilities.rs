@@ -139,9 +139,6 @@ impl StoragePermission {
     }
 }
 
-// StorageCapabilitySet removed - authorization now handled by Biscuit tokens
-// Legacy capability-based access control has been superseded by the effect system
-
 /// Access decision result
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AccessDecision {
@@ -176,12 +173,6 @@ impl AccessDecision {
     }
 }
 
-// AccessRequest removed - authorization now handled by Biscuit tokens
-// Legacy capability-based access requests have been superseded by the effect system
-
-// Removed evaluate_access function - was handling legacy capability-based access
-// Removed evaluate_hierarchical_access function - use Biscuit tokens instead
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,9 +198,4 @@ mod tests {
         assert!(namespace.covers(&content));
         assert!(!content.covers(&namespace));
     }
-
-    // Removed: test_capability_set_meet - StorageCapabilitySet was removed
-    // Removed: test_access_evaluation - AccessRequest and evaluate_access were removed
-    // Removed: test_hierarchical_access - evaluate_hierarchical_access was removed
-    // Legacy capability tests superseded by Biscuit token authorization
 }

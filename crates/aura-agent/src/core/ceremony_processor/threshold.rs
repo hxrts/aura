@@ -10,6 +10,7 @@ use crate::runtime::services::CeremonyTracker;
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
+use aura_core::identifiers::CeremonyId;
 use aura_core::{AuthorityId, DeviceId};
 
 /// Handles device threshold key ceremony messages
@@ -245,11 +246,12 @@ impl<'a> ThresholdHandler<'a> {
                 return ProcessResult::Skip;
             }
         };
+        let ceremony_id = CeremonyId::new(ceremony_id.clone());
 
         let participant = aura_core::threshold::ParticipantIdentity::device(acceptor_device_id);
         let threshold_reached = match self
             .ceremony_tracker
-            .mark_accepted(ceremony_id, participant)
+            .mark_accepted(&ceremony_id, participant)
             .await
         {
             Ok(reached) => reached,
@@ -266,7 +268,7 @@ impl<'a> ThresholdHandler<'a> {
 
         if threshold_reached {
             // When threshold is reached, send commit to all participants
-            if let Err(e) = self.send_commit_to_participants(ceremony_id).await {
+            if let Err(e) = self.send_commit_to_participants(&ceremony_id).await {
                 tracing::error!(
                     ceremony_id = %ceremony_id,
                     error = ?e,
@@ -279,7 +281,7 @@ impl<'a> ThresholdHandler<'a> {
     }
 
     /// Send commit messages to all ceremony participants
-    async fn send_commit_to_participants(&self, ceremony_id: &str) -> Result<(), String> {
+    async fn send_commit_to_participants(&self, ceremony_id: &CeremonyId) -> Result<(), String> {
         use aura_core::effects::TransportEffects;
 
         let ceremony_state = self
@@ -292,7 +294,7 @@ impl<'a> ThresholdHandler<'a> {
             let mut h = aura_core::hash::hasher();
             h.update(b"DEVICE_THRESHOLD_CONTEXT");
             h.update(&self.authority_id.to_bytes());
-            h.update(ceremony_id.as_bytes());
+            h.update(ceremony_id.as_str().as_bytes());
             h.finalize()
         };
         let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);

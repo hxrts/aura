@@ -2,27 +2,14 @@
 
 use super::state::with_state_mut_validated;
 use crate::handlers::Invitation;
+use aura_core::identifiers::InvitationId;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Default)]
 struct InvitationState {
-    invitations: HashMap<String, Invitation>,
-}
-
-impl InvitationState {
-    fn validate(&self) -> Result<(), String> {
-        for (id, invitation) in &self.invitations {
-            if id != &invitation.invitation_id {
-                return Err(format!(
-                    "invitation id mismatch: key {} vs value {}",
-                    id, invitation.invitation_id
-                ));
-            }
-        }
-        Ok(())
-    }
+    invitations: HashMap<InvitationId, Invitation>,
 }
 
 /// Manages cached invitations for the invitation handler.
@@ -48,13 +35,13 @@ impl InvitationManager {
                     .invitations
                     .insert(invitation.invitation_id.clone(), invitation);
             },
-            |state| state.validate(),
+            |_| Ok(()),
         )
         .await;
     }
 
     /// Get a cached invitation.
-    pub async fn get_invitation(&self, invitation_id: &str) -> Option<Invitation> {
+    pub async fn get_invitation(&self, invitation_id: &InvitationId) -> Option<Invitation> {
         self.state
             .read()
             .await
@@ -66,23 +53,23 @@ impl InvitationManager {
     /// Update a cached invitation if present.
     pub async fn update_invitation<R>(
         &self,
-        invitation_id: &str,
+        invitation_id: &InvitationId,
         f: impl FnOnce(&mut Invitation) -> R,
     ) -> Option<R> {
         with_state_mut_validated(
             &self.state,
             |state| state.invitations.get_mut(invitation_id).map(f),
-            |state| state.validate(),
+            |_| Ok(()),
         )
         .await
     }
 
     /// Remove a cached invitation.
-    pub async fn remove_invitation(&self, invitation_id: &str) -> Option<Invitation> {
+    pub async fn remove_invitation(&self, invitation_id: &InvitationId) -> Option<Invitation> {
         with_state_mut_validated(
             &self.state,
             |state| state.invitations.remove(invitation_id),
-            |state| state.validate(),
+            |_| Ok(()),
         )
         .await
     }

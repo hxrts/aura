@@ -9,6 +9,7 @@ use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::CeremonyTracker;
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
+use aura_core::identifiers::CeremonyId;
 use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
 use aura_core::{hash, AuthorityId, ContextId};
 use aura_journal::fact::RelationalFact;
@@ -46,6 +47,7 @@ impl<'a> GuardianHandler<'a> {
         ) else {
             return ProcessResult::Skip;
         };
+        let ceremony_id = CeremonyId::new(ceremony_id.clone());
 
         let guardian_authority: AuthorityId = match guardian_id.parse() {
             Ok(id) => id,
@@ -59,7 +61,7 @@ impl<'a> GuardianHandler<'a> {
                 let _ = self
                     .ceremony_tracker
                     .mark_failed(
-                        ceremony_id,
+                        &ceremony_id,
                         Some(format!("Invalid guardian id in acceptance: {guardian_id}")),
                     )
                     .await;
@@ -70,7 +72,7 @@ impl<'a> GuardianHandler<'a> {
         let threshold_reached = match self
             .ceremony_tracker
             .mark_accepted(
-                ceremony_id,
+                &ceremony_id,
                 aura_core::threshold::ParticipantIdentity::guardian(guardian_authority),
             )
             .await
@@ -92,14 +94,14 @@ impl<'a> GuardianHandler<'a> {
         }
 
         // Threshold reached - attempt to commit
-        match self.commit_ceremony(ceremony_id).await {
+        match self.commit_ceremony(&ceremony_id).await {
             Ok(()) => ProcessResult::Committed,
             Err(_) => ProcessResult::Processed,
         }
     }
 
     /// Commit a guardian ceremony after threshold is reached
-    async fn commit_ceremony(&self, ceremony_id: &str) -> Result<(), ()> {
+    async fn commit_ceremony(&self, ceremony_id: &CeremonyId) -> Result<(), ()> {
         use aura_core::effects::ThresholdSigningEffects;
 
         let ceremony_state = match self.ceremony_tracker.get(ceremony_id).await {

@@ -3,9 +3,10 @@
 //! MPST choreography definitions for invitation exchange and guardian invitation.
 //! These define the message flow and guard annotations for invitation ceremonies.
 
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
+use crate::InvitationType;
 
 // =============================================================================
 // Protocol Message Types
@@ -15,9 +16,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitationOffer {
     /// Unique invitation identifier
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Type of invitation (device, guardian, channel, etc.)
-    pub invitation_type: String,
+    pub invitation_type: InvitationType,
     /// Sender of the invitation
     pub sender: AuthorityId,
     /// Optional message included with invitation
@@ -32,7 +33,7 @@ pub struct InvitationOffer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitationResponse {
     /// Invitation identifier being responded to
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Whether the invitation was accepted
     pub accepted: bool,
     /// Optional response message
@@ -45,7 +46,7 @@ pub struct InvitationResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvitationAck {
     /// Invitation identifier
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Whether the response was successfully processed
     pub success: bool,
     /// Result status (e.g., "relationship_established", "declined_noted")
@@ -56,7 +57,7 @@ pub struct InvitationAck {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianRequest {
     /// Unique invitation identifier
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Principal requesting guardian relationship
     pub principal: AuthorityId,
     /// Proposed guardian role description
@@ -71,7 +72,7 @@ pub struct GuardianRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianAccept {
     /// Invitation identifier
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Guardian's acceptance signature
     pub signature: Vec<u8>,
     /// Guardian's public key for recovery operations
@@ -82,7 +83,7 @@ pub struct GuardianAccept {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianDecline {
     /// Invitation identifier
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Optional reason for declining
     pub reason: Option<String>,
 }
@@ -91,7 +92,7 @@ pub struct GuardianDecline {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianConfirm {
     /// Invitation identifier
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Relationship established successfully
     pub established: bool,
     /// Resulting relationship identifier
@@ -102,11 +103,11 @@ pub struct GuardianConfirm {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceEnrollmentRequest {
     /// Unique invitation identifier
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Account authority being modified
     pub subject_authority: AuthorityId,
     /// Ceremony identifier for the key rotation
-    pub ceremony_id: String,
+    pub ceremony_id: CeremonyId,
     /// Pending epoch created during prepare
     pub pending_epoch: u64,
     /// Device id being enrolled
@@ -117,9 +118,9 @@ pub struct DeviceEnrollmentRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceEnrollmentAccept {
     /// Invitation identifier being accepted
-    pub invitation_id: String,
+    pub invitation_id: InvitationId,
     /// Ceremony identifier
-    pub ceremony_id: String,
+    pub ceremony_id: CeremonyId,
     /// Device id that accepted and installed the share
     pub device_id: DeviceId,
 }
@@ -303,7 +304,7 @@ pub const GUARDIAN_PROTOCOL_ID: &str = "invitation_guardian.guardian.v1";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::identifiers::{AuthorityId, InvitationId};
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -312,8 +313,8 @@ mod tests {
     #[test]
     fn test_invitation_offer_serialization() {
         let offer = InvitationOffer {
-            invitation_id: "inv-123".to_string(),
-            invitation_type: "device".to_string(),
+            invitation_id: InvitationId::new("inv-123"),
+            invitation_type: InvitationType::Contact { nickname: None },
             sender: test_authority(),
             message: Some("Please join".to_string()),
             expires_at_ms: Some(1000000),
@@ -323,15 +324,18 @@ mod tests {
         let bytes = serde_json::to_vec(&offer).unwrap();
         let restored: InvitationOffer = serde_json::from_slice(&bytes).unwrap();
 
-        assert_eq!(restored.invitation_id, "inv-123");
-        assert_eq!(restored.invitation_type, "device");
+        assert_eq!(restored.invitation_id.as_str(), "inv-123");
+        assert!(matches!(
+            restored.invitation_type,
+            InvitationType::Contact { nickname: None }
+        ));
         assert_eq!(restored.message, Some("Please join".to_string()));
     }
 
     #[test]
     fn test_invitation_response_serialization() {
         let response = InvitationResponse {
-            invitation_id: "inv-123".to_string(),
+            invitation_id: InvitationId::new("inv-123"),
             accepted: true,
             message: Some("Happy to join".to_string()),
             signature: vec![1, 2, 3, 4],
@@ -340,14 +344,14 @@ mod tests {
         let bytes = serde_json::to_vec(&response).unwrap();
         let restored: InvitationResponse = serde_json::from_slice(&bytes).unwrap();
 
-        assert_eq!(restored.invitation_id, "inv-123");
+        assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert!(restored.accepted);
     }
 
     #[test]
     fn test_guardian_request_serialization() {
         let request = GuardianRequest {
-            invitation_id: "guard-456".to_string(),
+            invitation_id: InvitationId::new("guard-456"),
             principal: test_authority(),
             role_description: "Primary guardian".to_string(),
             recovery_capabilities: vec!["recover:device".to_string()],
@@ -357,14 +361,14 @@ mod tests {
         let bytes = serde_json::to_vec(&request).unwrap();
         let restored: GuardianRequest = serde_json::from_slice(&bytes).unwrap();
 
-        assert_eq!(restored.invitation_id, "guard-456");
+        assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert_eq!(restored.role_description, "Primary guardian");
     }
 
     #[test]
     fn test_guardian_accept_serialization() {
         let accept = GuardianAccept {
-            invitation_id: "guard-456".to_string(),
+            invitation_id: InvitationId::new("guard-456"),
             signature: vec![5, 6, 7, 8],
             recovery_public_key: vec![9, 10, 11, 12],
         };
@@ -372,7 +376,7 @@ mod tests {
         let bytes = serde_json::to_vec(&accept).unwrap();
         let restored: GuardianAccept = serde_json::from_slice(&bytes).unwrap();
 
-        assert_eq!(restored.invitation_id, "guard-456");
+        assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert_eq!(restored.recovery_public_key, vec![9, 10, 11, 12]);
     }
 
@@ -441,7 +445,7 @@ mod tests {
     #[test]
     fn test_invitation_ack_serialization() {
         let ack = InvitationAck {
-            invitation_id: "inv-123".to_string(),
+            invitation_id: InvitationId::new("inv-123"),
             success: true,
             status: "relationship_established".to_string(),
         };
@@ -449,7 +453,7 @@ mod tests {
         let bytes = serde_json::to_vec(&ack).unwrap();
         let restored: InvitationAck = serde_json::from_slice(&bytes).unwrap();
 
-        assert_eq!(restored.invitation_id, "inv-123");
+        assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert!(restored.success);
         assert_eq!(restored.status, "relationship_established");
     }
@@ -457,21 +461,21 @@ mod tests {
     #[test]
     fn test_guardian_decline_serialization() {
         let decline = GuardianDecline {
-            invitation_id: "guard-456".to_string(),
+            invitation_id: InvitationId::new("guard-456"),
             reason: Some("Unable to commit".to_string()),
         };
 
         let bytes = serde_json::to_vec(&decline).unwrap();
         let restored: GuardianDecline = serde_json::from_slice(&bytes).unwrap();
 
-        assert_eq!(restored.invitation_id, "guard-456");
+        assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert_eq!(restored.reason, Some("Unable to commit".to_string()));
     }
 
     #[test]
     fn test_guardian_confirm_serialization() {
         let confirm = GuardianConfirm {
-            invitation_id: "guard-456".to_string(),
+            invitation_id: InvitationId::new("guard-456"),
             established: true,
             relationship_id: Some("rel-789".to_string()),
         };
@@ -479,7 +483,7 @@ mod tests {
         let bytes = serde_json::to_vec(&confirm).unwrap();
         let restored: GuardianConfirm = serde_json::from_slice(&bytes).unwrap();
 
-        assert_eq!(restored.invitation_id, "guard-456");
+        assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert!(restored.established);
         assert_eq!(restored.relationship_id, Some("rel-789".to_string()));
     }

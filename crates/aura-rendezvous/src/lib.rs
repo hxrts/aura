@@ -92,8 +92,8 @@ pub use aura_journal::CapabilityRef;
 
 // Re-export fact types (for journal integration)
 pub use facts::{
-    RendezvousDescriptor, RendezvousFact, RendezvousFactReducer, TransportHint,
-    RENDEZVOUS_FACT_TYPE_ID,
+    RendezvousDescriptor, RendezvousFact, RendezvousFactReducer, TransportAddress,
+    TransportAddressError, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
 };
 
 // Re-export protocol types

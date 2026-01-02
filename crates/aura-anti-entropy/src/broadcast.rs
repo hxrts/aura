@@ -2,12 +2,11 @@ use super::effects::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::NetworkEffects;
-use aura_core::identifiers::ContextId;
+use aura_core::identifiers::{ContextId, DeviceId};
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::VecDeque;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// Configuration for broadcast behavior
 #[derive(Debug, Clone)]
@@ -51,11 +50,11 @@ pub struct BroadcasterHandler {
     oplog: Arc<RwLock<BTreeMap<Hash32, AttestedOp>>>,
     /// Insertion order for oplog eviction
     oplog_order: Arc<RwLock<VecDeque<Hash32>>>,
-    peers: Arc<RwLock<BTreeSet<Uuid>>>,
+    peers: Arc<RwLock<BTreeSet<DeviceId>>>,
     /// Pending announcements (CID -> set of peers that need it)
-    pending_announcements: Arc<RwLock<BTreeMap<Hash32, BTreeSet<Uuid>>>>,
+    pending_announcements: Arc<RwLock<BTreeMap<Hash32, BTreeSet<DeviceId>>>>,
     /// Rate limiting: peer -> count of ops pushed in current interval
-    rate_limits: Arc<RwLock<BTreeMap<Uuid, usize>>>,
+    rate_limits: Arc<RwLock<BTreeMap<DeviceId, usize>>>,
     /// Context ID for guard chain operations
     context_id: ContextId,
     /// Optional network effects for actual message transport
@@ -140,7 +139,7 @@ impl BroadcasterHandler {
     /// Lazy pull: Respond to peer request for specific operation
     async fn lazy_pull_response(
         &self,
-        peer_id: Uuid,
+        _peer_id: DeviceId,
         cid: Hash32,
     ) -> Result<AttestedOp, SyncError> {
         if !self.config.lazy_pull_enabled {
@@ -168,7 +167,7 @@ impl BroadcasterHandler {
     }
 
     /// Add peer to known peer set
-    pub async fn add_peer(&self, peer_id: Uuid) {
+    pub async fn add_peer(&self, peer_id: DeviceId) {
         let mut peers = self.peers.write().await;
         peers.insert(peer_id);
     }
@@ -194,7 +193,7 @@ impl BroadcasterHandler {
 
 #[async_trait]
 impl SyncEffects for BroadcasterHandler {
-    async fn sync_with_peer(&self, _peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
+    async fn sync_with_peer(&self, _peer_id: DeviceId) -> Result<SyncMetrics, SyncError> {
         // Broadcaster doesn't implement full sync - delegate to AntiEntropyHandler
         Err(SyncError::OperationNotFound)
     }
@@ -223,7 +222,7 @@ impl SyncEffects for BroadcasterHandler {
 
     async fn request_ops_from_peer(
         &self,
-        _peer_id: Uuid,
+        _peer_id: DeviceId,
         cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError> {
         // Return any ops we have that match the requested CIDs
@@ -277,11 +276,15 @@ impl SyncEffects for BroadcasterHandler {
         self.eager_push_to_neighbors(op).await
     }
 
-    async fn request_op(&self, peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
+    async fn request_op(&self, peer_id: DeviceId, cid: Hash32) -> Result<AttestedOp, SyncError> {
         self.lazy_pull_response(peer_id, cid).await
     }
 
-    async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
+    async fn push_op_to_peers(
+        &self,
+        op: AttestedOp,
+        peers: Vec<DeviceId>,
+    ) -> Result<(), SyncError> {
         let cid = Hash32::from(op.op.parent_commitment);
 
         // Check if we have network effects configured
@@ -305,7 +308,7 @@ impl SyncEffects for BroadcasterHandler {
         let mut send_errors = Vec::new();
         for peer in &peers {
             tracing::debug!(cid = ?cid, peer = ?peer, "Pushing operation to peer");
-            if let Err(e) = network.send_to_peer(*peer, op_data.clone()).await {
+            if let Err(e) = network.send_to_peer(peer.0, op_data.clone()).await {
                 tracing::warn!(
                     cid = ?cid,
                     peer = ?peer,
@@ -331,7 +334,7 @@ impl SyncEffects for BroadcasterHandler {
         Ok(())
     }
 
-    async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
+    async fn get_connected_peers(&self) -> Result<Vec<DeviceId>, SyncError> {
         let peers = self.peers.read().await;
         Ok(peers.iter().copied().collect())
     }
@@ -373,7 +376,7 @@ mod tests {
         let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
-        let peer1 = Uuid::from_u128(1);
+        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
         handler.add_peer(peer1).await;
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -407,7 +410,7 @@ mod tests {
         let context_id = ContextId::new_from_entropy([3u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
-        let peer1 = Uuid::from_u128(1);
+        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
         handler.add_peer(peer1).await;
 
         // Push 3 ops - third should be queued due to rate limit
@@ -458,7 +461,7 @@ mod tests {
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
 
-        let peer_id = Uuid::from_u128(1);
+        let peer_id = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
         let retrieved = handler
             .lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32]))
             .await;
@@ -482,7 +485,7 @@ mod tests {
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op).await;
 
-        let peer_id = Uuid::from_u128(1);
+        let peer_id = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
         let result = handler
             .lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32]))
             .await;
@@ -495,7 +498,7 @@ mod tests {
         let context_id = ContextId::new_from_entropy([7u8; 32]);
         let handler = BroadcasterHandler::new(BroadcastConfig::default(), context_id);
 
-        let peer1 = Uuid::from_u128(1);
+        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
         handler.add_peer(peer1).await;
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -532,7 +535,7 @@ mod tests {
         let context_id = ContextId::new_from_entropy([9u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
-        let peer1 = Uuid::from_u128(1);
+        let peer1 = DeviceId::from_uuid(uuid::Uuid::from_u128(1));
         handler.add_peer(peer1).await;
 
         // Hit rate limit
