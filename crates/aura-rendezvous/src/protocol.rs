@@ -104,17 +104,19 @@ pub struct RelayComplete {
 
 /// Guard annotations module for flow costs and capabilities
 pub mod guards {
+    use aura_core::FlowCost;
+
     /// Flow cost for publishing a descriptor
-    pub const DESCRIPTOR_PUBLISH_COST: u32 = 1;
+    pub const DESCRIPTOR_PUBLISH_COST: FlowCost = FlowCost::new(1);
 
     /// Flow cost for establishing a direct connection
-    pub const CONNECT_DIRECT_COST: u32 = 2;
+    pub const CONNECT_DIRECT_COST: FlowCost = FlowCost::new(2);
 
     /// Flow cost for relay forwarding
-    pub const RELAY_FORWARD_COST: u32 = 1;
+    pub const RELAY_FORWARD_COST: FlowCost = FlowCost::new(1);
 
     /// Flow cost for relayed connection
-    pub const RELAY_CONNECT_COST: u32 = 2;
+    pub const RELAY_CONNECT_COST: FlowCost = FlowCost::new(2);
 
     /// Required capability for descriptor publication
     pub const CAP_RENDEZVOUS_PUBLISH: &str = "rendezvous:publish";
@@ -339,9 +341,9 @@ mod tests {
 
     #[test]
     fn test_guard_constants() {
-        assert_eq!(guards::DESCRIPTOR_PUBLISH_COST, 1);
-        assert_eq!(guards::CONNECT_DIRECT_COST, 2);
-        assert_eq!(guards::RELAY_FORWARD_COST, 1);
+        assert_eq!(guards::DESCRIPTOR_PUBLISH_COST.value(), 1);
+        assert_eq!(guards::CONNECT_DIRECT_COST.value(), 2);
+        assert_eq!(guards::RELAY_FORWARD_COST.value(), 1);
         assert_eq!(guards::CAP_RENDEZVOUS_PUBLISH, "rendezvous:publish");
     }
 

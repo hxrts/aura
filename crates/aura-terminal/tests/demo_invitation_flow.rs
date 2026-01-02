@@ -165,9 +165,7 @@ async fn wait_for_contact(app_core: &Arc<RwLock<AppCore>>, contact_id: Authority
 
         if start.elapsed() > Duration::from_secs(2) {
             let contact_count = state.contacts.len();
-            panic!(
-                "Timed out waiting for contact {contact_id} ({contact_count} contacts present)"
-            );
+            panic!("Timed out waiting for contact {contact_id} ({contact_count} contacts present)");
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -257,7 +255,10 @@ async fn test_demo_invitation_codes_are_parseable() {
                 "    Invitation ID: {invitation_id}",
                 invitation_id = invitation.invitation_id
             );
-            println!("    Sender ID: {sender_id}", sender_id = invitation.sender_id);
+            println!(
+                "    Sender ID: {sender_id}",
+                sender_id = invitation.sender_id
+            );
             println!(
                 "    Type: {invitation_type:?}",
                 invitation_type = invitation.invitation_type
@@ -281,7 +282,10 @@ async fn test_demo_invitation_codes_are_parseable() {
                 "    Invitation ID: {invitation_id}",
                 invitation_id = invitation.invitation_id
             );
-            println!("    Sender ID: {sender_id}", sender_id = invitation.sender_id);
+            println!(
+                "    Sender ID: {sender_id}",
+                sender_id = invitation.sender_id
+            );
             println!(
                 "    Type: {invitation_type:?}",
                 invitation_type = invitation.invitation_type
@@ -541,7 +545,10 @@ async fn test_complete_demo_invitation_flow() {
     if let Ok(recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
         let guardian_count = recovery_state.guardians.len();
         println!("  Guardians: {guardian_count}");
-        println!("  Threshold: {threshold}", threshold = recovery_state.threshold);
+        println!(
+            "  Threshold: {threshold}",
+            threshold = recovery_state.threshold
+        );
     }
 
     drop(core);
@@ -753,7 +760,10 @@ async fn test_derivation_chain_consistency() {
     // 2. Verify it matches what's in the invitation
     let code = generate_demo_invite_code("Alice", seed);
     let invitation = ShareableInvitation::from_code(&code).unwrap();
-    println!("  Invitation sender_id: {sender_id}", sender_id = invitation.sender_id);
+    println!(
+        "  Invitation sender_id: {sender_id}",
+        sender_id = invitation.sender_id
+    );
 
     assert_eq!(
         authority, invitation.sender_id,

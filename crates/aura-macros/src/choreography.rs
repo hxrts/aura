@@ -31,6 +31,8 @@ struct ChoreographyInput {
 
 impl Parse for ChoreographyInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let full_input_str = input.fork().to_string();
+
         // Skip any attributes (like #[namespace = "..."]) before the choreography keyword
         while input.peek(Token![#]) {
             let _: syn::Attribute = input
@@ -60,7 +62,15 @@ impl Parse for ChoreographyInput {
                 content.parse::<Token![;]>()?;
                 break;
             }
-            roles.push(content.parse()?);
+            let role: Ident = content.parse()?;
+            if content.peek(syn::token::Bracket) {
+                let bracketed;
+                syn::bracketed!(bracketed in content);
+                while !bracketed.is_empty() {
+                    let _: proc_macro2::TokenTree = bracketed.parse()?;
+                }
+            }
+            roles.push(role);
             if content.peek(Token![,]) {
                 content.parse::<Token![,]>()?;
             }
@@ -72,10 +82,9 @@ impl Parse for ChoreographyInput {
             let _: proc_macro2::TokenTree = content.parse()?;
         }
 
-        // Extract Aura annotations from the full input
-        let full_input_str = input.to_string();
-        let aura_annotations =
-            extract_aura_annotations(&full_input_str).unwrap_or_else(|_| Vec::new()); // Gracefully handle extraction errors
+        let aura_annotations = extract_aura_annotations(&full_input_str).map_err(|err| {
+            syn::Error::new(proc_macro2::Span::call_site(), err.to_string())
+        })?;
 
         Ok(ChoreographyInput {
             _protocol_name: protocol_name,
@@ -90,7 +99,7 @@ impl Parse for ChoreographyInput {
 /// Uses namespace-aware rumpsteak-aura generation to avoid module conflicts
 pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> {
     // Try to parse the input to extract roles and protocol name for Aura wrapper
-    let parsed_input = syn::parse2::<ChoreographyInput>(input.clone()).ok();
+    let parsed_input = syn::parse2::<ChoreographyInput>(input.clone())?;
 
     // Generate the rumpsteak-aura choreography using namespace-aware functions
     let rumpsteak_output = choreography_impl_namespace_aware(input.clone()).unwrap_or_else(|err| {
@@ -107,24 +116,9 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     });
 
     // Generate the Aura wrapper module with namespace support
-    let aura_wrapper = if let Some(parsed) = &parsed_input {
-        // Extract namespace from the original input - we need to re-parse to get namespace
-        let namespace = extract_namespace_from_input(input.clone());
-        generate_aura_wrapper(parsed, namespace.as_deref())
-    } else {
-        // Fallback: generate with default Alice/Bob roles
-        generate_aura_wrapper(
-            &ChoreographyInput {
-                _protocol_name: Ident::new("DefaultProtocol", proc_macro2::Span::call_site()),
-                roles: vec![
-                    Ident::new("Alice", proc_macro2::Span::call_site()),
-                    Ident::new("Bob", proc_macro2::Span::call_site()),
-                ],
-                aura_annotations: Vec::new(),
-            },
-            None,
-        )
-    };
+    // Extract namespace from the original input - we need to re-parse to get namespace
+    let namespace = extract_namespace_from_input(input.clone());
+    let aura_wrapper = generate_aura_wrapper(&parsed_input, namespace.as_deref());
 
     // Extract namespace for uniqueness check (reuse from aura_wrapper if available)
     let namespace = extract_namespace_from_input(input.clone());
@@ -611,11 +605,13 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                         }
                         "flow_cost" | "guard_with_flow" => {
                             // Charge flow budget
+                            let amount = aura_core::FlowCost::try_from(flow_cost)
+                                .unwrap_or_else(|_| aura_core::FlowCost::new(u32::MAX));
                             commands.push(EffectCommand::ChargeBudget {
                                 context: ctx.context,
                                 authority: ctx.authority,
                                 peer: ctx.peer,
-                                amount: flow_cost as u32,
+                                amount,
                             });
                         }
                         "journal_facts" => {
@@ -917,12 +913,13 @@ fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
                 .collect();
 
             // Generate leakage recording code for this role
-            let role_ident = quote::format_ident!("{}", role);
+            let role_name = role.as_str().to_string();
+            let role_ident = quote::format_ident!("{}", role_name);
             leakage_ops.push(quote! {
                 // Record leakage for role #role_ident
                 if handler.role == AuraRole::#role_ident {
                     #(
-                    handler.log_audit(format!("LEAKAGE: {:?} operation visible to {:?}", #role, #observer_variants));
+                    handler.log_audit(format!("LEAKAGE: {:?} operation visible to {:?}", #role_name, #observer_variants));
                     )*
                 }
             });

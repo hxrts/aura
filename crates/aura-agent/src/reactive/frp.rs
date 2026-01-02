@@ -15,8 +15,8 @@
 
 #![allow(clippy::disallowed_types)]
 
-use crate::task_registry::TaskRegistry;
 use super::state::DynamicState;
+use crate::task_registry::TaskRegistry;
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, RwLock};

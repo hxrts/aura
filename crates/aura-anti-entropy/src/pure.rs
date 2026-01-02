@@ -37,7 +37,7 @@ pub fn compute_cids_to_pull(local: &BloomDigest, remote: &BloomDigest) -> BTreeS
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{Epoch, tree::TreeOpKind, TreeOp};
+    use aura_core::{tree::TreeOpKind, Epoch, TreeOp};
     use aura_journal::{LeafId, LeafNode, NodeIndex};
 
     fn create_test_op(commitment: Hash32) -> AttestedOp {

@@ -77,6 +77,9 @@ pub use rumpsteak_aura_choreography;
 /// Used by: aura-macros (production), examples
 pub mod ast_extraction;
 
+/// Identifier newtypes for roles and sessions
+pub mod ids;
+
 /// Journal annotation types for fact-based operations
 /// Used by: aura-protocol/guards/journal_coupler.rs
 pub mod journal;
@@ -124,6 +127,7 @@ pub fn init_aura_extensions() -> rumpsteak_aura_choreography::extensions::Extens
 pub use ast_extraction::{
     extract_aura_annotations, generate_aura_choreography_code, AuraEffect, AuraExtractionError,
 };
+pub use ids::{RoleId, SessionTypeId};
 /// Full-featured choreography! macro with ALL rumpsteak-aura features + Aura extensions
 ///
 /// This macro provides access to ALL rumpsteak-aura features plus Aura-specific extensions:

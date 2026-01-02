@@ -252,10 +252,7 @@ async fn test_start_direct_chat_creates_dm_channel() {
             contact_id: contact_id.to_string(),
         })
         .await;
-    assert!(
-        result.is_ok(),
-        "StartDirectChat should succeed: {result:?}"
-    );
+    assert!(result.is_ok(), "StartDirectChat should succeed: {result:?}");
     println!("  StartDirectChat dispatched");
 
     // Phase 3: Verify DM channel was created
@@ -360,7 +357,10 @@ async fn test_send_direct_message_adds_message() {
     );
     let channel = dm_channel.unwrap();
     assert!(channel.is_dm, "Channel should be marked as DM");
-    println!("  DM channel created: {channel_id}", channel_id = channel.id);
+    println!(
+        "  DM channel created: {channel_id}",
+        channel_id = channel.id
+    );
     println!("  Channel name: {name}", name = channel.name);
 
     assert!(
@@ -729,10 +729,7 @@ async fn test_command_authorization_levels() {
     let result = ctx
         .dispatch(EffectCommand::UpdateMfaPolicy { require_mfa: true })
         .await;
-    assert!(
-        result.is_ok(),
-        "UpdateMfaPolicy should succeed: {result:?}"
-    );
+    assert!(result.is_ok(), "UpdateMfaPolicy should succeed: {result:?}");
     println!("  UpdateMfaPolicy succeeded");
 
     cleanup_test_dir("auth-levels");

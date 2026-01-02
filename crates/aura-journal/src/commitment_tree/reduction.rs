@@ -273,7 +273,9 @@ fn apply_operation(state: &mut TreeState, op: &AttestedOp) -> Result<(), Reducti
         }
         TreeOpKind::RotateEpoch { affected } => {
             // Increment the epoch counter
-            state.increment_epoch();
+            state
+                .increment_epoch()
+                .map_err(|e| ReductionError::InvalidOperation(e.to_string()))?;
 
             // Mark all affected nodes for commitment recomputation
             affected_nodes.extend(affected.iter());

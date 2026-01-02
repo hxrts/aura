@@ -5,8 +5,8 @@
 
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
-use crate::runtime::AuraEffectSystem;
 use crate::runtime::services::OtaManager;
+use crate::runtime::AuraEffectSystem;
 use aura_core::effects::CryptoCoreEffects;
 use aura_core::hash::hash;
 
@@ -228,7 +228,7 @@ impl OtaHandler {
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use aura_core::identifiers::{AuthorityId};
+    use aura_core::identifiers::AuthorityId;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);

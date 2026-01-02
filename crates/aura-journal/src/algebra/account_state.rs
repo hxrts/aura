@@ -4,12 +4,12 @@
 
 use super::EpochLog;
 use crate::types::GuardianMetadata;
+use aura_core::crypto::ed25519::Ed25519SigningKey;
 use aura_core::Ed25519VerifyingKey;
 use aura_core::{
     identifiers::AccountId,
     semilattice::{Bottom, CvState, JoinSemilattice},
 };
-use aura_core::crypto::ed25519::Ed25519SigningKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

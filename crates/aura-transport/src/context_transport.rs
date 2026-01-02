@@ -7,6 +7,7 @@
 //! Actual coordination logic belongs in Layer 4 (aura-protocol).
 
 use crate::types::endpoint::EndpointAddress;
+use crate::types::SequenceNumber;
 use aura_core::identifiers::ContextId;
 use aura_core::AuthorityId;
 use serde::{Deserialize, Serialize};
@@ -142,7 +143,7 @@ pub enum ContextTransportMessage {
         /// Session identifier
         session_id: String,
         /// Sequence number for ordering
-        sequence: u64,
+        sequence: SequenceNumber,
         /// Message payload
         payload: Vec<u8>,
     },

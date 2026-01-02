@@ -166,7 +166,7 @@ impl HomeFact {
     /// Convert to Datalog fact string
     pub fn to_datalog(&self) -> String {
         format!(
-            "home(\"{}\", {}, {});",
+            "home(\"{}\", \"{}\", {});",
             self.home_id,
             self.created_at.to_index_ms(),
             self.storage_limit
@@ -262,7 +262,7 @@ impl ResidentFact {
     /// Convert to Datalog fact string
     pub fn to_datalog(&self) -> String {
         format!(
-            "resident(\"{}\", \"{}\", {}, {});",
+            "resident(\"{}\", \"{}\", \"{}\", {});",
             self.authority_id,
             self.home_id,
             self.joined_at.to_index_ms(),
@@ -361,7 +361,7 @@ impl StewardFact {
         let caps = self.capabilities.to_capability_set();
         let caps_str: Vec<_> = caps.iter().map(|s| format!("\"{s}\"")).collect();
         format!(
-            "steward(\"{}\", \"{}\", {}, [{}]);",
+            "steward(\"{}\", \"{}\", \"{}\", [{}]);",
             self.authority_id,
             self.home_id,
             self.granted_at.to_index_ms(),
@@ -414,7 +414,7 @@ impl PinnedContentFact {
     /// Convert to Datalog fact string
     pub fn to_datalog(&self) -> String {
         format!(
-            "pinned_content(hex:{:?}, \"{}\", \"{}\", {}, {});",
+            "pinned_content(hex:{:?}, \"{}\", \"{}\", \"{}\", {});",
             self.content_hash.0,
             self.home_id,
             self.pinned_by,
@@ -451,7 +451,7 @@ impl NeighborhoodFact {
     /// Convert to Datalog fact string
     pub fn to_datalog(&self) -> String {
         format!(
-            "neighborhood(\"{}\", {});",
+            "neighborhood(\"{}\", \"{}\");",
             self.neighborhood_id,
             self.created_at.to_index_ms()
         )
@@ -490,7 +490,7 @@ impl HomeMemberFact {
     /// Convert to Datalog fact string
     pub fn to_datalog(&self) -> String {
         format!(
-            "home_member(\"{}\", \"{}\", {}, {});",
+            "home_member(\"{}\", \"{}\", \"{}\", {});",
             self.home_id,
             self.neighborhood_id,
             self.joined_at.to_index_ms(),

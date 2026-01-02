@@ -143,8 +143,10 @@ impl RecoveryProtocol {
         operation: &RecoveryOperation,
     ) -> Result<(ConsensusProof, CommitFact)> {
         // Create prestate
+        let mut authority_commitments = std::collections::BTreeMap::new();
+        authority_commitments.insert(self.account_authority, self.current_commitment()?);
         let prestate = Prestate {
-            authority_commitments: vec![(self.account_authority, self.current_commitment()?)],
+            authority_commitments,
             context_commitment: self.recovery_context.journal_commitment()?,
         };
 

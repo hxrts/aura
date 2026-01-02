@@ -117,8 +117,8 @@ impl ITFTraceReplayer {
         #[allow(clippy::disallowed_methods)] // Test infrastructure reading external trace files
         let content = std::fs::read_to_string(path.as_ref())
             .map_err(|e| format!("Failed to read ITF file: {e}"))?;
-        let trace: ITFTrace = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse ITF JSON: {e}"))?;
+        let trace: ITFTrace =
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse ITF JSON: {e}"))?;
         self.replay_trace(&trace)
     }
 

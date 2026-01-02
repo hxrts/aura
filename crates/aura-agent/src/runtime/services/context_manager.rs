@@ -3,9 +3,9 @@
 //! Manages execution contexts and authority relationships.
 //! Provides context lifecycle management and isolation for concurrent protocol executions.
 
+use super::state::with_state_mut_validated;
 use crate::core::AgentConfig;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use super::state::with_state_mut_validated;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -195,7 +195,10 @@ impl ContextManager {
         with_state_mut_validated(
             &self.state,
             |state| {
-                let context = state.contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
+                let context = state
+                    .contexts
+                    .get_mut(&id)
+                    .ok_or(ContextError::NotFound(id))?;
 
                 if context.status != ContextStatus::Active {
                     return Err(ContextError::InvalidStateTransition {
@@ -217,7 +220,10 @@ impl ContextManager {
         with_state_mut_validated(
             &self.state,
             |state| {
-                let context = state.contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
+                let context = state
+                    .contexts
+                    .get_mut(&id)
+                    .ok_or(ContextError::NotFound(id))?;
 
                 if context.status != ContextStatus::Suspended {
                     return Err(ContextError::InvalidStateTransition {
@@ -239,7 +245,10 @@ impl ContextManager {
         with_state_mut_validated(
             &self.state,
             |state| {
-                let context = state.contexts.get_mut(&id).ok_or(ContextError::NotFound(id))?;
+                let context = state
+                    .contexts
+                    .get_mut(&id)
+                    .ok_or(ContextError::NotFound(id))?;
 
                 if context.status == ContextStatus::Terminated {
                     return Ok(()); // Already terminated

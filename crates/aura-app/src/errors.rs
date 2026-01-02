@@ -199,7 +199,6 @@ impl fmt::Display for SyncStage {
     }
 }
 
-
 /// Categorized application errors
 #[derive(Clone, Debug)]
 pub enum AppError {

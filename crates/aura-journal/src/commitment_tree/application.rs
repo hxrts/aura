@@ -73,6 +73,10 @@ pub enum ApplicationError {
     /// Reduction error during application
     #[error("Reduction error: {0}")]
     ReductionError(#[from] ReductionError),
+
+    /// Core error from aura-core operations
+    #[error("Core error: {0}")]
+    Core(#[from] aura_core::AuraError),
 }
 
 /// Result type for application operations
@@ -203,7 +207,7 @@ fn apply_verified_common(state: &mut TreeState, attested: &AttestedOp) -> Applic
 
     // Step 5: Update epoch if required
     if requires_epoch_update(&attested.op.op) {
-        state.increment_epoch();
+        state.increment_epoch()?;
     }
 
     // Step 6: Validate invariants
@@ -232,11 +236,9 @@ async fn verify_aggregate_signature(
         TreeOpKind::RotateEpoch { affected } => affected.first().copied().unwrap_or(NodeIndex(0)),
     };
 
-    let witness = state.signing_witness(&signing_node).ok_or_else(|| {
-        ApplicationError::verification_failed(format!(
-            "missing signing key for node {signing_node:?}"
-        ))
-    })?;
+    let witness = state
+        .signing_witness(&signing_node)
+        .map_err(|e| ApplicationError::verification_failed(e.to_string()))?;
 
     if attested.signer_count < witness.threshold {
         return Err(ApplicationError::verification_failed(format!(
@@ -262,41 +264,6 @@ async fn verify_aggregate_signature(
     .await?;
 
     Ok(())
-}
-
-/// Derive a deterministic group public key from leaf public keys (fallback when signing key missing)
-#[allow(dead_code)]
-fn derive_group_public_key_from_leaves(state: &TreeState) -> ApplicationResult<[u8; 32]> {
-    let mut ids = state.list_leaf_ids();
-    ids.sort_by_key(|id| id.0);
-    let mut hasher = hash::hasher();
-    for id in ids {
-        if let Some(leaf) = state.get_leaf(&id) {
-            hasher.update(&leaf.public_key);
-        }
-    }
-    Ok(hasher.finalize())
-}
-
-/// Extract group public key from tree state for a specific node
-#[allow(dead_code)]
-fn extract_group_public_key(state: &TreeState, node_id: &NodeIndex) -> ApplicationResult<Vec<u8>> {
-    // Derive a deterministic aggregated key by hashing leaf public keys under this branch.
-    let mut hasher = hash::hasher();
-
-    // Traverse leaves that descend from this branch
-    for (leaf_id, leaf) in state.leaves.iter() {
-        if let Some(parent) = state.get_leaf_parent(*leaf_id) {
-            // include leaf if it is under the requested branch
-            let path = state.get_leaf_path_to_root(*leaf_id);
-            if path.contains(node_id) || parent == *node_id {
-                hasher.update(&leaf.public_key);
-            }
-        }
-    }
-
-    let digest = hasher.finalize();
-    Ok(digest.to_vec())
 }
 
 /// Verify threshold signature via CryptoEffects
@@ -769,8 +736,7 @@ mod tests {
     fn test_apply_operation_add_leaf() {
         let mut state = TreeState::new();
         let device_id = aura_core::DeviceId(uuid::Uuid::from_bytes([7u8; 16]));
-        let leaf =
-            LeafNode::new_device(LeafId(1), device_id, vec![0u8; 32]).expect("valid leaf");
+        let leaf = LeafNode::new_device(LeafId(1), device_id, vec![0u8; 32]).expect("valid leaf");
 
         let op = TreeOp {
             parent_epoch: Epoch::initial(),

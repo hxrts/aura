@@ -207,9 +207,8 @@ async fn test_witness_state_lifecycle() {
         commitment: vec![5u8; 32],
     };
 
-    let signing_share =
-        frost_ed25519::keys::SigningShare::deserialize([5u8; 32])
-            .unwrap_or_else(|err| panic!("signing share deserialization failed: {err:?}"));
+    let signing_share = frost_ed25519::keys::SigningShare::deserialize([5u8; 32])
+        .unwrap_or_else(|err| panic!("signing share deserialization failed: {err:?}"));
     let mut rng = rand_chacha::ChaCha20Rng::from_seed([5u8; 32]);
     let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
     let token = aura_core::crypto::tree_signing::NonceToken::from(nonces);
@@ -251,9 +250,8 @@ async fn test_witness_state_lifecycle() {
     );
 
     // Invalidation
-    let signing_share2 =
-        frost_ed25519::keys::SigningShare::deserialize([6u8; 32])
-            .unwrap_or_else(|err| panic!("signing share deserialization failed: {err:?}"));
+    let signing_share2 = frost_ed25519::keys::SigningShare::deserialize([6u8; 32])
+        .unwrap_or_else(|err| panic!("signing share deserialization failed: {err:?}"));
     let mut rng2 = rand_chacha::ChaCha20Rng::from_seed([6u8; 32]);
     let nonces2 = frost_ed25519::round1::SigningNonces::new(&signing_share2, &mut rng2);
     let token2 = aura_core::crypto::tree_signing::NonceToken::from(nonces2);

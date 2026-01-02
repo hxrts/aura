@@ -13,6 +13,10 @@ workspace = true
 [features]
 default = []
 simulation = ["aura-core/simulation"]
+# Enable CrdtCoordinator for choreography-based CRDT synchronization.
+# This provides an alternative to the digest-based sync in aura-anti-entropy.
+# Currently not wired into any protocol; enable if choreography-based CRDT sync is needed.
+crdt-sync = []
 
 [dependencies]
 # Workspace crates

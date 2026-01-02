@@ -160,7 +160,7 @@ pub fn json_value_to_fact_value(value: &JsonValue) -> AuraResult<FactValue> {
         JsonValue::Object(map) => {
             let mut nested = Fact::new();
             for (key, nested_value) in map {
-                nested.insert(key.clone(), json_value_to_fact_value(nested_value)?);
+                let _ = nested.insert(key.clone(), json_value_to_fact_value(nested_value)?);
             }
             Ok(FactValue::Nested(Box::new(nested)))
         }
@@ -176,11 +176,11 @@ pub fn journal_from_json_fact(fact: &JsonValue) -> AuraResult<Journal> {
     match fact {
         JsonValue::Object(map) => {
             for (key, value) in map {
-                fact_record.insert(key.clone(), json_value_to_fact_value(value)?);
+                let _ = fact_record.insert(key.clone(), json_value_to_fact_value(value)?);
             }
         }
         _ => {
-            fact_record.insert("value", json_value_to_fact_value(fact)?);
+            let _ = fact_record.insert("value", json_value_to_fact_value(fact)?);
         }
     }
 

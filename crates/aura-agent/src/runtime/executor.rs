@@ -222,8 +222,8 @@ impl EffectResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EffectContext;
     use crate::runtime::registry::EffectRegistry;
+    use crate::EffectContext;
     use aura_core::effects::ExecutionMode;
     use aura_core::identifiers::{AuthorityId, ContextId};
     use futures::future::BoxFuture;

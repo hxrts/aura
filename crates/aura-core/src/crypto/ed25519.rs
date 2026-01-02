@@ -4,8 +4,59 @@ use ed25519_dalek::Signer;
 use serde::{Deserialize, Serialize};
 
 /// Basic Ed25519 signature wrapper (bytes form for serialization).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ed25519Signature(pub [u8; 64]);
+
+impl Serialize for Ed25519Signature {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Ed25519Signature {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct BytesVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for BytesVisitor {
+            type Value = Ed25519Signature;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("64 bytes for Ed25519 signature")
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                let arr: [u8; 64] = v.try_into().map_err(|_| {
+                    E::invalid_length(v.len(), &"64 bytes")
+                })?;
+                Ok(Ed25519Signature(arr))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut arr = [0u8; 64];
+                for (i, byte) in arr.iter_mut().enumerate() {
+                    *byte = seq
+                        .next_element()?
+                        .ok_or_else(|| serde::de::Error::invalid_length(i, &"64 bytes"))?;
+                }
+                Ok(Ed25519Signature(arr))
+            }
+        }
+
+        deserializer.deserialize_bytes(BytesVisitor)
+    }
+}
 
 impl Ed25519Signature {
     pub fn from_bytes(bytes: [u8; 64]) -> Self {
@@ -71,9 +122,9 @@ impl Ed25519SigningKey {
     }
 
     pub fn try_from_slice(bytes: &[u8]) -> Result<Self, crate::AuraError> {
-        let arr: [u8; 32] = bytes
-            .try_into()
-            .map_err(|_| crate::AuraError::crypto("Ed25519 signing key must be exactly 32 bytes"))?;
+        let arr: [u8; 32] = bytes.try_into().map_err(|_| {
+            crate::AuraError::crypto("Ed25519 signing key must be exactly 32 bytes")
+        })?;
         Ok(Self(arr))
     }
 

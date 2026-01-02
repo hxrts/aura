@@ -120,12 +120,19 @@ fn test_event_nonce() {
     assert_eq!(nonce1, nonce3);
 
     // Test increment
-    let next_nonce = nonce1.next();
+    let next_nonce = nonce1.next().expect("event nonce increment should succeed");
     assert_eq!(next_nonce.value(), 101);
 
     // Test value retrieval
     assert_eq!(nonce1.value(), 100);
     assert_eq!(nonce2.value(), 200);
+}
+
+#[test]
+fn test_event_nonce_overflow() {
+    let nonce = EventNonce::new(u64::MAX);
+    let err = nonce.next().unwrap_err();
+    assert!(err.to_string().contains("EventNonce overflow"));
 }
 
 /// Test string-based identifier types

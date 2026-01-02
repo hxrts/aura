@@ -203,7 +203,7 @@ impl MaintenanceService {
         participants: BTreeSet<AuthorityId>,
         threshold_signature: Vec<u8>,
     ) -> SyncResult<SnapshotCompleted> {
-        *self.last_snapshot_epoch.write() = Some(Epoch::new(snapshot.epoch));
+        *self.last_snapshot_epoch.write() = Some(snapshot.epoch);
 
         Ok(SnapshotCompleted::new(
             authority_id,
@@ -222,7 +222,7 @@ impl MaintenanceService {
         epoch_floor: Epoch,
     ) -> SyncResult<CacheInvalidated> {
         let mut cache = self.cache_manager.write();
-        cache.invalidate_keys(&keys, epoch_floor.value());
+        cache.invalidate_keys(&keys, epoch_floor);
 
         let wrapped_keys = keys.into_iter().map(CacheKey).collect();
         Ok(CacheInvalidated::new(

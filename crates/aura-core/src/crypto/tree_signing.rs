@@ -142,8 +142,7 @@ impl NonceToken {
     pub fn test_token() -> Self {
         use rand::SeedableRng;
 
-        let share = frost::keys::SigningShare::deserialize([1u8; 32])
-            .expect("valid signing share");
+        let share = frost::keys::SigningShare::deserialize([1u8; 32]).expect("valid signing share");
         let mut rng = rand::rngs::StdRng::from_seed([9u8; 32]);
         let nonces = frost::round1::SigningNonces::new(&share, &mut rng);
         NonceToken::from(nonces)
@@ -159,15 +158,12 @@ impl Nonce {
     /// # Arguments
     /// * `nonces` - The FROST signing nonces to wrap
     /// * `id` - A 32-byte random ID for tracking, should be generated via RandomEffects
-    pub fn from_frost(
-        nonces: frost::round1::SigningNonces,
-        id: [u8; 32],
-    ) -> Result<Self, String> {
+    pub fn from_frost(nonces: frost::round1::SigningNonces, id: [u8; 32]) -> Result<Self, String> {
         // Serialize nonces for secure persistence or in-memory caching
         let value = nonces
             .serialize()
             .map_err(|e| format!("Failed to serialize FROST nonces: {e}"))?;
-        let value_bytes = value.as_ref();
+        let value_bytes: &[u8] = value.as_ref();
         if value_bytes.len() != MAX_NONCE_BYTES {
             return Err(format!(
                 "Invalid nonce length: {} (expected {MAX_NONCE_BYTES})",
@@ -216,7 +212,7 @@ impl NonceCommitment {
         let commitment = commitments
             .serialize()
             .map_err(|e| format!("Failed to serialize FROST commitments: {e}"))?;
-        let commitment_bytes = commitment.as_ref();
+        let commitment_bytes: &[u8] = commitment.as_ref();
         if commitment_bytes.len() != MAX_COMMITMENT_BYTES {
             return Err(format!(
                 "Invalid commitment length: {} (expected {MAX_COMMITMENT_BYTES})",
@@ -523,8 +519,8 @@ pub async fn generate_nonce_with_share_secure<E>(
 where
     E: SecureStorageEffects,
 {
-    let (nonce, commitment) =
-        generate_nonce_with_share(signer_id, signing_share, rng).map_err(crate::AuraError::crypto)?;
+    let (nonce, commitment) = generate_nonce_with_share(signer_id, signing_share, rng)
+        .map_err(crate::AuraError::crypto)?;
     let location = SecureStorageLocation::frost_nonce(session_id, signer_id);
     storage
         .secure_store(
@@ -1015,15 +1011,14 @@ mod tests {
     fn test_nonce_and_commitment_sizes() {
         use rand::SeedableRng;
 
-        let share =
-            frost::keys::SigningShare::deserialize([1u8; 32]).expect("valid signing share");
+        let share = frost::keys::SigningShare::deserialize([1u8; 32]).expect("valid signing share");
         let mut rng = rand::rngs::StdRng::from_seed([2u8; 32]);
         let (nonces, commitments) = frost::round1::commit(&share, &mut rng);
 
         let nonce = Nonce::from_frost(nonces, [3u8; 32]).expect("nonce should serialize");
         let identifier = frost::Identifier::try_from(1u16).expect("valid identifier");
-        let commitment =
-            NonceCommitment::from_frost(identifier, commitments).expect("commitment should serialize");
+        let commitment = NonceCommitment::from_frost(identifier, commitments)
+            .expect("commitment should serialize");
 
         assert_eq!(nonce.value.len(), MAX_NONCE_BYTES);
         assert_eq!(commitment.commitment.len(), MAX_COMMITMENT_BYTES);

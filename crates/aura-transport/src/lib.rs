@@ -58,13 +58,7 @@
 ///
 /// This module provides fundamental transport abstractions including envelopes,
 /// configuration, and connection management, all with built-in privacy preservation.
-pub mod types {
-    pub mod config;
-    pub mod connection;
-    /// Endpoint address representation for transport layer.
-    pub mod endpoint;
-    pub mod envelope;
-}
+pub mod types;
 
 /// AMP types (clean - no domain dependencies)
 pub mod amp;
@@ -106,8 +100,11 @@ pub mod messages;
 
 // Re-export types from sub-modules
 pub use types::config::TransportConfig;
-pub use types::connection::{ConnectionId, ConnectionInfo, ConnectionState, ScopedConnectionId};
+pub use types::connection::{
+    ConnectionCloseReason, ConnectionId, ConnectionInfo, ConnectionState, ScopedConnectionId,
+};
 pub use types::envelope::{Envelope, FrameHeader, FrameType, PrivacyLevel, ScopedEnvelope};
+pub use types::ids::{MessageId, SequenceNumber};
 
 // Re-export peers from sub-modules
 pub use peers::info::{BlindedPeerCapabilities, PeerInfo, ScopedPeerMetrics};

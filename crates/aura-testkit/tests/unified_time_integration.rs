@@ -138,11 +138,16 @@ async fn test_cross_domain_time_comparisons() {
     let logical_index = logical.to_index_ms();
 
     assert_ne!(physical_index, logical_index); // Should differ for different domains
+    assert_ne!(physical_index.domain(), logical_index.domain());
 
-    // Test sort_compare provides deterministic ordering across domains
-    let cmp = physical.sort_compare(&logical, OrderingPolicy::Native);
+    // Native cross-domain sorting yields equality (no implicit total order)
+    let native_cmp = physical.sort_compare(&logical, OrderingPolicy::Native);
+    assert_eq!(native_cmp, std::cmp::Ordering::Equal);
+
+    // Deterministic tie-break yields a stable total order across domains
+    let det_cmp = physical.sort_compare(&logical, OrderingPolicy::DeterministicTieBreak);
     assert!(matches!(
-        cmp,
+        det_cmp,
         std::cmp::Ordering::Less | std::cmp::Ordering::Greater
     ));
 }
@@ -239,7 +244,12 @@ async fn test_fact_ordering_across_time_domains() {
     );
 
     // Verify the actual ordering values
-    assert!(fact1.timestamp.to_index_ms() < fact2.timestamp.to_index_ms());
+    assert_eq!(
+        fact1
+            .timestamp
+            .compare(&fact2.timestamp, OrderingPolicy::Native),
+        TimeOrdering::Before
+    );
 }
 
 #[tokio::test]
@@ -292,17 +302,28 @@ async fn test_time_leakage_properties() {
         TimeOrdering::Before | TimeOrdering::After
     ));
 
-    // But the raw bytes should not reveal timing information
-    // (In production, these would be cryptographically generated)
-    assert_ne!(ts1.to_index_ms(), 1000); // Should not leak original timestamp
-    assert_ne!(ts2.to_index_ms(), 6000); // Should not leak advanced timestamp
+    // But the domain-scoped index should not be comparable to physical time
+    let order_index1 = ts1.to_index_ms();
+    let order_index2 = ts2.to_index_ms();
+    assert_eq!(order_index1.domain(), TimeDomain::OrderClock);
+    assert_eq!(order_index2.domain(), TimeDomain::OrderClock);
+
+    let physical_index = TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 1000,
+        uncertainty: None,
+    })
+    .to_index_ms();
+    assert!(order_index1.cmp_same_domain(&physical_index).is_none());
 }
 
 #[tokio::test]
 async fn test_time_scenario_builder_integration() {
     let scenario = TimeScenarioBuilder::new()
         .with_initial_time(1000)
-        .with_devices(&[DeviceId::new_from_entropy([3u8; 32]), DeviceId::new_from_entropy([3u8; 32])])
+        .with_devices(&[
+            DeviceId::new_from_entropy([3u8; 32]),
+            DeviceId::new_from_entropy([3u8; 32]),
+        ])
         .with_time_skew(100) // 100ms skew
         .build();
 

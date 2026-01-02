@@ -45,15 +45,13 @@ fn test_itf_trace_invariants() {
     let trace_path = Path::new("../../traces/consensus.itf.json");
 
     if !trace_path.exists() {
-        eprintln!(
-            "Skipping ITF conformance test: trace file not found at {trace_path:?}"
-        );
+        eprintln!("Skipping ITF conformance test: trace file not found at {trace_path:?}");
         eprintln!("Generate traces with: quint run --out-itf=traces/consensus.itf.json verification/quint/protocol_consensus.qnt");
         return;
     }
 
-    let trace = load_itf_trace(trace_path)
-        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace =
+        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     println!(
         "Loaded ITF trace: {} states from {}",
@@ -87,8 +85,8 @@ fn test_itf_phase_transitions() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path)
-        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace =
+        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     // Track phase transitions per instance
     for i in 1..trace.states.len() {
@@ -148,8 +146,8 @@ fn test_itf_committed_has_commit_fact() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path)
-        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace =
+        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for state in &trace.states {
         for (cid, inst) in &state.instances {
@@ -247,8 +245,8 @@ fn test_itf_proposal_monotonicity() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path)
-        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace =
+        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -389,8 +387,8 @@ fn test_itf_action_inference() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path)
-        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace =
+        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     let mut action_counts: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
@@ -442,8 +440,8 @@ fn test_itf_equivocator_monotonicity() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path)
-        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace =
+        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -474,8 +472,8 @@ fn test_itf_terminal_states_permanent() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path)
-        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace =
+        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     for i in 1..trace.states.len() {
         let prev_state = &trace.states[i - 1];
@@ -572,8 +570,8 @@ fn test_itf_state_comparison_with_divergence() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path)
-        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace =
+        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     let mut total_divergences = 0;
     let mut unexpected_divergences = Vec::new();
@@ -756,8 +754,8 @@ fn test_action_inference_with_divergence() {
         return;
     }
 
-    let trace = load_itf_trace(trace_path)
-        .unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
+    let trace =
+        load_itf_trace(trace_path).unwrap_or_else(|err| panic!("failed to load ITF trace: {err}"));
 
     let mut action_divergence_correlation: HashMap<String, usize> = HashMap::new();
 
@@ -1022,9 +1020,7 @@ fn test_exhaustive_trace_conformance() {
     );
 
     println!();
-    println!(
-        "✓ All {passed} traces passed conformance testing ({total_states} total states)"
-    );
+    println!("✓ All {passed} traces passed conformance testing ({total_states} total states)");
 }
 
 /// Test for minimum trace coverage

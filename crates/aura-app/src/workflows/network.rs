@@ -6,6 +6,10 @@
 //! Peer state is managed through AppCore signals - terminals should not maintain local
 //! peer state.
 
+use crate::workflows::parse::parse_authority_id;
+use crate::workflows::signals::emit_signal;
+use crate::workflows::signals::read_signal_or_default;
+use crate::workflows::state_helpers::with_neighborhood_state;
 use crate::{
     signal_defs::{
         ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, DiscoveredPeersState,
@@ -15,13 +19,9 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::AuraError;
 use aura_core::identifiers::AuthorityId;
+use aura_core::AuraError;
 use std::{collections::HashSet, sync::Arc};
-use crate::workflows::parse::parse_authority_id;
-use crate::workflows::signals::emit_signal;
-use crate::workflows::signals::read_signal_or_default;
-use crate::workflows::state_helpers::with_neighborhood_state;
 
 // ============================================================================
 // Peer Management (connected peer tracking)
@@ -77,9 +77,7 @@ pub async fn remove_peer(
 ///
 /// **What it does**: Returns the current connected peer set from NeighborhoodState
 /// **Signal pattern**: Read-only operation (no emission)
-pub async fn get_connected_peers(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> HashSet<String> {
+pub async fn get_connected_peers(app_core: &Arc<RwLock<AppCore>>) -> HashSet<String> {
     let state = read_signal_or_default(app_core, &*crate::signal_defs::NEIGHBORHOOD_SIGNAL).await;
     state.connected_peers
 }

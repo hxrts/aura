@@ -148,9 +148,8 @@ impl Cut {
     }
 }
 
-/// Unique identifier for a snapshot proposal
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct ProposalId(pub TreeHash32);
+// ProposalId is now defined in types.rs - re-export for convenience
+pub use super::types::ProposalId;
 
 impl ProposalId {
     /// Create proposal ID from cut
@@ -158,12 +157,6 @@ impl ProposalId {
     pub fn from_cut(cut: &Cut) -> Self {
         // In real implementation, hash the cut
         Self(cut.commitment)
-    }
-
-    /// Create a new random proposal ID (for testing)
-    #[must_use]
-    pub fn new_random() -> Self {
-        Self([0u8; 32])
     }
 }
 
@@ -242,14 +235,14 @@ mod tests {
     #[test]
     fn test_snapshot_creation() {
         let snapshot = Snapshot::new(
-            5,
+            Epoch::new(5),
             [1u8; 32],
             vec![LeafId(1), LeafId(2)],
             BTreeMap::from([(NodeIndex(0), Policy::Any)]),
             1000,
         );
 
-        assert_eq!(snapshot.epoch, 5);
+        assert_eq!(snapshot.epoch, Epoch::new(5));
         assert_eq!(snapshot.roster_size(), 2);
         assert_eq!(snapshot.version, 1);
         assert!(snapshot.state_cid.is_none());
@@ -258,7 +251,7 @@ mod tests {
     #[test]
     fn test_snapshot_with_state_cid() {
         let snapshot = Snapshot::new(
-            5,
+            Epoch::new(5),
             [1u8; 32],
             vec![LeafId(1)],
             BTreeMap::from([(NodeIndex(0), Policy::Any)]),
@@ -272,7 +265,7 @@ mod tests {
     #[test]
     fn test_snapshot_contains_leaf() {
         let snapshot = Snapshot::new(
-            5,
+            Epoch::new(5),
             [1u8; 32],
             vec![LeafId(1), LeafId(2), LeafId(3)],
             BTreeMap::from([(NodeIndex(0), Policy::Any)]),
@@ -290,7 +283,7 @@ mod tests {
         policies.insert(NodeIndex(0), Policy::Any);
         policies.insert(NodeIndex(1), Policy::Threshold { m: 2, n: 3 });
 
-        let snapshot = Snapshot::new(5, [1u8; 32], vec![LeafId(1)], policies, 1000);
+        let snapshot = Snapshot::new(Epoch::new(5), [1u8; 32], vec![LeafId(1)], policies, 1000);
 
         assert_eq!(snapshot.get_policy(&NodeIndex(0)), Some(&Policy::Any));
         assert_eq!(
@@ -303,7 +296,7 @@ mod tests {
     #[test]
     fn test_snapshot_validate_success() {
         let snapshot = Snapshot::new(
-            5,
+            Epoch::new(5),
             [1u8; 32],
             vec![LeafId(1)],
             BTreeMap::from([(NodeIndex(0), Policy::Any)]),
@@ -316,7 +309,7 @@ mod tests {
     #[test]
     fn test_snapshot_validate_empty_roster() {
         let snapshot = Snapshot::new(
-            5,
+            Epoch::new(5),
             [1u8; 32],
             vec![],
             BTreeMap::from([(NodeIndex(0), Policy::Any)]),
@@ -328,16 +321,22 @@ mod tests {
 
     #[test]
     fn test_snapshot_validate_empty_policies() {
-        let snapshot = Snapshot::new(5, [1u8; 32], vec![LeafId(1)], BTreeMap::new(), 1000);
+        let snapshot = Snapshot::new(
+            Epoch::new(5),
+            [1u8; 32],
+            vec![LeafId(1)],
+            BTreeMap::new(),
+            1000,
+        );
 
         assert_eq!(snapshot.validate(), Err(SnapshotError::EmptyPolicies));
     }
 
     #[test]
     fn test_cut_creation() {
-        let cut = Cut::new(10, [1u8; 32], [2u8; 32], LeafId(1));
+        let cut = Cut::new(Epoch::new(10), [1u8; 32], [2u8; 32], LeafId(1));
 
-        assert_eq!(cut.epoch, 10);
+        assert_eq!(cut.epoch, Epoch::new(10));
         assert_eq!(cut.commitment, [1u8; 32]);
         assert_eq!(cut.cut_cid, [2u8; 32]);
         assert_eq!(cut.proposer, LeafId(1));
@@ -345,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_proposal_id_from_cut() {
-        let cut = Cut::new(10, [1u8; 32], [2u8; 32], LeafId(1));
+        let cut = Cut::new(Epoch::new(10), [1u8; 32], [2u8; 32], LeafId(1));
         let proposal_id = ProposalId::from_cut(&cut);
 
         assert_eq!(proposal_id.0, [1u8; 32]);

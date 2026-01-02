@@ -12,7 +12,9 @@ use aura_agent::handlers::{
     GuardianProfile, GuardianSet, RecoveryDispute, RecoveryOperation, RecoveryRequest,
     RecoveryResponse,
 };
-use aura_app::ui::workflows::recovery_cli::{self, validate_guardian_set, DISPUTE_WINDOW_HOURS_DEFAULT};
+use aura_app::ui::workflows::recovery_cli::{
+    self, validate_guardian_set, DISPUTE_WINDOW_HOURS_DEFAULT,
+};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash;
 use aura_core::Hash32;

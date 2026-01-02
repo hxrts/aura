@@ -16,14 +16,14 @@ use crate::signal_defs::{
     CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME, NETWORK_STATUS_SIGNAL, NETWORK_STATUS_SIGNAL_NAME,
     TRANSPORT_PEERS_SIGNAL, TRANSPORT_PEERS_SIGNAL_NAME,
 };
+use crate::workflows::signals::{emit_signal, read_signal};
+use crate::workflows::snapshot_policy::contacts_snapshot;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::AuraError;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use crate::workflows::signals::{emit_signal, read_signal};
-use crate::workflows::snapshot_policy::contacts_snapshot;
 
 // ============================================================================
 // OTA Upgrade Parsing Types and Functions
@@ -270,8 +270,13 @@ pub async fn refresh_connection_status_from_contacts(
         };
         let network_status = compute_network_status(true, online_contacts, &sync_status);
 
-        let _ =
-            emit_signal(app_core, &*CONTACTS_SIGNAL, contacts_state, CONTACTS_SIGNAL_NAME).await;
+        let _ = emit_signal(
+            app_core,
+            &*CONTACTS_SIGNAL,
+            contacts_state,
+            CONTACTS_SIGNAL_NAME,
+        )
+        .await;
         let _ = emit_signal(
             app_core,
             &*CONNECTION_STATUS_SIGNAL,
@@ -459,7 +464,10 @@ mod tests {
     fn test_parse_semantic_version_too_few_parts() {
         let result = parse_semantic_version("1.2");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("major.minor.patch"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("major.minor.patch"));
     }
 
     #[test]

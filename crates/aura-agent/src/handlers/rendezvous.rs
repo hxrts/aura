@@ -9,16 +9,18 @@ use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::RendezvousCacheManager;
 use crate::runtime::AuraEffectSystem;
 use aura_consensus::protocol::run_consensus;
-use aura_core::effects::{FlowBudgetEffects, TransportEnvelope, TransportEffects, TransportReceipt};
 use aura_core::effects::RandomExtendedEffects;
+use aura_core::effects::{
+    FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportReceipt,
+};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
-use aura_core::{Hash32, Prestate, Receipt};
+use aura_core::{FlowCost, Hash32, Prestate, Receipt};
 use aura_guards::chain::create_send_guard;
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
-use aura_protocol::effects::TreeEffects;
 use aura_protocol::effects::EffectApiEffects;
+use aura_protocol::effects::TreeEffects;
 use aura_rendezvous::{
     EffectCommand, GuardOutcome, GuardSnapshot, RendezvousConfig, RendezvousDescriptor,
     RendezvousFact, RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
@@ -106,7 +108,7 @@ impl RendezvousHandler {
                 "rendezvous:publish_descriptor".to_string(),
                 context_id,
                 self.context.authority.authority_id(),
-                1, // Low cost for descriptor publication
+                FlowCost::new(1), // Low cost for descriptor publication
             );
             let result = guard
                 .evaluate(effects)
@@ -213,7 +215,7 @@ impl RendezvousHandler {
                 "rendezvous:initiate_channel".to_string(),
                 context_id,
                 self.context.authority.authority_id(),
-                2, // Handshake cost
+                FlowCost::new(2), // Handshake cost
             );
             let result = guard
                 .evaluate(effects)
@@ -346,7 +348,7 @@ impl RendezvousHandler {
                 "rendezvous:relay_request".to_string(),
                 context_id,
                 self.context.authority.authority_id(),
-                2, // Relay request cost
+                FlowCost::new(2), // Relay request cost
             );
             let result = guard
                 .evaluate(effects)
@@ -399,7 +401,7 @@ impl RendezvousHandler {
         Ok(GuardSnapshot {
             authority_id: self.context.authority.authority_id(),
             context_id,
-            flow_budget_remaining: 1000, // Default budget
+            flow_budget_remaining: FlowCost::new(1000), // Default budget
             capabilities: vec![
                 "rendezvous:publish".to_string(),
                 "rendezvous:connect".to_string(),
@@ -425,7 +427,10 @@ impl RendezvousHandler {
             tracing::debug!(removed = removed_desc, "Cleaned up expired descriptors");
         }
         if removed_pending > 0 {
-            tracing::debug!(removed = removed_pending, "Cleaned up stale pending channels");
+            tracing::debug!(
+                removed = removed_pending,
+                "Cleaned up stale pending channels"
+            );
         }
     }
 }
@@ -539,7 +544,8 @@ async fn execute_journal_append(
         let prestate = Prestate::new(
             vec![(authority.authority_id(), Hash32(tree_state.root_commitment))],
             context_commitment,
-        );
+        )
+        .map_err(|e| AgentError::effects(format!("Invalid rendezvous prestate: {e}")))?;
         let params = build_consensus_params(effects, authority.authority_id(), effects)
             .await
             .map_err(|e| {
@@ -568,7 +574,7 @@ async fn execute_journal_append(
 }
 
 async fn execute_charge_flow_budget(
-    cost: u32,
+    cost: aura_core::FlowCost,
     context_id: ContextId,
     peer: AuthorityId,
     effects: &AuraEffectSystem,
@@ -581,9 +587,7 @@ async fn execute_charge_flow_budget(
         .charge_flow(&context_id, &peer, cost)
         .await
         .map_err(|e| {
-            AgentError::effects(format!(
-                "Failed to charge rendezvous flow budget: {e}"
-            ))
+            AgentError::effects(format!("Failed to charge rendezvous flow budget: {e}"))
         })?;
 
     Ok(Some(receipt))
@@ -595,10 +599,10 @@ fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
         src: receipt.src,
         dst: receipt.dst,
         epoch: receipt.epoch.value(),
-        cost: receipt.cost,
-        nonce: receipt.nonce,
+        cost: receipt.cost.value(),
+        nonce: receipt.nonce.value(),
         prev: receipt.prev.0,
-        sig: receipt.sig,
+        sig: receipt.sig.into_bytes(),
     }
 }
 
@@ -615,7 +619,9 @@ async fn execute_send_handshake(
     }
 
     let payload = serde_json::to_vec(&message).map_err(|e| {
-        AgentError::internal(format!("Failed to serialize rendezvous handshake init: {e}"))
+        AgentError::internal(format!(
+            "Failed to serialize rendezvous handshake init: {e}"
+        ))
     })?;
 
     let mut metadata = HashMap::new();
@@ -743,7 +749,9 @@ mod tests {
 
         let outcome = GuardOutcome {
             decision: GuardDecision::Allow,
-            effects: vec![EffectCommand::ChargeFlowBudget { cost: 1 }],
+            effects: vec![EffectCommand::ChargeFlowBudget {
+                cost: FlowCost::new(1),
+            }],
         };
 
         let result = execute_guard_outcome(outcome, &authority, context_id, &effects).await;
@@ -830,7 +838,9 @@ mod tests {
         let outcome = GuardOutcome {
             decision: GuardDecision::Allow,
             effects: vec![
-                EffectCommand::ChargeFlowBudget { cost: 1 },
+                EffectCommand::ChargeFlowBudget {
+                    cost: FlowCost::new(1),
+                },
                 EffectCommand::RecordReceipt {
                     operation: "multi_test".to_string(),
                     peer,

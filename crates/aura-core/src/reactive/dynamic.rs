@@ -79,7 +79,15 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     /// Get the current value.
     ///
     /// This is a synchronous operation that clones the value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal RwLock is poisoned (a thread panicked while
+    /// holding the lock). This indicates a serious bug elsewhere in the
+    /// program and recovering is not appropriate.
     pub fn get(&self) -> T {
+        // SAFETY: Lock poisoning indicates a thread panicked while holding this lock.
+        // Panicking here is correct - the program state is potentially corrupted.
         self.inner
             .value
             .read()
@@ -98,8 +106,15 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     ///
     /// This is a synchronous operation. Subscriptions will see the
     /// new value on their next `poll()` call.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal RwLock is poisoned (a thread panicked while
+    /// holding the lock). This indicates a serious bug elsewhere in the
+    /// program and recovering is not appropriate.
     pub fn set(&self, value: T) {
-        // Update the stored value
+        // SAFETY: Lock poisoning indicates a thread panicked while holding this lock.
+        // Panicking here is correct - the program state is potentially corrupted.
         {
             let mut guard = self.inner.value.write().expect("Dynamic lock poisoned");
             *guard = value;

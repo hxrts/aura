@@ -44,7 +44,9 @@ impl AgentRuntimeBridge {
         Ok(None)
     }
 
-    pub(super) async fn load_account_config(&self) -> Result<(String, StoredAccountConfig), IntentError> {
+    pub(super) async fn load_account_config(
+        &self,
+    ) -> Result<(String, StoredAccountConfig), IntentError> {
         let Some((key, config)) = self.try_load_account_config().await? else {
             return Err(IntentError::storage_error(
                 "No account configuration found".to_string(),

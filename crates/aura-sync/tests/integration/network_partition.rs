@@ -47,9 +47,7 @@ async fn test_partition_detection() -> AuraResult<()> {
             }
         }
 
-        println!(
-            "Created network partition: {group1:?} | {group2:?} | {isolated:?}"
-        );
+        println!("Created network partition: {group1:?} | {group2:?} | {isolated:?}");
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         // Step 2: Devices should detect partition within timeout

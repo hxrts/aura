@@ -7,6 +7,7 @@ use aura_core::{
     tree::{verify_attested_op, AttestedOp, BranchSigningKey},
     AccountId, AuraError, AuraResult, AuthorityId, Cap, Epoch, Hash32, Policy,
 };
+use crate::facts::{Confidence, PublicKeyBytes};
 use std::collections::HashMap;
 
 /// Type alias for identity operation results
@@ -27,7 +28,7 @@ pub struct AuthorityInfo {
     /// Authority identifier
     pub authority_id: AuthorityId,
     /// Authority public key
-    pub public_key: Vec<u8>,
+    pub public_key: PublicKeyBytes,
     /// Authority capabilities
     pub capabilities: Cap,
     /// Authority status
@@ -53,7 +54,7 @@ pub struct VerificationResult {
     /// Verification details
     pub details: String,
     /// Confidence score (0.0 to 1.0)
-    pub confidence: f64,
+    pub confidence: Confidence,
 }
 
 impl AuthorityRegistry {
@@ -96,9 +97,10 @@ impl AuthorityRegistry {
         };
 
         let confidence = match authority_info.status {
-            AuthorityStatus::Active => 1.0,
-            AuthorityStatus::Suspended => 0.5,
-            AuthorityStatus::Revoked => 0.0,
+            AuthorityStatus::Active => Confidence::MAX,
+            AuthorityStatus::Suspended => Confidence::new(0.5)
+                .unwrap_or(Confidence::MIN),
+            AuthorityStatus::Revoked => Confidence::MIN,
         };
 
         Ok(VerificationResult {
@@ -172,7 +174,7 @@ impl AuthorityRegistry {
                 "Signature verified with {} of {} signers",
                 attested_op.signer_count, witness.threshold
             ),
-            confidence: 1.0,
+            confidence: Confidence::MAX,
         })
     }
 
@@ -231,7 +233,7 @@ mod tests {
 
         let authority_info = AuthorityInfo {
             authority_id,
-            public_key: vec![1, 2, 3, 4],
+            public_key: PublicKeyBytes::new([1u8; 32]),
             capabilities: Cap::top(),
             status: AuthorityStatus::Active,
         };
@@ -247,7 +249,7 @@ mod tests {
 
         let authority_info = AuthorityInfo {
             authority_id,
-            public_key: vec![1, 2, 3, 4],
+            public_key: PublicKeyBytes::new([1u8; 32]),
             capabilities: Cap::top(),
             status: AuthorityStatus::Active,
         };
@@ -256,7 +258,7 @@ mod tests {
 
         let result = verifier.verify_authority(authority_id).unwrap();
         assert!(result.verified);
-        assert_eq!(result.confidence, 1.0);
+        assert_eq!(result.confidence, Confidence::MAX);
     }
 
     #[test]
@@ -266,7 +268,7 @@ mod tests {
 
         let authority_info = AuthorityInfo {
             authority_id,
-            public_key: vec![1, 2, 3, 4],
+            public_key: PublicKeyBytes::new([1u8; 32]),
             capabilities: Cap::top(),
             status: AuthorityStatus::Active,
         };
@@ -280,6 +282,39 @@ mod tests {
 
         let result = verifier.verify_authority(authority_id).unwrap();
         assert!(!result.verified);
-        assert_eq!(result.confidence, 0.5);
+        assert_eq!(result.confidence, Confidence::new(0.5).expect("valid confidence"));
+    }
+
+    #[test]
+    fn test_authority_lifecycle_transition() {
+        let mut verifier = AuthorityRegistry::new();
+        let authority_id = AuthorityId::new_from_entropy([4u8; 32]);
+
+        let authority_info = AuthorityInfo {
+            authority_id,
+            public_key: PublicKeyBytes::new([2u8; 32]),
+            capabilities: Cap::top(),
+            status: AuthorityStatus::Active,
+        };
+
+        verifier.register_authority(authority_info).unwrap();
+
+        let active = verifier.verify_authority(authority_id).unwrap();
+        assert!(active.verified);
+        assert_eq!(active.confidence, Confidence::MAX);
+
+        verifier
+            .update_authority_status(authority_id, AuthorityStatus::Suspended)
+            .unwrap();
+        let suspended = verifier.verify_authority(authority_id).unwrap();
+        assert!(!suspended.verified);
+        assert_eq!(suspended.confidence, Confidence::new(0.5).expect("valid confidence"));
+
+        verifier
+            .update_authority_status(authority_id, AuthorityStatus::Revoked)
+            .unwrap();
+        let revoked = verifier.verify_authority(authority_id).unwrap();
+        assert!(!revoked.verified);
+        assert_eq!(revoked.confidence, Confidence::MIN);
     }
 }

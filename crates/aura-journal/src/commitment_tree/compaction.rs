@@ -1,7 +1,7 @@
 use crate::algebra::OpLog;
 use aura_core::{
     tree::{Epoch, Snapshot, TreeOp, TreeOpKind},
-    AttestedOp, LeafId, NodeIndex,
+    AttestedOp, NodeIndex,
 };
 use std::collections::BTreeSet;
 
@@ -97,54 +97,6 @@ fn create_snapshot_fact_operation(
     };
 
     Ok(attested_op)
-}
-
-/// Serialize snapshot metadata for inclusion in snapshot fact
-#[allow(dead_code)]
-fn serialize_snapshot_metadata(snapshot: &Snapshot) -> Result<Vec<u8>, CompactionError> {
-    use std::io::Write;
-
-    let mut buffer = Vec::new();
-
-    // Write epoch
-    buffer
-        .write_all(&u64::from(snapshot.epoch).to_be_bytes())
-        .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
-
-    // Write tree hash
-    buffer
-        .write_all(&snapshot.commitment)
-        .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
-
-    // Write roster size
-    buffer
-        .write_all(&(snapshot.roster.len() as u32).to_be_bytes())
-        .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
-
-    // Write each leaf in roster
-    for leaf_id in &snapshot.roster {
-        let leaf_bytes = serialize_leaf_id(leaf_id)?;
-        buffer
-            .write_all(&(leaf_bytes.len() as u32).to_be_bytes())
-            .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
-        buffer
-            .write_all(&leaf_bytes)
-            .map_err(|e| CompactionError::SerializationError(e.to_string()))?;
-    }
-
-    Ok(buffer)
-}
-
-/// Serialize a leaf ID for snapshot metadata
-#[allow(dead_code)]
-fn serialize_leaf_id(leaf_id: &LeafId) -> Result<Vec<u8>, CompactionError> {
-    // This is simplified - real implementation would use proper serialization
-    let mut buffer = Vec::new();
-
-    // Write leaf ID
-    buffer.extend_from_slice(&leaf_id.0.to_be_bytes());
-
-    Ok(buffer)
 }
 
 /// Create a signature for the snapshot fact operation

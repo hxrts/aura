@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
 
+use crate::types::SequenceNumber;
 static HOLE_PUNCH_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Core hole punching messages for choreographic protocols
@@ -37,7 +38,7 @@ pub enum HolePunchMessage {
         /// Target authority
         target: AuthorityId,
         /// Sequence number for this punch attempt
-        sequence: u32,
+        sequence: SequenceNumber,
         /// Timestamp when packet was sent
         timestamp: TimeStamp,
     },
@@ -163,12 +164,12 @@ impl HolePunchMessage {
         session_id: Uuid,
         source: AuthorityId,
         target: AuthorityId,
-        sequence: u32,
+        sequence: SequenceNumber,
     ) -> Self {
         Self::punch_packet_at_time(session_id, source, target, sequence, {
             let mut bytes = [0u8; 32];
             bytes[..16].copy_from_slice(session_id.as_bytes());
-            let seq_hash = core_hash(&sequence.to_le_bytes());
+            let seq_hash = core_hash(&sequence.value().to_le_bytes());
             bytes[16..].copy_from_slice(&seq_hash[..16]);
             TimeStamp::OrderClock(OrderTime(bytes))
         })
@@ -179,7 +180,7 @@ impl HolePunchMessage {
         session_id: Uuid,
         source: AuthorityId,
         target: AuthorityId,
-        sequence: u32,
+        sequence: SequenceNumber,
         timestamp: TimeStamp,
     ) -> Self {
         Self::PunchPacket {

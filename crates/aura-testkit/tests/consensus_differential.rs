@@ -835,8 +835,7 @@ fn test_aggregation_bindings() {
         })
         .collect();
 
-    let sig =
-        aggregate_shares_ref(&proposals, 2).unwrap_or_else(|| panic!("Should aggregate"));
+    let sig = aggregate_shares_ref(&proposals, 2).unwrap_or_else(|| panic!("Should aggregate"));
 
     // Verify bindings extracted correctly
     assert_eq!(sig.bound_cid, "cns1");

@@ -66,11 +66,7 @@ impl LogicalClockManager {
                         let current_count = next_vector.get(auth).copied().unwrap_or(0);
                         next_vector.insert(*auth, current_count.max(*val));
                     }
-                    let obs_max = obs
-                        .iter()
-                        .map(|(_, v)| *v)
-                        .max()
-                        .unwrap_or(next_scalar);
+                    let obs_max = obs.iter().map(|(_, v)| *v).max().unwrap_or(next_scalar);
                     next_scalar = next_scalar.max(obs_max);
                 }
 

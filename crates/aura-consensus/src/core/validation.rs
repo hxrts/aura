@@ -40,6 +40,48 @@ pub enum ValidationError {
     MalformedInstance { reason: String },
 }
 
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValidationError::ShareBindingMismatch {
+                expected_cid,
+                actual_cid,
+            } => write!(
+                f,
+                "Share binding mismatch: expected {expected_cid}, got {actual_cid}"
+            ),
+            ValidationError::EmptyShareValue => write!(f, "Empty share value"),
+            ValidationError::EmptyNonceBinding => write!(f, "Empty nonce binding"),
+            ValidationError::ThresholdNotMet { required, actual } => {
+                write!(f, "Threshold not met: required {required}, got {actual}")
+            }
+            ValidationError::SignatureBindingMismatch => write!(f, "Signature binding mismatch"),
+            ValidationError::EquivocationDetected { witness } => {
+                write!(f, "Equivocation detected from witness: {witness}")
+            }
+            ValidationError::MalformedInstance { reason } => {
+                write!(f, "Malformed instance: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
+impl aura_core::ProtocolErrorCode for ValidationError {
+    fn code(&self) -> &'static str {
+        match self {
+            ValidationError::ShareBindingMismatch { .. } => "consensus_share_binding_mismatch",
+            ValidationError::EmptyShareValue => "consensus_empty_share_value",
+            ValidationError::EmptyNonceBinding => "consensus_empty_nonce_binding",
+            ValidationError::ThresholdNotMet { .. } => "consensus_threshold_not_met",
+            ValidationError::SignatureBindingMismatch => "consensus_signature_binding_mismatch",
+            ValidationError::EquivocationDetected { .. } => "consensus_equivocation_detected",
+            ValidationError::MalformedInstance { .. } => "consensus_malformed_instance",
+        }
+    }
+}
+
 /// Validate a signature share.
 ///
 /// Quint: `ValidShare(share, cid, rid, pHash)`

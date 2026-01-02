@@ -19,10 +19,10 @@ mod enrollment;
 mod guardian;
 mod threshold;
 
-use crate::ThresholdSigningService;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::CeremonyTracker;
 use crate::AgentResult;
+use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::AuthorityId;
 

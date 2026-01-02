@@ -3,6 +3,7 @@
 //! Types for session type signatures used by handler interfaces.
 //! Moved from aura-core as these represent session type system concerns.
 
+use crate::ids::SessionTypeId;
 use serde::{Deserialize, Serialize};
 
 /// Local session type for handler interfaces
@@ -13,19 +14,27 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LocalSessionType {
     /// Protocol name
-    pub protocol: String,
+    pub protocol: SessionTypeId,
     /// Session parameters
     pub params: Vec<u8>,
 }
 
 impl LocalSessionType {
     /// Create a new local session type
-    pub fn new(protocol: String, params: Vec<u8>) -> Self {
-        Self { protocol, params }
+    pub fn new(protocol: impl Into<SessionTypeId>, params: Vec<u8>) -> Self {
+        Self {
+            protocol: protocol.into(),
+            params,
+        }
     }
 
     /// Get the protocol name
     pub fn protocol(&self) -> &str {
+        self.protocol.as_str()
+    }
+
+    /// Get the protocol identifier
+    pub fn protocol_id(&self) -> &SessionTypeId {
         &self.protocol
     }
 

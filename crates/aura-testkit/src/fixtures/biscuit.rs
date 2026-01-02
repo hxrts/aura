@@ -9,7 +9,7 @@
 
 use aura_authorization::biscuit_token::{BiscuitError, BiscuitTokenManager, TokenAuthority};
 use aura_core::identifiers::AuthorityId;
-use aura_core::scope::{AuthorityOp, ResourceScope};
+use aura_core::scope::{AuthorityOp, ResourceScope, StoragePath};
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -157,7 +157,7 @@ impl BiscuitTestFixture {
                 }
                 ResourceScope::Storage { authority_id, path } => {
                     let authority_str = authority_id.to_string();
-                    let path_str = path.clone();
+                    let path_str = path.as_str();
                     current_token.append(block!(
                         r#"
                         check if authority({authority_str});
@@ -363,7 +363,7 @@ pub fn create_delegation_scenario() -> Result<BiscuitTestFixture, BiscuitError> 
         },
         ResourceScope::Storage {
             authority_id: owner_authority,
-            path: "/documents/".to_string(), // Further restricted by attenuation blocks
+            path: StoragePath::parse("documents").expect("valid storage path"),
         },
     ];
 

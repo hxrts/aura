@@ -42,10 +42,7 @@ impl SharedTransportState {
     fn validate(&self) -> Result<(), String> {
         for authority_id in &self.online {
             if !self.inboxes.contains_key(authority_id) {
-                return Err(format!(
-                    "online authority {:?} missing inbox",
-                    authority_id
-                ));
+                return Err(format!("online authority {:?} missing inbox", authority_id));
             }
         }
         Ok(())
@@ -61,7 +58,10 @@ impl SharedTransport {
     }
 
     /// Wrap an existing per-authority inbox (legacy simulation wiring).
-    pub fn from_inbox(authority_id: AuthorityId, inbox: Arc<RwLock<Vec<TransportEnvelope>>>) -> Self {
+    pub fn from_inbox(
+        authority_id: AuthorityId,
+        inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    ) -> Self {
         let mut inboxes = HashMap::new();
         inboxes.insert(authority_id, inbox);
         let mut online = HashSet::new();

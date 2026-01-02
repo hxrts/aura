@@ -13,8 +13,10 @@ use crate::{
     semilattice::{Bottom, CvState, JoinSemilattice},
     types::epochs::Epoch,
     types::identifiers::{AuthorityId, ContextId},
+    AuraError,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Errors that can occur during budget operations.
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -27,6 +29,163 @@ pub enum BudgetError {
         /// The remaining budget
         remaining: u64,
     },
+    /// Budget arithmetic overflow
+    #[error("Budget arithmetic overflow: spent {spent} + cost {cost}")]
+    Overflow {
+        /// The current spent value
+        spent: u64,
+        /// The cost that was requested
+        cost: u64,
+    },
+}
+
+/// Cost in flow budget units (bounded to u32 for transport compatibility).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct FlowCost(u32);
+
+impl FlowCost {
+    /// Create a new flow cost.
+    #[must_use]
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// Return the raw cost value.
+    #[must_use]
+    pub fn value(self) -> u32 {
+        self.0
+    }
+
+    /// Return the cost as u64 for budget arithmetic.
+    #[must_use]
+    pub fn as_u64(self) -> u64 {
+        u64::from(self.0)
+    }
+}
+
+impl fmt::Display for FlowCost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u32> for FlowCost {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<FlowCost> for u64 {
+    fn from(cost: FlowCost) -> Self {
+        cost.as_u64()
+    }
+}
+
+impl TryFrom<u64> for FlowCost {
+    type Error = AuraError;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        if value <= u64::from(u32::MAX) {
+            Ok(Self(value as u32))
+        } else {
+            Err(AuraError::invalid(format!(
+                "FlowCost overflow: {value} exceeds u32::MAX"
+            )))
+        }
+    }
+}
+
+impl TryFrom<i64> for FlowCost {
+    type Error = AuraError;
+
+    fn try_from(value: i64) -> Result<Self, Self::Error> {
+        if value < 0 {
+            return Err(AuraError::invalid(format!(
+                "FlowCost cannot be negative: {value}"
+            )));
+        }
+        FlowCost::try_from(value as u64)
+    }
+}
+
+/// Monotonic nonce for flow receipts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct FlowNonce(u64);
+
+impl FlowNonce {
+    /// Create a new flow nonce.
+    #[must_use]
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Return the raw nonce value.
+    #[must_use]
+    pub fn value(self) -> u64 {
+        self.0
+    }
+
+    /// Return the next nonce, or error on overflow.
+    pub fn checked_next(self) -> Result<Self, AuraError> {
+        self.0
+            .checked_add(1)
+            .map(Self)
+            .ok_or_else(|| AuraError::invalid("FlowNonce overflow"))
+    }
+}
+
+impl fmt::Display for FlowNonce {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<u64> for FlowNonce {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl From<FlowNonce> for u64 {
+    fn from(value: FlowNonce) -> Self {
+        value.0
+    }
+}
+
+/// Receipt signature bytes (validated length).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReceiptSig(Vec<u8>);
+
+impl ReceiptSig {
+    /// Create a new receipt signature, enforcing max size.
+    pub fn new(bytes: Vec<u8>) -> Result<Self, AuraError> {
+        if bytes.len() > MAX_SIGNATURE_BYTES {
+            return Err(AuraError::invalid(format!(
+                "Receipt signature too large: {} bytes (max {})",
+                bytes.len(),
+                MAX_SIGNATURE_BYTES
+            )));
+        }
+        Ok(Self(bytes))
+    }
+
+    /// View the signature bytes.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    /// Consume the signature bytes.
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+impl TryFrom<Vec<u8>> for ReceiptSig {
+    type Error = AuraError;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
 }
 
 /// Effect API-backed flow budget for a `(context, peer)` pair.
@@ -57,7 +216,7 @@ impl FlowBudget {
     /// Remaining headroom before the guard should block.
     #[must_use]
     pub fn headroom(&self) -> u64 {
-        self.limit.saturating_sub(self.spent)
+        self.limit.checked_sub(self.spent).unwrap_or(0)
     }
 
     /// Alias for headroom() - returns remaining budget
@@ -67,21 +226,31 @@ impl FlowBudget {
     }
 
     /// Returns true if charging `cost` would still be within the budget.
-    pub fn can_charge(&self, cost: u64) -> bool {
-        self.spent.saturating_add(cost) <= self.limit
+    pub fn can_charge(&self, cost: FlowCost) -> Result<bool, BudgetError> {
+        let cost_value = u64::from(cost);
+        let new_spent = self.spent.checked_add(cost_value).ok_or(BudgetError::Overflow {
+            spent: self.spent,
+            cost: cost_value,
+        })?;
+        Ok(new_spent <= self.limit)
     }
 
     /// Record a spend if possible.
     ///
     /// Returns `Ok(())` if the charge succeeded, or `Err(BudgetError::Exhausted)`
     /// if the budget would be exceeded.
-    pub fn record_charge(&mut self, cost: u64) -> std::result::Result<(), BudgetError> {
-        if self.can_charge(cost) {
-            self.spent = self.spent.saturating_add(cost);
+    pub fn record_charge(&mut self, cost: FlowCost) -> std::result::Result<(), BudgetError> {
+        let cost_value = u64::from(cost);
+        let new_spent = self.spent.checked_add(cost_value).ok_or(BudgetError::Overflow {
+            spent: self.spent,
+            cost: cost_value,
+        })?;
+        if new_spent <= self.limit {
+            self.spent = new_spent;
             Ok(())
         } else {
             Err(BudgetError::Exhausted {
-                cost,
+                cost: cost_value,
                 remaining: self.headroom(),
             })
         }
@@ -177,13 +346,13 @@ pub struct Receipt {
     /// Epoch binding the receipt to a FlowBudget row.
     pub epoch: Epoch,
     /// Cost that was charged.
-    pub cost: u32,
+    pub cost: FlowCost,
     /// Monotonic nonce per `(ctx, src, epoch)` used to prevent replay.
-    pub nonce: u64,
+    pub nonce: FlowNonce,
     /// Previous receipt hash (forms a hash chain for auditing).
     pub prev: Hash32,
     /// Transport-level signature or MAC over the receipt fields.
-    pub sig: Vec<u8>,
+    pub sig: ReceiptSig,
 }
 
 impl Receipt {
@@ -195,10 +364,10 @@ impl Receipt {
         src: AuthorityId,
         dst: AuthorityId,
         epoch: Epoch,
-        cost: u32,
-        nonce: u64,
+        cost: FlowCost,
+        nonce: FlowNonce,
         prev: Hash32,
-        sig: Vec<u8>,
+        sig: ReceiptSig,
     ) -> Self {
         Self {
             ctx,
@@ -267,11 +436,11 @@ mod tests {
     #[test]
     fn record_charge_enforces_limit() {
         let mut budget = FlowBudget::new(10, Epoch::initial());
-        assert!(budget.record_charge(4).is_ok());
+        assert!(budget.record_charge(FlowCost::new(4)).is_ok());
         assert_eq!(budget.spent, 4);
-        assert!(budget.record_charge(6).is_ok());
+        assert!(budget.record_charge(FlowCost::new(6)).is_ok());
         assert_eq!(budget.spent, 10);
-        assert!(budget.record_charge(1).is_err());
+        assert!(budget.record_charge(FlowCost::new(1)).is_err());
         assert_eq!(budget.spent, 10);
     }
 
@@ -285,5 +454,30 @@ mod tests {
         budget.rotate_epoch(Epoch::new(2));
         assert_eq!(budget.spent, 0);
         assert_eq!(budget.epoch, Epoch::new(2));
+    }
+
+    #[test]
+    fn record_charge_detects_overflow() {
+        let mut budget = FlowBudget {
+            limit: u64::MAX,
+            spent: u64::MAX,
+            epoch: Epoch::initial(),
+        };
+        let err = budget
+            .record_charge(FlowCost::new(1))
+            .expect_err("overflow should error");
+        assert!(matches!(err, BudgetError::Overflow { .. }));
+    }
+
+    #[test]
+    fn receipt_sig_enforces_max_size() {
+        let oversized = vec![0u8; MAX_SIGNATURE_BYTES + 1];
+        assert!(ReceiptSig::new(oversized).is_err());
+    }
+
+    #[test]
+    fn flow_cost_rejects_overflow() {
+        let err = FlowCost::try_from(u64::from(u32::MAX) + 1);
+        assert!(err.is_err());
     }
 }

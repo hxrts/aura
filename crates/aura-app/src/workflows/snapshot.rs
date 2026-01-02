@@ -1,5 +1,6 @@
 //! Snapshot maintenance workflows.
 
+use crate::workflows::journal::{encode_fact_content, persist_fact_value};
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::AuraError;
@@ -8,12 +9,14 @@ use aura_journal::DomainFact;
 use aura_maintenance::{MaintenanceFact, SnapshotProposed};
 use aura_protocol::effects::TreeEffects;
 use uuid::Uuid;
-use crate::workflows::journal::{encode_fact_content, persist_fact_value};
 
 /// Record a snapshot proposal fact in the local journal.
 ///
 /// Returns the proposal ID (fact key) for the snapshot proposal.
-pub async fn propose_snapshot<E>(effects: &E, device_authority: AuthorityId) -> Result<String, AuraError>
+pub async fn propose_snapshot<E>(
+    effects: &E,
+    device_authority: AuthorityId,
+) -> Result<String, AuraError>
 where
     E: JournalEffects + TreeEffects,
 {

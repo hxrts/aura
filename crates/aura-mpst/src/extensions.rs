@@ -4,6 +4,7 @@
 //! trait to integrate Aura's capability guards, flow cost management, and journal
 //! coupling into choreographic protocols.
 
+use crate::ids::RoleId;
 use rumpsteak_aura_choreography::effects::ExtensionEffect;
 use serde::{Deserialize, Serialize};
 use std::any::{Any, TypeId};
@@ -14,7 +15,7 @@ pub struct ValidateCapability {
     /// The capability string to validate
     pub capability: String,
     /// Role name as string to avoid generic conflicts
-    pub role: String,
+    pub role: RoleId,
 }
 
 impl ExtensionEffect for ValidateCapability {
@@ -50,7 +51,7 @@ pub struct ExecuteGuardChain {
     /// List of guard strings to execute
     pub guards: Vec<String>,
     /// Role executing the guard chain
-    pub role: String,
+    pub role: RoleId,
     /// Operation being guarded
     pub operation: String,
 }
@@ -89,7 +90,7 @@ pub struct ChargeFlowCost {
     /// The specific operation being performed that incurs this cost
     pub operation: String,
     /// The role that is being charged for this operation
-    pub role: String,
+    pub role: RoleId,
 }
 
 impl ExtensionEffect for ChargeFlowCost {
@@ -124,7 +125,7 @@ pub struct JournalFact {
     /// The fact to record in the journal
     pub fact: String,
     /// The role that is recording this fact
-    pub role: String,
+    pub role: RoleId,
     /// The operation that generated this fact
     pub operation: String,
 }
@@ -161,7 +162,7 @@ pub struct JournalMerge {
     /// The type of merge operation to perform (e.g., "anti_entropy", "consensus")
     pub merge_type: String,
     /// Multiple roles that can participate in the merge operation
-    pub roles: Vec<String>,
+    pub roles: Vec<RoleId>,
 }
 
 impl ExtensionEffect for JournalMerge {
@@ -215,7 +216,7 @@ pub struct CompositeExtension {
     /// The list of concrete extensions to execute for this operation
     pub extensions: Vec<ConcreteExtension>,
     /// The primary role executing this composite extension
-    pub role: String,
+    pub role: RoleId,
     /// The operation that this composite extension is attached to
     pub operation: String,
 }
@@ -275,7 +276,7 @@ impl ExtensionEffect for CompositeExtension {
 
 impl CompositeExtension {
     /// Create a new composite extension
-    pub fn new(role: String, operation: String) -> Self {
+    pub fn new(role: RoleId, operation: String) -> Self {
         Self {
             extensions: Vec::new(),
             role,

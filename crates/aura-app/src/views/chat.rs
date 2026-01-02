@@ -148,7 +148,7 @@ pub struct Channel {
 }
 
 /// A chat message
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Message {
     /// Message identifier (fact ID)

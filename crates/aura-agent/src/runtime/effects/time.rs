@@ -1,6 +1,8 @@
 use super::AuraEffectSystem;
 use async_trait::async_trait;
-use aura_core::effects::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeEffects, TimeError};
+use aura_core::effects::{
+    LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeEffects, TimeError,
+};
 
 // Time effects backed by the production physical clock handler.
 #[async_trait]

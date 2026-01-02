@@ -66,16 +66,16 @@ async fn propose_upgrade(
     ));
 
     // Use portable parsing from aura_app
-    let kind_value = parse_upgrade_kind(upgrade_type)
-        .map_err(|e| TerminalError::Input(e.to_string()))?;
+    let kind_value =
+        parse_upgrade_kind(upgrade_type).map_err(|e| TerminalError::Input(e.to_string()))?;
     let kind = match kind_value {
         UpgradeKindValue::Soft => UpgradeKind::SoftFork,
         UpgradeKindValue::Hard => UpgradeKind::HardFork,
     };
 
     // Parse version string using portable helper
-    let (major, minor, patch) = parse_semantic_version(to_version)
-        .map_err(|e| TerminalError::Input(e.to_string()))?;
+    let (major, minor, patch) =
+        parse_semantic_version(to_version).map_err(|e| TerminalError::Input(e.to_string()))?;
     let version = SemanticVersion::new(major, minor, patch);
 
     // Compute artifact hash from local file if available, otherwise hash the URL string

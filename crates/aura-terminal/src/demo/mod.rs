@@ -369,8 +369,7 @@ impl SimulatedAgent {
         // Prevent duplicates
         if !self.is_guardian_for(&account) {
             self.state.guardian_bindings.push(GuardianBinding::new(
-                account,
-                context_id,
+                account, context_id,
                 0, // bound_at timestamp - demo doesn't track this precisely
             ));
             tracing::info!(

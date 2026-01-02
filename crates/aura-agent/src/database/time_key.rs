@@ -59,7 +59,7 @@ pub(crate) fn timestamp_to_millis(ts: &TimeStamp) -> u64 {
                 ot.0[0], ot.0[1], ot.0[2], ot.0[3], ot.0[4], ot.0[5], ot.0[6], ot.0[7],
             ])
         }
-        TimeStamp::Range(rt) => rt.earliest_ms,
+        TimeStamp::Range(rt) => rt.earliest_ms(),
     }
 }
 

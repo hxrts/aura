@@ -2,7 +2,7 @@ use super::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::{FlowBudgetEffects, JournalEffects};
 use aura_core::scope::{AuthorizationOp, ContextOp, ResourceScope};
-use aura_core::{AuraError, AuthorityId, ContextId, Hash32};
+use aura_core::{AuraError, AuthorityId, ContextId, FlowCost, FlowNonce, Hash32, ReceiptSig};
 
 // Implementation of FlowBudgetEffects
 #[async_trait]
@@ -11,7 +11,7 @@ impl FlowBudgetEffects for AuraEffectSystem {
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> aura_core::AuraResult<aura_core::Receipt> {
         if let Some((token, bridge)) = &self.journal.journal_policy() {
             let scope = ResourceScope::Context {
@@ -38,9 +38,9 @@ impl FlowBudgetEffects for AuraEffectSystem {
             *peer,
             budget.epoch,
             cost,
-            budget.spent,
+            FlowNonce::new(budget.spent),
             Hash32::default(),
-            Vec::new(),
+            ReceiptSig::new(Vec::new())?,
         ))
     }
 }

@@ -360,7 +360,9 @@ mod tests {
         let op1_ctx = CausalContext::new(actor);
         // op2 depends on op1 - use explicit dependency
         let op1_id = OperationId::new(actor, 1);
-        let op2_ctx = CausalContext::after(actor, &op1_ctx).with_dependency(op1_id);
+        let op2_ctx = CausalContext::after(actor, &op1_ctx)
+            .expect("causal context overflow")
+            .with_dependency(op1_id);
         let op1 = TestOp {
             id: 1,
             value: 5,

@@ -13,7 +13,7 @@ use aura_core::Hash32;
 impl From<&AuthorityTreeState> for TreeStateSummary {
     fn from(authority_state: &AuthorityTreeState) -> Self {
         TreeStateSummary::with_values(
-            Epoch::new(authority_state.epoch),
+            authority_state.epoch,
             Hash32::new(authority_state.root_commitment),
             authority_state.get_threshold(),
             authority_state.active_leaf_count() as u32,
@@ -41,7 +41,7 @@ impl AttestedOp {
     }
 
     /// Get the resulting epoch after this operation
-    pub fn resulting_epoch(&self, parent_epoch: Epoch) -> Epoch {
+    pub fn resulting_epoch(&self, parent_epoch: Epoch) -> Result<Epoch, aura_core::AuraError> {
         // Tree operations increment the epoch
         parent_epoch.next()
     }
@@ -56,7 +56,7 @@ mod tests {
     #[test]
     fn test_tree_state_conversion() {
         let mut auth_state = AuthorityTreeState::new();
-        auth_state.epoch = 5;
+        auth_state.epoch = Epoch::new(5);
         auth_state.root_commitment = [1; 32];
 
         let tree_state = auth_state.to_tree_state_summary();

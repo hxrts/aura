@@ -10,7 +10,7 @@ use aura_core::effects::{
     RandomCoreEffects, StorageCoreEffects, StorageExtendedEffects,
 };
 use aura_core::time::PhysicalTime;
-use aura_core::types::flow::Receipt;
+use aura_core::types::flow::{FlowCost, FlowNonce, Receipt, ReceiptSig};
 use aura_core::types::Epoch;
 use aura_core::{AuraError, AuraResult, Cap, FlowBudget, Journal};
 use aura_core::{AuthorityId, ContextId};
@@ -228,10 +228,10 @@ impl JournalEffects for TestEffects {
         &self,
         _context: &ContextId,
         _peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> Result<FlowBudget, AuraError> {
         let mut budget = self.flow_budget.lock().await;
-        match budget.record_charge(cost as u64) {
+        match budget.record_charge(cost) {
             Ok(()) => Ok(*budget),
             Err(_) => Err(AuraError::permission_denied("insufficient budget")),
         }
@@ -244,7 +244,7 @@ impl FlowBudgetEffects for TestEffects {
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> AuraResult<Receipt> {
         let _ = self.charge_flow_budget(context, peer, cost).await?;
         let nonce = self.nonce.fetch_add(1, Ordering::SeqCst);
@@ -254,9 +254,9 @@ impl FlowBudgetEffects for TestEffects {
             *peer,
             Epoch::from(1),
             cost,
-            nonce,
+            FlowNonce::new(nonce),
             aura_core::Hash32::default(),
-            Vec::new(),
+            ReceiptSig::new(Vec::new())?,
         ))
     }
 }
@@ -317,7 +317,7 @@ async fn guard_chain_denies_transport_commands() {
     let context = ContextId::new_from_entropy([3u8; 32]);
     let effects = TestEffects::new(authority);
 
-    let request = GuardRequest::new(authority, "amp:send".to_string(), 1)
+    let request = GuardRequest::new(authority, "amp:send".to_string(), FlowCost::new(1))
         .with_context_id(context)
         .with_peer(peer)
         .with_context(context.to_bytes().to_vec());

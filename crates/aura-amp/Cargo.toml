@@ -13,6 +13,8 @@ workspace = true
 default = ["demo-crypto"]
 # Enable demo XOR-based encryption for simulation/testing (NOT for production)
 demo-crypto = []
+# Enable simulation mode for deterministic testing with aura-simulator.
+# Provides access to simulation-specific effect traits and handlers.
 simulation = ["aura-core/simulation"]
 
 [dependencies]

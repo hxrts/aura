@@ -4,10 +4,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Mutate state behind an async RwLock.
-pub async fn with_state_mut<State, F, R>(
-    state: &Arc<RwLock<State>>,
-    mutator: F,
-) -> R
+pub async fn with_state_mut<State, F, R>(state: &Arc<RwLock<State>>, mutator: F) -> R
 where
     F: FnOnce(&mut State) -> R,
 {

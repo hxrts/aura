@@ -269,7 +269,12 @@ impl TreeEffects for PersistentTreeHandler {
             .get_policy(&node)
             .ok_or_else(|| AuraError::invalid(format!("Missing policy for branch {}", node.0)))?;
         let child_count = state.get_children(node).len();
-        let threshold = policy.required_signers(child_count);
+        let threshold = policy.required_signers(child_count).map_err(|e| {
+            AuraError::invalid(format!(
+                "Invalid policy for branch {} (child_count={}): {e}",
+                node.0, child_count
+            ))
+        })?;
 
         aura_core::tree::verify_attested_op(op, signing_key, threshold, state.epoch)
             .map(|_| true)
@@ -299,11 +304,11 @@ impl TreeEffects for PersistentTreeHandler {
     async fn propose_snapshot(&self, cut: Cut) -> Result<ProposalId, AuraError> {
         let bytes = aura_core::util::serialization::to_vec(&cut)
             .map_err(|e| AuraError::internal(format!("serialize cut: {e}")))?;
-        Ok(ProposalId(Hash32(hash::hash(&bytes))))
+        Ok(ProposalId::new(hash::hash(&bytes)))
     }
 
     async fn approve_snapshot(&self, proposal_id: ProposalId) -> Result<Partial, AuraError> {
-        let signature_share = proposal_id.0 .0.to_vec();
+        let signature_share = proposal_id.0.to_vec();
         Ok(Partial {
             signature_share,
             participant_id: aura_core::identifiers::DeviceId::new_from_entropy([3u8; 32]),
@@ -316,10 +321,10 @@ impl TreeEffects for PersistentTreeHandler {
             cut: Cut {
                 epoch: state.epoch,
                 commitment: Hash32(state.root_commitment),
-                cid: proposal_id.0,
+                cid: Hash32(proposal_id.0),
             },
             tree_state: state,
-            aggregate_signature: proposal_id.0 .0.to_vec(),
+            aggregate_signature: proposal_id.0.to_vec(),
         })
     }
 

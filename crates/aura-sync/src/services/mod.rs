@@ -56,7 +56,7 @@ pub mod sync;
 pub use aura_maintenance::{
     AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEpoch,
     MaintenanceFact, MaintenanceFactKey, SnapshotCompleted, SnapshotProposed, UpgradeActivated,
-    UpgradeProposalMetadata, MAINTENANCE_FACT_TYPE_ID, OPERATION_CATEGORIES,
+    UpgradeProposalMetadata, MAINTENANCE_FACT_TYPE_ID,
 };
 pub use maintenance::{MaintenanceService, MaintenanceServiceConfig, UpgradeProposal};
 pub use sync::{SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth};

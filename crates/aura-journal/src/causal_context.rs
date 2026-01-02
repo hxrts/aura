@@ -187,15 +187,19 @@ impl CausalContext {
     }
 
     /// Create a context that happens after another context
-    pub fn after(actor: ActorId, previous: &CausalContext) -> Self {
+    pub fn after(actor: ActorId, previous: &CausalContext) -> Result<Self, aura_core::AuraError> {
         let mut vector = previous.logical_time.vector.clone();
-        vector.increment(actor);
-        let lamport = previous.logical_time.lamport + 1;
-        Self {
+        vector.increment(actor)?;
+        let lamport = previous
+            .logical_time
+            .lamport
+            .checked_add(1)
+            .ok_or_else(|| aura_core::AuraError::invalid("Lamport clock overflow"))?;
+        Ok(Self {
             logical_time: LogicalTime { vector, lamport },
             dependencies: BTreeSet::new(),
             actor,
-        }
+        })
     }
 
     /// Add an explicit dependency
@@ -205,16 +209,27 @@ impl CausalContext {
     }
 
     /// Increment clock for a device
-    pub fn increment(&mut self, device: DeviceId) {
-        self.logical_time.vector.increment(device);
-        self.logical_time.lamport += 1;
+    pub fn increment(&mut self, device: DeviceId) -> Result<(), aura_core::AuraError> {
+        self.logical_time.vector.increment(device)?;
+        self.logical_time.lamport = self
+            .logical_time
+            .lamport
+            .checked_add(1)
+            .ok_or_else(|| aura_core::AuraError::invalid("Lamport clock overflow"))?;
+        Ok(())
     }
 
     /// Merge with another context (take maximum of all clocks)
-    pub fn merge(&mut self, other: &CausalContext) {
+    pub fn merge(&mut self, other: &CausalContext) -> Result<(), aura_core::AuraError> {
         self.logical_time.vector.merge(&other.logical_time.vector);
-        self.logical_time.lamport = self.logical_time.lamport.max(other.logical_time.lamport) + 1;
+        self.logical_time.lamport = self
+            .logical_time
+            .lamport
+            .max(other.logical_time.lamport)
+            .checked_add(1)
+            .ok_or_else(|| aura_core::AuraError::invalid("Lamport clock overflow"))?;
         self.dependencies.extend(other.dependencies.iter().cloned());
+        Ok(())
     }
 
     /// Check if this context happens before another (delegates to vector clock)
@@ -327,7 +342,7 @@ mod tests {
 
         assert_eq!(vc1.get_time(&actor), 0);
 
-        vc1.increment(actor);
+        vc1.increment(actor).expect("vector clock increment");
         assert_eq!(vc1.get_time(&actor), 1);
 
         vc1.set_time(actor, 5);

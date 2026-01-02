@@ -9,6 +9,7 @@ use crate::runtime::services::RecoveryManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::identifiers::AuthorityId;
+use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard;
 use aura_protocol::effects::EffectApiEffects;
 use serde::{Deserialize, Serialize};
@@ -200,7 +201,7 @@ impl RecoveryHandler {
                 "recovery:initiate".to_string(),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
-                100, // Higher cost for recovery operations
+                FlowCost::new(100), // Higher cost for recovery operations
             );
             let result = guard
                 .evaluate(effects)
@@ -279,7 +280,7 @@ impl RecoveryHandler {
                 "recovery:approve".to_string(),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
-                50,
+                FlowCost::new(50),
             );
             let result = guard
                 .evaluate(effects)
@@ -409,7 +410,7 @@ impl RecoveryHandler {
                 "recovery:complete".to_string(),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
-                100,
+                FlowCost::new(100),
             );
             let result = guard
                 .evaluate(effects)
@@ -498,7 +499,7 @@ impl RecoveryHandler {
                 "recovery:cancel".to_string(),
                 self.context.effect_context.context_id(),
                 self.context.authority.authority_id(),
-                30,
+                FlowCost::new(30),
             );
             let result = guard
                 .evaluate(effects)

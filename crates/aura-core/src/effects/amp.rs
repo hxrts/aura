@@ -61,7 +61,7 @@ pub struct AmpCiphertext {
 }
 
 /// Optional parameters for channel creation
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelCreateParams {
     pub context: ContextId,
     /// Supply a channel id or let the implementation generate one

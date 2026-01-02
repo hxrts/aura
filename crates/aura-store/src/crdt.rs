@@ -4,6 +4,7 @@
 //! implementing join and meet semilattice operations for convergence.
 
 use crate::SearchIndexEntry;
+use crate::types::NodeId;
 use aura_core::time::PhysicalTime;
 use aura_core::{AuthorityId, ChunkId, ContentId, JoinSemilattice};
 use serde::{Deserialize, Serialize};
@@ -383,9 +384,9 @@ impl JoinSemilattice for StorageState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChunkAvailability {
     /// Mapping from chunk ID to set of nodes that have it
-    pub chunk_locations: BTreeMap<ChunkId, BTreeSet<String>>,
+    pub chunk_locations: BTreeMap<ChunkId, BTreeSet<NodeId>>,
     /// Last update timestamp per node (unified time system)
-    pub node_timestamps: BTreeMap<String, PhysicalTime>,
+    pub node_timestamps: BTreeMap<NodeId, PhysicalTime>,
 }
 
 impl ChunkAvailability {
@@ -400,7 +401,7 @@ impl ChunkAvailability {
     /// Mark chunk as available on a node
     ///
     /// **Time System**: Uses `PhysicalTime` for update timestamps.
-    pub fn add_chunk(&mut self, chunk_id: ChunkId, node_id: String, timestamp: PhysicalTime) {
+    pub fn add_chunk(&mut self, chunk_id: ChunkId, node_id: NodeId, timestamp: PhysicalTime) {
         self.chunk_locations
             .entry(chunk_id)
             .or_default()
@@ -412,7 +413,7 @@ impl ChunkAvailability {
     /// Mark chunk as available on a node (from milliseconds)
     ///
     /// Convenience method for backward compatibility.
-    pub fn add_chunk_ms(&mut self, chunk_id: ChunkId, node_id: String, timestamp_ms: u64) {
+    pub fn add_chunk_ms(&mut self, chunk_id: ChunkId, node_id: NodeId, timestamp_ms: u64) {
         self.add_chunk(
             chunk_id,
             node_id,
@@ -424,7 +425,7 @@ impl ChunkAvailability {
     }
 
     /// Remove chunk from a node
-    pub fn remove_chunk(&mut self, chunk_id: &ChunkId, node_id: &str) {
+    pub fn remove_chunk(&mut self, chunk_id: &ChunkId, node_id: &NodeId) {
         if let Some(nodes) = self.chunk_locations.get_mut(chunk_id) {
             nodes.remove(node_id);
             if nodes.is_empty() {
@@ -434,7 +435,7 @@ impl ChunkAvailability {
     }
 
     /// Get nodes that have a chunk
-    pub fn get_chunk_locations(&self, chunk_id: &ChunkId) -> Option<&BTreeSet<String>> {
+    pub fn get_chunk_locations(&self, chunk_id: &ChunkId) -> Option<&BTreeSet<NodeId>> {
         self.chunk_locations.get(chunk_id)
     }
 
@@ -584,15 +585,18 @@ mod tests {
 
         let chunk_id = ChunkId::from_bytes(b"chunk1");
 
-        avail1.add_chunk(chunk_id.clone(), "node1".to_string(), test_time(10));
-        avail2.add_chunk(chunk_id.clone(), "node2".to_string(), test_time(20));
+        let node1 = NodeId::new("node1");
+        let node2 = NodeId::new("node2");
+
+        avail1.add_chunk(chunk_id.clone(), node1.clone(), test_time(10));
+        avail2.add_chunk(chunk_id.clone(), node2.clone(), test_time(20));
 
         let merged = avail1.join(&avail2);
 
         let locations = merged.get_chunk_locations(&chunk_id).unwrap();
         assert_eq!(locations.len(), 2);
-        assert!(locations.contains("node1"));
-        assert!(locations.contains("node2"));
+        assert!(locations.contains(&node1));
+        assert!(locations.contains(&node2));
     }
 
     // Removed test_storage_state_capabilities_meet - capabilities field removed

@@ -264,10 +264,7 @@ impl EffectSystemBuilder {
         system.start_maintenance_tasks();
 
         // Start runtime services (sync, rendezvous, social, etc).
-        system
-            .start_services()
-            .await
-            .map_err(|e| e.to_string())?;
+        system.start_services().await.map_err(|e| e.to_string())?;
 
         Ok(system)
     }

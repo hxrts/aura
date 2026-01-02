@@ -232,9 +232,7 @@ fn test_cli_recovery_demo_invariants() {
 
     println!("Validation complete:");
     println!("  States validated: {}", trace.states.len());
-    println!(
-        "  Guardian relationships validated: {guardian_relationships_found}"
-    );
+    println!("  Guardian relationships validated: {guardian_relationships_found}");
     println!("  Max guardians per agent: {max_guardians_per_agent}");
 
     // Ensure we actually found guardian relationships

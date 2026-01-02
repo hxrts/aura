@@ -20,6 +20,7 @@ use crate::runtime_bridge::{
 use crate::views::ViewState;
 
 use crate::ReactiveHandler;
+use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::reactive::{
     ReactiveEffects, ReactiveError, Signal, SignalId, SignalStream,
@@ -33,7 +34,6 @@ use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::AccountId;
 use serde::{Deserialize, Serialize};
-use async_lock::RwLock;
 use std::sync::Arc;
 
 /// Configuration for creating an AppCore instance
@@ -497,7 +497,7 @@ impl AppCore {
                     .homes
                     .homes
                     .values()
-                    .find(|b| b.context_id == *home_id)
+                    .find(|b| b.context_id == Some(*home_id))
                     .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
 
                 if !home.is_admin() {
@@ -529,7 +529,7 @@ impl AppCore {
                     .homes
                     .homes
                     .values()
-                    .find(|b| b.context_id == *home_id)
+                    .find(|b| b.context_id == Some(*home_id))
                     .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
 
                 if !home.is_admin() {
@@ -734,9 +734,7 @@ impl AppCore {
     }
 
     /// Get settings + device list from the runtime (if available).
-    pub async fn settings_snapshot(
-        &self,
-    ) -> Option<(SettingsBridgeState, Vec<BridgeDeviceInfo>)> {
+    pub async fn settings_snapshot(&self) -> Option<(SettingsBridgeState, Vec<BridgeDeviceInfo>)> {
         let runtime = self.runtime.as_ref()?;
         let settings = runtime.get_settings().await;
         let devices = runtime.list_devices().await;

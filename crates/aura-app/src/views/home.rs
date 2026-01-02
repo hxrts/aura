@@ -22,7 +22,7 @@ pub enum ResidentRole {
 }
 
 /// A home resident
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Resident {
     /// Resident identifier (authority ID)
@@ -125,7 +125,7 @@ pub struct PinnedMessageMeta {
 // =============================================================================
 
 /// Home state with full moderation support
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct HomeState {
     /// Home identifier
@@ -165,8 +165,8 @@ pub struct HomeState {
     /// When the home was created (ms since epoch)
     pub created_at: u64,
     /// Relational context identifier for journal integration
-    #[serde(default)]
-    pub context_id: ContextId,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub context_id: Option<ContextId>,
 }
 
 impl HomeState {
@@ -216,7 +216,7 @@ impl HomeState {
             mute_list: HashMap::new(),
             kick_log: Vec::new(),
             created_at,
-            context_id,
+            context_id: Some(context_id),
         }
     }
 

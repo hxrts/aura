@@ -28,39 +28,37 @@ pub enum ReductionNamespaceError {
     /// Attempted to reduce an authority journal as relational state
     #[error("Cannot reduce authority journal as relational state: expected Context namespace, got Authority")]
     AuthorityAsContext,
+    /// Reduction failed due to internal validation error
+    #[error("Reduction failed: {0}")]
+    ReductionFailure(String),
 }
 
 /// Apply an attested operation to a tree state
 ///
 /// This function processes different types of attested operations and
 /// updates the tree state accordingly.
-fn apply_attested_op(tree_state: &TreeStateSummary, op: &AttestedOp) -> TreeStateSummary {
+fn apply_attested_op(
+    tree_state: &TreeStateSummary,
+    op: &AttestedOp,
+) -> Result<TreeStateSummary, ReductionNamespaceError> {
     match &op.tree_op {
         crate::fact::TreeOpKind::AddLeaf { public_key, role } => {
             // Add a new leaf to the tree with proper device/guardian distinction
-            apply_add_leaf_with_role(tree_state, public_key, *role)
+            Ok(apply_add_leaf_with_role(tree_state, public_key, *role))
         }
         crate::fact::TreeOpKind::RemoveLeaf { leaf_index } => {
             // Remove a leaf from the tree
-            apply_remove_leaf(tree_state, *leaf_index)
+            Ok(apply_remove_leaf(tree_state, *leaf_index))
         }
         crate::fact::TreeOpKind::UpdatePolicy { threshold } => {
             // Update the tree policy
-            apply_update_policy(tree_state, *threshold)
+            Ok(apply_update_policy(tree_state, *threshold))
         }
         crate::fact::TreeOpKind::RotateEpoch => {
             // Rotate to new epoch
             apply_rotate_epoch(tree_state)
         }
     }
-}
-
-/// Apply add leaf operation to tree state (deprecated - use fact-based approach)
-#[allow(dead_code)]
-fn apply_add_leaf(tree_state: &TreeStateSummary, public_key: &[u8]) -> TreeStateSummary {
-    // Old implementation that assumes device role
-    // This is kept for backward compatibility but new code should use apply_add_leaf_with_role
-    apply_add_leaf_with_role(tree_state, public_key, aura_core::tree::LeafRole::Device)
 }
 
 /// Apply add leaf operation to tree state with device/guardian role distinction
@@ -77,7 +75,7 @@ fn apply_add_leaf_with_role(
     // a leaf commitment and use it to update the root
 
     let new_leaf_id = LeafId(tree_state.device_count());
-    let leaf_commitment = commit_leaf(new_leaf_id, tree_state.epoch().0, public_key);
+    let leaf_commitment = commit_leaf(new_leaf_id, tree_state.epoch(), public_key);
 
     // In this reduced view we fold the new leaf commitment directly into the
     // root commitment to keep determinism without a full branch topology.
@@ -117,7 +115,7 @@ fn apply_remove_leaf(tree_state: &TreeStateSummary, leaf_index: u32) -> TreeStat
     hasher.update(b"ROOT_REMOVE_LEAF");
     hasher.update(&removed_leaf_id.0.to_le_bytes());
     hasher.update(tree_state.root_commitment().as_bytes());
-    hasher.update(&tree_state.epoch().0.to_le_bytes());
+    hasher.update(&u64::from(tree_state.epoch()).to_le_bytes());
     let new_commitment = hasher.finalize();
 
     TreeStateSummary::with_values(
@@ -146,7 +144,7 @@ fn apply_update_policy(tree_state: &TreeStateSummary, threshold: u16) -> TreeSta
     hasher.update(b"ROOT_WITH_POLICY");
     hasher.update(&new_policy_hash);
     hasher.update(tree_state.root_commitment().as_bytes());
-    hasher.update(&tree_state.epoch().0.to_le_bytes());
+    hasher.update(&u64::from(tree_state.epoch()).to_le_bytes());
     let new_commitment = hasher.finalize();
 
     TreeStateSummary::with_values(
@@ -158,11 +156,16 @@ fn apply_update_policy(tree_state: &TreeStateSummary, threshold: u16) -> TreeSta
 }
 
 /// Apply epoch rotation operation to tree state
-fn apply_rotate_epoch(tree_state: &TreeStateSummary) -> TreeStateSummary {
+fn apply_rotate_epoch(
+    tree_state: &TreeStateSummary,
+) -> Result<TreeStateSummary, ReductionNamespaceError> {
     // Epoch rotation requires recomputing all commitments in the tree
     // with the new epoch value
 
-    let new_epoch = tree_state.epoch().next();
+    let new_epoch = tree_state
+        .epoch()
+        .next()
+        .map_err(|e| ReductionNamespaceError::ReductionFailure(e.to_string()))?;
 
     // In a full implementation, we would:
     // 1. Iterate through all leaves and recompute their commitments with new epoch
@@ -186,12 +189,12 @@ fn apply_rotate_epoch(tree_state: &TreeStateSummary) -> TreeStateSummary {
     hasher.update(tree_state.root_commitment().as_bytes());
     let new_commitment = hasher.finalize();
 
-    TreeStateSummary::with_values(
+    Ok(TreeStateSummary::with_values(
         new_epoch,
         Hash32::new(new_commitment),
         tree_state.threshold(),
         tree_state.device_count(),
-    )
+    ))
 }
 
 /// Compute deterministic hash of authority state
@@ -298,7 +301,7 @@ pub fn reduce_authority(
             // Apply operations in order (facts are already ordered by BTreeSet)
             for op in attested_ops {
                 // Apply attested operation to tree state
-                tree_state = apply_attested_op(&tree_state, op);
+                tree_state = apply_attested_op(&tree_state, op)?;
             }
 
             // Convert journal facts to aura-core::Fact type
@@ -364,12 +367,14 @@ pub fn reduce_authority_with_validation(
                 // Validate that this operation builds on the current state
                 if op.parent_commitment == current_commitment {
                     // Apply the operation
-                    tree_state = apply_attested_op(&tree_state, op);
+                    tree_state =
+                        apply_attested_op(&tree_state, op).map_err(|e| e.to_string())?;
                     current_commitment = tree_state.root_commitment();
                 } else {
                     // Try to apply anyway but note the inconsistency
                     // In practice, this might indicate concurrent operations
-                    tree_state = apply_attested_op(&tree_state, op);
+                    tree_state =
+                        apply_attested_op(&tree_state, op).map_err(|e| e.to_string())?;
                     current_commitment = tree_state.root_commitment();
                 }
             }
@@ -493,37 +498,39 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                             crate::protocol_facts::ProtocolRelationalFact::GuardianBinding {
                                 account_id,
                                 guardian_id,
-                                binding_hash,
+                                ..
                             } => RelationalBinding {
                                 binding_type: RelationalBindingType::GuardianBinding {
                                     account_id: *account_id,
                                     guardian_id: *guardian_id,
                                 },
                                 context_id: *context_id,
-                                data: binding_hash.0.to_vec(),
+                                data: protocol.binding_key().data(),
                             },
                             crate::protocol_facts::ProtocolRelationalFact::RecoveryGrant {
                                 account_id,
                                 guardian_id,
-                                grant_hash,
+                                ..
                             } => RelationalBinding {
                                 binding_type: RelationalBindingType::RecoveryGrant {
                                     account_id: *account_id,
                                     guardian_id: *guardian_id,
                                 },
                                 context_id: *context_id,
-                                data: grant_hash.0.to_vec(),
+                                data: protocol.binding_key().data(),
                             },
                             crate::protocol_facts::ProtocolRelationalFact::Consensus {
-                                consensus_id,
-                                operation_hash,
-                                threshold_met: _,
-                                participant_count: _,
-                            } => RelationalBinding {
-                                binding_type: RelationalBindingType::Generic("consensus".to_string()),
-                                context_id: *context_id,
-                                data: [consensus_id.0.to_vec(), operation_hash.0.to_vec()].concat(),
-                            },
+                                ..
+                            } => {
+                                let key = protocol.binding_key();
+                                RelationalBinding {
+                                    binding_type: RelationalBindingType::Generic(
+                                        key.sub_type().to_string(),
+                                    ),
+                                    context_id: *context_id,
+                                    data: key.data(),
+                                }
+                            }
                             crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(cp) => {
                             channel_checkpoints
                                 .entry((cp.channel, cp.chan_epoch))
@@ -560,35 +567,47 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                             leakage_budget.set_for_observer(observer, next);
                             continue;
                             }
-                            crate::protocol_facts::ProtocolRelationalFact::DkgTranscriptCommit(commit) => {
+                            crate::protocol_facts::ProtocolRelationalFact::DkgTranscriptCommit(_) => {
+                            let key = protocol.binding_key();
                             bindings.push(RelationalBinding {
-                                binding_type: RelationalBindingType::Generic("dkg_transcript_commit".to_string()),
+                                binding_type: RelationalBindingType::Generic(
+                                    key.sub_type().to_string(),
+                                ),
                                 context_id: *context_id,
-                                data: commit.transcript_hash.0.to_vec(),
+                                data: key.data(),
                             });
                             continue;
                             }
-                            crate::protocol_facts::ProtocolRelationalFact::ConvergenceCert(cert) => {
+                            crate::protocol_facts::ProtocolRelationalFact::ConvergenceCert(_) => {
+                            let key = protocol.binding_key();
                             bindings.push(RelationalBinding {
-                                binding_type: RelationalBindingType::Generic("convergence_cert".to_string()),
+                                binding_type: RelationalBindingType::Generic(
+                                    key.sub_type().to_string(),
+                                ),
                                 context_id: *context_id,
-                                data: cert.op_id.0.to_vec(),
+                                data: key.data(),
                             });
                             continue;
                             }
-                            crate::protocol_facts::ProtocolRelationalFact::ReversionFact(reversion) => {
+                            crate::protocol_facts::ProtocolRelationalFact::ReversionFact(_) => {
+                            let key = protocol.binding_key();
                             bindings.push(RelationalBinding {
-                                binding_type: RelationalBindingType::Generic("reversion_fact".to_string()),
+                                binding_type: RelationalBindingType::Generic(
+                                    key.sub_type().to_string(),
+                                ),
                                 context_id: *context_id,
-                                data: reversion.op_id.0.to_vec(),
+                                data: key.data(),
                             });
                             continue;
                             }
-                            crate::protocol_facts::ProtocolRelationalFact::RotateFact(rotate) => {
+                            crate::protocol_facts::ProtocolRelationalFact::RotateFact(_) => {
+                            let key = protocol.binding_key();
                             bindings.push(RelationalBinding {
-                                binding_type: RelationalBindingType::Generic("rotate_fact".to_string()),
+                                binding_type: RelationalBindingType::Generic(
+                                    key.sub_type().to_string(),
+                                ),
                                 context_id: *context_id,
-                                data: rotate.to_state.0.to_vec(),
+                                data: key.data(),
                             });
                             continue;
                             }
@@ -871,7 +890,7 @@ fn convert_to_core_fact(
     // Add ordering token as a string key-value pair (simplified conversion)
     let order_key = "order";
     let order_value = format!("{:?}", journal_fact.timestamp);
-    core_fact.insert(
+    let _ = core_fact.insert(
         order_key,
         aura_core::journal::FactValue::String(order_value),
     );
@@ -884,7 +903,7 @@ fn convert_to_core_fact(
         crate::fact::FactContent::Snapshot(_) => "snapshot",
         crate::fact::FactContent::RendezvousReceipt { .. } => "rendezvous_receipt",
     };
-    core_fact.insert(
+    let _ = core_fact.insert(
         content_type_key,
         aura_core::journal::FactValue::String(content_type_value.to_string()),
     );
@@ -892,7 +911,7 @@ fn convert_to_core_fact(
     // Add a simplified content representation
     let content_key = "content_summary";
     let content_summary = format!("{:?}", journal_fact.content);
-    core_fact.insert(
+    let _ = core_fact.insert(
         content_key,
         aura_core::journal::FactValue::String(content_summary),
     );

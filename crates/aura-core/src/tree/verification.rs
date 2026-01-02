@@ -18,7 +18,7 @@
 //! - `docs/101_accounts_and_commitment_tree.md` - Tree structure
 //! - `docs/104_consensus.md` - Threshold signing
 
-use super::{AttestedOp, BranchSigningKey, Epoch, NodeIndex, Policy, TreeHash32};
+use super::{AttestedOp, BranchSigningKey, Epoch, NodeIndex, Policy, PolicyError, TreeHash32};
 use crate::crypto::{hash, tree_signing};
 use thiserror::Error;
 
@@ -83,6 +83,15 @@ pub enum CheckError {
     /// Policy not found for node
     #[error("Policy not found for node {0}")]
     PolicyNotFound(NodeIndex),
+
+    /// Policy is invalid for the given node/child count
+    #[error("Invalid policy for node {node}: {source}")]
+    PolicyInvalid {
+        /// Node with invalid policy
+        node: NodeIndex,
+        /// Underlying policy validation error
+        source: PolicyError,
+    },
 }
 
 /// Compute the binding message for an attested operation.
@@ -306,7 +315,9 @@ pub fn check_attested_op<S: TreeStateView>(
         .get_policy(target_node)
         .ok_or(CheckError::PolicyNotFound(target_node))?;
     let child_count = state.child_count(target_node);
-    let threshold = policy.required_signers(child_count);
+    let threshold = policy
+        .required_signers(child_count)
+        .map_err(|e| CheckError::PolicyInvalid { node: target_node, source: e })?;
 
     // 3. Get current epoch
     let current_epoch = state.current_epoch();

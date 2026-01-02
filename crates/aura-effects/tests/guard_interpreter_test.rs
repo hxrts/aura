@@ -3,6 +3,7 @@
 use aura_core::{
     effects::guard::{EffectCommand, GuardOutcome},
     identifiers::{AuthorityId, ContextId},
+    FlowCost,
 };
 
 #[test]
@@ -13,7 +14,7 @@ fn test_guard_outcome_creation() {
             context: ContextId::new_from_entropy([1u8; 32]),
             authority: AuthorityId::new_from_entropy([2u8; 32]),
             peer: AuthorityId::new_from_entropy([3u8; 32]),
-            amount: 100,
+            amount: FlowCost::new(100),
         },
         EffectCommand::RecordLeakage { bits: 64 },
     ];

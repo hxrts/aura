@@ -14,8 +14,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::core::config::StorageConfig;
+use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::{EffectContext, SharedTransport};
 use aura_app::signal_defs::SETTINGS_SIGNAL;
 use aura_app::{AppConfig, AppCore};

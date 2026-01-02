@@ -277,8 +277,12 @@ async fn load_privacy_tracker<E: GuardEffects + PhysicalTimeEffects>(
     let mut tracker = PrivacyBudgetTracker::new(authority_id, limits);
 
     let now_ms = effect_system.physical_time().await?.ts_ms;
-    let window_start =
-        now_ms.saturating_sub(tracker.state.tracking_window_hours.saturating_mul(3_600_000));
+    let window_start = now_ms.saturating_sub(
+        tracker
+            .state
+            .tracking_window_hours
+            .saturating_mul(3_600_000),
+    );
 
     let reset_ts = events
         .iter()
@@ -408,7 +412,9 @@ pub async fn reset_privacy_budget<E: GuardEffects + PhysicalTimeEffects + GuardC
     let reset_bytes =
         serde_json::to_vec(&reset_content).map_err(|e| AuraError::serialization(e.to_string()))?;
     let reset_key = leakage_fact_key(context_id, LeakageObserverClass::External, 0, b"reset");
-    delta.facts.insert(reset_key, FactValue::Bytes(reset_bytes))?;
+    delta
+        .facts
+        .insert(reset_key, FactValue::Bytes(reset_bytes))?;
 
     let merged = effect_system
         .merge_facts(&effect_system.get_journal().await?, &delta)

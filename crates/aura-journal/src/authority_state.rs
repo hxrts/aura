@@ -151,23 +151,6 @@ impl AuthorityState {
         Ok(Signature::from_bytes(&sig_array))
     }
 
-    /// Legacy method for backward compatibility.
-    ///
-    /// This method signs raw bytes by wrapping them in a `Message` operation.
-    /// Prefer using `sign_tree_op` for tree operations or `sign_message` for
-    /// other data with proper domain separation.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use sign_tree_op() or sign_message() for proper operation typing"
-    )]
-    pub async fn sign_with_threshold<E: ThresholdSigningEffects>(
-        &self,
-        effects: &E,
-        data: &[u8],
-    ) -> Result<Signature> {
-        self.sign_message(effects, "legacy_authority_state", data)
-            .await
-    }
 }
 
 /// Derived authority implementation
@@ -220,23 +203,6 @@ impl DerivedAuthority {
     ) -> Result<Signature> {
         self.state.sign_message(effects, domain, data).await
     }
-
-    /// Legacy method for backward compatibility.
-    ///
-    /// This method signs raw bytes by wrapping them in a `Message` operation.
-    /// Prefer using `sign_tree_operation` or `sign_message` for proper typing.
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use sign_tree_operation() or sign_message() for proper operation typing"
-    )]
-    #[allow(deprecated)]
-    pub async fn sign_operation_with_effects<E: ThresholdSigningEffects>(
-        &self,
-        effects: &E,
-        operation: &[u8],
-    ) -> Result<Signature> {
-        self.state.sign_with_threshold(effects, operation).await
-    }
 }
 
 #[async_trait]
@@ -256,7 +222,7 @@ impl Authority for DerivedAuthority {
 
     async fn sign_operation(&self, _operation: &[u8]) -> Result<Signature> {
         Err(AuraError::internal(
-            "Authority::sign_operation requires effect-backed crypto; call sign_operation_with_effects instead",
+            "Authority::sign_operation requires effect-backed crypto; use sign_tree_operation() or sign_message() instead",
         ))
     }
 

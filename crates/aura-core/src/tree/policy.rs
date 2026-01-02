@@ -21,6 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use thiserror::Error;
 
 /// Threshold policy for tree operations.
 ///
@@ -44,7 +45,32 @@ pub enum Policy {
     All,
 }
 
+/// Errors that can occur when validating policies.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum PolicyError {
+    /// Threshold policy has invalid m/n bounds.
+    #[error("Invalid threshold: m must satisfy 1 <= m <= n (m={m}, n={n})")]
+    InvalidThreshold { m: u16, n: u16 },
+    /// Child count does not match threshold policy's n.
+    #[error("Child count mismatch: policy expects n={expected}, got {actual}")]
+    ChildCountMismatch { expected: u16, actual: u16 },
+    /// Child count is zero.
+    #[error("Child count is zero")]
+    EmptyChildSet,
+    /// Child count exceeds u16::MAX.
+    #[error("Child count {child_count} exceeds u16::MAX")]
+    ChildCountOverflow { child_count: u64 },
+}
+
 impl Policy {
+    /// Create a validated m-of-n threshold policy.
+    pub fn threshold(m: u16, n: u16) -> Result<Self, PolicyError> {
+        if m == 0 || n == 0 || m > n {
+            return Err(PolicyError::InvalidThreshold { m, n });
+        }
+        Ok(Policy::Threshold { m, n })
+    }
+
     /// Compute the meet (⊓) of two policies, selecting the stricter one.
     ///
     /// The meet operation is:
@@ -171,15 +197,37 @@ impl Policy {
     /// ```
     /// use aura_core::tree::Policy;
     ///
-    /// assert_eq!(Policy::Any.required_signers(3), 1);
-    /// assert_eq!(Policy::All.required_signers(3), 3);
-    /// assert_eq!(Policy::Threshold { m: 2, n: 3 }.required_signers(3), 2);
+    /// assert_eq!(Policy::Any.required_signers(3).unwrap(), 1);
+    /// assert_eq!(Policy::All.required_signers(3).unwrap(), 3);
+    /// assert_eq!(
+    ///     Policy::Threshold { m: 2, n: 3 }.required_signers(3).unwrap(),
+    ///     2
+    /// );
     /// ```
-    pub fn required_signers(&self, child_count: usize) -> u16 {
+    pub fn required_signers(&self, child_count: usize) -> Result<u16, PolicyError> {
+        if child_count == 0 {
+            return Err(PolicyError::EmptyChildSet);
+        }
+        let child_count_u16 =
+            u16::try_from(child_count).map_err(|_| PolicyError::ChildCountOverflow {
+                child_count: child_count as u64,
+            })?;
+
         match self {
-            Policy::Any => 1,
-            Policy::All => child_count as u16,
-            Policy::Threshold { m, .. } => *m,
+            Policy::Any => Ok(1),
+            Policy::All => Ok(child_count_u16),
+            Policy::Threshold { m, n } => {
+                if *m == 0 || *n == 0 || *m > *n {
+                    return Err(PolicyError::InvalidThreshold { m: *m, n: *n });
+                }
+                if child_count_u16 != *n {
+                    return Err(PolicyError::ChildCountMismatch {
+                        expected: *n,
+                        actual: child_count_u16,
+                    });
+                }
+                Ok(*m)
+            }
         }
     }
 }
@@ -280,10 +328,7 @@ mod tests {
         for (a, b, c) in test_cases {
             let left = a.meet(&b).meet(&c);
             let right = a.meet(&b.meet(&c));
-            assert_eq!(
-                left, right,
-                "Associativity failed for {a:?}, {b:?}, {c:?}",
-            );
+            assert_eq!(left, right, "Associativity failed for {a:?}, {b:?}, {c:?}",);
         }
     }
 
@@ -330,5 +375,36 @@ mod tests {
             Policy::Threshold { m: 2, n: 3 }.partial_cmp(&Policy::Threshold { m: 2, n: 5 }),
             None
         );
+    }
+
+    #[test]
+    fn test_threshold_validation() {
+        assert!(Policy::threshold(0, 3).is_err());
+        assert!(Policy::threshold(1, 0).is_err());
+        assert!(Policy::threshold(3, 2).is_err());
+        assert!(Policy::threshold(2, 3).is_ok());
+    }
+
+    #[test]
+    fn test_required_signers_child_count_mismatch() {
+        let policy = Policy::Threshold { m: 2, n: 3 };
+        let err = policy.required_signers(2).unwrap_err();
+        assert!(matches!(
+            err,
+            PolicyError::ChildCountMismatch {
+                expected: 3,
+                actual: 2
+            }
+        ));
+    }
+
+    #[test]
+    fn test_required_signers_invalid_threshold() {
+        let policy = Policy::Threshold { m: 0, n: 3 };
+        let err = policy.required_signers(3).unwrap_err();
+        assert!(matches!(
+            err,
+            PolicyError::InvalidThreshold { m: 0, n: 3 }
+        ));
     }
 }

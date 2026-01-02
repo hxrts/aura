@@ -1,6 +1,6 @@
 use crate::authorization::BiscuitAuthorizationBridge;
 use aura_authorization::{BiscuitError, ResourceScope};
-use aura_core::{AuthorityId, FlowBudget};
+use aura_core::{AuthorityId, FlowBudget, FlowCost};
 use biscuit_auth::Biscuit;
 
 pub struct BiscuitGuardEvaluator {
@@ -24,7 +24,7 @@ impl BiscuitGuardEvaluator {
         token: &Biscuit,
         guard_capability: &str,
         resource: &ResourceScope,
-        flow_cost: u64,
+        flow_cost: FlowCost,
         budget: &mut FlowBudget,
     ) -> Result<GuardResult, GuardError> {
         self.evaluate_guard(token, guard_capability, resource, flow_cost, budget, 0)
@@ -46,13 +46,16 @@ impl BiscuitGuardEvaluator {
         token: &Biscuit,
         guard_capability: &str,
         resource: &ResourceScope,
-        flow_cost: u64,
+        flow_cost: FlowCost,
         budget: &mut FlowBudget,
         current_time_seconds: u64,
     ) -> Result<GuardResult, GuardError> {
-        if !budget.can_charge(flow_cost) {
+        let can_charge = budget
+            .can_charge(flow_cost)
+            .map_err(|e| GuardError::FlowBudget(e.to_string()))?;
+        if !can_charge {
             return Err(GuardError::BudgetExceeded {
-                required: flow_cost,
+                required: u64::from(flow_cost),
                 available: budget.headroom(),
             });
         }
@@ -75,7 +78,7 @@ impl BiscuitGuardEvaluator {
 
         Ok(GuardResult {
             authorized: true,
-            flow_consumed: flow_cost,
+            flow_consumed: u64::from(flow_cost),
             delegation_depth: auth_result.delegation_depth,
         })
     }

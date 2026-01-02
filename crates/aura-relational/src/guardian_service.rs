@@ -6,7 +6,7 @@ use crate::{run_consensus_with_config, ConsensusConfig, RelationalContext};
 use async_trait::async_trait;
 use aura_core::effects::guardian::{GuardianAcceptInput, GuardianEffects, GuardianRequestInput};
 use aura_core::relational::GuardianBinding;
-use aura_core::{Prestate, Result};
+use aura_core::{AuraError, Prestate, Result};
 use std::sync::Arc;
 
 /// Guardian service backed by a RelationalContext
@@ -80,7 +80,8 @@ impl GuardianEffects for GuardianService {
         ];
 
         let context_commitment = ctx.journal_commitment()?;
-        let prestate = Prestate::new(authority_commitments, context_commitment);
+        let prestate = Prestate::new(authority_commitments, context_commitment)
+            .map_err(|e| AuraError::invalid(e.to_string()))?;
 
         // Run consensus for GuardianBinding
         let consensus_proof = run_consensus_with_config(

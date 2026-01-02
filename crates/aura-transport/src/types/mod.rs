@@ -17,10 +17,15 @@
 
 pub mod config;
 pub mod connection;
-pub mod envelope;
 pub mod endpoint;
+pub mod ids;
+pub mod envelope;
 
 // Public API - curated exports only
 pub use config::{PrivacyLevel, TransportConfig};
-pub use connection::{ConnectionId, ConnectionInfo, ConnectionState, ScopedConnectionId};
+pub use connection::{
+    ConnectionCloseReason, ConnectionId, ConnectionInfo, ConnectionState, PrivacyContext,
+    ScopedConnectionId,
+};
 pub use envelope::{Envelope, FrameHeader, FrameType, ScopedEnvelope};
+pub use ids::{MessageId, SequenceNumber};

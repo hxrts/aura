@@ -23,7 +23,7 @@ use aura_core::effects::{PhysicalTimeEffects, RandomExtendedEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
-use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::time::{OrderingPolicy, PhysicalTime, TimeOrdering, TimeStamp};
 use aura_core::{Hash32, Prestate};
 use aura_guards::GuardContextProvider;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
@@ -97,10 +97,11 @@ impl ChatServiceApi {
             .await
             .map_err(|e| AgentError::effects(format!("Context journal lookup failed: {e}")))?;
         let context_commitment = context_commitment_from_journal(context_id, &journal)?;
-        Ok(Prestate::new(
+        Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
-        ))
+        )
+        .map_err(|e| AgentError::effects(format!("Invalid AMP prestate: {e}")))
     }
 
     async fn propose_and_finalize_amp_bump(
@@ -181,7 +182,7 @@ impl ChatServiceApi {
         Ok(GuardSnapshot::new(
             authority_id,
             context_id,
-            u32::MAX,
+            aura_core::FlowCost::new(u32::MAX),
             capabilities,
             now.ts_ms,
         ))
@@ -207,7 +208,7 @@ impl ChatServiceApi {
                     // recipient at commit time. The cost is tracked here for observability
                     // but actual budget deduction occurs when facts sync to peers.
                     tracing::trace!(
-                        cost,
+                        cost = cost.value(),
                         "Chat fact commit - flow cost tracked for sync-time charging"
                     );
                 }
@@ -454,7 +455,10 @@ impl ChatServiceApi {
 
             let timestamp = TimeStamp::PhysicalClock(sent_at);
             if let Some(before_ts) = &before {
-                if timestamp.to_index_ms() >= before_ts.to_index_ms() {
+                if !matches!(
+                    timestamp.compare(before_ts, OrderingPolicy::Native),
+                    TimeOrdering::Before
+                ) {
                     continue;
                 }
             }
@@ -488,7 +492,10 @@ impl ChatServiceApi {
         }
 
         // Sort by timestamp for stable history
-        messages.sort_by_key(|m| m.timestamp.to_index_ms());
+        messages.sort_by(|a, b| {
+            a.timestamp
+                .sort_compare(&b.timestamp, OrderingPolicy::DeterministicTieBreak)
+        });
 
         if let Some(limit) = limit {
             if messages.len() > limit {
@@ -613,7 +620,10 @@ impl ChatServiceApi {
             })
             .collect();
 
-        groups.sort_by_key(|g| g.created_at.to_index_ms());
+        groups.sort_by(|a, b| {
+            a.created_at
+                .sort_compare(&b.created_at, OrderingPolicy::DeterministicTieBreak)
+        });
         Ok(groups)
     }
 

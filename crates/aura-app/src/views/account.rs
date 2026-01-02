@@ -86,8 +86,8 @@ impl AccountBackup {
     ///
     /// Format: `aura:backup:v1:<base64>`
     pub fn encode(&self) -> Result<String, String> {
-        let json = serde_json::to_string(self)
-            .map_err(|e| format!("Failed to serialize backup: {e}"))?;
+        let json =
+            serde_json::to_string(self).map_err(|e| format!("Failed to serialize backup: {e}"))?;
 
         use base64::Engine;
         let encoded = base64::engine::general_purpose::STANDARD.encode(json.as_bytes());
@@ -110,11 +110,11 @@ impl AccountBackup {
             .decode(encoded)
             .map_err(|e| format!("Invalid backup code encoding: {e}"))?;
 
-        let json = String::from_utf8(json_bytes)
-            .map_err(|e| format!("Invalid backup code UTF-8: {e}"))?;
+        let json =
+            String::from_utf8(json_bytes).map_err(|e| format!("Invalid backup code UTF-8: {e}"))?;
 
-        let backup: AccountBackup = serde_json::from_str(&json)
-            .map_err(|e| format!("Invalid backup format: {e}"))?;
+        let backup: AccountBackup =
+            serde_json::from_str(&json).map_err(|e| format!("Invalid backup format: {e}"))?;
 
         Ok(backup)
     }

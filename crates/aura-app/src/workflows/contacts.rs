@@ -3,15 +3,15 @@
 //! This module contains contact-management operations that are portable across
 //! all frontends via the RuntimeBridge abstraction.
 
+use crate::workflows::context::default_relational_context;
+use crate::workflows::parse::parse_authority_id;
+use crate::workflows::runtime::require_runtime;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::AuraError;
 use aura_journal::DomainFact;
 use aura_relational::ContactFact;
 use std::sync::Arc;
-use crate::workflows::context::default_relational_context;
-use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::require_runtime;
 
 /// Update (or clear) a contact's nickname.
 ///

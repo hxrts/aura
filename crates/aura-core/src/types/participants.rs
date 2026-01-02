@@ -3,8 +3,11 @@
 //! These types describe "who can participate" in multi-party protocols such as
 //! threshold signing and how to reach them.
 
-use crate::{AuthorityId, DeviceId};
+use crate::{AuthorityId, DeviceId, RelayId};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::num::NonZeroU16;
+use thiserror::Error;
 
 /// Threshold value for FROST key-rotation ceremonies (k-of-n signing).
 ///
@@ -179,6 +182,98 @@ impl ParticipantIdentity {
     }
 }
 
+/// Validated network address for participant endpoints.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct NetworkAddress(String);
+
+/// Errors that can occur when parsing a network address.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum NetworkAddressError {
+    /// Address is empty.
+    #[error("network address is empty")]
+    Empty,
+    /// Address contains whitespace or control characters.
+    #[error("network address contains invalid characters")]
+    InvalidCharacters,
+    /// Address must include a host and port.
+    #[error("network address must include a host and port")]
+    MissingPort,
+    /// Address has an invalid port.
+    #[error("network address has an invalid port")]
+    InvalidPort,
+    /// Address has an invalid host.
+    #[error("network address has an invalid host")]
+    InvalidHost,
+}
+
+impl NetworkAddress {
+    /// Parse and validate a network address.
+    pub fn parse(input: &str) -> Result<Self, NetworkAddressError> {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return Err(NetworkAddressError::Empty);
+        }
+        if trimmed
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace())
+        {
+            return Err(NetworkAddressError::InvalidCharacters);
+        }
+
+        let (host, port_str) = split_host_port(trimmed)
+            .ok_or(NetworkAddressError::MissingPort)?;
+        let port: u16 = port_str.parse().map_err(|_| NetworkAddressError::InvalidPort)?;
+        if port == 0 {
+            return Err(NetworkAddressError::InvalidPort);
+        }
+        if !valid_host(host) {
+            return Err(NetworkAddressError::InvalidHost);
+        }
+
+        Ok(Self(trimmed.to_string()))
+    }
+
+    /// Access the normalized address string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for NetworkAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl AsRef<str> for NetworkAddress {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for NetworkAddress {
+    type Error = NetworkAddressError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        NetworkAddress::parse(&value)
+    }
+}
+
+impl TryFrom<&str> for NetworkAddress {
+    type Error = NetworkAddressError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        NetworkAddress::parse(value)
+    }
+}
+
+impl From<NetworkAddress> for String {
+    fn from(address: NetworkAddress) -> Self {
+        address.0
+    }
+}
+
 /// How to reach a participant for coordination.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ParticipantEndpoint {
@@ -189,15 +284,15 @@ pub enum ParticipantEndpoint {
     /// Reachable via relay with a relay identifier
     Relay {
         /// Relay server identifier
-        relay_id: String,
+        relay_id: RelayId,
         /// Participant's address on the relay
-        address: String,
+        address: NetworkAddress,
     },
 
     /// Direct peer-to-peer connection
     Direct {
         /// Network address (e.g., IP:port, hostname)
-        address: String,
+        address: NetworkAddress,
     },
 
     /// Offline - needs out-of-band coordination
@@ -210,16 +305,24 @@ pub struct SigningParticipant {
     /// Who this participant is
     pub identity: ParticipantIdentity,
     /// Their FROST participant index (1-based, must be non-zero)
-    pub signer_index: u16,
+    pub signer_index: NonZeroU16,
     /// How to reach them for coordination
     pub endpoint: ParticipantEndpoint,
+}
+
+/// Errors when validating signer indices.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum SignerIndexError {
+    /// Signer index must be non-zero.
+    #[error("signer index must be non-zero")]
+    Zero,
 }
 
 impl SigningParticipant {
     /// Create a new signing participant
     pub fn new(
         identity: ParticipantIdentity,
-        signer_index: u16,
+        signer_index: NonZeroU16,
         endpoint: ParticipantEndpoint,
     ) -> Self {
         Self {
@@ -229,27 +332,41 @@ impl SigningParticipant {
         }
     }
 
+    /// Create a new signing participant with checked signer index.
+    pub fn try_new(
+        identity: ParticipantIdentity,
+        signer_index: u16,
+        endpoint: ParticipantEndpoint,
+    ) -> Result<Self, SignerIndexError> {
+        let signer_index =
+            NonZeroU16::new(signer_index).ok_or(SignerIndexError::Zero)?;
+        Ok(Self::new(identity, signer_index, endpoint))
+    }
+
     /// Create a local device participant
-    pub fn local_device(device_id: DeviceId, signer_index: u16) -> Self {
-        Self {
-            identity: ParticipantIdentity::Device(device_id),
+    pub fn local_device(
+        device_id: DeviceId,
+        signer_index: u16,
+    ) -> Result<Self, SignerIndexError> {
+        Self::try_new(
+            ParticipantIdentity::Device(device_id),
             signer_index,
-            endpoint: ParticipantEndpoint::Local,
-        }
+            ParticipantEndpoint::Local,
+        )
     }
 
     /// Create a remote guardian participant (relay-routed)
     pub fn remote_guardian(
         authority: AuthorityId,
         signer_index: u16,
-        relay_id: String,
-        address: String,
-    ) -> Self {
-        Self {
-            identity: ParticipantIdentity::Guardian(authority),
+        relay_id: RelayId,
+        address: NetworkAddress,
+    ) -> Result<Self, SignerIndexError> {
+        Self::try_new(
+            ParticipantIdentity::Guardian(authority),
             signer_index,
-            endpoint: ParticipantEndpoint::Relay { relay_id, address },
-        }
+            ParticipantEndpoint::Relay { relay_id, address },
+        )
     }
 
     /// Check if this is a local participant
@@ -260,5 +377,89 @@ impl SigningParticipant {
     /// Check if this participant is reachable
     pub fn is_reachable(&self) -> bool {
         !matches!(self.endpoint, ParticipantEndpoint::Offline)
+    }
+}
+
+fn split_host_port(input: &str) -> Option<(&str, &str)> {
+    if let Some(stripped) = input.strip_prefix('[') {
+        let end = stripped.find(']')?;
+        let host = &stripped[..end];
+        let rest = &stripped[end + 1..];
+        let port = rest.strip_prefix(':')?;
+        if port.is_empty() {
+            return None;
+        }
+        return Some((host, port));
+    }
+
+    let (host, port) = input.rsplit_once(':')?;
+    if host.is_empty() || port.is_empty() {
+        return None;
+    }
+    Some((host, port))
+}
+
+fn valid_host(host: &str) -> bool {
+    if host.is_empty() {
+        return false;
+    }
+    if host.contains(':') {
+        let has_hex = host.chars().any(|c| c.is_ascii_hexdigit());
+        return has_hex && host.chars().all(|c| c.is_ascii_hexdigit() || c == ':');
+    }
+    if host.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        if host.starts_with('.') || host.ends_with('.') {
+            return false;
+        }
+        return host.split('.').all(|segment| {
+            !segment.is_empty() && segment.len() <= 3 && segment.parse::<u8>().is_ok()
+        });
+    }
+    if host.starts_with('.') || host.ends_with('.') {
+        return false;
+    }
+    if host.starts_with('-') || host.ends_with('-') {
+        return false;
+    }
+    host.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_address_validation() {
+        let addr = NetworkAddress::parse("example.com:443").unwrap();
+        assert_eq!(addr.as_str(), "example.com:443");
+        assert!(matches!(
+            NetworkAddress::parse("example.com"),
+            Err(NetworkAddressError::MissingPort)
+        ));
+        assert!(matches!(
+            NetworkAddress::parse("example.com:0"),
+            Err(NetworkAddressError::InvalidPort)
+        ));
+        assert!(matches!(
+            NetworkAddress::parse("example.com:99999"),
+            Err(NetworkAddressError::InvalidPort)
+        ));
+        assert!(matches!(
+            NetworkAddress::parse("bad host:443"),
+            Err(NetworkAddressError::InvalidCharacters)
+        ));
+    }
+
+    #[test]
+    fn signer_index_validation() {
+        let identity = ParticipantIdentity::device(DeviceId::new_from_entropy([1u8; 32]));
+        let endpoint = ParticipantEndpoint::Local;
+
+        assert!(matches!(
+            SigningParticipant::try_new(identity.clone(), 0, endpoint.clone()),
+            Err(SignerIndexError::Zero)
+        ));
+        assert!(SigningParticipant::try_new(identity, 1, endpoint).is_ok());
     }
 }

@@ -208,6 +208,12 @@ pub mod integration_docs {
 // Re-export essential foundation types from Layer 1 (aura-core)
 pub use aura_core::{AuraError, AuraResult, SessionId};
 
+// Re-export CrdtCoordinator when crdt-sync feature is enabled.
+// This provides choreography-based CRDT synchronization as an alternative
+// to digest-based anti-entropy sync for general CRDT state.
+#[cfg(feature = "crdt-sync")]
+pub use aura_protocol::effects::crdt::{CrdtCoordinator, CrdtCoordinatorError};
+
 // Note: Other layer dependencies are imported as needed but not re-exported
 // to maintain clean API boundaries and avoid dependency pollution.
 // Users should import from the appropriate layer crates directly.

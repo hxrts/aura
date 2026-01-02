@@ -43,8 +43,7 @@ pub struct MultiDeviceTestFixture {
 impl MultiDeviceTestFixture {
     /// Create a new multi-device test fixture
     pub async fn new(device_count: usize) -> AuraResult<Self> {
-        let device_labels: Vec<String> =
-            (0..device_count).map(|i| format!("device_{i}")).collect();
+        let device_labels: Vec<String> = (0..device_count).map(|i| format!("device_{i}")).collect();
         let device_labels_refs: Vec<&str> = device_labels.iter().map(|s| s.as_str()).collect();
 
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels_refs);

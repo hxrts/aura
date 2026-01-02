@@ -23,10 +23,7 @@ pub(super) async fn respond_to_guardian_ceremony(
             )
             .await
             .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to record guardian acceptance: {}",
-                    e
-                ))
+                IntentError::internal_error(format!("Failed to record guardian acceptance: {}", e))
             })?;
         Ok(())
     } else {

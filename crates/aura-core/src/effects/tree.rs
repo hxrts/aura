@@ -33,8 +33,11 @@ pub const MAX_TREE_SIGNATURE_SHARE_BYTES: usize = 1024;
 pub const MAX_TREE_STATE_BYTES: usize = 262_144;
 pub const MAX_TREE_AGGREGATE_SIGNATURE_BYTES: usize = 2048;
 
-// Snapshot-related types for Phase 5.4
-/// Defines a cut point for snapshotting
+// Re-export canonical ProposalId from tree module
+pub use crate::tree::ProposalId;
+
+// Snapshot-related types for effect interface (simplified versions)
+/// Defines a cut point for snapshotting (effect interface version)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cut {
     pub epoch: Epoch,
@@ -42,18 +45,14 @@ pub struct Cut {
     pub cid: Hash32,
 }
 
-/// Identifier for a snapshot proposal
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProposalId(pub Hash32);
-
-/// Partial signature share for snapshot approval
+/// Partial signature share for snapshot approval (effect interface version)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Partial {
     pub signature_share: Vec<u8>,
     pub participant_id: crate::types::identifiers::DeviceId,
 }
 
-/// Immutable snapshot containing compacted tree state
+/// Immutable snapshot containing compacted tree state (effect interface version)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
     pub cut: Cut,

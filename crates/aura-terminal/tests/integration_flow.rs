@@ -81,9 +81,7 @@ impl TestAgent {
     async fn new(name: &str) -> Self {
         // Use UUID v4 to ensure unique directories even when tests run concurrently
         let unique_id = uuid::Uuid::new_v4();
-        let test_dir = std::env::temp_dir().join(format!(
-            "aura-flow-test-{name}-{unique_id}"
-        ));
+        let test_dir = std::env::temp_dir().join(format!("aura-flow-test-{name}-{unique_id}"));
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -198,7 +196,10 @@ impl TestAgent {
             .read(&*HOMES_SIGNAL)
             .await
             .expect("Failed to read HOMES_SIGNAL");
-        homes.current_home().cloned().unwrap_or_default()
+        homes
+            .current_home()
+            .cloned()
+            .expect("No current home available in test")
     }
 
     async fn read_neighborhood(&self) -> aura_app::views::NeighborhoodState {
@@ -410,22 +411,13 @@ async fn test_chat_flow_sends_message() {
             code: alice_code.clone(),
         })
         .await;
-    println!(
-        "\nImport invitation: {ok}",
-        ok = import_result.is_ok()
-    );
+    println!("\nImport invitation: {ok}", ok = import_result.is_ok());
 
     // Read initial chat state
     println!("\nInitial chat state:");
     let bob_chat = env.get_agent("bob").read_chat().await;
-    println!(
-        "  Channels: {count}",
-        count = bob_chat.channels.len()
-    );
-    println!(
-        "  Messages: {count}",
-        count = bob_chat.messages.len()
-    );
+    println!("  Channels: {count}", count = bob_chat.channels.len());
+    println!("  Messages: {count}", count = bob_chat.messages.len());
 
     // Try to start DM (should work - creates channel)
     println!("\nStarting DM with alice...");
@@ -477,14 +469,8 @@ async fn test_chat_flow_sends_message() {
     // Verify final state
     let bob_chat_final = env.get_agent("bob").read_chat().await;
     println!("\nFinal chat state:");
-    println!(
-        "  Channels: {count}",
-        count = bob_chat_final.channels.len()
-    );
-    println!(
-        "  Messages: {count}",
-        count = bob_chat_final.messages.len()
-    );
+    println!("  Channels: {count}", count = bob_chat_final.channels.len());
+    println!("  Messages: {count}", count = bob_chat_final.messages.len());
 
     // Verify signal tracking
     println!("\nSignal emissions:");
@@ -556,11 +542,11 @@ async fn test_guardian_recovery_flow() {
     // Read recovery state
     println!("\nInitial recovery state:");
     let bob_recovery = env.get_agent("bob").read_recovery().await;
+    println!("  Guardians: {count}", count = bob_recovery.guardians.len());
     println!(
-        "  Guardians: {count}",
-        count = bob_recovery.guardians.len()
+        "  Threshold: {threshold}",
+        threshold = bob_recovery.threshold
     );
-    println!("  Threshold: {threshold}", threshold = bob_recovery.threshold);
     println!(
         "  Active recovery: {}",
         bob_recovery.active_recovery.is_some()
@@ -630,10 +616,7 @@ async fn test_home_lifecycle_flow() {
     let bob_home = env.get_agent("bob").read_home().await;
     println!("  Home ID: {id}", id = bob_home.id);
     println!("  Home name: {name}", name = bob_home.name);
-    println!(
-        "  Residents: {count}",
-        count = bob_home.residents.len()
-    );
+    println!("  Residents: {count}", count = bob_home.residents.len());
 
     // Note: Home creation commands would be added here when implemented
     // For now, we verify the signal infrastructure is in place
@@ -661,10 +644,7 @@ async fn test_neighborhood_formation_flow() {
     // Read initial neighborhood state
     println!("Initial neighborhood state:");
     let bob_neighborhood = env.get_agent("bob").read_neighborhood().await;
-    println!(
-        "  Home home ID: {id}",
-        id = bob_neighborhood.home_home_id
-    );
+    println!("  Home home ID: {id}", id = bob_neighborhood.home_home_id);
     println!(
         "  Home home name: {name}",
         name = bob_neighborhood.home_name
@@ -742,7 +722,10 @@ async fn test_social_graph_flow() {
         } else {
             c.id.to_string()
         };
-        println!("    - {name} (guardian: {is_guardian})", is_guardian = c.is_guardian);
+        println!(
+            "    - {name} (guardian: {is_guardian})",
+            is_guardian = c.is_guardian
+        );
     }
     env.track_signal("CONTACTS_SIGNAL", "contact_import");
 

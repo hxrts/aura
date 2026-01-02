@@ -11,6 +11,7 @@
 //! - `parse_peer_list()`: Parse comma-separated peer list string
 //! - `SyncConfigDefaults`: Portable config defaults struct
 
+use crate::workflows::signals::{emit_signal, read_signal_or_default};
 use crate::{
     signal_defs::{SyncStatus, SYNC_STATUS_SIGNAL, SYNC_STATUS_SIGNAL_NAME},
     AppCore,
@@ -19,7 +20,6 @@ use async_lock::RwLock;
 use aura_core::AuraError;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::workflows::signals::{emit_signal, read_signal_or_default};
 
 // ============================================================================
 // Portable Configuration Constants
@@ -354,8 +354,7 @@ mod tests {
 
     #[test]
     fn test_sync_config_with_peer_list() {
-        let config = SyncConfigDefaults::default()
-            .with_peer_list("peer1, peer2, peer3");
+        let config = SyncConfigDefaults::default().with_peer_list("peer1, peer2, peer3");
         assert_eq!(config.initial_peers, vec!["peer1", "peer2", "peer3"]);
     }
 

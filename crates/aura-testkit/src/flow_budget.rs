@@ -5,7 +5,7 @@
 use async_trait::async_trait;
 use aura_authorization::{BiscuitAuthorizationBridge, ContextOp, ResourceScope};
 use aura_core::effects::FlowBudgetEffects;
-use aura_core::flow::{FlowBudget, FlowBudgetKey, Receipt};
+use aura_core::flow::{FlowBudget, FlowBudgetKey, FlowCost, FlowNonce, Receipt, ReceiptSig};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::scope::AuthorizationOp;
 use aura_core::types::Epoch;
@@ -117,7 +117,7 @@ impl FlowBudgetHandler {
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> AuraResult<FlowBudget> {
         let key = FlowBudgetKey::new(*context, *peer);
         let mut budgets = self
@@ -129,7 +129,7 @@ impl FlowBudgetHandler {
             .entry(key)
             .or_insert_with(|| FlowBudget::new(self.default_limit, Epoch::initial()));
 
-        if let Err(e) = budget.record_charge(cost as u64) {
+        if let Err(e) = budget.record_charge(cost) {
             return Err(AuraError::budget_exceeded(format!(
                 "insufficient flow budget: {e}"
             )));
@@ -145,7 +145,7 @@ impl FlowBudgetEffects for FlowBudgetHandler {
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> AuraResult<Receipt> {
         let scope = self.scope_for_context(context);
         self.authorize_scope(&scope)?;
@@ -158,9 +158,9 @@ impl FlowBudgetEffects for FlowBudgetHandler {
             *peer,
             budget.epoch,
             cost,
-            budget.spent,
+            FlowNonce::new(budget.spent),
             Hash32::default(),
-            Vec::new(),
+            ReceiptSig::new(Vec::new())?,
         ))
     }
 }

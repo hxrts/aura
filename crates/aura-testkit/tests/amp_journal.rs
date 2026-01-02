@@ -39,8 +39,7 @@ async fn test_fetch_context_journal_empty() {
     let journal = effects.fetch_context_journal(test_context()).await;
     assert!(journal.is_ok());
 
-    let j = journal
-        .unwrap_or_else(|err| panic!("fetch context journal failed: {err}"));
+    let j = journal.unwrap_or_else(|err| panic!("fetch context journal failed: {err}"));
     assert!(j.facts.is_empty(), "empty context should have no facts");
 }
 

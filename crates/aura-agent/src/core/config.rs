@@ -32,7 +32,7 @@ pub fn default_storage_path() -> PathBuf {
 }
 
 /// Agent configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
     /// Device ID for this agent
     #[serde(with = "device_id_serde")]
@@ -165,6 +165,20 @@ impl Default for ChoreographyConfig {
     }
 }
 
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            device_id: derive_device_id("default"),
+            storage: StorageConfig::default(),
+            network: NetworkConfig::default(),
+            reliability: ReliabilityConfig::default(),
+            choreography: ChoreographyConfig::default(),
+            guardian: GuardianConsensusPolicy::default(),
+            lan_discovery: LanDiscoveryConfig::default(),
+        }
+    }
+}
+
 // Custom serde for DeviceId to keep DeviceId opaque in config
 mod device_id_serde {
     use super::*;
@@ -193,7 +207,6 @@ mod device_id_serde {
 }
 
 /// Derive a deterministic DeviceId from an arbitrary label (helper for tests/config)
-#[allow(dead_code)]
 pub fn derive_device_id(label: &str) -> DeviceId {
     let digest = hash::hash(label.as_bytes());
     let mut arr = [0u8; 32];

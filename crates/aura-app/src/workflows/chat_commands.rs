@@ -1315,7 +1315,9 @@ mod tests {
     #[test]
     fn test_commands_in_category() {
         let user_cmds = commands_in_category(CommandCategory::User);
-        assert!(user_cmds.iter().all(|h| h.category == CommandCategory::User));
+        assert!(user_cmds
+            .iter()
+            .all(|h| h.category == CommandCategory::User));
         assert!(user_cmds.iter().any(|h| h.name == "help"));
 
         let mod_cmds = commands_in_category(CommandCategory::Moderator);

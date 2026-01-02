@@ -361,13 +361,25 @@ mod tests {
 
     #[test]
     fn test_create_channel_step_navigation() {
-        assert_eq!(CreateChannelStep::Details.next(), Some(CreateChannelStep::Members));
-        assert_eq!(CreateChannelStep::Members.next(), Some(CreateChannelStep::Threshold));
+        assert_eq!(
+            CreateChannelStep::Details.next(),
+            Some(CreateChannelStep::Members)
+        );
+        assert_eq!(
+            CreateChannelStep::Members.next(),
+            Some(CreateChannelStep::Threshold)
+        );
         assert_eq!(CreateChannelStep::Threshold.next(), None);
 
         assert_eq!(CreateChannelStep::Details.prev(), None);
-        assert_eq!(CreateChannelStep::Members.prev(), Some(CreateChannelStep::Details));
-        assert_eq!(CreateChannelStep::Threshold.prev(), Some(CreateChannelStep::Members));
+        assert_eq!(
+            CreateChannelStep::Members.prev(),
+            Some(CreateChannelStep::Details)
+        );
+        assert_eq!(
+            CreateChannelStep::Threshold.prev(),
+            Some(CreateChannelStep::Members)
+        );
     }
 
     #[test]
@@ -401,11 +413,17 @@ mod tests {
 
     #[test]
     fn test_account_setup_step_navigation() {
-        assert_eq!(AccountSetupStep::Welcome.next(), Some(AccountSetupStep::DisplayName));
+        assert_eq!(
+            AccountSetupStep::Welcome.next(),
+            Some(AccountSetupStep::DisplayName)
+        );
         assert_eq!(AccountSetupStep::Complete.next(), None);
 
         assert_eq!(AccountSetupStep::Welcome.prev(), None);
-        assert_eq!(AccountSetupStep::DisplayName.prev(), Some(AccountSetupStep::Welcome));
+        assert_eq!(
+            AccountSetupStep::DisplayName.prev(),
+            Some(AccountSetupStep::Welcome)
+        );
     }
 
     #[test]
@@ -420,11 +438,17 @@ mod tests {
 
     #[test]
     fn test_recovery_setup_step_navigation() {
-        assert_eq!(RecoverySetupStep::Overview.next(), Some(RecoverySetupStep::SelectGuardians));
+        assert_eq!(
+            RecoverySetupStep::Overview.next(),
+            Some(RecoverySetupStep::SelectGuardians)
+        );
         assert_eq!(RecoverySetupStep::Confirm.next(), None);
 
         assert_eq!(RecoverySetupStep::Overview.prev(), None);
-        assert_eq!(RecoverySetupStep::Confirm.prev(), Some(RecoverySetupStep::SetThreshold));
+        assert_eq!(
+            RecoverySetupStep::Confirm.prev(),
+            Some(RecoverySetupStep::SetThreshold)
+        );
     }
 
     #[test]

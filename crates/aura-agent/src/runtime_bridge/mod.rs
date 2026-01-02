@@ -19,15 +19,15 @@ use aura_app::IntentError;
 use aura_app::ReactiveHandler;
 use aura_core::effects::{
     amp::{
-        AmpChannelEffects, AmpCiphertext, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
-        ChannelLeaveParams, ChannelSendParams,
+        AmpChannelEffects, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
+        ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
     },
     random::RandomCoreEffects,
     reactive::ReactiveEffects,
     task::TaskSpawner,
     time::PhysicalTimeEffects,
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
-    ThresholdSigningEffects, TransportEffects,
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
+    TransportEffects,
 };
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -60,19 +60,14 @@ mod settings;
 
 use amp::map_amp_error;
 use consensus::{map_consensus_error, persist_consensus_dkg_transcript};
-use invitation::{
-    convert_invitation_to_bridge_info,
-};
+use invitation::convert_invitation_to_bridge_info;
 
 fn service_error_to_intent(err: ServiceError) -> IntentError {
     IntentError::service_error(err.to_string())
 }
 
 fn service_unavailable(service: &'static str) -> IntentError {
-    service_error_to_intent(ServiceError::unavailable(
-        service,
-        "service unavailable",
-    ))
+    service_error_to_intent(ServiceError::unavailable(service, "service unavailable"))
 }
 
 fn service_unavailable_with_detail(
@@ -194,14 +189,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let journal = effects.fetch_context_journal(context).await.map_err(|e| {
                 IntentError::internal_error(format!("Context journal lookup failed: {e}"))
             })?;
-            let context_commitment = context_commitment_from_journal(context, &journal)
-                .map_err(|e| {
+            let context_commitment =
+                context_commitment_from_journal(context, &journal).map_err(|e| {
                     IntentError::internal_error(format!("Context commitment failed: {e}"))
                 })?;
             let prestate = Prestate::new(
                 vec![(authority_id, Hash32(tree_state.root_commitment))],
                 context_commitment,
-            );
+            )
+            .map_err(|e| {
+                IntentError::internal_error(format!("Invalid AMP prestate: {e}"))
+            })?;
 
             let params = build_consensus_params(effects.as_ref(), authority_id, effects.as_ref())
                 .await
@@ -256,61 +254,65 @@ impl RuntimeBridge for AgentRuntimeBridge {
             Arc::new(effects.time_effects().clone());
         let remaining = Arc::new(std::sync::atomic::AtomicUsize::new(120));
 
-        tasks.spawn_interval_until(time_effects, std::time::Duration::from_millis(1000), move || {
-            let _effects = effects.clone();
-            let reactive = reactive.clone();
-            let agent = agent.clone();
-            let invitation_ids = invitation_ids.clone();
-            let remaining = remaining.clone();
+        tasks.spawn_interval_until(
+            time_effects,
+            std::time::Duration::from_millis(1000),
+            move || {
+                let _effects = effects.clone();
+                let reactive = reactive.clone();
+                let agent = agent.clone();
+                let invitation_ids = invitation_ids.clone();
+                let remaining = remaining.clone();
 
-            async move {
-                let remaining_now = remaining.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                if remaining_now == 0 {
-                    return false;
-                }
+                async move {
+                    let remaining_now = remaining.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    if remaining_now == 0 {
+                        return false;
+                    }
 
-                let invitations = match reactive.read(&INVITATIONS_SIGNAL).await {
-                    Ok(state) => state,
-                    Err(_) => return true,
-                };
+                    let invitations = match reactive.read(&INVITATIONS_SIGNAL).await {
+                        Ok(state) => state,
+                        Err(_) => return true,
+                    };
 
-                let mut all_accepted = true;
-                let mut has_failure = false;
+                    let mut all_accepted = true;
+                    let mut has_failure = false;
 
-                for id in &invitation_ids {
-                    match invitations.invitation(id).map(|inv| inv.status) {
-                        Some(InvitationStatus::Accepted) => {}
-                        Some(InvitationStatus::Rejected)
-                        | Some(InvitationStatus::Expired)
-                        | Some(InvitationStatus::Revoked) => {
-                            has_failure = true;
-                            break;
-                        }
-                        _ => {
-                            all_accepted = false;
+                    for id in &invitation_ids {
+                        match invitations.invitation(id).map(|inv| inv.status) {
+                            Some(InvitationStatus::Accepted) => {}
+                            Some(InvitationStatus::Rejected)
+                            | Some(InvitationStatus::Expired)
+                            | Some(InvitationStatus::Revoked) => {
+                                has_failure = true;
+                                break;
+                            }
+                            _ => {
+                                all_accepted = false;
+                            }
                         }
                     }
-                }
 
-                if has_failure {
-                    return false;
-                }
+                    if has_failure {
+                        return false;
+                    }
 
-                if all_accepted {
-                    let bridge = AgentRuntimeBridge::new(agent.clone());
-                    let _ = bridge
-                        .bump_channel_epoch(
-                            context,
-                            channel,
-                            "All invitations accepted".to_string(),
-                        )
-                        .await;
-                    return false;
-                }
+                    if all_accepted {
+                        let bridge = AgentRuntimeBridge::new(agent.clone());
+                        let _ = bridge
+                            .bump_channel_epoch(
+                                context,
+                                channel,
+                                "All invitations accepted".to_string(),
+                            )
+                            .await;
+                        return false;
+                    }
 
-                true
-            }
-        });
+                    true
+                }
+            },
+        );
 
         Ok(())
     }
@@ -604,7 +606,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
         if let Some(sync) = self.agent.runtime().sync() {
             // Parse peer_id into DeviceId
-            let device_id: DeviceId = peer_id.into();
+            let device_id: DeviceId = peer_id.parse().map_err(|e| {
+                IntentError::validation_failed(format!("Invalid peer ID: {e}"))
+            })?;
 
             // Create a single-element vector for the target peer
             let peers = vec![device_id];
@@ -894,7 +898,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let prestate = Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
-        );
+        )
+        .map_err(|e| IntentError::internal_error(format!("Invalid guardian prestate: {e}")))?;
         let prestate_hash = prestate.compute_hash();
         let threshold_k_value = threshold_k.value();
         let operation = GuardianRotationOp {
@@ -1150,7 +1155,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let prestate = Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
-        );
+        )
+        .map_err(|e| IntentError::internal_error(format!("Invalid MFA prestate: {e}")))?;
         let prestate_hash = prestate.compute_hash();
 
         let op_input = serde_json::to_vec(&(
@@ -1468,7 +1474,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let prestate = Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
-        );
+        )
+        .map_err(|e| IntentError::internal_error(format!("Invalid enrollment prestate: {e}")))?;
         let prestate_hash = prestate.compute_hash();
 
         let op_input = serde_json::to_vec(&(
@@ -1596,9 +1603,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         }
 
         // Create a shareable device enrollment invitation (out-of-band transfer).
-        let invitation_service = self.agent.invitations().map_err(|e| {
-            service_unavailable_with_detail("invitation_service", e)
-        })?;
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let invitation = invitation_service
             .invite_device_enrollment(
@@ -1800,7 +1808,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let prestate = Prestate::new(
             vec![(authority_id, Hash32(tree_state.root_commitment))],
             context_commitment,
-        );
+        )
+        .map_err(|e| IntentError::internal_error(format!("Invalid removal prestate: {e}")))?;
         let prestate_hash = prestate.compute_hash();
 
         let op_input = serde_json::to_vec(&(
@@ -2103,9 +2112,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn export_invitation(&self, invitation_id: &str) -> Result<String, IntentError> {
         // Get the invitation service from the agent
-        let invitation_service = self.agent.invitations().map_err(|e| {
-            service_unavailable_with_detail("invitation_service", e)
-        })?;
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         // Export the invitation code
         invitation_service
@@ -2121,9 +2131,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
-        let invitation_service = self.agent.invitations().map_err(|e| {
-            service_unavailable_with_detail("invitation_service", e)
-        })?;
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let invitation = invitation_service
             .invite_as_contact(receiver, nickname, message, ttl_ms)
@@ -2142,9 +2153,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
-        let invitation_service = self.agent.invitations().map_err(|e| {
-            service_unavailable_with_detail("invitation_service", e)
-        })?;
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let invitation = invitation_service
             .invite_as_guardian(receiver, subject, message, ttl_ms)
@@ -2163,9 +2175,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
-        let invitation_service = self.agent.invitations().map_err(|e| {
-            service_unavailable_with_detail("invitation_service", e)
-        })?;
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let invitation = invitation_service
             .invite_to_channel(receiver, home_id, message, ttl_ms)
@@ -2178,9 +2191,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn accept_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
-        let invitation_service = self.agent.invitations().map_err(|e| {
-            service_unavailable_with_detail("invitation_service", e)
-        })?;
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let result = invitation_service
             .accept(invitation_id)
@@ -2199,9 +2213,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
-        let invitation_service = self.agent.invitations().map_err(|e| {
-            service_unavailable_with_detail("invitation_service", e)
-        })?;
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let result = invitation_service
             .decline(invitation_id)
@@ -2220,9 +2235,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
-        let invitation_service = self.agent.invitations().map_err(|e| {
-            service_unavailable_with_detail("invitation_service", e)
-        })?;
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let result = invitation_service
             .cancel(invitation_id)
@@ -2254,9 +2270,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn import_invitation(&self, code: &str) -> Result<InvitationInfo, IntentError> {
-        let invitation_service = self.agent.invitations().map_err(|e| {
-            service_unavailable_with_detail("invitation_service", e)
-        })?;
+        let invitation_service = self
+            .agent
+            .invitations()
+            .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         // Import into the agent cache so later operations (accept/decline) can resolve
         // the invitation details by ID even when the original `Sent` fact isn't present.

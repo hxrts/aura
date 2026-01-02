@@ -175,7 +175,9 @@ impl EpochRotationCoordinator {
             ));
         }
 
-        let target_epoch = self.current_epoch.next();
+        let target_epoch = self.current_epoch.next().map_err(|e| {
+            sync_protocol_error("epochs", format!("epoch overflow: {e}"))
+        })?;
         let rotation_id = format!("epoch-rotation-{}-{}", target_epoch.value(), now.ts_ms);
 
         let rotation = EpochRotation {

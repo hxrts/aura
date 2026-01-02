@@ -58,8 +58,7 @@ fn test_load_consensus_trace_from_file() {
         return;
     }
 
-    let trace =
-        ITFLoader::load_from_file(&trace_path).expect("Failed to load consensus trace");
+    let trace = ITFLoader::load_from_file(&trace_path).expect("Failed to load consensus trace");
 
     assert!(!trace.states.is_empty(), "Trace should have states");
     assert!(
@@ -87,14 +86,16 @@ fn test_load_anti_entropy_trace_from_file() {
         return;
     }
 
-    let trace =
-        ITFLoader::load_from_file(&trace_path).expect("Failed to load anti_entropy trace");
+    let trace = ITFLoader::load_from_file(&trace_path).expect("Failed to load anti_entropy trace");
 
     assert!(!trace.states.is_empty());
     assert!(trace.vars.contains(&"nodeStates".to_string()));
     assert!(trace.vars.contains(&"pendingDeltas".to_string()));
 
-    println!("Loaded anti_entropy trace with {} states", trace.states.len());
+    println!(
+        "Loaded anti_entropy trace with {} states",
+        trace.states.len()
+    );
 }
 
 #[test]

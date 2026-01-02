@@ -1,10 +1,10 @@
 //! Enhanced time handler for production use with advanced scheduling capabilities.
 
+use crate::runtime::services::state::with_state_mut_validated;
 use aura_core::effects::{
     PhysicalTimeEffects, RandomExtendedEffects, TimeoutHandle, WakeCondition,
 };
 use aura_core::{AuraError, Result};
-use crate::runtime::services::state::with_state_mut_validated;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -162,8 +162,7 @@ impl EnhancedTimeHandler {
             &self.state,
             |state| {
                 if state.contexts.remove(&context_id).is_some() {
-                    state.stats.active_contexts =
-                        state.stats.active_contexts.saturating_sub(1);
+                    state.stats.active_contexts = state.stats.active_contexts.saturating_sub(1);
                 }
             },
             |state| state.validate(),

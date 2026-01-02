@@ -19,7 +19,7 @@ pub mod typed;
 
 // Re-export commonly used types
 pub use constants::WIRE_FORMAT_VERSION;
-pub use envelope::WireEnvelope;
+pub use envelope::{EnvelopeValidationError, MessageSequence, MessageTimestamp, WireEnvelope};
 pub use error::{
     cid_mismatch_error, invalid_envelope_size_error, invalid_message_format_error,
     message_deserialization_error, message_serialization_error, message_too_large_error,

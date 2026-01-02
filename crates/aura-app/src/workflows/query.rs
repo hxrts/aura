@@ -3,11 +3,11 @@
 //! This module contains query operations that are portable across all frontends.
 //! These are read-only operations that query contact and channel state.
 
+use crate::workflows::parse::parse_authority_id;
+use crate::workflows::snapshot_policy::full_snapshot;
 use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
 use aura_core::AuraError;
-use crate::workflows::parse::parse_authority_id;
-use crate::workflows::snapshot_policy::full_snapshot;
 use std::sync::Arc;
 
 /// List participants in a channel

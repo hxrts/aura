@@ -7,37 +7,36 @@
 //! coordination logic maintains shared state across multiple contexts, making it multi-party
 //! coordination logic that belongs in the orchestration layer.
 //!
-//! Key violations that required the extraction:
-//! - Maintains global timeout registry (`Arc<RwLock<HashMap<Uuid, JoinHandle>>>`)
-//! - Maintains global context registry (`Arc<RwLock<HashMap<Uuid, broadcast::Sender>>>`)
-//! - Manages timeouts across multiple contexts (multi-party coordination)
-//! - Broadcasts events to all registered contexts
-//! - Tracks timeout tasks globally for cancellation
+//! ## Current Status
+//!
+//! This is currently a simple wrapper around PhysicalTimeEffects. Future extensions may add:
+//! - Global timeout registry (`Arc<RwLock<HashMap<Uuid, JoinHandle>>>`)
+//! - Global context registry (`Arc<RwLock<HashMap<Uuid, broadcast::Sender>>>`)
+//! - Multi-context timeout management with broadcast events
+//! - Global task tracking for cancellation
 
 use async_trait::async_trait;
-use aura_core::effects::{PhysicalTimeEffects, RandomEffects, TimeError};
+use aura_core::effects::{PhysicalTimeEffects, TimeError};
 
-/// Timeout coordinator that adds multi-context coordination to a base TimeEffects handler
+/// Timeout coordinator that adds multi-context coordination to a base TimeEffects handler.
+///
+/// Currently delegates to the inner handler. Future versions may add timeout registry
+/// and context broadcast capabilities for multi-party coordination.
 #[derive(Debug, Clone)]
-pub struct TimeoutCoordinator<T, R> {
+pub struct TimeoutCoordinator<T> {
     /// Base time handler for stateless operations
     inner: T,
-    /// Random effects for UUID generation
-    #[allow(dead_code)]
-    random: R,
 }
 
-impl<T: PhysicalTimeEffects + Clone, R: RandomEffects + Clone> TimeoutCoordinator<T, R> {
-    /// Create a new timeout coordinator wrapping a base time handler and random effects
-    pub fn new(inner: T, random: R) -> Self {
-        Self { inner, random }
+impl<T: PhysicalTimeEffects + Clone> TimeoutCoordinator<T> {
+    /// Create a new timeout coordinator wrapping a base time handler
+    pub fn new(inner: T) -> Self {
+        Self { inner }
     }
 }
 
 #[async_trait]
-impl<T: PhysicalTimeEffects + Clone, R: RandomEffects + Clone> PhysicalTimeEffects
-    for TimeoutCoordinator<T, R>
-{
+impl<T: PhysicalTimeEffects + Clone> PhysicalTimeEffects for TimeoutCoordinator<T> {
     async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
         self.inner.physical_time().await
     }

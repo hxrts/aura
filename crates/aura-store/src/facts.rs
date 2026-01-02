@@ -11,15 +11,24 @@
 
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
-use aura_core::types::facts::{FactDelta, FactDeltaReducer};
-use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
+use aura_core::types::facts::{
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactTypeId,
+    MAX_FACT_PAYLOAD_BYTES,
+};
+use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use aura_core::{ChunkId, ContentId, ContextId};
+use crate::types::{ByteSize, ChunkCount, ChunkIndex, NodeId};
 use serde::{Deserialize, Serialize};
 
 /// Unique type ID for storage facts in the journal system
-pub const STORAGE_FACT_TYPE_ID: &str = "aura.store.v1";
+pub static STORAGE_FACT_TYPE_ID: FactTypeId = FactTypeId::new("aura.store.v1");
 /// Schema version for storage fact encoding
 pub const STORAGE_FACT_SCHEMA_VERSION: u16 = 1;
+
+/// Get the typed fact ID for storage facts
+pub fn storage_fact_type_id() -> &'static FactTypeId {
+    &STORAGE_FACT_TYPE_ID
+}
 
 /// Storage domain facts for journal integration
 ///
@@ -28,6 +37,7 @@ pub const STORAGE_FACT_SCHEMA_VERSION: u16 = 1;
 ///
 /// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum StorageFact {
     /// Content was added to storage
     ContentAdded {
@@ -36,9 +46,9 @@ pub enum StorageFact {
         /// Content identifier (hash of content)
         content_id: ContentId,
         /// Total size in bytes
-        size_bytes: u64,
+        size_bytes: ByteSize,
         /// Number of chunks
-        chunk_count: u32,
+        chunk_count: ChunkCount,
         /// Context where content is stored (if any)
         context_id: Option<ContextId>,
         /// Timestamp when content was added (unified time system)
@@ -66,9 +76,9 @@ pub enum StorageFact {
         /// Parent content identifier
         content_id: ContentId,
         /// Chunk size in bytes
-        size_bytes: u32,
+        size_bytes: ByteSize,
         /// Chunk index within content
-        chunk_index: u32,
+        chunk_index: ChunkIndex,
         /// Whether this is a parity chunk
         is_parity: bool,
         /// Timestamp when chunk was stored (unified time system)
@@ -82,7 +92,7 @@ pub enum StorageFact {
         /// Chunk identifier
         chunk_id: ChunkId,
         /// Node identifier where chunk was replicated
-        node_id: String,
+        node_id: NodeId,
         /// Timestamp when replication completed (unified time system)
         replicated_at: PhysicalTime,
     },
@@ -128,19 +138,15 @@ pub enum StorageFact {
         /// Context identifier
         context_id: ContextId,
         /// New quota limit in bytes
-        quota_bytes: u64,
+        quota_bytes: ByteSize,
         /// Current usage in bytes
-        used_bytes: u64,
+        used_bytes: ByteSize,
         /// Timestamp when quota was updated (unified time system)
         updated_at: PhysicalTime,
     },
 }
 
 impl StorageFact {
-    fn version() -> SemanticVersion {
-        SemanticVersion::new(STORAGE_FACT_SCHEMA_VERSION, 0, 0)
-    }
-
     /// Get the authority associated with this fact
     pub fn authority_id(&self) -> AuthorityId {
         match self {
@@ -178,25 +184,95 @@ impl StorageFact {
         self.timestamp().ts_ms
     }
 
+    /// Validate quota invariants for quota update facts.
+    pub fn quota_is_valid(&self) -> bool {
+        match self {
+            StorageFact::QuotaUpdated {
+                quota_bytes,
+                used_bytes,
+                ..
+            } => used_bytes.value() <= quota_bytes.value(),
+            _ => true,
+        }
+    }
+
     /// Get the fact type ID for journal registration
     pub fn type_id() -> &'static str {
-        STORAGE_FACT_TYPE_ID
+        STORAGE_FACT_TYPE_ID.as_str()
     }
 
     /// Encode this fact with a canonical envelope.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let message = VersionedMessage::new(self.clone(), Self::version())
-            .with_metadata("type".to_string(), STORAGE_FACT_TYPE_ID.to_string());
-        to_vec(&message).unwrap_or_default()
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn try_encode(&self) -> Result<Vec<u8>, FactError> {
+        let payload = to_vec(self)?;
+        if payload.len() > MAX_FACT_PAYLOAD_BYTES {
+            return Err(FactError::PayloadTooLarge {
+                size: payload.len() as u64,
+                max: MAX_FACT_PAYLOAD_BYTES as u64,
+            });
+        }
+        let envelope = FactEnvelope {
+            type_id: storage_fact_type_id().clone(),
+            schema_version: STORAGE_FACT_SCHEMA_VERSION,
+            encoding: FactEncoding::DagCbor,
+            payload,
+        };
+        let bytes = to_vec(&envelope)?;
+        Ok(bytes)
     }
 
     /// Decode a fact from a canonical envelope.
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let message: VersionedMessage<Self> = from_slice(bytes).ok()?;
-        if !message.version.is_compatible(&Self::version()) {
-            return None;
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn try_decode(bytes: &[u8]) -> Result<Self, FactError> {
+        let envelope: FactEnvelope = from_slice(bytes)?;
+
+        if envelope.type_id.as_str() != storage_fact_type_id().as_str() {
+            return Err(FactError::TypeMismatch {
+                expected: storage_fact_type_id().to_string(),
+                actual: envelope.type_id.to_string(),
+            });
         }
-        Some(message.payload)
+
+        if envelope.schema_version != STORAGE_FACT_SCHEMA_VERSION {
+            return Err(FactError::VersionMismatch {
+                expected: STORAGE_FACT_SCHEMA_VERSION,
+                actual: envelope.schema_version,
+            });
+        }
+
+        let fact = match envelope.encoding {
+            FactEncoding::DagCbor => from_slice::<Self>(&envelope.payload)?,
+            FactEncoding::Json => serde_json::from_slice::<Self>(&envelope.payload).map_err(|err| {
+                FactError::Serialization(SerializationError::InvalidFormat(format!(
+                    "JSON decode failed: {err}"
+                )))
+            })?,
+        };
+        Ok(fact)
+    }
+
+    /// Encode this fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, FactError> {
+        self.try_encode()
+    }
+
+    /// Decode a fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FactError> {
+        Self::try_decode(bytes)
     }
 }
 
@@ -248,14 +324,14 @@ impl StorageFactDelta {
         match fact {
             StorageFact::ContentAdded { size_bytes, .. } => {
                 self.content_additions += 1;
-                self.bytes_added += size_bytes;
+                self.bytes_added += size_bytes.value();
             }
             StorageFact::ContentRemoved { .. } => {
                 self.content_removals += 1;
             }
             StorageFact::ChunkStored { size_bytes, .. } => {
                 self.chunks_stored += 1;
-                self.bytes_added += *size_bytes as u64;
+                self.bytes_added += size_bytes.value();
             }
             StorageFact::ChunkReplicated { .. } => {
                 self.chunks_replicated += 1;
@@ -324,8 +400,8 @@ mod tests {
         let fact = StorageFact::ContentAdded {
             authority_id: test_authority(1),
             content_id: ContentId::from_bytes(b"test-content"),
-            size_bytes: 1024,
-            chunk_count: 2,
+            size_bytes: ByteSize::new(1024),
+            chunk_count: ChunkCount::new(2),
             context_id: None,
             added_at: test_time(1000),
         };
@@ -341,8 +417,8 @@ mod tests {
             authority_id: test_authority(2),
             chunk_id: ChunkId::from_bytes(b"chunk1"),
             content_id: ContentId::from_bytes(b"content1"),
-            size_bytes: 512,
-            chunk_index: 0,
+            size_bytes: ByteSize::new(512),
+            chunk_index: ChunkIndex::new(0),
             is_parity: false,
             stored_at: test_time(2000),
         };
@@ -359,8 +435,8 @@ mod tests {
         let fact1 = StorageFact::ContentAdded {
             authority_id: test_authority(1),
             content_id: ContentId::from_bytes(b"content1"),
-            size_bytes: 1000,
-            chunk_count: 1,
+            size_bytes: ByteSize::new(1000),
+            chunk_count: ChunkCount::new(1),
             context_id: None,
             added_at: test_time(1000),
         };
@@ -369,8 +445,8 @@ mod tests {
             authority_id: test_authority(1),
             chunk_id: ChunkId::from_bytes(b"chunk1"),
             content_id: ContentId::from_bytes(b"content1"),
-            size_bytes: 500,
-            chunk_index: 0,
+            size_bytes: ByteSize::new(500),
+            chunk_index: ChunkIndex::new(0),
             is_parity: false,
             stored_at: test_time(1001),
         };
@@ -391,16 +467,16 @@ mod tests {
             StorageFact::ContentAdded {
                 authority_id: test_authority(1),
                 content_id: ContentId::from_bytes(b"content1"),
-                size_bytes: 1000,
-                chunk_count: 2,
+                size_bytes: ByteSize::new(1000),
+                chunk_count: ChunkCount::new(2),
                 context_id: None,
                 added_at: test_time(1000),
             },
             StorageFact::ContentAdded {
                 authority_id: test_authority(2),
                 content_id: ContentId::from_bytes(b"content2"),
-                size_bytes: 2000,
-                chunk_count: 4,
+                size_bytes: ByteSize::new(2000),
+                chunk_count: ChunkCount::new(4),
                 context_id: None,
                 added_at: test_time(2000),
             },
@@ -409,5 +485,114 @@ mod tests {
         let delta = reducer.reduce_batch(&facts);
         assert_eq!(delta.content_additions, 2);
         assert_eq!(delta.bytes_added, 3000);
+    }
+}
+
+/// Property tests for semilattice laws on StorageFactDelta
+#[cfg(test)]
+mod proptest_semilattice {
+    use super::*;
+    use aura_core::types::facts::FactDelta;
+    use proptest::prelude::*;
+
+    /// Strategy for generating arbitrary StorageFactDelta values
+    fn arb_delta() -> impl Strategy<Value = StorageFactDelta> {
+        (
+            0u64..1000,
+            0u64..1000,
+            0u64..1000,
+            0u64..1000,
+            0u64..1000,
+            0u64..1000,
+            0u64..1_000_000,
+            0u64..1_000_000,
+        )
+            .prop_map(
+                |(
+                    content_additions,
+                    content_removals,
+                    chunks_stored,
+                    chunks_replicated,
+                    chunks_collected,
+                    index_updates,
+                    bytes_added,
+                    bytes_removed,
+                )| {
+                    StorageFactDelta {
+                        content_additions,
+                        content_removals,
+                        chunks_stored,
+                        chunks_replicated,
+                        chunks_collected,
+                        index_updates,
+                        bytes_added,
+                        bytes_removed,
+                    }
+                },
+            )
+    }
+
+    /// Helper to check if two deltas are equal
+    fn deltas_equal(a: &StorageFactDelta, b: &StorageFactDelta) -> bool {
+        a.content_additions == b.content_additions
+            && a.content_removals == b.content_removals
+            && a.chunks_stored == b.chunks_stored
+            && a.chunks_replicated == b.chunks_replicated
+            && a.chunks_collected == b.chunks_collected
+            && a.index_updates == b.index_updates
+            && a.bytes_added == b.bytes_added
+            && a.bytes_removed == b.bytes_removed
+    }
+
+    proptest! {
+        /// Idempotence: merging with self doubles the value (additive merge)
+        #[test]
+        fn merge_idempotent(a in arb_delta()) {
+            let original = a.clone();
+            let mut result = a.clone();
+            result.merge(&original);
+            // For additive deltas: a + a = 2a
+            prop_assert_eq!(result.content_additions, original.content_additions * 2);
+            prop_assert_eq!(result.bytes_added, original.bytes_added * 2);
+        }
+
+        /// Commutativity: a.merge(&b) == b.merge(&a) (result equivalence)
+        #[test]
+        fn merge_commutative(a in arb_delta(), b in arb_delta()) {
+            let mut ab = a.clone();
+            ab.merge(&b);
+
+            let mut ba = b.clone();
+            ba.merge(&a);
+
+            prop_assert!(deltas_equal(&ab, &ba), "merge should be commutative");
+        }
+
+        /// Associativity: (a.merge(&b)).merge(&c) == a.merge(&(b.merge(&c)))
+        #[test]
+        fn merge_associative(a in arb_delta(), b in arb_delta(), c in arb_delta()) {
+            // Left associative: (a merge b) merge c
+            let mut left = a.clone();
+            left.merge(&b);
+            left.merge(&c);
+
+            // Right associative: a merge (b merge c)
+            let mut bc = b.clone();
+            bc.merge(&c);
+            let mut right = a.clone();
+            right.merge(&bc);
+
+            prop_assert!(deltas_equal(&left, &right), "merge should be associative");
+        }
+
+        /// Identity: merge with default (zero) leaves value unchanged
+        #[test]
+        fn merge_identity(a in arb_delta()) {
+            let original = a.clone();
+            let mut result = a.clone();
+            result.merge(&StorageFactDelta::default());
+
+            prop_assert!(deltas_equal(&result, &original), "merge with identity should preserve value");
+        }
     }
 }

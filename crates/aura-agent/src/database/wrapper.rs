@@ -157,7 +157,7 @@ impl<J: JournalEffects> JournalEffects for IndexedJournalWrapper<J> {
         &self,
         context: &aura_core::ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: aura_core::FlowCost,
     ) -> Result<aura_core::FlowBudget, AuraError> {
         self.inner.charge_flow_budget(context, peer, cost).await
     }

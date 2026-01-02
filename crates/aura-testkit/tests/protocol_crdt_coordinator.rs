@@ -1,4 +1,7 @@
+//! Tests for CrdtCoordinator - requires crdt-sync feature on aura-protocol
+#![cfg(feature = "crdt-sync")]
 #![allow(missing_docs)]
+
 use aura_core::{
     semilattice::{
         Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, JoinSemilattice, MvState, Top,

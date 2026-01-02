@@ -35,7 +35,7 @@ pub struct MySuggestion {
 // =============================================================================
 
 /// A contact
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Contact {
     /// Contact identifier (authority ID)

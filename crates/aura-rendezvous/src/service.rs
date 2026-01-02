@@ -10,6 +10,7 @@ use crate::protocol::{guards, HandshakeComplete, HandshakeInit, NoiseHandshake};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult};
 use aura_guards::types;
+use aura_core::FlowCost;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
@@ -81,7 +82,7 @@ pub struct GuardSnapshot {
     /// Context for the operation
     pub context_id: ContextId,
     /// Current flow budget remaining
-    pub flow_budget_remaining: u32,
+    pub flow_budget_remaining: FlowCost,
     /// Capabilities held by the authority
     pub capabilities: Vec<String>,
     /// Current epoch
@@ -95,7 +96,7 @@ impl types::CapabilitySnapshot for GuardSnapshot {
 }
 
 impl types::FlowBudgetSnapshot for GuardSnapshot {
-    fn flow_budget_remaining(&self) -> u32 {
+    fn flow_budget_remaining(&self) -> FlowCost {
         self.flow_budget_remaining
     }
 }
@@ -128,7 +129,7 @@ pub enum EffectCommand {
     /// Append fact to journal
     JournalAppend { fact: RendezvousFact },
     /// Charge flow budget
-    ChargeFlowBudget { cost: u32 },
+    ChargeFlowBudget { cost: FlowCost },
     /// Send handshake message
     SendHandshake {
         peer: AuthorityId,
@@ -674,7 +675,7 @@ mod tests {
         GuardSnapshot {
             authority_id: test_authority(),
             context_id: test_context(),
-            flow_budget_remaining: 100,
+            flow_budget_remaining: FlowCost::new(100),
             capabilities: vec![
                 guards::CAP_RENDEZVOUS_PUBLISH.to_string(),
                 guards::CAP_RENDEZVOUS_CONNECT.to_string(),
@@ -729,7 +730,7 @@ mod tests {
     fn test_prepare_publish_descriptor_insufficient_budget() {
         let service = RendezvousService::new(test_authority(), RendezvousConfig::default());
         let mut snapshot = test_snapshot();
-        snapshot.flow_budget_remaining = 0;
+        snapshot.flow_budget_remaining = FlowCost::new(0);
 
         let outcome = service.prepare_publish_descriptor(
             &snapshot,

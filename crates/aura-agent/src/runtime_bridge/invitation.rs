@@ -1,6 +1,4 @@
-use aura_app::runtime_bridge::{
-    InvitationBridgeStatus, InvitationBridgeType, InvitationInfo,
-};
+use aura_app::runtime_bridge::{InvitationBridgeStatus, InvitationBridgeType, InvitationInfo};
 use aura_core::types::Epoch;
 
 /// Convert domain Invitation to bridge InvitationInfo.

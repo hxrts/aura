@@ -134,14 +134,6 @@ impl AuthorityTreeState {
             .map(|leaf| leaf.public_key.as_slice())
     }
 
-    /// Internal: Look up leaf by local device ID (reserved for future use)
-    #[allow(dead_code)]
-    fn get_leaf_by_device(&self, device_id: LocalDeviceId) -> Option<&LocalLeafNode> {
-        self.device_mapping
-            .get(&device_id)
-            .and_then(|leaf_id| self.leaves.get(leaf_id))
-    }
-
     /// Remove a device by leaf index
     pub fn remove_device(&mut self, leaf_index: u32) -> Result<(), aura_core::AuraError> {
         let leaf_id = LeafId(leaf_index);
@@ -200,10 +192,10 @@ impl AuthorityTreeState {
 
     /// Rotate epoch (invalidates old shares)
     pub fn rotate_epoch(&mut self) -> Result<(), aura_core::AuraError> {
-        self.epoch = self.epoch.next();
+        self.epoch = self.epoch.next()?;
 
         // Invalidate cached key shares on tree changes
-        self.invalidate_cached_key_shares();
+        self.invalidate_cached_key_shares()?;
 
         self.recompute_commitments();
 
@@ -516,18 +508,20 @@ impl AuthorityTreeState {
     }
 
     /// Invalidate cached key shares on tree structure changes
-    fn invalidate_cached_key_shares(&mut self) {
+    fn invalidate_cached_key_shares(&mut self) -> Result<(), aura_core::AuraError> {
         // 1. Clear any cached FROST threshold signature shares
         self.clear_frost_key_cache();
 
         // 2. Mark key derivation cache as stale
-        self.mark_key_derivation_stale();
+        self.mark_key_derivation_stale()?;
 
         // 3. Notify devices that key shares need regeneration
         self.mark_devices_for_key_regeneration();
 
         // 4. Update epoch markers to trigger DKG if needed
-        self.update_dkg_epoch_markers();
+        self.update_dkg_epoch_markers()?;
+
+        Ok(())
     }
 
     /// Clear cached FROST threshold signature shares
@@ -537,15 +531,17 @@ impl AuthorityTreeState {
     }
 
     /// Mark key derivation cache as stale
-    fn mark_key_derivation_stale(&mut self) {
+    fn mark_key_derivation_stale(&mut self) -> Result<(), aura_core::AuraError> {
         // Increment epoch to indicate key derivation state has changed
         // This ensures that any derived keys are regenerated
-        self.epoch = self.epoch.next();
+        self.epoch = self.epoch.next()?;
 
         // In a full implementation, this would also:
         // - Update cached merkle paths
         // - Invalidate any precomputed signing contexts
         // - Clear threshold signature caches
+
+        Ok(())
     }
 
     /// Mark devices for key regeneration
@@ -557,12 +553,12 @@ impl AuthorityTreeState {
     }
 
     /// Update epoch markers to trigger DKG if needed
-    fn update_dkg_epoch_markers(&mut self) {
+    fn update_dkg_epoch_markers(&mut self) -> Result<(), aura_core::AuraError> {
         // Update internal markers that indicate when DKG should be performed
         // This is critical for maintaining security after tree changes
 
         // Increment epoch to trigger new DKG ceremony
-        self.epoch = self.epoch.next();
+        self.epoch = self.epoch.next()?;
 
         if !self.pending_dkg_devices.is_empty() {
             self.scheduled_dkg_epochs
@@ -578,6 +574,8 @@ impl AuthorityTreeState {
                 });
             }
         }
+
+        Ok(())
     }
 
     /// Queue DKG for a specific device

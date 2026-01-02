@@ -28,6 +28,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
 use aura_guards::types;
 use aura_signature::session::SessionScope;
+use aura_core::FlowCost;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -36,27 +37,29 @@ use serde::{Deserialize, Serialize};
 
 /// Guard cost and capability constants for authentication operations
 pub mod costs {
+    use aura_core::FlowCost;
+
     // -------------------------------------------------------------------------
     // Flow Costs
     // -------------------------------------------------------------------------
 
     /// Flow cost for requesting an authentication challenge
-    pub const CHALLENGE_REQUEST_COST: u32 = 1;
+    pub const CHALLENGE_REQUEST_COST: FlowCost = FlowCost::new(1);
 
     /// Flow cost for submitting an authentication proof
-    pub const PROOF_SUBMISSION_COST: u32 = 2;
+    pub const PROOF_SUBMISSION_COST: FlowCost = FlowCost::new(2);
 
     /// Flow cost for verifying an authentication proof
-    pub const PROOF_VERIFICATION_COST: u32 = 2;
+    pub const PROOF_VERIFICATION_COST: FlowCost = FlowCost::new(2);
 
     /// Flow cost for creating a session ticket
-    pub const SESSION_CREATION_COST: u32 = 2;
+    pub const SESSION_CREATION_COST: FlowCost = FlowCost::new(2);
 
     /// Flow cost for guardian approval request
-    pub const GUARDIAN_APPROVAL_REQUEST_COST: u32 = 3;
+    pub const GUARDIAN_APPROVAL_REQUEST_COST: FlowCost = FlowCost::new(3);
 
     /// Flow cost for submitting guardian approval decision
-    pub const GUARDIAN_APPROVAL_DECISION_COST: u32 = 2;
+    pub const GUARDIAN_APPROVAL_DECISION_COST: FlowCost = FlowCost::new(2);
 
     // -------------------------------------------------------------------------
     // Capabilities
@@ -107,7 +110,7 @@ pub struct GuardSnapshot {
     pub device_id: Option<DeviceId>,
 
     /// Current flow budget remaining
-    pub flow_budget_remaining: u32,
+    pub flow_budget_remaining: FlowCost,
 
     /// Capabilities held by the authority
     pub capabilities: Vec<String>,
@@ -128,7 +131,7 @@ impl GuardSnapshot {
         authority_id: AuthorityId,
         context_id: Option<ContextId>,
         device_id: Option<DeviceId>,
-        flow_budget_remaining: u32,
+        flow_budget_remaining: FlowCost,
         capabilities: Vec<String>,
         epoch: u64,
         now_ms: u64,
@@ -157,7 +160,7 @@ impl GuardSnapshot {
     }
 
     /// Check if snapshot has sufficient flow budget
-    pub fn has_budget(&self, cost: u32) -> bool {
+    pub fn has_budget(&self, cost: FlowCost) -> bool {
         self.flow_budget_remaining >= cost
     }
 }
@@ -329,7 +332,7 @@ pub enum EffectCommand {
     /// Charge flow budget
     ChargeFlowBudget {
         /// Cost to charge
-        cost: u32,
+        cost: FlowCost,
     },
 
     /// Append fact to journal
@@ -413,7 +416,7 @@ impl types::CapabilitySnapshot for GuardSnapshot {
 }
 
 impl types::FlowBudgetSnapshot for GuardSnapshot {
-    fn flow_budget_remaining(&self) -> u32 {
+    fn flow_budget_remaining(&self) -> FlowCost {
         self.flow_budget_remaining
     }
 }
@@ -432,7 +435,10 @@ pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<
 }
 
 /// Check flow budget and return denied outcome if insufficient
-pub fn check_flow_budget(snapshot: &GuardSnapshot, required_cost: u32) -> Option<GuardOutcome> {
+pub fn check_flow_budget(
+    snapshot: &GuardSnapshot,
+    required_cost: FlowCost,
+) -> Option<GuardOutcome> {
     if snapshot.flow_budget_remaining >= required_cost {
         None
     } else {
@@ -735,7 +741,7 @@ mod tests {
             test_authority(),
             None,
             None,
-            100,
+            FlowCost::new(100),
             vec![
                 costs::CAP_REQUEST_AUTH.to_string(),
                 costs::CAP_SUBMIT_PROOF.to_string(),
@@ -758,9 +764,9 @@ mod tests {
     #[test]
     fn test_guard_snapshot_has_budget() {
         let snapshot = test_snapshot();
-        assert!(snapshot.has_budget(50));
-        assert!(snapshot.has_budget(100));
-        assert!(!snapshot.has_budget(101));
+        assert!(snapshot.has_budget(FlowCost::new(50)));
+        assert!(snapshot.has_budget(FlowCost::new(100)));
+        assert!(!snapshot.has_budget(FlowCost::new(101)));
     }
 
     #[test]
@@ -781,7 +787,8 @@ mod tests {
 
     #[test]
     fn test_guard_outcome_allowed() {
-        let outcome = GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget { cost: 10 }]);
+        let outcome =
+            GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget { cost: FlowCost::new(10) }]);
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 1);
     }
@@ -811,14 +818,14 @@ mod tests {
     #[test]
     fn test_check_flow_budget_success() {
         let snapshot = test_snapshot();
-        let result = check_flow_budget(&snapshot, 50);
+        let result = check_flow_budget(&snapshot, FlowCost::new(50));
         assert!(result.is_none());
     }
 
     #[test]
     fn test_check_flow_budget_failure() {
         let snapshot = test_snapshot();
-        let result = check_flow_budget(&snapshot, 150);
+        let result = check_flow_budget(&snapshot, FlowCost::new(150));
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());
     }
@@ -867,8 +874,8 @@ mod tests {
 
     #[test]
     fn test_guard_costs_defined() {
-        assert_eq!(costs::CHALLENGE_REQUEST_COST, 1);
-        assert_eq!(costs::PROOF_SUBMISSION_COST, 2);
+        assert_eq!(costs::CHALLENGE_REQUEST_COST.value(), 1);
+        assert_eq!(costs::PROOF_SUBMISSION_COST.value(), 2);
         assert_eq!(costs::CAP_REQUEST_AUTH, "auth:request");
     }
 }

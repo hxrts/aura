@@ -17,13 +17,13 @@
 //! state is updated. Once threshold is reached, the ceremony is marked complete
 //! and `commit_guardian_key_rotation()` is triggered.
 
+use super::state::with_state_mut_validated;
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
 use aura_core::ceremony::{SupersessionReason, SupersessionRecord};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity};
 use aura_core::DeviceId;
 use aura_core::Hash32;
-use super::state::with_state_mut_validated;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -64,7 +64,10 @@ impl CeremonyTrackerState {
             }
             let participant_set: HashSet<_> = state.participants.iter().collect();
             if participant_set.len() != state.participants.len() {
-                return Err(format!("ceremony {} has duplicate participants", ceremony_id));
+                return Err(format!(
+                    "ceremony {} has duplicate participants",
+                    ceremony_id
+                ));
             }
             let accepted_set: HashSet<_> = state.accepted_participants.iter().collect();
             if accepted_set.len() != state.accepted_participants.len() {

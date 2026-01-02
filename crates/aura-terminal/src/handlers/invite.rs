@@ -208,24 +208,18 @@ async fn create_invitation(
     let parsed_role = parse_invitation_role(role);
 
     match parsed_role {
-        InvitationRoleValue::Guardian => {
-            service
-                .invite_as_guardian(receiver_id, subject_authority, None, expires_ms)
-                .await
-                .map_err(|e| TerminalError::Operation(e.to_string()))
-        }
-        InvitationRoleValue::Channel => {
-            service
-                .invite_to_channel(receiver_id, "channel".to_string(), None, expires_ms)
-                .await
-                .map_err(|e| TerminalError::Operation(e.to_string()))
-        }
-        InvitationRoleValue::Contact { nickname } => {
-            service
-                .invite_as_contact(receiver_id, nickname, None, expires_ms)
-                .await
-                .map_err(|e| TerminalError::Operation(e.to_string()))
-        }
+        InvitationRoleValue::Guardian => service
+            .invite_as_guardian(receiver_id, subject_authority, None, expires_ms)
+            .await
+            .map_err(|e| TerminalError::Operation(e.to_string())),
+        InvitationRoleValue::Channel => service
+            .invite_to_channel(receiver_id, "channel".to_string(), None, expires_ms)
+            .await
+            .map_err(|e| TerminalError::Operation(e.to_string())),
+        InvitationRoleValue::Contact { nickname } => service
+            .invite_as_contact(receiver_id, nickname, None, expires_ms)
+            .await
+            .map_err(|e| TerminalError::Operation(e.to_string())),
     }
 }
 

@@ -296,11 +296,13 @@ mod tests {
         ];
         let epoch = Epoch::from(1);
 
-        let config = RelationalConsensusBuilder::from_prestate(
-            &Prestate::new(vec![], Hash32::default()),
-            epoch,
+        let prestate = Prestate::new(
+            vec![(witnesses[0], Hash32::default())],
+            Hash32::default(),
         )
-        .with_witnesses(witnesses.clone())
+        .unwrap();
+        let config = RelationalConsensusBuilder::from_prestate(&prestate, epoch)
+            .with_witnesses(witnesses.clone())
         .with_threshold(2)
         .with_timeout_ms(10000)
         .build()

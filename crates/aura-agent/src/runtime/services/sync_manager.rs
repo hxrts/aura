@@ -120,8 +120,10 @@ impl SyncState {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if matches!(self.status, SyncManagerState::Running | SyncManagerState::Starting)
-            && self.service.is_none()
+        if matches!(
+            self.status,
+            SyncManagerState::Running | SyncManagerState::Starting
+        ) && self.service.is_none()
         {
             return Err("sync state running without service".to_string());
         }
@@ -261,7 +263,8 @@ impl SyncServiceManager {
         .await;
 
         // Cancel background task if running
-        let background_task = with_state_mut(&self.state, |state| state.background_task.take()).await;
+        let background_task =
+            with_state_mut(&self.state, |state| state.background_task.take()).await;
         if let Some(handle) = background_task {
             handle.abort();
         }
@@ -311,7 +314,10 @@ impl SyncServiceManager {
             let time_effects = time_effects.clone();
             async move {
                 let status = manager.state.read().await.status;
-                if matches!(status, SyncManagerState::Stopped | SyncManagerState::Stopping) {
+                if matches!(
+                    status,
+                    SyncManagerState::Stopped | SyncManagerState::Stopping
+                ) {
                     return true;
                 }
 
@@ -396,12 +402,22 @@ impl SyncServiceManager {
 
     /// Get service health information
     pub async fn health(&self) -> Option<aura_sync::services::SyncServiceHealth> {
-        self.state.read().await.service.as_ref().map(|s| s.get_health())
+        self.state
+            .read()
+            .await
+            .service
+            .as_ref()
+            .map(|s| s.get_health())
     }
 
     /// Get service metrics
     pub async fn metrics(&self) -> Option<aura_sync::services::ServiceMetrics> {
-        self.state.read().await.service.as_ref().map(|s| s.get_metrics())
+        self.state
+            .read()
+            .await
+            .service
+            .as_ref()
+            .map(|s| s.get_metrics())
     }
 
     /// Get the configuration
@@ -546,12 +562,14 @@ impl SyncServiceManager {
                     use aura_sync::services::HealthStatus;
                     match svc_health.status {
                         HealthStatus::Healthy => ServiceHealth::Healthy,
-                        HealthStatus::Degraded | HealthStatus::Starting => ServiceHealth::Degraded {
-                            reason: format!(
-                                "status={:?}, active_sessions={}",
-                                svc_health.status, svc_health.active_sessions
-                            ),
-                        },
+                        HealthStatus::Degraded | HealthStatus::Starting => {
+                            ServiceHealth::Degraded {
+                                reason: format!(
+                                    "status={:?}, active_sessions={}",
+                                    svc_health.status, svc_health.active_sessions
+                                ),
+                            }
+                        }
                         HealthStatus::Unhealthy | HealthStatus::Stopping => {
                             ServiceHealth::Unhealthy {
                                 reason: format!("status={:?}", svc_health.status),

@@ -200,6 +200,26 @@ impl AuraHandlerError {
     }
 }
 
+impl aura_core::ProtocolErrorCode for AuraHandlerError {
+    fn code(&self) -> &'static str {
+        match self {
+            AuraHandlerError::UnsupportedEffect { .. } => "handler_unsupported_effect",
+            AuraHandlerError::UnknownOperation { .. } => "handler_unknown_operation",
+            AuraHandlerError::EffectSerialization { .. } => "handler_serialization",
+            AuraHandlerError::EffectDeserialization { .. } => "handler_deserialization",
+            AuraHandlerError::SessionExecution { .. } => "handler_session_execution",
+            AuraHandlerError::ContextError { .. } => "handler_context",
+            AuraHandlerError::MiddlewareError { .. } => "handler_middleware",
+            AuraHandlerError::RegistryError { .. } => "handler_registry",
+            AuraHandlerError::UnsupportedOperation { .. } => "handler_unsupported_operation",
+            AuraHandlerError::ParameterDeserializationFailed { .. } => "handler_param_deserialization",
+            AuraHandlerError::ExecutionFailed { .. } => "handler_execution",
+            AuraHandlerError::AuthorizationFailed { .. } => "handler_authorization",
+            AuraHandlerError::HandlerCreationFailed { .. } => "handler_creation",
+        }
+    }
+}
+
 // The primary AuraHandler trait is now defined in the erased module
 // to avoid duplication and ensure all handlers use the unified interface.
 

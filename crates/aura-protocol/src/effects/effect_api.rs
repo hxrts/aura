@@ -157,6 +157,24 @@ pub enum EffectApiError {
     },
 }
 
+impl aura_core::ProtocolErrorCode for EffectApiError {
+    fn code(&self) -> &'static str {
+        match self {
+            EffectApiError::NotAvailable => "effect_api_not_available",
+            EffectApiError::AccessDenied { .. } => "effect_api_access_denied",
+            EffectApiError::DeviceNotFound { .. } => "effect_api_device_not_found",
+            EffectApiError::InvalidEvent => "effect_api_invalid_event",
+            EffectApiError::EpochOutOfRange { .. } => "effect_api_epoch_out_of_range",
+            EffectApiError::Corrupted { .. } => "effect_api_corrupted",
+            EffectApiError::ConcurrentAccess => "effect_api_concurrent_access",
+            EffectApiError::Backend { .. } => "effect_api_backend",
+            EffectApiError::GraphOperationFailed { .. } => "effect_api_graph_operation",
+            EffectApiError::CryptoOperationFailed { .. } => "effect_api_crypto_operation",
+            EffectApiError::InvalidGraphData { .. } => "effect_api_invalid_graph_data",
+        }
+    }
+}
+
 /// Effect API events
 #[derive(Debug, Clone)]
 pub enum EffectApiEvent {

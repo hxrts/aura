@@ -950,11 +950,7 @@ mod tests {
             &self,
             location: &SecureStorageLocation,
         ) -> Result<bool, aura_core::AuraError> {
-            Ok(self
-                .data
-                .read()
-                .await
-                .contains_key(&location.full_path()))
+            Ok(self.data.read().await.contains_key(&location.full_path()))
         }
 
         async fn secure_list_keys(

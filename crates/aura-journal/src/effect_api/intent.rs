@@ -345,7 +345,8 @@ mod tests {
                 crate::LeafId(0),
                 DeviceId(uuid::Uuid::from_bytes([9u8; 16])),
                 vec![0u8; 32],
-            ),
+            )
+            .expect("valid leaf"),
             under: NodeIndex(0),
         };
 

@@ -7,9 +7,7 @@
 //! - `require_*` helpers: Pre-check functions for authorization
 
 use crate::{
-    views::home::ResidentRole,
-    workflows::chat_commands::CommandCapability,
-    StateSnapshot,
+    views::home::ResidentRole, workflows::chat_commands::CommandCapability, StateSnapshot,
 };
 use aura_core::AuraError;
 
@@ -217,22 +215,37 @@ mod tests {
 
     #[test]
     fn test_level_descriptions() {
-        assert_eq!(CommandAuthorizationLevel::Public.description(), "public access");
+        assert_eq!(
+            CommandAuthorizationLevel::Public.description(),
+            "public access"
+        );
         assert_eq!(CommandAuthorizationLevel::Admin.label(), "ADMIN");
     }
 
     #[test]
     fn test_role_has_capability_none() {
         assert!(role_has_capability(None, &CommandCapability::None));
-        assert!(role_has_capability(Some(ResidentRole::Resident), &CommandCapability::None));
+        assert!(role_has_capability(
+            Some(ResidentRole::Resident),
+            &CommandCapability::None
+        ));
     }
 
     #[test]
     fn test_role_has_capability_basic() {
         // All roles can send messages
-        assert!(role_has_capability(Some(ResidentRole::Resident), &CommandCapability::SendMessage));
-        assert!(role_has_capability(Some(ResidentRole::Admin), &CommandCapability::SendMessage));
-        assert!(role_has_capability(Some(ResidentRole::Owner), &CommandCapability::SendMessage));
+        assert!(role_has_capability(
+            Some(ResidentRole::Resident),
+            &CommandCapability::SendMessage
+        ));
+        assert!(role_has_capability(
+            Some(ResidentRole::Admin),
+            &CommandCapability::SendMessage
+        ));
+        assert!(role_has_capability(
+            Some(ResidentRole::Owner),
+            &CommandCapability::SendMessage
+        ));
     }
 
     #[test]
@@ -247,21 +260,32 @@ mod tests {
     #[test]
     fn test_role_has_capability_moderation() {
         // Moderation requires Admin or Owner
-        assert!(!role_has_capability(Some(ResidentRole::Resident), &CommandCapability::ModerateKick));
-        assert!(role_has_capability(Some(ResidentRole::Admin), &CommandCapability::ModerateKick));
-        assert!(role_has_capability(Some(ResidentRole::Owner), &CommandCapability::ModerateKick));
+        assert!(!role_has_capability(
+            Some(ResidentRole::Resident),
+            &CommandCapability::ModerateKick
+        ));
+        assert!(role_has_capability(
+            Some(ResidentRole::Admin),
+            &CommandCapability::ModerateKick
+        ));
+        assert!(role_has_capability(
+            Some(ResidentRole::Owner),
+            &CommandCapability::ModerateKick
+        ));
 
-        assert!(!role_has_capability(Some(ResidentRole::Resident), &CommandCapability::GrantSteward));
-        assert!(role_has_capability(Some(ResidentRole::Admin), &CommandCapability::GrantSteward));
+        assert!(!role_has_capability(
+            Some(ResidentRole::Resident),
+            &CommandCapability::GrantSteward
+        ));
+        assert!(role_has_capability(
+            Some(ResidentRole::Admin),
+            &CommandCapability::GrantSteward
+        ));
     }
 
     #[test]
     fn test_check_authorization_level_public() {
-        assert!(check_authorization_level(
-            CommandAuthorizationLevel::Public,
-            None,
-            "Test"
-        ).is_ok());
+        assert!(check_authorization_level(CommandAuthorizationLevel::Public, None, "Test").is_ok());
     }
 
     #[test]
@@ -271,28 +295,43 @@ mod tests {
             CommandAuthorizationLevel::Admin,
             Some(ResidentRole::Resident),
             "Kick"
-        ).is_err());
+        )
+        .is_err());
 
         // Admin level succeeds with admin role
         assert!(check_authorization_level(
             CommandAuthorizationLevel::Admin,
             Some(ResidentRole::Admin),
             "Kick"
-        ).is_ok());
+        )
+        .is_ok());
 
         // Admin level succeeds with owner role
         assert!(check_authorization_level(
             CommandAuthorizationLevel::Admin,
             Some(ResidentRole::Owner),
             "Kick"
-        ).is_ok());
+        )
+        .is_ok());
     }
 
     #[test]
     fn test_minimum_role_for_level() {
-        assert_eq!(minimum_role_for_level(CommandAuthorizationLevel::Public), None);
-        assert_eq!(minimum_role_for_level(CommandAuthorizationLevel::Basic), None);
-        assert_eq!(minimum_role_for_level(CommandAuthorizationLevel::Sensitive), Some(ResidentRole::Resident));
-        assert_eq!(minimum_role_for_level(CommandAuthorizationLevel::Admin), Some(ResidentRole::Admin));
+        assert_eq!(
+            minimum_role_for_level(CommandAuthorizationLevel::Public),
+            None
+        );
+        assert_eq!(
+            minimum_role_for_level(CommandAuthorizationLevel::Basic),
+            None
+        );
+        assert_eq!(
+            minimum_role_for_level(CommandAuthorizationLevel::Sensitive),
+            Some(ResidentRole::Resident)
+        );
+        assert_eq!(
+            minimum_role_for_level(CommandAuthorizationLevel::Admin),
+            Some(ResidentRole::Admin)
+        );
     }
 }

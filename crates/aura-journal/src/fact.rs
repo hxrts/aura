@@ -486,6 +486,191 @@ pub enum RelationalFact {
     },
 }
 
+/// Typed key for protocol-level relational facts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProtocolFactKey {
+    /// Guardian binding between an account and guardian authority.
+    GuardianBinding {
+        /// The account being protected.
+        account_id: AuthorityId,
+        /// The guardian authority.
+        guardian_id: AuthorityId,
+        /// Hash of the binding commitment.
+        binding_hash: Hash32,
+    },
+    /// Recovery grant issued by a guardian.
+    RecoveryGrant {
+        /// The account being recovered.
+        account_id: AuthorityId,
+        /// The guardian issuing the grant.
+        guardian_id: AuthorityId,
+        /// Hash of the grant commitment.
+        grant_hash: Hash32,
+    },
+    /// Consensus result tying a consensus instance to an operation.
+    Consensus {
+        /// Unique identifier for the consensus instance.
+        consensus_id: Hash32,
+        /// Hash of the operation being decided.
+        operation_hash: Hash32,
+    },
+    /// AMP channel checkpoint anchor.
+    AmpChannelCheckpoint {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// The channel epoch at checkpoint.
+        chan_epoch: u64,
+        /// Commitment to the checkpoint state.
+        ck_commitment: Hash32,
+    },
+    /// Proposed AMP channel epoch bump.
+    AmpProposedChannelEpochBump {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// The epoch being bumped from.
+        parent_epoch: u64,
+        /// The proposed new epoch.
+        new_epoch: u64,
+        /// Unique identifier for this bump proposal.
+        bump_id: Hash32,
+    },
+    /// Committed AMP channel epoch bump.
+    AmpCommittedChannelEpochBump {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// The epoch being bumped from.
+        parent_epoch: u64,
+        /// The committed new epoch.
+        new_epoch: u64,
+        /// The chosen bump proposal identifier.
+        chosen_bump_id: Hash32,
+    },
+    /// Channel policy override.
+    AmpChannelPolicy {
+        /// The channel identifier.
+        channel: ChannelId,
+    },
+    /// Leakage accounting event.
+    LeakageEvent {
+        /// Source authority of the leakage.
+        source: AuthorityId,
+        /// Destination authority of the leakage.
+        destination: AuthorityId,
+        /// When the leakage occurred.
+        timestamp: aura_core::time::PhysicalTime,
+    },
+    /// Finalized DKG transcript commit.
+    DkgTranscriptCommit {
+        /// Hash of the committed transcript.
+        transcript_hash: Hash32,
+    },
+    /// Coordinator convergence certificate.
+    ConvergenceCert {
+        /// Operation identifier for convergence.
+        op_id: Hash32,
+    },
+    /// Explicit reversion fact.
+    ReversionFact {
+        /// Operation identifier being reverted.
+        op_id: Hash32,
+    },
+    /// Lifecycle rotation marker.
+    RotateFact {
+        /// Hash of the target state.
+        to_state: Hash32,
+    },
+}
+
+impl ProtocolFactKey {
+    /// Stable subtype identifier for reducer keys.
+    pub fn sub_type(&self) -> &'static str {
+        match self {
+            ProtocolFactKey::GuardianBinding { .. } => "guardian-binding",
+            ProtocolFactKey::RecoveryGrant { .. } => "recovery-grant",
+            ProtocolFactKey::Consensus { .. } => "consensus",
+            ProtocolFactKey::AmpChannelCheckpoint { .. } => "amp-channel-checkpoint",
+            ProtocolFactKey::AmpProposedChannelEpochBump { .. } => "amp-proposed-epoch-bump",
+            ProtocolFactKey::AmpCommittedChannelEpochBump { .. } => {
+                "amp-committed-epoch-bump"
+            }
+            ProtocolFactKey::AmpChannelPolicy { .. } => "amp-channel-policy",
+            ProtocolFactKey::LeakageEvent { .. } => "leakage-event",
+            ProtocolFactKey::DkgTranscriptCommit { .. } => "dkg-transcript-commit",
+            ProtocolFactKey::ConvergenceCert { .. } => "convergence-cert",
+            ProtocolFactKey::ReversionFact { .. } => "reversion-fact",
+            ProtocolFactKey::RotateFact { .. } => "rotate-fact",
+        }
+    }
+
+    /// Opaque key payload for reducer indexing.
+    pub fn data(&self) -> Vec<u8> {
+        match self {
+            ProtocolFactKey::GuardianBinding { binding_hash, .. } => {
+                binding_hash.as_bytes().to_vec()
+            }
+            ProtocolFactKey::RecoveryGrant { grant_hash, .. } => grant_hash.as_bytes().to_vec(),
+            ProtocolFactKey::Consensus {
+                consensus_id,
+                operation_hash,
+            } => {
+                let mut data = Vec::with_capacity(64);
+                data.extend_from_slice(consensus_id.as_bytes());
+                data.extend_from_slice(operation_hash.as_bytes());
+                data
+            }
+            ProtocolFactKey::AmpChannelCheckpoint {
+                channel,
+                chan_epoch,
+                ck_commitment,
+            } => aura_core::util::serialization::to_vec(&(
+                channel,
+                chan_epoch,
+                ck_commitment,
+            ))
+            .unwrap_or_default(),
+            ProtocolFactKey::AmpProposedChannelEpochBump {
+                channel,
+                parent_epoch,
+                new_epoch,
+                bump_id,
+            } => aura_core::util::serialization::to_vec(&(
+                channel,
+                parent_epoch,
+                new_epoch,
+                bump_id,
+            ))
+            .unwrap_or_default(),
+            ProtocolFactKey::AmpCommittedChannelEpochBump {
+                channel,
+                parent_epoch,
+                new_epoch,
+                chosen_bump_id,
+            } => aura_core::util::serialization::to_vec(&(
+                channel,
+                parent_epoch,
+                new_epoch,
+                chosen_bump_id,
+            ))
+            .unwrap_or_default(),
+            ProtocolFactKey::AmpChannelPolicy { channel } => {
+                aura_core::util::serialization::to_vec(channel).unwrap_or_default()
+            }
+            ProtocolFactKey::LeakageEvent {
+                source,
+                destination,
+                timestamp,
+            } => aura_core::util::serialization::to_vec(&(source, destination, timestamp))
+                .unwrap_or_default(),
+            ProtocolFactKey::DkgTranscriptCommit { transcript_hash } => {
+                transcript_hash.as_bytes().to_vec()
+            }
+            ProtocolFactKey::ConvergenceCert { op_id } => op_id.as_bytes().to_vec(),
+            ProtocolFactKey::ReversionFact { op_id } => op_id.as_bytes().to_vec(),
+            ProtocolFactKey::RotateFact { to_state } => to_state.as_bytes().to_vec(),
+        }
+    }
+}
+
 /// Snapshot fact for garbage collection
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SnapshotFact {

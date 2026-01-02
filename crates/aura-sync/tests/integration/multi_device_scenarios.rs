@@ -222,9 +222,7 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
         for i in 0..device_count {
             for j in (i + 1)..device_count {
                 let pair_index = i * device_count + j - i * (i + 1) / 2;
-                println!(
-                    "  Sync pair {pair_index}/{total_pairs}: Device {i} ↔ Device {j}"
-                );
+                println!("  Sync pair {pair_index}/{total_pairs}: Device {i} ↔ Device {j}");
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }

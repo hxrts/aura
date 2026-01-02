@@ -34,7 +34,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::{HealthCheck, HealthStatus, Service, ServiceMetrics, ServiceState};
-use crate::core::{sync_session_error, MetricsCollector, SessionConfig, SessionManager, SyncResult};
+use crate::core::{
+    sync_session_error, MetricsCollector, SessionConfig, SessionManager, SyncResult,
+};
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol, SyncProtocolEffects};
 use aura_core::effects::{PhysicalTimeEffects, TimeError};

@@ -233,14 +233,14 @@ impl LeafNode {
         device_id: crate::types::identifiers::DeviceId,
         role: LeafRole,
         public_key: impl TryInto<LeafPublicKey, Error = AuraError>,
-        meta: impl TryInto<LeafMetadata, Error = AuraError>,
+        meta: LeafMetadata,
     ) -> Result<Self, AuraError> {
         Ok(Self {
             leaf_id,
             device_id,
             role,
             public_key: public_key.try_into()?,
-            meta: meta.try_into()?,
+            meta,
         })
     }
 
@@ -275,12 +275,10 @@ impl LeafNode {
     }
 
     /// Create a leaf node with metadata
-    pub fn with_meta(
-        mut self,
-        meta: impl TryInto<LeafMetadata, Error = AuraError>,
-    ) -> Result<Self, AuraError> {
-        self.meta = meta.try_into()?;
-        Ok(self)
+    #[must_use]
+    pub fn with_meta(mut self, meta: LeafMetadata) -> Self {
+        self.meta = meta;
+        self
     }
 }
 
@@ -334,6 +332,62 @@ impl TreeCommitment {
 impl fmt::Display for TreeCommitment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "TreeCommit({})", hex::encode(&self.0[..8]))
+    }
+}
+
+/// Unique identifier for a snapshot proposal.
+///
+/// Used to track approval progress for snapshot creation.
+/// This is the canonical definition - other modules should import from here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct ProposalId(pub TreeHash32);
+
+impl ProposalId {
+    /// Create a new proposal ID from a hash
+    #[must_use]
+    pub fn new(hash: TreeHash32) -> Self {
+        Self(hash)
+    }
+
+    /// Create a proposal ID from a Hash32
+    #[must_use]
+    pub fn from_hash32(hash: crate::Hash32) -> Self {
+        Self(hash.0)
+    }
+
+    /// Convert to Hash32
+    #[must_use]
+    pub fn to_hash32(&self) -> crate::Hash32 {
+        crate::Hash32(self.0)
+    }
+
+    /// Get the underlying bytes
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Create a zero proposal ID (for testing)
+    #[must_use]
+    pub fn zero() -> Self {
+        Self([0u8; 32])
+    }
+}
+
+impl From<crate::Hash32> for ProposalId {
+    fn from(hash: crate::Hash32) -> Self {
+        Self(hash.0)
+    }
+}
+
+impl From<ProposalId> for crate::Hash32 {
+    fn from(id: ProposalId) -> Self {
+        crate::Hash32(id.0)
+    }
+}
+
+impl fmt::Display for ProposalId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Proposal({})", hex::encode(&self.0[..8]))
     }
 }
 

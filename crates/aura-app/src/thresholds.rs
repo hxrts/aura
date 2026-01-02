@@ -130,7 +130,10 @@ mod tests {
     #[test]
     fn test_normalize_channel_threshold() {
         // Default when 0
-        assert_eq!(normalize_channel_threshold(0, 4), default_channel_threshold(4));
+        assert_eq!(
+            normalize_channel_threshold(0, 4),
+            default_channel_threshold(4)
+        );
         // Clamped to total
         assert_eq!(normalize_channel_threshold(10, 4), 4);
         // Pass-through when valid

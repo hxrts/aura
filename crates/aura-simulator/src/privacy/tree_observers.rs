@@ -685,8 +685,8 @@ mod tests {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        observer.observe_operation(now_ms, 1, "AddLeaf".to_string(), 5);
-        observer.observe_operation(now_ms + 1000, 1, "RemoveLeaf".to_string(), 3);
+        observer.observe_operation(now_ms, Epoch::new(1), "AddLeaf".to_string(), 5);
+        observer.observe_operation(now_ms + 1000, Epoch::new(1), "RemoveLeaf".to_string(), 3);
 
         let distribution = observer.signer_count_distribution();
         assert_eq!(distribution, &[5, 3]);

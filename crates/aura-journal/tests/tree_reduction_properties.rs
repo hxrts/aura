@@ -194,7 +194,7 @@ mod unit_tests {
         let ops: Vec<AttestedOp> = oplog.list_ops().into_iter().cloned().collect();
         let state = reduce(&ops).unwrap();
 
-        assert_eq!(state.epoch, 0);
+        assert_eq!(state.epoch, Epoch(0));
         assert_eq!(state.leaves.len(), 0);
     }
 
@@ -207,7 +207,7 @@ mod unit_tests {
         let ops: Vec<AttestedOp> = oplog.list_ops().into_iter().cloned().collect();
         let state = reduce(&ops).unwrap();
 
-        assert!(!state.leaves.is_empty() || state.epoch >= 1);
+        assert!(!state.leaves.is_empty() || state.epoch >= Epoch(1));
     }
 
     #[test]

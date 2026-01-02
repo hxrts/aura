@@ -5,8 +5,8 @@
 //! authorization concern and belongs in the authorization domain (aura-authorization).
 
 // Authorization logic moved from aura-store to proper domain (aura-authorization)
-use aura_core::scope::ResourceScope;
-use aura_core::{AuthorityId, FlowBudget};
+use aura_core::scope::{ResourceScope, StoragePath};
+use aura_core::{AuthorityId, FlowBudget, FlowCost};
 use biscuit_auth::{
     macros::{fact, policy, rule},
     Authorizer, Biscuit, PublicKey,
@@ -127,7 +127,10 @@ impl BiscuitStorageEvaluator {
         let flow_cost = self.calculate_flow_cost(resource, permission);
 
         // Check flow budget
-        if !budget.can_charge(flow_cost) {
+        let can_charge = budget
+            .can_charge(flow_cost)
+            .map_err(|e| BiscuitStorageError::FlowBudget(e.to_string()))?;
+        if !can_charge {
             return Ok(AccessDecision::deny(&format!(
                 "Insufficient flow budget: required {}, available {}",
                 flow_cost,
@@ -180,33 +183,47 @@ impl BiscuitStorageEvaluator {
         match resource {
             StorageResource::Content(content_id) => {
                 // Use authority ID and content ID as path
+                let path = StoragePath::parse(&format!("content/{content_id}"))
+                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
                 Ok(ResourceScope::Storage {
                     authority_id: self.authority_id,
-                    path: format!("content/{}", content_id),
+                    path,
                 })
             }
             StorageResource::Namespace(namespace) => {
                 // Use authority ID and namespace as path
+                let path = StoragePath::parse(&format!("namespace/{namespace}/*"))
+                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
                 Ok(ResourceScope::Storage {
                     authority_id: self.authority_id,
-                    path: format!("namespace/{}/*", namespace),
+                    path,
                 })
             }
             StorageResource::Global => {
                 // Global storage scoped to this authority
+                let path = StoragePath::parse("global/*")
+                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
                 Ok(ResourceScope::Storage {
                     authority_id: self.authority_id,
-                    path: "global/*".to_string(),
+                    path,
                 })
             }
-            StorageResource::SearchIndex => Ok(ResourceScope::Storage {
-                authority_id: self.authority_id,
-                path: "search_index".to_string(),
-            }),
-            StorageResource::GarbageCollection => Ok(ResourceScope::Storage {
-                authority_id: self.authority_id,
-                path: "gc".to_string(),
-            }),
+            StorageResource::SearchIndex => {
+                let path = StoragePath::parse("search_index")
+                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
+                Ok(ResourceScope::Storage {
+                    authority_id: self.authority_id,
+                    path,
+                })
+            }
+            StorageResource::GarbageCollection => {
+                let path = StoragePath::parse("gc")
+                    .map_err(|e| BiscuitStorageError::InvalidResource(e.to_string()))?;
+                Ok(ResourceScope::Storage {
+                    authority_id: self.authority_id,
+                    path,
+                })
+            }
         }
     }
 
@@ -355,16 +372,16 @@ impl BiscuitStorageEvaluator {
         &self,
         resource: &StorageResource,
         permission: &StoragePermission,
-    ) -> u64 {
+    ) -> FlowCost {
         // Base costs by operation type
-        let base_cost = match permission {
+        let base_cost: u32 = match permission {
             StoragePermission::Read => 10,
             StoragePermission::Write => 50,
             StoragePermission::Admin => 100,
         };
 
         // Resource multipliers
-        let resource_multiplier = match resource {
+        let resource_multiplier: u32 = match resource {
             StorageResource::Content(_) => 1,
             StorageResource::Namespace(_) => 2,
             StorageResource::Global => 5,
@@ -372,7 +389,7 @@ impl BiscuitStorageEvaluator {
             StorageResource::GarbageCollection => 4,
         };
 
-        base_cost * resource_multiplier
+        FlowCost::from(base_cost * resource_multiplier)
     }
 }
 
@@ -717,8 +734,8 @@ mod tests {
         }) = scope_result
         {
             assert_eq!(scope_authority, evaluator.authority_id);
-            assert!(path.contains("content/"));
-            assert!(path.contains("personal/user123/doc"));
+            assert!(path.as_str().contains("content/"));
+            assert!(path.as_str().contains("personal/user123/doc"));
         } else {
             panic!("Expected Storage ResourceScope");
         }
@@ -739,7 +756,7 @@ mod tests {
         }) = scope_result
         {
             assert_eq!(scope_authority, evaluator.authority_id);
-            assert_eq!(path, "namespace/personal/*");
+            assert_eq!(path.as_str(), "namespace/personal/*");
         } else {
             panic!("Expected Storage ResourceScope");
         }
@@ -760,7 +777,7 @@ mod tests {
         }) = scope_result
         {
             assert_eq!(scope_authority, evaluator.authority_id);
-            assert_eq!(path, "global/*");
+            assert_eq!(path.as_str(), "global/*");
         } else {
             panic!("Expected Storage ResourceScope");
         }
@@ -777,14 +794,14 @@ mod tests {
         let admin_cost =
             evaluator.calculate_flow_cost(&content_resource, &StoragePermission::Admin);
 
-        assert_eq!(read_cost, 10); // 10 * 1
-        assert_eq!(write_cost, 50); // 50 * 1
-        assert_eq!(admin_cost, 100); // 100 * 1
+        assert_eq!(read_cost, 10.into()); // 10 * 1
+        assert_eq!(write_cost, 50.into()); // 50 * 1
+        assert_eq!(admin_cost, 100.into()); // 100 * 1
 
         let global_resource = StorageResource::Global;
         let global_read_cost =
             evaluator.calculate_flow_cost(&global_resource, &StoragePermission::Read);
-        assert_eq!(global_read_cost, 50); // 10 * 5
+        assert_eq!(global_read_cost, 50.into()); // 10 * 5
     }
 
     #[test]

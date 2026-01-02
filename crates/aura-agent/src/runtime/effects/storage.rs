@@ -62,7 +62,8 @@ impl SecureStorageEffects for AuraEffectSystem {
         key: &[u8],
         caps: &[SecureStorageCapability],
     ) -> Result<(), SecureStorageError> {
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_store(location, key, caps)
             .await
     }
@@ -72,7 +73,8 @@ impl SecureStorageEffects for AuraEffectSystem {
         location: &SecureStorageLocation,
         caps: &[SecureStorageCapability],
     ) -> Result<Vec<u8>, SecureStorageError> {
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_retrieve(location, caps)
             .await
     }
@@ -82,7 +84,8 @@ impl SecureStorageEffects for AuraEffectSystem {
         location: &SecureStorageLocation,
         caps: &[SecureStorageCapability],
     ) -> Result<(), SecureStorageError> {
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_delete(location, caps)
             .await
     }
@@ -99,7 +102,8 @@ impl SecureStorageEffects for AuraEffectSystem {
         namespace: &str,
         caps: &[SecureStorageCapability],
     ) -> Result<Vec<String>, SecureStorageError> {
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_list_keys(namespace, caps)
             .await
     }
@@ -110,7 +114,8 @@ impl SecureStorageEffects for AuraEffectSystem {
         context: &str,
         caps: &[SecureStorageCapability],
     ) -> Result<Option<Vec<u8>>, SecureStorageError> {
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_generate_key(location, context, caps)
             .await
     }
@@ -121,7 +126,8 @@ impl SecureStorageEffects for AuraEffectSystem {
         caps: &[SecureStorageCapability],
         expires_at: &aura_core::time::PhysicalTime,
     ) -> Result<Vec<u8>, SecureStorageError> {
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_create_time_bound_token(location, caps, expires_at)
             .await
     }
@@ -131,7 +137,8 @@ impl SecureStorageEffects for AuraEffectSystem {
         token: &[u8],
         location: &SecureStorageLocation,
     ) -> Result<Vec<u8>, SecureStorageError> {
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_access_with_token(token, location)
             .await
     }
@@ -141,13 +148,15 @@ impl SecureStorageEffects for AuraEffectSystem {
     }
 
     async fn is_secure_storage_available(&self) -> bool {
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .is_secure_storage_available()
             .await
     }
 
     fn get_secure_storage_capabilities(&self) -> Vec<String> {
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .get_secure_storage_capabilities()
     }
 }

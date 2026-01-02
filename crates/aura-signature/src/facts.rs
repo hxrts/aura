@@ -7,30 +7,157 @@
 //! authority-centric model where authorities hide internal device structure.
 
 use aura_core::time::PhysicalTime;
-use aura_core::types::facts::{FactDelta, FactDeltaReducer};
+use aura_core::types::facts::{FactDelta, FactDeltaReducer, FactError, FactTypeId};
 use aura_core::types::Epoch;
-use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
 use aura_core::AuthorityId;
 use aura_core::{AccountId, Cap};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Unique type identifier for verification facts
-pub const VERIFY_FACT_TYPE_ID: &str = "verify/v1";
+pub static VERIFY_FACT_TYPE_ID: FactTypeId = FactTypeId::new("verify/v1");
 /// Schema version for verification fact encoding
 pub const VERIFY_FACT_SCHEMA_VERSION: u16 = 2;
+
+/// Get the typed fact ID for verification facts
+pub fn verify_fact_type_id() -> &'static FactTypeId {
+    &VERIFY_FACT_TYPE_ID
+}
+
+/// Validated Ed25519 public key bytes (32 bytes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PublicKeyBytes([u8; 32]);
+
+impl PublicKeyBytes {
+    /// Length in bytes for Ed25519 public keys.
+    pub const LENGTH: usize = 32;
+
+    /// Create from a fixed-size array.
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Attempt to create from a byte slice.
+    pub fn try_from_slice(bytes: &[u8]) -> Result<Self, PublicKeyBytesError> {
+        if bytes.len() != Self::LENGTH {
+            return Err(PublicKeyBytesError {
+                actual: bytes.len() as u64,
+            });
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(bytes);
+        Ok(Self(arr))
+    }
+
+    /// Access the underlying bytes.
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl TryFrom<Vec<u8>> for PublicKeyBytes {
+    type Error = PublicKeyBytesError;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::try_from_slice(&value)
+    }
+}
+
+impl From<PublicKeyBytes> for Vec<u8> {
+    fn from(value: PublicKeyBytes) -> Self {
+        value.0.to_vec()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicKeyBytesError {
+    actual: u64,
+}
+
+impl fmt::Display for PublicKeyBytesError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "public key must be {} bytes, got {}",
+            PublicKeyBytes::LENGTH,
+            self.actual
+        )
+    }
+}
+
+impl std::error::Error for PublicKeyBytesError {}
+
+/// Confidence score between 0.0 and 1.0 (inclusive).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "f64", into = "f64")]
+pub struct Confidence(f64);
+
+impl Confidence {
+    /// Maximum confidence (1.0).
+    pub const MAX: Confidence = Confidence(1.0);
+    /// Minimum confidence (0.0).
+    pub const MIN: Confidence = Confidence(0.0);
+
+    /// Create a validated confidence score.
+    pub fn new(value: f64) -> Result<Self, ConfidenceError> {
+        if (0.0..=1.0).contains(&value) {
+            Ok(Self(value))
+        } else {
+            Err(ConfidenceError { value })
+        }
+    }
+
+    /// Access the underlying value.
+    pub fn value(self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for Confidence {
+    type Error = ConfidenceError;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        Confidence::new(value)
+    }
+}
+
+impl From<Confidence> for f64 {
+    fn from(value: Confidence) -> Self {
+        value.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfidenceError {
+    value: f64,
+}
+
+impl fmt::Display for ConfidenceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "confidence must be between 0.0 and 1.0, got {}",
+            self.value
+        )
+    }
+}
+
+impl std::error::Error for ConfidenceError {}
 
 /// Verification domain facts for identity state changes.
 ///
 /// These facts capture authority lifecycle events and are used by the
 /// journal system to derive authority registry state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum VerifyFact {
     /// Authority registered
     AuthorityRegistered {
         /// Authority being registered
         authority_id: AuthorityId,
         /// Authority public key (serialized)
-        public_key: Vec<u8>,
+        public_key: PublicKeyBytes,
         /// Initial capabilities granted
         capabilities: Cap,
         /// Epoch when authority was registered
@@ -44,7 +171,7 @@ pub enum VerifyFact {
         /// Authority being suspended
         authority_id: AuthorityId,
         /// Reason for suspension
-        reason: String,
+        reason: RevocationReason,
         /// Epoch when authority was suspended
         suspended_epoch: Epoch,
         /// Timestamp when authority was suspended (uses unified time system)
@@ -56,7 +183,7 @@ pub enum VerifyFact {
         /// Authority being revoked
         authority_id: AuthorityId,
         /// Reason for revocation
-        reason: String,
+        reason: RevocationReason,
         /// Epoch when authority was revoked
         revoked_epoch: Epoch,
         /// Timestamp when authority was revoked (uses unified time system)
@@ -106,7 +233,7 @@ pub enum VerifyFact {
         /// Whether verification succeeded
         success: bool,
         /// Confidence score (0.0 to 1.0)
-        confidence: f64,
+        confidence: Confidence,
         /// Timestamp when verification occurred (uses unified time system)
         verified_at: PhysicalTime,
     },
@@ -139,11 +266,24 @@ pub enum VerificationType {
     Threshold,
 }
 
-impl VerifyFact {
-    fn version() -> SemanticVersion {
-        SemanticVersion::new(VERIFY_FACT_SCHEMA_VERSION, 0, 0)
-    }
+/// Closed set of lifecycle revocation/suspension reasons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RevocationReason {
+    /// Policy or terms violation.
+    PolicyViolation,
+    /// Cryptographic key compromise detected.
+    CompromiseDetected,
+    /// User-initiated revocation.
+    UserRequested,
+    /// Administrative action.
+    Administrative,
+    /// Credential or delegation expired.
+    Expired,
+    /// Reason could not be determined.
+    Unknown,
+}
 
+impl VerifyFact {
     /// Get the authority ID associated with this fact, if applicable
     pub fn authority_id(&self) -> Option<AuthorityId> {
         match self {
@@ -173,25 +313,53 @@ impl VerifyFact {
     }
 
     /// Encode this fact with a canonical envelope.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let message = VersionedMessage::new(self.clone(), Self::version())
-            .with_metadata("type".to_string(), VERIFY_FACT_TYPE_ID.to_string());
-        to_vec(&message).unwrap_or_default()
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn try_encode(&self) -> Result<Vec<u8>, FactError> {
+        aura_core::types::facts::try_encode_fact(
+            verify_fact_type_id(),
+            VERIFY_FACT_SCHEMA_VERSION,
+            self,
+        )
     }
 
     /// Decode a fact from a canonical envelope.
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let message: VersionedMessage<Self> = from_slice(bytes).ok()?;
-        if !message.version.is_compatible(&Self::version()) {
-            return None;
-        }
-        Some(message.payload)
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn try_decode(bytes: &[u8]) -> Result<Self, FactError> {
+        aura_core::types::facts::try_decode_fact(
+            verify_fact_type_id(),
+            VERIFY_FACT_SCHEMA_VERSION,
+            bytes,
+        )
+    }
+
+    /// Encode this fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, FactError> {
+        self.try_encode()
+    }
+
+    /// Decode a fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FactError> {
+        Self::try_decode(bytes)
     }
 
     /// Create an AuthorityRegistered fact with millisecond timestamp
     pub fn authority_registered_ms(
         authority_id: AuthorityId,
-        public_key: Vec<u8>,
+        public_key: PublicKeyBytes,
         capabilities: Cap,
         registered_epoch: Epoch,
         registered_at_ms: u64,
@@ -211,7 +379,7 @@ impl VerifyFact {
     /// Create an AuthoritySuspended fact with millisecond timestamp
     pub fn authority_suspended_ms(
         authority_id: AuthorityId,
-        reason: String,
+        reason: RevocationReason,
         suspended_epoch: Epoch,
         suspended_at_ms: u64,
     ) -> Self {
@@ -229,7 +397,7 @@ impl VerifyFact {
     /// Create an AuthorityRevoked fact with millisecond timestamp
     pub fn authority_revoked_ms(
         authority_id: AuthorityId,
-        reason: String,
+        reason: RevocationReason,
         revoked_epoch: Epoch,
         revoked_at_ms: u64,
     ) -> Self {
@@ -301,7 +469,7 @@ impl VerifyFact {
         authority_id: AuthorityId,
         verification_type: VerificationType,
         success: bool,
-        confidence: f64,
+        confidence: Confidence,
         verified_at_ms: u64,
     ) -> Self {
         Self::IdentityVerified {
@@ -466,7 +634,7 @@ mod tests {
 
         let fact = VerifyFact::authority_registered_ms(
             authority_id,
-            vec![1, 2, 3, 4],
+            PublicKeyBytes::new([1u8; 32]),
             Cap::top(),
             Epoch::new(1),
             1000,
@@ -485,7 +653,7 @@ mod tests {
 
         let fact = VerifyFact::authority_registered_ms(
             authority_id,
-            vec![1, 2, 3, 4],
+            PublicKeyBytes::new([2u8; 32]),
             Cap::top(),
             Epoch::new(1),
             1000,
@@ -504,7 +672,7 @@ mod tests {
             authority_id,
             VerificationType::Authority,
             true,
-            1.0,
+            Confidence::new(1.0).expect("valid confidence"),
             2000,
         );
 
@@ -524,10 +692,152 @@ mod tests {
 
         let fact = VerifyFact::authority_suspended_ms(
             authority_id,
-            "test reason".to_string(),
+            RevocationReason::Administrative,
             Epoch::new(1),
             1234567890,
         );
         assert_eq!(fact.timestamp_ms(), 1234567890);
+    }
+
+    #[test]
+    fn test_public_key_bytes_validation() {
+        let ok = PublicKeyBytes::try_from_slice(&[0u8; 32]);
+        assert!(ok.is_ok());
+
+        let bad = PublicKeyBytes::try_from_slice(&[0u8; 31]);
+        assert!(bad.is_err());
+    }
+
+    #[test]
+    fn test_confidence_validation() {
+        assert!(Confidence::new(0.0).is_ok());
+        assert!(Confidence::new(1.0).is_ok());
+        assert!(Confidence::new(-0.1).is_err());
+        assert!(Confidence::new(1.1).is_err());
+    }
+}
+
+/// Property tests for semilattice laws on VerifyFactDelta
+#[cfg(test)]
+mod proptest_semilattice {
+    use super::*;
+    use aura_core::types::facts::FactDelta;
+    use proptest::prelude::*;
+
+    /// Strategy for generating arbitrary AuthorityId values
+    fn arb_authority_id() -> impl Strategy<Value = AuthorityId> {
+        any::<[u8; 32]>().prop_map(AuthorityId::new_from_entropy)
+    }
+
+    /// Strategy for generating arbitrary VerifyFactDelta values
+    fn arb_delta() -> impl Strategy<Value = VerifyFactDelta> {
+        (
+            prop::collection::vec(arb_authority_id(), 0..5),
+            prop::collection::vec(arb_authority_id(), 0..5),
+            prop::collection::vec(arb_authority_id(), 0..5),
+            prop::collection::vec(arb_authority_id(), 0..5),
+            0u64..100,
+            0u64..100,
+        )
+            .prop_map(
+                |(
+                    authorities_registered,
+                    authorities_suspended,
+                    authorities_revoked,
+                    authorities_reactivated,
+                    verifications_performed,
+                    verifications_successful,
+                )| {
+                    VerifyFactDelta {
+                        authorities_registered,
+                        authorities_suspended,
+                        authorities_revoked,
+                        authorities_reactivated,
+                        verifications_performed,
+                        verifications_successful,
+                    }
+                },
+            )
+    }
+
+    /// Compare deltas as multisets (order-independent for Vec fields)
+    fn deltas_equivalent(a: &VerifyFactDelta, b: &VerifyFactDelta) -> bool {
+        // For Vec fields, compare as sorted multisets
+        let mut a_registered = a.authorities_registered.clone();
+        let mut b_registered = b.authorities_registered.clone();
+        a_registered.sort();
+        b_registered.sort();
+
+        let mut a_suspended = a.authorities_suspended.clone();
+        let mut b_suspended = b.authorities_suspended.clone();
+        a_suspended.sort();
+        b_suspended.sort();
+
+        let mut a_revoked = a.authorities_revoked.clone();
+        let mut b_revoked = b.authorities_revoked.clone();
+        a_revoked.sort();
+        b_revoked.sort();
+
+        let mut a_reactivated = a.authorities_reactivated.clone();
+        let mut b_reactivated = b.authorities_reactivated.clone();
+        a_reactivated.sort();
+        b_reactivated.sort();
+
+        a_registered == b_registered
+            && a_suspended == b_suspended
+            && a_revoked == b_revoked
+            && a_reactivated == b_reactivated
+            && a.verifications_performed == b.verifications_performed
+            && a.verifications_successful == b.verifications_successful
+    }
+
+    proptest! {
+        /// Commutativity: a.merge(&b) == b.merge(&a) (multiset equivalence)
+        #[test]
+        fn merge_commutative(a in arb_delta(), b in arb_delta()) {
+            let mut ab = a.clone();
+            ab.merge(&b);
+
+            let mut ba = b.clone();
+            ba.merge(&a);
+
+            prop_assert!(
+                deltas_equivalent(&ab, &ba),
+                "merge should be commutative (as multisets)"
+            );
+        }
+
+        /// Associativity: (a.merge(&b)).merge(&c) == a.merge(&(b.merge(&c)))
+        #[test]
+        fn merge_associative(a in arb_delta(), b in arb_delta(), c in arb_delta()) {
+            // Left associative: (a merge b) merge c
+            let mut left = a.clone();
+            left.merge(&b);
+            left.merge(&c);
+
+            // Right associative: a merge (b merge c)
+            let mut bc = b.clone();
+            bc.merge(&c);
+            let mut right = a.clone();
+            right.merge(&bc);
+
+            prop_assert!(
+                deltas_equivalent(&left, &right),
+                "merge should be associative (as multisets)"
+            );
+        }
+
+        /// Identity: merge with default (empty) leaves value unchanged
+        #[test]
+        fn merge_identity(a in arb_delta()) {
+            let original = a.clone();
+            let mut result = a.clone();
+            result.merge(&VerifyFactDelta::default());
+
+            prop_assert!(
+                deltas_equivalent(&result, &original),
+                "merge with identity should preserve value"
+            );
+        }
     }
 }

@@ -5,14 +5,15 @@
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::handlers::shared::HandlerUtilities;
-use crate::runtime::AuraEffectSystem;
 use crate::runtime::services::SessionManager;
+use crate::runtime::AuraEffectSystem;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
     RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects,
 };
 use aura_core::hash;
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
+use aura_core::FlowCost;
 use aura_macros::choreography;
 use aura_protocol::effects::{ChoreographicRole, EffectApiEffects};
 use serde::{Deserialize, Serialize};
@@ -274,7 +275,7 @@ impl SessionOperations {
         &self,
         effects: &AuraEffectSystem,
         operation: &str,
-        cost: u32,
+        cost: FlowCost,
     ) -> AgentResult<()> {
         // Skip guard enforcement in test mode
         if effects.is_testing() {
@@ -316,7 +317,7 @@ impl SessionOperations {
         session_type: SessionType,
         participants: Vec<DeviceId>,
     ) -> AgentResult<SessionHandle> {
-        self.enforce_guard(&self.effects, "session:create", 100)
+        self.enforce_guard(&self.effects, "session:create", FlowCost::new(100))
             .await?;
         let device_id = self.device_id();
         let _timestamp_millis = self.effects.current_timestamp().await.unwrap_or(0);
@@ -458,7 +459,7 @@ impl SessionOperations {
                 continue;
             }
 
-            self.enforce_guard(effects, "session:invite", 50).await?;
+            self.enforce_guard(effects, "session:invite", FlowCost::new(50)).await?;
 
             let invitation = ParticipantInvitation {
                 session_id: request.session_id.clone(),
@@ -754,19 +755,15 @@ mod tests {
 
     #[tokio::test]
     async fn invitations_use_transport_envelopes() {
-        let authority_context =
-            AuthorityContext::new(AuthorityId::new_from_entropy([70u8; 32]));
+        let authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([70u8; 32]));
         let account_id = AccountId::new_from_entropy([12u8; 32]);
         let config = AgentConfig::default();
 
         // Use shared transport inbox to verify messages are sent
         let shared_transport = crate::runtime::SharedTransport::new();
         let effects = Arc::new(
-            AuraEffectSystem::testing_with_shared_transport(
-                &config,
-                shared_transport.clone(),
-            )
-            .unwrap(),
+            AuraEffectSystem::testing_with_shared_transport(&config, shared_transport.clone())
+                .unwrap(),
         );
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
 
@@ -794,8 +791,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_handles_are_persisted() {
-        let authority_context =
-            AuthorityContext::new(AuthorityId::new_from_entropy([71u8; 32]));
+        let authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([71u8; 32]));
         let account_id = AccountId::new_from_entropy([14u8; 32]);
         let config = AgentConfig::default();
         let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());

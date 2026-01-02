@@ -52,7 +52,9 @@ impl AuthorityManager {
                     return Err(AuthorityError::AlreadyExists(authority_id));
                 }
                 let authority_state = AuthorityState::new(authority_id, timestamp_ms);
-                state.authorities.insert(authority_id, authority_state.clone());
+                state
+                    .authorities
+                    .insert(authority_id, authority_state.clone());
                 Ok(authority_state)
             },
             |state| state.validate(),
@@ -73,7 +75,9 @@ impl AuthorityManager {
                     return Ok(existing.clone());
                 }
                 let authority_state = AuthorityState::new(authority_id, timestamp_ms);
-                state.authorities.insert(authority_id, authority_state.clone());
+                state
+                    .authorities
+                    .insert(authority_id, authority_state.clone());
                 Ok(authority_state)
             },
             |state| state.validate(),

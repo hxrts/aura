@@ -218,7 +218,7 @@ pub enum GuardianStatus {
 }
 
 /// A guardian
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Guardian {
     /// Guardian identifier
@@ -253,11 +253,7 @@ pub struct GuardianBinding {
 impl GuardianBinding {
     /// Create a new guardian binding.
     #[must_use]
-    pub fn new(
-        account_authority: AuthorityId,
-        context_id: ContextId,
-        bound_at: u64,
-    ) -> Self {
+    pub fn new(account_authority: AuthorityId, context_id: ContextId, bound_at: u64) -> Self {
         Self {
             account_authority,
             context_id,
@@ -303,7 +299,7 @@ pub enum RecoveryProcessStatus {
 }
 
 /// Guardian approval for recovery (with detailed info)
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct RecoveryApproval {
     /// Guardian ID who approved
@@ -313,7 +309,7 @@ pub struct RecoveryApproval {
 }
 
 /// Active recovery process (if any)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct RecoveryProcess {
     /// Recovery context ID
@@ -531,17 +527,11 @@ impl RecoveryState {
     ///
     /// This records that we can approve recovery requests for the specified account.
     /// Duplicate bindings are prevented.
-    pub fn add_guardian_for(
-        &mut self,
-        account: AuthorityId,
-        context_id: ContextId,
-        bound_at: u64,
-    ) {
+    pub fn add_guardian_for(&mut self, account: AuthorityId, context_id: ContextId, bound_at: u64) {
         // Prevent duplicate bindings
         if !self.is_guardian_for(&account) {
-            self.guardian_bindings.push(GuardianBinding::new(
-                account, context_id, bound_at,
-            ));
+            self.guardian_bindings
+                .push(GuardianBinding::new(account, context_id, bound_at));
         }
     }
 
@@ -927,10 +917,7 @@ mod tests {
             CeremonyProgress::new(1, 3, 2).status_text(),
             "1/2 (1 more needed)"
         );
-        assert_eq!(
-            CeremonyProgress::new(2, 3, 2).status_text(),
-            "2/2 (ready)"
-        );
+        assert_eq!(CeremonyProgress::new(2, 3, 2).status_text(), "2/2 (ready)");
     }
 
     #[test]

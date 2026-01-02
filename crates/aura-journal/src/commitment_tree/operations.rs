@@ -246,7 +246,7 @@ impl TreeOperationProcessor {
         let failed = self.operation_history.len() - successful;
 
         ProcessingStats {
-            current_epoch: self.current_state.current_epoch(),
+            current_epoch: self.current_state.current_epoch().into(),
             total_operations: self.operation_history.len() as u64,
             successful_operations: successful as u64,
             failed_operations: failed as u64,

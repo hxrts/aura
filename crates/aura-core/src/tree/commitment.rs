@@ -229,7 +229,7 @@ mod tests {
         let base = commit_branch(node_idx, epoch, &policy, &left, &right);
 
         // Different epoch
-        let diff_epoch = commit_branch(node_idx, 43, &policy, &left, &right);
+        let diff_epoch = commit_branch(node_idx, Epoch::new(43), &policy, &left, &right);
         assert_ne!(base, diff_epoch, "Different epoch should change commitment");
 
         // Different policy
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn test_commit_leaf_deterministic() {
         let leaf_id = LeafId(5);
-        let epoch = 42;
+        let epoch = Epoch::new(42);
         let pubkey = vec![1, 2, 3, 4];
 
         let c1 = commit_leaf(leaf_id, epoch, &pubkey);
@@ -273,13 +273,13 @@ mod tests {
     #[test]
     fn test_commit_leaf_changes_with_inputs() {
         let leaf_id = LeafId(5);
-        let epoch = 42;
+        let epoch = Epoch::new(42);
         let pubkey = vec![1, 2, 3, 4];
 
         let base = commit_leaf(leaf_id, epoch, &pubkey);
 
         // Different epoch
-        let diff_epoch = commit_leaf(leaf_id, 43, &pubkey);
+        let diff_epoch = commit_leaf(leaf_id, Epoch::new(43), &pubkey);
         assert_ne!(base, diff_epoch, "Different epoch should change commitment");
 
         // Different leaf ID
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn test_compute_root_commitment() {
         let root_idx = NodeIndex(0);
-        let epoch = 100;
+        let epoch = Epoch::new(100);
         let policy = Policy::Threshold { m: 2, n: 3 };
         let left = [0xAA; 32];
         let right = [0xBB; 32];

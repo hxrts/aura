@@ -46,6 +46,7 @@ use std::fmt::Debug;
 pub use aura_core::types::facts::{
     decode_domain_fact, encode_domain_fact, FactEncoding, FactEnvelope,
 };
+pub use crate::fact::ProtocolFactKey;
 
 /// Trait for domain-specific fact types
 ///

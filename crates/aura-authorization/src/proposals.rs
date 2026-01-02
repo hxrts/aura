@@ -51,18 +51,25 @@
 
 use crate::effect_policy::{ApprovalThreshold, OperationType};
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::types::facts::FactTypeId;
 use aura_core::time::PhysicalTime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Type identifier for proposal facts
-pub const PROPOSAL_FACT_TYPE_ID: &str = "proposal/v1";
+pub static PROPOSAL_FACT_TYPE_ID: FactTypeId = FactTypeId::new("proposal/v1");
+
+/// Get the typed fact ID for proposal facts.
+pub fn proposal_fact_type_id() -> &'static FactTypeId {
+    &PROPOSAL_FACT_TYPE_ID
+}
 
 /// Proposal domain fact types
 ///
 /// These facts represent proposal-related state changes.
 /// They are stored via the journal system and reduced by `ProposalFactReducer`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub enum ProposalFact {
     /// Proposal created for a deferred operation
     Created {
@@ -147,6 +154,7 @@ pub enum ProposalFact {
 
 /// Reasons a proposal can fail
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub enum ProposalFailureReason {
     /// Proposal expired before threshold was met
     Expired,
@@ -608,7 +616,7 @@ impl ProposalFactReducer {
 
     /// Get the type ID this reducer handles
     pub fn handles_type(&self) -> &'static str {
-        PROPOSAL_FACT_TYPE_ID
+        PROPOSAL_FACT_TYPE_ID.as_str()
     }
 }
 
@@ -967,7 +975,7 @@ mod tests {
     #[test]
     fn test_proposal_fact_reducer() {
         let reducer = ProposalFactReducer::new();
-        assert_eq!(reducer.handles_type(), PROPOSAL_FACT_TYPE_ID);
+        assert_eq!(reducer.handles_type(), PROPOSAL_FACT_TYPE_ID.as_str());
 
         let created = ProposalFact::created(
             test_context_id(),

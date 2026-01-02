@@ -3,6 +3,7 @@
 //! Simple annotation extraction utilities for Aura choreographic effects.
 //! Follows the rumpsteak-aura demo pattern for clean, simple annotation processing.
 
+use crate::ids::RoleId;
 /// Aura-specific effect that can be generated from annotations
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuraEffect {
@@ -11,40 +12,40 @@ pub enum AuraEffect {
         /// The required capability string
         capability: String,
         /// The role that needs this capability
-        role: String,
+        role: RoleId,
     },
     /// Flow budget cost for operations
     FlowCost {
         /// The cost in flow units
         cost: u64,
         /// The role that pays this cost
-        role: String,
+        role: RoleId,
     },
     /// Journal facts to be recorded
     JournalFacts {
         /// The facts to record
         facts: String,
         /// The role that records these facts
-        role: String,
+        role: RoleId,
     },
     /// Journal merge operation
     JournalMerge {
         /// The role that triggers the merge
-        role: String,
+        role: RoleId,
     },
     /// Audit log entry
     AuditLog {
         /// The action to log
         action: String,
         /// The role that performs the action
-        role: String,
+        role: RoleId,
     },
     /// Leakage tracking annotation
     Leakage {
         /// Observer classes that can see this operation
         observers: Vec<String>,
         /// The role that leaks information
-        role: String,
+        role: RoleId,
     },
 }
 
@@ -62,6 +63,106 @@ pub enum AuraExtractionError {
     /// Unsupported feature
     #[error("Unsupported feature: {0}")]
     UnsupportedFeature(String),
+}
+
+#[derive(Debug)]
+struct AnnotationList {
+    items: Vec<AnnotationItem>,
+}
+
+#[derive(Debug)]
+struct AnnotationItem {
+    name: String,
+    value: Option<AnnotationValue>,
+}
+
+#[derive(Debug)]
+enum AnnotationValue {
+    Str(String),
+    Int(u64),
+    Bool(bool),
+    IdentList(Vec<String>),
+    IntList(Vec<u64>),
+}
+
+impl Parse for AnnotationList {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut items = Vec::new();
+        while !input.is_empty() {
+            items.push(input.parse()?);
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            } else {
+                break;
+            }
+        }
+        Ok(Self { items })
+    }
+}
+
+impl Parse for AnnotationItem {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let name: Ident = input.parse()?;
+        let value = if input.peek(Token![=]) {
+            input.parse::<Token![=]>()?;
+            Some(parse_annotation_value(input)?)
+        } else {
+            None
+        };
+        Ok(Self {
+            name: name.to_string(),
+            value,
+        })
+    }
+}
+
+fn parse_annotation_value(input: ParseStream) -> syn::Result<AnnotationValue> {
+    if input.peek(LitStr) {
+        let lit: LitStr = input.parse()?;
+        Ok(AnnotationValue::Str(lit.value()))
+    } else if input.peek(LitInt) {
+        let lit: LitInt = input.parse()?;
+        let value = lit.base10_parse::<u64>()?;
+        Ok(AnnotationValue::Int(value))
+    } else if input.peek(LitBool) {
+        let lit: LitBool = input.parse()?;
+        Ok(AnnotationValue::Bool(lit.value))
+    } else if input.peek(syn::token::Paren) {
+        let content;
+        parenthesized!(content in input);
+        let idents: Punctuated<Ident, Token![,]> =
+            content.parse_terminated(Ident::parse, Token![,])?;
+        if idents.is_empty() {
+            return Err(syn::Error::new(
+                content.span(),
+                "leak list must contain at least one identifier",
+            ));
+        }
+        Ok(AnnotationValue::IdentList(
+            idents.into_iter().map(|ident| ident.to_string()).collect(),
+        ))
+    } else if input.peek(syn::token::Bracket) {
+        let content;
+        bracketed!(content in input);
+        let values: Punctuated<LitInt, Token![,]> =
+            content.parse_terminated(LitInt::parse, Token![,])?;
+        if values.is_empty() {
+            return Err(syn::Error::new(
+                content.span(),
+                "leakage_budget must contain at least one integer",
+            ));
+        }
+        let parsed = values
+            .into_iter()
+            .map(|lit| lit.base10_parse::<u64>())
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(AnnotationValue::IntList(parsed))
+    } else {
+        Err(syn::Error::new(
+            input.span(),
+            "Expected string, integer, boolean, or identifier list",
+        ))
+    }
 }
 
 /// Extract Aura annotations from a choreography string
@@ -138,201 +239,245 @@ fn detect_annotations_in_text(
     choreography_str: &str,
     effects: &mut Vec<AuraEffect>,
 ) -> Result<(), AuraExtractionError> {
-    // Simple pattern matching following the rumpsteak-aura demo approach
+    for raw_segment in choreography_str.split(';') {
+        let line = raw_segment.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let annotation_content = match extract_annotation_content(line) {
+            Some(content) => content,
+            None => continue,
+        };
 
-    for line in choreography_str.lines() {
-        // Check if this line has a role annotation (contains '[' and has a send arrow '->')
-        let has_role_annotation = line.contains('[') && line.contains("->");
+        let role = extract_role_from_line(line).unwrap_or_else(|| RoleId::new("UnknownRole"));
+        let has_role_annotation = line.contains("->");
+        let items = parse_annotation_list(&annotation_content)?;
+        let mut has_flow_cost = false;
 
-        if line.contains("guard_capability") {
-            if let Some(cap) = extract_capability_from_line(line) {
-                effects.push(AuraEffect::GuardCapability {
-                    capability: cap,
-                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
-                });
+        for item in items {
+            match item.name.as_str() {
+                "guard_capability" => {
+                    let capability = match item.value {
+                        Some(AnnotationValue::Str(value)) => value,
+                        Some(_) => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "guard_capability expects a string literal".to_string(),
+                            ))
+                        }
+                        None => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "guard_capability requires a string literal".to_string(),
+                            ))
+                        }
+                    };
+                    effects.push(AuraEffect::GuardCapability {
+                        capability,
+                        role: role.clone(),
+                    });
+                }
+                "flow_cost" => {
+                    if has_flow_cost {
+                        return Err(AuraExtractionError::InvalidAnnotationValue(
+                            "flow_cost specified multiple times".to_string(),
+                        ));
+                    }
+                    let cost = match item.value {
+                        Some(AnnotationValue::Int(value)) => value,
+                        Some(_) => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "flow_cost expects an integer literal".to_string(),
+                            ))
+                        }
+                        None => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "flow_cost requires an integer literal".to_string(),
+                            ))
+                        }
+                    };
+                    effects.push(AuraEffect::FlowCost {
+                        cost,
+                        role: role.clone(),
+                    });
+                    has_flow_cost = true;
+                }
+                "journal_facts" => {
+                    let facts = match item.value {
+                        Some(AnnotationValue::Str(value)) => value,
+                        Some(_) => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "journal_facts expects a string literal".to_string(),
+                            ))
+                        }
+                        None => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "journal_facts requires a string literal".to_string(),
+                            ))
+                        }
+                    };
+                    effects.push(AuraEffect::JournalFacts {
+                        facts,
+                        role: role.clone(),
+                    });
+                }
+                "journal_merge" => {
+                    match item.value {
+                        None => {
+                            effects.push(AuraEffect::JournalMerge { role: role.clone() });
+                        }
+                        Some(AnnotationValue::Bool(true)) => {
+                            effects.push(AuraEffect::JournalMerge { role: role.clone() });
+                        }
+                        Some(AnnotationValue::Bool(false)) => {}
+                        Some(_) => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "journal_merge expects a boolean literal".to_string(),
+                            ))
+                        }
+                    }
+                }
+                "audit_log" => {
+                    let action = match item.value {
+                        Some(AnnotationValue::Str(value)) => value,
+                        Some(_) => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "audit_log expects a string literal".to_string(),
+                            ))
+                        }
+                        None => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "audit_log requires a string literal".to_string(),
+                            ))
+                        }
+                    };
+                    effects.push(AuraEffect::AuditLog {
+                        action,
+                        role: role.clone(),
+                    });
+                }
+                "leak" => {
+                    let observers = match item.value {
+                        Some(AnnotationValue::IdentList(values)) => values,
+                        Some(AnnotationValue::Str(value)) => vec![value],
+                        Some(_) => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "leak expects a parenthesized identifier list or string literal"
+                                    .to_string(),
+                            ))
+                        }
+                        None => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "leak requires observers".to_string(),
+                            ))
+                        }
+                    };
+                    effects.push(AuraEffect::Leakage {
+                        observers,
+                        role: role.clone(),
+                    });
+                }
+                "leakage_budget" => {
+                    match item.value {
+                        Some(AnnotationValue::IntList(_values)) => {}
+                        Some(_) => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "leakage_budget expects a list of integers".to_string(),
+                            ))
+                        }
+                        None => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "leakage_budget requires a list of integers".to_string(),
+                            ))
+                        }
+                    }
+                }
+                other => {
+                    return Err(AuraExtractionError::UnsupportedFeature(format!(
+                        "Unknown annotation: {other}"
+                    )))
+                }
             }
         }
 
-        // Handle flow_cost - apply default of 100 if annotation bracket exists but no flow_cost specified
-        if line.contains("flow_cost") {
-            if let Some(cost) = extract_flow_cost_from_line(line) {
-                effects.push(AuraEffect::FlowCost {
-                    cost,
-                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
-                });
-            }
-        } else if has_role_annotation {
-            // Line has role annotation but no explicit flow_cost - apply default
-            if let Some(role) = extract_role_from_line(line) {
-                effects.push(AuraEffect::FlowCost {
-                    cost: 100, // Default flow cost
-                    role,
-                });
-            }
-        }
-
-        if line.contains("journal_facts") {
-            if let Some(facts) = extract_journal_facts_from_line(line) {
-                effects.push(AuraEffect::JournalFacts {
-                    facts,
-                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
-                });
-            }
-        }
-
-        // Handle leak annotation: [leak: (External, Neighbor)]
-        if line.contains("leak:") || line.contains("leak =") {
-            if let Some(observers) = extract_leakage_observers_from_line(line) {
-                effects.push(AuraEffect::Leakage {
-                    observers,
-                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
-                });
-            }
-        }
-
-        // Handle journal_merge annotation: [journal_merge = true] or [journal_merge]
-        if line.contains("journal_merge") {
-            // Extract role and add JournalMerge effect
-            effects.push(AuraEffect::JournalMerge {
-                role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
+        if has_role_annotation && !has_flow_cost {
+            effects.push(AuraEffect::FlowCost {
+                cost: 100,
+                role,
             });
-        }
-
-        // Handle audit_log annotation: [audit_log = "action_name"]
-        if line.contains("audit_log") {
-            if let Some(action) = extract_audit_log_from_line(line) {
-                effects.push(AuraEffect::AuditLog {
-                    action,
-                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
-                });
-            }
         }
     }
 
     Ok(())
 }
 
+fn parse_annotation_list(content: &str) -> Result<Vec<AnnotationItem>, AuraExtractionError> {
+    let normalized = content.replace("leak:", "leak =");
+    let list: AnnotationList = syn::parse_str(&normalized)
+        .map_err(|err| AuraExtractionError::AnnotationParseError(err.to_string()))?;
+    Ok(list.items)
+}
+
+fn extract_annotation_content(line: &str) -> Option<String> {
+    if line.trim_start().starts_with("#[") {
+        return None;
+    }
+
+    let bytes = line.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index] != b'[' {
+            index += 1;
+            continue;
+        }
+
+        let start = index + 1;
+        let mut depth = 1usize;
+        index += 1;
+        while index < bytes.len() && depth > 0 {
+            match bytes[index] {
+                b'[' => depth += 1,
+                b']' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            index += 1;
+        }
+
+        if depth != 0 {
+            break;
+        }
+
+        let end = index - 1;
+        let content = line[start..end].trim();
+        if is_annotation_content(content) {
+            return Some(content.to_string());
+        }
+    }
+    None
+}
+
+fn is_annotation_content(content: &str) -> bool {
+    let normalized = content.replace("leak:", "leak =");
+    [
+        "guard_capability",
+        "flow_cost",
+        "journal_facts",
+        "journal_merge",
+        "audit_log",
+        "leak",
+        "leakage_budget",
+    ]
+    .iter()
+    .any(|key| normalized.contains(key))
+}
+
 /// Extract role from a line - simple implementation
-fn extract_role_from_line(line: &str) -> Option<String> {
+fn extract_role_from_line(line: &str) -> Option<RoleId> {
     // Try to find role before brackets like "Alice[guard_capability = ...]"
     if let Some(bracket_pos) = line.find('[') {
         let before_bracket = line[..bracket_pos].trim();
         if !before_bracket.is_empty() {
-            return Some(before_bracket.to_string());
+            return Some(RoleId::new(before_bracket));
         }
     }
-    None
-}
-
-fn extract_capability_from_line(line: &str) -> Option<String> {
-    // Extract capability value from line like: guard_capability = "send_message"
-    if let Some(start) = line.find("guard_capability") {
-        if let Some(quote_start) = line[start..].find('"') {
-            let quote_start = start + quote_start + 1;
-            if let Some(quote_end) = line[quote_start..].find('"') {
-                return Some(line[quote_start..quote_start + quote_end].to_string());
-            }
-        }
-    }
-    None
-}
-
-fn extract_flow_cost_from_line(line: &str) -> Option<u64> {
-    // Extract cost value from line like: flow_cost = 100 or Alice[flow_cost = 100]
-    if let Some(start) = line.find("flow_cost") {
-        if let Some(equals) = line[start..].find('=') {
-            let after_equals = start + equals + 1;
-            // Look for digits after the equals sign
-            let remaining = &line[after_equals..];
-
-            // Handle both bracketed and non-bracketed values
-            let value_str = remaining
-                .trim()
-                .split(|c: char| c == ']' || c.is_whitespace())
-                .next()?;
-            if let Ok(cost) = value_str.trim().parse::<u64>() {
-                return Some(cost);
-            }
-
-            // Fallback: look for tokens in remaining string
-            for token in remaining.split_whitespace() {
-                if let Ok(cost) = token.trim_end_matches(&[',', ']'][..]).parse::<u64>() {
-                    return Some(cost);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn extract_journal_facts_from_line(line: &str) -> Option<String> {
-    // Extract facts value from line like: journal_facts = "message_sent"
-    if let Some(start) = line.find("journal_facts") {
-        if let Some(quote_start) = line[start..].find('"') {
-            let quote_start = start + quote_start + 1;
-            if let Some(quote_end) = line[quote_start..].find('"') {
-                return Some(line[quote_start..quote_start + quote_end].to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Extract audit log action from a line
-fn extract_audit_log_from_line(line: &str) -> Option<String> {
-    // Extract action value from line like: audit_log = "action_name"
-    if let Some(start) = line.find("audit_log") {
-        if let Some(quote_start) = line[start..].find('"') {
-            let quote_start = start + quote_start + 1;
-            if let Some(quote_end) = line[quote_start..].find('"') {
-                return Some(line[quote_start..quote_start + quote_end].to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Extract leakage observers from a line
-fn extract_leakage_observers_from_line(line: &str) -> Option<Vec<String>> {
-    // Look for pattern like "leak: (External, Neighbor)" or "leak = (External)" or "leak = \"External\""
-    let after_leak = if let Some(start) = line.find("leak:") {
-        &line[start + 5..]
-    } else if let Some(start) = line.find("leak =") {
-        &line[start + 6..]
-    } else if let Some(start) = line.find("leak=") {
-        &line[start + 5..]
-    } else {
-        return None;
-    };
-
-    // Find the parentheses
-    if let Some(paren_start) = after_leak.find('(') {
-        if let Some(paren_end) = after_leak.find(')') {
-            let observers_str = &after_leak[paren_start + 1..paren_end];
-
-            // Split by comma and trim
-            let observers: Vec<String> = observers_str
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-
-            if !observers.is_empty() {
-                return Some(observers);
-            }
-        }
-    }
-
-    // Also handle quoted string format: leak = "External"
-    if let Some(quote_start) = after_leak.find('"') {
-        if let Some(quote_end) = after_leak[quote_start + 1..].find('"') {
-            let observer = after_leak[quote_start + 1..quote_start + 1 + quote_end].trim();
-            if !observer.is_empty() {
-                return Some(vec![observer.to_string()]);
-            }
-        }
-    }
-
     None
 }
 
@@ -344,13 +489,13 @@ mod tests {
     fn test_aura_effect_types() {
         let guard_effect = AuraEffect::GuardCapability {
             capability: "test_capability".to_string(),
-            role: "TestRole".to_string(),
+            role: RoleId::new("TestRole"),
         };
 
         match guard_effect {
             AuraEffect::GuardCapability { capability, role } => {
                 assert_eq!(capability, "test_capability");
-                assert_eq!(role, "TestRole");
+                assert_eq!(role.as_str(), "TestRole");
             }
             _ => panic!("Wrong effect type"),
         }
@@ -360,44 +505,49 @@ mod tests {
     fn test_flow_cost_effect() {
         let cost_effect = AuraEffect::FlowCost {
             cost: 150,
-            role: "Coordinator".to_string(),
+            role: RoleId::new("Coordinator"),
         };
 
         match cost_effect {
             AuraEffect::FlowCost { cost, role } => {
                 assert_eq!(cost, 150);
-                assert_eq!(role, "Coordinator");
+                assert_eq!(role.as_str(), "Coordinator");
             }
             _ => panic!("Wrong effect type"),
         }
     }
 
     #[test]
-    fn test_extract_capability_from_line() {
-        let line = r#"Alice[guard_capability = "send_message"] -> Bob: Message;"#;
-        let capability = extract_capability_from_line(line);
-        assert_eq!(capability, Some("send_message".to_string()));
-    }
-
-    #[test]
-    fn test_extract_flow_cost_from_line() {
-        let line = "Alice[flow_cost = 100] -> Bob: Message;";
-        let cost = extract_flow_cost_from_line(line);
-        assert_eq!(cost, Some(100));
-    }
-
-    #[test]
-    fn test_extract_journal_facts_from_line() {
-        let line = r#"Alice[journal_facts = "message_sent"] -> Bob: Message;"#;
-        let facts = extract_journal_facts_from_line(line);
-        assert_eq!(facts, Some("message_sent".to_string()));
-    }
-
-    #[test]
     fn test_extract_role_from_line() {
         let line = r#"Alice[guard_capability = "send_message"] -> Bob: Message;"#;
         let role = extract_role_from_line(line);
-        assert_eq!(role, Some("Alice".to_string()));
+        assert_eq!(role.map(|role| role.as_str().to_string()), Some("Alice".to_string()));
+    }
+
+    #[test]
+    fn test_guard_capability_annotation() {
+        let choreography = r#"
+            Alice[guard_capability = "send_message"] -> Bob: Message;
+        "#;
+        let effects = extract_aura_annotations(choreography).unwrap();
+        let has_guard = effects.iter().any(|e| {
+            matches!(e, AuraEffect::GuardCapability { capability, role }
+                if capability == "send_message" && role.as_str() == "Alice")
+        });
+        assert!(has_guard, "Should extract guard_capability annotation");
+    }
+
+    #[test]
+    fn test_journal_facts_annotation() {
+        let choreography = r#"
+            Alice[journal_facts = "message_sent"] -> Bob: Message;
+        "#;
+        let effects = extract_aura_annotations(choreography).unwrap();
+        let has_facts = effects.iter().any(|e| {
+            matches!(e, AuraEffect::JournalFacts { facts, role }
+                if facts == "message_sent" && role.as_str() == "Alice")
+        });
+        assert!(has_facts, "Should extract journal_facts annotation");
     }
 
     #[test]
@@ -471,7 +621,7 @@ mod tests {
 
         let has_journal_merge = effects
             .iter()
-            .any(|e| matches!(e, AuraEffect::JournalMerge { role } if role == "Alice"));
+            .any(|e| matches!(e, AuraEffect::JournalMerge { role } if role.as_str() == "Alice"));
 
         assert!(has_journal_merge, "Should extract journal_merge annotation");
     }
@@ -485,7 +635,7 @@ mod tests {
 
         let has_audit_log = effects
             .iter()
-            .any(|e| matches!(e, AuraEffect::AuditLog { action, role } if action == "message_sent" && role == "Alice"));
+            .any(|e| matches!(e, AuraEffect::AuditLog { action, role } if action == "message_sent" && role.as_str() == "Alice"));
 
         assert!(has_audit_log, "Should extract audit_log annotation");
     }
@@ -501,7 +651,7 @@ mod tests {
             matches!(e, AuraEffect::Leakage { observers, role }
                 if observers.contains(&"External".to_string())
                 && observers.contains(&"Neighbor".to_string())
-                && role == "Alice")
+                && role.as_str() == "Alice")
         });
 
         assert!(
@@ -520,7 +670,7 @@ mod tests {
         let has_leakage = effects.iter().any(|e| {
             matches!(e, AuraEffect::Leakage { observers, role }
                 if observers.contains(&"External".to_string())
-                && role == "Alice")
+                && role.as_str() == "Alice")
         });
 
         assert!(
@@ -529,3 +679,6 @@ mod tests {
         );
     }
 }
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::{bracketed, parenthesized, Ident, LitBool, LitInt, LitStr, Token};

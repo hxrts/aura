@@ -106,13 +106,13 @@ pub mod fact_types;
 pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, AuthorityContext};
 
 // Builder system exports
-pub use builder::{BuildError, CliPresetBuilder, CustomPresetBuilder};
 #[cfg(feature = "android")]
 pub use builder::AndroidPresetBuilder;
-#[cfg(feature = "ios")]
-pub use builder::{DataProtectionClass, IosPresetBuilder};
 #[cfg(feature = "web")]
 pub use builder::WebPresetBuilder;
+pub use builder::{BuildError, CliPresetBuilder, CustomPresetBuilder};
+#[cfg(feature = "ios")]
+pub use builder::{DataProtectionClass, IosPresetBuilder};
 
 // Session management types
 pub use handlers::{SessionHandle, SessionServiceApi, SessionStats};

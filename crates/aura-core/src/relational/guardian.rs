@@ -3,7 +3,7 @@
 //! This module defines the domain types used for guardian configuration
 //! and relationships in cross-authority contexts.
 
-use crate::time::{PhysicalTime, TimeStamp};
+use crate::time::{PhysicalTime, TimeDomain, TimeStamp};
 use crate::Hash32;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -170,7 +170,14 @@ impl GuardianParameters {
     fn expiration_ms(&self) -> u64 {
         match &self.expiration {
             Some(TimeStamp::PhysicalClock(p)) => p.ts_ms,
-            Some(other) => other.to_index_ms().max(0) as u64,
+            Some(other) => {
+                let index = other.to_index_ms();
+                if index.domain() == TimeDomain::PhysicalClock {
+                    index.value()
+                } else {
+                    0
+                }
+            }
             None => 0,
         }
     }

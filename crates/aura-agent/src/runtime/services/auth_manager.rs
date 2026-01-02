@@ -1,7 +1,7 @@
 //! Authentication state manager.
 
-use crate::handlers::AuthChallenge;
 use super::state::with_state_mut_validated;
+use crate::handlers::AuthChallenge;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

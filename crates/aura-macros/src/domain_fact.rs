@@ -156,6 +156,7 @@ pub fn derive_domain_fact_impl(input: proc_macro::TokenStream) -> proc_macro::To
 
             fn to_bytes(&self) -> Vec<u8> {
                 aura_journal::encode_domain_fact(#type_id, #schema_version, self)
+                    .expect("DomainFact encoding failed")
             }
 
             fn from_bytes(bytes: &[u8]) -> Option<Self>

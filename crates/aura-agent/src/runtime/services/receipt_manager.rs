@@ -9,8 +9,8 @@
 //! When enabled, it periodically prunes expired receipts based on the configured
 //! retention period.
 
-use crate::core::AgentConfig;
 use super::state::with_state_mut_validated;
+use crate::core::AgentConfig;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::{HashMap, HashSet};
@@ -119,7 +119,10 @@ impl ReceiptState {
         for (key, chain) in &self.chains {
             for receipt_id in chain {
                 if !self.receipts.contains_key(receipt_id) {
-                    return Err(format!("chain {:?} references missing receipt {:?}", key, receipt_id));
+                    return Err(format!(
+                        "chain {:?} references missing receipt {:?}",
+                        key, receipt_id
+                    ));
                 }
             }
         }
@@ -203,8 +206,7 @@ impl ReceiptManager {
                             .filter(|(_, r)| r.timestamp < cutoff)
                             .map(|(id, _)| *id)
                             .collect();
-                        let expired_set: HashSet<ReceiptId> =
-                            expired_ids.iter().copied().collect();
+                        let expired_set: HashSet<ReceiptId> = expired_ids.iter().copied().collect();
                         let count = expired_ids.len();
 
                         if count > 0 {
@@ -260,7 +262,11 @@ impl ReceiptManager {
             &self.state,
             |state| {
                 state.receipts.insert(id, receipt);
-                state.chains.entry((context_id, peer_id)).or_default().push(id);
+                state
+                    .chains
+                    .entry((context_id, peer_id))
+                    .or_default()
+                    .push(id);
             },
             |state| state.validate(),
         )
@@ -316,8 +322,7 @@ impl ReceiptManager {
                     .filter(|(_, r)| r.timestamp < before_timestamp)
                     .map(|(id, _)| *id)
                     .collect();
-                let expired_set: HashSet<ReceiptId> =
-                    expired_ids.iter().copied().collect();
+                let expired_set: HashSet<ReceiptId> = expired_ids.iter().copied().collect();
 
                 let count = expired_ids.len();
 

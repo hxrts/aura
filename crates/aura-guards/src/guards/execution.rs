@@ -14,7 +14,7 @@ use super::{
 };
 use crate::authorization::BiscuitAuthorizationBridge;
 use aura_authorization::{AuthorityOp, ResourceScope};
-use aura_core::{types::Epoch, AuraError, AuraResult, FlowBudget};
+use aura_core::{types::Epoch, AuraError, AuraResult, FlowBudget, FlowCost};
 use std::future::Future;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -56,7 +56,7 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
             authority_id: guard.authority_id,
             operation: AuthorityOp::UpdateTree,
         },
-        1,
+        FlowCost::from(1),
         FlowBudget::new(guard.required_tokens.len() as u64 + 1, Epoch::new(0)),
     );
 
@@ -125,7 +125,7 @@ pub struct GuardVerificationContext {
     /// The resource scope for authorization
     pub resource_scope: ResourceScope,
     /// Flow cost for this operation
-    pub flow_cost: u64,
+    pub flow_cost: FlowCost,
     /// Available flow budget
     pub flow_budget: FlowBudget,
 }
@@ -135,7 +135,7 @@ impl GuardVerificationContext {
     pub fn new(
         capability: impl Into<String>,
         resource_scope: ResourceScope,
-        flow_cost: u64,
+        flow_cost: FlowCost,
         flow_budget: FlowBudget,
     ) -> Self {
         Self {

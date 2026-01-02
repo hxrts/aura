@@ -32,6 +32,18 @@
 //! - **Pull-Based**: Requestor drives sync (no unsolicited pushes)
 //! - **Verification**: All received operations verified before storage
 //! - **Shared Storage**: Sync and tree handlers share the same storage backend
+//!
+//! ## CRDT Synchronization
+//!
+//! For choreography-based CRDT state synchronization, use `CrdtCoordinator` from
+//! `aura-protocol` (enabled via `crdt-sync` feature). Integration happens in
+//! higher layers (`aura-sync` or `aura-agent`) to avoid circular dependencies.
+//!
+//! | Handler | Data Type | Method | Use Case |
+//! |---------|-----------|--------|----------|
+//! | `AntiEntropyHandler` | Tree ops (AttestedOp) | Digest comparison | Commitment tree sync |
+//! | `CrdtCoordinator` (aura-protocol) | General CRDT state | Choreographic | Journal/app state |
+//! | `BroadcasterHandler` | Any ops | Eager push | Real-time propagation |
 
 pub mod anti_entropy;
 pub mod broadcast;

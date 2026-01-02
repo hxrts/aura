@@ -247,10 +247,10 @@ mod tests {
         let device = DeviceId::new_from_entropy([5u8; 32]);
         let mut ctx = CausalContext::empty();
 
-        ctx.increment(device);
+        ctx.increment(device).expect("causal context increment");
         assert_eq!(ctx.logical_time.vector.get(&device), Some(&1));
 
-        ctx.increment(device);
+        ctx.increment(device).expect("causal context increment");
         assert_eq!(ctx.logical_time.vector.get(&device), Some(&2));
     }
 
@@ -267,7 +267,7 @@ mod tests {
         ctx2.logical_time.vector.insert(device_a, 1);
         ctx2.logical_time.vector.insert(device_b, 3);
 
-        ctx1.merge(&ctx2);
+        ctx1.merge(&ctx2).expect("causal context merge");
 
         assert_eq!(ctx1.logical_time.vector.get(&device_a), Some(&2)); // max(2, 1)
         assert_eq!(ctx1.logical_time.vector.get(&device_b), Some(&3)); // max(1, 3)

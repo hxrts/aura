@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use aura_core::effects::transport::{TransportEnvelope, TransportReceipt};
 use aura_core::effects::{PhysicalTimeEffects, TransportEffects};
 use aura_core::hash::hash;
-use aura_core::{AuthorityId, ContextId};
-use aura_guards::{GuardOperation, JournalCoupler};
+use aura_core::{AuthorityId, ContextId, FlowCost};
 use aura_guards::prelude::create_send_guard_op;
+use aura_guards::{GuardOperation, JournalCoupler};
 use aura_protocol::effects::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics,
@@ -41,7 +41,7 @@ impl ChoreographicEffects for AuraEffectSystem {
             GuardOperation::Custom("choreography:send".to_string()),
             context_id,
             peer,
-            flow_cost,
+            FlowCost::new(flow_cost),
         )
         .with_operation_id(format!(
             "choreography_send_{:?}_{:?}",
@@ -79,10 +79,10 @@ impl ChoreographicEffects for AuraEffectSystem {
                 src: receipt.src,
                 dst: receipt.dst,
                 epoch: receipt.epoch.value(),
-                cost: receipt.cost,
-                nonce: receipt.nonce,
+                cost: receipt.cost.value(),
+                nonce: receipt.nonce.value(),
                 prev: receipt.prev.0,
-                sig: receipt.sig.clone(),
+                sig: receipt.sig.clone().into_bytes(),
             });
 
         let envelope = TransportEnvelope {
@@ -264,4 +264,3 @@ impl ChoreographicEffects for AuraEffectSystem {
         state.metrics.clone()
     }
 }
-

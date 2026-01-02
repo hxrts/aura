@@ -1,7 +1,7 @@
 //! Invitation cache manager.
 
-use crate::handlers::Invitation;
 use super::state::with_state_mut_validated;
+use crate::handlers::Invitation;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -88,10 +88,7 @@ impl InvitationManager {
     }
 
     /// List pending invitations.
-    pub async fn list_pending(
-        &self,
-        is_pending: impl Fn(&Invitation) -> bool,
-    ) -> Vec<Invitation> {
+    pub async fn list_pending(&self, is_pending: impl Fn(&Invitation) -> bool) -> Vec<Invitation> {
         self.state
             .read()
             .await

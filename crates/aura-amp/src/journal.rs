@@ -179,7 +179,7 @@ fn extract_fact_contents(journal: &Journal) -> Vec<(Option<OrderTime>, FactConte
                     .and_then(|bytes| serde_json::from_slice(&bytes).ok()),
                 _ => None,
             };
-            content.map(|content| (parse_order_from_key(key), content))
+            content.map(|content| (parse_order_from_key(key.as_str()), content))
         })
         .collect()
 }

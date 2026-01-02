@@ -31,16 +31,18 @@ pub const DISPUTE_WINDOW_HOURS_MIN: u64 = 1;
 /// Prevents indefinite recovery windows that could block account access.
 pub const DISPUTE_WINDOW_HOURS_MAX: u64 = 720;
 
+use crate::workflows::journal::{encode_relational_generic, persist_fact_value};
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects, TimeEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::{hash, AuraError, FactValue, Hash32};
-use aura_relational::RelationalContext;
 use aura_recovery::guardian_key_recovery::GuardianKeyApproval;
-use aura_recovery::recovery_protocol::{RecoveryProtocol, RecoveryProtocolHandler, RecoveryRequest};
+use aura_recovery::recovery_protocol::{
+    RecoveryProtocol, RecoveryProtocolHandler, RecoveryRequest,
+};
 use aura_recovery::types::{GuardianProfile, RecoveryEvidence, RecoveryShare};
+use aura_relational::RelationalContext;
 use serde::Serialize;
-use crate::workflows::journal::{encode_relational_generic, persist_fact_value};
 
 // ============================================================================
 // Guardian Set Validation (re-exported from thresholds)
@@ -111,7 +113,9 @@ pub fn validate_guardian_set_full(
 // ============================================================================
 
 /// Run the recovery protocol initiation sequence.
-pub async fn initiate_recovery_protocol<E: PhysicalTimeEffects + NetworkEffects + JournalEffects>(
+pub async fn initiate_recovery_protocol<
+    E: PhysicalTimeEffects + NetworkEffects + JournalEffects,
+>(
     effects: &E,
     account_authority: AuthorityId,
     guardian_authorities: Vec<AuthorityId>,
@@ -174,9 +178,10 @@ pub async fn generate_guardian_approval<E: PhysicalTimeEffects>(
     guardian: &GuardianProfile,
     request_hash: Hash32,
 ) -> Result<GuardianKeyApproval, AuraError> {
-    let physical_time = effects.physical_time().await.map_err(|e| {
-        AuraError::agent(format!("Failed to get physical time: {e}"))
-    })?;
+    let physical_time = effects
+        .physical_time()
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to get physical time: {e}")))?;
     let timestamp_ms = physical_time.ts_ms;
 
     // Deterministic partial signature derived from the request hash
@@ -350,7 +355,7 @@ pub fn extract_timestamp_ms(ts: &TimeStamp) -> u64 {
             buf.copy_from_slice(&o.0[..8]);
             u64::from_be_bytes(buf)
         }
-        TimeStamp::Range(r) => r.latest_ms,
+        TimeStamp::Range(r) => r.latest_ms(),
     }
 }
 
@@ -359,9 +364,7 @@ pub fn find_guardian_index(
     guardians: &[AuthorityId],
     guardian_authority: AuthorityId,
 ) -> Option<usize> {
-    guardians
-        .iter()
-        .position(|g| *g == guardian_authority)
+    guardians.iter().position(|g| *g == guardian_authority)
 }
 
 #[cfg(test)]

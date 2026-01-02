@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{FlowBudgetEffects, JournalEffects};
-use aura_core::flow::Receipt;
+use aura_core::flow::{FlowCost, FlowNonce, Receipt, ReceiptSig};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Hash32};
 use biscuit_auth::Biscuit;
@@ -79,7 +79,7 @@ impl<J: JournalEffects + Send + Sync> FlowBudgetEffects for JournalBackedFlowBud
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> AuraResult<Receipt> {
         let scope = ResourceScope::Context {
             context_id: *context,
@@ -88,16 +88,17 @@ impl<J: JournalEffects + Send + Sync> FlowBudgetEffects for JournalBackedFlowBud
         self.authorize_scope(&scope)?;
 
         let current = self.journal.get_flow_budget(context, peer).await?;
-        if current.limit > 0 && !current.can_charge(cost as u64) {
-            return Err(AuraError::budget_exceeded(format!(
-                "insufficient flow budget: remaining={}, cost={}",
-                current.remaining(),
-                cost
-            )));
-        }
-
         let mut updated = current;
-        updated.spent = updated.spent.saturating_add(cost as u64);
+        if updated.limit > 0 {
+            updated
+                .record_charge(cost)
+                .map_err(|e| AuraError::budget_exceeded(e.to_string()))?;
+        } else {
+            let cost_value = u64::from(cost);
+            updated.spent = updated.spent.checked_add(cost_value).ok_or_else(|| {
+                AuraError::invalid("flow budget overflow while recording unbounded spend")
+            })?;
+        }
         let updated = self
             .journal
             .update_flow_budget(context, peer, &updated)
@@ -109,9 +110,9 @@ impl<J: JournalEffects + Send + Sync> FlowBudgetEffects for JournalBackedFlowBud
             *peer,
             updated.epoch,
             cost,
-            updated.spent,
+            FlowNonce::new(updated.spent),
             Hash32::default(),
-            Vec::new(),
+            ReceiptSig::new(Vec::new())?,
         ))
     }
 }

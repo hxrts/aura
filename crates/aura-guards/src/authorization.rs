@@ -138,7 +138,7 @@ impl BiscuitAuthorizationBridge {
                 authorizer
                     .add_fact(fact!("authority_id({auth_id})"))
                     .map_err(BiscuitError::BiscuitLib)?;
-                let path_str = path.clone();
+                let path_str = path.as_str();
                 authorizer
                     .add_fact(fact!("storage_path({path_str})"))
                     .map_err(BiscuitError::BiscuitLib)?;

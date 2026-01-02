@@ -3,8 +3,8 @@
 //! This module contains steward role management operations that are portable across all frontends.
 //! Stewards (Admins) have elevated permissions within a home.
 
-use crate::{views::home::ResidentRole, AppCore};
 use crate::workflows::parse::parse_authority_id;
+use crate::{views::home::ResidentRole, AppCore};
 use async_lock::RwLock;
 use aura_core::AuraError;
 use std::sync::Arc;

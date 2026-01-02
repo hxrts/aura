@@ -136,12 +136,6 @@ impl PlatformDetector {
     }
 }
 
-/// Create a path-based storage handler for platform detection
-#[allow(dead_code)]
-fn create_path_storage_adapter() -> FilesystemStorageHandler {
-    FilesystemStorageHandler::with_default_path()
-}
-
 /// Path-based storage adapter for platform detection
 ///
 /// Uses the proper FilesystemStorageHandler from aura-effects instead of

@@ -7,6 +7,7 @@ use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 use crate::protocols::rendezvous_constants::PROTOCOL_RENDEZVOUS;
+use crate::types::SequenceNumber;
 
 // Re-export rendezvous message types
 pub use crate::messages::rendezvous::*;
@@ -17,7 +18,7 @@ pub struct RendezvousEnvelope {
     /// Authority that sent this message
     pub sender: AuthorityId,
     /// Message sequence number
-    pub sequence: u64,
+    pub sequence: SequenceNumber,
     /// Timestamp when message was created
     pub timestamp: u64,
     /// The actual rendezvous protocol payload
@@ -36,7 +37,7 @@ impl RendezvousEnvelope {
     /// Create a new rendezvous message
     pub fn new(
         sender: AuthorityId,
-        sequence: u64,
+        sequence: SequenceNumber,
         timestamp: u64,
         payload: RendezvousPayload,
     ) -> Self {

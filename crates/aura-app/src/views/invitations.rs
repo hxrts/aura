@@ -45,7 +45,7 @@ pub enum InvitationDirection {
 }
 
 /// An invitation
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct Invitation {
     /// Invitation identifier (fact ID)

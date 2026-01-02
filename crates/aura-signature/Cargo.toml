@@ -28,3 +28,4 @@ hex = { workspace = true }
 signature = { workspace = true }
 ed25519-dalek = { workspace = true }
 rand = { workspace = true }
+proptest = { workspace = true }

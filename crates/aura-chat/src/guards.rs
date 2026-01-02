@@ -5,6 +5,7 @@
 //! producing an explicit list of `EffectCommand` values for an async interpreter.
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::FlowCost;
 use aura_guards::types;
 
 use crate::facts::ChatFact;
@@ -15,11 +16,13 @@ use crate::facts::ChatFact;
 
 /// Guard cost and capability constants for chat operations.
 pub mod costs {
+    use aura_core::FlowCost;
+
     /// Flow cost for creating a channel.
-    pub const CHAT_CHANNEL_CREATE_COST: u32 = 1;
+    pub const CHAT_CHANNEL_CREATE_COST: FlowCost = FlowCost::new(1);
 
     /// Flow cost for sending a message.
-    pub const CHAT_MESSAGE_SEND_COST: u32 = 1;
+    pub const CHAT_MESSAGE_SEND_COST: FlowCost = FlowCost::new(1);
 
     /// Required capability for creating a channel.
     pub const CAP_CHAT_CHANNEL_CREATE: &str = "chat:channel:create";
@@ -42,7 +45,7 @@ pub struct GuardSnapshot {
     pub context_id: ContextId,
 
     /// Current flow budget remaining.
-    pub flow_budget_remaining: u32,
+    pub flow_budget_remaining: FlowCost,
 
     /// Capabilities held by the authority.
     pub capabilities: Vec<String>,
@@ -56,7 +59,7 @@ impl GuardSnapshot {
     pub fn new(
         authority_id: AuthorityId,
         context_id: ContextId,
-        flow_budget_remaining: u32,
+        flow_budget_remaining: FlowCost,
         capabilities: Vec<String>,
         now_ms: u64,
     ) -> Self {
@@ -82,7 +85,7 @@ impl types::CapabilitySnapshot for GuardSnapshot {
 }
 
 impl types::FlowBudgetSnapshot for GuardSnapshot {
-    fn flow_budget_remaining(&self) -> u32 {
+    fn flow_budget_remaining(&self) -> FlowCost {
         self.flow_budget_remaining
     }
 }
@@ -106,7 +109,7 @@ pub enum EffectCommand {
     /// Charge flow budget.
     ChargeFlowBudget {
         /// Cost to charge from the current context budget.
-        cost: u32,
+        cost: FlowCost,
     },
 }
 
@@ -123,6 +126,9 @@ pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<
 }
 
 /// Check flow budget and return a denied outcome if insufficient.
-pub fn check_flow_budget(snapshot: &GuardSnapshot, required_cost: u32) -> Option<GuardOutcome> {
+pub fn check_flow_budget(
+    snapshot: &GuardSnapshot,
+    required_cost: FlowCost,
+) -> Option<GuardOutcome> {
     types::check_flow_budget(snapshot, required_cost)
 }

@@ -6,7 +6,7 @@
 
 use aura_core::{
     effects::guard::{EffectCommand, EffectInterpreter, EffectResult},
-    AuthorityId, ContextId, Result,
+    AuthorityId, ContextId, FlowCost, Result,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -41,7 +41,9 @@ impl aura_core::effects::guard::EffectInterpreter for MockEffectInterpreter {
         match command {
             EffectCommand::GenerateNonce { .. } => Ok(EffectResult::Nonce(vec![1, 2, 3, 4])),
             EffectCommand::ChargeBudget { amount, .. } => {
-                Ok(EffectResult::RemainingBudget(1000 - amount))
+                Ok(EffectResult::RemainingBudget(
+                    1000u32.saturating_sub(amount.value()),
+                ))
             }
             _ => Ok(EffectResult::Success),
         }
@@ -87,7 +89,7 @@ async fn test_flow_cost_annotation() {
         context,
         authority,
         peer,
-        amount: 200,
+        amount: FlowCost::new(200),
     };
 
     let result = interpreter.execute(command.clone()).await;
@@ -97,7 +99,7 @@ async fn test_flow_cost_annotation() {
     assert_eq!(executed.len(), 1);
     assert!(matches!(
         &executed[0],
-        EffectCommand::ChargeBudget { amount, .. } if *amount == 200
+        EffectCommand::ChargeBudget { amount, .. } if *amount == FlowCost::new(200)
     ));
 }
 
@@ -161,7 +163,7 @@ async fn test_multiple_annotations() {
             context,
             authority,
             peer,
-            amount: 100,
+            amount: FlowCost::new(100),
         },
         EffectCommand::RecordLeakage { bits: 16 },
     ];
@@ -205,7 +207,7 @@ async fn test_effect_execution_order() {
             context,
             authority,
             peer,
-            amount: 50,
+            amount: FlowCost::new(50),
         },
         EffectCommand::StoreMetadata {
             key: "step2".to_string(),
@@ -254,13 +256,17 @@ async fn test_effect_error_handling() {
     impl aura_core::effects::guard::EffectInterpreter for FailingInterpreter {
         async fn execute(&self, command: EffectCommand) -> Result<EffectResult> {
             match command {
-                EffectCommand::ChargeBudget { amount, .. } if amount > 1000 => {
+                EffectCommand::ChargeBudget { amount, .. }
+                    if amount > FlowCost::new(1000) =>
+                {
                     Err(AuraError::Internal {
                         message: "Insufficient budget".to_string(),
                     })
                 }
                 EffectCommand::ChargeBudget { amount, .. } => {
-                    Ok(EffectResult::RemainingBudget(1000 - amount))
+                    Ok(EffectResult::RemainingBudget(
+                        1000u32.saturating_sub(amount.value()),
+                    ))
                 }
                 _ => Ok(EffectResult::Success),
             }
@@ -281,7 +287,7 @@ async fn test_effect_error_handling() {
         context,
         authority,
         peer,
-        amount: 100,
+        amount: FlowCost::new(100),
     };
     assert!(interpreter.execute(ok_command).await.is_ok());
 
@@ -290,7 +296,7 @@ async fn test_effect_error_handling() {
         context,
         authority,
         peer,
-        amount: 2000,
+        amount: FlowCost::new(2000),
     };
     let result = interpreter.execute(fail_command).await;
     assert!(result.is_err());
@@ -314,7 +320,7 @@ async fn test_guard_chain_integration() {
     let authority = AuthorityId::new_from_entropy([1u8; 32]);
     let context = ContextId::new_from_entropy([2u8; 32]);
     let mut budgets = HashMap::new();
-    budgets.insert((context, authority), 500);
+    budgets.insert((context, authority), FlowCost::new(500));
 
     let mut metadata = HashMap::new();
     metadata.insert("authz:test_op".to_string(), "allow".to_string());
@@ -331,7 +337,7 @@ async fn test_guard_chain_integration() {
     };
 
     // Create a guard request
-    let request = GuardRequest::new(authority, "test_op", 100)
+    let request = GuardRequest::new(authority, "test_op", FlowCost::new(100))
         .with_context_id(context)
         .with_peer(AuthorityId::new_from_entropy([1u8; 32]));
 
@@ -367,7 +373,7 @@ async fn test_unified_effect_command_system() {
         context,
         authority,
         peer,
-        amount: 200,
+        amount: FlowCost::new(200),
     };
 
     // Effect from runtime guard (same type!)
@@ -375,7 +381,7 @@ async fn test_unified_effect_command_system() {
         context,
         authority,
         peer,
-        amount: 200,
+        amount: FlowCost::new(200),
     };
 
     // Both execute through the same interpreter

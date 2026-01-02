@@ -179,8 +179,8 @@ impl FlowTraceReplayer {
     pub fn replay_trace_file(&self, path: impl AsRef<Path>) -> Result<FlowReplayResult, String> {
         let content = std::fs::read_to_string(path.as_ref())
             .map_err(|e| format!("Failed to read ITF file: {e}"))?;
-        let trace: FlowITFTrace = serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse ITF JSON: {e}"))?;
+        let trace: FlowITFTrace =
+            serde_json::from_str(&content).map_err(|e| format!("Failed to parse ITF JSON: {e}"))?;
         self.replay_trace(&trace)
     }
 

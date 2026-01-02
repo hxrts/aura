@@ -11,7 +11,7 @@
 
 use crate::{
     types::identifiers::{AuthorityId, ContextId},
-    AuraError, FlowBudget, Journal,
+    AuraError, FlowBudget, FlowCost, Journal,
 };
 use async_trait::async_trait;
 
@@ -55,7 +55,7 @@ pub trait JournalEffects: Send + Sync {
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> Result<FlowBudget, AuraError>;
 }
 
@@ -103,7 +103,7 @@ impl<T: JournalEffects + ?Sized> JournalEffects for std::sync::Arc<T> {
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> Result<FlowBudget, AuraError> {
         (**self).charge_flow_budget(context, peer, cost).await
     }

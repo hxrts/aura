@@ -54,7 +54,7 @@ use aura_authorization::BiscuitTokenManager;
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::scope::ResourceScope;
 use aura_core::types::Epoch;
-use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, Journal};
+use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, FlowCost, Journal};
 use aura_guards::{BiscuitGuardEvaluator, GuardError};
 
 // =============================================================================
@@ -453,7 +453,7 @@ impl AntiEntropyProtocol {
                 token,
                 "sync_journal",
                 &resource,
-                100,
+                FlowCost::new(100),
                 &mut flow_budget,
             ) {
                 Ok(guard_result) if guard_result.authorized => {

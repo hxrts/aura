@@ -12,7 +12,7 @@
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::{
-    effects::JournalEffects, epochs::Epoch, AuraError, AuthorityId, ContextId, FlowBudget,
+    effects::JournalEffects, epochs::Epoch, AuraError, AuthorityId, ContextId, FlowBudget, FlowCost,
     Journal as CoreJournal,
 };
 use std::collections::HashMap;
@@ -145,7 +145,7 @@ impl JournalEffects for MockJournalHandler {
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> Result<FlowBudget, AuraError> {
         let mut budgets = self.flow_budgets.write().await;
         let key = (*context, *peer);
@@ -155,7 +155,7 @@ impl JournalEffects for MockJournalHandler {
             .cloned()
             .unwrap_or_else(|| FlowBudget::new(1000, Epoch(0)));
 
-        budget.spent += cost as u64;
+        budget.spent += u64::from(cost);
         budgets.insert(key, budget);
 
         Ok(budget)

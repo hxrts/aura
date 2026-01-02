@@ -14,6 +14,7 @@
 )] // Tests use unwrap for clarity; allow test-only hash utilities
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::FlowCost;
 use aura_rendezvous::{
     facts::{RendezvousDescriptor, RendezvousFact, TransportHint},
     new_channel::{ChannelManager, HandshakeConfig, Handshaker, SecureChannel},
@@ -37,7 +38,7 @@ fn test_snapshot(authority: AuthorityId, context: ContextId) -> GuardSnapshot {
     GuardSnapshot {
         authority_id: authority,
         context_id: context,
-        flow_budget_remaining: 1000,
+        flow_budget_remaining: FlowCost::new(1000),
         capabilities: vec![
             guards::CAP_RENDEZVOUS_PUBLISH.to_string(),
             guards::CAP_RENDEZVOUS_CONNECT.to_string(),
@@ -356,7 +357,7 @@ fn test_insufficient_flow_budget_blocks_publish() {
 
     // Snapshot with insufficient budget
     let mut snapshot = test_snapshot(alice, context);
-    snapshot.flow_budget_remaining = 0; // No budget
+    snapshot.flow_budget_remaining = FlowCost::new(0); // No budget
 
     let hints = vec![TransportHint::QuicDirect {
         addr: "10.0.0.1:8443".to_string(),

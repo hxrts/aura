@@ -93,6 +93,10 @@ pub mod tree;
 
 /// Ceremony types for Category C operations (supersession, lifecycle)
 pub mod ceremony;
+/// Consolidated constants for size limits and defaults
+pub mod constants;
+/// Convenient re-exports of commonly used types
+pub mod prelude;
 /// Protocol types for version negotiation and capabilities
 pub mod protocol;
 
@@ -165,6 +169,8 @@ pub use messages::{
     MessageValidation,
     MessageValidator,
     Msg,
+    MessageSequence,
+    MessageTimestamp,
     SemanticVersion,
     TypedMessage,
     WireEnvelope,
@@ -275,23 +281,26 @@ pub use relational::*;
 #[doc = "stable: Tree types are foundational Layer 1 abstractions required by effect traits and FROST primitives"]
 pub use tree::{
     commit_branch, commit_leaf, compute_root_commitment, policy_hash, AttestedOp, BranchNode,
-    Epoch, LeafId, LeafNode, LeafRole, NodeIndex, NodeKind, Policy, TreeCommitment, TreeOp,
-    TreeOpKind,
+    Epoch, LeafId, LeafNode, LeafRole, NodeIndex, NodeKind, Policy, PolicyError, TreeCommitment,
+    TreeOp, TreeOpKind,
 };
 #[doc = "stable: Epoch counters and participant identifiers"]
 pub use types::epochs::*;
 #[doc = "unstable: FlowBudget API is experimental and may change"]
-pub use types::flow::{FlowBudget, Receipt};
+pub use types::flow::{FlowBudget, FlowCost, FlowNonce, Receipt, ReceiptSig};
 #[doc = "unstable: Relationship types are under active development"]
 pub use types::relationships::*;
 #[doc = "stable: Resource scope types for authorization with semver guarantees"]
-pub use types::scope::{AuthorityOp, AuthorizationOp, ContextOp, ResourceScope};
+pub use types::scope::{
+    AuthorityOp, AuthorizationOp, ContextOp, ResourceScope, ResourceScopeParseError, StoragePath,
+    StoragePathError,
+};
 
 // Threshold signing types
 #[doc = "unstable: Unified threshold signing types are under active development"]
 pub use threshold::{
-    ApprovalContext, ParticipantEndpoint, ParticipantIdentity, SignableOperation, SigningContext,
-    SigningParticipant, ThresholdSignature,
+    ApprovalContext, NetworkAddress, NetworkAddressError, ParticipantEndpoint, ParticipantIdentity,
+    SignableOperation, SignerIndexError, SigningContext, SigningParticipant, ThresholdSignature,
 };
 
 /// Standard result type for core operations

@@ -317,7 +317,7 @@ where
             context,
             peer,
             "amp_send",
-            config.default_flow_cost,
+            config.default_flow_cost.value(),
             Some(receipt),
         );
     }
@@ -336,7 +336,7 @@ where
         &header,
         payload_size,
         sealed.len(),
-        config.default_flow_cost,
+        config.default_flow_cost.value(),
         guard_result.receipt.as_ref(),
     );
 

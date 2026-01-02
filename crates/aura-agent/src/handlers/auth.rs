@@ -11,6 +11,7 @@ use aura_core::effects::{
     CryptoCoreEffects, CryptoExtendedEffects, RandomCoreEffects, RandomExtendedEffects,
 };
 use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard;
 use aura_protocol::effects::EffectApiEffects;
 use serde::{Deserialize, Serialize};
@@ -441,7 +442,7 @@ impl AuthHandler {
             "auth:authenticate".to_string(),
             self.context.effect_context.context_id(),
             self.context.authority.authority_id(),
-            50,
+            FlowCost::new(50),
         );
         let result = guard.evaluate(effects).await.map_err(|e| {
             crate::core::AgentError::effects(format!("guard evaluation failed: {e}"))
@@ -472,7 +473,7 @@ mod tests {
     use crate::core::AgentConfig;
     use crate::core::AuthorityContext;
     use crate::runtime::effects::AuraEffectSystem;
-    use aura_core::identifiers::{AuthorityId};
+    use aura_core::identifiers::AuthorityId;
 
     #[tokio::test]
     async fn auth_fact_is_journaled() {

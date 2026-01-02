@@ -24,9 +24,10 @@ pub(super) async fn get_rendezvous_status(bridge: &AgentRuntimeBridge) -> Rendez
 
 pub(super) async fn trigger_discovery(bridge: &AgentRuntimeBridge) -> Result<(), IntentError> {
     if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
-        rendezvous.trigger_discovery().await.map_err(|e| {
-            IntentError::internal_error(format!("Failed to trigger discovery: {}", e))
-        })
+        rendezvous
+            .trigger_discovery()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to trigger discovery: {}", e)))
     } else {
         Err(service_unavailable("rendezvous_service"))
     }

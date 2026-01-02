@@ -18,16 +18,24 @@ pub mod sessions;
 // Re-export all public types for convenience
 pub use authority::{Authority, AuthorityRef, AuthorityState, TreeStateSummary};
 pub use epochs::*;
-pub use flow::{FlowBudget, Receipt};
+pub use flow::{FlowBudget, FlowCost, FlowNonce, Receipt, ReceiptSig};
 pub use identifiers::{
     AccountId, AuthorityId, ChannelId, ContextId, DataId, DeviceId, DkdContextId, EventId,
     EventNonce, GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext,
     OperationId, RelayId, SessionId,
 };
 pub use participants::{
-    FrostThreshold, InvalidThresholdError, ParticipantEndpoint, ParticipantIdentity,
-    SigningParticipant,
+    FrostThreshold, InvalidThresholdError, NetworkAddress, NetworkAddressError, ParticipantEndpoint,
+    ParticipantIdentity, SignerIndexError, SigningParticipant,
 };
 pub use relationships::*;
-pub use scope::{AuthorityOp, ContextOp, ResourceScope};
+pub use scope::{
+    AuthorityOp, ContextOp, ResourceScope, ResourceScopeParseError, StoragePath, StoragePathError,
+};
 pub use sessions::*;
+
+// Fact encoding types
+pub use facts::{
+    try_decode_fact, try_decode_fact_compatible, try_encode_fact, FactDelta, FactDeltaReducer,
+    FactEncoding, FactEnvelope, FactError, FactTypeId,
+};

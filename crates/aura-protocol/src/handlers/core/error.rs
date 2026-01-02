@@ -90,3 +90,16 @@ impl FactoryError {
         }
     }
 }
+
+impl aura_core::ProtocolErrorCode for FactoryError {
+    fn code(&self) -> &'static str {
+        match self {
+            FactoryError::ConfigurationError { .. } => "factory_configuration",
+            FactoryError::HandlerCreationFailed { .. } => "factory_handler_creation",
+            FactoryError::MiddlewareCreationFailed { .. } => "factory_middleware_creation",
+            FactoryError::PlatformDetectionFailed { .. } => "factory_platform_detection",
+            FactoryError::RequiredEffectUnavailable { .. } => "factory_effect_unavailable",
+            FactoryError::UnsupportedExecutionMode { .. } => "factory_unsupported_mode",
+        }
+    }
+}

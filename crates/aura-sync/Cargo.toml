@@ -7,6 +7,13 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# Enable choreography-based CRDT synchronization via CrdtCoordinator.
+# Use this for general CRDT state sync (journal facts, app state) as an
+# alternative to digest-based anti-entropy sync.
+crdt-sync = ["aura-protocol/crdt-sync"]
+
 [dependencies]
 aura-core = { path = "../aura-core" }
 aura-protocol = { path = "../aura-protocol" }

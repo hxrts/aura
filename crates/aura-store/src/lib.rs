@@ -50,6 +50,9 @@ pub mod capabilities;
 /// Storage domain facts for journal integration
 pub mod facts;
 
+/// Strongly typed identifiers and size wrappers
+pub mod types;
+
 /// Search query types and result filtering logic
 pub mod search;
 
@@ -74,6 +77,7 @@ pub use crdt::{StorageIndex, StorageOpLog, StorageOpType, StorageOperation, Stor
 pub use errors::StorageError;
 pub use facts::{StorageFact, StorageFactDelta, StorageFactReducer, STORAGE_FACT_TYPE_ID};
 pub use search::{SearchIndexEntry, SearchQuery, SearchResults, SearchScope};
+pub use types::{ByteSize, ChunkCount, ChunkIndex, NodeId};
 
 // Biscuit authorization APIs now available from aura-authorization
 // Import like: use aura_authorization::{BiscuitStorageEvaluator, StoragePermission, etc.}

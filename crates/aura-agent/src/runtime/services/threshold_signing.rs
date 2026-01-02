@@ -19,6 +19,7 @@
 //! For single-device (threshold=1), signing is local without network.
 //! For multi-device (threshold>1), coordination happens via choreography.
 
+use super::state::with_state_mut_validated;
 use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_consensus::dkg::recovery::recover_share_from_transcript;
@@ -38,7 +39,6 @@ use aura_core::{
     threshold::{ConvergenceCert, ReversionFact},
     AuraError, ContextId, Hash32,
 };
-use super::state::with_state_mut_validated;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;

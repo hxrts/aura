@@ -18,8 +18,7 @@ pub use aura_app::ui::types::{
 
 // Use portable constants from aura-app
 use aura_app::ui::types::{
-    DEFAULT_TOAST_TICKS as PORTABLE_DEFAULT_TICKS,
-    MAX_PENDING_TOASTS as PORTABLE_MAX_PENDING,
+    DEFAULT_TOAST_TICKS as PORTABLE_DEFAULT_TICKS, MAX_PENDING_TOASTS as PORTABLE_MAX_PENDING,
     NO_AUTO_DISMISS as PORTABLE_NO_DISMISS,
 };
 

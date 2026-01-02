@@ -250,6 +250,16 @@ impl std::fmt::Display for EffectPolicyError {
 
 impl std::error::Error for EffectPolicyError {}
 
+impl aura_core::ProtocolErrorCode for EffectPolicyError {
+    fn code(&self) -> &'static str {
+        match self {
+            EffectPolicyError::ApprovalRequired { .. } => "approval_required",
+            EffectPolicyError::CeremonyRequired { .. } => "ceremony_required",
+            EffectPolicyError::PolicyNotFound { .. } => "policy_not_found",
+        }
+    }
+}
+
 impl From<EffectPolicyError> for AuraError {
     fn from(err: EffectPolicyError) -> Self {
         AuraError::permission_denied(err.to_string())

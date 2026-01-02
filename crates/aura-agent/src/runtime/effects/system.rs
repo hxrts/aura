@@ -101,4 +101,3 @@ impl SystemEffects for AuraEffectSystem {
         Ok(())
     }
 }
-

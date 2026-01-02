@@ -5,7 +5,7 @@ use async_lock::RwLock;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::TransportEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::{tree::AttestedOp, Hash32};
+use aura_core::{tree::AttestedOp, FlowCost, Hash32};
 use aura_guards::chain::create_send_guard_op;
 use aura_guards::traits::GuardContextProvider;
 use aura_guards::GuardEffects;
@@ -226,7 +226,7 @@ impl AntiEntropyHandler {
         effect_system: &E,
     ) -> Result<Vec<AttestedOp>, SyncError> {
         let peer_authority = AuthorityId::from(peer_id);
-        let cost = cids.len() as u32 * self.runtime.request_cost_per_cid;
+        let cost = FlowCost::new(cids.len() as u32 * self.runtime.request_cost_per_cid.value());
 
         let guard_chain = create_send_guard_op(
             GuardOperation::SyncRequestOps,

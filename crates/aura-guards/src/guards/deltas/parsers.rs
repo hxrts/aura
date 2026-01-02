@@ -54,62 +54,11 @@ pub fn parse_result_from_fact(fact: &JsonValue) -> AuraResult<JsonValue> {
         .ok_or_else(|| AuraError::invalid("Missing result"))
 }
 
-#[allow(dead_code)]
-pub fn parse_relationship_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("relationship_id")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing relationship_id in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_participants_from_fact(fact: &JsonValue) -> AuraResult<Vec<String>> {
-    fact.get("participants")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .ok_or_else(|| AuraError::invalid("Missing or invalid participants in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_relationship_type_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("relationship_type")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing relationship_type in fact"))
-}
-
 pub fn parse_account_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
     fact.get("account_id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| AuraError::invalid("Missing account_id in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_ceremony_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("ceremony_id")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing ceremony_id in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_threshold_from_fact(fact: &JsonValue) -> AuraResult<u32> {
-    fact.get("threshold")
-        .and_then(|v| v.as_u64())
-        .map(|n| n as u32)
-        .ok_or_else(|| AuraError::invalid("Missing or invalid threshold in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_commitment_from_fact(fact: &JsonValue) -> AuraResult<JsonValue> {
-    fact.get("commitment")
-        .cloned()
-        .ok_or_else(|| AuraError::invalid("Missing commitment in fact"))
 }
 
 pub fn parse_derivation_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
@@ -119,49 +68,11 @@ pub fn parse_derivation_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
         .ok_or_else(|| AuraError::invalid("Missing derivation_id in fact"))
 }
 
-#[allow(dead_code)]
-pub fn parse_context_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("context")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing context in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_derivation_path_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("derivation_path")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing derivation_path in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_public_key_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("public_key")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing public_key in fact"))
-}
-
 pub fn parse_context_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
     fact.get("context_id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| AuraError::invalid("Missing context_id in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_flow_limit_from_fact(fact: &JsonValue) -> AuraResult<u64> {
-    fact.get("new_limit")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| AuraError::invalid("Missing or invalid new_limit in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_epoch_from_fact(fact: &JsonValue) -> AuraResult<u64> {
-    fact.get("epoch")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| AuraError::invalid("Missing or invalid epoch in fact"))
 }
 
 pub fn parse_recovery_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
@@ -171,14 +82,6 @@ pub fn parse_recovery_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
         .ok_or_else(|| AuraError::invalid("Missing recovery_id in fact"))
 }
 
-#[allow(dead_code)]
-pub fn parse_recovery_type_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("recovery_type")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing recovery_type in fact"))
-}
-
 pub fn parse_content_hash_from_fact(fact: &JsonValue) -> AuraResult<String> {
     fact.get("content_hash")
         .and_then(|v| v.as_str())
@@ -186,77 +89,11 @@ pub fn parse_content_hash_from_fact(fact: &JsonValue) -> AuraResult<String> {
         .ok_or_else(|| AuraError::invalid("Missing content_hash in fact"))
 }
 
-#[allow(dead_code)]
-pub fn parse_size_from_fact(fact: &JsonValue) -> AuraResult<u64> {
-    fact.get("size")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| AuraError::invalid("Missing or invalid size in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_access_policy_from_fact(fact: &JsonValue) -> AuraResult<JsonValue> {
-    fact.get("access_policy")
-        .cloned()
-        .ok_or_else(|| AuraError::invalid("Missing access_policy in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_timestamp_from_fact(fact: &JsonValue) -> AuraResult<u64> {
-    fact.get("timestamp")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| AuraError::invalid("Missing or invalid timestamp in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_deployment_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("deployment_id")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing deployment_id in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_version_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("version")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing version in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_target_devices_from_fact(fact: &JsonValue) -> AuraResult<Vec<String>> {
-    fact.get("target_devices")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .ok_or_else(|| AuraError::invalid("Missing or invalid target_devices in fact"))
-}
-
 pub fn parse_deployment_hash_from_fact(fact: &JsonValue) -> AuraResult<String> {
     fact.get("deployment_hash")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| AuraError::invalid("Missing deployment_hash in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_target_device_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("target_device")
-        .or_else(|| fact.get("peer_device"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing target_device in fact"))
-}
-
-#[allow(dead_code)]
-pub fn parse_trust_level_from_fact(fact: &JsonValue) -> AuraResult<String> {
-    fact.get("trust_level")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| AuraError::invalid("Missing trust_level in fact"))
 }
 
 pub fn parse_guardian_id_from_fact(fact: &JsonValue) -> AuraResult<String> {

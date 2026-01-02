@@ -257,6 +257,7 @@ pub fn arb_threshold_config() -> impl Strategy<Value = (u16, u16)> {
 ///
 /// ```rust
 /// use aura_testkit::strategies::create_test_tree_op;
+/// use aura_core::Epoch;
 ///
 /// let op = create_test_tree_op([0u8; 32], 1, 42);
 /// assert_eq!(op.op.parent_epoch, Epoch::new(1));

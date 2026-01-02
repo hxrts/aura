@@ -3,12 +3,13 @@
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::util::test_utils::test_authority_id;
 use aura_invitation::{guards::GuardSnapshot, InvitationConfig, InvitationService, InvitationType};
+use aura_core::FlowCost;
 
 fn snapshot_with_caps(auth: AuthorityId, ctx: ContextId, caps: &[&str]) -> GuardSnapshot {
     GuardSnapshot::new(
         auth,
         ctx,
-        10, // flow budget
+        FlowCost::new(10), // flow budget
         caps.iter().map(|c| c.to_string()).collect(),
         0,     // epoch
         1_000, // now_ms

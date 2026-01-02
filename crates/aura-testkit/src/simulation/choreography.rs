@@ -853,7 +853,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_transport_communication() {
-        let devices = vec![DeviceId::new_from_entropy([3u8; 32]), DeviceId::new_from_entropy([3u8; 32])];
+        let devices = vec![
+            DeviceId::new_from_entropy([3u8; 32]),
+            DeviceId::new_from_entropy([3u8; 32]),
+        ];
         let transport = MockChoreographyTransport::new(devices.clone());
 
         let message = b"hello".to_vec();

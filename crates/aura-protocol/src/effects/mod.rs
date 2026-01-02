@@ -95,9 +95,10 @@ pub use aura_core::effects::{LogicalClockEffects, OrderClockEffects, PhysicalTim
 pub use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
 
 pub use crdt::{
-    ComposedHandler, CrdtCoordinator, CrdtCoordinatorError, DeliveryConfig, DeliveryEffect,
-    DeliveryGuarantee, GossipStrategy, TopicId,
+    ComposedHandler, DeliveryConfig, DeliveryEffect, DeliveryGuarantee, GossipStrategy, TopicId,
 };
+#[cfg(feature = "crdt-sync")]
+pub use crdt::{CrdtCoordinator, CrdtCoordinatorError};
 pub use effect_api::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 pub use params::*; // Re-export all parameter types
                    // Sync effects re-exported from consolidated module

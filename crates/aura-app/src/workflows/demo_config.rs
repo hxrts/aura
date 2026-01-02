@@ -477,7 +477,10 @@ mod tests {
     fn test_demo_scenario_seeds() {
         assert_eq!(DemoScenario::HappyPath.seed(), DEMO_SEED_HAPPY_PATH);
         assert_eq!(DemoScenario::SlowGuardian.seed(), DEMO_SEED_SLOW_GUARDIAN);
-        assert_eq!(DemoScenario::FailedRecovery.seed(), DEMO_SEED_FAILED_RECOVERY);
+        assert_eq!(
+            DemoScenario::FailedRecovery.seed(),
+            DEMO_SEED_FAILED_RECOVERY
+        );
         assert_eq!(DemoScenario::Interactive.seed(), DEMO_SEED_INTERACTIVE);
     }
 

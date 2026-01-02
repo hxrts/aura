@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::FlowCost;
 use aura_guards::chain::create_send_guard_op;
 use aura_guards::executor::GuardPlan;
 use aura_guards::guards::pure::GuardRequest;
@@ -11,13 +12,14 @@ fn guard_plan_matches_choreography_request() {
     let peer = AuthorityId::new_from_entropy([2u8; 32]);
     let context = ContextId::new_from_entropy([3u8; 32]);
 
-    let send_guard = create_send_guard_op(GuardOperation::AmpSend, context, peer, 1);
+    let send_guard =
+        create_send_guard_op(GuardOperation::AmpSend, context, peer, FlowCost::new(1));
     let plan = match GuardPlan::from_send_guard(&send_guard, authority) {
         Ok(plan) => plan,
         Err(err) => panic!("plan: {err}"),
     };
 
-    let request = GuardRequest::new(authority, "amp:send".to_string(), 1)
+    let request = GuardRequest::new(authority, "amp:send".to_string(), FlowCost::new(1))
         .with_context_id(context)
         .with_peer(peer)
         .with_context(context.to_bytes().to_vec());

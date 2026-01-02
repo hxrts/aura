@@ -62,6 +62,18 @@ pub enum TransportCoordinationError {
     Effect(String),
 }
 
+impl aura_core::ProtocolErrorCode for TransportCoordinationError {
+    fn code(&self) -> &'static str {
+        match self {
+            TransportCoordinationError::ProtocolFailed(_) => "transport_protocol_failed",
+            TransportCoordinationError::CapabilityCheckFailed(_) => "transport_capability_check",
+            TransportCoordinationError::FlowBudgetExceeded(_) => "transport_flow_budget_exceeded",
+            TransportCoordinationError::Transport(_) => "transport_layer_error",
+            TransportCoordinationError::Effect(_) => "transport_effect_error",
+        }
+    }
+}
+
 /// Result type for transport coordination operations
 pub type CoordinationResult<T> = Result<T, TransportCoordinationError>;
 

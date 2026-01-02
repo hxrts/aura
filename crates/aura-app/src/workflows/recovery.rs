@@ -3,26 +3,26 @@
 //! This module contains guardian recovery operations that are portable
 //! across all frontends. Uses typed reactive signals for state reads/writes.
 
+use crate::workflows::ceremonies::{
+    CeremonyLifecycle, CeremonyLifecycleState, CeremonyPollPolicy, CeremonyStatusLike,
+};
+use crate::workflows::parse::parse_authority_id;
+use crate::workflows::runtime::require_runtime;
+use crate::workflows::snapshot_policy::recovery_snapshot;
+use crate::workflows::state_helpers::with_recovery_state;
+use crate::workflows::time::current_time_ms;
 use crate::{
     runtime_bridge::CeremonyStatus,
     views::recovery::{RecoveryProcess, RecoveryProcessStatus, RecoveryState},
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::{
-    identifiers::AuthorityId, types::FrostThreshold, AuraError, Hash32,
-};
+use aura_core::{identifiers::AuthorityId, types::FrostThreshold, AuraError, Hash32};
 use aura_journal::fact::RelationalFact;
-use crate::workflows::runtime::require_runtime;
-use crate::workflows::parse::parse_authority_id;
-use crate::workflows::state_helpers::with_recovery_state;
-use crate::workflows::time::current_time_ms;
-use crate::workflows::snapshot_policy::recovery_snapshot;
 use aura_journal::ProtocolRelationalFact;
-use std::sync::Arc;
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
-use crate::workflows::ceremonies::{CeremonyPollPolicy, CeremonyLifecycle, CeremonyLifecycleState, CeremonyStatusLike};
 
 /// Start a guardian recovery ceremony
 ///
@@ -42,9 +42,7 @@ pub async fn start_recovery(
     guardian_ids: Vec<String>,
     threshold_k: FrostThreshold,
 ) -> Result<String, AuraError> {
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     if guardian_ids.is_empty() {
         return Err(AuraError::invalid("Guardian list cannot be empty"));
@@ -128,11 +126,13 @@ pub async fn start_recovery_from_state(
         return Err(AuraError::agent("Recovery already in progress"));
     }
 
-    let guardian_ids: Vec<String> =
-        state.guardians.iter().map(|g| g.id.to_string()).collect();
+    let guardian_ids: Vec<String> = state.guardians.iter().map(|g| g.id.to_string()).collect();
 
     let threshold = FrostThreshold::new(state.threshold as u16).map_err(|e| {
-        AuraError::invalid(format!("Invalid recovery threshold {}: {e}", state.threshold))
+        AuraError::invalid(format!(
+            "Invalid recovery threshold {}: {e}",
+            state.threshold
+        ))
     })?;
 
     start_recovery(app_core, guardian_ids, threshold).await
@@ -147,9 +147,7 @@ pub async fn approve_recovery(
     app_core: &Arc<RwLock<AppCore>>,
     ceremony_id: &str,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     runtime
         .respond_to_guardian_ceremony(ceremony_id, true, None)
@@ -164,9 +162,7 @@ pub async fn commit_guardian_binding(
     guardian_id: AuthorityId,
     binding_hash: Hash32,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let fact = RelationalFact::Protocol(ProtocolRelationalFact::GuardianBinding {
         account_id,
@@ -190,9 +186,7 @@ pub async fn dispute_recovery(
     ceremony_id: &str,
     reason: String,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     runtime
         .respond_to_guardian_ceremony(ceremony_id, false, Some(reason))
@@ -223,9 +217,7 @@ pub async fn get_ceremony_status(
     app_core: &Arc<RwLock<AppCore>>,
     ceremony_id: &str,
 ) -> Result<CeremonyStatus, AuraError> {
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     runtime
         .get_ceremony_status(ceremony_id)

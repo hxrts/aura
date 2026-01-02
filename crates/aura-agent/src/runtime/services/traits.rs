@@ -50,7 +50,10 @@ impl ServiceHealth {
 
     /// Returns true if the service is operational (healthy or degraded)
     pub fn is_operational(&self) -> bool {
-        matches!(self, ServiceHealth::Healthy | ServiceHealth::Degraded { .. })
+        matches!(
+            self,
+            ServiceHealth::Healthy | ServiceHealth::Degraded { .. }
+        )
     }
 }
 

@@ -17,7 +17,6 @@
 //! - Switching to lock-free concurrent data structures (DashMap)
 
 #![allow(clippy::disallowed_types)]
-
 // Note: Module-level allow covers handler.rs, wrapper.rs, and test code
 //!
 //! # Effect Classification
@@ -383,7 +382,7 @@ mod tests {
             &self,
             _context: &aura_core::ContextId,
             _peer: &AuthorityId,
-            _cost: u32,
+            _cost: aura_core::FlowCost,
         ) -> Result<aura_core::FlowBudget, AuraError> {
             Ok(aura_core::FlowBudget::default())
         }

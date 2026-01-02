@@ -133,9 +133,8 @@ fn test_evidence_record_serialization_roundtrip() {
         .unwrap_or_else(|err| panic!("serialization should succeed: {err}"));
 
     // Deserialize
-    let recovered: EvidenceRecord =
-        serde_json::from_slice(&bytes)
-            .unwrap_or_else(|err| panic!("deserialization should succeed: {err}"));
+    let recovered: EvidenceRecord = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|err| panic!("deserialization should succeed: {err}"));
 
     assert_eq!(recovered.entries.len(), 2);
     assert_eq!(
@@ -175,13 +174,12 @@ fn test_evidence_delta_serialization_roundtrip() {
     delta.entries.insert("evidence:2".to_string(), vec![0x02]);
 
     // Serialize
-    let bytes =
-        serde_json::to_vec(&delta).unwrap_or_else(|err| panic!("serialization should succeed: {err}"));
+    let bytes = serde_json::to_vec(&delta)
+        .unwrap_or_else(|err| panic!("serialization should succeed: {err}"));
 
     // Deserialize
-    let recovered: EvidenceDelta =
-        serde_json::from_slice(&bytes)
-            .unwrap_or_else(|err| panic!("deserialization should succeed: {err}"));
+    let recovered: EvidenceDelta = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|err| panic!("deserialization should succeed: {err}"));
 
     assert_eq!(recovered.entries.len(), 2);
 }

@@ -10,7 +10,7 @@
 //! - `hash_id!`: Hash32-backed identifiers for content-addressed data
 //! - `string_id!`: String-backed identifiers for human-readable names
 
-use crate::{crypto::hash, Hash32};
+use crate::{crypto::hash, AuraError, Hash32};
 use hex;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -277,8 +277,11 @@ impl EventNonce {
     }
 
     /// Get the next nonce in sequence
-    pub fn next(self) -> Self {
-        Self(self.0 + 1)
+    pub fn next(self) -> Result<Self, AuraError> {
+        self.0
+            .checked_add(1)
+            .map(Self)
+            .ok_or_else(|| AuraError::invalid("EventNonce overflow"))
     }
 }
 

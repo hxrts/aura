@@ -6,6 +6,8 @@
 //! These operations delegate to the RuntimeBridge to commit moderation facts.
 //! UI state is updated by reactive views driven from the journal.
 
+use crate::workflows::parse::parse_authority_id;
+use crate::workflows::runtime::require_runtime;
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::{
@@ -13,8 +15,6 @@ use aura_core::{
     AuraError,
 };
 use std::sync::Arc;
-use crate::workflows::runtime::require_runtime;
-use crate::workflows::parse::parse_authority_id;
 
 async fn current_home_context(
     app_core: &Arc<RwLock<AppCore>>,
@@ -25,7 +25,10 @@ async fn current_home_context(
         .current_home()
         .ok_or_else(|| AuraError::not_found("No current home selected"))?;
 
-    Ok((home_state.context_id, home_state.id, home_state.is_admin()))
+    let ctx_id = home_state
+        .context_id
+        .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
+    Ok((ctx_id, home_state.id, home_state.is_admin()))
 }
 
 /// Kick a user from the current home.
@@ -42,9 +45,7 @@ pub async fn kick_user(
         ));
     }
 
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let target_id = parse_authority_id(target)?;
     runtime
@@ -74,9 +75,7 @@ pub async fn ban_user(
         ));
     }
 
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let target_id = parse_authority_id(target)?;
     runtime
@@ -101,9 +100,7 @@ pub async fn unban_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result
         ));
     }
 
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let target_id = parse_authority_id(target)?;
     runtime
@@ -128,9 +125,7 @@ pub async fn mute_user(
         ));
     }
 
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let target_id = parse_authority_id(target)?;
     runtime
@@ -150,9 +145,7 @@ pub async fn unmute_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Resul
         ));
     }
 
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let target_id = parse_authority_id(target)?;
     runtime
@@ -175,9 +168,7 @@ pub async fn pin_message(
         ));
     }
 
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     runtime
         .moderation_pin(context_id, channel_id, message_id.to_string())
@@ -199,9 +190,7 @@ pub async fn unpin_message(
         ));
     }
 
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     runtime
         .moderation_unpin(context_id, channel_id, message_id.to_string())

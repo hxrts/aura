@@ -1159,10 +1159,10 @@ mod tests {
             &self,
             _context: &ContextId,
             _peer: &AuthorityId,
-            cost: u32,
+            cost: FlowCost,
         ) -> Result<FlowBudget, AuraError> {
             let mut budget = FlowBudget::new(1_000, Epoch::new(0));
-            budget.spent = cost as u64;
+            budget.spent = u64::from(cost);
             Ok(budget)
         }
     }

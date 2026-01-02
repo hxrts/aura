@@ -258,7 +258,7 @@ fn test_memory_bounded_with_gc() {
 
     // Create snapshot at epoch 500
     let snapshot = Snapshot {
-        epoch: 500,
+        epoch: Epoch::new(500),
         commitment: [0x50; 32],
         roster: (0..100).map(LeafId).collect(),
         policies: BTreeMap::new(),
@@ -291,7 +291,7 @@ fn test_memory_bounded_with_gc() {
     let ops_after_snapshot = oplog
         .list_ops()
         .iter()
-        .filter(|op| op.op.parent_epoch > 500)
+        .filter(|op| op.op.parent_epoch > Epoch::new(500))
         .count();
 
     assert_eq!(
@@ -372,7 +372,7 @@ fn compute_cid(op: &AttestedOp) -> Hash32 {
     use aura_core::hash::hasher;
     let mut h = hasher();
     h.update(b"ATTESTED_OP");
-    h.update(&op.op.parent_epoch.to_le_bytes());
+    h.update(&u64::from(op.op.parent_epoch).to_le_bytes());
     h.update(&op.op.parent_commitment);
     h.update(&[op.op.version as u8]);
     h.update(&(op.signer_count as u64).to_le_bytes());

@@ -14,6 +14,7 @@ use aura_core::{
     identifiers::{AuthorityId, ContextId},
     journal::{Cap, Fact},
     time::TimeStamp,
+    FlowCost,
 };
 use aura_simulator::effects::SimulationEffectInterpreter;
 
@@ -42,10 +43,10 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
     let context = context(0); // Would come from request context
     let authority = authority(0); // Would come from request
     let required_budget = match request_type {
-        "read" => 10,
-        "write" => 50,
-        "admin" => 100,
-        _ => 25,
+        "read" => FlowCost::new(10),
+        "write" => FlowCost::new(50),
+        "admin" => FlowCost::new(100),
+        _ => FlowCost::new(25),
     };
 
     if !snapshot
@@ -117,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Set up initial state
-    interpreter.set_initial_budget(authority, 200);
+    interpreter.set_initial_budget(authority, FlowCost::new(200));
     interpreter
         .execute(EffectCommand::StoreMetadata {
             key: "user:authorized".to_string(),
@@ -146,7 +147,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let state = interpreter.snapshot_state();
         // Convert flow_budgets to include context
         let context = context(2);
-        let budgets_with_context: std::collections::HashMap<(ContextId, AuthorityId), u32> = state
+        let budgets_with_context: std::collections::HashMap<(ContextId, AuthorityId), FlowCost> =
+            state
             .flow_budgets
             .iter()
             .map(|(auth, amount)| ((context, *auth), *amount))
@@ -186,13 +188,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let new_budget = interpreter.state().get_budget(&authority);
             println!("  - Remaining budget: {new_budget}");
         } else {
-            let reason = outcome
-                .decision
-                .denial_reason()
-                .unwrap_or("Unknown reason");
-            println!(
-                "  ✗ Denied: {reason}"
-            );
+            let reason = outcome.decision.denial_reason().unwrap_or("Unknown reason");
+            println!("  ✗ Denied: {reason}");
         }
 
         println!();
@@ -241,7 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Set same initial conditions
-    replay_interpreter.set_initial_budget(authority, 200);
+    replay_interpreter.set_initial_budget(authority, FlowCost::new(200));
 
     // Replay events
     replay_interpreter.replay(events).await?;

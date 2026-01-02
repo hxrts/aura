@@ -691,7 +691,7 @@ impl FlowBudgetEffects for MockEffects {
         &self,
         context: &ContextId,
         authority: &AuthorityId,
-        cost: u32,
+        cost: aura_core::FlowCost,
     ) -> aura_core::Result<Receipt> {
         let key = (*context, *authority);
         let mut state = self.state.lock().unwrap();
@@ -703,9 +703,9 @@ impl FlowBudgetEffects for MockEffects {
             dst: *authority, // Self-charge for simplicity
             epoch: Epoch(0),
             cost,
-            nonce: state.flow_receipts.len() as u64,
+            nonce: aura_core::FlowNonce::new(state.flow_receipts.len() as u64),
             prev: Hash32::new([0; 32]),
-            sig: vec![0xAB; 64],
+            sig: aura_core::ReceiptSig::new(vec![0xAB; 64])?,
         };
 
         state.flow_receipts.insert(key, receipt.clone());
@@ -752,7 +752,7 @@ impl JournalEffects for MockEffects {
         let total_spent = state
             .flow_receipts
             .get(&key)
-            .map(|r| r.cost as u64)
+            .map(|r| u64::from(r.cost))
             .unwrap_or(0);
         Ok(FlowBudget {
             limit: 1000,
@@ -774,7 +774,7 @@ impl JournalEffects for MockEffects {
         &self,
         context: &ContextId,
         authority: &AuthorityId,
-        cost: u32,
+        cost: aura_core::FlowCost,
     ) -> Result<FlowBudget, AuraError> {
         let _receipt =
             <Self as FlowBudgetEffects>::charge_flow(self, context, authority, cost).await?;

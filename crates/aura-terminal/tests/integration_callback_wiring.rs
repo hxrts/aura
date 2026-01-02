@@ -325,8 +325,8 @@ async fn test_chat_signal_message_accumulation() {
         // Add first message
         chat.messages.push(Message {
             id: "msg-1".to_string(),
-            channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
-            sender_id: "alice".parse::<AuthorityId>().unwrap_or_default(),
+            channel_id: ChannelId::from_bytes([0x10; 32]),
+            sender_id: AuthorityId::new_from_entropy([0xAA; 32]),
             sender_name: "Alice".to_string(),
             content: "Hello world!".to_string(),
             timestamp: 1000,
@@ -338,8 +338,8 @@ async fn test_chat_signal_message_accumulation() {
         // Add second message
         chat.messages.push(Message {
             id: "msg-2".to_string(),
-            channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
-            sender_id: "bob".parse::<AuthorityId>().unwrap_or_default(),
+            channel_id: ChannelId::from_bytes([0x10; 32]),
+            sender_id: AuthorityId::new_from_entropy([0xBB; 32]),
             sender_name: "Bob".to_string(),
             content: "Hi Alice!".to_string(),
             timestamp: 2000,
@@ -452,7 +452,7 @@ async fn test_contacts_signal_contact_tracking() {
 
     // Phase 2: Add a contact via signal
     println!("\nPhase 2: Add contact via signal");
-    let contact_alice_id = "contact-alice".parse::<AuthorityId>().unwrap_or_default();
+    let contact_alice_id = AuthorityId::new_from_entropy([0xCA; 32]);
     {
         let core = app_core.read().await;
         let mut contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
@@ -499,9 +499,15 @@ async fn test_contacts_signal_contact_tracking() {
         assert_eq!(alice.nickname, "Alice (Friend)", "Nickname should match");
         assert!(!alice.is_guardian, "Should not be guardian initially");
 
-        println!("  Contact found: {suggested_name:?}", suggested_name = alice.suggested_name);
+        println!(
+            "  Contact found: {suggested_name:?}",
+            suggested_name = alice.suggested_name
+        );
         println!("  Nickname: {nickname}", nickname = alice.nickname);
-        println!("  Is guardian: {is_guardian}", is_guardian = alice.is_guardian);
+        println!(
+            "  Is guardian: {is_guardian}",
+            is_guardian = alice.is_guardian
+        );
     }
 
     // Phase 4: Update contact to be a guardian
@@ -546,7 +552,10 @@ async fn test_contacts_signal_contact_tracking() {
             "Nickname should be updated"
         );
 
-        println!("  Guardian status: {is_guardian}", is_guardian = alice.is_guardian);
+        println!(
+            "  Guardian status: {is_guardian}",
+            is_guardian = alice.is_guardian
+        );
         println!("  Updated nickname: {nickname}", nickname = alice.nickname);
     }
 
@@ -590,7 +599,7 @@ async fn test_recovery_signal_state_tracking() {
 
         recovery.active_recovery = Some(RecoveryProcess {
             id: "recovery-session-123".to_string(),
-            account_id: "my-account".parse::<AuthorityId>().unwrap_or_default(),
+            account_id: AuthorityId::new_from_entropy([0xAC; 32]),
             status: RecoveryProcessStatus::WaitingForApprovals,
             approvals_received: 0,
             approvals_required: 2,
@@ -637,8 +646,8 @@ async fn test_recovery_signal_state_tracking() {
 
     // Phase 4: Simulate guardian approval
     println!("\nPhase 4: Simulate guardian approval");
-    let guardian_alice_id = "guardian-alice".parse::<AuthorityId>().unwrap_or_default();
-    let guardian_bob_id = "guardian-bob".parse::<AuthorityId>().unwrap_or_default();
+    let guardian_alice_id = AuthorityId::new_from_entropy([0x0A; 32]);
+    let guardian_bob_id = AuthorityId::new_from_entropy([0x0B; 32]);
     {
         let core = app_core.read().await;
         let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
@@ -672,7 +681,10 @@ async fn test_recovery_signal_state_tracking() {
         let approvals_received = active.approvals_received;
         let approvals_required = active.approvals_required;
         println!("  Approvals: {approvals_received}/{approvals_required}");
-        println!("  Approved by: {approved_by:?}", approved_by = active.approved_by);
+        println!(
+            "  Approved by: {approved_by:?}",
+            approved_by = active.approved_by
+        );
         println!("  Progress: {progress}%", progress = active.progress);
     }
 
@@ -716,7 +728,10 @@ async fn test_recovery_signal_state_tracking() {
         let approvals_received = active.approvals_received;
         let approvals_required = active.approvals_required;
         println!("  Final approvals: {approvals_received}/{approvals_required}");
-        println!("  Approved by: {approved_by:?}", approved_by = active.approved_by);
+        println!(
+            "  Approved by: {approved_by:?}",
+            approved_by = active.approved_by
+        );
     }
 
     cleanup_test_dir("recovery-track");
@@ -758,10 +773,7 @@ async fn test_neighborhood_position_tracking() {
         let core = app_core.read().await;
         let neighborhood = core.read(&*NEIGHBORHOOD_SIGNAL).await.unwrap();
 
-        println!(
-            "  Home: {home_id:?}",
-            home_id = neighborhood.home_home_id
-        );
+        println!("  Home: {home_id:?}", home_id = neighborhood.home_home_id);
         println!("  Position: {position:?}", position = neighborhood.position);
         let neighbor_count = neighborhood.neighbors.len();
         println!("  Neighbors: {neighbor_count} entries");

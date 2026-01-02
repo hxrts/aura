@@ -23,7 +23,7 @@ use aura_core::{
     identifiers::{AuthorityId, ContextId},
     journal::Journal,
     time::TimeStamp,
-    AuraError, AuraResult as Result, Cap, Receipt,
+    AuraError, AuraResult as Result, Cap, FlowCost, Receipt,
 };
 
 // Re-export key types for easier use by macro-generated code
@@ -76,7 +76,7 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
         debug!(
             authority = ?request.authority,
             operation = %request.operation,
-            cost = request.cost,
+            cost = ?request.cost,
             "Evaluating pure guard chain"
         );
 
@@ -190,7 +190,9 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
             .get_flow_budget(&request.context, &request.peer)
             .await
         {
-            budgets.insert((request.context, request.peer), budget.remaining() as u32);
+            let remaining = aura_core::FlowCost::try_from(budget.remaining())
+                .map_err(|e| AuraError::invalid(e.to_string()))?;
+            budgets.insert((request.context, request.peer), remaining);
         }
         let budget_view = FlowBudgetView::new(budgets);
 
@@ -731,7 +733,9 @@ where
 
     let mut budgets = HashMap::new();
     if let Ok(budget) = effect_system.get_flow_budget(context, authority).await {
-        budgets.insert((*context, *authority), budget.remaining() as u32);
+        let remaining = FlowCost::try_from(budget.remaining())
+            .map_err(|e| AuraError::invalid(e.to_string()))?;
+        budgets.insert((*context, *authority), remaining);
     }
 
     let mut metadata = HashMap::new();
@@ -830,7 +834,9 @@ mod tests {
 
             match cmd {
                 EffectCommand::ChargeBudget { amount, .. } => {
-                    Ok(EffectResult::RemainingBudget(1000 - amount))
+                    Ok(EffectResult::RemainingBudget(
+                        1000u32.saturating_sub(amount.value()),
+                    ))
                 }
                 _ => Ok(EffectResult::Success),
             }
@@ -865,7 +871,7 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([75u8; 32]);
         let authority = AuthorityId::new_from_entropy([76u8; 32]); // Create once and reuse
         let message_authorization = "guard:send".to_string();
-        let cost = 42;
+        let cost = FlowCost::new(42);
 
         let guard = SendGuardChain::new(message_authorization.clone(), context, peer, cost);
 

@@ -80,7 +80,8 @@ pub use registry::{AuthorityRegistry, AuthorityStatus, VerificationResult};
 
 // Re-export fact types
 pub use facts::{
-    VerificationType, VerifyFact, VerifyFactDelta, VerifyFactReducer, VERIFY_FACT_TYPE_ID,
+    Confidence, PublicKeyBytes, RevocationReason, VerificationType, VerifyFact, VerifyFactDelta,
+    VerifyFactReducer, VERIFY_FACT_TYPE_ID,
 };
 
 // Re-export crypto message types (now consolidated in messages.rs)

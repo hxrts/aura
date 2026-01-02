@@ -2346,8 +2346,8 @@ async fn test_channel_mode_operations() {
         .await
         .expect("Failed to create account");
 
-    let home_id = "test-home-mode".parse::<ChannelId>().unwrap_or_default();
-    let owner_id = "owner-id".parse::<AuthorityId>().unwrap_or_default();
+    let home_id = ChannelId::from_bytes([0x30; 32]);
+    let owner_id = AuthorityId::new_from_entropy([0x31; 32]);
     let home_context_id = ContextId::new_from_entropy([10u8; 32]);
 
     // Set up a home with the user as owner (required for SetChannelMode)
@@ -3747,7 +3747,7 @@ async fn test_journal_compaction_primitives() {
     println!("  ✓ Re-compaction with same epoch removes 0 ops");
 
     // Test compaction of remaining operations
-    let removed_rest = op_log.compact_before_epoch(10);
+    let removed_rest = op_log.compact_before_epoch(Epoch::new(10));
     assert_eq!(removed_rest, 5, "Should remove remaining 5 operations");
     assert!(
         op_log.is_empty(),

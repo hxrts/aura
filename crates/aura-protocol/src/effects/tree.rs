@@ -28,7 +28,10 @@ use aura_core::{
 use aura_journal::commitment_tree::TreeState;
 use serde::{Deserialize, Serialize};
 
-// Snapshot-related types for Phase 5.4
+// Re-export canonical ProposalId from aura-core
+pub use aura_core::tree::ProposalId;
+
+// Snapshot-related types for Phase 5.4 (protocol-layer versions with TreeState)
 /// Defines a cut point for snapshotting
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cut {
@@ -36,10 +39,6 @@ pub struct Cut {
     pub commitment: Hash32,
     pub cid: Hash32,
 }
-
-/// Identifier for a snapshot proposal
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProposalId(pub Hash32);
 
 /// Partial signature share for snapshot approval
 #[derive(Debug, Clone, Serialize, Deserialize)]

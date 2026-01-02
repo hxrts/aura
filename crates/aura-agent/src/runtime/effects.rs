@@ -16,10 +16,10 @@ use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
 use crate::database::IndexedJournalHandler;
 use crate::fact_registry::build_fact_registry;
+use crate::runtime::services::LogicalClockManager;
 use crate::runtime::subsystems::{
     crypto::CryptoRng, ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem,
 };
-use crate::runtime::services::LogicalClockManager;
 use crate::runtime::time_handler::EnhancedTimeHandler;
 use async_trait::async_trait;
 use aura_app::ReactiveHandler;
@@ -310,11 +310,8 @@ impl AuraEffectSystem {
                 .map(|shared| shared.inbox_for(authority))
                 .unwrap_or_else(|| Arc::new(RwLock::new(Vec::new())))
         });
-        let transport = TransportSubsystem::from_parts(
-            transport_handler,
-            transport_inbox,
-            shared_transport,
-        );
+        let transport =
+            TransportSubsystem::from_parts(transport_handler, transport_inbox, shared_transport);
 
         // === Build JournalSubsystem ===
         let indexed_journal = Arc::new(IndexedJournalHandler::with_capacity(100_000));
@@ -1042,7 +1039,8 @@ impl AuraEffectSystem {
         ];
 
         let data = epoch.to_le_bytes().to_vec();
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_store(&location, &data, &caps)
             .await
             .map_err(|e| AuraError::storage(format!("Failed to store epoch state: {}", e)))
@@ -1128,7 +1126,8 @@ impl AuraEffectSystem {
         let data = serde_json::to_vec(&metadata).map_err(|e| {
             AuraError::storage(format!("Failed to serialize threshold metadata: {}", e))
         })?;
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_store(&location, &data, &caps)
             .await
             .map_err(|e| {

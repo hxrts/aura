@@ -32,10 +32,18 @@ use std::time::Duration;
 /// Real simulation logic is provided by `aura-simulator` layer.
 #[derive(Debug, Clone)]
 pub struct FallbackSimulationHandler<S, T> {
-    /// Storage effects handler reference (currently unused in fallback mode)
+    /// Storage effects handler reference.
+    ///
+    /// Currently unused in fallback mode but retained for future extensions where
+    /// the fallback handler may need to snapshot/restore state or persist metrics.
+    /// This is intentional infrastructure, not dead code.
     #[allow(dead_code)]
     storage: Arc<S>,
-    /// Time effects handler reference (currently unused in fallback mode)
+    /// Time effects handler reference.
+    ///
+    /// Currently unused in fallback mode but retained for future extensions where
+    /// the fallback handler may need to access simulated time or provide timing
+    /// diagnostics. This is intentional infrastructure, not dead code.
     #[allow(dead_code)]
     time: Arc<T>,
 }

@@ -104,7 +104,11 @@ impl IndexedJournalHandler {
         {
             if let Err(message) = guard.validate() {
                 tracing::error!(%message, "IndexedJournalHandler state invariant violated");
-                debug_assert!(false, "IndexedJournalHandler invariant violated: {}", message);
+                debug_assert!(
+                    false,
+                    "IndexedJournalHandler invariant violated: {}",
+                    message
+                );
             }
         }
         result
@@ -332,7 +336,8 @@ impl IndexedJournalEffects for IndexedJournalHandler {
     }
 
     async fn index_stats(&self) -> Result<IndexStats, AuraError> {
-        let (stats, filter) = self.with_state(|state| (state.index.stats(), state.bloom_filter.clone()));
+        let (stats, filter) =
+            self.with_state(|state| (state.index.stats(), state.bloom_filter.clone()));
         let mut stats = stats;
         // Estimate false positive rate based on filter fill ratio
         // Note: set_bits could be used for more accurate FP estimation in the future

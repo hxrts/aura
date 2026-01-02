@@ -20,6 +20,7 @@ aura-macros = { path = "../aura-macros" }
 
 # Serialization
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Utilities
 hex = { workspace = true }
@@ -29,6 +30,7 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 async-trait = { workspace = true }
 uuid = { workspace = true }
 aura-testkit = { path = "../aura-testkit" }
+proptest = { workspace = true }
 
 [features]
 default = []

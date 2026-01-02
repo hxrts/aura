@@ -537,7 +537,7 @@ impl HomeSignalView {
         homes
             .homes
             .values_mut()
-            .find(|home_state| &home_state.context_id == context_id)
+            .find(|home_state| home_state.context_id.as_ref() == Some(context_id))
     }
 }
 

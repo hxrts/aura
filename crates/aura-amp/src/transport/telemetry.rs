@@ -56,7 +56,7 @@ impl AmpTelemetry {
             payload_bytes = payload_size,
             encrypted_bytes = encrypted_size,
             flow_charged = flow_charge,
-            receipt_nonce = receipt.map(|r| r.nonce),
+            receipt_nonce = ?receipt.map(|r| r.nonce),
             "AMP send completed"
         );
     }
@@ -207,7 +207,7 @@ impl AmpTelemetry {
             context = %context,
             peer = %peer,
             cost = cost,
-            receipt_nonce = receipt.map(|r| r.nonce),
+            receipt_nonce = ?receipt.map(|r| r.nonce),
             "Flow budget charged"
         );
     }

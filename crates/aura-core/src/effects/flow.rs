@@ -10,7 +10,7 @@
 //! - Core trait definition belongs in Layer 1 (foundation)
 
 use crate::{
-    types::flow::Receipt,
+    types::flow::{FlowCost, Receipt},
     types::identifiers::{AuthorityId, ContextId},
     AuraResult,
 };
@@ -28,12 +28,12 @@ pub struct FlowHint {
     /// The peer authority that will receive the information
     pub peer: AuthorityId,
     /// The cost in flow budget units
-    pub cost: u32,
+    pub cost: FlowCost,
 }
 
 impl FlowHint {
     /// Create a new flow hint
-    pub fn new(context: ContextId, peer: AuthorityId, cost: u32) -> Self {
+    pub fn new(context: ContextId, peer: AuthorityId, cost: FlowCost) -> Self {
         Self {
             context,
             peer,
@@ -52,7 +52,7 @@ impl FlowHint {
     }
 
     /// Get the cost
-    pub fn cost(&self) -> u32 {
+    pub fn cost(&self) -> FlowCost {
         self.cost
     }
 }
@@ -97,7 +97,7 @@ pub trait FlowBudgetEffects: Send + Sync {
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> AuraResult<Receipt>;
 }
 
@@ -108,7 +108,7 @@ impl<T: FlowBudgetEffects + ?Sized> FlowBudgetEffects for std::sync::Arc<T> {
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> AuraResult<Receipt> {
         (**self).charge_flow(context, peer, cost).await
     }

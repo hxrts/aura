@@ -88,7 +88,10 @@ impl ThresholdConfig {
 /// # Returns
 /// * `Ok(ThresholdConfig)` if valid
 /// * `Err(AuraError)` with descriptive message if invalid
-pub fn validate_threshold_params(threshold: u32, num_devices: u32) -> Result<ThresholdConfig, AuraError> {
+pub fn validate_threshold_params(
+    threshold: u32,
+    num_devices: u32,
+) -> Result<ThresholdConfig, AuraError> {
     let config = ThresholdConfig::new(threshold, num_devices);
     config.validate()?;
     Ok(config)
@@ -249,7 +252,6 @@ pub fn can_submit_account_setup(display_name: &str, is_creating: bool, is_succes
     is_valid_display_name(display_name) && !is_creating && !is_success
 }
 
-
 // =============================================================================
 // ID Derivation Functions
 // =============================================================================
@@ -333,8 +335,8 @@ pub fn derive_recovered_context_id(recovered_authority: &AuthorityId) -> Context
 pub fn parse_backup_code(
     backup_code: &str,
 ) -> Result<crate::views::account::AccountBackup, AuraError> {
-    let backup = crate::views::account::AccountBackup::decode(backup_code)
-        .map_err(AuraError::invalid)?;
+    let backup =
+        crate::views::account::AccountBackup::decode(backup_code).map_err(AuraError::invalid)?;
 
     backup.validate().map_err(AuraError::invalid)?;
 
@@ -371,7 +373,9 @@ mod tests {
     fn test_threshold_config_num_devices_zero() {
         let config = ThresholdConfig::new(1, 0);
         let err = config.validate().unwrap_err();
-        assert!(err.to_string().contains("num_devices must be greater than 0"));
+        assert!(err
+            .to_string()
+            .contains("num_devices must be greater than 0"));
     }
 
     #[test]

@@ -13,6 +13,7 @@ aura-core = { path = "../aura-core" }
 aura-macros = { path = "../aura-macros" }
 async-trait = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 hex = { workspace = true }
@@ -23,5 +24,4 @@ tokio = { workspace = true, features = ["sync"] }
 
 # For property-based testing of semilattice laws
 [dev-dependencies]
-# quickcheck = { workspace = true } # removed - unused
-# tokio-test = { workspace = true } # removed - unused
+proptest = { workspace = true }

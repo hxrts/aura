@@ -200,6 +200,30 @@ impl FactOpId {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fact_key_round_trip() {
+        let key = FactKey::new("device:root");
+        assert_eq!(key.as_str(), "device:root");
+        let owned = key.clone().into_string();
+        assert_eq!(owned, "device:root");
+        let from_str: FactKey = "device:root".into();
+        assert_eq!(from_str, key);
+    }
+
+    #[test]
+    fn fact_op_id_changes_with_timestamp() {
+        let actor = ActorId::authority(AuthorityId::new_from_entropy([1u8; 32]));
+        let key = FactKey::new("entry");
+        let op1 = FactOpId::for_add(&actor, FactTimestamp::new(1), &key);
+        let op2 = FactOpId::for_add(&actor, FactTimestamp::new(2), &key);
+        assert_ne!(op1, op2);
+    }
+}
+
 impl fmt::Display for FactOpId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", hex::encode(self.0))
@@ -232,7 +256,7 @@ struct FactCrdt {
 struct VersionedFactValue {
     value: FactValue,
     timestamp: FactTimestamp,
-    actor_id: ActorId, // Device/actor that created this value
+    actor_id: ActorId,      // Device/actor that created this value
     version: FactTimestamp, // Logical clock for causality
 }
 
@@ -1249,7 +1273,7 @@ impl fmt::Display for Journal {
 }
 
 #[cfg(test)]
-mod tests {
+mod semilattice_tests {
     use super::*;
 
     #[test]
@@ -1330,12 +1354,10 @@ mod tests {
     #[test]
     fn test_journal_merge_and_caps_refinement() {
         let mut journal_a = Journal::with_facts(
-            Fact::with_value("k1", FactValue::String("v1".to_string()))
-                .expect("fact should build"),
+            Fact::with_value("k1", FactValue::String("v1".to_string())).expect("fact should build"),
         );
         let mut journal_b = Journal::with_facts(
-            Fact::with_value("k2", FactValue::String("v2".to_string()))
-                .expect("fact should build"),
+            Fact::with_value("k2", FactValue::String("v2".to_string())).expect("fact should build"),
         );
 
         // Refine capabilities on B to simulate attenuation
@@ -1581,11 +1603,7 @@ mod tests {
         )
         .expect("insert should succeed");
 
-        let stored = fact
-            .entries
-            .lww_map
-            .get(&key)
-            .expect("value should exist");
+        let stored = fact.entries.lww_map.get(&key).expect("value should exist");
         assert_eq!(stored.actor_id, actor_low);
     }
 
@@ -1601,11 +1619,8 @@ mod tests {
     fn test_fact_entry_limit_enforced() {
         let mut fact = Fact::new();
         for i in 0..MAX_LWW_MAP_ENTRIES_COUNT {
-            fact.insert(
-                format!("k{i}"),
-                FactValue::Number(i64::from(i)),
-            )
-            .expect("insert within limit");
+            fact.insert(format!("k{i}"), FactValue::Number(i64::from(i)))
+                .expect("insert within limit");
         }
 
         let result = fact.insert(

@@ -119,11 +119,7 @@ impl RendezvousCacheManager {
     }
 
     /// Cleanup expired descriptors and stale pending channels.
-    pub async fn cleanup_expired(
-        &self,
-        now_ms: u64,
-        pending_max_age_ms: u64,
-    ) -> (usize, usize) {
+    pub async fn cleanup_expired(&self, now_ms: u64, pending_max_age_ms: u64) -> (usize, usize) {
         with_state_mut_validated(
             &self.state,
             |state| {

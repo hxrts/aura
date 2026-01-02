@@ -23,6 +23,7 @@ use super::NetworkAddress;
 use crate::{
     domain::journal::{Cap, Fact},
     time::TimeStamp,
+    types::flow::FlowCost,
     types::identifiers::{AuthorityId, ContextId},
     AuraResult as Result, Receipt,
 };
@@ -52,22 +53,27 @@ pub struct GuardSnapshot {
 /// Read-only view of flow budgets
 #[derive(Debug, Clone, Default)]
 pub struct FlowBudgetView {
-    budgets: HashMap<(ContextId, AuthorityId), u32>,
+    budgets: HashMap<(ContextId, AuthorityId), FlowCost>,
 }
 
 impl FlowBudgetView {
     /// Create a new flow budget view
-    pub fn new(budgets: HashMap<(ContextId, AuthorityId), u32>) -> Self {
+    pub fn new(budgets: HashMap<(ContextId, AuthorityId), FlowCost>) -> Self {
         Self { budgets }
     }
 
     /// Get remaining budget for a context/authority
-    pub fn get(&self, context: &ContextId, authority: &AuthorityId) -> Option<u32> {
+    pub fn get(&self, context: &ContextId, authority: &AuthorityId) -> Option<FlowCost> {
         self.budgets.get(&(*context, *authority)).copied()
     }
 
     /// Check if authority has at least the specified budget in a context
-    pub fn has_budget(&self, context: &ContextId, authority: &AuthorityId, amount: u32) -> bool {
+    pub fn has_budget(
+        &self,
+        context: &ContextId,
+        authority: &AuthorityId,
+        amount: FlowCost,
+    ) -> bool {
         self.get(context, authority)
             .is_some_and(|budget| budget >= amount)
     }
@@ -167,7 +173,7 @@ pub enum EffectCommand {
         /// Peer being communicated with (if applicable)
         peer: AuthorityId,
         /// Amount to charge
-        amount: u32,
+        amount: FlowCost,
     },
     /// Append entry to the journal
     AppendJournal {
@@ -312,13 +318,13 @@ mod tests {
         let mut budgets = HashMap::new();
         let authority = AuthorityId::new_from_entropy([31u8; 32]);
         let context = ContextId::new_from_entropy([32u8; 32]);
-        budgets.insert((context, authority), 1000);
+        budgets.insert((context, authority), FlowCost::new(1000));
 
         let view = FlowBudgetView::new(budgets);
 
-        assert_eq!(view.get(&context, &authority), Some(1000));
-        assert!(view.has_budget(&context, &authority, 500));
-        assert!(!view.has_budget(&context, &authority, 2000));
+        assert_eq!(view.get(&context, &authority), Some(FlowCost::new(1000)));
+        assert!(view.has_budget(&context, &authority, FlowCost::new(500)));
+        assert!(!view.has_budget(&context, &authority, FlowCost::new(2000)));
 
         let unknown = AuthorityId::new_from_entropy([33u8; 32]);
         assert_eq!(view.get(&context, &unknown), None);
@@ -354,7 +360,7 @@ mod tests {
             context: ContextId::new_from_entropy([34u8; 32]),
             authority: AuthorityId::new_from_entropy([35u8; 32]),
             peer: AuthorityId::new_from_entropy([36u8; 32]),
-            amount: 100,
+            amount: FlowCost::new(100),
         }];
 
         let authorized = GuardOutcome::authorized(effects);
@@ -372,7 +378,7 @@ mod tests {
             context: ContextId::new_from_entropy([37u8; 32]),
             authority: AuthorityId::new_from_entropy([38u8; 32]),
             peer: AuthorityId::new_from_entropy([39u8; 32]),
-            amount: 100,
+            amount: FlowCost::new(100),
         };
 
         let serialized = crate::util::serialization::to_vec(&cmd).unwrap();
@@ -380,7 +386,9 @@ mod tests {
             crate::util::serialization::from_slice(&serialized).unwrap();
 
         match deserialized {
-            EffectCommand::ChargeBudget { amount, .. } => assert_eq!(amount, 100),
+            EffectCommand::ChargeBudget { amount, .. } => {
+                assert_eq!(amount, FlowCost::new(100))
+            }
             _ => panic!("Wrong command type"),
         }
     }

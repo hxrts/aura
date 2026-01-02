@@ -99,7 +99,8 @@ impl AmpChannelEffects for AuraEffectSystem {
             let prestate = aura_core::Prestate::new(
                 vec![(self.authority_id, Hash32(tree_state.root_commitment))],
                 context_commitment,
-            );
+            )
+            .map_err(|e| map_amp_err(AuraError::invalid(format!("Invalid AMP prestate: {e}"))))?;
             let consensus_params =
                 crate::runtime::consensus::build_consensus_params(self, self.authority_id, self)
                     .await

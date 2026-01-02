@@ -24,10 +24,7 @@ where
 }
 
 /// Read a signal or return its Default value on error.
-pub async fn read_signal_or_default<T>(
-    app_core: &Arc<RwLock<AppCore>>,
-    signal: &Signal<T>,
-) -> T
+pub async fn read_signal_or_default<T>(app_core: &Arc<RwLock<AppCore>>, signal: &Signal<T>) -> T
 where
     T: Clone + Default + Send + Sync + 'static,
 {

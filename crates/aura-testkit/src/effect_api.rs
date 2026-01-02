@@ -4,6 +4,7 @@
 //! (CRDT-based account effect_apis) across the Aura test suite.
 
 use async_lock::RwLock;
+use aura_core::crypto::Ed25519VerifyingKey;
 use aura_core::hash::hash;
 use aura_core::AccountId;
 use aura_journal::algebra::AccountState;
@@ -45,11 +46,9 @@ impl LedgerTestFixture {
     /// Create a new effect_api test fixture with a specific account ID
     pub async fn new(account_id: AccountId) -> Self {
         // Create a minimal AccountState for testing
-        let (_, group_public_key) = crate::test_key_pair(42);
-        let initial_state = AccountState::new(
-            account_id,
-            group_public_key,
-        );
+        let (_, verifying_key) = crate::test_key_pair(42);
+        let group_public_key = Ed25519VerifyingKey(verifying_key.to_bytes());
+        let initial_state = AccountState::new(account_id, group_public_key);
         let effect_api = Arc::new(RwLock::new(
             AccountEffectApi::new(initial_state).expect("Failed to create AccountEffectApi"),
         ));

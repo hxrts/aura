@@ -11,6 +11,8 @@ workspace = true
 
 [features]
 default = []
+# Enable simulation mode for deterministic testing with aura-simulator.
+# Provides access to simulation-specific effect traits and handlers.
 simulation = ["aura-core/simulation"]
 
 [dependencies]

@@ -13,12 +13,13 @@ use crate::runtime::AuraEffectSystem;
 use crate::InvitationServiceApi;
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::RandomExtendedEffects;
-use aura_core::effects::{FlowBudgetEffects, TransportEnvelope, TransportEffects, TransportReceipt};
 use aura_core::effects::{
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+    FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportReceipt,
 };
+use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
+use aura_core::FlowCost;
 use aura_core::Receipt;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
@@ -61,10 +62,8 @@ pub struct InvitationHandler {
 
 impl Clone for InvitationHandler {
     fn clone(&self) -> Self {
-        let service = CoreInvitationService::new(
-            self.service.authority_id(),
-            self.service.config().clone(),
-        );
+        let service =
+            CoreInvitationService::new(self.service.authority_id(), self.service.config().clone());
         Self {
             context: self.context.clone(),
             service,
@@ -200,7 +199,7 @@ impl InvitationHandler {
         GuardSnapshot::new(
             self.context.authority.authority_id(),
             self.context.effect_context.context_id(),
-            100, // Default flow budget
+            FlowCost::new(100), // Default flow budget
             capabilities,
             1, // Default epoch
             now_ms,
@@ -326,8 +325,12 @@ impl InvitationHandler {
         };
 
         // Persist the invitation to storage (so it survives service recreation)
-        Self::persist_created_invitation(effects, self.context.authority.authority_id(), &invitation)
-            .await?;
+        Self::persist_created_invitation(
+            effects,
+            self.context.authority.authority_id(),
+            &invitation,
+        )
+        .await?;
 
         // Cache the pending invitation (for fast lookup within same service instance)
         self.invitation_cache
@@ -530,11 +533,7 @@ impl InvitationHandler {
         let own_id = self.context.authority.authority_id();
 
         // First try the local cache (fast path when the same handler instance is reused).
-        if let Some(inv) = self
-            .invitation_cache
-            .get_invitation(invitation_id)
-            .await
-        {
+        if let Some(inv) = self.invitation_cache.get_invitation(invitation_id).await {
             if let InvitationType::Contact { nickname } = &inv.invitation_type {
                 let other = if inv.sender_id == own_id {
                     inv.receiver_id
@@ -632,11 +631,7 @@ impl InvitationHandler {
         let own_id = self.context.authority.authority_id();
 
         // First try the local cache (fast path when the same handler instance is reused).
-        if let Some(inv) = self
-            .invitation_cache
-            .get_invitation(invitation_id)
-            .await
-        {
+        if let Some(inv) = self.invitation_cache.get_invitation(invitation_id).await {
             if let InvitationType::DeviceEnrollment {
                 subject_authority,
                 initiator_device_id,
@@ -712,17 +707,17 @@ impl InvitationHandler {
 
         // Persist the shareable invitation so later operations (accept/decline) can resolve it
         // even if AuraAgent constructs a fresh InvitationService/InvitationHandler.
-        Self::persist_imported_invitation(effects, self.context.authority.authority_id(), &shareable)
-            .await?;
+        Self::persist_imported_invitation(
+            effects,
+            self.context.authority.authority_id(),
+            &shareable,
+        )
+        .await?;
 
         let invitation_id = shareable.invitation_id.clone();
 
         // Fast path: already cached.
-        if let Some(existing) = self
-            .invitation_cache
-            .get_invitation(&invitation_id)
-            .await
-        {
+        if let Some(existing) = self.invitation_cache.get_invitation(&invitation_id).await {
             return Ok(existing);
         }
 
@@ -805,10 +800,7 @@ impl InvitationHandler {
         execute_guard_outcome(outcome, &self.context.authority, effects).await?;
 
         // Remove from cache
-        let _ = self
-            .invitation_cache
-            .remove_invitation(invitation_id)
-            .await;
+        let _ = self.invitation_cache.remove_invitation(invitation_id).await;
 
         Ok(InvitationResult {
             success: true,
@@ -837,11 +829,7 @@ impl InvitationHandler {
         invitation_id: &str,
     ) -> Option<Invitation> {
         // First check in-memory cache
-        if let Some(inv) = self
-            .invitation_cache
-            .get_invitation(invitation_id)
-            .await
-        {
+        if let Some(inv) = self.invitation_cache.get_invitation(invitation_id).await {
             return Some(inv);
         }
 
@@ -1108,23 +1096,19 @@ async fn execute_effect_command(
         aura_invitation::guards::EffectCommand::NotifyPeer {
             peer,
             invitation_id,
-        } => execute_notify_peer(
-            peer,
-            invitation_id,
-            authority,
-            pending_receipt.clone(),
-            effects,
-        )
-        .await,
-        aura_invitation::guards::EffectCommand::RecordReceipt { operation, peer } => {
-            execute_record_receipt(
-                operation,
+        } => {
+            execute_notify_peer(
                 peer,
-                context_id,
-                pending_receipt.take(),
+                invitation_id,
+                authority,
+                pending_receipt.clone(),
                 effects,
             )
             .await
+        }
+        aura_invitation::guards::EffectCommand::RecordReceipt { operation, peer } => {
+            execute_record_receipt(operation, peer, context_id, pending_receipt.take(), effects)
+                .await
         }
     }
 }
@@ -1146,7 +1130,7 @@ async fn execute_journal_append(
 }
 
 async fn execute_charge_flow_budget(
-    cost: u32,
+    cost: aura_core::FlowCost,
     context_id: ContextId,
     peer: AuthorityId,
     effects: &AuraEffectSystem,
@@ -1173,12 +1157,15 @@ async fn execute_notify_peer(
         return Ok(());
     }
 
-    let invitation =
-        InvitationHandler::load_created_invitation(effects, authority.authority_id(), &invitation_id)
-            .await
-            .ok_or_else(|| {
-                AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
-            })?;
+    let invitation = InvitationHandler::load_created_invitation(
+        effects,
+        authority.authority_id(),
+        &invitation_id,
+    )
+    .await
+    .ok_or_else(|| {
+        AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
+    })?;
 
     let code = InvitationServiceApi::export_invitation(&invitation);
     let mut metadata = HashMap::new();
@@ -1215,10 +1202,10 @@ fn transport_receipt_from_flow(receipt: Receipt) -> TransportReceipt {
         src: receipt.src,
         dst: receipt.dst,
         epoch: receipt.epoch.value(),
-        cost: receipt.cost,
-        nonce: receipt.nonce,
+        cost: receipt.cost.value(),
+        nonce: receipt.nonce.value(),
         prev: receipt.prev.0,
-        sig: receipt.sig,
+        sig: receipt.sig.into_bytes(),
     }
 }
 
@@ -1249,9 +1236,8 @@ async fn execute_record_receipt(
         "invitation/receipts/{}/{}/{}/{}",
         receipt.ctx, peer_id, operation_key, receipt.nonce
     );
-    let bytes = serde_json::to_vec(&receipt).map_err(|e| {
-        AgentError::effects(format!("Failed to serialize invitation receipt: {e}"))
-    })?;
+    let bytes = serde_json::to_vec(&receipt)
+        .map_err(|e| AgentError::effects(format!("Failed to serialize invitation receipt: {e}")))?;
     effects
         .store(&key, bytes)
         .await
@@ -1281,7 +1267,9 @@ mod tests {
         let config = AgentConfig::default();
         let effects = AuraEffectSystem::testing(&config).unwrap();
 
-        let outcome = GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget { cost: 1 }]);
+        let outcome = GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget {
+            cost: FlowCost::new(1),
+        }]);
 
         let result = execute_guard_outcome(outcome, &authority, &effects).await;
         assert!(result.is_ok());
@@ -1363,7 +1351,9 @@ mod tests {
 
         let peer = AuthorityId::new_from_entropy([139u8; 32]);
         let outcome = GuardOutcome::allowed(vec![
-            EffectCommand::ChargeFlowBudget { cost: 1 },
+            EffectCommand::ChargeFlowBudget {
+                cost: FlowCost::new(1),
+            },
             EffectCommand::NotifyPeer {
                 peer,
                 invitation_id: "inv-multi".to_string(),

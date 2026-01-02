@@ -17,10 +17,7 @@ impl SessionState {
     fn validate(&self) -> Result<(), String> {
         for session_id in self.participants.keys() {
             if !self.metadata.contains_key(session_id) {
-                return Err(format!(
-                    "Missing metadata entry for session {}",
-                    session_id
-                ));
+                return Err(format!("Missing metadata entry for session {}", session_id));
             }
         }
         Ok(())
@@ -37,21 +34,22 @@ impl SessionManager {
         Self::default()
     }
 
-    pub(crate) async fn register_session(
-        &self,
-        session_id: &str,
-        participants: Vec<DeviceId>,
-    ) {
-        with_state_mut_validated(&self.state, |state| {
-            state
-                .participants
-                .entry(session_id.to_string())
-                .or_insert_with(|| participants);
-            state
-                .metadata
-                .entry(session_id.to_string())
-                .or_insert_with(HashMap::new);
-        }, |state| state.validate()).await;
+    pub(crate) async fn register_session(&self, session_id: &str, participants: Vec<DeviceId>) {
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state
+                    .participants
+                    .entry(session_id.to_string())
+                    .or_insert_with(|| participants);
+                state
+                    .metadata
+                    .entry(session_id.to_string())
+                    .or_insert_with(HashMap::new);
+            },
+            |state| state.validate(),
+        )
+        .await;
     }
 
     pub(crate) async fn update_metadata(
@@ -59,14 +57,19 @@ impl SessionManager {
         session_id: &str,
         metadata: HashMap<String, Value>,
     ) -> HashMap<String, Value> {
-        with_state_mut_validated(&self.state, |state| {
-            let entry = state
-                .metadata
-                .entry(session_id.to_string())
-                .or_insert_with(HashMap::new);
-            entry.extend(metadata);
-            entry.clone()
-        }, |state| state.validate()).await
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let entry = state
+                    .metadata
+                    .entry(session_id.to_string())
+                    .or_insert_with(HashMap::new);
+                entry.extend(metadata);
+                entry.clone()
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     pub(crate) async fn add_participant(
@@ -74,20 +77,25 @@ impl SessionManager {
         session_id: &str,
         device_id: DeviceId,
     ) -> Vec<DeviceId> {
-        with_state_mut_validated(&self.state, |state| {
-            let participants = state
-                .participants
-                .entry(session_id.to_string())
-                .or_insert_with(Vec::new);
-            if !participants.contains(&device_id) {
-                participants.push(device_id);
-            }
-            state
-                .metadata
-                .entry(session_id.to_string())
-                .or_insert_with(HashMap::new);
-            participants.clone()
-        }, |state| state.validate()).await
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                let participants = state
+                    .participants
+                    .entry(session_id.to_string())
+                    .or_insert_with(Vec::new);
+                if !participants.contains(&device_id) {
+                    participants.push(device_id);
+                }
+                state
+                    .metadata
+                    .entry(session_id.to_string())
+                    .or_insert_with(HashMap::new);
+                participants.clone()
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 
     pub(crate) async fn remove_participant(
@@ -95,12 +103,17 @@ impl SessionManager {
         session_id: &str,
         device_id: DeviceId,
     ) -> Option<Vec<DeviceId>> {
-        with_state_mut_validated(&self.state, |state| {
-            if let Some(participants) = state.participants.get_mut(session_id) {
-                participants.retain(|id| id != &device_id);
-                return Some(participants.clone());
-            }
-            None
-        }, |state| state.validate()).await
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                if let Some(participants) = state.participants.get_mut(session_id) {
+                    participants.retain(|id| id != &device_id);
+                    return Some(participants.clone());
+                }
+                None
+            },
+            |state| state.validate(),
+        )
+        .await
     }
 }

@@ -32,7 +32,7 @@ pub mod types;
 pub mod verification;
 
 pub use commitment::*;
-pub use policy::Policy;
+pub use policy::{Policy, PolicyError};
 pub use snapshot::*;
 pub use types::*;
 pub use verification::{

@@ -5,9 +5,9 @@
 //! in a threshold ceremony (setup or rotation).
 
 use super::ProcessResult;
-use crate::ThresholdSigningService;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::CeremonyTracker;
+use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
 use aura_core::{hash, AuthorityId, ContextId};
@@ -154,10 +154,7 @@ impl<'a> GuardianHandler<'a> {
                     );
                     let _ = self
                         .ceremony_tracker
-                        .mark_failed(
-                            ceremony_id,
-                            Some(format!("Transcript check failed: {e}")),
-                        )
+                        .mark_failed(ceremony_id, Some(format!("Transcript check failed: {e}")))
                         .await;
                     return Err(());
                 }

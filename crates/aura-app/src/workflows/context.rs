@@ -124,7 +124,9 @@ pub async fn current_home_context_or_fallback(
     let core = app_core.read().await;
     let homes = core.views().get_homes();
     if let Some(home_state) = homes.current_home() {
-        return Ok(home_state.context_id);
+        if let Some(ctx_id) = home_state.context_id {
+            return Ok(ctx_id);
+        }
     }
 
     // Fallback: when no home is selected yet (common in demos/tests), use a

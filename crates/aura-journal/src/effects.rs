@@ -3,7 +3,7 @@ use crate::extensibility::FactRegistry;
 use async_trait::async_trait;
 use aura_core::effects::BiscuitAuthorizationEffects;
 use aura_core::effects::{CryptoEffects, JournalEffects, StorageEffects};
-use aura_core::flow::FlowBudget;
+use aura_core::flow::{FlowBudget, FlowCost};
 use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
 use aura_core::types::Epoch;
 use aura_core::util::serialization::{from_slice, to_vec};
@@ -367,17 +367,19 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send 
         &self,
         context: &ContextId,
         peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> Result<FlowBudget, AuraError> {
         let mut current = self.get_flow_budget(context, peer).await?;
-        if current.limit > 0 && !current.can_charge(cost as u64) {
-            return Err(AuraError::budget_exceeded(format!(
-                "insufficient flow budget: remaining={}, cost={}",
-                current.remaining(),
-                cost
-            )));
+        if current.limit > 0 {
+            current
+                .record_charge(cost)
+                .map_err(|e| AuraError::budget_exceeded(e.to_string()))?;
+        } else {
+            let cost_value = u64::from(cost);
+            current.spent = current.spent.checked_add(cost_value).ok_or_else(|| {
+                AuraError::invalid("flow budget overflow while recording unbounded spend")
+            })?;
         }
-        current.spent = current.spent.saturating_add(cost as u64);
         self.update_flow_budget(context, peer, &current).await
     }
 }
@@ -431,7 +433,7 @@ impl JournalHandlerFactory {
 mod tests {
     use aura_core::domain::content::Hash32;
     use aura_core::identifiers::{AuthorityId, ContextId};
-    use aura_core::types::flow::{FlowBudget, Receipt};
+    use aura_core::types::flow::{FlowBudget, FlowCost, FlowNonce, Receipt, ReceiptSig};
     use aura_core::types::Epoch;
 
     #[test]
@@ -446,15 +448,15 @@ mod tests {
             AuthorityId::new_from_entropy([2u8; 32]),
             AuthorityId::new_from_entropy([3u8; 32]),
             Epoch::new(2),
-            7,
-            99,
+            FlowCost::new(7),
+            FlowNonce::new(99),
             Hash32::zero(),
-            Vec::new(),
+            ReceiptSig::new(Vec::new()).unwrap(),
         );
 
         let updated = FlowBudget {
             limit: current.limit,
-            spent: current.spent.saturating_add(receipt.cost as u64),
+            spent: current.spent.saturating_add(receipt.cost.value() as u64),
             epoch: receipt.epoch,
         };
         assert_eq!(updated.spent, 27);

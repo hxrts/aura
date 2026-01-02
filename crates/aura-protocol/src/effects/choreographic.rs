@@ -158,6 +158,24 @@ pub enum ChoreographyError {
     },
 }
 
+impl aura_core::ProtocolErrorCode for ChoreographyError {
+    fn code(&self) -> &'static str {
+        match self {
+            ChoreographyError::RoleNotFound { .. } => "choreography_role_not_found",
+            ChoreographyError::CommunicationTimeout { .. } => "choreography_timeout",
+            ChoreographyError::SerializationFailed { .. } => "choreography_serialization",
+            ChoreographyError::DeserializationFailed { .. } => "choreography_deserialization",
+            ChoreographyError::ProtocolViolation { .. } => "choreography_protocol_violation",
+            ChoreographyError::SessionNotStarted => "choreography_session_not_started",
+            ChoreographyError::SessionAlreadyExists { .. } => "choreography_session_exists",
+            ChoreographyError::InsufficientParticipants { .. } => "choreography_insufficient_participants",
+            ChoreographyError::ByzantineBehavior { .. } => "choreography_byzantine",
+            ChoreographyError::Transport { .. } => "choreography_transport",
+            ChoreographyError::InternalError { .. } => "choreography_internal",
+        }
+    }
+}
+
 /// Choreography events for debugging and visualization
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ChoreographyEvent {

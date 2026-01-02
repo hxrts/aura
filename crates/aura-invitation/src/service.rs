@@ -499,6 +499,7 @@ impl InvitationService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::FlowCost;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -527,7 +528,7 @@ mod tests {
         GuardSnapshot::new(
             test_authority(),
             test_context(),
-            100,
+            FlowCost::new(100),
             full_capabilities(),
             1,
             1000,
@@ -580,7 +581,7 @@ mod tests {
     fn test_prepare_send_invitation_insufficient_budget() {
         let service = InvitationService::new(test_authority(), InvitationConfig::default());
         let mut snapshot = test_snapshot();
-        snapshot.flow_budget_remaining = 0;
+        snapshot.flow_budget_remaining = FlowCost::new(0);
 
         let outcome = service.prepare_send_invitation(
             &snapshot,

@@ -3,14 +3,14 @@
 //! This module contains settings operations that are portable across all frontends.
 //! It follows the reactive signal pattern and emits SETTINGS_SIGNAL updates.
 
+use crate::workflows::runtime::require_runtime;
+use crate::workflows::signals::{emit_signal, read_signal};
 use crate::{
     signal_defs::{DeviceInfo, SettingsState, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME},
     AppCore,
 };
 use async_lock::RwLock;
 use aura_core::AuraError;
-use crate::workflows::runtime::require_runtime;
-use crate::workflows::signals::{emit_signal, read_signal};
 use std::sync::Arc;
 
 async fn refresh_settings_signal_from_runtime(
@@ -121,8 +121,7 @@ pub async fn set_channel_mode(
 /// **Returns**: Current settings state
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> Result<SettingsState, AuraError> {
-    read_signal(app_core, &SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME)
-        .await
+    read_signal(app_core, &SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await
 }
 
 #[cfg(test)]

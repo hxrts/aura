@@ -6,7 +6,7 @@ use aura_core::effects::{NetworkCoreEffects, NetworkError, NetworkExtendedEffect
 use aura_core::effects::{PhysicalTimeEffects, TimeError};
 use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::time::PhysicalTime;
-use aura_core::{FlowBudget, Journal};
+use aura_core::{FlowBudget, FlowCost, Journal};
 use aura_sync::protocols::{JournalSyncConfig, JournalSyncProtocol};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,11 +29,7 @@ struct TestEffects {
 }
 
 impl TestEffects {
-    fn new(
-        id: Uuid,
-        inbox: PeerReceiver,
-        initial_journal: Journal,
-    ) -> Self {
+    fn new(id: Uuid, inbox: PeerReceiver, initial_journal: Journal) -> Self {
         Self {
             id,
             journal: Arc::new(Mutex::new(initial_journal)),
@@ -104,11 +100,11 @@ impl JournalEffects for TestEffects {
         &self,
         _context: &ContextId,
         _peer: &AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> Result<FlowBudget, aura_core::AuraError> {
         Ok(FlowBudget {
             limit: 1000,
-            spent: cost as u64,
+            spent: u64::from(cost),
             epoch: aura_core::types::Epoch::new(0),
         })
     }

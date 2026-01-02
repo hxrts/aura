@@ -2,7 +2,7 @@ use super::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::indexed;
 use aura_core::effects::{BloomFilter, IndexedJournalEffects, JournalEffects};
-use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, Journal};
+use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, FlowCost, Journal};
 
 // Implementation of JournalEffects
 #[async_trait]
@@ -71,7 +71,7 @@ impl JournalEffects for AuraEffectSystem {
         &self,
         _context: &ContextId,
         _peer: &AuthorityId,
-        _cost: u32,
+        _cost: FlowCost,
     ) -> Result<FlowBudget, AuraError> {
         self.journal_handler()
             .charge_flow_budget(_context, _peer, _cost)
@@ -90,14 +90,20 @@ impl IndexedJournalEffects for AuraEffectSystem {
         &self,
         predicate: &str,
     ) -> Result<Vec<indexed::IndexedFact>, AuraError> {
-        self.journal.indexed_journal().facts_by_predicate(predicate).await
+        self.journal
+            .indexed_journal()
+            .facts_by_predicate(predicate)
+            .await
     }
 
     async fn facts_by_authority(
         &self,
         authority: &AuthorityId,
     ) -> Result<Vec<indexed::IndexedFact>, AuraError> {
-        self.journal.indexed_journal().facts_by_authority(authority).await
+        self.journal
+            .indexed_journal()
+            .facts_by_authority(authority)
+            .await
     }
 
     async fn facts_in_range(
@@ -105,7 +111,10 @@ impl IndexedJournalEffects for AuraEffectSystem {
         start: aura_core::time::TimeStamp,
         end: aura_core::time::TimeStamp,
     ) -> Result<Vec<indexed::IndexedFact>, AuraError> {
-        self.journal.indexed_journal().facts_in_range(start, end).await
+        self.journal
+            .indexed_journal()
+            .facts_in_range(start, end)
+            .await
     }
 
     async fn all_facts(&self) -> Result<Vec<indexed::IndexedFact>, AuraError> {
@@ -117,7 +126,9 @@ impl IndexedJournalEffects for AuraEffectSystem {
         predicate: &str,
         value: &aura_core::domain::journal::FactValue,
     ) -> bool {
-        self.journal.indexed_journal().might_contain(predicate, value)
+        self.journal
+            .indexed_journal()
+            .might_contain(predicate, value)
     }
 
     async fn merkle_root(&self) -> Result<[u8; 32], AuraError> {
@@ -125,7 +136,10 @@ impl IndexedJournalEffects for AuraEffectSystem {
     }
 
     async fn verify_fact_inclusion(&self, fact: &indexed::IndexedFact) -> Result<bool, AuraError> {
-        self.journal.indexed_journal().verify_fact_inclusion(fact).await
+        self.journal
+            .indexed_journal()
+            .verify_fact_inclusion(fact)
+            .await
     }
 
     async fn get_bloom_filter(&self) -> Result<BloomFilter, AuraError> {

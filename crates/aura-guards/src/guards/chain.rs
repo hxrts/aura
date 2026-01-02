@@ -12,7 +12,7 @@ use crate::guards::{
     config::GuardRuntimeConfig, privacy::track_leakage_consumption, JournalCoupler, LeakageBudget,
 };
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::{AuraError, AuraResult, Receipt};
+use aura_core::{AuraError, AuraResult, FlowCost, Receipt};
 use tracing::{debug, warn};
 
 /// Complete send-site guard chain implementing the formal predicate:
@@ -24,7 +24,7 @@ pub struct SendGuardChain {
     /// Target peer authority
     peer: AuthorityId,
     /// Flow cost for this send
-    cost: u32,
+    cost: FlowCost,
     /// Context for authorization and flow evaluation
     context: ContextId,
     /// Optional leakage budget to consume for this send
@@ -40,7 +40,7 @@ impl SendGuardChain {
         &self.message_authorization
     }
 
-    pub fn cost(&self) -> u32 {
+    pub fn cost(&self) -> FlowCost {
         self.cost
     }
 
@@ -111,7 +111,7 @@ impl SendGuardChain {
         message_authorization: String,
         context: ContextId,
         peer: AuthorityId,
-        cost: u32,
+        cost: FlowCost,
     ) -> Self {
         Self {
             message_authorization,
@@ -167,7 +167,7 @@ impl SendGuardChain {
         debug!(
             operation_id = operation_id,
             peer = ?self.peer,
-            cost = self.cost,
+            cost = ?self.cost,
             authorization = %self.message_authorization,
             context = ?self.context,
             "Starting send guard evaluation (pure executor path)"
@@ -220,7 +220,7 @@ impl SendGuardChain {
         debug!(
             context = ?self.context,
             peer = ?self.peer,
-            cost = self.cost,
+            cost = ?self.cost,
             "Evaluating flow guard: checking headroom and charging budget"
         );
 
@@ -233,7 +233,7 @@ impl SendGuardChain {
                 warn!(
                     context = ?self.context,
                     peer = ?self.peer,
-                    cost = self.cost,
+                    cost = ?self.cost,
                     error = %e,
                     "Flow budget charge failed"
                 );
@@ -246,8 +246,8 @@ impl SendGuardChain {
         debug!(
             context = ?self.context,
             peer = ?self.peer,
-            cost = self.cost,
-            nonce = receipt.nonce,
+            cost = ?self.cost,
+            nonce = ?receipt.nonce,
             "Flow budget charged successfully, receipt generated"
         );
 
@@ -371,7 +371,7 @@ pub fn create_send_guard(
     message_authorization: String,
     context: ContextId,
     peer: AuthorityId,
-    cost: u32,
+    cost: FlowCost,
 ) -> SendGuardChain {
     SendGuardChain::new(message_authorization, context, peer, cost)
 }
@@ -381,7 +381,7 @@ pub fn create_send_guard_op(
     operation: GuardOperation,
     context: ContextId,
     peer: AuthorityId,
-    cost: u32,
+    cost: FlowCost,
 ) -> SendGuardChain {
     SendGuardChain::new(operation.into(), context, peer, cost)
 }
@@ -404,7 +404,7 @@ mod tests {
         let authorization = "message:send".to_string();
         let context = test_context();
         let peer = test_peer();
-        let cost = 100;
+        let cost: FlowCost = 100.into();
 
         let guard = SendGuardChain::new(authorization.clone(), context, peer, cost)
             .with_operation_id("test_send");
@@ -421,7 +421,7 @@ mod tests {
         let authorization = "message:send".to_string();
         let context = test_context();
         let peer = test_peer();
-        let cost = 50;
+        let cost: FlowCost = 50.into();
 
         let guard = create_send_guard(authorization.clone(), context, peer, cost);
 
@@ -436,7 +436,7 @@ mod tests {
         let authorization = "message:send".to_string();
         let context = test_context();
         let peer = test_peer();
-        let guard = SendGuardChain::new(authorization, context, peer, 100);
+        let guard = SendGuardChain::new(authorization, context, peer, 100.into());
 
         // Test authorization failure only
         let reason = guard.build_denial_reason(false, true);

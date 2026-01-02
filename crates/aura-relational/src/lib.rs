@@ -369,10 +369,10 @@ impl RelationalContext {
         &self,
         authority_commitments: Vec<(AuthorityId, Hash32)>,
     ) -> Result<aura_core::Prestate> {
-        Ok(aura_core::Prestate::new(
-            authority_commitments,
-            self.journal_commitment()?,
-        ))
+        let context_commitment = self.journal_commitment()?;
+        let prestate = aura_core::Prestate::new(authority_commitments, context_commitment)
+            .map_err(|e| aura_core::AuraError::invalid(e.to_string()))?;
+        Ok(prestate)
     }
 
     /// Get all facts in this context for iteration

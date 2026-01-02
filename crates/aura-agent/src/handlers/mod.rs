@@ -27,8 +27,8 @@ pub use auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult}
 pub use auth_service::AuthServiceApi;
 
 // Re-export chat types for public API
-pub use chat_service::ChatServiceApi;
 pub use aura_chat::{ChatGroupId, ChatMessageId};
+pub use chat_service::ChatServiceApi;
 
 // Re-export invitation types for public API
 pub use invitation::{
@@ -72,8 +72,8 @@ pub use aura_sync::services::HealthStatus;
 pub use aura_authentication::{DkdConfig, DkdProtocol, RecoveryContext, RecoveryOperationType};
 
 // Re-export recovery types for CLI/tooling usage
-pub use aura_recovery::guardian_setup::GuardianSetupCoordinator;
 pub use aura_recovery::guardian_key_recovery::GuardianKeyApproval;
+pub use aura_recovery::guardian_setup::GuardianSetupCoordinator;
 pub use aura_recovery::recovery_protocol::{
     RecoveryOperation as ProtocolRecoveryOperation, RecoveryProtocol, RecoveryProtocolHandler,
     RecoveryRequest as ProtocolRecoveryRequest,

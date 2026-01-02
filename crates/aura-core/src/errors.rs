@@ -276,6 +276,42 @@ impl From<crate::effects::TimeError> for AuraError {
     }
 }
 
+impl From<crate::effects::NetworkError> for AuraError {
+    fn from(err: crate::effects::NetworkError) -> Self {
+        Self::network(format!("{err}"))
+    }
+}
+
+impl From<crate::effects::ChoreographyError> for AuraError {
+    fn from(err: crate::effects::ChoreographyError) -> Self {
+        Self::internal(format!("Choreography error: {err}"))
+    }
+}
+
+impl From<crate::effects::AuthorizationError> for AuraError {
+    fn from(err: crate::effects::AuthorizationError) -> Self {
+        Self::permission_denied(format!("{err}"))
+    }
+}
+
+impl From<crate::effects::QueryError> for AuraError {
+    fn from(err: crate::effects::QueryError) -> Self {
+        Self::invalid(format!("Query error: {err}"))
+    }
+}
+
+impl From<crate::effects::FactError> for AuraError {
+    fn from(err: crate::effects::FactError) -> Self {
+        Self::invalid(format!("Fact error: {err}"))
+    }
+}
+
+impl From<crate::util::serialization::SerializationError> for AuraError {
+    fn from(err: crate::util::serialization::SerializationError) -> Self {
+        Self::serialization(format!("{err}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

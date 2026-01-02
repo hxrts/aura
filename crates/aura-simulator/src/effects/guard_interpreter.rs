@@ -16,7 +16,7 @@ use aura_core::{
     },
     identifiers::AuthorityId,
     time::TimeStamp,
-    AuraError, AuraResult as Result,
+    AuraError, AuraResult as Result, FlowCost,
 };
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -31,7 +31,7 @@ use tracing::{debug, info};
 #[derive(Debug, Clone)]
 pub struct SimulationState {
     /// Flow budgets by authority
-    pub flow_budgets: HashMap<AuthorityId, u32>,
+    pub flow_budgets: HashMap<AuthorityId, FlowCost>,
     /// Journal entries in order
     pub journal: Vec<JournalEntry>,
     /// Metadata storage
@@ -77,13 +77,16 @@ impl SimulationState {
     }
 
     /// Set initial flow budget for an authority
-    pub fn set_budget(&mut self, authority: AuthorityId, budget: u32) {
+    pub fn set_budget(&mut self, authority: AuthorityId, budget: FlowCost) {
         self.flow_budgets.insert(authority, budget);
     }
 
     /// Get current flow budget for an authority
-    pub fn get_budget(&self, authority: &AuthorityId) -> u32 {
-        self.flow_budgets.get(authority).copied().unwrap_or(0)
+    pub fn get_budget(&self, authority: &AuthorityId) -> FlowCost {
+        self.flow_budgets
+            .get(authority)
+            .copied()
+            .unwrap_or_else(|| FlowCost::new(0))
     }
 
     /// Record an event
@@ -198,7 +201,7 @@ impl SimulationEffectInterpreter {
                     remaining,
                     ..
                 } => {
-                    state.flow_budgets.insert(*authority, *remaining);
+                    state.flow_budgets.insert(*authority, FlowCost::new(*remaining));
                 }
                 SimulationEvent::JournalAppended { entry, .. } => {
                     state.journal.push(entry.clone());
@@ -233,7 +236,7 @@ impl SimulationEffectInterpreter {
     }
 
     /// Set initial flow budget for testing
-    pub fn set_initial_budget(&self, authority: AuthorityId, budget: u32) {
+    pub fn set_initial_budget(&self, authority: AuthorityId, budget: FlowCost) {
         let mut state = self.state.lock().unwrap();
         state.set_budget(authority, budget);
     }
@@ -254,7 +257,7 @@ impl EffectInterpreter for SimulationEffectInterpreter {
             EffectCommand::ChargeBudget {
                 authority, amount, ..
             } => {
-                debug!(?authority, amount, "Simulation: Charging flow budget");
+                debug!(?authority, amount = amount.value(), "Simulation: Charging flow budget");
 
                 let current_budget = state.get_budget(&authority);
                 if current_budget < amount {
@@ -263,24 +266,26 @@ impl EffectInterpreter for SimulationEffectInterpreter {
                     )));
                 }
 
-                let remaining = current_budget - amount;
+                let remaining = FlowCost::new(current_budget.value() - amount.value());
                 state.set_budget(authority, remaining);
 
                 let current_time = state.current_time.clone();
                 let event = SimulationEvent::BudgetCharged {
                     time: current_time,
                     authority,
-                    amount,
-                    remaining,
+                    amount: amount.value(),
+                    remaining: remaining.value(),
                 };
                 state.record_event(event);
 
                 info!(
                     ?authority,
-                    amount, remaining, "Simulation: Successfully charged flow budget"
+                    amount = amount.value(),
+                    remaining = remaining.value(),
+                    "Simulation: Successfully charged flow budget"
                 );
 
-                Ok(EffectResult::RemainingBudget(remaining))
+                Ok(EffectResult::RemainingBudget(remaining.value()))
             }
 
             EffectCommand::AppendJournal { entry } => {
@@ -442,14 +447,14 @@ mod tests {
         let interp = SimulationEffectInterpreter::new(42, time, authority, addr);
 
         // Set initial budget
-        interp.set_initial_budget(authority, 1000);
+        interp.set_initial_budget(authority, FlowCost::new(1000));
 
         // Charge budget
         let cmd = EffectCommand::ChargeBudget {
             context: ContextId::new_from_entropy([10u8; 32]),
             authority,
             peer: authority,
-            amount: 250,
+            amount: FlowCost::new(250),
         };
         let result = interp.execute(cmd).await.unwrap();
 
@@ -462,7 +467,7 @@ mod tests {
 
         // Check state
         let state = interp.snapshot_state();
-        assert_eq!(state.get_budget(&authority), 750);
+        assert_eq!(state.get_budget(&authority), FlowCost::new(750));
         assert_eq!(state.events.len(), 1);
     }
 
@@ -524,14 +529,14 @@ mod tests {
 
         // First execution
         let interp1 = SimulationEffectInterpreter::new(42, time.clone(), authority, addr.clone());
-        interp1.set_initial_budget(authority, 1000);
+        interp1.set_initial_budget(authority, FlowCost::new(1000));
 
         let cmds = vec![
             EffectCommand::ChargeBudget {
                 context: ContextId::new_from_entropy([12u8; 32]),
                 authority,
                 peer: authority,
-                amount: 100,
+                amount: FlowCost::new(100),
             },
             EffectCommand::StoreMetadata {
                 key: "k1".to_string(),

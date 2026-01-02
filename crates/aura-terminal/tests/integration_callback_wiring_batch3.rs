@@ -636,7 +636,10 @@ async fn test_retry_message() {
         println!("  Messages in current view: {message_count}");
         for msg in &chat_state.messages {
             if msg.content.contains("Retried") {
-                println!("    Found retried message: {content}", content = msg.content);
+                println!(
+                    "    Found retried message: {content}",
+                    content = msg.content
+                );
             }
         }
     }
@@ -723,7 +726,8 @@ async fn test_toggle_contact_guardian() {
     let (ctx, app_core) = setup_test_env("toggle-guardian").await;
 
     let contact_id = "guardian-candidate-123";
-    let contact_authority_id = contact_id.parse::<AuthorityId>().unwrap_or_default();
+    // Generate a deterministic AuthorityId for the test
+    let contact_authority_id = AuthorityId::new_from_entropy([0x12; 32]);
 
     // Phase 1: Get initial guardian status
     println!("Phase 1: Check initial guardian status");

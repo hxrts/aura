@@ -187,10 +187,7 @@ impl std::fmt::Debug for JournalSubsystem {
             .field("fact_registry", &"<Arc<FactRegistry>>")
             .field("has_fact_sink", &self.has_fact_sink())
             .field("has_journal_policy", &self.journal_policy.is_some())
-            .field(
-                "has_verifying_key",
-                &self.journal_verifying_key.is_some(),
-            )
+            .field("has_verifying_key", &self.journal_verifying_key.is_some())
             .finish()
     }
 }

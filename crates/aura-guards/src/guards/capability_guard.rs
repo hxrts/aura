@@ -9,7 +9,7 @@
 use super::{BiscuitGuardEvaluator, GuardResult};
 use crate::authorization::BiscuitAuthorizationBridge;
 use aura_authorization::{AuthorityOp, ContextOp, ResourceScope};
-use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, Result};
+use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, FlowCost, Result};
 use biscuit_auth::Biscuit;
 
 /// Guard for evaluating capability-based authorization
@@ -107,8 +107,8 @@ impl CapabilityGuard {
     }
 
     /// Get flow cost for an authority operation
-    fn authority_op_flow_cost(operation: &AuthorityOp) -> u64 {
-        match operation {
+    fn authority_op_flow_cost(operation: &AuthorityOp) -> FlowCost {
+        FlowCost::from(match operation {
             AuthorityOp::UpdateTree => 100,
             AuthorityOp::AddDevice => 75,
             AuthorityOp::RemoveDevice => 75,
@@ -117,7 +117,7 @@ impl CapabilityGuard {
             AuthorityOp::RemoveGuardian => 200,
             AuthorityOp::ModifyThreshold => 300,
             AuthorityOp::RevokeDevice => 100,
-        }
+        })
     }
 
     /// Evaluate an authority operation with full authorization result
@@ -202,8 +202,8 @@ impl CapabilityGuard {
     }
 
     /// Get flow cost for a context operation
-    fn context_op_flow_cost(operation: &ContextOp) -> u64 {
-        match operation {
+    fn context_op_flow_cost(operation: &ContextOp) -> FlowCost {
+        FlowCost::from(match operation {
             ContextOp::AddBinding => 100,
             ContextOp::ApproveRecovery => 200,
             ContextOp::UpdateParams => 50,
@@ -211,7 +211,7 @@ impl CapabilityGuard {
             ContextOp::RecoverAccountAccess => 300,
             ContextOp::UpdateGuardianSet => 250,
             ContextOp::EmergencyFreeze => 500,
-        }
+        })
     }
 }
 

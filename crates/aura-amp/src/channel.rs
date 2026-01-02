@@ -14,9 +14,9 @@ use aura_core::effects::amp::{
 use aura_core::effects::random::RandomExtendedEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
-use aura_core::Hash32;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::time::{OrderTime, TimeStamp};
+use aura_core::Hash32;
 use aura_journal::fact::{
     ChannelBumpReason, ChannelCheckpoint, ChannelPolicy, ProposedChannelEpochBump, RelationalFact,
 };

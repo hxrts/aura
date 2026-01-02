@@ -170,8 +170,9 @@ pub fn context_commitment_from_journal(
     hasher.update(b"RELATIONAL_CONTEXT_FACTS");
     hasher.update(context_id.as_bytes());
     for fact in journal.facts.iter() {
-        let bytes = aura_core::util::serialization::to_vec(fact)
-            .map_err(|e| crate::core::AgentError::effects(format!("Serialize context fact: {e}")))?;
+        let bytes = aura_core::util::serialization::to_vec(fact).map_err(|e| {
+            crate::core::AgentError::effects(format!("Serialize context fact: {e}"))
+        })?;
         hasher.update(&bytes);
     }
     Ok(Hash32(hasher.finalize()))

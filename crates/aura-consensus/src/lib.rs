@@ -71,7 +71,7 @@ pub mod prelude;
 pub use messages::{
     ConsensusError, ConsensusMessage, ConsensusPhase, ConsensusRequest, ConsensusResponse,
 };
-pub use protocol::{run_consensus, ConsensusProtocol};
+pub use protocol::{run_consensus, ConsensusParams, ConsensusProtocol, ProtocolStats};
 pub use types::{CommitFact, ConflictFact, ConsensusConfig, ConsensusId, ConsensusResult};
 // Intentionally avoid re-exporting witness internals to reduce coupling.
 

@@ -21,8 +21,8 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::sync::RwLock;
 
-use super::state::{with_state_mut, with_state_mut_validated};
 use super::lan_discovery::LanDiscoveryService;
+use super::state::{with_state_mut, with_state_mut_validated};
 
 /// Configuration for the rendezvous service manager
 #[derive(Debug, Clone)]
@@ -651,10 +651,14 @@ impl RendezvousManager {
         });
 
         let lan_service = Arc::new(lan_service);
-        with_state_mut_validated(&self.state, |state| {
-            state.lan_discovery = Some(lan_service);
-            state.lan_tasks = Some((announcer_handle, listener_handle));
-        }, |state| state.validate())
+        with_state_mut_validated(
+            &self.state,
+            |state| {
+                state.lan_discovery = Some(lan_service);
+                state.lan_tasks = Some((announcer_handle, listener_handle));
+            },
+            |state| state.validate(),
+        )
         .await;
 
         tracing::info!(
@@ -672,11 +676,12 @@ impl RendezvousManager {
         }
 
         // Abort tasks
-        let tasks =
-            with_state_mut_validated(&self.state, |state| state.lan_tasks.take(), |state| {
-                state.validate()
-            })
-            .await;
+        let tasks = with_state_mut_validated(
+            &self.state,
+            |state| state.lan_tasks.take(),
+            |state| state.validate(),
+        )
+        .await;
         if let Some((announcer, listener)) = tasks {
             announcer.abort();
             listener.abort();
@@ -875,6 +880,7 @@ impl RendezvousManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::FlowCost;
     use aura_effects::time::PhysicalTimeHandler;
     use aura_rendezvous::GuardSnapshot;
 
@@ -894,7 +900,7 @@ mod tests {
         GuardSnapshot {
             authority_id: authority,
             context_id: context,
-            flow_budget_remaining: 1000,
+            flow_budget_remaining: FlowCost::new(1000),
             capabilities: vec![
                 "rendezvous:publish".to_string(),
                 "rendezvous:connect".to_string(),

@@ -2,7 +2,9 @@
 
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{hash, AuraError, Hash32};
-use aura_journal::fact::{ChannelBumpReason, ChannelCheckpoint, ProposedChannelEpochBump, RelationalFact};
+use aura_journal::fact::{
+    ChannelBumpReason, ChannelCheckpoint, ProposedChannelEpochBump, RelationalFact,
+};
 use aura_journal::ChannelEpochState;
 use aura_protocol::amp::{get_channel_state, AmpJournalEffects};
 
@@ -34,7 +36,9 @@ pub async fn propose_bump<E: AmpJournalEffects>(
         parent_epoch: state.chan_epoch,
         new_epoch: state.chan_epoch + 1,
         reason: ChannelBumpReason::Routine,
-        bump_id: Hash32::new(hash::hash(format!("amp-bump:{context}:{channel}").as_bytes())),
+        bump_id: Hash32::new(hash::hash(
+            format!("amp-bump:{context}:{channel}").as_bytes(),
+        )),
     };
 
     effects

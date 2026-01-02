@@ -5,7 +5,7 @@
 //! Session type system types (LocalSessionType) have moved to aura-mpst.
 
 use crate::types::identifiers::DeviceId;
-use crate::GuardianId;
+use crate::{AuraError, GuardianId};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
@@ -88,8 +88,11 @@ impl Epoch {
     }
 
     /// Get the next epoch
-    pub fn next(self) -> Self {
-        Self(self.0 + 1)
+    pub fn next(self) -> Result<Self, AuraError> {
+        self.0
+            .checked_add(1)
+            .map(Self)
+            .ok_or_else(|| AuraError::invalid("Epoch overflow"))
     }
 
     /// Get the initial epoch (0)
@@ -119,6 +122,25 @@ impl From<Epoch> for u64 {
 impl Default for Epoch {
     fn default() -> Self {
         Self::initial()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn epoch_next_increments() {
+        let epoch = Epoch::new(41);
+        let next = epoch.next().expect("epoch increment should succeed");
+        assert_eq!(next.value(), 42);
+    }
+
+    #[test]
+    fn epoch_next_overflow() {
+        let epoch = Epoch::new(u64::MAX);
+        let err = epoch.next().unwrap_err();
+        assert!(err.to_string().contains("Epoch overflow"));
     }
 }
 

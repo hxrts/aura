@@ -6,6 +6,7 @@
 //! This module provides shared guard decision/outcome types and basic capability/budget
 //! checks that are generic over a feature crate's command enum.
 
+use aura_core::FlowCost;
 use serde::{Deserialize, Serialize};
 
 /// Decision from guard evaluation.
@@ -100,7 +101,7 @@ pub trait CapabilitySnapshot {
 /// Minimal budget query contract required by `check_flow_budget`.
 pub trait FlowBudgetSnapshot {
     /// Remaining flow budget in the current context.
-    fn flow_budget_remaining(&self) -> u32;
+    fn flow_budget_remaining(&self) -> FlowCost;
 }
 
 /// Check capability and return denied outcome if missing.
@@ -118,7 +119,7 @@ where
 }
 
 /// Check flow budget and return denied outcome if insufficient.
-pub fn check_flow_budget<S, C>(snapshot: &S, required_cost: u32) -> Option<GuardOutcome<C>>
+pub fn check_flow_budget<S, C>(snapshot: &S, required_cost: FlowCost) -> Option<GuardOutcome<C>>
 where
     S: FlowBudgetSnapshot,
 {

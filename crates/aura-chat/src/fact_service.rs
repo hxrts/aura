@@ -96,6 +96,7 @@ impl ChatFactService {
 mod tests {
     use super::*;
     use aura_core::identifiers::{AuthorityId, ContextId};
+    use aura_core::FlowCost;
 
     #[test]
     fn denied_when_missing_capability() {
@@ -103,7 +104,7 @@ mod tests {
         let snapshot = GuardSnapshot::new(
             AuthorityId::new_from_entropy([1u8; 32]),
             ContextId::new_from_entropy([2u8; 32]),
-            10,
+            FlowCost::new(10),
             vec![],
             123,
         );
@@ -127,7 +128,7 @@ mod tests {
         let snapshot = GuardSnapshot::new(
             AuthorityId::new_from_entropy([1u8; 32]),
             ContextId::new_from_entropy([2u8; 32]),
-            10,
+            FlowCost::new(10),
             vec![costs::CAP_CHAT_MESSAGE_SEND.to_string()],
             123,
         );

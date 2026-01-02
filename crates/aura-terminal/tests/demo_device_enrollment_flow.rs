@@ -15,8 +15,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::core::config::StorageConfig;
+use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::{EffectContext, SharedTransport};
 use aura_app::signal_defs::SETTINGS_SIGNAL;
 use aura_app::{AppConfig, AppCore};
@@ -119,9 +119,7 @@ async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
 
         if start.elapsed() > Duration::from_secs(3) {
             let device_count = state.devices.len();
-            panic!(
-                "Timed out waiting for device {device_id} ({device_count} devices present)"
-            );
+            panic!("Timed out waiting for device {device_id} ({device_count} devices present)");
         }
 
         tokio::time::sleep(Duration::from_millis(25)).await;

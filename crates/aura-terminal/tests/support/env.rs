@@ -153,11 +153,8 @@ impl FullTestEnv {
             ..Default::default()
         };
 
-        let effect_ctx = EffectContext::new(
-            authority_id,
-            context_id,
-            ExecutionMode::Simulation { seed },
-        );
+        let effect_ctx =
+            EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
         let agent = AgentBuilder::new()
             .with_config(agent_config)

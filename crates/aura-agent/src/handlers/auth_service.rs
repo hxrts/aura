@@ -100,7 +100,7 @@ impl AuthServiceApi {
 mod tests {
     use super::*;
     use crate::core::AgentConfig;
-    use aura_core::identifiers::{AuthorityId};
+    use aura_core::identifiers::AuthorityId;
 
     #[tokio::test]
     async fn test_auth_service_creation() {

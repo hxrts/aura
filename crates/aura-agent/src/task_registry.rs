@@ -70,17 +70,13 @@ impl TaskRegistry {
         time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
         interval: Duration,
         mut f: F,
-    )
-    where
+    ) where
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
         let handle = tokio::spawn(async move {
-            let interval_ms = interval
-                .as_millis()
-                .try_into()
-                .unwrap_or(u64::MAX);
+            let interval_ms = interval.as_millis().try_into().unwrap_or(u64::MAX);
             loop {
                 if *shutdown_rx.borrow() {
                     break;

@@ -5,22 +5,31 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::PhysicalTime;
-use aura_core::types::facts::{FactDelta, FactDeltaReducer};
-use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
+use aura_core::types::facts::{
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactTypeId,
+    MAX_FACT_PAYLOAD_BYTES,
+};
+use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use serde::{Deserialize, Serialize};
 
 use crate::context_transport::TransportProtocol;
 
 /// Unique type identifier for transport facts
-pub const TRANSPORT_FACT_TYPE_ID: &str = "transport/v1";
+pub static TRANSPORT_FACT_TYPE_ID: FactTypeId = FactTypeId::new("transport/v1");
 /// Schema version for transport fact encoding
 pub const TRANSPORT_FACT_SCHEMA_VERSION: u16 = 1;
+
+/// Get the typed fact ID for transport facts
+pub fn transport_fact_type_id() -> &'static FactTypeId {
+    &TRANSPORT_FACT_TYPE_ID
+}
 
 /// Transport domain facts for state changes.
 ///
 /// These facts capture transport layer events and are used by the
 /// journal system to derive transport state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum TransportFact {
     /// Session established between two authorities
     SessionEstablished {
@@ -138,9 +147,6 @@ pub enum TransportFact {
 }
 
 impl TransportFact {
-    fn version() -> SemanticVersion {
-        SemanticVersion::new(TRANSPORT_FACT_SCHEMA_VERSION, 0, 0)
-    }
 
     /// Get the context ID for this fact
     pub fn context_id(&self) -> ContextId {
@@ -347,19 +353,77 @@ impl TransportFact {
     }
 
     /// Encode this fact with a canonical envelope.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let message = VersionedMessage::new(self.clone(), Self::version())
-            .with_metadata("type".to_string(), TRANSPORT_FACT_TYPE_ID.to_string());
-        to_vec(&message).unwrap_or_default()
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn try_encode(&self) -> Result<Vec<u8>, FactError> {
+        let payload = to_vec(self)?;
+        if payload.len() > MAX_FACT_PAYLOAD_BYTES {
+            return Err(FactError::PayloadTooLarge {
+                size: payload.len() as u64,
+                max: MAX_FACT_PAYLOAD_BYTES as u64,
+            });
+        }
+        let envelope = FactEnvelope {
+            type_id: transport_fact_type_id().clone(),
+            schema_version: TRANSPORT_FACT_SCHEMA_VERSION,
+            encoding: FactEncoding::DagCbor,
+            payload,
+        };
+        let bytes = to_vec(&envelope)?;
+        Ok(bytes)
     }
 
     /// Decode a fact from a canonical envelope.
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let message: VersionedMessage<Self> = from_slice(bytes).ok()?;
-        if !message.version.is_compatible(&Self::version()) {
-            return None;
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn try_decode(bytes: &[u8]) -> Result<Self, FactError> {
+        let envelope: FactEnvelope = from_slice(bytes)?;
+
+        if envelope.type_id.as_str() != transport_fact_type_id().as_str() {
+            return Err(FactError::TypeMismatch {
+                expected: transport_fact_type_id().to_string(),
+                actual: envelope.type_id.to_string(),
+            });
         }
-        Some(message.payload)
+
+        if envelope.schema_version != TRANSPORT_FACT_SCHEMA_VERSION {
+            return Err(FactError::VersionMismatch {
+                expected: TRANSPORT_FACT_SCHEMA_VERSION,
+                actual: envelope.schema_version,
+            });
+        }
+
+        let fact = match envelope.encoding {
+            FactEncoding::DagCbor => from_slice(&envelope.payload)?,
+            FactEncoding::Json => serde_json::from_slice(&envelope.payload).map_err(|err| {
+                FactError::Serialization(SerializationError::InvalidFormat(format!(
+                    "JSON decode failed: {err}"
+                )))
+            })?,
+        };
+        Ok(fact)
+    }
+
+    /// Encode this fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, FactError> {
+        self.try_encode()
+    }
+
+    /// Decode a fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FactError> {
+        Self::try_decode(bytes)
     }
 }
 

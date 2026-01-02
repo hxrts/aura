@@ -85,6 +85,12 @@ pub fn verify_threshold_signature_with_signers(
     expected_signers: &[AuthorityId],
     group_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
+    if expected_signers.is_empty() {
+        return Err(AuthenticationError::InvalidThresholdSignature {
+            details: "expected signer set cannot be empty".to_string(),
+        });
+    }
+
     // First verify the signature itself using FROST-compatible verification
     let valid =
         aura_core::ed25519_verify(message, threshold_sig, group_public_key).map_err(|e| {
@@ -161,5 +167,28 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_verify_threshold_signature_with_empty_signers_fails() {
+        let expected_signers = Vec::new();
+
+        let signing_key = Ed25519SigningKey::from_bytes([12u8; 32]);
+        let verifying_key = signing_key.verifying_key().unwrap();
+        let message = b"test threshold message";
+        let signature = signing_key.sign(message).unwrap();
+
+        let result = verify_threshold_signature_with_signers(
+            message,
+            &signature,
+            &expected_signers,
+            &verifying_key,
+        );
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            AuthenticationError::InvalidThresholdSignature { .. }
+        ));
     }
 }

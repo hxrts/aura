@@ -1,0 +1,12 @@
+error: Invalid annotation value: guard_capability expects a string literal
+  --> tests/trybuild/invalid_guard_capability.rs:3:1
+   |
+ 3 | / choreography! {
+ 4 | |     #[namespace = "invalid_guard_capability"]
+ 5 | |     choreography InvalidGuardCapability {
+ 6 | |         roles: Alice, Bob;
+...  |
+10 | | }
+   | |_^
+   |
+   = note: this error originates in the macro `choreography` (in Nightly builds, run with -Z macro-backtrace for more info)

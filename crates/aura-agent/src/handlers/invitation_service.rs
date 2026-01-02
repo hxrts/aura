@@ -24,7 +24,8 @@ pub struct InvitationServiceApi {
 
 impl std::fmt::Debug for InvitationServiceApi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InvitationServiceApi").finish_non_exhaustive()
+        f.debug_struct("InvitationServiceApi")
+            .finish_non_exhaustive()
     }
 }
 

@@ -17,6 +17,8 @@ full-effect-system = ["dep:aura-agent"]
 # Enable Lean oracle for differential testing against formally verified models
 # Requires Lean toolchain and `just lean-oracle-build` to be run first
 lean = []
+# Enable CrdtCoordinator tests (forwards to aura-protocol/crdt-sync)
+crdt-sync = ["aura-protocol/crdt-sync"]
 
 [dependencies]
 # Workspace crates - Layer 8 testkit provides test utilities

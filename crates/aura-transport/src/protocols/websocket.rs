@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
 
+use crate::types::SequenceNumber;
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Core WebSocket protocol messages for choreographic usage
@@ -86,7 +87,7 @@ pub struct FrameMetadata {
     /// Timestamp when frame was created (using Aura unified time system)
     pub timestamp: TimeStamp,
     /// Frame sequence number
-    pub sequence: u64,
+    pub sequence: SequenceNumber,
 }
 
 /// WebSocket frame types
@@ -182,7 +183,7 @@ impl WebSocketMessage {
             metadata: FrameMetadata {
                 frame_type,
                 timestamp,
-                sequence: 0, // Deterministically assigned by caller if needed
+                sequence: SequenceNumber::default(), // Deterministically assigned by caller if needed
             },
         }
     }

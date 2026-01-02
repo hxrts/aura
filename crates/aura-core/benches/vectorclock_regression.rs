@@ -33,7 +33,9 @@ fn bench_vectorclock_single_device(c: &mut Criterion) {
     group.bench_function("increment", |b| {
         let mut clock = VectorClock::single(device, 0);
         b.iter(|| {
-            clock.increment(black_box(device));
+            clock
+                .increment(black_box(device))
+                .expect("vector clock increment");
         });
         black_box(clock);
     });

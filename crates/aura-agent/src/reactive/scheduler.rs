@@ -16,6 +16,7 @@
 //! regardless of timing. All sleeps go through `PhysicalTimeEffects::sleep_ms` so
 //! the simulator can control time advancement.
 
+use super::state::SchedulerStats;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::util::graph::{CycleError, DagNode};
@@ -25,7 +26,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use super::state::SchedulerStats;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
 type ApplyFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;

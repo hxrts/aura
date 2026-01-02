@@ -40,7 +40,8 @@ impl CryptoCoreEffects for AuraEffectSystem {
         info: &[u8],
         output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .hkdf_derive(ikm, salt, info, output_len)
             .await
     }
@@ -62,7 +63,10 @@ impl CryptoCoreEffects for AuraEffectSystem {
         message: &[u8],
         private_key: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler().ed25519_sign(message, private_key).await
+        self.crypto
+            .handler()
+            .ed25519_sign(message, private_key)
+            .await
     }
 
     async fn ed25519_verify(
@@ -71,7 +75,8 @@ impl CryptoCoreEffects for AuraEffectSystem {
         signature: &[u8],
         public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .ed25519_verify(message, signature, public_key)
             .await
     }
@@ -101,13 +106,17 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         threshold: u16,
         max_signers: u16,
     ) -> Result<FrostKeyGenResult, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .frost_generate_keys(threshold, max_signers)
             .await
     }
 
     async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler().frost_generate_nonces(key_package).await
+        self.crypto
+            .handler()
+            .frost_generate_nonces(key_package)
+            .await
     }
 
     async fn frost_create_signing_package(
@@ -117,7 +126,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         participants: &[u16],
         public_key_package: &[u8],
     ) -> Result<FrostSigningPackage, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .frost_create_signing_package(message, nonces, participants, public_key_package)
             .await
     }
@@ -128,7 +138,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key_share: &[u8],
         nonces: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .frost_sign_share(signing_package, key_share, nonces)
             .await
     }
@@ -138,7 +149,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         signing_package: &FrostSigningPackage,
         signature_shares: &[Vec<u8>],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .frost_aggregate_signatures(signing_package, signature_shares)
             .await
     }
@@ -149,7 +161,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         signature: &[u8],
         public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .frost_verify(message, signature, public_key)
             .await
     }
@@ -164,7 +177,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .chacha20_encrypt(plaintext, key, nonce)
             .await
     }
@@ -175,7 +189,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .chacha20_decrypt(ciphertext, key, nonce)
             .await
     }
@@ -186,7 +201,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .aes_gcm_encrypt(plaintext, key, nonce)
             .await
     }
@@ -197,7 +213,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .aes_gcm_decrypt(ciphertext, key, nonce)
             .await
     }
@@ -209,7 +226,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         new_threshold: u16,
         new_max_signers: u16,
     ) -> Result<FrostKeyGenResult, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
             .await
     }
@@ -219,7 +237,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         threshold: u16,
         max_signers: u16,
     ) -> Result<SigningKeyGenResult, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .generate_signing_keys(threshold, max_signers)
             .await
     }
@@ -230,7 +249,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         threshold: u16,
         max_signers: u16,
     ) -> Result<SigningKeyGenResult, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .generate_signing_keys_with(method, threshold, max_signers)
             .await
     }
@@ -241,7 +261,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         key_package: &[u8],
         mode: SigningMode,
     ) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .sign_with_key(message, key_package, mode)
             .await
     }
@@ -253,7 +274,8 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         public_key_package: &[u8],
         mode: SigningMode,
     ) -> Result<bool, CryptoError> {
-        self.crypto.handler()
+        self.crypto
+            .handler()
             .verify_signature(message, signature, public_key_package, mode)
             .await
     }
@@ -278,7 +300,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             "1",                        // signer index 1
         );
         let caps = vec![SecureStorageCapability::Write];
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_store(&location, &signing_keys.key_packages[0], &caps)
             .await?;
 
@@ -287,7 +310,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             format!("{}_public", key_prefix),
             format!("{}/0", authority),
         );
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_store(&pub_location, &signing_keys.public_key_package, &caps)
             .await?;
 
@@ -426,7 +450,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             format!("{}/{}", authority, current_epoch),
             "1",
         );
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_exists(&location)
             .await
             .unwrap_or(false)
@@ -435,7 +460,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
     async fn public_key_package(&self, authority: &AuthorityId) -> Option<Vec<u8>> {
         let location = SecureStorageLocation::new("frost_public_keys", format!("{}/0", authority));
         let caps = vec![SecureStorageCapability::Read];
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_retrieve(&location, &caps)
             .await
             .ok()
@@ -479,7 +505,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
 
         // Generate new threshold keys
         let key_result = if new_threshold >= 2 {
-            self.crypto.handler()
+            self.crypto
+                .handler()
                 .frost_rotate_keys(&[], 0, new_threshold, new_total_participants)
                 .await?
         } else {
@@ -505,7 +532,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
                 format!("{}/{}", authority, new_epoch),
                 participant.storage_key(),
             );
-            self.crypto.secure_storage()
+            self.crypto
+                .secure_storage()
                 .secure_store(&location, key_package, &caps)
                 .await?;
         }
@@ -516,7 +544,8 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
             format!("{}", authority),
             format!("{}", new_epoch),
         );
-        self.crypto.secure_storage()
+        self.crypto
+            .secure_storage()
             .secure_store(&pub_location, &key_result.public_key_package, &caps)
             .await?;
 

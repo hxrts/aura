@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
 
 // Pure functions for Aeneas translation (formal verification)
 pub mod pure;
@@ -13,6 +14,7 @@ pub mod pure;
 use crate::{
     crypto::Ed25519Signature,
     types::identifiers::{AuthorityId, DeviceId},
+    AuraError,
 };
 
 /// Physical clock representation with optional uncertainty.
@@ -36,9 +38,44 @@ pub struct OrderTime(pub [u8; 32]);
 /// Range constraint (validity window).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RangeTime {
-    pub earliest_ms: u64,
-    pub latest_ms: u64,
-    pub confidence: TimeConfidence,
+    earliest_ms: u64,
+    latest_ms: u64,
+    confidence: TimeConfidence,
+}
+
+impl RangeTime {
+    /// Create a validated range (earliest <= latest).
+    pub fn new(
+        earliest_ms: u64,
+        latest_ms: u64,
+        confidence: TimeConfidence,
+    ) -> Result<Self, crate::AuraError> {
+        if earliest_ms > latest_ms {
+            return Err(crate::AuraError::invalid(format!(
+                "RangeTime invalid: earliest_ms ({earliest_ms}) > latest_ms ({latest_ms})"
+            )));
+        }
+        Ok(Self {
+            earliest_ms,
+            latest_ms,
+            confidence,
+        })
+    }
+
+    /// Earliest valid timestamp (ms).
+    pub fn earliest_ms(&self) -> u64 {
+        self.earliest_ms
+    }
+
+    /// Latest valid timestamp (ms).
+    pub fn latest_ms(&self) -> u64 {
+        self.latest_ms
+    }
+
+    /// Confidence indicator for this range.
+    pub fn confidence(&self) -> &TimeConfidence {
+        &self.confidence
+    }
 }
 
 /// Vector clock: device -> counter (causal domain).
@@ -124,7 +161,7 @@ impl VectorClock {
     }
 
     /// Increment a device's counter - common operation optimized
-    pub fn increment(&mut self, device: DeviceId) {
+    pub fn increment(&mut self, device: DeviceId) -> Result<(), AuraError> {
         match self {
             VectorClock::Single {
                 device: current_device,
@@ -132,7 +169,9 @@ impl VectorClock {
             } => {
                 if device == *current_device {
                     // Fast path: increment in place
-                    *current_counter = current_counter.saturating_add(1);
+                    *current_counter = current_counter.checked_add(1).ok_or_else(|| {
+                        AuraError::invalid("VectorClock overflow on single-device increment")
+                    })?;
                 } else {
                     // Need to convert to Multiple
                     let old_counter = *current_counter;
@@ -148,12 +187,17 @@ impl VectorClock {
                     *self = VectorClock::Single { device, counter: 1 };
                 } else {
                     // Increment or insert
-                    map.entry(device)
-                        .and_modify(|c| *c = c.saturating_add(1))
-                        .or_insert(1);
+                    if let Some(counter) = map.get_mut(&device) {
+                        *counter = counter.checked_add(1).ok_or_else(|| {
+                            AuraError::invalid("VectorClock overflow on multi-device increment")
+                        })?;
+                    } else {
+                        map.insert(device, 1);
+                    }
                 }
             }
         }
+        Ok(())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&DeviceId, &u64)> {
@@ -324,12 +368,70 @@ pub enum TimeStamp {
 }
 
 /// Domain selector for time requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TimeDomain {
     LogicalClock,
     OrderClock,
     PhysicalClock,
     Range,
+}
+
+impl TimeDomain {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TimeDomain::LogicalClock => "logical",
+            TimeDomain::OrderClock => "order",
+            TimeDomain::PhysicalClock => "physical",
+            TimeDomain::Range => "range",
+        }
+    }
+}
+
+impl fmt::Display for TimeDomain {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// Domain-scoped index for time ordering within a single time domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeIndex {
+    domain: TimeDomain,
+    value: u64,
+}
+
+impl TimeIndex {
+    pub fn new(domain: TimeDomain, value: u64) -> Self {
+        Self { domain, value }
+    }
+
+    pub fn domain(&self) -> TimeDomain {
+        self.domain
+    }
+
+    pub fn value(&self) -> u64 {
+        self.value
+    }
+
+    /// Compare indices only when they share a domain.
+    pub fn cmp_same_domain(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.domain == other.domain {
+            Some(self.value.cmp(&other.value))
+        } else {
+            None
+        }
+    }
+
+    /// Deterministic tie-break key across domains (explicit use only).
+    pub fn tie_break_key(&self) -> (TimeDomain, u64) {
+        (self.domain, self.value)
+    }
+}
+
+impl fmt::Display for TimeIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.domain, self.value)
+    }
 }
 
 /// Optional trust/provenance wrapper for time claims (e.g., consensus or multi-attestor).
@@ -371,21 +473,20 @@ pub enum OrderingPolicy {
 }
 
 impl TimeStamp {
-    /// Convert TimeStamp to milliseconds for indexing compatibility.
+    /// Convert TimeStamp to a domain-scoped index.
     ///
-    /// This provides a total ordering for timestamps across different domains.
-    /// For logical clocks, uses lamport counter. For order clocks, uses first 8 bytes.
-    /// For ranges, uses the latest timestamp.
-    pub fn to_index_ms(&self) -> i64 {
+    /// This does **not** define a total order across domains. Callers must
+    /// explicitly choose a tie-break policy when comparing different domains.
+    pub fn to_index_ms(&self) -> TimeIndex {
         match self {
-            TimeStamp::PhysicalClock(p) => p.ts_ms as i64,
-            TimeStamp::LogicalClock(l) => l.lamport as i64,
+            TimeStamp::PhysicalClock(p) => TimeIndex::new(TimeDomain::PhysicalClock, p.ts_ms),
+            TimeStamp::LogicalClock(l) => TimeIndex::new(TimeDomain::LogicalClock, l.lamport),
             TimeStamp::OrderClock(o) => {
                 let mut buf = [0u8; 8];
                 buf.copy_from_slice(&o.0[..8]);
-                i64::from_be_bytes(buf)
+                TimeIndex::new(TimeDomain::OrderClock, u64::from_be_bytes(buf))
             }
-            TimeStamp::Range(r) => r.latest_ms as i64,
+            TimeStamp::Range(r) => TimeIndex::new(TimeDomain::Range, r.latest_ms()),
         }
     }
 
@@ -404,13 +505,13 @@ impl TimeStamp {
             (TimeStamp::OrderClock(a), TimeStamp::OrderClock(b)) => a.0.cmp(&b.0),
             // Range fast path - optimized range comparison
             (TimeStamp::Range(a), TimeStamp::Range(b)) => {
-                if a.latest_ms < b.earliest_ms {
+                if a.latest_ms() < b.earliest_ms() {
                     std::cmp::Ordering::Less
-                } else if b.latest_ms < a.earliest_ms {
+                } else if b.latest_ms() < a.earliest_ms() {
                     std::cmp::Ordering::Greater
                 } else {
                     // Overlapping ranges - compare by latest timestamp
-                    a.latest_ms.cmp(&b.latest_ms)
+                    a.latest_ms().cmp(&b.latest_ms())
                 }
             }
             // LogicalClock comparison requires full comparison logic
@@ -421,29 +522,23 @@ impl TimeStamp {
                     TimeOrdering::Concurrent | TimeOrdering::Overlapping => {
                         std::cmp::Ordering::Equal
                     }
-                    TimeOrdering::Incomparable => {
-                        // Shouldn't happen for same-domain logical clocks, but handle gracefully
-                        self.to_index_ms().cmp(&other.to_index_ms())
-                    }
-                }
-            }
-            // Cross-domain comparison - fall back to index-based ordering
-            _ => {
-                // Fast path: if index values differ significantly, avoid full comparison
-                let self_index = self.to_index_ms();
-                let other_index = other.to_index_ms();
-                match self_index.cmp(&other_index) {
-                    std::cmp::Ordering::Equal => {
-                        // Same index - need full comparison for stability
-                        match self.compare(other, policy) {
-                            TimeOrdering::Before => std::cmp::Ordering::Less,
-                            TimeOrdering::After => std::cmp::Ordering::Greater,
-                            _ => std::cmp::Ordering::Equal,
+                    TimeOrdering::Incomparable => match policy {
+                        OrderingPolicy::Native => std::cmp::Ordering::Equal,
+                        OrderingPolicy::DeterministicTieBreak => {
+                            self.to_index_ms().value().cmp(&other.to_index_ms().value())
                         }
-                    }
-                    ordering => ordering,
+                    },
                 }
             }
+            // Cross-domain comparison - only allowed with explicit tie-break policy
+            _ => match policy {
+                OrderingPolicy::Native => std::cmp::Ordering::Equal,
+                OrderingPolicy::DeterministicTieBreak => {
+                    let self_index = self.to_index_ms();
+                    let other_index = other.to_index_ms();
+                    self_index.tie_break_key().cmp(&other_index.tie_break_key())
+                }
+            },
         }
     }
 
@@ -543,9 +638,9 @@ impl TimeStamp {
                 }
             }
             (TimeStamp::Range(a), TimeStamp::Range(b)) => {
-                if a.latest_ms < b.earliest_ms {
+                if a.latest_ms() < b.earliest_ms() {
                     TimeOrdering::Before
-                } else if b.latest_ms < a.earliest_ms {
+                } else if b.latest_ms() < a.earliest_ms() {
                     TimeOrdering::After
                 } else {
                     TimeOrdering::Overlapping
@@ -650,21 +745,9 @@ mod tests {
 
     #[test]
     fn range_clock_detects_overlap() {
-        let r1 = TimeStamp::Range(RangeTime {
-            earliest_ms: 0,
-            latest_ms: 10,
-            confidence: TimeConfidence::High,
-        });
-        let r2 = TimeStamp::Range(RangeTime {
-            earliest_ms: 11,
-            latest_ms: 20,
-            confidence: TimeConfidence::High,
-        });
-        let r3 = TimeStamp::Range(RangeTime {
-            earliest_ms: 5,
-            latest_ms: 15,
-            confidence: TimeConfidence::High,
-        });
+        let r1 = TimeStamp::Range(RangeTime::new(0, 10, TimeConfidence::High).unwrap());
+        let r2 = TimeStamp::Range(RangeTime::new(11, 20, TimeConfidence::High).unwrap());
+        let r3 = TimeStamp::Range(RangeTime::new(5, 15, TimeConfidence::High).unwrap());
 
         assert_eq!(
             r1.compare(&r2, OrderingPolicy::Native),
@@ -678,8 +761,21 @@ mod tests {
     }
 
     #[test]
-    fn to_index_ms_provides_consistent_ordering() {
-        // Test that to_index_ms provides a total ordering
+    fn range_time_rejects_inverted_bounds() {
+        let err = RangeTime::new(10, 5, TimeConfidence::High);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn vector_clock_increment_detects_overflow() {
+        let device = DeviceId::new_from_entropy([9u8; 32]);
+        let mut vc = VectorClock::single(device, u64::MAX);
+        assert!(vc.increment(device).is_err());
+    }
+
+    #[test]
+    fn to_index_ms_is_domain_scoped() {
+        // Test that to_index_ms provides a domain-scoped index
         let physical = TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 1000,
             uncertainty: None,
@@ -689,20 +785,24 @@ mod tests {
             lamport: 500,
         });
         let order = TimeStamp::OrderClock(OrderTime([1u8; 32]));
-        let range = TimeStamp::Range(RangeTime {
-            earliest_ms: 900,
-            latest_ms: 1100,
-            confidence: TimeConfidence::High,
-        });
+        let range = TimeStamp::Range(RangeTime::new(900, 1100, TimeConfidence::High).unwrap());
 
-        // Verify each returns a consistent i64 value
-        assert_eq!(physical.to_index_ms(), 1000);
-        assert_eq!(logical.to_index_ms(), 500);
-        assert_eq!(range.to_index_ms(), 1100); // Uses latest_ms
+        let physical_index = physical.to_index_ms();
+        assert_eq!(physical_index.domain(), TimeDomain::PhysicalClock);
+        assert_eq!(physical_index.value(), 1000);
+
+        let logical_index = logical.to_index_ms();
+        assert_eq!(logical_index.domain(), TimeDomain::LogicalClock);
+        assert_eq!(logical_index.value(), 500);
+
+        let range_index = range.to_index_ms();
+        assert_eq!(range_index.domain(), TimeDomain::Range);
+        assert_eq!(range_index.value(), 1100); // Uses latest_ms
 
         // Verify order clock returns a deterministic value
-        let order_ms = order.to_index_ms();
-        assert_eq!(order.to_index_ms(), order_ms); // Should be consistent
+        let order_index = order.to_index_ms();
+        assert_eq!(order_index.domain(), TimeDomain::OrderClock);
+        assert_eq!(order.to_index_ms().value(), order_index.value());
     }
 
     #[test]
@@ -730,14 +830,24 @@ mod tests {
             std::cmp::Ordering::Greater
         );
 
-        // Cross-domain comparisons should fall back to index-based ordering
+        // Cross-domain comparisons are incomparable under Native policy
         assert_eq!(
             physical1.sort_compare(&logical, OrderingPolicy::Native),
-            std::cmp::Ordering::Less
+            std::cmp::Ordering::Equal
         );
         assert_eq!(
             logical.sort_compare(&physical2, OrderingPolicy::Native),
-            std::cmp::Ordering::Less
+            std::cmp::Ordering::Equal
+        );
+
+        // Deterministic tie-break yields a stable ordering across domains
+        let det = physical1.sort_compare(&logical, OrderingPolicy::DeterministicTieBreak);
+        assert_eq!(
+            det,
+            physical1
+                .to_index_ms()
+                .tie_break_key()
+                .cmp(&logical.to_index_ms().tie_break_key())
         );
     }
 }

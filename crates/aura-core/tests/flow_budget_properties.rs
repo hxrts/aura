@@ -6,7 +6,11 @@
 //! - Epoch rotation behavior
 //! - No-Observable-Without-Charge invariant
 
-use aura_core::{flow::FlowBudget, semilattice::JoinSemilattice, types::Epoch};
+use aura_core::{
+    flow::{FlowBudget, FlowCost},
+    semilattice::JoinSemilattice,
+    types::Epoch,
+};
 
 /// Test FlowBudget CRDT join operation is associative
 #[test]
@@ -180,11 +184,11 @@ fn flow_budget_merge_invariants() {
 #[test]
 fn charge_flow_respects_limits() {
     let test_cases = [
-        (100, 30, 50, true),    // Within budget: 30 + 50 <= 100
-        (100, 30, 70, true),    // At limit: 30 + 70 = 100
-        (100, 30, 71, false),   // Exceeds budget: 30 + 71 > 100
-        (50, 0, 60, false),     // Exceeds from zero: 0 + 60 > 50
-        (1000, 500, 400, true), // Large numbers within budget
+        (100, 30, 50u32, true),    // Within budget: 30 + 50 <= 100
+        (100, 30, 70u32, true),    // At limit: 30 + 70 = 100
+        (100, 30, 71u32, false),   // Exceeds budget: 30 + 71 > 100
+        (50, 0, 60u32, false),     // Exceeds from zero: 0 + 60 > 50
+        (1000, 500, 400u32, true), // Large numbers within budget
     ];
 
     for (limit, initial_spent, cost, should_succeed) in test_cases.iter() {
@@ -192,7 +196,7 @@ fn charge_flow_respects_limits() {
         budget.spent = *initial_spent;
 
         let initial_spent_value = budget.spent;
-        let charge_result = budget.record_charge(*cost);
+        let charge_result = budget.record_charge(FlowCost::new(*cost));
 
         if *should_succeed {
             assert!(
@@ -201,7 +205,7 @@ fn charge_flow_respects_limits() {
             );
             assert_eq!(
                 budget.spent,
-                initial_spent_value + cost,
+                initial_spent_value + u64::from(*cost),
                 "Spent should increase by cost"
             );
         } else {
@@ -247,23 +251,24 @@ fn headroom_calculation_correct() {
 #[test]
 fn can_charge_predicate_matches_record_charge() {
     let test_cases = [
-        (100, 30, 50),
-        (100, 30, 70),
-        (100, 30, 71),
-        (50, 0, 60),
-        (1000, 500, 400),
+        (100, 30, 50u32),
+        (100, 30, 70u32),
+        (100, 30, 71u32),
+        (50, 0, 60u32),
+        (1000, 500, 400u32),
     ];
 
     for (limit, initial_spent, cost) in test_cases.iter() {
         let mut budget = FlowBudget::new(*limit, Epoch::initial());
         budget.spent = *initial_spent;
 
-        let can_charge_result = budget.can_charge(*cost);
+        let can_charge_result = budget.can_charge(FlowCost::new(*cost));
         let mut budget_copy = budget;
-        let record_charge_result = budget_copy.record_charge(*cost).is_ok();
+        let record_charge_result = budget_copy.record_charge(FlowCost::new(*cost)).is_ok();
 
         assert_eq!(
-            can_charge_result, record_charge_result,
+            can_charge_result.unwrap_or(false),
+            record_charge_result,
             "can_charge and record_charge must agree"
         );
     }
@@ -321,7 +326,7 @@ mod convergence_tests {
 
         // Initially near limit
         assert_eq!(budget.headroom(), 10);
-        assert!(!budget.can_charge(50));
+        assert!(!budget.can_charge(FlowCost::new(50)).unwrap_or(false));
 
         // Rotate to next epoch
         budget.rotate_epoch(Epoch::new(2));
@@ -329,7 +334,7 @@ mod convergence_tests {
         // Spent should reset, allowing new charges
         assert_eq!(budget.spent, 0);
         assert_eq!(budget.headroom(), 100);
-        assert!(budget.can_charge(50));
+        assert!(budget.can_charge(FlowCost::new(50)).unwrap_or(false));
 
         // Epoch should advance
         assert_eq!(budget.epoch.value(), 2);
@@ -364,12 +369,12 @@ mod convergence_tests {
         let mut budget = FlowBudget::new(50, Epoch::initial());
 
         // Successful charge within budget
-        let success = budget.record_charge(30);
+        let success = budget.record_charge(FlowCost::new(30));
         assert!(success.is_ok(), "Charge within budget should succeed");
         assert_eq!(budget.spent, 30);
 
         // Failed charge exceeding budget
-        let failure = budget.record_charge(30); // 30 + 30 > 50
+        let failure = budget.record_charge(FlowCost::new(30)); // 30 + 30 > 50
         assert!(failure.is_err(), "Charge exceeding budget should fail");
         assert_eq!(budget.spent, 30); // Spent should remain unchanged
 

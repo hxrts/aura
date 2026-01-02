@@ -14,7 +14,7 @@ use aura_core::{
     tree::{
         BranchNode, BranchSigningKey, Epoch, LeafNode, SigningWitness, TreeHash32, TreeStateView,
     },
-    LeafId, NodeIndex, Policy,
+    LeafId, NodeIndex, Policy, PolicyError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -291,8 +291,9 @@ impl TreeState {
     }
 
     /// Increment the epoch (used during reduction)
-    pub fn increment_epoch(&mut self) {
-        self.epoch = self.epoch.next();
+    pub fn increment_epoch(&mut self) -> Result<(), aura_core::AuraError> {
+        self.epoch = self.epoch.next()?;
+        Ok(())
     }
 
     /// Set the root commitment (used during reduction)
@@ -450,13 +451,23 @@ impl TreeState {
     /// Get the signing witness for a node (key + threshold derived from policy)
     ///
     /// This is the complete information needed to verify an operation at this node.
-    pub fn signing_witness(&self, index: &NodeIndex) -> Option<SigningWitness> {
-        let key = self.branch_signing_keys.get(index)?;
-        let policy = self.get_policy(index)?;
+    pub fn signing_witness(&self, index: &NodeIndex) -> Result<SigningWitness, TreeStateError> {
+        let key = self
+            .branch_signing_keys
+            .get(index)
+            .ok_or(TreeStateError::SigningKeyNotFound(*index))?;
+        let policy = self
+            .get_policy(index)
+            .ok_or(TreeStateError::PolicyNotFound(*index))?;
         let child_count = self.get_children(*index).len();
-        let threshold = policy.required_signers(child_count);
+        let threshold = policy
+            .required_signers(child_count)
+            .map_err(|e| TreeStateError::InvalidPolicy {
+                node: *index,
+                source: e,
+            })?;
 
-        Some(SigningWitness::from_signing_key(key, threshold))
+        Ok(SigningWitness::from_signing_key(key, threshold))
     }
 }
 
@@ -513,6 +524,23 @@ pub enum TreeStateError {
         expected: TreeHash32,
         /// The actual commitment hash
         actual: TreeHash32,
+    },
+
+    /// Signing key not found for node
+    #[error("Signing key not found for node {0:?}")]
+    SigningKeyNotFound(NodeIndex),
+
+    /// Policy not found for node
+    #[error("Policy not found for node {0:?}")]
+    PolicyNotFound(NodeIndex),
+
+    /// Invalid policy for node
+    #[error("Invalid policy for node {node:?}: {source}")]
+    InvalidPolicy {
+        /// Node with invalid policy
+        node: NodeIndex,
+        /// Underlying policy error
+        source: PolicyError,
     },
 }
 
@@ -615,10 +643,10 @@ mod tests {
         let mut state = TreeState::new();
         assert_eq!(state.current_epoch(), Epoch::initial());
 
-        state.increment_epoch();
+        state.increment_epoch().unwrap();
         assert_eq!(state.current_epoch(), Epoch::new(1));
 
-        state.increment_epoch();
+        state.increment_epoch().unwrap();
         assert_eq!(state.current_epoch(), Epoch::new(2));
     }
 }

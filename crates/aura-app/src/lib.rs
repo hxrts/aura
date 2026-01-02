@@ -121,6 +121,7 @@ uniffi::custom_type!(ContextId, String);
 // Modules
 // =============================================================================
 
+pub mod authorization;
 pub mod bridge;
 pub mod core;
 pub mod effects;
@@ -128,11 +129,10 @@ pub mod errors;
 pub mod queries;
 pub mod runtime_bridge;
 pub mod signal_defs;
+pub mod thresholds;
 pub mod ui;
 pub mod views;
 pub(crate) mod workflows;
-pub mod authorization;
-pub mod thresholds;
 
 #[cfg(feature = "signals")]
 pub mod reactive_state;

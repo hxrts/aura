@@ -506,6 +506,7 @@ impl<T: RendezvousFlooder + ?Sized> RendezvousFlooder for std::sync::Arc<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FlowCost;
 
     #[test]
     fn test_rendezvous_packet_ttl() {
@@ -616,9 +617,18 @@ mod tests {
 
         assert!(budget.flood.can_originate());
         assert!(budget.flood.can_forward());
-        assert!(budget.neighborhood.can_charge(100));
-        assert!(budget.home.can_charge(100));
-        assert!(budget.direct.can_charge(100));
+        assert!(budget
+            .neighborhood
+            .can_charge(FlowCost::new(100))
+            .unwrap_or(false));
+        assert!(budget
+            .home
+            .can_charge(FlowCost::new(100))
+            .unwrap_or(false));
+        assert!(budget
+            .direct
+            .can_charge(FlowCost::new(100))
+            .unwrap_or(false));
     }
 
     #[test]

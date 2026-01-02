@@ -573,6 +573,7 @@ pub struct GuardianApprovalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::FlowCost;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -583,7 +584,7 @@ mod tests {
             test_authority(),
             None,
             None,
-            100,
+            FlowCost::new(100),
             vec![
                 costs::CAP_REQUEST_AUTH.to_string(),
                 costs::CAP_SUBMIT_PROOF.to_string(),
@@ -622,7 +623,7 @@ mod tests {
             test_authority(),
             None,
             None,
-            100,
+            FlowCost::new(100),
             vec![], // No capabilities
             1,
             1000,

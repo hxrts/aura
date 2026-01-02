@@ -134,8 +134,8 @@ async fn test_chat_signal_state_updates() {
     let mut updated_state = initial.clone();
     updated_state.messages.push(Message {
         id: "msg-1".to_string(),
-        channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
-        sender_id: "alice".parse::<AuthorityId>().unwrap_or_default(),
+        channel_id: ChannelId::from_bytes([0x40; 32]),
+        sender_id: AuthorityId::new_from_entropy([0xAA; 32]),
         sender_name: "Alice".to_string(),
         content: "Hello, world!".to_string(),
         timestamp: 1234567890,
@@ -167,7 +167,7 @@ async fn test_recovery_signal_state_updates() {
     let mut updated_state = initial.clone();
     updated_state.active_recovery = Some(RecoveryProcess {
         id: "recovery-123".to_string(),
-        account_id: "account-456".parse::<AuthorityId>().unwrap_or_default(),
+        account_id: AuthorityId::new_from_entropy([0x45; 32]),
         status: RecoveryProcessStatus::WaitingForApprovals,
         approvals_received: 0,
         approvals_required: 2,
@@ -262,10 +262,8 @@ async fn test_chat_message_accumulation() {
         let mut state = core.read(&*CHAT_SIGNAL).await.unwrap();
         state.messages.push(Message {
             id: format!("msg-{i}"),
-            channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
-            sender_id: format!("user-{}", i % 3)
-                .parse::<AuthorityId>()
-                .unwrap_or_default(),
+            channel_id: ChannelId::from_bytes([0x10 + i as u8; 32]),
+            sender_id: AuthorityId::new_from_entropy([0x20 + (i % 3) as u8; 32]),
             sender_name: format!("User{}", i % 3),
             content: format!("Message number {i}"),
             timestamp: 1234567890 + i as u64,

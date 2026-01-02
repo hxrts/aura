@@ -3,15 +3,11 @@
 //! Provides essential message wrappers with built-in privacy preservation, context scoping,
 //! and minimal framing metadata. Target: <150 lines (concise implementation).
 
-use aura_core::{
-    hash::hasher,
-    identifiers::{AuthorityId, ContextId},
-    AuraResult,
-};
+use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::AuraResult;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
-use uuid::Uuid;
 
+use super::ids::MessageId;
 /// Universal message wrapper with essential blinding capabilities
 ///
 /// Integrates privacy preservation directly into the core envelope type.
@@ -19,7 +15,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Envelope {
     /// Unique message identifier
-    pub message_id: Uuid,
+    pub message_id: MessageId,
     /// Frame metadata with privacy hints
     pub header: FrameHeader,
     /// Message payload (may be blinded)
@@ -86,19 +82,13 @@ pub enum PrivacyLevel {
 }
 
 impl Envelope {
-    /// Global counter to provide uniqueness without randomness
-    fn message_counter() -> &'static AtomicU64 {
-        static COUNTER: AtomicU64 = AtomicU64::new(1);
-        &COUNTER
-    }
-
     /// Create new envelope with minimal privacy preservation
     pub fn new(payload: Vec<u8>) -> Self {
-        Self::new_with_id(Self::generate_message_id(), payload)
+        Self::new_with_id(MessageId::new(), payload)
     }
 
     /// Create new envelope with specified message ID
-    pub fn new_with_id(message_id: Uuid, payload: Vec<u8>) -> Self {
+    pub fn new_with_id(message_id: MessageId, payload: Vec<u8>) -> Self {
         Self {
             message_id,
             header: FrameHeader {
@@ -112,19 +102,6 @@ impl Envelope {
         }
     }
 
-    /// Generate a deterministic message ID based on payload
-    /// This avoids direct UUID generation while providing uniqueness
-    fn generate_message_id() -> Uuid {
-        let counter = Self::message_counter().fetch_add(1, Ordering::SeqCst);
-        let mut h = hasher();
-        h.update(b"aura-envelope-id");
-        h.update(&counter.to_le_bytes());
-        let digest = h.finalize();
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&digest[..16]);
-        Uuid::from_bytes(uuid_bytes)
-    }
-
     /// Create context-scoped envelope with privacy preservation
     pub fn new_scoped(
         payload: Vec<u8>,
@@ -132,7 +109,7 @@ impl Envelope {
         capability_hint: Option<String>,
     ) -> Self {
         Self::new_scoped_with_id(
-            Self::generate_message_id(),
+            MessageId::new(),
             payload,
             context_id,
             capability_hint,
@@ -141,7 +118,7 @@ impl Envelope {
 
     /// Create context-scoped envelope with specified message ID
     pub fn new_scoped_with_id(
-        message_id: Uuid,
+        message_id: MessageId,
         payload: Vec<u8>,
         context_id: ContextId,
         capability_hint: Option<String>,
@@ -161,11 +138,11 @@ impl Envelope {
 
     /// Create blinded envelope hiding all metadata
     pub fn new_blinded(payload: Vec<u8>) -> Self {
-        Self::new_blinded_with_id(Self::generate_message_id(), payload)
+        Self::new_blinded_with_id(MessageId::new(), payload)
     }
 
     /// Create blinded envelope with specified message ID
-    pub fn new_blinded_with_id(message_id: Uuid, payload: Vec<u8>) -> Self {
+    pub fn new_blinded_with_id(message_id: MessageId, payload: Vec<u8>) -> Self {
         Self {
             message_id,
             header: FrameHeader {

@@ -11,7 +11,7 @@ use aura_core::{
     identifiers::{AuthorityId, ContextId},
     journal::Fact,
     time::{PhysicalTime, TimeStamp},
-    AuraError,
+    AuraError, FlowCost,
 };
 use aura_simulator::effects::{SimulationEffectInterpreter, SimulationState};
 use std::sync::Arc;
@@ -58,9 +58,9 @@ async fn test_multi_party_protocol_simulation() -> Result<(), AuraError> {
     );
 
     // Set initial budgets
-    alice_interp.set_initial_budget(alice, 1000);
-    bob_interp.set_initial_budget(bob, 1000);
-    carol_interp.set_initial_budget(carol, 1000);
+    alice_interp.set_initial_budget(alice, FlowCost::new(1000));
+    bob_interp.set_initial_budget(bob, FlowCost::new(1000));
+    carol_interp.set_initial_budget(carol, FlowCost::new(1000));
 
     // Simulate a threshold signing protocol
     // 1. Alice initiates by storing session metadata
@@ -102,7 +102,7 @@ async fn test_multi_party_protocol_simulation() -> Result<(), AuraError> {
             context,
             authority: bob,
             peer: alice,
-            amount: 50,
+            amount: FlowCost::new(50),
         })
         .await?;
 
@@ -111,7 +111,7 @@ async fn test_multi_party_protocol_simulation() -> Result<(), AuraError> {
             context,
             authority: carol,
             peer: alice,
-            amount: 50,
+            amount: FlowCost::new(50),
         })
         .await?;
 
@@ -195,9 +195,9 @@ async fn test_multi_party_protocol_simulation() -> Result<(), AuraError> {
     );
 
     // Set same initial conditions
-    replay_interp.set_initial_budget(alice, 1000);
-    replay_interp.set_initial_budget(bob, 1000);
-    replay_interp.set_initial_budget(carol, 1000);
+    replay_interp.set_initial_budget(alice, FlowCost::new(1000));
+    replay_interp.set_initial_budget(bob, FlowCost::new(1000));
+    replay_interp.set_initial_budget(carol, FlowCost::new(1000));
 
     // Replay should produce identical state
     replay_interp.replay(events).await?;
@@ -222,7 +222,7 @@ async fn test_guard_chain_simulation() {
     let addr = NetworkAddress::new("test://guard_test".to_string());
 
     let interp = SimulationEffectInterpreter::new(42, time.clone(), authority, addr);
-    interp.set_initial_budget(authority, 500);
+    interp.set_initial_budget(authority, FlowCost::new(500));
 
     // Simulate a guard chain that:
     // 1. Checks authorization (metadata lookup)
@@ -246,7 +246,7 @@ async fn test_guard_chain_simulation() {
             context: ContextId::new_from_entropy([1u8; 32]),
             authority,
             peer: authority,
-            amount: 100,
+            amount: FlowCost::new(100),
         },
         EffectCommand::RecordLeakage {
             bits: 16, // User ID leaked
@@ -272,7 +272,7 @@ async fn test_guard_chain_simulation() {
 
     // Verify guard chain execution
     let state = interp.snapshot_state();
-    assert_eq!(state.get_budget(&authority), 400); // 500 - 100
+    assert_eq!(state.get_budget(&authority), FlowCost::new(400)); // 500 - 100
     assert_eq!(state.total_leakage_bits, 16);
     assert_eq!(state.journal.len(), 1);
     assert_eq!(state.message_queue.len(), 1);
@@ -298,7 +298,7 @@ async fn test_budget_exhaustion_simulation() {
     let addr = NetworkAddress::new("test://exhaustion_test".to_string());
 
     let interp = SimulationEffectInterpreter::new(42, time, authority, addr);
-    interp.set_initial_budget(authority, 100);
+    interp.set_initial_budget(authority, FlowCost::new(100));
 
     // First charge should succeed
     let result = interp
@@ -306,7 +306,7 @@ async fn test_budget_exhaustion_simulation() {
             context: ContextId::new_from_entropy([2u8; 32]),
             authority,
             peer: authority,
-            amount: 60,
+            amount: FlowCost::new(60),
         })
         .await
         .unwrap();
@@ -324,7 +324,7 @@ async fn test_budget_exhaustion_simulation() {
             context: ContextId::new_from_entropy([3u8; 32]),
             authority,
             peer: authority,
-            amount: 40,
+            amount: FlowCost::new(40),
         })
         .await
         .unwrap();
@@ -342,7 +342,7 @@ async fn test_budget_exhaustion_simulation() {
             context: ContextId::new_from_entropy([4u8; 32]),
             authority,
             peer: authority,
-            amount: 10,
+            amount: FlowCost::new(10),
         })
         .await;
 

@@ -160,7 +160,7 @@ where
                 context,
                 peer,
             } => {
-                debug!(?authority, amount, "Charging flow budget for authority");
+                debug!(?authority, ?amount, "Charging flow budget for authority");
 
                 // Charge the flow budget
                 let receipt = self
@@ -174,8 +174,8 @@ where
 
                 info!(
                     ?authority,
-                    amount,
-                    flow_amount = receipt.cost,
+                    ?amount,
+                    flow_amount = ?receipt.cost,
                     "Successfully charged flow budget"
                 );
 
@@ -412,7 +412,7 @@ mod tests {
             &self,
             _context: &aura_core::identifiers::ContextId,
             _peer: &AuthorityId,
-            _cost: u32,
+            _cost: aura_core::FlowCost,
         ) -> Result<aura_core::FlowBudget> {
             Ok(aura_core::FlowBudget::default())
         }
@@ -436,21 +436,22 @@ mod tests {
             &self,
             context: &aura_core::identifiers::ContextId,
             peer: &AuthorityId,
-            cost: u32,
+            cost: aura_core::FlowCost,
         ) -> Result<aura_core::flow::Receipt> {
             let mut budgets = self.budgets.lock().await;
             let budget = budgets.entry(*peer).or_insert(1000);
-            if *budget >= cost {
-                *budget -= cost;
+            let cost_value = cost.value();
+            if *budget >= cost_value {
+                *budget -= cost_value;
                 Ok(aura_core::flow::Receipt {
                     ctx: *context,
                     src: *peer,
                     dst: *peer, // Using peer for both in mock
                     epoch: aura_core::types::Epoch::new(0),
                     cost,
-                    nonce: 0,
+                    nonce: aura_core::FlowNonce::new(0),
                     prev: aura_core::domain::Hash32([0u8; 32]),
-                    sig: vec![],
+                    sig: aura_core::ReceiptSig::new(vec![])?,
                 })
             } else {
                 Err(AuraError::from(Layer3Error::invalid_input(
@@ -709,13 +710,13 @@ mod tests {
             context: aura_core::identifiers::ContextId::new_from_entropy([3u8; 32]),
             authority,
             peer: authority,
-            amount: 100,
+            amount: aura_core::FlowCost::new(100),
         };
 
         let result = interpreter.execute(cmd).await.unwrap();
         match result {
             EffectResult::Receipt(receipt) => {
-                assert_eq!(receipt.cost, 100);
+                assert_eq!(receipt.cost, aura_core::FlowCost::new(100));
             }
             _ => panic!("Expected Receipt result"),
         }

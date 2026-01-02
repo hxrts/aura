@@ -5,8 +5,8 @@
 //! Tracks flow budgets per (ContextId, AuthorityId) pair for charge-before-send
 //! enforcement in the guard chain.
 
-use crate::core::AgentConfig;
 use super::state::with_state_mut_validated;
+use crate::core::AgentConfig;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::HashMap;
 use std::sync::Arc;

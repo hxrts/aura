@@ -1,7 +1,7 @@
 //! Recovery cache manager.
 
-use crate::handlers::recovery::{ActiveRecovery, RecoveryState};
 use super::state::with_state_mut_validated;
+use crate::handlers::recovery::{ActiveRecovery, RecoveryState};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -63,12 +63,7 @@ impl RecoveryManager {
 
     /// Get a cloned recovery.
     pub async fn get_recovery(&self, recovery_id: &str) -> Option<ActiveRecovery> {
-        self.state
-            .read()
-            .await
-            .recoveries
-            .get(recovery_id)
-            .cloned()
+        self.state.read().await.recoveries.get(recovery_id).cloned()
     }
 
     /// Mutate a recovery if present.
@@ -112,11 +107,9 @@ impl RecoveryManager {
             &self.state,
             |state| {
                 let before = state.recoveries.len();
-                state.recoveries.retain(|_, r| {
-                    r.request
-                        .expires_at
-                        .map_or(true, |exp| exp > current_time)
-                });
+                state
+                    .recoveries
+                    .retain(|_, r| r.request.expires_at.map_or(true, |exp| exp > current_time));
                 before - state.recoveries.len()
             },
             |state| state.validate(),

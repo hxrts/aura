@@ -356,10 +356,7 @@ mod tests {
     fn test_operation_error() {
         let e1 = OperationError::not_implemented("feature X");
         assert!(matches!(e1, OperationError::NotImplemented(_)));
-        assert_eq!(
-            e1.category(),
-            crate::errors::ErrorCategory::NotImplemented
-        );
+        assert_eq!(e1.category(), crate::errors::ErrorCategory::NotImplemented);
 
         let e2 = OperationError::invalid_argument("bad value");
         assert!(matches!(e2, OperationError::InvalidArgument(_)));

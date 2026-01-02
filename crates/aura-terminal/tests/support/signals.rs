@@ -30,6 +30,7 @@ use aura_app::views::{
 use aura_app::{AppCore, AppError};
 use aura_core::effects::reactive::{ReactiveEffects, Signal};
 use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_terminal::ids;
 
 /// Default timeout for signal waits.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(500);
@@ -251,7 +252,7 @@ pub async fn wait_for_devices(
 
 /// Wait for a specific device to appear by device ID string.
 pub async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
-    let device_id = DeviceId::from(device_id);
+    let device_id = ids::device_id(device_id);
     wait_for_signal(
         app_core,
         &*SETTINGS_SIGNAL,
@@ -264,7 +265,7 @@ pub async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
 
 /// Wait for a device to be absent by device ID string.
 pub async fn wait_for_device_absent(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
-    let device_id = DeviceId::from(device_id);
+    let device_id = ids::device_id(device_id);
     wait_for_signal(
         app_core,
         &*SETTINGS_SIGNAL,

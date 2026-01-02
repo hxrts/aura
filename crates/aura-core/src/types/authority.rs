@@ -160,11 +160,11 @@ impl TreeStateSummary {
     }
 
     /// Apply an attested operation to the tree state
-    pub fn apply(&self, op: &AttestedOp) -> Self {
+    pub fn apply(&self, op: &AttestedOp) -> Result<Self> {
         let mut next = self.clone();
 
         // Advance epoch relative to parent binding
-        next.epoch = op.op.parent_epoch.next();
+        next.epoch = op.op.parent_epoch.next()?;
 
         // Update commitment deterministically from the operation payload
         if let Ok(bytes) = crate::util::serialization::to_vec(&op.op) {
@@ -190,7 +190,7 @@ impl TreeStateSummary {
             }
         }
 
-        next
+        Ok(next)
     }
 
     /// Update the commitment (internal method for reduction pipeline)

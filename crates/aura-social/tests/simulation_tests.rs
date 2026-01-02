@@ -479,11 +479,7 @@ fn test_cross_neighborhood_routing() {
     let topology1 = SocialTopology::new(steward1, Some(home1), vec![neighborhood1.clone()]);
 
     // Topology for home2 - bridge between neighborhoods
-    let topology2 = SocialTopology::new(
-        steward2,
-        Some(home2),
-        vec![neighborhood1, neighborhood2],
-    );
+    let topology2 = SocialTopology::new(steward2, Some(home2), vec![neighborhood1, neighborhood2]);
 
     // home1 has social presence through neighborhood1
     assert!(topology1.has_social_presence());

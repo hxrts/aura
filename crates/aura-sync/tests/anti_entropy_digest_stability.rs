@@ -28,9 +28,9 @@ fn anti_entropy_digest_is_stable_for_identical_inputs() {
 
     assert_eq!(digest_first, digest_second);
 
-    let encoded = serde_json::to_vec(&digest_first)
-        .unwrap_or_else(|e| panic!("digest serializes: {e}"));
-    let decoded: JournalDigest = serde_json::from_slice(&encoded)
-        .unwrap_or_else(|e| panic!("digest deserializes: {e}"));
+    let encoded =
+        serde_json::to_vec(&digest_first).unwrap_or_else(|e| panic!("digest serializes: {e}"));
+    let decoded: JournalDigest =
+        serde_json::from_slice(&encoded).unwrap_or_else(|e| panic!("digest deserializes: {e}"));
     assert_eq!(digest_first, decoded);
 }

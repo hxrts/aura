@@ -58,7 +58,8 @@ impl SessionOperations {
             .session_manager
             .add_participant(_session_id, _device_id)
             .await;
-        self.persist_participants(_session_id, &participants).await?;
+        self.persist_participants(_session_id, &participants)
+            .await?;
         HandlerUtilities::append_relational_fact(
             &self.authority_context,
             self.effects(),
@@ -85,7 +86,8 @@ impl SessionOperations {
             .remove_participant(_session_id, _device_id)
             .await
         {
-            self.persist_participants(_session_id, &participants).await?;
+            self.persist_participants(_session_id, &participants)
+                .await?;
             HandlerUtilities::append_relational_fact(
                 &self.authority_context,
                 self.effects(),

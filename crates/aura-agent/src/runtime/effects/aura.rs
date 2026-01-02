@@ -42,7 +42,10 @@ impl GuardContextProvider for AuraEffectSystem {
 #[cfg(feature = "simulation")]
 impl aura_core::effects::RuntimeEffectsBundle for AuraEffectSystem {
     fn is_simulation_mode(&self) -> bool {
-        matches!(self.execution_mode, aura_core::effects::ExecutionMode::Simulation { .. })
+        matches!(
+            self.execution_mode,
+            aura_core::effects::ExecutionMode::Simulation { .. }
+        )
     }
 
     fn simulation_seed(&self) -> Option<u64> {

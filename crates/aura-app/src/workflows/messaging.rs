@@ -3,6 +3,13 @@
 //! This module contains messaging operations that are portable across all frontends.
 //! Uses typed reactive signals for state reads/writes.
 
+use crate::workflows::channel_ref::ChannelRef;
+use crate::workflows::context::current_home_context_or_fallback;
+use crate::workflows::parse::parse_authority_id;
+use crate::workflows::runtime::require_runtime;
+use crate::workflows::signals::read_signal;
+use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
+use crate::workflows::state_helpers::with_chat_state;
 use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     thresholds::{default_channel_threshold, normalize_channel_threshold},
@@ -21,13 +28,6 @@ use aura_core::{
     AuraError,
 };
 use aura_journal::DomainFact;
-use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::require_runtime;
-use crate::workflows::context::current_home_context_or_fallback;
-use crate::workflows::channel_ref::ChannelRef;
-use crate::workflows::signals::read_signal;
-use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
-use crate::workflows::state_helpers::with_chat_state;
 use std::sync::Arc;
 
 /// Messaging backend policy (runtime-backed vs UI-local).
@@ -64,9 +64,7 @@ fn channel_id_from_input(channel: &str) -> ChannelId {
 }
 
 /// Get current home channel id (e.g., "home:<id>") with fallback.
-pub async fn current_home_channel_id(
-    app_core: &Arc<RwLock<AppCore>>,
-) -> Result<String, AuraError> {
+pub async fn current_home_channel_id(app_core: &Arc<RwLock<AppCore>>) -> Result<String, AuraError> {
     let homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
         .await
         .ok();
@@ -85,7 +83,9 @@ async fn context_id_for_channel(
         let core = app_core.read().await;
         let homes = core.views().get_homes();
         if let Some(home_state) = homes.home_state(&channel_id) {
-            return Ok(home_state.context_id);
+            if let Some(ctx_id) = home_state.context_id {
+                return Ok(ctx_id);
+            }
         }
     }
 
@@ -303,9 +303,7 @@ pub async fn create_channel(
 
 /// Join an existing channel.
 pub async fn join_channel(app_core: &Arc<RwLock<AppCore>>, channel: &str) -> Result<(), AuraError> {
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let channel_id = channel_id_from_input(channel);
     let context_id = current_home_context_or_fallback(app_core).await?;
@@ -327,9 +325,7 @@ pub async fn leave_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel: &str,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let channel_id = channel_id_from_input(channel);
     let context_id = current_home_context_or_fallback(app_core).await?;
@@ -355,9 +351,7 @@ pub async fn close_channel(
     channel: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let channel_id = channel_id_from_input(channel);
     let context_id = context_id_for_channel(app_core, channel_id).await?;
@@ -392,9 +386,7 @@ pub async fn set_topic(
     text: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let runtime = {
-        require_runtime(app_core).await?
-    };
+    let runtime = { require_runtime(app_core).await? };
 
     let channel_id = channel_id_from_input(channel);
     let context_id = context_id_for_channel(app_core, channel_id).await?;
@@ -539,7 +531,8 @@ pub async fn start_direct_chat(
     let channel_id = dm_channel_id(contact_id);
 
     // Parse contact_id as AuthorityId for lookup
-    let authority_id = parse_authority_id(contact_id).unwrap_or_else(|_| AuthorityId::new_from_entropy([1u8; 32]));
+    let authority_id =
+        parse_authority_id(contact_id).unwrap_or_else(|_| AuthorityId::new_from_entropy([1u8; 32]));
 
     let contacts = contacts_snapshot(app_core).await;
 

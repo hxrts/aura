@@ -5,9 +5,9 @@
 //! - `application/aura-device-threshold-acceptance`: Acceptance acknowledgment
 
 use super::ProcessResult;
-use crate::ThresholdSigningService;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::CeremonyTracker;
+use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use aura_core::{AuthorityId, DeviceId};
@@ -308,8 +308,14 @@ impl<'a> ThresholdHandler<'a> {
                 "application/aura-device-threshold-commit".to_string(),
             );
             metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
-            metadata.insert("new-epoch".to_string(), ceremony_state.new_epoch.to_string());
-            metadata.insert("aura-destination-device-id".to_string(), device_id.to_string());
+            metadata.insert(
+                "new-epoch".to_string(),
+                ceremony_state.new_epoch.to_string(),
+            );
+            metadata.insert(
+                "aura-destination-device-id".to_string(),
+                device_id.to_string(),
+            );
 
             let commit_envelope = aura_core::effects::TransportEnvelope {
                 destination: self.authority_id,

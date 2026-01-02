@@ -71,8 +71,10 @@ pub fn build_fact_registry() -> FactRegistry {
     );
     registry.register::<RendezvousFact>(RENDEZVOUS_FACT_TYPE_ID, Box::new(RendezvousFactReducer));
     registry.register::<RecoveryFact>(RECOVERY_FACT_TYPE_ID, Box::new(RecoveryFactReducer));
-    registry
-        .register::<MaintenanceFact>(MAINTENANCE_FACT_TYPE_ID, Box::new(MaintenanceFactReducer));
+    registry.register::<MaintenanceFact>(
+        MAINTENANCE_FACT_TYPE_ID.as_str(),
+        Box::new(MaintenanceFactReducer),
+    );
     register_moderation_facts(&mut registry);
 
     registry
@@ -102,7 +104,7 @@ mod tests {
 
     #[test]
     fn fact_type_ids_are_unique() {
-        validate_type_ids(FACT_TYPE_IDS).expect("fact type ids must be unique");
+        validate_type_ids(FACT_TYPE_IDS.as_slice()).expect("fact type ids must be unique");
     }
 
     #[test]

@@ -283,7 +283,7 @@ pub struct SettingsBridgeState {
 ///
 /// This is used to populate UI settings screens without requiring the UI layer
 /// to understand commitment-tree internals.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeDeviceInfo {
     /// Stable device identifier
     pub id: DeviceId,

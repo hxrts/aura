@@ -9,7 +9,7 @@
 use aura_core::{
     effects::{FlowBudgetEffects, FlowHint},
     identifiers::{AuthorityId, ContextId},
-    AuraResult, Receipt,
+    AuraResult, FlowCost, Receipt,
 };
 
 /// Guard that must run before every transport send.
@@ -19,7 +19,7 @@ pub struct FlowGuard {
 }
 
 impl FlowGuard {
-    pub fn new(context: ContextId, peer: AuthorityId, cost: u32) -> Self {
+    pub fn new(context: ContextId, peer: AuthorityId, cost: FlowCost) -> Self {
         Self {
             hint: FlowHint::new(context, peer, cost),
         }

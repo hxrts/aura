@@ -56,10 +56,11 @@ fn get_authority_id(
             field: key.to_string(),
         });
     }
-    s.parse::<AuthorityId>().map_err(|e| QueryParseError::InvalidValue {
-        field: key.to_string(),
-        reason: format!("{e}"),
-    })
+    s.parse::<AuthorityId>()
+        .map_err(|e| QueryParseError::InvalidValue {
+            field: key.to_string(),
+            reason: format!("{e}"),
+        })
 }
 
 /// Helper to extract an optional AuthorityId from a DatalogRow.
@@ -91,27 +92,11 @@ fn get_channel_id(
             field: key.to_string(),
         });
     }
-    s.parse::<ChannelId>().map_err(|e| QueryParseError::InvalidValue {
-        field: key.to_string(),
-        reason: format!("{e}"),
-    })
-}
-
-/// Helper to extract a ContextId from a DatalogRow.
-fn get_context_id(
-    row: &aura_core::query::DatalogRow,
-    key: &str,
-) -> Result<ContextId, QueryParseError> {
-    let s = get_string(row, key);
-    if s.is_empty() {
-        return Err(QueryParseError::MissingField {
+    s.parse::<ChannelId>()
+        .map_err(|e| QueryParseError::InvalidValue {
             field: key.to_string(),
-        });
-    }
-    s.parse::<ContextId>().map_err(|e| QueryParseError::InvalidValue {
-        field: key.to_string(),
-        reason: format!("{e}"),
-    })
+            reason: format!("{e}"),
+        })
 }
 
 /// Helper to extract an optional ChannelId from a DatalogRow.
@@ -124,6 +109,24 @@ fn get_optional_channel_id(
         Ok(None)
     } else {
         s.parse::<ChannelId>()
+            .map(Some)
+            .map_err(|e| QueryParseError::InvalidValue {
+                field: key.to_string(),
+                reason: format!("{e}"),
+            })
+    }
+}
+
+/// Helper to extract an optional ContextId from a DatalogRow.
+fn get_optional_context_id(
+    row: &aura_core::query::DatalogRow,
+    key: &str,
+) -> Result<Option<ContextId>, QueryParseError> {
+    let s = get_string(row, key);
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        s.parse::<ContextId>()
             .map(Some)
             .map_err(|e| QueryParseError::InvalidValue {
                 field: key.to_string(),
@@ -1116,7 +1119,7 @@ impl Query for HomesQuery {
                     mute_list: Default::default(),
                     kick_log: Vec::new(),
                     created_at: get_int(&row, "created_at") as u64,
-                    context_id: get_context_id(&row, "context_id")?,
+                    context_id: get_optional_context_id(&row, "context_id")?,
                 })
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;

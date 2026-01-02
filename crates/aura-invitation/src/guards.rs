@@ -25,6 +25,7 @@
 //! ```
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::FlowCost;
 use aura_guards::types;
 
 use crate::facts::InvitationFact;
@@ -35,17 +36,19 @@ use crate::facts::InvitationFact;
 
 /// Guard cost and capability constants for invitation operations
 pub mod costs {
+    use aura_core::FlowCost;
+
     /// Flow cost for sending an invitation
-    pub const INVITATION_SEND_COST: u32 = 1;
+    pub const INVITATION_SEND_COST: FlowCost = FlowCost::new(1);
 
     /// Flow cost for accepting an invitation
-    pub const INVITATION_ACCEPT_COST: u32 = 1;
+    pub const INVITATION_ACCEPT_COST: FlowCost = FlowCost::new(1);
 
     /// Flow cost for declining an invitation
-    pub const INVITATION_DECLINE_COST: u32 = 1;
+    pub const INVITATION_DECLINE_COST: FlowCost = FlowCost::new(1);
 
     /// Flow cost for cancelling an invitation
-    pub const INVITATION_CANCEL_COST: u32 = 1;
+    pub const INVITATION_CANCEL_COST: FlowCost = FlowCost::new(1);
 
     /// Required capability for sending invitations
     pub const CAP_INVITATION_SEND: &str = "invitation:send";
@@ -86,7 +89,7 @@ pub struct GuardSnapshot {
     pub context_id: ContextId,
 
     /// Current flow budget remaining
-    pub flow_budget_remaining: u32,
+    pub flow_budget_remaining: FlowCost,
 
     /// Capabilities held by the authority
     pub capabilities: Vec<String>,
@@ -103,7 +106,7 @@ impl GuardSnapshot {
     pub fn new(
         authority_id: AuthorityId,
         context_id: ContextId,
-        flow_budget_remaining: u32,
+        flow_budget_remaining: FlowCost,
         capabilities: Vec<String>,
         epoch: u64,
         now_ms: u64,
@@ -124,7 +127,7 @@ impl GuardSnapshot {
     }
 
     /// Check if snapshot has sufficient flow budget
-    pub fn has_budget(&self, cost: u32) -> bool {
+    pub fn has_budget(&self, cost: FlowCost) -> bool {
         self.flow_budget_remaining >= cost
     }
 }
@@ -175,7 +178,7 @@ pub enum EffectCommand {
     /// Charge flow budget
     ChargeFlowBudget {
         /// Cost to charge
-        cost: u32,
+        cost: FlowCost,
     },
 
     /// Notify peer about invitation
@@ -234,7 +237,10 @@ pub fn check_capability(snapshot: &GuardSnapshot, required_cap: &str) -> Option<
 }
 
 /// Check flow budget and return denied outcome if insufficient
-pub fn check_flow_budget(snapshot: &GuardSnapshot, required_cost: u32) -> Option<GuardOutcome> {
+pub fn check_flow_budget(
+    snapshot: &GuardSnapshot,
+    required_cost: FlowCost,
+) -> Option<GuardOutcome> {
     if snapshot.flow_budget_remaining >= required_cost {
         None
     } else {
@@ -253,7 +259,7 @@ impl types::CapabilitySnapshot for GuardSnapshot {
 }
 
 impl types::FlowBudgetSnapshot for GuardSnapshot {
-    fn flow_budget_remaining(&self) -> u32 {
+    fn flow_budget_remaining(&self) -> FlowCost {
         self.flow_budget_remaining
     }
 }
@@ -265,6 +271,7 @@ impl types::FlowBudgetSnapshot for GuardSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::FlowCost;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -278,7 +285,7 @@ mod tests {
         GuardSnapshot::new(
             test_authority(),
             test_context(),
-            100,
+            FlowCost::new(100),
             vec![
                 costs::CAP_INVITATION_SEND.to_string(),
                 costs::CAP_INVITATION_ACCEPT.to_string(),
@@ -299,9 +306,9 @@ mod tests {
     #[test]
     fn test_guard_snapshot_has_budget() {
         let snapshot = test_snapshot();
-        assert!(snapshot.has_budget(50));
-        assert!(snapshot.has_budget(100));
-        assert!(!snapshot.has_budget(101));
+        assert!(snapshot.has_budget(FlowCost::new(50)));
+        assert!(snapshot.has_budget(FlowCost::new(100)));
+        assert!(!snapshot.has_budget(FlowCost::new(101)));
     }
 
     #[test]
@@ -322,7 +329,8 @@ mod tests {
 
     #[test]
     fn test_guard_outcome_allowed() {
-        let outcome = GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget { cost: 10 }]);
+        let outcome =
+            GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget { cost: FlowCost::new(10) }]);
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 1);
     }
@@ -352,22 +360,22 @@ mod tests {
     #[test]
     fn test_check_flow_budget_success() {
         let snapshot = test_snapshot();
-        let result = check_flow_budget(&snapshot, 50);
+        let result = check_flow_budget(&snapshot, FlowCost::new(50));
         assert!(result.is_none()); // None means check passed
     }
 
     #[test]
     fn test_check_flow_budget_failure() {
         let snapshot = test_snapshot();
-        let result = check_flow_budget(&snapshot, 150);
+        let result = check_flow_budget(&snapshot, FlowCost::new(150));
         assert!(result.is_some());
         assert!(result.unwrap().is_denied());
     }
 
     #[test]
     fn test_guard_costs_defined() {
-        assert_eq!(costs::INVITATION_SEND_COST, 1);
-        assert_eq!(costs::INVITATION_ACCEPT_COST, 1);
+        assert_eq!(costs::INVITATION_SEND_COST.value(), 1);
+        assert_eq!(costs::INVITATION_ACCEPT_COST.value(), 1);
         assert_eq!(costs::CAP_INVITATION_SEND, "invitation:send");
     }
 }

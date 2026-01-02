@@ -17,6 +17,7 @@
 // ============================================================================
 
 use aura_core::identifiers::{AuthorityId, SessionId};
+use crate::facts::PublicKeyBytes;
 use serde::{Deserialize, Serialize};
 
 /// Unified cryptographic protocol message envelope
@@ -136,7 +137,7 @@ pub struct AcknowledgeSubShareMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FinalizeResharingMessage {
     pub session_id: SessionId,
-    pub new_group_public_key: Vec<u8>,
+    pub new_group_public_key: PublicKeyBytes,
     pub new_threshold: u16,
     pub test_signature: Vec<u8>, // Proof that new shares work
     /// Commitments from each participating authority
@@ -204,7 +205,7 @@ pub struct RollbackResharingMessage {
 pub struct ResharingProtocolResult {
     pub session_id: SessionId,
     pub success: bool,
-    pub new_group_public_key: Option<Vec<u8>>,
+    pub new_group_public_key: Option<PublicKeyBytes>,
     pub new_threshold: Option<u16>,
     /// Authorities that successfully completed resharing
     pub new_participants: Vec<AuthorityId>,

@@ -17,7 +17,7 @@ use aura_core::{
     identifiers::{AuthorityId, ContextId},
     journal::Cap,
     time::{PhysicalTime, TimeStamp},
-    AuraResult,
+    AuraResult, FlowCost,
 };
 use aura_guards::pure::{Guard, GuardChain, GuardRequest};
 // Note: Examples can use tokio::main for simplicity (arch-check accepts this for examples/)
@@ -50,7 +50,7 @@ impl Guard for DomainSpecificGuard {
 /// Example deterministic interpreter for simulation
 struct SimulationInterpreter {
     events: Vec<String>,
-    flow_budgets: HashMap<(ContextId, AuthorityId), u32>,
+    flow_budgets: HashMap<(ContextId, AuthorityId), FlowCost>,
     journal_entries: Vec<JournalEntry>,
 }
 
@@ -63,7 +63,7 @@ impl SimulationInterpreter {
         }
     }
 
-    fn set_budget(&mut self, context: ContextId, authority: AuthorityId, budget: u32) {
+    fn set_budget(&mut self, context: ContextId, authority: AuthorityId, budget: FlowCost) {
         self.flow_budgets.insert((context, authority), budget);
     }
 }
@@ -82,11 +82,12 @@ impl EffectInterpreter for SimulationInterpreter {
                     .flow_budgets
                     .get(&(context, authority))
                     .copied()
-                    .unwrap_or(0);
+                    .unwrap_or_else(|| FlowCost::new(0));
                 if current < amount {
                     Ok(EffectResult::Failure("Insufficient budget".to_string()))
                 } else {
-                    Ok(EffectResult::RemainingBudget(current - amount))
+                    let remaining = current.value().saturating_sub(amount.value());
+                    Ok(EffectResult::RemainingBudget(remaining))
                 }
             }
             EffectCommand::AppendJournal { entry } => {
@@ -119,7 +120,7 @@ async fn run_examples() -> AuraResult<()> {
     let authority = AuthorityId::new_from_entropy([1u8; 32]);
     let context = ContextId::new_from_entropy([2u8; 32]);
     let mut budgets = HashMap::new();
-    budgets.insert((context, authority), 1000);
+    budgets.insert((context, authority), FlowCost::new(1000));
 
     let mut metadata = HashMap::new();
     metadata.insert("authz:send_message".to_string(), "allow".to_string());
@@ -136,10 +137,11 @@ async fn run_examples() -> AuraResult<()> {
     };
 
     let request =
-        GuardRequest::new(authority, "send_message", 100).with_context(b"Hello, World!".to_vec());
+        GuardRequest::new(authority, "send_message", FlowCost::new(100))
+            .with_context(b"Hello, World!".to_vec());
 
     let mut interpreter = SimulationInterpreter::new();
-    interpreter.set_budget(context, authority, 1000);
+    interpreter.set_budget(context, authority, FlowCost::new(1000));
 
     let outcome = guard_chain.evaluate(&snapshot, &request);
     let executed = run_effects(&interpreter, &outcome.effects).await?;
@@ -160,7 +162,8 @@ async fn run_examples() -> AuraResult<()> {
     // let result = send_guard.evaluate(&effect_system).await?;
 
     // New way - same behavior, pure implementation
-    let request = GuardRequest::new(authority, "message:send", 100).with_capability(Cap::default());
+    let request = GuardRequest::new(authority, "message:send", FlowCost::new(100))
+        .with_capability(Cap::default());
 
     let guard_chain = GuardChain::standard();
     let interpreter = SimulationInterpreter::new();
@@ -173,7 +176,7 @@ async fn run_examples() -> AuraResult<()> {
     println!("\n=== Example 3: Pure Testing ===");
 
     // Test insufficient budget scenario
-    let expensive_request = GuardRequest::new(authority, "expensive_op", 2000);
+    let expensive_request = GuardRequest::new(authority, "expensive_op", FlowCost::new(2000));
     let result = guard_chain.evaluate(&snapshot, &expensive_request);
 
     println!("Expensive operation denied: {}", !result.is_authorized());

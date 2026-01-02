@@ -7,22 +7,33 @@
 //! model where authorities hide internal device structure.
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::scope::{AuthorizationOp, ResourceScope};
 use aura_core::time::PhysicalTime;
-use aura_core::types::facts::{FactDelta, FactDeltaReducer};
+use aura_core::types::facts::{
+    FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactTypeId,
+    MAX_FACT_PAYLOAD_BYTES,
+};
+use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use aura_core::types::Epoch;
-use aura_core::util::serialization::{from_slice, to_vec, SemanticVersion, VersionedMessage};
+use aura_core::Cap;
 use serde::{Deserialize, Serialize};
 
 /// Unique type identifier for WoT facts
-pub const WOT_FACT_TYPE_ID: &str = "wot/v1";
+pub static WOT_FACT_TYPE_ID: FactTypeId = FactTypeId::new("wot/v1");
 /// Schema version for WoT facts
 pub const WOT_FACT_SCHEMA_VERSION: u16 = 1;
+
+/// Get the typed fact ID for WoT facts
+pub fn wot_fact_type_id() -> &'static FactTypeId {
+    &WOT_FACT_TYPE_ID
+}
 
 /// Web of Trust domain facts for authorization state changes.
 ///
 /// These facts capture flow budget charges, capability delegations,
 /// and epoch rotations that affect authorization state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum WotFact {
     /// Flow budget charged for a message send
     ///
@@ -66,10 +77,10 @@ pub enum WotFact {
         grantor: AuthorityId,
         /// Authority receiving the capability
         grantee: AuthorityId,
-        /// Scope of the delegated capability (serialized ResourceScope)
-        scope: Vec<u8>,
-        /// Capabilities being delegated (serialized Cap)
-        capabilities: Vec<u8>,
+        /// Scope of the delegated capability
+        scope: ResourceScope,
+        /// Capabilities being delegated
+        capabilities: Cap,
         /// Epoch when delegation occurred
         delegation_epoch: Epoch,
         /// Timestamp when delegation occurred (unified time system)
@@ -99,7 +110,7 @@ pub enum WotFact {
         /// Token fingerprint (hash of token for reference)
         token_fingerprint: [u8; 32],
         /// Initial capabilities in the token
-        initial_capabilities: Vec<String>,
+        initial_capabilities: Vec<AuthorizationOp>,
         /// Epoch when token was issued
         issued_epoch: Epoch,
         /// Timestamp when token was issued (unified time system)
@@ -122,10 +133,6 @@ pub enum WotFact {
 }
 
 impl WotFact {
-    fn version() -> SemanticVersion {
-        SemanticVersion::new(WOT_FACT_SCHEMA_VERSION, 0, 0)
-    }
-
     /// Get the primary authority ID associated with this fact
     pub fn authority_id(&self) -> AuthorityId {
         match self {
@@ -188,19 +195,77 @@ impl WotFact {
     }
 
     /// Encode this fact with a canonical envelope.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let message = VersionedMessage::new(self.clone(), Self::version())
-            .with_metadata("type".to_string(), WOT_FACT_TYPE_ID.to_string());
-        to_vec(&message).unwrap_or_default()
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn try_encode(&self) -> Result<Vec<u8>, FactError> {
+        let payload = to_vec(self)?;
+        if payload.len() > MAX_FACT_PAYLOAD_BYTES {
+            return Err(FactError::PayloadTooLarge {
+                size: payload.len() as u64,
+                max: MAX_FACT_PAYLOAD_BYTES as u64,
+            });
+        }
+        let envelope = FactEnvelope {
+            type_id: wot_fact_type_id().clone(),
+            schema_version: WOT_FACT_SCHEMA_VERSION,
+            encoding: FactEncoding::DagCbor,
+            payload,
+        };
+        let bytes = to_vec(&envelope)?;
+        Ok(bytes)
     }
 
     /// Decode a fact from a canonical envelope.
-    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        let message: VersionedMessage<Self> = from_slice(bytes).ok()?;
-        if !message.version.is_compatible(&Self::version()) {
-            return None;
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn try_decode(bytes: &[u8]) -> Result<Self, FactError> {
+        let envelope: FactEnvelope = from_slice(bytes)?;
+
+        if envelope.type_id.as_str() != wot_fact_type_id().as_str() {
+            return Err(FactError::TypeMismatch {
+                expected: wot_fact_type_id().to_string(),
+                actual: envelope.type_id.to_string(),
+            });
         }
-        Some(message.payload)
+
+        if envelope.schema_version != WOT_FACT_SCHEMA_VERSION {
+            return Err(FactError::VersionMismatch {
+                expected: WOT_FACT_SCHEMA_VERSION,
+                actual: envelope.schema_version,
+            });
+        }
+
+        let fact = match envelope.encoding {
+            FactEncoding::DagCbor => from_slice(&envelope.payload)?,
+            FactEncoding::Json => serde_json::from_slice(&envelope.payload).map_err(|err| {
+                FactError::Serialization(SerializationError::InvalidFormat(format!(
+                    "JSON decode failed: {err}"
+                )))
+            })?,
+        };
+        Ok(fact)
+    }
+
+    /// Encode this fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, FactError> {
+        self.try_encode()
+    }
+
+    /// Decode a fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FactError> {
+        Self::try_decode(bytes)
     }
 }
 
@@ -276,6 +341,7 @@ impl FactDeltaReducer<WotFact, WotFactDelta> for WotFactReducer {
 mod tests {
     use super::*;
     use aura_core::types::facts::FactDeltaReducer;
+    use aura_core::scope::ContextOp;
 
     fn pt(ts_ms: u64) -> PhysicalTime {
         PhysicalTime {
@@ -332,12 +398,18 @@ mod tests {
     fn test_capability_delegated_fact() {
         let grantor = AuthorityId::new_from_entropy([1u8; 32]);
         let grantee = AuthorityId::new_from_entropy([2u8; 32]);
+        let context_id = ContextId::new_from_entropy([9u8; 32]);
+        let scope = ResourceScope::Context {
+            context_id,
+            operation: ContextOp::AddBinding,
+        };
+        let capabilities = Cap::new();
 
         let fact = WotFact::CapabilityDelegated {
             grantor,
             grantee,
-            scope: vec![1, 2, 3],
-            capabilities: vec![4, 5, 6],
+            scope,
+            capabilities,
             delegation_epoch: Epoch::new(1),
             delegated_at: pt(2000),
         };
@@ -361,7 +433,7 @@ mod tests {
             issuer,
             recipient,
             token_fingerprint: [0u8; 32],
-            initial_capabilities: vec!["read".to_string(), "write".to_string()],
+            initial_capabilities: vec![AuthorizationOp::Read, AuthorizationOp::Write],
             issued_epoch: Epoch::new(1),
             issued_at: pt(3000),
         };
@@ -373,5 +445,151 @@ mod tests {
         let reducer = WotFactReducer::new();
         let delta = reducer.apply(&fact);
         assert_eq!(delta.tokens_issued, 1);
+    }
+
+    #[test]
+    fn test_capability_revoked_fact() {
+        let revoker = AuthorityId::new_from_entropy([4u8; 32]);
+        let revokee = AuthorityId::new_from_entropy([5u8; 32]);
+
+        let fact = WotFact::CapabilityRevoked {
+            revoker,
+            revokee,
+            reason: "expired".to_string(),
+            revocation_epoch: Epoch::new(3),
+            revoked_at: pt(4000),
+        };
+
+        assert_eq!(fact.authority_id(), revoker);
+        assert_eq!(fact.timestamp_ms(), 4000);
+        assert_eq!(fact.epoch(), Some(Epoch::new(3)));
+        assert_eq!(fact.fact_type(), "capability_revoked");
+
+        let reducer = WotFactReducer::new();
+        let delta = reducer.apply(&fact);
+        assert_eq!(delta.capabilities_revoked, 1);
+    }
+
+    #[test]
+    fn test_token_attenuated_fact() {
+        let attenuator = AuthorityId::new_from_entropy([6u8; 32]);
+
+        let fact = WotFact::TokenAttenuated {
+            attenuator,
+            original_fingerprint: [1u8; 32],
+            new_fingerprint: [2u8; 32],
+            attenuation_type: "restrict_read".to_string(),
+            attenuated_at: pt(5000),
+        };
+
+        assert_eq!(fact.authority_id(), attenuator);
+        assert_eq!(fact.timestamp_ms(), 5000);
+        assert_eq!(fact.epoch(), None);
+        assert_eq!(fact.fact_type(), "token_attenuated");
+
+        let reducer = WotFactReducer::new();
+        let delta = reducer.apply(&fact);
+        assert_eq!(delta.tokens_attenuated, 1);
+    }
+}
+
+/// Property tests for semilattice laws on WotFactDelta
+#[cfg(test)]
+mod proptest_semilattice {
+    use super::*;
+    use aura_core::types::facts::FactDelta;
+    use proptest::prelude::*;
+
+    /// Strategy for generating arbitrary WotFactDelta values
+    fn arb_delta() -> impl Strategy<Value = WotFactDelta> {
+        (
+            0u64..1000,
+            0u64..1000,
+            0u64..1000,
+            0u64..1000,
+            0u64..1000,
+            0u64..1000,
+        )
+            .prop_map(
+                |(
+                    flow_charges,
+                    epoch_rotations,
+                    capabilities_delegated,
+                    capabilities_revoked,
+                    tokens_issued,
+                    tokens_attenuated,
+                )| {
+                    WotFactDelta {
+                        flow_charges,
+                        epoch_rotations,
+                        capabilities_delegated,
+                        capabilities_revoked,
+                        tokens_issued,
+                        tokens_attenuated,
+                    }
+                },
+            )
+    }
+
+    /// Helper to check if two deltas are equal
+    fn deltas_equal(a: &WotFactDelta, b: &WotFactDelta) -> bool {
+        a.flow_charges == b.flow_charges
+            && a.epoch_rotations == b.epoch_rotations
+            && a.capabilities_delegated == b.capabilities_delegated
+            && a.capabilities_revoked == b.capabilities_revoked
+            && a.tokens_issued == b.tokens_issued
+            && a.tokens_attenuated == b.tokens_attenuated
+    }
+
+    proptest! {
+        /// Idempotence: merging with self doubles the value (additive merge)
+        #[test]
+        fn merge_idempotent(a in arb_delta()) {
+            let original = a.clone();
+            let mut result = a.clone();
+            result.merge(&original);
+            // For additive deltas: a + a = 2a
+            prop_assert_eq!(result.flow_charges, original.flow_charges * 2);
+            prop_assert_eq!(result.epoch_rotations, original.epoch_rotations * 2);
+        }
+
+        /// Commutativity: a.merge(&b) == b.merge(&a) (result equivalence)
+        #[test]
+        fn merge_commutative(a in arb_delta(), b in arb_delta()) {
+            let mut ab = a.clone();
+            ab.merge(&b);
+
+            let mut ba = b.clone();
+            ba.merge(&a);
+
+            prop_assert!(deltas_equal(&ab, &ba), "merge should be commutative");
+        }
+
+        /// Associativity: (a.merge(&b)).merge(&c) == a.merge(&(b.merge(&c)))
+        #[test]
+        fn merge_associative(a in arb_delta(), b in arb_delta(), c in arb_delta()) {
+            // Left associative: (a merge b) merge c
+            let mut left = a.clone();
+            left.merge(&b);
+            left.merge(&c);
+
+            // Right associative: a merge (b merge c)
+            let mut bc = b.clone();
+            bc.merge(&c);
+            let mut right = a.clone();
+            right.merge(&bc);
+
+            prop_assert!(deltas_equal(&left, &right), "merge should be associative");
+        }
+
+        /// Identity: merge with default (zero) leaves value unchanged
+        #[test]
+        fn merge_identity(a in arb_delta()) {
+            let original = a.clone();
+            let mut result = a.clone();
+            result.merge(&WotFactDelta::default());
+
+            prop_assert!(deltas_equal(&result, &original), "merge with identity should preserve value");
+        }
     }
 }

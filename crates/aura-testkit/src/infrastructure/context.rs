@@ -549,7 +549,7 @@ impl JournalEffects for CompositeTestHandler {
         &self,
         context: &aura_core::identifiers::ContextId,
         peer: &aura_core::AuthorityId,
-        cost: u32,
+        cost: aura_core::FlowCost,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         self.journal.charge_flow_budget(context, peer, cost).await
     }

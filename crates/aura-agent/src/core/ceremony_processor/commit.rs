@@ -5,9 +5,9 @@
 //! - `application/aura-device-threshold-commit`: Threshold ceremony commit
 
 use super::ProcessResult;
-use crate::ThresholdSigningService;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::CeremonyTracker;
+use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::ThresholdSigningEffects;
 use aura_core::AuthorityId;

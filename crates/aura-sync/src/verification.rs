@@ -295,7 +295,7 @@ impl MerkleVerifier {
             TimeStamp::PhysicalClock(physical) => physical.ts_ms,
             TimeStamp::Range(range) => {
                 // For ranges, check the latest time (most permissive)
-                range.latest_ms
+                range.latest_ms()
             }
             // Logical and Order clocks don't have physical time semantics
             TimeStamp::LogicalClock(_) | TimeStamp::OrderClock(_) => return Ok(()),

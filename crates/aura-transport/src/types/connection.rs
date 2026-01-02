@@ -60,15 +60,35 @@ pub enum ConnectionState {
         /// Time when close initiated (using Aura unified time system)
         closing_at: TimeStamp,
         /// Reason for closing
-        reason: String,
+        reason: ConnectionCloseReason,
     },
     /// Connection closed
     Closed {
         /// Time when connection closed (using Aura unified time system)
         closed_at: TimeStamp,
         /// Final close reason
-        reason: String,
+        reason: ConnectionCloseReason,
     },
+}
+
+/// Closed set of connection close reasons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ConnectionCloseReason {
+    /// Normal closure after completing work.
+    Graceful,
+    /// Remote peer closed the connection.
+    RemoteClosed,
+    /// Idle or explicit timeout.
+    Timeout,
+    /// Protocol violation detected.
+    ProtocolError,
+    /// Authorization or capability failure.
+    Unauthorized,
+    /// Flow budget exceeded.
+    FlowBudgetExceeded,
+    /// Transport-level error.
+    TransportError,
 }
 
 /// Essential connection metadata with context scoping
