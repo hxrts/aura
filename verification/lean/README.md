@@ -1,10 +1,41 @@
+Aura Development Environment
+============================
+
+Rust version: rustc 1.90.0 (1159e78c4 2025-09-14)
+Cargo version: cargo 1.90.0 (840b83a10 2025-07-30)
+Quint version: 0.25.1
+Apalache version: 0.45.4
+TLA+ tools: available
+Node.js version: v20.19.5
+Lean version: Lean (version 4.23.0, arm64-apple-darwin, commit v4.23.0, Release)
+Aeneas version: available
+
+Available commands:
+  just --list          Show all available tasks
+  just build           Build all crates
+  just test            Run all tests
+  just check           Check workspace (cargo check)
+  just quint-parse     Parse Quint files to JSON
+  just serve-console   Serve console with hot reload (crates/console)
+  quint --help         Formal verification with Quint
+  apalache-mc --help   Model checking with Apalache
+  lean --help          Kernel verification with Lean 4
+  aeneas --help        Rust-to-Lean translation
+  crate2nix --help     Generate hermetic Nix builds
+
+Hermetic builds:
+  nix build            Build with crate2nix (hermetic)
+  nix build .#aura-terminal Build specific package
+  nix run              Run aura CLI hermetically
+  nix flake check      Run hermetic tests
+
 # Aura Lean Verification
 
 Formal verification modules for Aura's kernel components using Lean 4.
 
 ## Setup
 
-The Lean toolchain is managed through Nix:
+The Lean toolchain is managed through Nix (from repo root):
 
 ```bash
 nix develop
@@ -18,11 +49,30 @@ just lean-build
 cd verification/lean && lake build
 ```
 
+Check current proof status (sorries/TODOs):
+
+```bash
+just lean-status
+# or:
+rg -n "\bsorry\b" verification/lean
+```
+
 ## Module Structure
 
 ```
 Aura/
 ├── Assumptions.lean          # Cryptographic axioms (FROST, hash, PRF)
+├── Types.lean                # Shared core type definitions
+├── Types/                    # Shared type helpers (ByteArray32, OrderTime, etc.)
+│   ├── AttestedOp.lean
+│   ├── ByteArray32.lean
+│   ├── FactContent.lean
+│   ├── Identifiers.lean
+│   ├── Namespace.lean
+│   ├── OrderTime.lean
+│   ├── ProtocolFacts.lean
+│   ├── TimeStamp.lean
+│   └── TreeOp.lean
 ├── Consensus/
 │   ├── Types.lean            # Core consensus data structures
 │   ├── Agreement.lean        # Agreement safety proofs
@@ -32,14 +82,16 @@ Aura/
 │   ├── Frost.lean            # FROST threshold signature integration
 │   ├── Liveness.lean         # Liveness claims (synchrony model)
 │   ├── Adversary.lean        # Byzantine model and tolerance
-│   └── Proofs.lean           # Claims bundle aggregation
+│   ├── Proofs.lean           # Claims bundle aggregation
+│   ├── RustCorrespondence.lean # Mapping notes for Rust core
+│   └── TestVectors.lean      # Test fixtures and examples
 ├── Journal.lean              # CRDT semilattice proofs
 ├── KeyDerivation.lean        # Contextual key derivation isolation
 ├── GuardChain.lean           # Guard chain cost calculation
 ├── FlowBudget.lean           # Budget charging monotonicity
 ├── Frost.lean                # FROST state machine correctness
-├── TimeSystem.lean           # Timestamp ordering & privacy
-└── Runner.lean               # CLI for differential testing
+├── TimeSystem.lean           # Timestamp ordering and privacy
+└── Runner.lean               # CLI for differential testing (aura_verifier)
 ```
 
 ## Quint Correspondence
@@ -55,65 +107,50 @@ Lean proofs correspond to Quint specifications for verification coverage:
 | `Consensus.Adversary` | `protocol_consensus_adversary.qnt` | Byzantine tolerance bounds |
 | `Consensus.Equivocation` | `protocol_consensus_adversary.qnt` | Detection soundness/completeness |
 
-See `verification/CORRESPONDENCE.md` for complete mapping.
+See `verification/README.md` for the complete correspondence mapping.
 
 ## Proof Status
 
-All proofs are complete (no `sorry` placeholders):
+All proofs are complete with no `sorry` placeholders. Cryptographic assumptions are documented as axioms in `Aura/Assumptions.lean`.
 
-| Module | Status | Key Theorems |
-|--------|--------|--------------|
-| `Assumptions` | ● Complete | Cryptographic axioms for FROST, hash, PRF |
-| `Consensus.Agreement` | ● Complete | `agreement`, `unique_commit`, `commit_determinism` |
-| `Consensus.Validity` | ● Complete | `threshold_reflexivity`, `prestate_binding` |
-| `Consensus.Evidence` | ● Complete | `merge_comm`, `merge_assoc`, `merge_idem` |
-| `Consensus.Equivocation` | ● Complete | `detection_soundness`, `detection_completeness`, `honest_never_detected` |
-| `Consensus.Frost` | ● Complete | `share_session_consistency`, `aggregatable_implies_valid_commit` |
-| `Consensus.Liveness` | ● Complete | `termination_under_synchrony`, `fast_path_bound` (axiomatic) |
-| `Consensus.Adversary` | ● Complete | `byzantine_tolerance`, `honest_majority_sufficient` |
-| `Journal` | ● Complete | `merge_comm`, `merge_assoc`, `merge_idem` |
-| `KeyDerivation` | ● Complete | `derive_unique` (axiomatic) |
-| `GuardChain` | ● Complete | `cost_sum` |
-| `FlowBudget` | ● Complete | `charge_decreases`, `charge_exact` |
-| `Frost` | ● Complete | `aggregate_same_session_round` |
-| `TimeSystem` | ● Complete | `compare_refl`, `compare_trans`, `physical_hidden` |
+Run `just lean-status` for the authoritative, per-module status.
 
-## Key Properties Proven
+## Key Properties (where proved or axiomatically assumed)
 
 ### Consensus Agreement
-- **Agreement**: Valid commits for the same consensus instance have the same result
-- **Unique Commit**: At most one valid CommitFact per ConsensusId
-- **Commit Determinism**: Same threshold shares produce the same commit
+- Agreement: Valid commits for the same consensus instance have the same result
+- Unique Commit: At most one valid CommitFact per ConsensusId
+- Commit Determinism: Same threshold shares produce the same commit
 
 ### Consensus Evidence (CRDT)
-- **Commutativity**: `merge e1 e2 ≃ merge e2 e1` (membership-wise)
-- **Associativity**: `merge (merge e1 e2) e3 ≃ merge e1 (merge e2 e3)`
-- **Idempotence**: `merge e e ≃ e`
-- **Monotonicity**: Votes and equivocators only grow under merge
+- Commutativity: `merge e1 e2 ≃ merge e2 e1` (membership-wise)
+- Associativity: `merge (merge e1 e2) e3 ≃ merge e1 (merge e2 e3)`
+- Idempotence: `merge e e ≃ e`
+- Monotonicity: Votes and equivocators only grow under merge
 
 ### Equivocation Detection
-- **Soundness**: Detection only reports actual equivocation
-- **Completeness**: All equivocations are detectable
-- **Honest Safety**: Honest witnesses are never falsely accused
+- Soundness: Detection only reports actual equivocation
+- Completeness: All equivocations are detectable
+- Honest Safety: Honest witnesses are never falsely accused
 
 ### FROST Integration
-- **Session Consistency**: All shares in aggregation have same session
-- **Threshold Requirement**: Aggregation requires ≥k shares
-- **Share Binding**: Shares are cryptographically bound to consensus data
+- Session Consistency: All shares in aggregation have same session
+- Threshold Requirement: Aggregation requires at least k shares
+- Share Binding: Shares are cryptographically bound to consensus data
 
 ### Journal CRDT
-- **Commutativity**: `merge j1 j2 ≃ merge j2 j1`
-- **Associativity**: `merge (merge j1 j2) j3 ≃ merge j1 (merge j2 j3)`
-- **Idempotence**: `merge j j ≃ j`
+- Commutativity: `merge j1 j2 ≃ merge j2 j1`
+- Associativity: `merge (merge j1 j2) j3 ≃ merge j1 (merge j2 j3)`
+- Idempotence: `merge j j ≃ j`
 
 ### Flow Budget
-- **Monotonic Decrease**: Charging never increases available budget
-- **Exact Charge**: Charging exact amount results in zero budget
+- Monotonic Decrease: Charging never increases available budget
+- Exact Charge: Charging exact amount results in zero budget
 
 ### TimeSystem
-- **Reflexivity**: `compare policy t t = .eq`
-- **Transitivity**: `compare policy a b = .lt → compare policy b c = .lt → compare policy a c = .lt`
-- **Privacy**: Physical time hidden when `ignorePhysical = true`
+- Reflexivity: `compare policy t t = .eq`
+- Transitivity: `compare policy a b = .lt -> compare policy b c = .lt -> compare policy a c = .lt`
+- Privacy: Physical time hidden when `ignorePhysical = true`
 
 ## Claims Bundles
 
@@ -134,9 +171,13 @@ Axioms are documented in `Aura.Assumptions`.
 ## Justfile Commands
 
 ```bash
-just lean-build    # Build and check proofs
-just lean-full     # Full workflow (clean + build + verify)
-just lean-clean    # Clean build artifacts
+just lean-build        # Build and check proofs
+just lean-check        # Build (same as lean-build)
+just lean-clean        # Clean build artifacts
+just lean-full         # Clean + build + check
+just lean-status       # Per-module status (sorries)
+just lean-oracle-build # Build aura_verifier (Lean oracle)
+just test-differential # Rust vs Lean oracle tests
 ```
 
 ## Implementation Notes
@@ -177,9 +218,11 @@ The Lean proofs correspond to a pure, effect-free Rust implementation for direct
 
 | Lean Module | Rust Module | Correspondence |
 |-------------|-------------|----------------|
-| `Consensus.Types` | `aura-consensus/src/consensus/core/state.rs` | State structures |
-| `Consensus.Agreement` | `aura-consensus/src/consensus/core/validation.rs` | Invariant checks |
-| `Consensus.Evidence` | `aura-consensus/src/consensus/core/transitions.rs` | State transitions |
+| `Consensus.Types` | `crates/aura-consensus/src/core/state.rs` | State structures |
+| `Consensus.Agreement` | `crates/aura-consensus/src/core/validation.rs` | Invariant checks |
+| `Consensus.Evidence` | `crates/aura-consensus/src/core/transitions.rs` | State transitions |
+
+See `Aura/Consensus/RustCorrespondence.lean` for additional mapping notes.
 
 ### ITF Trace Conformance
 
@@ -187,15 +230,14 @@ The Rust pure core can be tested against Quint ITF traces:
 
 ```bash
 # Generate traces
-cd verification/quint
-quint run --out-itf=consensus_trace.itf.json protocol_consensus.qnt
+./scripts/generate-itf-traces.sh 50
 
 # Run conformance tests
-cargo test -p aura-consensus --test consensus_itf_conformance
+cargo test -p aura-testkit --test consensus_itf_conformance
 ```
 
-ITF loader: `crates/aura-consensus/src/consensus/core/itf_loader.rs`
-Conformance tests: `crates/aura-consensus/tests/consensus_itf_conformance.rs`
+ITF loader: `crates/aura-testkit/src/consensus/itf_loader.rs`
+Conformance tests: `crates/aura-testkit/tests/consensus_itf_conformance.rs`
 
 ## Differential Testing
 
@@ -214,13 +256,9 @@ Oracle commands (JSON stdin/stdout):
 
 ## CI Integration
 
-Two CI jobs verify formal proofs:
+CI jobs in `.github/workflows/ci.yml` include:
 
-1. **lean-proofs**: Builds all Lean modules
-2. **differential-testing**: Runs Rust vs Lean oracle tests
+1. `lean-proofs`: builds Lean modules and reports `sorry` usage (warning-only today)
+2. `differential-testing`: runs the Lean oracle checks
 
-Jobs trigger on changes to:
-- `verification/lean/**`
-- `crates/aura-journal/**`
-- `crates/aura-core/src/time/**`
-- `crates/aura-testkit/**`
+Refer to the workflow file for exact triggers.

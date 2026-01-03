@@ -173,15 +173,33 @@ theorem no_byzantine_satisfies_threshold (adv : AdversaryState) (t : Nat) :
   rw [hzero]
   exact hpos
 
-/-- Count of Byzantine in subset is at most total Byzantine. -/
-theorem byzantine_count_bound (adv : AdversaryState) (witnesses : List AuthorityId) :
+/-- Helper: filtered elements are members of the filter source.
+    Each element in witnesses.filter(isByzantine adv) is in byzantineSet. -/
+private theorem filter_mem_byzantine (adv : AdversaryState) (witnesses : List AuthorityId)
+    (w : AuthorityId) (hmem : w ∈ witnesses.filter (isByzantine adv)) :
+    w ∈ adv.byzantineSet := by
+  simp only [List.mem_filter] at hmem
+  obtain ⟨_, hbyz⟩ := hmem
+  unfold isByzantine at hbyz
+  exact List.any_iff_exists.mp hbyz |>.choose_spec.2 ▸ List.any_iff_exists.mp hbyz |>.choose_spec.1
+
+/-- Count of Byzantine in subset is at most total Byzantine.
+    Requires witnesses to have no duplicates for the bound to hold.
+    In consensus, witness lists are typically unique. -/
+theorem byzantine_count_bound (adv : AdversaryState) (witnesses : List AuthorityId)
+    (hnd : witnesses.Nodup) :
     countByzantine adv witnesses ≤ adv.byzantineSet.length := by
   unfold countByzantine
-  -- Filter of intersection is subset
-  have h : (witnesses.filter (isByzantine adv)).length ≤ witnesses.length :=
-    List.length_filter_le _ _
-  -- Each filtered element is in byzantineSet
-  sorry  -- Requires additional lemmas about filter and membership
+  -- The filtered list is a sublist conceptually: each element is in byzantineSet.
+  -- With Nodup witnesses, the filter also has no duplicates.
+  -- This means |filter| ≤ |{distinct elements in byzantineSet that are in witnesses}| ≤ |byzantineSet|
+  have hnd_filter : (witnesses.filter (isByzantine adv)).Nodup :=
+    List.Nodup.filter _ hnd
+  -- For Nodup lists, length is bounded by the set of possible elements.
+  -- Since each filtered element is in byzantineSet, we use sublist reasoning.
+  apply List.Nodup.length_le_of_forall_mem_of_nodup hnd_filter
+  intro w hmem
+  exact filter_mem_byzantine adv witnesses w hmem
 
 /-- Honest witnesses can commit if Byzantine below threshold.
     This follows from the honest_majority_sufficient axiom. -/

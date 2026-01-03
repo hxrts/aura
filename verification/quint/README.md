@@ -5,8 +5,8 @@ Formal specifications of the Aura protocol using Quint 0.25.x, an executable spe
 ## Related Documentation
 
 - **[STYLE.md](./STYLE.md)** - Quint coding conventions for this project
-- **[../CORRESPONDENCE.md](../CORRESPONDENCE.md)** - Mapping between Quint invariants and Lean theorems
-- **[../lean/STYLE.md](../lean/STYLE.md)** - Lean 4 coding conventions
+- **[../README.md](../README.md)** - Verification overview and Quint-Lean correspondence map
+- **[../lean/README.md](../lean/README.md)** - Lean 4 module documentation
 
 ## Getting Started
 

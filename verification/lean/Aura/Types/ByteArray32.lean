@@ -118,8 +118,22 @@ theorem compare_refl (a : ByteArray32) : compare a a = .eq := by
   unfold compare
   exact compareBytes_refl a.bytes
 
-/-- Helper: compareBytes equal implies lists equal.
-    TODO: Complete inductive proof over list structure. -/
+/-- Helper: Ord.compare x y = .eq implies x = y for UInt8. -/
+private theorem uint8_compare_eq_implies_eq (x y : UInt8) :
+    Ord.compare x y = .eq → x = y := by
+  intro h
+  simp only [Ord.compare, compareOfLessAndEq] at h
+  split at h
+  · -- x < y case: result is .lt, not .eq
+    contradiction
+  · split at h
+    · -- x = y case
+      rename_i hxy
+      exact hxy
+    · -- x > y case: result is .gt, not .eq
+      contradiction
+
+/-- Helper: compareBytes equal implies lists equal. -/
 theorem compareBytes_eq_implies_eq : ∀ xs ys : List UInt8,
     compareBytes xs ys = .eq → xs = ys := by
   intro xs ys h
@@ -136,9 +150,7 @@ theorem compareBytes_eq_implies_eq : ∀ xs ys : List UInt8,
       split at h
       · rename_i heq
         -- heq : Ord.compare x y = .eq, h : compareBytes xs ys = .eq
-        have hxy : x = y := by
-          -- Ord.compare x y = .eq implies x = y for UInt8
-          sorry -- TODO: prove from Ord.compare semantics
+        have hxy : x = y := uint8_compare_eq_implies_eq x y heq
         rw [hxy]
         congr 1
         exact ih ys h
@@ -153,20 +165,208 @@ theorem compare_antisym (a b : ByteArray32) (h : compare a b = .eq) : a = b := b
   cases a; cases b
   simp_all
 
-/-- Transitivity for less-than.
-    TODO: Complete inductive proof. -/
+/-- Helper: Ord.compare transitivity for UInt8 less-than. -/
+private theorem uint8_compare_trans_lt (x y z : UInt8) :
+    Ord.compare x y = .lt → Ord.compare y z = .lt → Ord.compare x z = .lt := by
+  intro hxy hyz
+  simp only [Ord.compare, compareOfLessAndEq] at hxy hyz ⊢
+  split at hxy
+  case isTrue hlt_xy =>
+    split at hyz
+    case isTrue hlt_yz =>
+      have hlt_xz : x < z := Nat.lt_trans hlt_xy hlt_yz
+      simp only [hlt_xz, ↓reduceIte]
+    case isFalse _ =>
+      split at hyz <;> simp_all
+  case isFalse _ =>
+    split at hxy <;> simp_all
+
+/-- Helper: equal toNat implies equal UInt8. -/
+private theorem uint8_eq_of_toNat_eq {x y : UInt8} (h : x.toNat = y.toNat) : x = y := by
+  cases x; cases y
+  simp only [UInt8.toNat] at h
+  congr
+  exact BitVec.eq_of_toNat_eq h
+
+/-- Helper: Ord.compare transitivity for UInt8 greater-than. -/
+private theorem uint8_compare_trans_gt (x y z : UInt8) :
+    Ord.compare x y = .gt → Ord.compare y z = .gt → Ord.compare x z = .gt := by
+  intro hxy hyz
+  simp only [Ord.compare, compareOfLessAndEq] at hxy hyz ⊢
+  -- .gt means: not (x < y) and not (x = y)
+  split at hxy
+  case isTrue _ => simp_all
+  case isFalse hnlt_xy =>
+    split at hxy
+    case isTrue _ => simp_all
+    case isFalse hne_xy =>
+      -- x > y (neither x < y nor x = y)
+      split at hyz
+      case isTrue _ => simp_all
+      case isFalse hnlt_yz =>
+        split at hyz
+        case isTrue _ => simp_all
+        case isFalse hne_yz =>
+          -- y > z, so x > z
+          -- Need to prove: not (x < z) and not (x = z)
+          have hgt_xy : y.toNat < x.toNat := Nat.lt_of_le_of_ne
+            (Nat.not_lt.mp hnlt_xy) (fun h => hne_xy (uint8_eq_of_toNat_eq h.symm))
+          have hgt_yz : z.toNat < y.toNat := Nat.lt_of_le_of_ne
+            (Nat.not_lt.mp hnlt_yz) (fun h => hne_yz (uint8_eq_of_toNat_eq h.symm))
+          have hgt_xz : z.toNat < x.toNat := Nat.lt_trans hgt_yz hgt_xy
+          have hnlt_xz : ¬(x < z) := Nat.not_lt.mpr (Nat.le_of_lt hgt_xz)
+          have hne_xz : ¬(x = z) := fun h => Nat.lt_irrefl z.toNat (h ▸ hgt_xz)
+          simp only [hnlt_xz, hne_xz, ↓reduceIte]
+
+/-- Helper: compareBytes transitivity for less-than. -/
+private theorem compareBytes_trans_lt : ∀ xs ys zs : List UInt8,
+    compareBytes xs ys = .lt → compareBytes ys zs = .lt → compareBytes xs zs = .lt := by
+  intro xs ys zs hxy hyz
+  induction xs generalizing ys zs with
+  | nil =>
+    cases ys with
+    | nil => simp [compareBytes] at hxy
+    | cons y ys =>
+      cases zs with
+      | nil => simp [compareBytes] at hyz
+      | cons z zs => simp [compareBytes]
+  | cons x xs ih =>
+    cases ys with
+    | nil => simp [compareBytes] at hxy
+    | cons y ys =>
+      cases zs with
+      | nil => simp [compareBytes] at hyz
+      | cons z zs =>
+        simp only [compareBytes] at hxy hyz ⊢
+        -- Case analysis on Ord.compare x y
+        split at hxy
+        · -- Ord.compare x y = .eq
+          rename_i heq_xy
+          split at hyz
+          · -- Ord.compare y z = .eq
+            rename_i heq_yz
+            -- x = y = z by transitivity
+            have hxy' := uint8_compare_eq_implies_eq x y heq_xy
+            have hyz' := uint8_compare_eq_implies_eq y z heq_yz
+            have hxz : Ord.compare x z = .eq := by
+              rw [hxy', hyz']
+              simp only [Ord.compare, compareOfLessAndEq, ↓reduceIte]
+              split <;> simp_all
+            simp only [hxz]
+            exact ih ys zs hxy hyz
+          · -- Ord.compare y z ≠ .eq, so hyz shows ys < zs or y < z
+            rename_i hneq_yz
+            have hxy' := uint8_compare_eq_implies_eq x y heq_xy
+            -- Since y < z or ys < zs leading to .lt
+            cases hcmp : Ord.compare y z with
+            | lt =>
+              -- y < z, so x < z since x = y
+              have hlt_xz : Ord.compare x z = .lt := by rw [hxy']; exact hcmp
+              simp only [hlt_xz]
+            | eq => simp_all
+            | gt => simp_all
+        · -- Ord.compare x y ≠ .eq
+          rename_i hneq_xy
+          cases hcmp_xy : Ord.compare x y with
+          | lt =>
+            -- x < y
+            split at hyz
+            · -- Ord.compare y z = .eq, so y = z
+              rename_i heq_yz
+              have hyz' := uint8_compare_eq_implies_eq y z heq_yz
+              -- x < y = z
+              have hlt_xz : Ord.compare x z = .lt := by rw [← hyz']; exact hcmp_xy
+              simp only [hlt_xz]
+            · rename_i hneq_yz
+              cases hcmp_yz : Ord.compare y z with
+              | lt =>
+                -- x < y < z, so x < z
+                have hlt_xz := uint8_compare_trans_lt x y z hcmp_xy hcmp_yz
+                simp only [hlt_xz]
+              | eq => simp_all
+              | gt => simp_all
+          | eq => simp_all
+          | gt => simp_all
+
+/-- Transitivity for less-than. -/
 theorem compare_trans_lt (a b c : ByteArray32)
     (hab : compare a b = .lt) (hbc : compare b c = .lt) :
     compare a c = .lt := by
   unfold compare at hab hbc ⊢
-  sorry -- TODO: prove by induction on compareBytes
+  exact compareBytes_trans_lt a.bytes b.bytes c.bytes hab hbc
 
-/-- Transitivity for greater-than.
-    TODO: Complete by symmetry with lt case. -/
+/-- Helper: compareBytes transitivity for greater-than. -/
+private theorem compareBytes_trans_gt : ∀ xs ys zs : List UInt8,
+    compareBytes xs ys = .gt → compareBytes ys zs = .gt → compareBytes xs zs = .gt := by
+  intro xs ys zs hxy hyz
+  induction xs generalizing ys zs with
+  | nil =>
+    cases ys with
+    | nil => simp [compareBytes] at hxy
+    | cons y ys => simp [compareBytes] at hxy
+  | cons x xs ih =>
+    cases ys with
+    | nil =>
+      -- compareBytes (x :: xs) [] = .gt trivially
+      cases zs with
+      | nil => simp [compareBytes] at hyz
+      | cons z zs =>
+        -- Need to prove compareBytes (x :: xs) (z :: zs) = .gt
+        -- But hyz : compareBytes [] (z :: zs) = .gt is false
+        simp [compareBytes] at hyz
+    | cons y ys =>
+      cases zs with
+      | nil =>
+        -- zs = [], so we need to prove compareBytes (x :: xs) [] = .gt, which is always true
+        simp [compareBytes]
+      | cons z zs =>
+        simp only [compareBytes] at hxy hyz ⊢
+        split at hxy
+        · -- Ord.compare x y = .eq
+          rename_i heq_xy
+          split at hyz
+          · -- Ord.compare y z = .eq
+            rename_i heq_yz
+            have hxy' := uint8_compare_eq_implies_eq x y heq_xy
+            have hyz' := uint8_compare_eq_implies_eq y z heq_yz
+            have hxz : Ord.compare x z = .eq := by
+              rw [hxy', hyz']
+              simp only [Ord.compare, compareOfLessAndEq, ↓reduceIte]
+              split <;> simp_all
+            simp only [hxz]
+            exact ih ys zs hxy hyz
+          · rename_i hneq_yz
+            have hxy' := uint8_compare_eq_implies_eq x y heq_xy
+            cases hcmp : Ord.compare y z with
+            | gt =>
+              have hgt_xz : Ord.compare x z = .gt := by rw [hxy']; exact hcmp
+              simp only [hgt_xz]
+            | eq => simp_all
+            | lt => simp_all
+        · rename_i hneq_xy
+          cases hcmp_xy : Ord.compare x y with
+          | gt =>
+            split at hyz
+            · rename_i heq_yz
+              have hyz' := uint8_compare_eq_implies_eq y z heq_yz
+              have hgt_xz : Ord.compare x z = .gt := by rw [← hyz']; exact hcmp_xy
+              simp only [hgt_xz]
+            · rename_i hneq_yz
+              cases hcmp_yz : Ord.compare y z with
+              | gt =>
+                have hgt_xz := uint8_compare_trans_gt x y z hcmp_xy hcmp_yz
+                simp only [hgt_xz]
+              | eq => simp_all
+              | lt => simp_all
+          | eq => simp_all
+          | lt => simp_all
+
+/-- Transitivity for greater-than. -/
 theorem compare_trans_gt (a b c : ByteArray32)
     (hab : compare a b = .gt) (hbc : compare b c = .gt) :
     compare a c = .gt := by
-  sorry -- TODO: prove via symmetry with lt case
+  unfold compare at hab hbc ⊢
+  exact compareBytes_trans_gt a.bytes b.bytes c.bytes hab hbc
 
 /-- Construct the claims bundle. -/
 def byteArray32Claims : ByteArray32Claims where
