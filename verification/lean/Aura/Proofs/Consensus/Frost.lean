@@ -1,48 +1,142 @@
+import Aura.Domain.Consensus.Frost
 import Aura.Domain.Consensus.Types
 import Aura.Assumptions
 
 /-!
-# FROST Consensus Integration Proofs
+# FROST Protocol Proofs
 
-Proves that FROST threshold signatures integrate correctly with consensus,
-ensuring signature aggregation only uses valid, consistent shares.
+Proves session/round consistency for threshold signature aggregation
+and FROST integration with consensus.
 
 ## Quint Correspondence
+- File: verification/quint/protocol_frost.qnt
 - File: verification/quint/protocol_consensus.qnt
 - Section: INVARIANTS
 - Invariant: `InvariantCommitRequiresThreshold`
-- Action: `submitWitnessShare`, `aggregateShares`
+- Properties: Aggregate only combines shares from same session/round
 
 ## Rust Correspondence
 - File: crates/aura-core/src/crypto/tree_signing.rs
-- Functions: `aggregate_signatures`, `verify_share`
+- Functions: `aggregate`, `aggregate_signatures`, `verify_share`
 - File: crates/aura-consensus/src/consensus/frost.rs
 - Type: `FrostConsensusOrchestrator`
 
 ## Expose
 
-The following definitions form the semantic interface for proofs:
-
-**Properties** (stable, theorem statements):
-- `share_session_consistency`: All shares in aggregation have same session
+**Properties** (theorem statements):
+- `aggregate_same_session_round`: Successful aggregation implies all shares match session/round
+- `share_session_consistency`: All shares in aggregation have same consensus
+- `share_result_consistency`: All shares have same result
 - `aggregation_threshold`: Aggregation only succeeds with ≥k shares
-- `signature_uniqueness`: Same shares produce same signature
-- `share_binding`: Shares are cryptographically bound to consensus data
+- `aggregatable_implies_valid_commit`: Aggregatable shares form valid commit candidate
 
-**Internal helpers** (may change):
-- Share validation utilities
-- Session tracking predicates
+**Claims Bundles**:
+- `FrostOrchestratorClaims`: Low-level aggregation safety
+- `FrostClaims`: Consensus integration properties
 -/
 
-namespace Aura.Consensus.Frost
+namespace Aura.Proofs.Consensus.Frost
 
+open Aura.Domain.Consensus.Frost
 open Aura.Domain.Consensus.Types
 open Aura.Assumptions
 
 /-!
-## FROST Session Predicates
+## Part 1: Aggregation Safety (from Aura.Frost)
 
-Predicates expressing FROST session consistency requirements.
+Low-level FROST share aggregation proofs.
+-/
+
+/-!
+### Helper Lemmas
+-/
+
+/-- List.all means the predicate holds for every element. -/
+theorem list_all_forall {α : Type} (p : α → Bool) (xs : List α) :
+    xs.all p = true → ∀ x ∈ xs, p x = true := by
+  induction xs with
+  | nil => intro _ x hx; cases hx
+  | cons y ys ih =>
+    intro hall x hx
+    simp only [List.all, Bool.and_eq_true] at hall
+    cases hx with
+    | head => exact hall.1
+    | tail _ htail => exact ih hall.2 x htail
+
+/-- BEq equality for SessionId implies propositional equality. -/
+theorem SessionId.eq_of_beq {a b : SessionId} (h : (a == b) = true) : a = b := by
+  cases a with | mk aid =>
+  cases b with | mk bid =>
+  simp only [SessionId.mk.injEq]
+  simp only [BEq.beq] at h
+  exact of_decide_eq_true h
+
+/-- BEq equality for Round implies propositional equality. -/
+theorem Round.eq_of_beq {a b : Round} (h : (a == b) = true) : a = b := by
+  cases a with | mk aidx =>
+  cases b with | mk bidx =>
+  simp only [Round.mk.injEq]
+  simp only [BEq.beq] at h
+  exact of_decide_eq_true h
+
+/-- Extract equalities from conjunction of BEq checks. -/
+theorem beq_and_true_imp {a b : SessionId} {c d : Round}
+    (h : (a == b && c == d) = true) : a = b ∧ c = d := by
+  simp only [Bool.and_eq_true] at h
+  exact ⟨SessionId.eq_of_beq h.1, Round.eq_of_beq h.2⟩
+
+/-!
+### Orchestrator Claims Bundle
+-/
+
+/-- Claims bundle for FROST orchestrator properties. -/
+structure FrostOrchestratorClaims where
+  /-- Session/round consistency: Successful aggregation implies all shares match. -/
+  aggregate_same_session_round : ∀ (state : AggregatorState) (sig : Signature),
+    aggregate state = some sig →
+    ∃ sid rnd, ∀ sh ∈ state.pending, sh.sid = sid ∧ sh.round = rnd
+
+/-!
+### Orchestrator Proofs
+-/
+
+/-- Aggregation session/round consistency.
+    If `aggregate` succeeds, ALL shares have the same session and round. -/
+theorem aggregate_same_session_round
+  (state : AggregatorState) (sig : Signature)
+  (h : aggregate state = some sig) :
+  ∃ sid rnd, ∀ sh ∈ state.pending, sh.sid = sid ∧ sh.round = rnd := by
+  unfold aggregate at h
+  split at h
+  case isTrue hcan =>
+    cases hpend : state.pending with
+    | nil =>
+      simp only [canAggregate, hpend] at hcan
+      exact False.elim (Bool.false_ne_true hcan)
+    | cons first rest =>
+      refine ⟨first.sid, first.round, ?_⟩
+      intro x hx
+      cases hx with
+      | head => exact ⟨rfl, rfl⟩
+      | tail _ htail =>
+        simp only [canAggregate, hpend] at hcan
+        have hpred := list_all_forall _ rest hcan x htail
+        exact beq_and_true_imp hpred
+  case isFalse hcant =>
+    cases h
+
+/-- The claims bundle for FROST orchestrator. -/
+def frostOrchestratorClaims : FrostOrchestratorClaims where
+  aggregate_same_session_round := aggregate_same_session_round
+
+/-!
+## Part 2: Consensus Integration (from Aura.Consensus.Frost)
+
+FROST integration with consensus protocol.
+-/
+
+/-!
+### Consistency Predicates
 -/
 
 /-- All votes are for the same consensus instance.
@@ -81,14 +175,10 @@ def canAggregateShares (votes : List WitnessVote) : Prop :=
   votes.length ≥ threshold
 
 /-!
-## Claims Bundle
-
-This structure collects all the theorems about FROST-consensus integration.
-Reviewers can inspect this to understand what's proven without
-reading individual proofs.
+### Consensus Integration Claims Bundle
 -/
 
-/-- Claims bundle for FROST integration properties. -/
+/-- Claims bundle for FROST-consensus integration properties. -/
 structure FrostClaims where
   /-- Session consistency: All shares in successful aggregation have same consensus. -/
   share_session_consistency : ∀ votes : List WitnessVote,
@@ -115,9 +205,7 @@ structure FrostClaims where
     v.share.dataBinding ≠ ""
 
 /-!
-## Proofs
-
-Individual theorem proofs that construct the claims bundle.
+### Consensus Integration Proofs
 -/
 
 /-- Session consistency follows from canAggregateShares definition. -/
@@ -161,9 +249,7 @@ theorem share_binding (v : WitnessVote) : v.share.dataBinding ≠ "" :=
   share_data_binding_nonempty v
 
 /-!
-## Integration Theorems
-
-These connect FROST properties to consensus safety.
+### Integration Theorems
 -/
 
 /-- If shares can be aggregated, the result is a valid commit candidate. -/
@@ -210,13 +296,7 @@ theorem threshold_aggregation_exists (votes : List WitnessVote)
     votes.length ≥ threshold := by
   exact aggregation_threshold votes h
 
-/-!
-## Claims Bundle Construction
-
-Construct the claims bundle from individual proofs.
--/
-
-/-- The claims bundle, proving FROST-consensus integration. -/
+/-- The claims bundle for FROST-consensus integration. -/
 def frostClaims : FrostClaims where
   share_session_consistency := share_session_consistency
   share_result_consistency := share_result_consistency
@@ -224,4 +304,4 @@ def frostClaims : FrostClaims where
   distinct_signers := distinct_signers
   share_binding := share_binding
 
-end Aura.Consensus.Frost
+end Aura.Proofs.Consensus.Frost

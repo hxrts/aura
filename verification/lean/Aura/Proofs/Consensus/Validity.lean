@@ -32,7 +32,7 @@ The following definitions form the semantic interface for proofs:
 - Threshold counting utilities
 -/
 
-namespace Aura.Consensus.Validity
+namespace Aura.Proofs.Consensus.Validity
 
 open Aura.Domain.Consensus.Types
 open Aura.Assumptions
@@ -182,4 +182,4 @@ def validityClaims : ValidityClaims where
   prestate_binding_unique := fun _ _ _ => trivial
   threshold_gt_byzantine := byzantine_threshold
 
-end Aura.Consensus.Validity
+end Aura.Proofs.Consensus.Validity

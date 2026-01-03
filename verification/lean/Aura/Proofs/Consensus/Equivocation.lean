@@ -40,7 +40,7 @@ The following definitions form the semantic interface for proofs:
 - Vote comparison utilities
 -/
 
-namespace Aura.Consensus.Equivocation
+namespace Aura.Proofs.Consensus.Equivocation
 
 open Aura.Domain.Consensus.Types
 open Aura.Assumptions
@@ -222,4 +222,4 @@ def equivocationClaims : EquivocationClaims where
   verified_proof_sound := verified_proof_sound
   honest_never_detected := honest_never_detected
 
-end Aura.Consensus.Equivocation
+end Aura.Proofs.Consensus.Equivocation

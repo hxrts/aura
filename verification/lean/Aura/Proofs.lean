@@ -5,18 +5,41 @@ import Aura.Proofs.GuardChain
 import Aura.Proofs.TimeSystem
 import Aura.Proofs.KeyDerivation
 
--- Consensus proofs (still in old location, to be moved in Phase 3 remainder)
-import Aura.Consensus.Agreement
-import Aura.Consensus.Validity
-import Aura.Consensus.Evidence
-import Aura.Consensus.Equivocation
-import Aura.Consensus.Frost
+-- Consensus proofs
+import Aura.Proofs.Consensus.Agreement
+import Aura.Proofs.Consensus.Validity
+import Aura.Proofs.Consensus.Evidence
+import Aura.Proofs.Consensus.Equivocation
+import Aura.Proofs.Consensus.Frost
+import Aura.Proofs.Consensus.Liveness
+import Aura.Proofs.Consensus.Adversary
+import Aura.Proofs.Consensus.Summary
 
 /-!
 # Aura Proof Entry Point
 
 Top-level module re-exporting all proofs for reviewer inspection.
 Each proof module provides a Claims bundle collecting its theorems.
+
+## Directory Structure
+
+```
+Aura/Proofs/
+├── Journal.lean              -- CRDT semilattice proofs
+├── FlowBudget.lean           -- Budget charging proofs
+├── GuardChain.lean           -- Guard evaluation proofs
+├── TimeSystem.lean           -- Timestamp ordering proofs
+├── KeyDerivation.lean        -- PRF isolation proofs
+└── Consensus/
+    ├── Agreement.lean        -- Agreement safety proofs
+    ├── Validity.lean         -- Validity proofs
+    ├── Evidence.lean         -- Evidence CRDT proofs
+    ├── Equivocation.lean     -- Equivocation detection proofs
+    ├── Frost.lean            -- FROST integration proofs
+    ├── Liveness.lean         -- Liveness claims (axiomatized)
+    ├── Adversary.lean        -- Byzantine model proofs
+    └── Summary.lean          -- Claims bundle aggregation
+```
 
 ## Quint Correspondence
 - Directory: verification/quint/
@@ -38,10 +61,15 @@ Start by inspecting the Claims bundles in each module:
 - `Aura.Proofs.KeyDerivation.keyDerivationClaims` - Key isolation from PRF security
 
 ### Consensus Proofs
-- `Aura.Consensus.Agreement.agreementClaims` - Agreement safety
-- `Aura.Consensus.Validity.validityClaims` - Valid value acceptance
-- `Aura.Consensus.Evidence.evidenceClaims` - Evidence CRDT properties
-- `Aura.Consensus.Equivocation.equivocationClaims` - Equivocation detection
+- `Aura.Proofs.Consensus.Agreement.agreementClaims` - Agreement safety
+- `Aura.Proofs.Consensus.Validity.validityClaims` - Valid value acceptance
+- `Aura.Proofs.Consensus.Evidence.evidenceClaims` - Evidence CRDT properties
+- `Aura.Proofs.Consensus.Equivocation.equivocationClaims` - Equivocation detection
+- `Aura.Proofs.Consensus.Frost.frostClaims` - FROST integration
+- `Aura.Proofs.Consensus.Frost.frostOrchestratorClaims` - Aggregation safety
+- `Aura.Proofs.Consensus.Liveness.livenessClaims` - Liveness (axiomatized)
+- `Aura.Proofs.Consensus.Adversary.adversaryClaims` - Byzantine tolerance
+- `Aura.Proofs.Consensus.Summary.consensusClaims` - Main consensus bundle
 
 ### Axioms
 - `Aura.Assumptions` - Cryptographic primitives (SHA256, FROST, PRF)
@@ -58,6 +86,7 @@ namespace Aura.Proofs
 Re-export all claims bundles for easy access.
 -/
 
+-- Infrastructure claims
 /-- Journal CRDT semilattice proofs. -/
 def journalClaims := Aura.Proofs.Journal.journalClaims
 
@@ -73,16 +102,32 @@ def timeSystemClaims := Aura.Proofs.TimeSystem.timeSystemClaims
 /-- Key derivation isolation proofs. -/
 def keyDerivationClaims := Aura.Proofs.KeyDerivation.keyDerivationClaims
 
+-- Consensus claims
 /-- Consensus agreement proofs. -/
-def agreementClaims := Aura.Consensus.Agreement.agreementClaims
+def agreementClaims := Aura.Proofs.Consensus.Agreement.agreementClaims
 
 /-- Consensus validity proofs. -/
-def validityClaims := Aura.Consensus.Validity.validityClaims
+def validityClaims := Aura.Proofs.Consensus.Validity.validityClaims
 
 /-- Evidence CRDT proofs. -/
-def evidenceClaims := Aura.Consensus.Evidence.evidenceClaims
+def evidenceClaims := Aura.Proofs.Consensus.Evidence.evidenceClaims
 
 /-- Equivocation detection proofs. -/
-def equivocationClaims := Aura.Consensus.Equivocation.equivocationClaims
+def equivocationClaims := Aura.Proofs.Consensus.Equivocation.equivocationClaims
+
+/-- FROST consensus integration proofs. -/
+def frostClaims := Aura.Proofs.Consensus.Frost.frostClaims
+
+/-- FROST orchestrator aggregation proofs. -/
+def frostOrchestratorClaims := Aura.Proofs.Consensus.Frost.frostOrchestratorClaims
+
+/-- Liveness claims (axiomatized, verified in Quint). -/
+def livenessClaims := Aura.Proofs.Consensus.Liveness.livenessClaims
+
+/-- Adversary model proofs. -/
+def adversaryClaims := Aura.Proofs.Consensus.Adversary.adversaryClaims
+
+/-- Main consensus bundle containing all consensus verification claims. -/
+def consensusClaims := Aura.Proofs.Consensus.Summary.consensusClaims
 
 end Aura.Proofs

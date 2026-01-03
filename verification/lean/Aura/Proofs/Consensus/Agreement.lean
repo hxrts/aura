@@ -31,7 +31,7 @@ The following definitions form the semantic interface for proofs:
 - Auxiliary lemmas about signature verification
 -/
 
-namespace Aura.Consensus.Agreement
+namespace Aura.Proofs.Consensus.Agreement
 
 open Aura.Domain.Consensus.Types
 open Aura.Assumptions
@@ -248,4 +248,4 @@ def agreementClaims : AgreementClaims where
   commit_determinism := fun c1 c2 hs hcid hrid hph hwf1 hwf2 hwf3 hwf4 hwf5 hwf6 =>
     commit_determinism c1 c2 hs hcid hrid hph hwf1 hwf2 hwf3 hwf4 hwf5 hwf6
 
-end Aura.Consensus.Agreement
+end Aura.Proofs.Consensus.Agreement

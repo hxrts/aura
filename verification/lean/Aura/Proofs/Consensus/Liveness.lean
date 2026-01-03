@@ -33,7 +33,7 @@ documents the assumptions and provides Lean-side type definitions.
 - Timing calculations
 -/
 
-namespace Aura.Consensus.Liveness
+namespace Aura.Proofs.Consensus.Liveness
 
 open Aura.Domain.Consensus.Types
 open Aura.Assumptions
@@ -206,4 +206,4 @@ theorem progress_requires_all (pc : ProgressCondition) :
   simp only [Bool.and_eq_true] at h
   exact h
 
-end Aura.Consensus.Liveness
+end Aura.Proofs.Consensus.Liveness

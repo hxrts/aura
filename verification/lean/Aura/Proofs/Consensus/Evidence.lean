@@ -38,7 +38,7 @@ The following definitions form the semantic interface for proofs:
 - List manipulation utilities
 -/
 
-namespace Aura.Consensus.Evidence
+namespace Aura.Proofs.Consensus.Evidence
 
 open Aura.Domain.Consensus.Types
 
@@ -304,4 +304,4 @@ def evidenceClaims : EvidenceClaims where
   equivocator_preserved := fun e1 e2 w h => equivocator_preserved_left e1 e2 w h
   votes_preserved := fun e1 e2 v h => votes_preserved_left e1 e2 v h
 
-end Aura.Consensus.Evidence
+end Aura.Proofs.Consensus.Evidence

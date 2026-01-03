@@ -446,7 +446,7 @@ pub enum LeanFactContent {
 // ============================================================================
 
 /// Full structured fact.
-/// Matches Lean: `Aura.Journal.Fact`
+/// Matches Lean: `Aura.Domain.Journal.Fact`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LeanFact {
     /// Opaque total order for deterministic merges
@@ -468,7 +468,7 @@ impl LeanFact {
 }
 
 /// Full structured journal.
-/// Matches Lean: `Aura.Journal.Journal`
+/// Matches Lean: `Aura.Domain.Journal.Journal`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LeanJournal {
     /// Namespace this journal belongs to (field name matches JSON key)

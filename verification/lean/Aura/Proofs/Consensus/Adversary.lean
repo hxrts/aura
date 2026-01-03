@@ -31,7 +31,7 @@ Proves that honest majority can commit despite Byzantine behavior.
 - Counting functions, threshold checks
 -/
 
-namespace Aura.Consensus.Adversary
+namespace Aura.Proofs.Consensus.Adversary
 
 open Aura.Domain.Consensus.Types
 open Aura.Assumptions
@@ -244,4 +244,4 @@ theorem honest_majority_liveness (n k f : Nat) :
   intro _ _
   omega
 
-end Aura.Consensus.Adversary
+end Aura.Proofs.Consensus.Adversary
