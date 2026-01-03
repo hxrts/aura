@@ -453,16 +453,16 @@ jobs:
           cd verification/quint
 
           # Verify core consensus invariants
-          echo "  Verifying protocol_consensus.qnt..."
-          quint verify --invariant=AllInvariants protocol_consensus.qnt --max-samples=1000 || exit 1
+          echo "  Verifying consensus/core.qnt..."
+          quint verify --invariant=AllInvariants consensus/core.qnt --max-samples=1000 || exit 1
 
           # Verify adversary model
-          echo "  Verifying protocol_consensus_adversary.qnt..."
-          quint verify --invariant=InvariantByzantineThreshold protocol_consensus_adversary.qnt --max-samples=500 || exit 1
+          echo "  Verifying consensus/adversary.qnt..."
+          quint verify --invariant=InvariantByzantineThreshold consensus/adversary.qnt --max-samples=500 || exit 1
 
           # Verify liveness properties
-          echo "  Verifying protocol_consensus_liveness.qnt..."
-          quint verify --invariant=InvariantProgressUnderSynchrony protocol_consensus_liveness.qnt --max-samples=500 || exit 1
+          echo "  Verifying consensus/liveness.qnt..."
+          quint verify --invariant=InvariantProgressUnderSynchrony consensus/liveness.qnt --max-samples=500 || exit 1
 
           echo "[OK] All Quint invariants pass model checking"
 
@@ -578,7 +578,7 @@ jobs:
         run: |
           echo "Generating ITF traces from Quint spec..."
           # Generate traces to the dedicated traces directory
-          quint run --out-itf=traces/consensus.itf.json verification/quint/protocol_consensus.qnt --max-steps=30 --max-samples=5
+          quint run --out-itf=traces/consensus.itf.json verification/quint/consensus/core.qnt --max-steps=30 --max-samples=5
           echo "[OK] Generated fresh ITF traces to traces/"
       - name: Run ITF conformance tests
         run: |

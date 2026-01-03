@@ -11,7 +11,7 @@ module harness_groups {
   type GroupId = str
 
   // ============ IMPORTS ============
-  import protocol_groups from "./protocol_groups"
+  import protocol_groups from "../sessions/groups"
 
   // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"

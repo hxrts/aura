@@ -66,7 +66,7 @@ echo -e "${YELLOW}[1/4]${NC} Generating fast path traces..."
 for i in $(seq 1 "$TRACE_COUNT"); do
     seed=$((1000 + i * 7))
     output="$TRACE_DIR/fast_path_${i}.itf.json"
-    if generate_trace "$QUINT_DIR/protocol_consensus.qnt" "$output" "$seed" 15 2; then
+    if generate_trace "$QUINT_DIR/consensus/core.qnt" "$output" "$seed" 15 2; then
         ((total_generated++))
     else
         ((total_failed++))
@@ -81,7 +81,7 @@ echo -e "${YELLOW}[2/4]${NC} Generating fallback path traces..."
 for i in $(seq 1 "$TRACE_COUNT"); do
     seed=$((2000 + i * 11))
     output="$TRACE_DIR/fallback_${i}.itf.json"
-    if generate_trace "$QUINT_DIR/protocol_consensus.qnt" "$output" "$seed" 25 3; then
+    if generate_trace "$QUINT_DIR/consensus/core.qnt" "$output" "$seed" 25 3; then
         ((total_generated++))
     else
         ((total_failed++))
@@ -95,7 +95,7 @@ echo -e "${YELLOW}[3/4]${NC} Generating Byzantine traces..."
 for i in $(seq 1 "$TRACE_COUNT"); do
     seed=$((3000 + i * 13))
     output="$TRACE_DIR/byzantine_${i}.itf.json"
-    if generate_trace "$QUINT_DIR/protocol_consensus_adversary.qnt" "$output" "$seed" 20 3; then
+    if generate_trace "$QUINT_DIR/consensus/adversary.qnt" "$output" "$seed" 20 3; then
         ((total_generated++))
     else
         ((total_failed++))
@@ -109,7 +109,7 @@ echo -e "${YELLOW}[4/4]${NC} Generating random exploration traces..."
 for i in $(seq 1 "$TRACE_COUNT"); do
     seed=$RANDOM$RANDOM
     output="$TRACE_DIR/random_${i}.itf.json"
-    if generate_trace "$QUINT_DIR/protocol_consensus.qnt" "$output" "$seed" 20 3; then
+    if generate_trace "$QUINT_DIR/consensus/core.qnt" "$output" "$seed" 20 3; then
         ((total_generated++))
     else
         ((total_failed++))

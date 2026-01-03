@@ -29,7 +29,7 @@
 // See: docs/004_distributed_systems_contract.md (§6.2 Byzantine Witness Model)
 
 module protocol_consensus_adversary {
-    import protocol_consensus as core from "protocol_consensus"
+    import protocol_consensus as core from "./core"
 
     // Local Option type for match patterns (Quint doesn't allow qualified match patterns)
     type Option[a] = Some(a) | None

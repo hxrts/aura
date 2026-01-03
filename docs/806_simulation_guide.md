@@ -728,7 +728,7 @@ async fn test_exploration() {
 
     // Explore with effect execution
     let result = simulator.explore_with_effects(
-        "verification/quint/protocol_recovery.qnt",
+        "verification/quint/recovery.qnt",
         500, // max steps
     ).await?;
 
@@ -751,7 +751,7 @@ async fn generate_tests_from_quint() {
 
     // Generate test cases validated through effects
     let test_cases = fuzzer.generate_validated_test_cases(
-        "verification/quint/protocol_dkg.qnt",
+        "verification/quint/keys/dkg.qnt",
         50, // number of test cases
     ).await?;
 
@@ -780,7 +780,7 @@ async fn test_mbt_pipeline() {
     // 3. Validate properties
     // 4. Generate test cases
     let result = fuzzer.run_mbt_with_effects(
-        "verification/quint/protocol_capability_properties.qnt",
+        "verification/quint/authorization.qnt",
         100, // trace count
     ).await?;
 
@@ -818,14 +818,14 @@ The following Quint specs are available for generative simulation:
 
 | Spec | Purpose | Location |
 |------|---------|----------|
-| `protocol_capability_properties.qnt` | Guard chain security | `verification/quint/` |
-| `protocol_core.qnt` | Protocol lifecycle | `verification/quint/` |
-| `protocol_recovery.qnt` | Guardian recovery | `verification/quint/` |
-| `protocol_dkg.qnt` | DKG ceremony | `verification/quint/` |
-| `protocol_journal.qnt` | Journal CRDT | `verification/quint/` |
-| `protocol_sessions.qnt` | Session management | `verification/quint/` |
-| `protocol_groups.qnt` | Group membership | `verification/quint/` |
-| `protocol_sbb.qnt` | Gossip transport | `verification/quint/` |
+| `authorization.qnt` | Guard chain security | `verification/quint/` |
+| `core.qnt` | Protocol lifecycle | `verification/quint/` |
+| `recovery.qnt` | Guardian recovery | `verification/quint/` |
+| `keys/dkg.qnt` | DKG ceremony | `verification/quint/` |
+| `journal/core.qnt` | Journal CRDT | `verification/quint/` |
+| `sessions/core.qnt` | Session management | `verification/quint/` |
+| `sessions/groups.qnt` | Group membership | `verification/quint/` |
+| `sbb.qnt` | Gossip transport | `verification/quint/` |
 
 See `verification/quint/` for spec details and invariants.
 

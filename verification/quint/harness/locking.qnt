@@ -10,7 +10,7 @@ module harness_locking {
   type AuthorityId = str
 
   // ============ IMPORTS ============
-  import protocol_locking from "./protocol_locking"
+  import protocol_locking from "../sessions/locking"
 
   // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"

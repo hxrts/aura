@@ -1448,9 +1448,9 @@ Formal verification bridge to Quint model checker and property evaluator.
 - `properties.rs`: Property specification management and classification
 
 **Quint specifications** (`verification/quint/`):
-- `protocol_*.qnt`: Core protocol state machines (DKG, recovery, resharing, sessions, etc.)
-- `harness_*.qnt`: Standard harness modules for simulator integration
-- `protocol_capability_properties.qnt`: Guard chain and authorization verification
+- Domain-organized specs: `consensus/`, `journal/`, `keys/`, `sessions/`, `liveness/`
+- `harness/`: Standard harness modules for simulator integration
+- `authorization.qnt`: Guard chain and authorization verification
 
 **Usage**: See `verification/quint/` and `verification/lean/` for specification patterns and proof structure.
 

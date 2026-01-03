@@ -4,7 +4,6 @@ Formal specifications of the Aura protocol using Quint 0.25.x, an executable spe
 
 ## Related Documentation
 
-- **[STYLE.md](./STYLE.md)** - Quint coding conventions for this project
 - **[../README.md](../README.md)** - Verification overview and Quint-Lean correspondence map
 - **[../lean/README.md](../lean/README.md)** - Lean 4 module documentation
 
@@ -40,45 +39,84 @@ quint verify <spec>.qnt
 
 ## Specification Structure
 
-### Protocol Specifications (18 specs)
+### Directory Layout
+
+```
+verification/quint/
+├── core.qnt                    # Shared runtime utilities, lifecycle, effects
+├── recovery.qnt                # Guardian-based recovery flows
+├── authorization.qnt           # Guard chain authorization properties
+├── epochs.qnt                  # Epoch transitions and receipt windows
+├── sbb.qnt                     # Social Bulletin Board gossip
+├── interaction.qnt             # Recovery∥Consensus concurrent safety
+├── consensus/                  # Consensus protocol specs
+│   ├── core.qnt                # Fast-path/fallback consensus
+│   ├── frost.qnt               # FROST threshold signatures
+│   ├── adversary.qnt           # Byzantine adversary models
+│   └── liveness.qnt            # Liveness and termination
+├── journal/                    # Journal and CRDT specs
+│   ├── core.qnt                # CRDT journal operations
+│   ├── anti_entropy.qnt        # Delta sync and convergence
+│   └── counter.qnt             # Lamport clock coordination
+├── keys/                       # Key management specs
+│   ├── dkg.qnt                 # Distributed Key Generation
+│   ├── dkd.qnt                 # Deterministic Key Derivation
+│   └── resharing.qnt           # Threshold key resharing
+├── sessions/                   # Session and group specs
+│   ├── core.qnt                # Session lifecycle
+│   ├── groups.qnt              # Group membership management
+│   └── locking.qnt             # Distributed locking
+├── liveness/                   # Liveness analysis specs
+│   ├── timing.qnt              # Synchrony model and timing
+│   ├── connectivity.qnt        # Gossip graph connectivity
+│   └── properties.qnt          # Liveness properties
+├── harness/                    # Simulator harness modules
+│   ├── dkg.qnt, resharing.qnt, recovery.qnt
+│   ├── locking.qnt, counter.qnt, groups.qnt
+│   └── flows.qnt               # TUI flow harness
+└── tui/                        # TUI state machine specs
+    ├── flows.qnt               # TUI flow specifications
+    └── cli_recovery_demo.qnt   # CLI recovery demo
+```
+
+### Protocol Specifications
 
 Core protocol state machines modeling Aura's distributed protocols:
 
-| Specification | Description | Documentation |
-|---------------|-------------|---------------|
-| `protocol_core.qnt` | Shared runtime utilities, protocol lifecycle, effects, timers | [System Architecture](../../docs/001_system_architecture.md) |
-| `protocol_dkg.qnt` | FROST Distributed Key Generation ceremony | [Crypto Guide](../../docs/116_crypto.md) |
-| `protocol_dkd.qnt` | Deterministic Key Derivation for context keys | [Crypto Guide](../../docs/116_crypto.md) |
-| `protocol_resharing.qnt` | Threshold key resharing protocol | [Crypto Guide](../../docs/116_crypto.md) |
-| `protocol_recovery.qnt` | Guardian-based recovery flows | [Relational Contexts](../../docs/103_relational_contexts.md) |
-| `protocol_locking.qnt` | Distributed locking protocol | - |
-| `protocol_counter.qnt` | Lamport clock counter coordination | - |
-| `protocol_groups.qnt` | Group membership management | [Social Architecture](../../docs/114_social_architecture.md) |
-| `protocol_sessions.qnt` | Session lifecycle and presence | [MPST Guide](../../docs/107_mpst_and_choreography.md) |
-| `protocol_sbb.qnt` | Social Bulletin Board gossip | [Rendezvous](../../docs/110_rendezvous.md) |
-| `protocol_journal.qnt` | CRDT journal operations | [Journal Guide](../../docs/102_journal.md) |
-| `protocol_signals.qnt` | Protocol signaling utilities | - |
-| `protocol_consensus.qnt` | Fast-path/fallback consensus with threshold signatures | [Consensus](../../docs/104_consensus.md), [Lean Proofs](../lean/Aura/Consensus/) |
-| `protocol_consensus_adversary.qnt` | Byzantine adversary models for consensus | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
-| `protocol_consensus_liveness.qnt` | Liveness and termination properties | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
-| `protocol_cross_interaction.qnt` | Recovery∥Consensus concurrent execution safety | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
-| `protocol_anti_entropy.qnt` | CRDT delta sync and eventual convergence | [Maintenance](../../docs/111_maintenance.md) |
-| `protocol_epochs.qnt` | Epoch transitions and receipt validity windows | [Transport](../../docs/108_transport_and_information_flow.md) |
-| `protocol_frost.qnt` | FROST threshold signature protocol model | [Crypto Guide](../../docs/116_crypto.md) |
-| `protocol_capability_properties.qnt` | Guard chain authorization, budget, and integrity verification | [Information Flow](../../docs/003_information_flow_contract.md) |
+| Directory | Specification | Description | Documentation |
+|-----------|---------------|-------------|---------------|
+| `.` | `core.qnt` | Shared runtime utilities, protocol lifecycle, effects, timers | [System Architecture](../../docs/001_system_architecture.md) |
+| `consensus/` | `core.qnt` | Fast-path/fallback consensus with threshold signatures | [Consensus](../../docs/104_consensus.md) |
+| `consensus/` | `frost.qnt` | FROST threshold signature protocol model | [Crypto Guide](../../docs/116_crypto.md) |
+| `consensus/` | `adversary.qnt` | Byzantine adversary models for consensus | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
+| `consensus/` | `liveness.qnt` | Liveness and termination properties | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
+| `journal/` | `core.qnt` | CRDT journal operations | [Journal Guide](../../docs/102_journal.md) |
+| `journal/` | `anti_entropy.qnt` | CRDT delta sync and eventual convergence | [Maintenance](../../docs/111_maintenance.md) |
+| `journal/` | `counter.qnt` | Lamport clock counter coordination | - |
+| `keys/` | `dkg.qnt` | FROST Distributed Key Generation ceremony | [Crypto Guide](../../docs/116_crypto.md) |
+| `keys/` | `dkd.qnt` | Deterministic Key Derivation for context keys | [Crypto Guide](../../docs/116_crypto.md) |
+| `keys/` | `resharing.qnt` | Threshold key resharing protocol | [Crypto Guide](../../docs/116_crypto.md) |
+| `sessions/` | `core.qnt` | Session lifecycle and presence | [MPST Guide](../../docs/107_mpst_and_choreography.md) |
+| `sessions/` | `groups.qnt` | Group membership management | [Social Architecture](../../docs/114_social_architecture.md) |
+| `sessions/` | `locking.qnt` | Distributed locking protocol | - |
+| `.` | `recovery.qnt` | Guardian-based recovery flows | [Relational Contexts](../../docs/103_relational_contexts.md) |
+| `.` | `authorization.qnt` | Guard chain authorization, budget verification | [Information Flow](../../docs/003_information_flow_contract.md) |
+| `.` | `epochs.qnt` | Epoch transitions and receipt validity windows | [Transport](../../docs/108_transport_and_information_flow.md) |
+| `.` | `sbb.qnt` | Social Bulletin Board gossip | [Rendezvous](../../docs/110_rendezvous.md) |
+| `.` | `interaction.qnt` | Recovery∥Consensus concurrent execution safety | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
 
-### Harness Modules (6 specs)
+### Harness Modules
 
-Standard entry points for simulator integration:
+Standard entry points for simulator integration (in `harness/`):
 
 | Harness | Protocol | Entry Points |
 |---------|----------|--------------|
-| `harness_dkg.qnt` | DKG | `register`, `submitCommitment`, `complete`, `abort` |
-| `harness_resharing.qnt` | Resharing | `register`, `approve`, `moveToDistribution`, `complete`, `abort` |
-| `harness_recovery.qnt` | Recovery | `register`, `submitShare`, `complete`, `abort` |
-| `harness_locking.qnt` | Locking | `register`, `requestLock`, `complete`, `abort` |
-| `harness_counter.qnt` | Counter | `register`, `increment`, `complete`, `abort` |
-| `harness_groups.qnt` | Groups | `register`, `addMember`, `removeMember`, `complete`, `abort` |
+| `dkg.qnt` | DKG | `register`, `submitCommitment`, `complete`, `abort` |
+| `resharing.qnt` | Resharing | `register`, `approve`, `moveToDistribution`, `complete`, `abort` |
+| `recovery.qnt` | Recovery | `register`, `submitShare`, `complete`, `abort` |
+| `locking.qnt` | Locking | `register`, `requestLock`, `complete`, `abort` |
+| `counter.qnt` | Counter | `register`, `increment`, `complete`, `abort` |
+| `groups.qnt` | Groups | `register`, `addMember`, `removeMember`, `complete`, `abort` |
 
 ### Test Specifications
 
@@ -132,16 +170,16 @@ All core protocol specifications have been verified with Apalache model checking
 
 | Specification | Verified Invariants |
 |---------------|---------------------|
-| `protocol_journal.qnt` | `InvariantNonceUnique`, `InvariantEventsOrdered`, `InvariantLamportMonotonic`, `InvariantReduceDeterministic` |
-| `protocol_consensus.qnt` | `InvariantUniqueCommitPerInstance`, `InvariantCommitRequiresThreshold`, `InvariantPathConvergence` |
-| `protocol_anti_entropy.qnt` | `InvariantFactsMonotonic`, `InvariantVectorClockConsistent`, `InvariantEventualConvergence` |
-| `protocol_recovery.qnt` | `InvariantThresholdWithinBounds`, `InvariantApprovalsSubsetGuardians`, `InvariantPhaseConsistency` |
-| `protocol_sessions.qnt` | `InvariantAuthoritiesRegisteredSessions`, `InvariantRevokedInactive` |
-| `protocol_cross_interaction.qnt` | `InvariantNoDeadlock`, `InvariantRevokedDevicesExcluded` |
-| `protocol_epochs.qnt` | `InvariantReceiptValidityWindow`, `InvariantCrossEpochReplayPrevention` |
-| `protocol_dkg.qnt` | `InvariantThresholdBounds`, `InvariantPhaseCommitmentCounts`, `InvariantSharesOnlyAfterVerification` |
-| `protocol_capability_properties.qnt` | `guardChainOrder`, `chargeBeforeSend`, `spentWithinLimit`, `attenuationOnlyNarrows` |
-| `protocol_frost.qnt` | `thresholdInvariant`, `commitmentBeforeSigning`, `sharesFromCommitted`, `validSignatureInvariant` |
+| `journal/core.qnt` | `InvariantNonceUnique`, `InvariantEventsOrdered`, `InvariantLamportMonotonic`, `InvariantReduceDeterministic` |
+| `consensus/core.qnt` | `InvariantUniqueCommitPerInstance`, `InvariantCommitRequiresThreshold`, `InvariantPathConvergence` |
+| `journal/anti_entropy.qnt` | `InvariantFactsMonotonic`, `InvariantVectorClockConsistent`, `InvariantEventualConvergence` |
+| `recovery.qnt` | `InvariantThresholdWithinBounds`, `InvariantApprovalsSubsetGuardians`, `InvariantPhaseConsistency` |
+| `sessions/core.qnt` | `InvariantAuthoritiesRegisteredSessions`, `InvariantRevokedInactive` |
+| `interaction.qnt` | `InvariantNoDeadlock`, `InvariantRevokedDevicesExcluded` |
+| `epochs.qnt` | `InvariantReceiptValidityWindow`, `InvariantCrossEpochReplayPrevention` |
+| `keys/dkg.qnt` | `InvariantThresholdBounds`, `InvariantPhaseCommitmentCounts`, `InvariantSharesOnlyAfterVerification` |
+| `authorization.qnt` | `guardChainOrder`, `chargeBeforeSend`, `spentWithinLimit`, `attenuationOnlyNarrows` |
+| `consensus/frost.qnt` | `thresholdInvariant`, `commitmentBeforeSigning`, `sharesFromCommitted`, `validSignatureInvariant` |
 
 ## Verified Properties
 
@@ -189,18 +227,18 @@ Model-based testing traces are generated in `traces/`:
 
 | Trace File | Source Spec | Description |
 |------------|-------------|-------------|
-| `cap_props.itf.json` | `protocol_capability_properties.qnt` | Guard chain and budget verification |
-| `frost.itf.json` | `protocol_frost.qnt` | FROST threshold signature protocol |
-| `dkg.itf.json` | `protocol_dkg.qnt` | DKG ceremony execution |
-| `consensus.itf.json` | `protocol_consensus.qnt` | Fast-path/fallback consensus |
-| `cross_interaction.itf.json` | `protocol_cross_interaction.qnt` | Concurrent protocol safety |
-| `anti_entropy.itf.json` | `protocol_anti_entropy.qnt` | CRDT synchronization |
-| `epochs.itf.json` | `protocol_epochs.qnt` | Epoch transitions and receipts |
+| `cap_props.itf.json` | `authorization.qnt` | Guard chain and budget verification |
+| `frost.itf.json` | `consensus/frost.qnt` | FROST threshold signature protocol |
+| `dkg.itf.json` | `keys/dkg.qnt` | DKG ceremony execution |
+| `consensus.itf.json` | `consensus/core.qnt` | Fast-path/fallback consensus |
+| `cross_interaction.itf.json` | `interaction.qnt` | Concurrent protocol safety |
+| `anti_entropy.itf.json` | `journal/anti_entropy.qnt` | CRDT synchronization |
+| `epochs.itf.json` | `epochs.qnt` | Epoch transitions and receipts |
 
 Generate traces with:
 
 ```bash
-quint run verification/quint/protocol_consensus.qnt \
+quint run verification/quint/consensus/core.qnt \
   --main=protocol_consensus \
   --max-samples=5 --max-steps=20 \
   --out-itf=traces/consensus.itf.json

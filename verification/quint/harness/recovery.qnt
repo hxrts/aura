@@ -10,7 +10,7 @@ module harness_recovery {
   type AuthorityId = str
 
   // ============ IMPORTS ============
-  import protocol_recovery from "./protocol_recovery"
+  import protocol_recovery from "../recovery"
 
   // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"

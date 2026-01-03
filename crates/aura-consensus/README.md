@@ -103,5 +103,5 @@ Reference-model and Lean correspondence tests are in `tests/`.
 
 - `docs/104_consensus.md` - Consensus protocol design
 - `docs/116_crypto.md` - Cryptography architecture
-- `verification/quint/protocol_consensus.qnt` - Quint specification
+- `verification/quint/consensus/core.qnt` - Quint specification
 - `verification/lean/Aura/Consensus/` - Lean proofs

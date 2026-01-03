@@ -1,34 +1,3 @@
-Aura Development Environment
-============================
-
-Rust version: rustc 1.90.0 (1159e78c4 2025-09-14)
-Cargo version: cargo 1.90.0 (840b83a10 2025-07-30)
-Quint version: 0.25.1
-Apalache version: 0.45.4
-TLA+ tools: available
-Node.js version: v20.19.5
-Lean version: Lean (version 4.23.0, arm64-apple-darwin, commit v4.23.0, Release)
-Aeneas version: available
-
-Available commands:
-  just --list          Show all available tasks
-  just build           Build all crates
-  just test            Run all tests
-  just check           Check workspace (cargo check)
-  just quint-parse     Parse Quint files to JSON
-  just serve-console   Serve console with hot reload (crates/console)
-  quint --help         Formal verification with Quint
-  apalache-mc --help   Model checking with Apalache
-  lean --help          Kernel verification with Lean 4
-  aeneas --help        Rust-to-Lean translation
-  crate2nix --help     Generate hermetic Nix builds
-
-Hermetic builds:
-  nix build            Build with crate2nix (hermetic)
-  nix build .#aura-terminal Build specific package
-  nix run              Run aura CLI hermetically
-  nix flake check      Run hermetic tests
-
 # Aura Lean Verification
 
 Formal verification modules for Aura's kernel components using Lean 4.
@@ -75,7 +44,8 @@ Aura/
 │   └── TreeOp.lean
 ├── Domain/                   # Domain types and operations (no proofs)
 │   ├── Consensus/
-│   │   └── Types.lean        # Consensus data structures
+│   │   ├── Types.lean        # Consensus data structures
+│   │   └── Frost.lean        # FROST types and operations
 │   ├── Journal/
 │   │   ├── Types.lean        # Fact, Journal structures
 │   │   └── Operations.lean   # merge, reduce, factsEquiv
@@ -84,22 +54,20 @@ Aura/
 │   ├── TimeSystem.lean       # Timestamp types and comparison
 │   └── KeyDerivation.lean    # Key derivation types
 ├── Proofs/                   # All proofs centralized
+│   ├── Consensus/            # Consensus proofs
+│   │   ├── Agreement.lean    # Agreement safety proofs
+│   │   ├── Validity.lean     # Validity proofs
+│   │   ├── Evidence.lean     # Evidence CRDT proofs
+│   │   ├── Equivocation.lean # Equivocation detection
+│   │   ├── Frost.lean        # FROST integration proofs
+│   │   ├── Liveness.lean     # Liveness claims (axiomatized)
+│   │   ├── Adversary.lean    # Byzantine model
+│   │   └── Summary.lean      # Claims bundle aggregation
 │   ├── Journal.lean          # CRDT semilattice proofs
 │   ├── FlowBudget.lean       # Budget charging proofs
 │   ├── GuardChain.lean       # Guard evaluation proofs
 │   ├── TimeSystem.lean       # Timestamp ordering proofs
 │   └── KeyDerivation.lean    # PRF isolation proofs
-├── Consensus/                # Consensus proofs (legacy location)
-│   ├── Agreement.lean        # Agreement safety proofs
-│   ├── Validity.lean         # Validity proofs
-│   ├── Evidence.lean         # Evidence CRDT proofs
-│   ├── Equivocation.lean     # Equivocation detection
-│   ├── Frost.lean            # FROST integration
-│   ├── Liveness.lean         # Liveness claims
-│   ├── Adversary.lean        # Byzantine model
-│   ├── Proofs.lean           # Claims bundle aggregation
-│   └── ...
-├── Frost.lean                # FROST state machine (legacy)
 ├── Proofs.lean               # Top-level entry point for reviewers
 └── Runner.lean               # CLI for differential testing
 ```
@@ -116,12 +84,12 @@ Lean proofs correspond to Quint specifications for verification coverage:
 
 | Lean Module | Quint File | What It Proves |
 |-------------|------------|----------------|
-| `Consensus.Agreement` | `protocol_consensus.qnt` | Agreement safety (unique commits) |
-| `Consensus.Evidence` | `protocol_consensus.qnt` | CRDT semilattice properties |
-| `Consensus.Frost` | `protocol_consensus.qnt` | Threshold signature correctness |
-| `Consensus.Liveness` | `protocol_consensus_liveness.qnt` | Synchrony model axioms |
-| `Consensus.Adversary` | `protocol_consensus_adversary.qnt` | Byzantine tolerance bounds |
-| `Consensus.Equivocation` | `protocol_consensus_adversary.qnt` | Detection soundness/completeness |
+| `Proofs.Consensus.Agreement` | `consensus/core.qnt` | Agreement safety (unique commits) |
+| `Proofs.Consensus.Evidence` | `consensus/core.qnt` | CRDT semilattice properties |
+| `Proofs.Consensus.Frost` | `consensus/frost.qnt` | Threshold signature correctness |
+| `Proofs.Consensus.Liveness` | `consensus/liveness.qnt` | Synchrony model axioms |
+| `Proofs.Consensus.Adversary` | `consensus/adversary.qnt` | Byzantine tolerance bounds |
+| `Proofs.Consensus.Equivocation` | `consensus/adversary.qnt` | Detection soundness/completeness |
 
 See `verification/README.md` for the complete correspondence mapping.
 
@@ -187,6 +155,10 @@ import Aura.Proofs
 #check Aura.Proofs.validityClaims
 #check Aura.Proofs.evidenceClaims
 #check Aura.Proofs.equivocationClaims
+#check Aura.Proofs.frostClaims
+#check Aura.Proofs.livenessClaims
+#check Aura.Proofs.adversaryClaims
+#check Aura.Proofs.consensusClaims  -- Main bundle
 ```
 
 Axioms are documented in `Aura.Assumptions`.
@@ -241,11 +213,11 @@ The Lean proofs correspond to a pure, effect-free Rust implementation for direct
 
 | Lean Module | Rust Module | Correspondence |
 |-------------|-------------|----------------|
-| `Consensus.Types` | `crates/aura-consensus/src/core/state.rs` | State structures |
-| `Consensus.Agreement` | `crates/aura-consensus/src/core/validation.rs` | Invariant checks |
-| `Consensus.Evidence` | `crates/aura-consensus/src/core/transitions.rs` | State transitions |
+| `Domain.Consensus.Types` | `crates/aura-consensus/src/core/state.rs` | State structures |
+| `Proofs.Consensus.Agreement` | `crates/aura-consensus/src/core/validation.rs` | Invariant checks |
+| `Proofs.Consensus.Evidence` | `crates/aura-consensus/src/core/transitions.rs` | State transitions |
 
-See `Aura/Consensus/RustCorrespondence.lean` for additional mapping notes.
+See the doc comments in individual proof modules for Rust correspondence notes.
 
 ### ITF Trace Conformance
 

@@ -7,8 +7,8 @@
 // See: docs/004_distributed_systems_contract.md §4, docs/104_consensus.md §16
 
 module protocol_liveness_connectivity {
-    import protocol_consensus as core from "protocol_consensus"
-    import protocol_liveness_timing as timing from "protocol_liveness_timing"
+    import protocol_consensus as core from "../consensus/core"
+    import protocol_liveness_timing as timing from "./timing"
 
     // ════════════════════════════════════════════════════════════════════════
     // CONNECTIVITY HELPERS

@@ -11,7 +11,7 @@ module harness_counter {
   type CounterId = str
 
   // ============ IMPORTS ============
-  import protocol_counter from "./protocol_counter"
+  import protocol_counter from "../journal/counter"
 
   // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"

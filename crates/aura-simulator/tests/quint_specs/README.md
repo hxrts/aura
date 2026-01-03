@@ -6,7 +6,7 @@ This directory holds the lightweight Quint specs exercised by the simulator test
 
 - **dkd_minimal.qnt** — Minimal deterministic key-derivation harness for quick bounded checks.
 
-> Note: The guard-chain invariants now reside in `verification/quint/protocol_capability_properties.qnt`, and the full FROST protocol specification lives in `verification/quint/protocol_frost.qnt` alongside the other primary specs.
+> Note: The guard-chain invariants now reside in `verification/quint/authorization.qnt`, and the full FROST protocol specification lives in `verification/quint/consensus/frost.qnt` alongside the other primary specs.
 
 ## Running
 

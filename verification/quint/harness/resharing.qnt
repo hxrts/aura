@@ -10,7 +10,7 @@ module harness_resharing {
   type AuthorityId = str
 
   // ============ IMPORTS ============
-  import protocol_resharing from "./protocol_resharing"
+  import protocol_resharing from "../keys/resharing"
 
   // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"

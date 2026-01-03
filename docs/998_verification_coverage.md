@@ -86,10 +86,10 @@ These properties are assumed based on cryptographic security proofs:
 
 | File | Key Functions | Verified Spec | Coverage |
 |------|---------------|---------------|----------|
-| `types.rs` | `ConsensusId`, `CommitFact`, `WitnessVote` | Quint: `protocol_consensus.qnt` TYPES | ✓ types match |
+| `types.rs` | `ConsensusId`, `CommitFact`, `WitnessVote` | Quint: `consensus/core.qnt` TYPES | ✓ types match |
 | `protocol.rs` | `run_consensus`, `participate_as_witness` | Quint: `submitWitnessShare`, `commitViaFastPath` | partial |
 | `witness.rs` | `WitnessSet`, `WitnessTracker` | Quint: `WitnessState` | partial |
-| `frost.rs` | `sign_with_nonce`, `aggregate_signatures` | Quint: `protocol_frost.qnt` | ✓ types match |
+| `frost.rs` | `sign_with_nonce`, `aggregate_signatures` | Quint: `consensus/frost.qnt` | ✓ types match |
 
 ### Core Crypto (`crates/aura-core/src/crypto/`)
 
@@ -138,11 +138,11 @@ cd verification/quint
 for f in *.qnt; do quint typecheck "$f"; done
 
 # Check specific invariants
-quint run --invariant=InvariantUniqueCommitPerInstance protocol_consensus.qnt
-quint run --invariant=WellFormedState protocol_consensus.qnt
-quint run --invariant=WellFormedDkgState protocol_dkg.qnt
-quint run --invariant=WellFormedRecoveryState protocol_recovery.qnt
-quint run --invariant=WellFormedFrostState protocol_frost.qnt
+quint run --invariant=InvariantUniqueCommitPerInstance consensus/core.qnt
+quint run --invariant=WellFormedState consensus/core.qnt
+quint run --invariant=WellFormedDkgState keys/dkg.qnt
+quint run --invariant=WellFormedRecoveryState recovery.qnt
+quint run --invariant=WellFormedFrostState consensus/frost.qnt
 ```
 
 ### Property Tests

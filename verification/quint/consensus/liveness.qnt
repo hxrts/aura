@@ -35,10 +35,10 @@
 // 4. Network partitions (before GST) only delay, not prevent, termination
 
 module protocol_consensus_liveness {
-    import protocol_consensus as core from "protocol_consensus"
-    import protocol_liveness_timing as timing from "protocol_liveness_timing"
-    import protocol_liveness_connectivity as conn from "protocol_liveness_connectivity"
-    import protocol_liveness_properties as props from "protocol_liveness_properties"
+    import protocol_consensus as core from "./core"
+    import protocol_liveness_timing as timing from "../liveness/timing"
+    import protocol_liveness_connectivity as conn from "../liveness/connectivity"
+    import protocol_liveness_properties as props from "../liveness/properties"
 
     // ════════════════════════════════════════════════════════════════════════
     // STATE VARIABLES

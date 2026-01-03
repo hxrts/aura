@@ -230,7 +230,7 @@ module protocol_consensus {
     }
 
     /// Global state well-formedness (combines all invariants).
-    /// This is the master predicate for state validity.
+    /// This is the main predicate for state validity.
     pure def WellFormedState(
         insts: ConsensusId -> ConsensusInstance,
         committed: Set[CommitFact],

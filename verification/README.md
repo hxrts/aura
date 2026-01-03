@@ -25,9 +25,14 @@ verification/
 ├── quint/                    # Quint state machine specs
 │   ├── README.md             # Detailed Quint documentation
 │   ├── STYLE.md              # Quint coding conventions
-│   ├── protocol_*.qnt        # Protocol specifications
-│   ├── harness_*.qnt         # Simulator harness modules
-│   └── tui_*.qnt             # TUI state machine specs
+│   ├── core.qnt              # Shared runtime utilities
+│   ├── consensus/            # Fast-path/fallback consensus specs
+│   ├── journal/              # Journal and CRDT specs
+│   ├── keys/                 # DKG, DKD, resharing specs
+│   ├── sessions/             # Session and group specs
+│   ├── liveness/             # Liveness analysis specs
+│   ├── harness/              # Simulator harness modules
+│   └── tui/                  # TUI state machine specs
 └── traces/                   # Generated ITF traces for testing
 ```
 
@@ -67,10 +72,10 @@ nix develop
 cd verification/lean && lake build
 
 # Check Quint specs
-cd verification/quint && quint typecheck protocol_consensus.qnt
+cd verification/quint && quint typecheck consensus/core.qnt
 
 # Run model checking
-quint run --invariant=InvariantUniqueCommitPerInstance protocol_consensus.qnt
+quint run --invariant=InvariantUniqueCommitPerInstance consensus/core.qnt
 ```
 
 ## Correspondence Map
@@ -216,7 +221,7 @@ Current proof status (run `just lean-status` for authoritative results):
 
 All invariants can be checked via:
 ```bash
-quint run --invariant=InvariantName protocol_consensus.qnt
+quint run --invariant=InvariantName consensus/core.qnt
 ```
 
 Key invariants verified:
@@ -247,8 +252,8 @@ just test-differential # Rust vs Lean oracle tests
 
 ```bash
 cd verification/quint
-quint typecheck protocol_consensus.qnt
-quint run --invariant=InvariantUniqueCommitPerInstance protocol_consensus.qnt
+quint typecheck consensus/core.qnt
+quint run --invariant=InvariantUniqueCommitPerInstance consensus/core.qnt
 ```
 
 ### Accessing Claims Bundles
@@ -273,5 +278,3 @@ import Aura.Consensus.Proofs
 
 - [Lean README](./lean/README.md) - Detailed Lean module documentation
 - [Quint README](./quint/README.md) - Detailed Quint specification documentation
-- [Quint Style Guide](./quint/STYLE.md) - Quint coding conventions
-- [Verification Guide](../docs/807_verification_guide.md) - Project verification guide

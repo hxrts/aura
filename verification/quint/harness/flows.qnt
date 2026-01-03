@@ -13,7 +13,7 @@
 
 module harness_flows {
   // ============ IMPORTS ============
-  import tui_flows from "./tui_flows"
+  import tui_flows from "../tui/flows"
 
   // ============ TYPE ALIASES ============
   type AgentId = str

@@ -10,8 +10,8 @@ module harness_dkg {
   type AuthorityId = str
 
   // ============ IMPORTS ============
-  import protocol_core from "./protocol_core"
-  import protocol_dkg from "./protocol_dkg"
+  import protocol_core from "../core"
+  import protocol_dkg from "../keys/dkg"
 
   // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"
