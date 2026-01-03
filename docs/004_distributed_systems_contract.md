@@ -2,6 +2,8 @@
 
 This contract specifies Aura's distributed systems model. It defines the safety, liveness, and consistency guarantees provided by the architecture. It also documents the synchrony assumptions, latency expectations, and adversarial capabilities the system tolerates. This contract complements [Privacy and Information Flow](003_information_flow_contract.md), which focuses on metadata and privacy budgets. Together these contracts define the full set of invariants protocol authors must respect.
 
+Formal verification of these properties uses Quint model checking (`verification/quint/`) and Lean 4 theorem proofs (`verification/lean/`). See [Verification Coverage](998_verification_coverage.md) for current status.
+
 ## 1. Scope
 
 The contract applies to the following aspects of the system.
@@ -12,98 +14,227 @@ Relational contexts and rendezvous flows fall under this contract. Relational co
 
 ## 2. Safety Guarantees
 
-### Journals are monotone
+### 2.1 Journal CRDT Properties
 
-Facts merge via set union and never retract. See [Journal System](102_journal.md) for details. Reduction is deterministic. Identical fact sets produce identical states.
+Facts merge via set union and never retract. Journals satisfy the semilattice laws:
 
-### Charge-before-send
+- **Commutativity**: `merge(j1, j2) ≡ merge(j2, j1)`
+- **Associativity**: `merge(merge(j1, j2), j3) ≡ merge(j1, merge(j2, j3))`
+- **Idempotence**: `merge(j, j) ≡ j`
 
-Every transport observable is preceded by `CapGuard`, `FlowGuard`, and `JournalCoupler`. See [Effect System and Runtime](106_effect_system_and_runtime.md) and [Authorization](109_authorization.md). No packet is emitted without a successful charge. Guard evaluation is pure over a prepared snapshot and yields commands that an interpreter executes, so the chain never blocks on embedded I/O. This invariant is enforced by the [guard chain](109_authorization.md).
+Reduction is deterministic. Identical fact sets produce identical states. No two facts share the same nonce within a namespace (`InvariantNonceUnique`).
 
-### Consensus agreement
+**Verified by**: `Aura.Proofs.Journal`, `journal/core.qnt`
 
-For any pair `(cid, prestate_hash)` there is at most one commit fact. See [Consensus](104_consensus.md). Fallback gossip plus FROST signatures prevent divergent commits. Byzantine witnesses cannot force multiple commits for the same instance.
+### 2.2 Charge-Before-Send
 
-### Context isolation
+Every transport observable is preceded by `CapGuard`, `FlowGuard`, and `JournalCoupler`. See [Effect System and Runtime](106_effect_system_and_runtime.md) and [Authorization](109_authorization.md). No packet is emitted without a successful charge. Guard evaluation is pure over a prepared snapshot and yields commands that an interpreter executes, so the chain never blocks on embedded I/O.
+
+Flow budgets satisfy monotonicity: charging never increases available budget (`monotonic_decrease`). Charging the exact remaining amount results in zero budget (`exact_charge`).
+
+**Verified by**: `Aura.Proofs.FlowBudget`, `authorization.qnt`, `transport.qnt`
+
+### 2.3 Consensus Agreement
+
+For any pair `(cid, prestate_hash)` there is at most one commit fact (`InvariantUniqueCommitPerInstance`). Fallback gossip plus FROST signatures prevent divergent commits. Byzantine witnesses cannot force multiple commits for the same instance.
+
+Commits require threshold participation (`InvariantCommitRequiresThreshold`). Equivocating witnesses are excluded from threshold calculations (`InvariantEquivocatorsExcluded`).
+
+**Verified by**: `Aura.Proofs.Consensus.Agreement`, `consensus/core.qnt`
+
+### 2.4 Evidence CRDT
+
+The evidence system tracks votes and equivocations as a grow-only CRDT:
+
+- **Monotonicity**: Votes and equivocator sets only grow under merge
+- **Commit preservation**: `merge` preserves existing commit facts
+- **Semilattice laws**: Evidence merge is commutative, associative, and idempotent
+
+**Verified by**: `Aura.Proofs.Consensus.Evidence`, `consensus/core.qnt`
+
+### 2.5 Equivocation Detection
+
+The system detects witnesses who vote for conflicting results:
+
+- **Soundness**: Detection only reports actual equivocation (no false positives)
+- **Completeness**: All equivocations are detectable given sufficient evidence
+- **Honest safety**: Honest witnesses are never falsely accused
+
+Types like `HasEquivocated` and `HasEquivocatedInSet` exclude conflicting shares from consensus. See [Consensus](104_consensus.md).
+
+**Verified by**: `Aura.Proofs.Consensus.Equivocation`, `consensus/adversary.qnt`
+
+### 2.6 FROST Threshold Signatures
+
+Threshold signatures satisfy binding and consistency properties:
+
+- **Share binding**: Shares are cryptographically bound to `(consensus_id, result_id, prestate_hash)`
+- **Threshold requirement**: Aggregation requires at least k shares from distinct signers
+- **Session consistency**: All shares in an aggregation have the same session
+- **Determinism**: Same shares always produce the same signature
+
+**Verified by**: `Aura.Proofs.Consensus.Frost`, `consensus/frost.qnt`
+
+### 2.7 Context Isolation
 
 Messages scoped to `ContextId` never leak into other contexts. Contexts may be explicitly bridged through typed protocols only. See [Theoretical Model](002_theoretical_model.md). Each authority maintains separate journals per context to enforce this isolation.
 
-### Deterministic reduction order
+**Verified by**: `transport.qnt` (`InvariantContextIsolation`)
+
+### 2.8 Transport Layer
+
+Beyond context isolation, transport satisfies:
+
+- **Flow budget non-negativity**: Spent never exceeds limit (`InvariantFlowBudgetNonNegative`)
+- **Sequence monotonicity**: Message sequence numbers strictly increase (`InvariantSequenceMonotonic`)
+- **Fact backing**: Every sent message has a corresponding journal fact (`InvariantSentMessagesHaveFacts`)
+
+**Verified by**: `transport.qnt`
+
+### 2.9 Deterministic Reduction Order
 
 Commitment tree operations resolve conflicts using the stable ordering described in [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md). This ordering is derived from the cryptographic identifiers and facts stored in the journal. Conflicts are always resolved in the same way across all replicas.
 
-### Receipt chain
+### 2.10 Receipt Chain
 
 Multi-hop forwarding requires signed receipts. Downstream peers reject messages lacking a chain rooted in their relational context. See [Transport and Information Flow](108_transport_and_information_flow.md). This prevents unauthorized message propagation.
 
-## 3. Liveness Guarantees
+## 3. Protocol-Specific Guarantees
 
-### Fast-path consensus
+### 3.1 DKG and Resharing
 
-Fast-path consensus completes in one round-trip time (RTT) when all witnesses are online. Responses are gathered synchronously before committing.
+Distributed key generation and resharing satisfy:
 
-### Fallback consensus
+- **Threshold bounds**: `1 ≤ t ≤ n` where t is threshold and n is participant count
+- **Phase consistency**: Commitment counts match protocol phase
+- **Share timing**: Shares distributed only after commitment verification
 
-Fallback consensus eventually completes under partial synchrony with bounded message delays. Gossip ensures progress if a majority of witnesses re-transmit proposals. See [Consensus](104_consensus.md) for timeout configuration.
+**Verified by**: `keys/dkg.qnt`, `keys/resharing.qnt`
 
-### Anti-entropy
+### 3.2 Invitation Flows
 
-Journals converge under eventual delivery. Periodic syncs or reorder-resistant CRDT merges reconcile fact sets even after partitions. Authorities exchange their complete fact journals with neighbors to ensure diverged state is healed.
+Invitation lifecycle satisfies authorization invariants:
 
-### Rendezvous
+- **Sender authority**: Only sender can cancel an invitation
+- **Receiver authority**: Only receiver can accept or decline
+- **Single resolution**: No invitation resolved twice
+- **Terminal immutability**: Terminal status (accepted/declined/cancelled/expired) is permanent
+- **Fact backing**: Accepted invitations have corresponding journal facts
+- **Ceremony gating**: Ceremonies only initiated for accepted invitations
+
+**Verified by**: `invitation.qnt`
+
+### 3.3 Epoch Validity
+
+Epochs enforce temporal boundaries:
+
+- **Receipt validity window**: Receipts only valid within their epoch
+- **Replay prevention**: Old epoch receipts cannot be replayed in new epochs
+
+**Verified by**: `epochs.qnt`
+
+### 3.4 Cross-Protocol Safety
+
+Concurrent protocol execution (e.g., Recovery∥Consensus) satisfies:
+
+- **No deadlock**: Interleaved execution always makes progress
+- **Revocation enforcement**: Revoked devices excluded from all protocols
+
+**Verified by**: `interaction.qnt`
+
+## 4. Liveness Guarantees
+
+### 4.1 Fast-Path Consensus
+
+Fast-path consensus completes in 2δ (two message delays) when all witnesses are online. Responses are gathered synchronously before committing.
+
+### 4.2 Fallback Consensus
+
+Fallback consensus eventually completes under partial synchrony with bounded message delays. The fallback timeout is `T_fallback = 2×Δ` in formal verification (implementations may use up to `3×Δ` for margin). Gossip ensures progress if a majority of witnesses re-transmit proposals. See [Consensus](104_consensus.md) for timeout configuration.
+
+**Verified by**: `Aura.Proofs.Consensus.Liveness`, `consensus/liveness.qnt`
+
+### 4.3 Anti-Entropy
+
+Journals converge under eventual delivery. Periodic syncs or reorder-resistant CRDT merges reconcile fact sets even after partitions. Vector clocks accurately track causal dependencies (`InvariantVectorClockConsistent`). Authorities exchange their complete fact journals with neighbors to ensure diverged state is healed.
+
+**Verified by**: `journal/anti_entropy.qnt`
+
+### 4.4 Rendezvous
 
 Offer and answer envelopes flood gossip neighborhoods. Secure channels can be established as long as at least one bidirectional path remains between parties. See [Rendezvous Architecture](110_rendezvous.md).
 
-### Flow budgets
+### 4.5 Flow Budgets
 
 Provided the limit is greater than zero, `FlowGuard` eventually grants headroom. Headroom is available once the epoch rotates or recipients replenish budgets. Budget exhaustion is temporary and recoverable.
 
 Liveness requires that each authority eventually receives messages from its immediate neighbors. This is the eventual delivery assumption. Liveness also requires that clocks do not drift unboundedly. This is necessary for epoch rotation and receipt expiry.
 
-## 4. Synchrony and Timing Model
+## 5. Time System
 
-Aura assumes partial synchrony. There exists a bound Δ on message delay and processing time once the network stabilizes. This bound is possibly unknown before stabilization occurs.
+Aura uses a unified `TimeStamp` with domain-specific comparison:
 
-`T_fallback` in consensus is configured as 2 - 3 times Δ. Before stabilization, timeouts may be conservative. Gossip intervals target 250 to 500 milliseconds. Handlers must tolerate jitter but assume eventual delivery of periodic messages.
+- **Reflexivity**: `compare(policy, t, t) = eq`
+- **Transitivity**: `compare(policy, a, b) = lt ∧ compare(policy, b, c) = lt → compare(policy, a, c) = lt`
+- **Privacy**: Physical time hidden when `ignorePhysical = true`
+
+Time variants include `PhysicalClock` (wall time), `LogicalClock` (vector/Lamport), `OrderClock` (opaque ordering tokens), and `Range` (validity windows).
+
+**Verified by**: `Aura.Proofs.TimeSystem`
+
+## 6. Synchrony and Timing Model
+
+Aura assumes partial synchrony. There exists a bound Δ on message delay and processing time once the network stabilizes (Global Stabilization Time, GST). This bound is possibly unknown before stabilization occurs.
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| `T_fallback` | 2×Δ (verification) / 2-3×Δ (production) | Fallback consensus timeout |
+| Gossip interval | 250-500ms | Periodic message exchange |
+| GST model | Unknown until stabilization | Partial synchrony assumption |
+
+Before stabilization, timeouts may be conservative. Handlers must tolerate jitter but assume eventual delivery of periodic messages.
 
 Epoch rotation relies on loosely synchronized clocks. The journal serves as the source of truth. Authorities treat an epoch change as effective once they observe it in the journal. This design avoids hard synchronization requirements.
 
-## 5. Latency Expectations
+## 7. Latency Expectations
 
 | Operation                          | Typical Bound (Δ assumptions) |
 |-----------------------------------|-------------------------------|
-| Threshold tree update (fast path) | ≤ 2 × RTT of slowest witness  |
-| Rendezvous offer propagation      | O(log N) gossip hops          |
-| FlowGuard charge                  | Single local transaction (<10 ms) |
+| Threshold tree update (fast path) | ≤ 2δ (two message delays)     |
+| Fallback consensus                | ≤ T_fallback after GST        |
+| Rendezvous offer propagation      | O(log N) gossip hops          |
+| FlowGuard charge                  | Single local transaction (<10 ms) |
 | Anti-entropy reconciliation       | k × gossip period (k depends on fanout) |
 
-## 6. Adversarial Model
+## 8. Adversarial Model
 
-### 6.1 Network Adversary
+### 8.1 Network Adversary
 
 A network adversary controls a subset of transport links. It can delay or drop packets but cannot break cryptography. It cannot forge receipts without `FlowGuard` grants. Receipts are protected by signatures and epoch binding.
 
-The network adversary may simultaneously compromise up to `f < t` authorities per consensus instance without violating safety. Here `t` is the consensus threshold. This is the standard Byzantine fault tolerance guarantee.
+The network adversary may simultaneously compromise up to `f < t` authorities per consensus instance without violating safety. Here `t` is the consensus threshold. This is the standard Byzantine fault tolerance guarantee (`InvariantByzantineThreshold`).
 
-### 6.2 Byzantine Witness
+### 8.2 Byzantine Witness
 
-A Byzantine witness may equivocate during consensus. The system detects equivocation via the evidence CRDT. Types like `HasEquivocated` and `HasEquivocatedInSet` exclude conflicting shares from consensus. See [Consensus](104_consensus.md).
+A Byzantine witness may equivocate during consensus. The system detects equivocation via the evidence CRDT (see §2.5). Equivocators are excluded from threshold calculations.
 
-A Byzantine witness cannot cause multiple commits. Threshold signature verification rejects tampered results. The `t` of `t`-of-`n` threshold signatures prevents this attack.
+A Byzantine witness cannot cause multiple commits. Threshold signature verification rejects tampered results. The `t` of `t`-of-`n` threshold signatures prevents this attack. Honest majority can always commit (`InvariantHonestMajorityCanCommit`).
 
-### 6.3 Malicious Relay
+**Verified by**: `Aura.Proofs.Consensus.Adversary`, `consensus/adversary.qnt`
+
+### 8.3 Malicious Relay
 
 A malicious relay may drop or delay envelopes. It cannot forge flow receipts because receipts require cryptographic signatures. It cannot read payloads because of context-specific encryption.
 
 Downstream peers detect misbehavior via missing receipts or inconsistent budget charges. The transport layer detects relay failures automatically.
 
-### 6.4 Device Compromise
+### 8.4 Device Compromise
 
 A compromised device reveals its share and journal copy. It cannot reconstitute the account without meeting the branch policy. Recovery relies on relational contexts as described in [Relational Contexts](103_relational_contexts.md).
 
-Device compromise is recoverable because the threshold prevents a single device from acting unilaterally. Guardians can revoke the compromised device and issue a new one.
+Device compromise is recoverable because the threshold prevents a single device from acting unilaterally. Guardians can revoke the compromised device and issue a new one. Compromised nonces are excluded from future consensus (`InvariantCompromisedNoncesExcluded`).
 
-## 7. Consistency Model
+## 9. Consistency Model
 
 Journals eventually converge after replicas exchange all facts. This is eventual consistency. Authorities that have seen the same fact set arrive at identical states.
 
@@ -113,7 +244,7 @@ Causal delivery is not enforced at the transport layer. Choreographies enforce o
 
 Each authority's view of its own journal is monotone. Once it observes a fact locally, it will never un-see it. This is monotonic read-after-write consistency.
 
-## 8. Failure Handling
+## 10. Failure Handling
 
 Timeouts trigger fallback consensus. See [Consensus](104_consensus.md) for `T_fallback` guidelines. Fallback consensus allows the system to make progress during temporary network instability.
 
@@ -123,7 +254,7 @@ Budget exhaustion causes local blocking. Protocols must implement backoff or wai
 
 Guard-chain failures return local errors. These errors include `AuthorizationDenied`, `InsufficientBudget`, and `JournalCommitFailed`. Protocol authors must handle these errors without leaking information. Proper error handling is critical for security.
 
-## 9. Deployment Guidance
+## 11. Deployment Guidance
 
 Configure witness sets such that `t > f`. Here `t` is the consensus threshold and `f` is the maximum number of Byzantine authorities tolerated. This is the standard Byzantine fault tolerance condition.
 
@@ -131,7 +262,20 @@ Tune gossip fanout and timeout parameters based on observed round-trip times and
 
 Monitor receipt acceptance rates, consensus backlog, and budget utilization. See [Maintenance](111_maintenance.md) for monitoring guidance. Early detection of synchrony violations prevents cascading failures.
 
-## 10. References
+## 12. Verification Coverage
+
+This contract's guarantees are formally verified:
+
+| Layer | Tool | Location |
+|-------|------|----------|
+| Model checking | Quint + Apalache | `verification/quint/` |
+| Theorem proofs | Lean 4 | `verification/lean/` |
+| Differential testing | Rust + Lean oracle | `crates/aura-testkit/` |
+| ITF conformance | Quint traces | `verification/traces/` |
+
+See [Verification Coverage Report](998_verification_coverage.md) for metrics and [verification/README.md](../verification/README.md) for the Quint-Lean correspondence map.
+
+## 13. References
 
 [System Architecture](001_system_architecture.md) describes runtime layering and the [guard chain](109_authorization.md).
 
@@ -148,3 +292,5 @@ Monitor receipt acceptance rates, consensus backlog, and budget utilization. See
 [Transport and Information Flow](108_transport_and_information_flow.md) documents transport semantics.
 
 [Authorization](109_authorization.md) covers `CapGuard` and `FlowGuard` sequencing.
+
+[Verification Coverage](998_verification_coverage.md) tracks formal verification status.
