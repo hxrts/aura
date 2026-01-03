@@ -1,9 +1,10 @@
 import Lean.Data.Json
 import Aura.Types
-import Aura.Journal
-import Aura.FlowBudget
-import Aura.TimeSystem
-import Aura.Consensus.Types
+import Aura.Domain.Journal.Types
+import Aura.Domain.Journal.Operations
+import Aura.Domain.FlowBudget
+import Aura.Domain.TimeSystem
+import Aura.Domain.Consensus.Types
 import Aura.Consensus.Evidence
 
 /-!
@@ -63,10 +64,10 @@ Each command reads a JSON object from stdin and writes a JSON result to stdout.
 namespace Aura.Runner
 
 open Lean (Json ToJson FromJson)
-open Aura.Journal (Fact Journal merge merge_safe reduce)
-open Aura.FlowBudget (Budget charge)
-open Aura.TimeSystem (Policy Ordering)
-open Aura.Consensus.Types
+open Aura.Domain.Journal (Fact Journal merge merge_safe reduce)
+open Aura.Domain.FlowBudget (Budget charge)
+open Aura.Domain.TimeSystem (Policy Ordering)
+open Aura.Domain.Consensus.Types
 open Aura.Consensus.Evidence (mergeEvidence)
 
 /-!
@@ -100,13 +101,13 @@ instance : FromJson Budget where
 
 /-- TimeStamp serialization for TimeSystem (legacy simplified version).
     The full TimeStamp is in Aura.Types.TimeStamp. -/
-instance : ToJson Aura.TimeSystem.TimeStamp where
+instance : ToJson Aura.Domain.TimeSystem.TimeStamp where
   toJson t := Json.mkObj [
     ("logical", Json.num t.logical),
     ("orderClock", Json.num t.orderClock)
   ]
 
-instance : FromJson Aura.TimeSystem.TimeStamp where
+instance : FromJson Aura.Domain.TimeSystem.TimeStamp where
   fromJson? j := do
     let logVal ← j.getObjVal? "logical"
     let ocVal ← j.getObjVal? "orderClock"
@@ -123,7 +124,7 @@ instance : FromJson Policy where
     let ip ← ipVal.getBool?
     pure { ignorePhysical := ip }
 
-instance : ToJson Aura.TimeSystem.Ordering where
+instance : ToJson Aura.Domain.TimeSystem.Ordering where
   toJson o := match o with
     | .lt => Json.str "lt"
     | .eq => Json.str "eq"
@@ -238,10 +239,10 @@ def handleTimestampCompare (input : String) : IO String := do
     match j.getObjVal? "policy", j.getObjVal? "a", j.getObjVal? "b" with
     | .ok pVal, .ok aVal, .ok bVal =>
       match FromJson.fromJson? (α := Policy) pVal,
-            FromJson.fromJson? (α := Aura.TimeSystem.TimeStamp) aVal,
-            FromJson.fromJson? (α := Aura.TimeSystem.TimeStamp) bVal with
+            FromJson.fromJson? (α := Aura.Domain.TimeSystem.TimeStamp) aVal,
+            FromJson.fromJson? (α := Aura.Domain.TimeSystem.TimeStamp) bVal with
       | .ok policy, .ok a, .ok b =>
-        let result := Aura.TimeSystem.compare policy a b
+        let result := Aura.Domain.TimeSystem.compare policy a b
         let resultJson := Json.mkObj [("ordering", ToJson.toJson result)]
         pure resultJson.compress
       | _, _, _ =>

@@ -1,3 +1,5 @@
+import Aura.Domain.TimeSystem
+
 /-!
 # Unified Time System Proofs
 
@@ -6,85 +8,28 @@ the multi-domain timestamp system.
 
 ## Quint Correspondence
 - File: verification/quint/protocol_core.qnt
-- Section: TYPE DEFINITIONS
+- Section: INVARIANTS
 - Properties: Timestamp ordering is transitive and reflexive
 
 ## Rust Correspondence
 - File: crates/aura-core/src/time.rs
-- Type: `TimeStamp`, `Policy`
 - Function: `compare` - policy-aware timestamp comparison
 
 ## Expose
 
-**Types**:
-- `TimeStamp`: Abstract timestamp with logical and order clock components
-- `Policy`: Comparison policy (ignorePhysical for privacy)
-- `Ordering`: Three-way comparison result (lt, eq, gt)
-
-**Operations** (stable):
-- `compare`: Compare timestamps according to policy
-- `compareNat`: Three-way comparison for natural numbers
-
-**Properties** (stable, theorem statements):
+**Properties** (theorem statements):
 - `compare_refl`: Comparison is reflexive
 - `compare_trans`: Comparison is transitive for lt
 - `physical_hidden`: Privacy mode hides physical time
 
-**Internal helpers** (may change):
-- `compareNat_*` lemmas
+**Claims Bundle**:
+- `TimeSystemClaims`: All timestamp properties bundled
+- `timeSystemClaims`: The constructed claims bundle
 -/
 
-namespace Aura.TimeSystem
+namespace Aura.Proofs.TimeSystem
 
-/-!
-## Core Types
-
-Timestamp and policy types.
--/
-
-/-- Abstract timestamp with two components.
-    Rust: aura-core/src/time.rs::TimeStamp -/
-structure TimeStamp where
-  logical : Nat
-  orderClock : Nat
-  deriving BEq, Repr
-
-/-- Comparison policy determines which clock components to use.
-    Rust: aura-core/src/time.rs::ComparePolicy -/
-structure Policy where
-  ignorePhysical : Bool
-  deriving BEq, Repr
-
-/-- Three-way comparison result.
-    Rust: std::cmp::Ordering -/
-inductive Ordering where
-  | lt : Ordering
-  | eq : Ordering
-  | gt : Ordering
-  deriving BEq, Repr, DecidableEq
-
-/-!
-## Comparison Functions
-
-Policy-aware timestamp comparison.
--/
-
-/-- Standard three-way comparison for natural numbers. -/
-def compareNat (a b : Nat) : Ordering :=
-  if a < b then .lt
-  else if a = b then .eq
-  else .gt
-
-/-- Compare timestamps according to policy.
-    Quint: If ignorePhysical, only logical clock is used -/
-def compare (policy : Policy) (a b : TimeStamp) : Ordering :=
-  if policy.ignorePhysical then
-    compareNat a.logical b.logical
-  else
-    match compareNat a.logical b.logical with
-    | .lt => .lt
-    | .gt => .gt
-    | .eq => compareNat a.orderClock b.orderClock
+open Aura.Domain.TimeSystem
 
 /-!
 ## Claims Bundle
@@ -96,20 +41,20 @@ Timestamp comparison properties.
 structure TimeSystemClaims where
   /-- Reflexivity: compare policy t t = eq for any policy and timestamp. -/
   compare_refl : ∀ (policy : Policy) (t : TimeStamp),
-    compare policy t t = .eq
+    Aura.Domain.TimeSystem.compare policy t t = .eq
 
   /-- Transitivity: If a < b and b < c, then a < c. -/
   compare_trans : ∀ (policy : Policy) (a b c : TimeStamp),
-    compare policy a b = .lt →
-    compare policy b c = .lt →
-    compare policy a c = .lt
+    Aura.Domain.TimeSystem.compare policy a b = .lt →
+    Aura.Domain.TimeSystem.compare policy b c = .lt →
+    Aura.Domain.TimeSystem.compare policy a c = .lt
 
   /-- Privacy: When ignorePhysical = true, result depends only on logical clocks. -/
   physical_hidden : ∀ (policy : Policy),
     policy.ignorePhysical = true →
     ∀ (a1 a2 b1 b2 : TimeStamp),
       a1.logical = a2.logical ∧ b1.logical = b2.logical →
-      compare policy a1 b1 = compare policy a2 b2
+      Aura.Domain.TimeSystem.compare policy a1 b1 = Aura.Domain.TimeSystem.compare policy a2 b2
 
 /-!
 ## Helper Lemmas
@@ -165,8 +110,8 @@ Main timestamp comparison theorems.
 
 /-- Reflexivity: compare policy t t = eq for any policy and timestamp. -/
 theorem compare_refl (policy : Policy) (t : TimeStamp) :
-    compare policy t t = .eq := by
-  simp only [compare]
+    Aura.Domain.TimeSystem.compare policy t t = .eq := by
+  unfold Aura.Domain.TimeSystem.compare
   split
   · exact compareNat_refl t.logical
   · simp only [compareNat_refl t.logical, compareNat_refl t.orderClock]
@@ -174,11 +119,11 @@ theorem compare_refl (policy : Policy) (t : TimeStamp) :
 /-- Transitivity: If a < b and b < c, then a < c.
     Proof requires case analysis on logical clock comparison results. -/
 theorem compare_trans (policy : Policy) (a b c : TimeStamp) :
-    compare policy a b = .lt →
-    compare policy b c = .lt →
-    compare policy a c = .lt := by
+    Aura.Domain.TimeSystem.compare policy a b = .lt →
+    Aura.Domain.TimeSystem.compare policy b c = .lt →
+    Aura.Domain.TimeSystem.compare policy a c = .lt := by
   intro hab hbc
-  simp only [compare] at hab hbc ⊢
+  unfold Aura.Domain.TimeSystem.compare at hab hbc ⊢
   split at hab <;> split at hbc <;> split
   all_goals try simp_all
   next =>
@@ -217,8 +162,8 @@ theorem physical_hidden
     (policy : Policy) (h : policy.ignorePhysical = true)
     (a1 a2 b1 b2 : TimeStamp)
     (h_log : a1.logical = a2.logical ∧ b1.logical = b2.logical) :
-    compare policy a1 b1 = compare policy a2 b2 := by
-  unfold compare
+    Aura.Domain.TimeSystem.compare policy a1 b1 = Aura.Domain.TimeSystem.compare policy a2 b2 := by
+  unfold Aura.Domain.TimeSystem.compare
   simp only [h, ↓reduceIte, compareNat]
   obtain ⟨ha, hb⟩ := h_log
   simp only [ha, hb]
@@ -233,4 +178,4 @@ def timeSystemClaims : TimeSystemClaims where
   compare_trans := compare_trans
   physical_hidden := physical_hidden
 
-end Aura.TimeSystem
+end Aura.Proofs.TimeSystem

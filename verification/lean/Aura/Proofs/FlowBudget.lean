@@ -1,3 +1,5 @@
+import Aura.Domain.FlowBudget
+
 /-!
 # Flow Budget Proofs
 
@@ -16,47 +18,21 @@ system that enforces charge-before-send.
 
 ## Expose
 
-**Types**:
-- `Budget`: Available units remaining for rate limiting
-
-**Operations** (stable):
-- `charge`: Deduct cost from budget, returning None if insufficient
-
-**Properties** (stable, theorem statements):
+**Properties** (theorem statements):
 - `charge_decreases`: Charging never increases the budget
 - `charge_exact`: Charging exact remaining amount yields zero
+- `charge_zero`: Charging zero always succeeds
+- `charge_insufficient`: Failed charge means cost exceeds available
+- `charge_additive`: Sequential charges equal combined charge
 
-**Internal helpers** (may change):
-- None
+**Claims Bundle**:
+- `FlowBudgetClaims`: All budget properties bundled
+- `flowBudgetClaims`: The constructed claims bundle
 -/
 
-namespace Aura.FlowBudget
+namespace Aura.Proofs.FlowBudget
 
-/-!
-## Core Types
-
-Budget state for rate limiting.
--/
-
-/-- Budget state: tracks available units remaining.
-    Rust: FlowBudget { limit, spent } where available = limit - spent -/
-structure Budget where
-  available : Nat
-  deriving BEq, Repr
-
-/-!
-## Charge Operation
-
-Deduct cost from budget with underflow protection.
--/
-
-/-- Charge a cost against a budget. Returns None if insufficient.
-    Quint: Models FlowGuard check: if spent + cost > limit, block -/
-def charge (budget : Budget) (cost : Nat) : Option Budget :=
-  if budget.available >= cost then
-    some { available := budget.available - cost }
-  else
-    none
+open Aura.Domain.FlowBudget
 
 /-!
 ## Claims Bundle
@@ -183,4 +159,4 @@ def flowBudgetClaims : FlowBudgetClaims where
   charge_insufficient := charge_insufficient
   charge_additive := charge_additive
 
-end Aura.FlowBudget
+end Aura.Proofs.FlowBudget

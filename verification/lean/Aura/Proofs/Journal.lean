@@ -1,10 +1,5 @@
-import Lean.Data.Json
-import Aura.Types.ByteArray32
-import Aura.Types.Identifiers
-import Aura.Types.OrderTime
-import Aura.Types.TimeStamp
-import Aura.Types.Namespace
-import Aura.Types.FactContent
+import Aura.Domain.Journal.Types
+import Aura.Domain.Journal.Operations
 
 /-!
 # Journal CRDT Proofs
@@ -19,19 +14,9 @@ replicas can merge in any order and converge to the same state.
 
 ## Rust Correspondence
 - File: crates/aura-journal/src/fact.rs
-- Type: `Journal`, `Fact`, `JournalNamespace`
 - Function: `join` - combines journals via set union (same namespace only)
 
 ## Expose
-
-**Types** (stable):
-- `Fact`: Structured fact with order, timestamp, content
-- `Journal`: Namespace + list of facts (set semantics via membership equivalence)
-
-**Operations** (stable):
-- `merge`: Combine two journals via list concatenation (requires same namespace)
-- `merge_safe`: Option-returning merge that checks namespace
-- `reduce`: Deterministically derive canonical state from facts
 
 **Properties** (theorem statements):
 - `merge_comm`: Merge is commutative (membership-wise)
@@ -39,110 +24,20 @@ replicas can merge in any order and converge to the same state.
 - `merge_idem`: Merge is idempotent
 - `merge_same_namespace`: Merge preserves namespace
 - `equiv_refl`, `equiv_symm`, `equiv_trans`: Equivalence relation properties
+- `reduce_idem`, `reduce_subset`, `reduce_respects_equiv`, `reduce_merge_comm`
 
-**Internal helpers** (may change):
-- `JoinSemilatticeEquiv`: Typeclass for semilattice up to equivalence
+**Claims Bundle**:
+- `JournalClaims`: All CRDT properties bundled
+- `journalClaims`: The constructed claims bundle
 -/
 
-namespace Aura.Journal
+namespace Aura.Proofs.Journal
 
-open Lean (Json ToJson FromJson)
-open Aura.Types.ByteArray32 (ByteArray32)
-open Aura.Types.Identifiers (Hash32 AuthorityId ContextId)
-open Aura.Types.OrderTime (OrderTime)
-open Aura.Types.TimeStamp (TimeStamp)
-open Aura.Types.Namespace (JournalNamespace)
-open Aura.Types.FactContent (FactContent)
+open Aura.Domain.Journal
 
 /-!
-## Core Types
-
-Structured fact with order key, semantic timestamp, and typed content.
+## Equivalence Relation Proofs
 -/
-
-/-- Structured fact with ordering, timestamp, and content.
-    Rust: aura-journal/src/fact.rs::Fact -/
-structure Fact where
-  /-- Opaque total order for deterministic merges. -/
-  order : OrderTime
-  /-- Semantic timestamp (not for ordering). -/
-  timestamp : TimeStamp
-  /-- Content payload (4 variants). -/
-  content : FactContent
-  deriving Repr, BEq
-
-/-- Compare facts by their order key. -/
-def Fact.compare (a b : Fact) : Ordering :=
-  Aura.Types.OrderTime.compare a.order b.order
-
-instance : Ord Fact where
-  compare := Fact.compare
-
-/-! ## JSON Serialization for Fact -/
-
-instance : ToJson Fact where
-  toJson f := Json.mkObj [
-    ("order", ToJson.toJson f.order),
-    ("timestamp", ToJson.toJson f.timestamp),
-    ("content", ToJson.toJson f.content)
-  ]
-
-instance : FromJson Fact where
-  fromJson? j := do
-    let order ← j.getObjValAs? OrderTime "order"
-    let timestamp ← j.getObjValAs? TimeStamp "timestamp"
-    let content ← j.getObjValAs? FactContent "content"
-    pure ⟨order, timestamp, content⟩
-
-/-!
-## Journal Structure
-
-Journal with namespace and list of facts (set semantics via membership equivalence).
--/
-
-/-- Journal as a namespace plus list of facts.
-    We use List rather than Finset for pure Lean 4 compatibility.
-    Rust: aura-journal/src/fact.rs::Journal -/
-structure Journal where
-  /-- Namespace this journal belongs to. -/
-  ns : JournalNamespace
-  /-- Facts in this journal (set semantics via membership equivalence). -/
-  facts : List Fact
-  deriving Repr, BEq
-
-/-! ## JSON Serialization for Journal -/
-
-instance : ToJson Journal where
-  toJson j := Json.mkObj [
-    ("namespace", ToJson.toJson j.ns),
-    ("facts", Json.arr (j.facts.map ToJson.toJson).toArray)
-  ]
-
-instance : FromJson Journal where
-  fromJson? j := do
-    let ns ← j.getObjValAs? JournalNamespace "namespace"
-    let factsArr ← j.getObjValAs? (Array Json) "facts"
-    let facts ← factsArr.toList.mapM fun fj => FromJson.fromJson? fj
-    pure ⟨ns, facts⟩
-
-/-!
-## Equivalence Relation
-
-Set-membership equivalence: two journals are equal if they have the same
-namespace and contain the same facts. This is the right notion for CRDTs
-where order doesn't matter, only presence.
--/
-
-/-- Set-membership equivalence for journal facts. -/
-def Journal.factsEquiv (j1 j2 : Journal) : Prop :=
-  ∀ f, f ∈ j1.facts ↔ f ∈ j2.facts
-
-/-- Full journal equivalence: same namespace and same facts. -/
-def Journal.equiv (j1 j2 : Journal) : Prop :=
-  j1.ns = j2.ns ∧ j1.factsEquiv j2
-
-/-- Infix notation for journal equivalence. -/
-infix:50 " ≃ " => Journal.equiv
 
 /-- Reflexivity: every journal is equivalent to itself. -/
 theorem equiv_refl (j : Journal) : j ≃ j :=
@@ -155,44 +50,6 @@ theorem equiv_symm {j1 j2 : Journal} (h : j1 ≃ j2) : j2 ≃ j1 :=
 /-- Transitivity: if j1 ≃ j2 and j2 ≃ j3 then j1 ≃ j3. -/
 theorem equiv_trans {j1 j2 j3 : Journal} (h12 : j1 ≃ j2) (h23 : j2 ≃ j3) : j1 ≃ j3 :=
   ⟨h12.1.trans h23.1, fun f => Iff.trans (h12.2 f) (h23.2 f)⟩
-
-/-!
-## Merge Operation
-
-Merge two journals via list concatenation.
-Under membership equivalence, this behaves like set union.
-Precondition: journals must have the same namespace.
--/
-
-/-- Merge two journals (set union semantics).
-    PRECONDITION: j1.ns = j2.ns
-    Quint: Journal merge accumulates facts from both sources -/
-def merge (j1 j2 : Journal) : Journal :=
-  { ns := j1.ns, facts := j1.facts ++ j2.facts }
-
-/-- Safe merge that checks namespace equality.
-    Returns None if namespaces differ. -/
-def merge_safe (j1 j2 : Journal) : Option Journal :=
-  if j1.ns == j2.ns then
-    some (merge j1 j2)
-  else
-    none
-
-/-- Element membership distributes over append. -/
-theorem mem_append {f : Fact} {xs ys : List Fact} :
-    f ∈ xs ++ ys ↔ f ∈ xs ∨ f ∈ ys := List.mem_append
-
-/-!
-## Reduction
-
-Deterministically derives canonical state from facts.
-Defined early to allow Claims bundle to reference it.
--/
-
-/-- Reduce facts to canonical form.
-    Currently identity; full implementation applies domain-specific rules. -/
-def reduce (j : Journal) : Journal :=
-  { ns := j.ns, facts := j.facts }
 
 /-!
 ## Claims Bundle
@@ -232,9 +89,7 @@ structure JournalClaims where
     (reduce (merge j1 j2)).factsEquiv (merge (reduce j1) (reduce j2))
 
 /-!
-## Proofs
-
-Individual theorem proofs that construct the claims bundle.
+## Merge Proofs
 -/
 
 /-- CRDT Law 1: Commutativity - merge(j1,j2).facts ≃ merge(j2,j1).facts.
@@ -280,18 +135,8 @@ theorem merge_same_namespace (j1 j2 : Journal) :
   simp only [merge]
 
 /-!
-## Semilattice Structure
-
-The Journal with merge forms a join-semilattice.
+## Semilattice Instance
 -/
-
-/-- Typeclass for join-semilattice up to a custom equivalence relation. -/
-class JoinSemilatticeEquiv (α : Type) where
-  join : α → α → α
-  equiv : α → α → Prop
-  join_comm : ∀ a b, equiv (join a b) (join b a)
-  join_assoc : ∀ a b c, equiv (join (join a b) c) (join a (join b c))
-  join_idem : ∀ a, equiv (join a a) a
 
 /-- For the semilattice instance, we use facts-only equivalence.
     This is the appropriate equivalence for CRDT semantics where we care
@@ -306,8 +151,6 @@ instance : JoinSemilatticeEquiv Journal where
 
 /-!
 ## Reduction Proofs
-
-Properties of the reduce function (defined above with merge).
 -/
 
 /-- Reduction is deterministic. -/
@@ -356,4 +199,4 @@ def journalClaims : JournalClaims where
   reduce_respects_equiv := reduce_respects_equiv
   reduce_merge_comm := reduce_merge_comm
 
-end Aura.Journal
+end Aura.Proofs.Journal

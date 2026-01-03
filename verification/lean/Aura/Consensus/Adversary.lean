@@ -1,4 +1,4 @@
-import Aura.Consensus.Types
+import Aura.Domain.Consensus.Types
 import Aura.Assumptions
 
 /-!
@@ -33,7 +33,7 @@ Proves that honest majority can commit despite Byzantine behavior.
 
 namespace Aura.Consensus.Adversary
 
-open Aura.Consensus.Types
+open Aura.Domain.Consensus.Types
 open Aura.Assumptions
 
 /-!

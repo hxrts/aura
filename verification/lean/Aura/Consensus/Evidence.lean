@@ -1,4 +1,4 @@
-import Aura.Consensus.Types
+import Aura.Domain.Consensus.Types
 
 /-!
 # Evidence CRDT Proofs
@@ -40,7 +40,7 @@ The following definitions form the semantic interface for proofs:
 
 namespace Aura.Consensus.Evidence
 
-open Aura.Consensus.Types
+open Aura.Domain.Consensus.Types
 
 /-!
 ## List Merge Utilities

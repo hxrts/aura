@@ -63,7 +63,7 @@ rg -n "\bsorry\b" verification/lean
 Aura/
 ├── Assumptions.lean          # Cryptographic axioms (FROST, hash, PRF)
 ├── Types.lean                # Shared core type definitions
-├── Types/                    # Shared type helpers (ByteArray32, OrderTime, etc.)
+├── Types/                    # Shared type helpers
 │   ├── AttestedOp.lean
 │   ├── ByteArray32.lean
 │   ├── FactContent.lean
@@ -73,26 +73,42 @@ Aura/
 │   ├── ProtocolFacts.lean
 │   ├── TimeStamp.lean
 │   └── TreeOp.lean
-├── Consensus/
-│   ├── Types.lean            # Core consensus data structures
+├── Domain/                   # Domain types and operations (no proofs)
+│   ├── Consensus/
+│   │   └── Types.lean        # Consensus data structures
+│   ├── Journal/
+│   │   ├── Types.lean        # Fact, Journal structures
+│   │   └── Operations.lean   # merge, reduce, factsEquiv
+│   ├── FlowBudget.lean       # Budget types and charge operation
+│   ├── GuardChain.lean       # Guard types and evaluation
+│   ├── TimeSystem.lean       # Timestamp types and comparison
+│   └── KeyDerivation.lean    # Key derivation types
+├── Proofs/                   # All proofs centralized
+│   ├── Journal.lean          # CRDT semilattice proofs
+│   ├── FlowBudget.lean       # Budget charging proofs
+│   ├── GuardChain.lean       # Guard evaluation proofs
+│   ├── TimeSystem.lean       # Timestamp ordering proofs
+│   └── KeyDerivation.lean    # PRF isolation proofs
+├── Consensus/                # Consensus proofs (legacy location)
 │   ├── Agreement.lean        # Agreement safety proofs
-│   ├── Validity.lean         # Validity proofs (threshold, prestate)
-│   ├── Evidence.lean         # Evidence CRDT semilattice proofs
-│   ├── Equivocation.lean     # Equivocation detection correctness
-│   ├── Frost.lean            # FROST threshold signature integration
-│   ├── Liveness.lean         # Liveness claims (synchrony model)
-│   ├── Adversary.lean        # Byzantine model and tolerance
+│   ├── Validity.lean         # Validity proofs
+│   ├── Evidence.lean         # Evidence CRDT proofs
+│   ├── Equivocation.lean     # Equivocation detection
+│   ├── Frost.lean            # FROST integration
+│   ├── Liveness.lean         # Liveness claims
+│   ├── Adversary.lean        # Byzantine model
 │   ├── Proofs.lean           # Claims bundle aggregation
-│   ├── RustCorrespondence.lean # Mapping notes for Rust core
-│   └── TestVectors.lean      # Test fixtures and examples
-├── Journal.lean              # CRDT semilattice proofs
-├── KeyDerivation.lean        # Contextual key derivation isolation
-├── GuardChain.lean           # Guard chain cost calculation
-├── FlowBudget.lean           # Budget charging monotonicity
-├── Frost.lean                # FROST state machine correctness
-├── TimeSystem.lean           # Timestamp ordering and privacy
-└── Runner.lean               # CLI for differential testing (aura_verifier)
+│   └── ...
+├── Frost.lean                # FROST state machine (legacy)
+├── Proofs.lean               # Top-level entry point for reviewers
+└── Runner.lean               # CLI for differential testing
 ```
+
+### Import Discipline
+
+Domain modules don't import from Proofs:
+- `Domain/* ←── Proofs/*`
+- Types flow upward, proofs import types
 
 ## Quint Correspondence
 
@@ -154,16 +170,23 @@ Run `just lean-status` for the authoritative, per-module status.
 
 ## Claims Bundles
 
-Each module exports a Claims bundle for reviewers:
+Each module exports a Claims bundle for reviewers. Start with `Aura.Proofs`:
 
 ```lean
-import Aura.Consensus.Proofs
+import Aura.Proofs
 
-#check Aura.Consensus.Agreement.agreementClaims
-#check Aura.Consensus.Validity.validityClaims
-#check Aura.Consensus.Evidence.evidenceClaims
-#check Aura.Consensus.Equivocation.equivocationClaims
-#check Aura.Consensus.Frost.frostClaims
+-- Infrastructure claims
+#check Aura.Proofs.journalClaims
+#check Aura.Proofs.flowBudgetClaims
+#check Aura.Proofs.guardChainClaims
+#check Aura.Proofs.timeSystemClaims
+#check Aura.Proofs.keyDerivationClaims
+
+-- Consensus claims
+#check Aura.Proofs.agreementClaims
+#check Aura.Proofs.validityClaims
+#check Aura.Proofs.evidenceClaims
+#check Aura.Proofs.equivocationClaims
 ```
 
 Axioms are documented in `Aura.Assumptions`.

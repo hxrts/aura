@@ -42,7 +42,7 @@ The following definitions form the semantic interface for proofs:
 Changing exposed definitions requires updating Quint specs and Rust implementation.
 -/
 
-namespace Aura.Consensus.Types
+namespace Aura.Domain.Consensus.Types
 
 /-!
 ## Utility Functions
@@ -374,4 +374,4 @@ def Evidence.empty (cid : ConsensusId) : Evidence :=
   , equivocators := []
   , commitFact := none }
 
-end Aura.Consensus.Types
+end Aura.Domain.Consensus.Types

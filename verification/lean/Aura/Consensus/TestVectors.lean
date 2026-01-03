@@ -1,4 +1,4 @@
-import Aura.Consensus.Types
+import Aura.Domain.Consensus.Types
 import Aura.Consensus.Evidence
 import Lean.Data.Json
 
@@ -33,7 +33,7 @@ are tested via Quint ITF traces.
 namespace Aura.Consensus.TestVectors
 
 open Lean
-open Aura.Consensus.Types
+open Aura.Domain.Consensus.Types
 open Aura.Consensus.Evidence
 
 /-!

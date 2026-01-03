@@ -1,4 +1,4 @@
-import Aura.Consensus.Types
+import Aura.Domain.Consensus.Types
 import Aura.Consensus.Evidence
 import Aura.Consensus.Frost
 import Aura.Assumptions
@@ -68,7 +68,7 @@ Lean proves the mathematical properties that Quint assumes.
 
 namespace Aura.Consensus.RustCorrespondence
 
-open Aura.Consensus.Types
+open Aura.Domain.Consensus.Types
 open Aura.Consensus.Evidence
 open Aura.Consensus.Frost
 open Aura.Assumptions

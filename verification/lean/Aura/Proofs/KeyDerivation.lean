@@ -1,3 +1,5 @@
+import Aura.Domain.KeyDerivation
+
 /-!
 # Contextual Key Derivation Proofs
 
@@ -6,73 +8,28 @@ different contexts always yield different keys for relational isolation.
 
 ## Quint Correspondence
 - File: verification/quint/protocol_dkd.qnt
-- Section: TYPE DEFINITIONS
+- Section: INVARIANTS
 - Properties: Key derivation context isolation
 
 ## Rust Correspondence
 - File: crates/aura-core/src/crypto/key_derivation.rs
-- Type: `RootKey`, `DerivedKey`
 - Function: `derive` - context-specific key derivation via HKDF
 
 ## Expose
 
-**Types**:
-- `RootKey`: Account's master key held in threshold shares
-- `AppId`: Application identifier namespace
-- `CtxLabel`: Context label for specific relationship
-- `DerivedKey`: Output of key derivation
-
-**Operations** (stable):
-- `derive`: Derive context-specific key from root
-
-**Properties** (stable, theorem statements):
+**Properties** (theorem statements):
 - `contextual_isolation`: Different (app, context) pairs yield different keys
+- `root_isolation`: Different roots with same context yield different keys
+- `full_isolation`: Equal derived keys require equal (root, app, ctx) triples
 
-**Internal helpers** (may change):
-- None
+**Claims Bundle**:
+- `KeyDerivationClaims`: All key derivation properties bundled
+- `keyDerivationClaims`: The constructed claims bundle
 -/
 
-namespace Aura.KeyDerivation
+namespace Aura.Proofs.KeyDerivation
 
-/-!
-## Core Types
-
-Key types for hierarchical derivation.
--/
-
-/-- The account's root key, held in threshold shares across devices.
-    Rust: aura-core/src/crypto/key_derivation.rs -/
-structure RootKey where
-  id : Nat
-  deriving BEq, Repr, DecidableEq
-
-/-- Application identifier (e.g., "chat", "storage", "recovery").
-    Rust: Corresponds to derivation path component -/
-structure AppId where
-  id : String
-  deriving BEq, Repr, DecidableEq
-
-/-- Context label identifying a specific relationship or usage.
-    Rust: Combined with AppId to form full derivation path -/
-structure CtxLabel where
-  label : String
-  deriving BEq, Repr, DecidableEq
-
-/-- The output of key derivation.
-    Rust: 32-byte key for symmetric encryption or signing -/
-structure DerivedKey where
-  value : Nat
-  deriving BEq, Repr, DecidableEq
-
-/-!
-## Key Derivation Function
-
-Abstract key derivation with cryptographic assumptions.
--/
-
-/-- Key derivation function (abstract).
-    Rust: HKDF-based construction in aura-core -/
-axiom derive : RootKey → AppId → CtxLabel → DerivedKey
+open Aura.Domain.KeyDerivation
 
 /-!
 ## Claims Bundle
@@ -163,4 +120,4 @@ def keyDerivationClaims : KeyDerivationClaims where
   root_isolation := root_isolation
   full_isolation := full_isolation
 
-end Aura.KeyDerivation
+end Aura.Proofs.KeyDerivation

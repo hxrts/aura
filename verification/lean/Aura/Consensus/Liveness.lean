@@ -1,4 +1,4 @@
-import Aura.Consensus.Types
+import Aura.Domain.Consensus.Types
 import Aura.Assumptions
 
 /-!
@@ -35,7 +35,7 @@ documents the assumptions and provides Lean-side type definitions.
 
 namespace Aura.Consensus.Liveness
 
-open Aura.Consensus.Types
+open Aura.Domain.Consensus.Types
 open Aura.Assumptions
 
 /-!
