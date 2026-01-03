@@ -731,6 +731,6 @@ effects.configure_scope(config).await?;
 ## See Also
 
 - [Journal System](102_journal.md) - Fact storage and reduction
-- [State Reduction](110_state_reduction.md) - Reduction pipeline details
+- [State Reduction](120_state_reduction.md) - Reduction pipeline details
 - [Authorization](109_authorization.md) - Biscuit token evaluation
 - [Effect System](106_effect_system_and_runtime.md) - Effect implementation patterns

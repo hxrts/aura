@@ -532,3 +532,9 @@ The implementation provides concrete types (`RelationalContext`, `GuardianBindin
 - **Prestate Computation**: `aura-core/src/domain/consensus.rs` - Prestate struct and methods
 - **Protocol Usage**: `aura-authentication/src/guardian_auth_relational.rs` - Guardian authentication
 - **Recovery Flows**: `aura-recovery/src/` - Guardian recovery choreographies
+
+## See Also
+
+- [Key Rotation Ceremonies](118_key_rotation_ceremonies.md) - Guardian rotation and device enrollment ceremonies
+- [Consensus](104_consensus.md) - Aura Consensus protocol for strong agreement
+- [Operation Categories](117_operation_categories.md) - Category B and C operations for relational contexts

@@ -30,7 +30,7 @@ The layers are as follows:
 
 4. Orchestration (`aura-protocol` + `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`): Multi-party coordination, guard chain, consensus, AMP, and anti-entropy.
 
-5. Feature implementation (`aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates for authentication, secure messaging, recovery, relational contexts, rendezvous, social topology, and synchronization.
+5. Feature implementation (`aura-authentication`, `aura-chat`, `aura-invitation`, `aura-maintenance`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates for authentication, secure messaging, recovery, maintenance, relational contexts, rendezvous, social topology, and synchronization.
 
 6. Runtime composition (`aura-agent`, `aura-simulator`, `aura-app`): Complete system assembly, deterministic simulation, and portable application core.
 
@@ -84,7 +84,7 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Rendezvous Architecture](110_rendezvous.md) covers context-scoped rendezvous envelopes and channel establishment.
 
-[State Reduction](110_state_reduction.md) describes deterministic state reduction from fact journals to canonical state.
+[State Reduction](120_state_reduction.md) describes deterministic state reduction from fact journals to canonical state.
 
 [Maintenance](111_maintenance.md) covers the distributed maintenance stack including snapshots and garbage collection.
 

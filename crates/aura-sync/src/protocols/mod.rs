@@ -1,7 +1,7 @@
 //! Layer 5: Synchronization Protocol Implementations - Anti-Entropy, Snapshots, OTA, Epochs
 //!
 //! Complete end-to-end protocol implementations built atop Layer 4 orchestration:
-//! - **anti_entropy**: Digest-based CRDT reconciliation with state transfer (per docs/110_state_reduction.md)
+//! - **anti_entropy**: Digest-based CRDT reconciliation with state transfer (per docs/120_state_reduction.md)
 //! - **journal**: Journal operation synchronization with causal ordering guarantees
 //! - **snapshots**: Coordinated garbage collection with writer fencing and threshold approval
 //! - **ota**: OTA upgrade coordination with epoch fencing for consistency

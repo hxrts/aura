@@ -127,9 +127,9 @@ The following direct imports are allowed in Layer 3:
 
 Aura separates key generation from agreement/finality:
 
-- **K1**: Single‑signer (Ed25519) — no DKG.
-- **K2**: Dealer‑based DKG — trusted coordinator produces dealer packages.
-- **K3**: Consensus‑finalized DKG — BFT‑DKG transcript finalized by consensus.
+- **K1**: Single-signer (Ed25519). No DKG required.
+- **K2**: Dealer-based DKG. A trusted coordinator produces dealer packages.
+- **K3**: Consensus-finalized DKG. The BFT-DKG transcript is finalized by consensus.
 
 Transcript hashing uses the following rules:
 

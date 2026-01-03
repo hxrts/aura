@@ -1304,7 +1304,7 @@ The `just check-arch --serialization` command validates:
 - **How relational contexts work** → `docs/103_relational_contexts.md`
 - **How transport and receipts work** → `docs/108_transport_and_information_flow.md`
 - **How rendezvous and peer discovery work** → `docs/110_rendezvous.md`
-- **How state reduction works** → `docs/110_state_reduction.md`
+- **How state reduction works** → `docs/120_state_reduction.md`
 - **How the mathematical model works** → `docs/002_theoretical_model.md`
 - **How identifiers and boundaries work** → `docs/105_identifiers_and_boundaries.md`
 - **How authorization and capabilities work** → `docs/109_authorization.md`

@@ -63,8 +63,8 @@ This model supports account operations, relational context operations, snapshots
 
 `RelationalFact` has only two variants:
 
-- `Protocol(ProtocolRelationalFact)` — protocol-level facts that **must** live in `aura-journal` because reduction semantics depend on them.
-- `Generic { .. }` — extensibility hook for domain facts (`DomainFact` + `FactReducer`).
+- `Protocol(ProtocolRelationalFact)`: Protocol-level facts that must live in `aura-journal` because reduction semantics depend on them.
+- `Generic { .. }`: Extensibility hook for domain facts (`DomainFact` + `FactReducer`).
 
 **Criteria for ProtocolRelationalFact** (all must hold):
 
@@ -350,6 +350,6 @@ By clearly separating validation responsibilities, runtime authors know which ef
 ## See Also
 
 - [Database Architecture](113_database.md) - Query system for reading journal facts via Datalog
-- [State Reduction](110_state_reduction.md) - Reduction pipeline details
+- [State Reduction](120_state_reduction.md) - Reduction pipeline details
 - [Maintenance](111_maintenance.md) - Snapshot and garbage collection pipeline
 - [Relational Contexts](103_relational_contexts.md) - Context journal structure

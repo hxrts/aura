@@ -17,7 +17,7 @@
 - [Transport and Information Flow](108_transport_and_information_flow.md)
 - [Authorization](109_authorization.md)
 - [Rendezvous Architecture](110_rendezvous.md)
-- [State Reduction Flows](110_state_reduction.md)
+- [State Reduction Flows](120_state_reduction.md)
 - [Distributed Maintenance Architecture](111_maintenance.md)
 - [Aura Messaging Protocol (AMP)](112_amp.md)
 - [Database Architecture](113_database.md)

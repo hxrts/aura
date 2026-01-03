@@ -151,8 +151,8 @@ This architecture ensures a single source of truth and eliminates dual-write bug
 
 For compile-time safety, there are no public methods on `AppCore` to mutate ViewState for UI-affecting state. Code that needs to update what the UI displays must:
 
-1. **Production**: Commit facts via `RuntimeBridge.commit_relational_facts()` — facts flow through the scheduler to signals
-2. **Demo/Test**: Emit directly to signals via `ReactiveEffects::emit()` — explicit and type-safe
+1. **Production**: Commit facts via `RuntimeBridge.commit_relational_facts()`. Facts flow through the scheduler to signals.
+2. **Demo/Test**: Emit directly to signals via `ReactiveEffects::emit()`. This is explicit and type-safe.
 
 This design prevents the "dual-write" bug class where code updates ViewState expecting UI changes, but signals remain unchanged.
 
@@ -256,10 +256,10 @@ The domain owns the reactive state. Avoid caching domain data in `TuiState`. Pre
 
 ### Single source of truth invariants
 
-- **Signals are the source of truth** for UI state, not ViewState
-- **Facts drive signals** in production — commit facts via RuntimeBridge
-- **Direct emission** is only for demo/test scenarios via `ReactiveEffects::emit()`
-- **No ViewState mutation for UI state** — AppCore has no public methods to mutate ViewState for UI-affecting state
+- **Signals are the source of truth** for UI state, not ViewState.
+- **Facts drive signals** in production. Commit facts via RuntimeBridge.
+- **Direct emission** is only for demo/test scenarios via `ReactiveEffects::emit()`.
+- **No ViewState mutation for UI state**. AppCore has no public methods to mutate ViewState for UI-affecting state.
 
 ### Common pitfalls
 
@@ -267,8 +267,8 @@ The domain owns the reactive state. Avoid caching domain data in `TuiState`. Pre
 - Storing domain state in `TuiState` instead of subscribing to signals
 - Adding per-modal `visible` flags instead of using `QueuedModal` and the modal queue
 - Using `UiUpdate` as a general event bus instead of subscribing to signals
-- Expecting ViewState changes to appear in the UI — ViewState does not propagate to signals
-- Emitting directly to domain signals in production code — use fact commits instead
+- Expecting ViewState changes to appear in the UI. ViewState does not propagate to signals.
+- Emitting directly to domain signals in production code. Use fact commits instead.
 
 ## Testing strategy
 

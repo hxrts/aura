@@ -996,3 +996,9 @@ winner = argmin_i score_i
 
 Aura Consensus produces monotone commit facts that represent non-monotone operations. It integrates with journals through set union. It uses FROST threshold signatures and CRDT evidence structures. It provides agreement, validity, and liveness. It supports authority updates and relational operations. It requires no global log and no central coordinator.
 The helper `HasEquivocatedInSet` excludes conflict batches that contain conflicting signatures from the same witness. `Fallback_Start` transitions the local state machine into fallback mode and arms gossip timers. Implementations must provide these utilities alongside the timers described earlier.
+
+## See Also
+
+- [Operation Categories](117_operation_categories.md) - When consensus is required (Category C operations)
+- [Key Rotation Ceremonies](118_key_rotation_ceremonies.md) - Category C ceremony lifecycle and prestate binding
+- [Relational Contexts](103_relational_contexts.md) - Consensus integration for relational operations
