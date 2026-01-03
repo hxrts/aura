@@ -256,6 +256,21 @@ quint typecheck consensus/core.qnt
 quint run --invariant=InvariantUniqueCommitPerInstance consensus/core.qnt
 ```
 
+### Verification Tooling
+
+```bash
+# Check Quint-Rust type correspondence (detects type drift)
+just quint-check-types          # Summary output
+just quint-check-types --verbose # Detailed report
+
+# Generate verification coverage report
+just verification-coverage      # Markdown report
+just verification-coverage --json # JSON metrics
+
+# Run all verification
+just verify-all                 # Lean + Quint + conformance tests
+```
+
 ### Accessing Claims Bundles
 
 ```lean
@@ -278,3 +293,5 @@ import Aura.Consensus.Proofs
 
 - [Lean README](./lean/README.md) - Detailed Lean module documentation
 - [Quint README](./quint/README.md) - Detailed Quint specification documentation
+- [Verification Coverage](../docs/998_verification_coverage.md) - Current coverage metrics
+- [Verification Guide](../docs/807_verification_guide.md) - Verification development guide

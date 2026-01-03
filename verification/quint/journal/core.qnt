@@ -1,24 +1,29 @@
 // CRDT Journal Specification
 //
-// Models Aura's fact-based journal as a state-based CRDT. Events form
+// Models Aura's fact-based journal as a state-based CRDT. Facts form
 // a hash-linked log (via parent pointers) with nonce uniqueness enforcement.
 // Merging journals from different replicas converges via set union + max.
 //
 // Key CRDT properties verified:
 // - Merge is commutative, associative, idempotent (semilattice)
-// - Reduce is deterministic (same events → same derived state)
+// - Reduce is deterministic (same facts → same derived state)
 // - Lamport timestamps monotonically increase
 //
+// == Terminology ==
+// Journals are namespaced by AuthorityId (for authority journals) or
+// ContextId (for relational context journals). This spec models authority
+// journals. See docs/102_journal.md for the full journal model.
+//
 // == Lean Correspondence ==
-// Module: Aura.Journal (verification/lean/Aura/Journal.lean)
-// - Types: Aura.Journal.Fact, Aura.Journal.FactId, Aura.Journal.Journal
-// - Merge: Aura.Journal.merge (set union with deduplication)
-// - Reduce: Aura.Journal.reduce (deterministic state derivation)
-// - Semilattice: Aura.Journal.merge_comm, merge_assoc, merge_idem
+// Module: Aura.Domain.Journal (verification/lean/Aura/Domain/Journal/)
+// - Types: Fact, FactId, Journal, JournalNamespace
+// - Merge: merge (set union with deduplication)
+// - Reduce: reduce (deterministic state derivation)
+// - Semilattice: merge_comm, merge_assoc, merge_idem
 //
 // == Rust Correspondence ==
 // - File: crates/aura-journal/src/lib.rs
-// - Types: Fact, FactId, Journal
+// - Types: Fact, FactId, Journal, JournalNamespace
 // - Functions: merge, reduce
 //
 // See: docs/102_journal.md
@@ -26,35 +31,40 @@
 module protocol_journal {
   // ==================== TYPE DEFINITIONS ====================
   // Base types for journal entries and state.
+  // Journals are namespaced per authority (AuthorityId) or context (ContextId).
 
   type Option[a] = Some(a) | None
-  type AccountId = str
-  type AuthorityId = str  // Opaque authority (was DeviceId)
-  type EventId = str
+  type AuthorityId = str   // Opaque authority identifier (journal namespace owner)
+  type ContextId = str     // Relational context identifier
+  type FactId = str        // Unique fact identifier (typically a hash)
   type SessionId = str
 
-  // How was this event authorized?
-  type EventAuthorization =
-    | AuthThreshold          // k-of-n threshold signature
-    | AuthDevice(AuthorityId)   // Single device signature
+  // How was this fact authorized?
+  // See docs/102_journal.md for AttestedOp structure.
+  type FactAuthorization =
+    | AuthThreshold             // k-of-n threshold signature (AttestedOp)
+    | AuthSingleDevice          // Single device signature
     | AuthGuardian(AuthorityId) // Guardian-assisted recovery
 
-  // A single journal event (fact).
-  type EventRecord = {
-    id: EventId,                 // Unique identifier (typically a hash)
-    account: AccountId,          // Which account this event belongs to
-    timestamp: int,              // Lamport timestamp (causal ordering)
-    nonce: int,                  // Replay protection (must be unique)
-    parent: Option[EventId],     // Hash chain link to previous event
-    epoch: int,                  // Session epoch for invalidation
-    eventType: str,              // Type tag for deserialization
-    authorization: EventAuthorization
+  // A single journal fact.
+  // Facts are immutable and identified by hash.
+  // See docs/102_journal.md §2 for the Fact model.
+  type Fact = {
+    id: FactId,                    // Unique identifier (content hash)
+    namespace: AuthorityId,        // Journal namespace (authority owner)
+    timestamp: int,                // Lamport timestamp (causal ordering)
+    nonce: int,                    // Replay protection (must be unique)
+    parent: Option[FactId],        // Hash chain link to previous fact
+    epoch: int,                    // Session epoch for invalidation
+    factType: str,                 // Type tag for deserialization
+    authorization: FactAuthorization
   }
 
-  // Derived state computed by reducing the event log.
-  type LedgerState = {
-    account: AccountId,
-    authorities: Set[AuthorityId],  // Current authority set
+  // Derived state computed by reducing the fact log.
+  // See docs/102_journal.md §4 for TreeStateSummary.
+  type AuthorityState = {
+    authority: AuthorityId,         // Namespace owner
+    devices: Set[AuthorityId],      // Current device set (derived from tree)
     guardians: Set[AuthorityId],    // Guardian set for recovery
     sessionEpoch: int,              // Current session epoch
     lamport: int,                   // Max Lamport seen
@@ -66,203 +76,206 @@ module protocol_journal {
 
   // ==================== STATE VARIABLES ====================
   // Mutable state tracked by the model checker.
+  // Journals are keyed by AuthorityId (namespace owner).
 
-  var ledgerStates: AccountId -> LedgerState      // Derived state per account
-  var events: AccountId -> List[EventRecord]      // Event log per account
-  var usedNonces: AccountId -> Set[int]           // Consumed nonces (replay protection)
-  var lifecycleStatus: JournalStatus              // External lifecycle coordination
+  var authorityStates: AuthorityId -> AuthorityState  // Derived state per authority
+  var facts: AuthorityId -> List[Fact]                // Fact log per authority
+  var usedNonces: AuthorityId -> Set[int]             // Consumed nonces (replay protection)
+  var lifecycleStatus: JournalStatus                  // External lifecycle coordination
 
   // ==================== HELPER FUNCTIONS ====================
   // Pure functions for safe map/option access.
 
-  pure def getOrDefaultLedger(m: AccountId -> LedgerState, key: AccountId): Option[LedgerState] =
+  pure def getOrDefaultState(m: AuthorityId -> AuthorityState, key: AuthorityId): Option[AuthorityState] =
     if (key.in(m.keys())) Some(m.get(key)) else None
 
-  pure def getOrDefaultNonces(m: AccountId -> Set[int], key: AccountId): Set[int] =
+  pure def getOrDefaultNonces(m: AuthorityId -> Set[int], key: AuthorityId): Set[int] =
     if (key.in(m.keys())) m.get(key) else Set()
 
-  pure def getOrDefaultEvents(m: AccountId -> List[EventRecord], key: AccountId): List[EventRecord] =
+  pure def getOrDefaultFacts(m: AuthorityId -> List[Fact], key: AuthorityId): List[Fact] =
     if (key.in(m.keys())) m.get(key) else List()
 
   // Nonce validation: returns true if nonce hasn't been used yet.
-  pure def validateNonce(account: AccountId, nonce: int, nonces: AccountId -> Set[int]): bool =
-    not(nonce.in(getOrDefaultNonces(nonces, account)))
+  pure def validateNonce(authority: AuthorityId, nonce: int, nonces: AuthorityId -> Set[int]): bool =
+    not(nonce.in(getOrDefaultNonces(nonces, authority)))
 
-  // Get the last event's ID for hash chain linking.
-  pure def lastEventId(eventList: List[EventRecord]): Option[EventId] =
-    if (eventList.length() == 0) None
-    else Some(eventList[eventList.length() - 1].id)
+  // Get the last fact's ID for hash chain linking.
+  pure def lastFactId(factList: List[Fact]): Option[FactId] =
+    if (factList.length() == 0) None
+    else Some(factList[factList.length() - 1].id)
 
   // ==================== INITIALISATION ====================
-  // Start with empty state (no accounts).
+  // Start with empty state (no authorities).
 
   action init: bool = all {
-    ledgerStates' = Map(),
-    events' = Map(),
+    authorityStates' = Map(),
+    facts' = Map(),
     usedNonces' = Map(),
     lifecycleStatus' = JournalPending
   }
 
   // ==================== ACTIONS ====================
-  // These model journal mutations (event appends).
+  // These model journal mutations (fact appends).
 
-  // Create a new account with initial authority and guardian.
-  action createAccount(account: AccountId, authority: AuthorityId, guardian: AuthorityId): bool = all {
-    not(account.in(ledgerStates.keys())),
-    ledgerStates' = ledgerStates.put(account, {
-      account: account,
-      authorities: Set(authority),
+  // Create a new authority journal with initial device and guardian.
+  action createAuthority(authority: AuthorityId, device: AuthorityId, guardian: AuthorityId): bool = all {
+    not(authority.in(authorityStates.keys())),
+    authorityStates' = authorityStates.put(authority, {
+      authority: authority,
+      devices: Set(device),
       guardians: Set(guardian),
       sessionEpoch: 0,
       lamport: 0,
       cooldowns: Map()
     }),
-    events' = events.put(account, List()),
-    usedNonces' = usedNonces.put(account, Set()),
+    facts' = facts.put(authority, List()),
+    usedNonces' = usedNonces.put(authority, Set()),
     lifecycleStatus' = lifecycleStatus
   }
 
-  // Append a generic event to the journal (with nonce validation).
-  action appendLedgerEvent(
-    account: AccountId,
-    eventId: EventId,
+  // Append a generic fact to the journal (with nonce validation).
+  action appendFact(
+    authority: AuthorityId,
+    factId: FactId,
     nonce: int,
-    eventType: str,
-    auth: EventAuthorization
+    factType: str,
+    auth: FactAuthorization
   ): bool = {
-    val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
-    val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
-    val ledger = match ledgerOpt {
-      | Some(l) => l
-      | None => { account: "", authorities: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
+    val stateOpt = getOrDefaultState(authorityStates, authority)
+    val hasState = match stateOpt { | Some(_) => true | None => false }
+    val state = match stateOpt {
+      | Some(s) => s
+      | None => { authority: "", devices: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
     }
-    val validNonce = validateNonce(account, nonce, usedNonces)
-    val parentId = lastEventId(getOrDefaultEvents(events, account))
-    val newEvent = {
-      id: eventId,
-      account: account,
-      timestamp: ledger.lamport + 1,
+    val validNonce = validateNonce(authority, nonce, usedNonces)
+    val parentId = lastFactId(getOrDefaultFacts(facts, authority))
+    val newFact = {
+      id: factId,
+      namespace: authority,
+      timestamp: state.lamport + 1,
       nonce: nonce,
       parent: parentId,
-      epoch: ledger.sessionEpoch,
-      eventType: eventType,
+      epoch: state.sessionEpoch,
+      factType: factType,
       authorization: auth
     }
     all {
-      hasLedger,
+      hasState,
       validNonce,
-      ledgerStates' = ledgerStates.set(account, {
-        ...ledger,
-        lamport: ledger.lamport + 1
+      authorityStates' = authorityStates.set(authority, {
+        ...state,
+        lamport: state.lamport + 1
       }),
-      events' = events.set(account, getOrDefaultEvents(events, account).append(newEvent)),
-      usedNonces' = usedNonces.set(account, getOrDefaultNonces(usedNonces, account).union(Set(nonce))),
+      facts' = facts.set(authority, getOrDefaultFacts(facts, authority).append(newFact)),
+      usedNonces' = usedNonces.set(authority, getOrDefaultNonces(usedNonces, authority).union(Set(nonce))),
       lifecycleStatus' = lifecycleStatus
     }
   }
 
-  // Add a new authority to the account (requires threshold authorization).
-  action addAuthority(account: AccountId, authority: AuthorityId, nonce: int): bool = {
-    val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
-    val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
-    val ledger = match ledgerOpt {
-      | Some(l) => l
-      | None => { account: "", authorities: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
+  // Add a new device to the authority (requires threshold authorization).
+  // This models an AddLeaf operation in the commitment tree.
+  action addDevice(authority: AuthorityId, device: AuthorityId, nonce: int): bool = {
+    val stateOpt = getOrDefaultState(authorityStates, authority)
+    val hasState = match stateOpt { | Some(_) => true | None => false }
+    val state = match stateOpt {
+      | Some(s) => s
+      | None => { authority: "", devices: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
     }
-    val notPresent = not(ledger.authorities.contains(authority))
-    val validNonce = validateNonce(account, nonce, usedNonces)
-    val parentId = lastEventId(getOrDefaultEvents(events, account))
-    val newEvent = {
-      id: "AddAuthority",
-      account: account,
-      timestamp: ledger.lamport + 1,
+    val notPresent = not(state.devices.contains(device))
+    val validNonce = validateNonce(authority, nonce, usedNonces)
+    val parentId = lastFactId(getOrDefaultFacts(facts, authority))
+    val newFact = {
+      id: "AddDevice",
+      namespace: authority,
+      timestamp: state.lamport + 1,
       nonce: nonce,
       parent: parentId,
-      epoch: ledger.sessionEpoch,
-      eventType: "AddAuthority",
+      epoch: state.sessionEpoch,
+      factType: "AddDevice",
       authorization: AuthThreshold
     }
     all {
-      hasLedger,
+      hasState,
       notPresent,
       validNonce,
-      ledgerStates' = ledgerStates.set(account, {
-        ...ledger,
-        lamport: ledger.lamport + 1,
-        authorities: ledger.authorities.union(Set(authority))
+      authorityStates' = authorityStates.set(authority, {
+        ...state,
+        lamport: state.lamport + 1,
+        devices: state.devices.union(Set(device))
       }),
-      events' = events.set(account, getOrDefaultEvents(events, account).append(newEvent)),
-      usedNonces' = usedNonces.set(account, getOrDefaultNonces(usedNonces, account).union(Set(nonce))),
+      facts' = facts.set(authority, getOrDefaultFacts(facts, authority).append(newFact)),
+      usedNonces' = usedNonces.set(authority, getOrDefaultNonces(usedNonces, authority).union(Set(nonce))),
       lifecycleStatus' = lifecycleStatus
     }
   }
 
-  // Remove an authority from the account.
-  action removeAuthority(account: AccountId, authority: AuthorityId, nonce: int): bool = {
-    val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
-    val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
-    val ledger = match ledgerOpt {
-      | Some(l) => l
-      | None => { account: "", authorities: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
+  // Remove a device from the authority.
+  // This models a RemoveLeaf operation in the commitment tree.
+  action removeDevice(authority: AuthorityId, device: AuthorityId, nonce: int): bool = {
+    val stateOpt = getOrDefaultState(authorityStates, authority)
+    val hasState = match stateOpt { | Some(_) => true | None => false }
+    val state = match stateOpt {
+      | Some(s) => s
+      | None => { authority: "", devices: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
     }
-    val isPresent = ledger.authorities.contains(authority)
-    val validNonce = validateNonce(account, nonce, usedNonces)
-    val parentId = lastEventId(getOrDefaultEvents(events, account))
-    val newEvent = {
-      id: "RemoveAuthority",
-      account: account,
-      timestamp: ledger.lamport + 1,
+    val isPresent = state.devices.contains(device)
+    val validNonce = validateNonce(authority, nonce, usedNonces)
+    val parentId = lastFactId(getOrDefaultFacts(facts, authority))
+    val newFact = {
+      id: "RemoveDevice",
+      namespace: authority,
+      timestamp: state.lamport + 1,
       nonce: nonce,
       parent: parentId,
-      epoch: ledger.sessionEpoch,
-      eventType: "RemoveAuthority",
+      epoch: state.sessionEpoch,
+      factType: "RemoveDevice",
       authorization: AuthThreshold
     }
     all {
-      hasLedger,
+      hasState,
       isPresent,
       validNonce,
-      ledgerStates' = ledgerStates.set(account, {
-        ...ledger,
-        lamport: ledger.lamport + 1,
-        authorities: ledger.authorities.filter(d => d != authority)
+      authorityStates' = authorityStates.set(authority, {
+        ...state,
+        lamport: state.lamport + 1,
+        devices: state.devices.filter(d => d != device)
       }),
-      events' = events.set(account, getOrDefaultEvents(events, account).append(newEvent)),
-      usedNonces' = usedNonces.set(account, getOrDefaultNonces(usedNonces, account).union(Set(nonce))),
+      facts' = facts.set(authority, getOrDefaultFacts(facts, authority).append(newFact)),
+      usedNonces' = usedNonces.set(authority, getOrDefaultNonces(usedNonces, authority).union(Set(nonce))),
       lifecycleStatus' = lifecycleStatus
     }
   }
 
   // Increment session epoch (invalidates all sessions in prior epochs).
-  action bumpSessionEpoch(account: AccountId, nonce: int): bool = {
-    val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
-    val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
-    val ledger = match ledgerOpt {
-      | Some(l) => l
-      | None => { account: "", authorities: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
+  action bumpSessionEpoch(authority: AuthorityId, nonce: int): bool = {
+    val stateOpt = getOrDefaultState(authorityStates, authority)
+    val hasState = match stateOpt { | Some(_) => true | None => false }
+    val state = match stateOpt {
+      | Some(s) => s
+      | None => { authority: "", devices: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
     }
-    val validNonce = validateNonce(account, nonce, usedNonces)
-    val parentId = lastEventId(getOrDefaultEvents(events, account))
-    val newEvent = {
+    val validNonce = validateNonce(authority, nonce, usedNonces)
+    val parentId = lastFactId(getOrDefaultFacts(facts, authority))
+    val newFact = {
       id: "SessionEpochBump",
-      account: account,
-      timestamp: ledger.lamport + 1,
+      namespace: authority,
+      timestamp: state.lamport + 1,
       nonce: nonce,
       parent: parentId,
-      epoch: ledger.sessionEpoch,
-      eventType: "SessionEpochBump",
+      epoch: state.sessionEpoch,
+      factType: "SessionEpochBump",
       authorization: AuthThreshold
     }
     all {
-      hasLedger,
+      hasState,
       validNonce,
-      ledgerStates' = ledgerStates.set(account, {
-        ...ledger,
-        lamport: ledger.lamport + 1,
-        sessionEpoch: ledger.sessionEpoch + 1
+      authorityStates' = authorityStates.set(authority, {
+        ...state,
+        lamport: state.lamport + 1,
+        sessionEpoch: state.sessionEpoch + 1
       }),
-      events' = events.set(account, getOrDefaultEvents(events, account).append(newEvent)),
-      usedNonces' = usedNonces.set(account, getOrDefaultNonces(usedNonces, account).union(Set(nonce))),
+      facts' = facts.set(authority, getOrDefaultFacts(facts, authority).append(newFact)),
+      usedNonces' = usedNonces.set(authority, getOrDefaultNonces(usedNonces, authority).union(Set(nonce))),
       lifecycleStatus' = lifecycleStatus
     }
   }
@@ -273,8 +286,8 @@ module protocol_journal {
     all {
       isPending,
       lifecycleStatus' = JournalCompleted,
-      ledgerStates' = ledgerStates,
-      events' = events,
+      authorityStates' = authorityStates,
+      facts' = facts,
       usedNonces' = usedNonces
     }
   }
@@ -283,46 +296,47 @@ module protocol_journal {
   // Nondeterministically choose any enabled action.
 
   action step: bool = any {
-    nondet account = oneOf(Set("acc1", "acc2"))
-    nondet authority = oneOf(Set("auth1", "auth2", "auth3"))
+    nondet authority = oneOf(Set("auth1", "auth2"))
+    nondet device = oneOf(Set("dev1", "dev2", "dev3"))
     nondet guardian = oneOf(Set("guard1", "guard2"))
     nondet nonce = oneOf(1.to(100))
-    nondet eventId = oneOf(Set("evt1", "evt2", "evt3", "evt4", "evt5"))
+    nondet factId = oneOf(Set("fact1", "fact2", "fact3", "fact4", "fact5"))
     any {
-      createAccount(account, authority, guardian),
-      addAuthority(account, authority, nonce),
-      removeAuthority(account, authority, nonce),
-      bumpSessionEpoch(account, nonce),
-      appendLedgerEvent(account, eventId, nonce, "GenericEvent", AuthThreshold),
+      createAuthority(authority, device, guardian),
+      addDevice(authority, device, nonce),
+      removeDevice(authority, device, nonce),
+      bumpSessionEpoch(authority, nonce),
+      appendFact(authority, factId, nonce, "GenericFact", AuthThreshold),
       signalFinalize
     }
   }
 
   // ==================== CRDT MERGE OPERATIONS ====================
   // These implement the state-based CRDT merge for journal synchronization.
-  // Lean: Aura.Journal.merge, Aura.Journal.Semilattice
+  // See docs/102_journal.md §3 for semilattice structure.
+  // Lean: Aura.Domain.Journal.Semilattice
 
-  // Merge two event lists (union with deduplication by id).
+  // Merge two fact lists (union with deduplication by id).
   // This is the core CRDT operation for eventual consistency.
-  pure def mergeEvents(a: List[EventRecord], b: List[EventRecord]): List[EventRecord] = {
-    val aIds: Set[EventId] = a.foldl(Set(), (acc, e) => acc.union(Set(e.id)))
-    // Filter b to only events not in a (by id)
-    val bOnly = b.foldl(List(), (acc, e) =>
-      if (e.id.in(aIds)) acc else acc.append(e)
+  pure def mergeFacts(a: List[Fact], b: List[Fact]): List[Fact] = {
+    val aIds: Set[FactId] = a.foldl(Set(), (acc, f) => acc.union(Set(f.id)))
+    // Filter b to only facts not in a (by id)
+    val bOnly = b.foldl(List(), (acc, f) =>
+      if (f.id.in(aIds)) acc else acc.append(f)
     )
-    // Combine lists (in real impl would sort by timestamp)
+    // Combine lists (in real impl would sort by OrderTime)
     a.concat(bOnly)
   }
 
   // Merge nonce sets (set union = CRDT G-Set).
   pure def mergeNonces(a: Set[int], b: Set[int]): Set[int] = a.union(b)
 
-  // Merge ledger states using component-wise lattice operations.
-  // Sets use union, integers use max.
-  pure def mergeLedgers(a: LedgerState, b: LedgerState): LedgerState = {
+  // Merge authority states using component-wise lattice operations.
+  // Sets use union (join), integers use max (join).
+  pure def mergeAuthorityStates(a: AuthorityState, b: AuthorityState): AuthorityState = {
     {
-      account: a.account,
-      authorities: a.authorities.union(b.authorities),
+      authority: a.authority,
+      devices: a.devices.union(b.devices),
       guardians: a.guardians.union(b.guardians),
       sessionEpoch: if (a.sessionEpoch > b.sessionEpoch) a.sessionEpoch else b.sessionEpoch,
       lamport: if (a.lamport > b.lamport) a.lamport else b.lamport,
@@ -332,7 +346,7 @@ module protocol_journal {
 
   // ==================== CRDT PROPERTIES ====================
   // These properties verify the CRDT semilattice laws.
-  // Lean: Aura.Journal.merge_comm, merge_assoc, merge_idem
+  // Lean: Aura.Domain.Journal.merge_comm, merge_assoc, merge_idem
 
   // Commutativity: merge(a, b) == merge(b, a)
   pure def propNonceMergeCommutative(a: Set[int], b: Set[int]): bool =
@@ -346,8 +360,8 @@ module protocol_journal {
   pure def propNonceMergeIdempotent(a: Set[int]): bool =
     mergeNonces(a, a) == a
 
-  // Authority merge is commutative (set union).
-  pure def propAuthorityMergeCommutative(a: Set[AuthorityId], b: Set[AuthorityId]): bool =
+  // Device set merge is commutative (set union).
+  pure def propDeviceMergeCommutative(a: Set[AuthorityId], b: Set[AuthorityId]): bool =
     a.union(b) == b.union(a)
 
   // Lamport timestamps form a join-semilattice (max is the join operation).
@@ -361,66 +375,67 @@ module protocol_journal {
   }
 
   // ==================== REDUCE DETERMINISM ====================
-  // Reduce computes derived state from the event log.
-  // Lean: Aura.Journal.reduce_deterministic
+  // Reduce computes derived state from the fact log.
+  // See docs/102_journal.md §4 for reduction semantics.
+  // Lean: Aura.Domain.Journal.reduce_deterministic
 
-  // Compute authority set from event list by replaying events.
-  pure def reduceAuthorities(eventList: List[EventRecord], initial: Set[AuthorityId]): Set[AuthorityId] =
-    eventList.foldl(initial, (acc, event) =>
-      if (event.eventType == "AddAuthority") acc.union(Set(event.id))
-      else if (event.eventType == "RemoveAuthority") acc.filter(a => a != event.id)
+  // Compute device set from fact list by replaying facts.
+  pure def reduceDevices(factList: List[Fact], initial: Set[AuthorityId]): Set[AuthorityId] =
+    factList.foldl(initial, (acc, fact) =>
+      if (fact.factType == "AddDevice") acc.union(Set(fact.id))
+      else if (fact.factType == "RemoveDevice") acc.filter(d => d != fact.id)
       else acc
     )
 
-  // Compute max Lamport timestamp from event list.
-  pure def reduceLamport(eventList: List[EventRecord]): int =
-    eventList.foldl(0, (acc, event) => if (event.timestamp > acc) event.timestamp else acc)
+  // Compute max Lamport timestamp from fact list.
+  pure def reduceLamport(factList: List[Fact]): int =
+    factList.foldl(0, (acc, fact) => if (fact.timestamp > acc) fact.timestamp else acc)
 
   // Determinism: running reduce twice yields same result.
-  pure def propReduceLamportDeterministic(events: List[EventRecord]): bool = {
-    val result1 = reduceLamport(events)
-    val result2 = reduceLamport(events)
+  pure def propReduceLamportDeterministic(factList: List[Fact]): bool = {
+    val result1 = reduceLamport(factList)
+    val result2 = reduceLamport(factList)
     result1 == result2
   }
 
-  // Ordering: timestamps are monotonically increasing in the event list.
-  pure def propReducePreservesOrder(events: List[EventRecord]): bool =
-    events.length() < 2 or
-    events.indices().filter(i => i > 0).forall(i =>
-      events[i].timestamp >= events[i-1].timestamp
+  // Ordering: timestamps are monotonically increasing in the fact list.
+  pure def propReducePreservesOrder(factList: List[Fact]): bool =
+    factList.length() < 2 or
+    factList.indices().filter(i => i > 0).forall(i =>
+      factList[i].timestamp >= factList[i-1].timestamp
     )
 
   // ==================== INVARIANTS ====================
   // Safety properties that must hold in every reachable state.
 
-  // Helper: check if all events satisfy a predicate.
-  pure def allEventsMatch(eventList: List[EventRecord], pred: EventRecord => bool): bool =
-    eventList.foldl(true, (acc, event) => acc and pred(event))
+  // Helper: check if all facts satisfy a predicate.
+  pure def allFactsMatch(factList: List[Fact], pred: Fact => bool): bool =
+    factList.foldl(true, (acc, fact) => acc and pred(fact))
 
-  // Lean: Aura.Journal.nonce_unique
-  // Nonces are unique within each account (replay protection).
+  // Lean: Aura.Domain.Journal.nonce_unique
+  // Nonces are unique within each authority journal (replay protection).
   val InvariantNonceUnique =
-    usedNonces.keys().forall(account =>
-      usedNonces.get(account).forall(n =>
-        usedNonces.get(account).filter(m => m == n).size() == 1
+    usedNonces.keys().forall(authority =>
+      usedNonces.get(authority).forall(n =>
+        usedNonces.get(authority).filter(m => m == n).size() == 1
       )
     )
 
-  // Lean: Aura.Journal.events_ordered
-  // Events have positive timestamps.
-  val InvariantEventsOrdered =
-    events.keys().forall(account =>
-      allEventsMatch(events.get(account), event => event.timestamp > 0)
+  // Lean: Aura.Domain.Journal.facts_ordered
+  // Facts have positive timestamps.
+  val InvariantFactsOrdered =
+    facts.keys().forall(authority =>
+      allFactsMatch(facts.get(authority), fact => fact.timestamp > 0)
     )
 
-  // Lean: Aura.Journal.events_match_account
-  // Events are scoped to their account.
-  val InvariantEventsMatchAccount =
-    events.keys().forall(account =>
-      allEventsMatch(events.get(account), event => event.account == account)
+  // Lean: Aura.Domain.Journal.facts_match_namespace
+  // Facts are scoped to their authority namespace.
+  val InvariantFactsMatchNamespace =
+    facts.keys().forall(authority =>
+      allFactsMatch(facts.get(authority), fact => fact.namespace == authority)
     )
 
-  // Lean: Aura.Journal.lifecycle_completed_stable
+  // Lean: Aura.Domain.Journal.lifecycle_completed_stable
   // Completed lifecycle implies stable state.
   val InvariantLifecycleCompletedImpliesStable = {
     val isCompleted = match lifecycleStatus { | JournalCompleted => true | _ => false }
@@ -430,30 +445,30 @@ module protocol_journal {
   // ==================== CRDT INVARIANTS ====================
   // These ensure the CRDT semilattice properties hold at runtime.
 
-  // Lean: Aura.Journal.merge_comm
+  // Lean: Aura.Domain.Journal.merge_comm
   // Nonce merge is commutative (concurrent additions converge).
   val InvariantNonceMergeCommutative =
-    usedNonces.keys().forall(acc1 =>
-      usedNonces.keys().forall(acc2 =>
+    usedNonces.keys().forall(auth1 =>
+      usedNonces.keys().forall(auth2 =>
         propNonceMergeCommutative(
-          getOrDefaultNonces(usedNonces, acc1),
-          getOrDefaultNonces(usedNonces, acc2)
+          getOrDefaultNonces(usedNonces, auth1),
+          getOrDefaultNonces(usedNonces, auth2)
         )
       )
     )
 
-  // Lean: Aura.Journal.lamport_monotonic
+  // Lean: Aura.Domain.Journal.lamport_monotonic
   // Lamport timestamps are non-negative.
   val InvariantLamportMonotonic =
-    ledgerStates.keys().forall(account =>
-      ledgerStates.get(account).lamport >= 0
+    authorityStates.keys().forall(authority =>
+      authorityStates.get(authority).lamport >= 0
     )
 
-  // Lean: Aura.Journal.reduce_deterministic
-  // Event list reduce is deterministic.
+  // Lean: Aura.Domain.Journal.reduce_deterministic
+  // Fact list reduce is deterministic.
   val InvariantReduceDeterministic =
-    events.keys().forall(account =>
-      propReduceLamportDeterministic(getOrDefaultEvents(events, account))
+    facts.keys().forall(authority =>
+      propReduceLamportDeterministic(getOrDefaultFacts(facts, authority))
     )
 
 }

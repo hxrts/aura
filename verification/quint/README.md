@@ -47,6 +47,7 @@ verification/quint/
 ├── recovery.qnt                # Guardian-based recovery flows
 ├── authorization.qnt           # Guard chain authorization properties
 ├── epochs.qnt                  # Epoch transitions and receipt windows
+├── transport.qnt               # Transport layer, sessions, guard chain
 ├── sbb.qnt                     # Social Bulletin Board gossip
 ├── interaction.qnt             # Recovery∥Consensus concurrent safety
 ├── consensus/                  # Consensus protocol specs
@@ -102,6 +103,8 @@ Core protocol state machines modeling Aura's distributed protocols:
 | `.` | `recovery.qnt` | Guardian-based recovery flows | [Relational Contexts](../../docs/103_relational_contexts.md) |
 | `.` | `authorization.qnt` | Guard chain authorization, budget verification | [Information Flow](../../docs/003_information_flow_contract.md) |
 | `.` | `epochs.qnt` | Epoch transitions and receipt validity windows | [Transport](../../docs/108_transport_and_information_flow.md) |
+| `.` | `transport.qnt` | Transport layer: connections, sessions, guard chain, message ordering | [Transport](../../docs/108_transport_and_information_flow.md) |
+| `.` | `invitation.qnt` | Invitation lifecycle, ceremonies, authorization invariants | [Relational Contexts](../../docs/103_relational_contexts.md) |
 | `.` | `sbb.qnt` | Social Bulletin Board gossip | [Rendezvous](../../docs/110_rendezvous.md) |
 | `.` | `interaction.qnt` | Recovery∥Consensus concurrent execution safety | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
 
@@ -179,6 +182,8 @@ All core protocol specifications have been verified with Apalache model checking
 | `epochs.qnt` | `InvariantReceiptValidityWindow`, `InvariantCrossEpochReplayPrevention` |
 | `keys/dkg.qnt` | `InvariantThresholdBounds`, `InvariantPhaseCommitmentCounts`, `InvariantSharesOnlyAfterVerification` |
 | `authorization.qnt` | `guardChainOrder`, `chargeBeforeSend`, `spentWithinLimit`, `attenuationOnlyNarrows` |
+| `transport.qnt` | `InvariantContextIsolation`, `InvariantFlowBudgetNonNegative`, `InvariantSequenceMonotonic`, `InvariantSentMessagesHaveFacts` |
+| `invitation.qnt` | `InvariantOnlySenderCancels`, `InvariantOnlyReceiverAcceptsOrDeclines`, `InvariantNoDoubleResolution`, `InvariantTerminalStatusImmutable`, `InvariantAcceptedHasFact`, `InvariantCeremonyForAcceptedOnly` |
 | `consensus/frost.qnt` | `thresholdInvariant`, `commitmentBeforeSigning`, `sharesFromCommitted`, `validSignatureInvariant` |
 
 ## Verified Properties
@@ -244,6 +249,54 @@ quint run verification/quint/consensus/core.qnt \
   --out-itf=traces/consensus.itf.json
 ```
 
+## Rust Integration
+
+### Bounded Liveness Checking
+
+The `aura-simulator` crate provides bounded liveness checking that integrates with Quint liveness specs:
+
+```rust
+use aura_simulator::liveness::{
+    BoundedLivenessChecker, BoundedLivenessProperty, SynchronyAssumption
+};
+
+// Check that consensus terminates within 20 steps under partial synchrony
+let mut checker = BoundedLivenessChecker::with_synchrony(
+    SynchronyAssumption::PartialSynchrony { gst: 5, delta: 3 }
+);
+checker.add_property(BoundedLivenessProperty {
+    name: "consensus_terminates".to_string(),
+    precondition: "gstReached".to_string(),
+    goal: "allInstancesTerminated(instances)".to_string(),
+    step_bound: 20,
+    ..Default::default()
+});
+```
+
+See `crates/aura-simulator/src/liveness/mod.rs` for the full API.
+
+### Type Drift Detection
+
+Check correspondence between Quint types and Rust `QuintMappable` implementations:
+
+```bash
+just quint-check-types          # Summary
+just quint-check-types --verbose # Detailed report
+```
+
+This detects when Quint type definitions drift from their Rust counterparts.
+
+### Verification Coverage
+
+Generate a verification coverage report:
+
+```bash
+just verification-coverage      # Markdown
+just verification-coverage --json # JSON metrics
+```
+
+See `docs/998_verification_coverage.md` for the current coverage status.
+
 ## Resources
 
 - [Quint Documentation](https://quint-lang.org/docs)
@@ -251,3 +304,4 @@ quint run verification/quint/consensus/core.qnt \
 - [Simulation Guide](../../docs/806_simulation_guide.md)
 - [Generative Testing Guide](../../docs/809_generative_testing_guide.md)
 - [System Architecture](../../docs/001_system_architecture.md)
+- [Verification Coverage](../../docs/998_verification_coverage.md)

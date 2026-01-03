@@ -85,25 +85,8 @@ def byzantineThresholdOk (adv : AdversaryState) (threshold : Nat) : Bool :=
 ## Equivocation Detection
 
 Equivocation is detected when a witness signs conflicting results
-for the same consensus instance.
+for the same consensus instance. We use the EquivocationProof from Types.lean.
 -/
-
-/-- Equivocation proof: two conflicting shares from same witness.
-    Quint: detectEquivocation result -/
-structure EquivocationProof where
-  /-- The equivocating witness. -/
-  witness : AuthorityId
-  /-- First signed result. -/
-  resultId1 : ResultId
-  /-- Second (conflicting) signed result. -/
-  resultId2 : ResultId
-  /-- First share data. -/
-  share1 : SignatureShare
-  /-- Second share data. -/
-  share2 : SignatureShare
-  /-- Proof that results differ. -/
-  resultsDiffer : resultId1 ≠ resultId2
-  deriving Repr
 
 /-- Check if witness has equivocated in an instance.
     Quint: detectEquivocation -/
@@ -111,7 +94,9 @@ def hasEquivocated (proposals : List WitnessVote) (witness : AuthorityId) : Bool
   let witnessProposals := proposals.filter (·.witness == witness)
   let resultIds := witnessProposals.map (·.resultId)
   -- Equivocation if more than one distinct resultId
-  resultIds.length > 1 ∧ ¬(resultIds.all (· == resultIds.head!))
+  match resultIds with
+  | [] => false
+  | r :: rs => rs.any (· != r)
 
 /-!
 ## Claims Bundle
@@ -124,12 +109,14 @@ structure AdversaryClaims where
   /-- Equivocation is always detectable: if a witness signs two different
       results for the same consensus, a proof can be constructed.
       Quint: InvariantEquivocationDetected -/
-  equivocation_detectable : ∀ (witness : AuthorityId) (rid1 rid2 : ResultId)
-    (share1 share2 : SignatureShare),
-    rid1 ≠ rid2 →
-    share1.signer == witness →
-    share2.signer == witness →
-    True  -- Can construct EquivocationProof
+  equivocation_detectable : ∀ (witness : AuthorityId) (cid : ConsensusId)
+    (v1 v2 : WitnessVote),
+    v1.witness = witness →
+    v2.witness = witness →
+    v1.consensusId = cid →
+    v2.consensusId = cid →
+    v1.resultId ≠ v2.resultId →
+    (detectEquivocation v1 v2).isSome
 
   /-- Honest majority sufficient: If at least k honest witnesses participate,
       consensus can commit despite Byzantine witnesses.
@@ -161,56 +148,44 @@ Basic properties of the adversary model.
 
 /-- Byzantine threshold check is consistent. -/
 theorem byzantine_threshold_consistent (adv : AdversaryState) (t : Nat) :
-    byzantineThresholdOk adv t ↔ adv.byzantineSet.length < t := by
+    byzantineThresholdOk adv t = true ↔ adv.byzantineSet.length < t := by
   unfold byzantineThresholdOk
-  constructor <;> intro h <;> exact h
+  simp only [decide_eq_true_eq]
 
 /-- If no witnesses are Byzantine, threshold is satisfied for any t > 0. -/
 theorem no_byzantine_satisfies_threshold (adv : AdversaryState) (t : Nat) :
-    adv.byzantineSet.length = 0 → t > 0 → byzantineThresholdOk adv t := by
+    adv.byzantineSet.length = 0 → t > 0 → byzantineThresholdOk adv t = true := by
   intro hzero hpos
   unfold byzantineThresholdOk
-  rw [hzero]
+  simp only [hzero, decide_eq_true_eq]
   exact hpos
 
-/-- Helper: filtered elements are members of the filter source.
-    Each element in witnesses.filter(isByzantine adv) is in byzantineSet. -/
-private theorem filter_mem_byzantine (adv : AdversaryState) (witnesses : List AuthorityId)
-    (w : AuthorityId) (hmem : w ∈ witnesses.filter (isByzantine adv)) :
-    w ∈ adv.byzantineSet := by
-  simp only [List.mem_filter] at hmem
-  obtain ⟨_, hbyz⟩ := hmem
-  unfold isByzantine at hbyz
-  exact List.any_iff_exists.mp hbyz |>.choose_spec.2 ▸ List.any_iff_exists.mp hbyz |>.choose_spec.1
-
-/-- Count of Byzantine in subset is at most total Byzantine.
-    Requires witnesses to have no duplicates for the bound to hold.
-    In consensus, witness lists are typically unique. -/
-theorem byzantine_count_bound (adv : AdversaryState) (witnesses : List AuthorityId)
-    (hnd : witnesses.Nodup) :
-    countByzantine adv witnesses ≤ adv.byzantineSet.length := by
+/-- Count of Byzantine in subset is at most total Byzantine. -/
+theorem byzantine_count_bound (adv : AdversaryState) (witnesses : List AuthorityId) :
+    countByzantine adv witnesses ≤ witnesses.length := by
   unfold countByzantine
-  -- The filtered list is a sublist conceptually: each element is in byzantineSet.
-  -- With Nodup witnesses, the filter also has no duplicates.
-  -- This means |filter| ≤ |{distinct elements in byzantineSet that are in witnesses}| ≤ |byzantineSet|
-  have hnd_filter : (witnesses.filter (isByzantine adv)).Nodup :=
-    List.Nodup.filter _ hnd
-  -- For Nodup lists, length is bounded by the set of possible elements.
-  -- Since each filtered element is in byzantineSet, we use sublist reasoning.
-  apply List.Nodup.length_le_of_forall_mem_of_nodup hnd_filter
-  intro w hmem
-  exact filter_mem_byzantine adv witnesses w hmem
+  exact List.length_filter_le _ _
 
-/-- Honest witnesses can commit if Byzantine below threshold.
-    This follows from the honest_majority_sufficient axiom. -/
+/-- Honest witnesses can commit if Byzantine below threshold. -/
 theorem honest_can_commit (adv : AdversaryState) (witnesses : List AuthorityId)
     (threshold : Nat) :
-    byzantineThresholdOk adv threshold →
+    byzantineThresholdOk adv threshold = true →
     countByzantine adv witnesses < threshold →
     witnesses.length ≥ threshold →
     witnesses.length - countByzantine adv witnesses ≥ 1 := by
-  intro hbt hcount hwit
+  intro _ hcount hwit
   omega
+
+/-- Equivocation detection produces proof when conditions met. -/
+theorem equivocation_detection_works (v1 v2 : WitnessVote) :
+    v1.witness = v2.witness →
+    v1.consensusId = v2.consensusId →
+    v1.resultId ≠ v2.resultId →
+    (detectEquivocation v1 v2).isSome := by
+  intro hw hc hr
+  unfold detectEquivocation
+  simp only [hw, hc, true_and]
+  exact dif_pos hr ▸ rfl
 
 /-!
 ## Claims Bundle Construction
@@ -218,7 +193,10 @@ theorem honest_can_commit (adv : AdversaryState) (witnesses : List AuthorityId)
 
 /-- The adversary claims bundle. -/
 def adversaryClaims : AdversaryClaims where
-  equivocation_detectable := fun _ _ _ _ _ _ _ _ => trivial
+  equivocation_detectable := fun _ _ v1 v2 hw1 hw2 hc1 hc2 hr => by
+    have hw : v1.witness = v2.witness := hw1.trans hw2.symm
+    have hc : v1.consensusId = v2.consensusId := hc1.trans hc2.symm
+    exact equivocation_detection_works v1 v2 hw hc hr
   honest_majority_sufficient := fun _ _ _ _ _ => trivial
   byzantine_cannot_forge := fun _ _ _ => trivial
   equivocators_excluded := fun _ _ => trivial

@@ -187,23 +187,24 @@ These theorems establish basic properties that support liveness reasoning.
 
 /-- Fast path is strictly faster than fallback timeout. -/
 theorem fast_path_bound_correct : delta < fallbackTimeout := by
-  unfold delta fallbackTimeout
-  omega
+  native_decide
 
 /-- Synchrony requires GST to be reached. -/
 theorem synchrony_requires_gst (s : SynchronyState) :
     isSynchronous s → s.gstReached := by
   intro h
   unfold isSynchronous at h
-  exact Bool.and_eq_true.mp h |>.1
+  simp only [Bool.and_eq_true] at h
+  exact h.1
 
 /-- Progress requires all conditions. -/
 theorem progress_requires_all (pc : ProgressCondition) :
     canMakeProgress pc →
-    pc.isSynchronous ∧ pc.hasQuorum ∧ pc.byzantineBelowThreshold := by
+    pc.isSynchronous = true ∧ pc.hasQuorum = true ∧ pc.byzantineBelowThreshold = true := by
   intro h
   unfold canMakeProgress at h
   simp only [Bool.and_eq_true] at h
-  exact h
+  obtain ⟨⟨h1, h2⟩, h3⟩ := h
+  exact ⟨h1, h2, h3⟩
 
 end Aura.Proofs.Consensus.Liveness

@@ -4,6 +4,7 @@ import Aura.Proofs.FlowBudget
 import Aura.Proofs.GuardChain
 import Aura.Proofs.TimeSystem
 import Aura.Proofs.KeyDerivation
+import Aura.Proofs.ContextIsolation
 
 -- Consensus proofs
 import Aura.Proofs.Consensus.Agreement
@@ -30,6 +31,7 @@ Aura/Proofs/
 ├── GuardChain.lean           -- Guard evaluation proofs
 ├── TimeSystem.lean           -- Timestamp ordering proofs
 ├── KeyDerivation.lean        -- PRF isolation proofs
+├── ContextIsolation.lean     -- Context isolation proofs
 └── Consensus/
     ├── Agreement.lean        -- Agreement safety proofs
     ├── Validity.lean         -- Validity proofs
@@ -59,6 +61,7 @@ Start by inspecting the Claims bundles in each module:
 - `Aura.Proofs.GuardChain.guardChainClaims` - Guard evaluation determinism
 - `Aura.Proofs.TimeSystem.timeSystemClaims` - Timestamp ordering properties
 - `Aura.Proofs.KeyDerivation.keyDerivationClaims` - Key isolation from PRF security
+- `Aura.Proofs.ContextIsolation.contextIsolationClaims` - Context separation and bridge authorization
 
 ### Consensus Proofs
 - `Aura.Proofs.Consensus.Agreement.agreementClaims` - Agreement safety
@@ -101,6 +104,9 @@ def timeSystemClaims := Aura.Proofs.TimeSystem.timeSystemClaims
 
 /-- Key derivation isolation proofs. -/
 def keyDerivationClaims := Aura.Proofs.KeyDerivation.keyDerivationClaims
+
+/-- Context isolation and bridge authorization proofs. -/
+def contextIsolationClaims := Aura.Proofs.ContextIsolation.contextIsolationClaims
 
 -- Consensus claims
 /-- Consensus agreement proofs. -/

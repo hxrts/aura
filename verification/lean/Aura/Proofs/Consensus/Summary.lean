@@ -101,7 +101,7 @@ open Aura.Proofs.Consensus.Frost (frostClaims FrostClaims frostOrchestratorClaim
 open Aura.Proofs.Consensus.Liveness (livenessClaims LivenessClaims)
 open Aura.Proofs.Consensus.Adversary (adversaryClaims AdversaryClaims)
 
-/-- Master bundle containing all consensus verification claims. -/
+/-- Main bundle containing all consensus verification claims. -/
 structure ConsensusClaims where
   agreement : AgreementClaims
   validity : ValidityClaims

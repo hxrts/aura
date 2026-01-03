@@ -257,3 +257,16 @@ CI jobs in `.github/workflows/ci.yml` include:
 2. `differential-testing`: runs the Lean oracle checks
 
 Refer to the workflow file for exact triggers.
+
+## Verification Coverage
+
+See the full verification coverage report:
+
+```bash
+just verification-coverage      # Markdown report
+just verification-coverage --json # JSON metrics
+```
+
+Current metrics include theorem counts per module and correspondence with Quint invariants.
+
+See `docs/998_verification_coverage.md` for the generated report.
