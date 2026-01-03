@@ -9,8 +9,8 @@ use std::sync::Arc;
 use async_lock::RwLock;
 
 use crate::signal_defs::{
-    CHAT_SIGNAL, CHAT_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME,
-    RECOVERY_SIGNAL, RECOVERY_SIGNAL_NAME,
+    CHAT_SIGNAL, CHAT_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME, RECOVERY_SIGNAL,
+    RECOVERY_SIGNAL_NAME,
 };
 use crate::views::{chat::ChatState, neighborhood::NeighborhoodState, recovery::RecoveryState};
 use crate::workflows::signals::emit_signal;

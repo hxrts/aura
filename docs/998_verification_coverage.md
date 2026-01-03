@@ -154,8 +154,9 @@ cargo test consensus                         # Consensus-specific tests
 
 ## Related Documentation
 
-- [CORRESPONDENCE.md](../verification/CORRESPONDENCE.md) - Detailed type/theorem mapping
-- [verification/lean/STYLE.md](../verification/lean/STYLE.md) - Lean coding conventions
+- [verification/README.md](../verification/README.md) - Verification overview and Quint-Lean correspondence map
+- [verification/lean/README.md](../verification/lean/README.md) - Lean module documentation
+- [verification/quint/README.md](../verification/quint/README.md) - Quint specification documentation
 - [verification/quint/STYLE.md](../verification/quint/STYLE.md) - Quint coding conventions
 - [docs/004_distributed_systems_contract.md](004_distributed_systems_contract.md) - System guarantees
 - [docs/104_consensus.md](104_consensus.md) - Consensus protocol design

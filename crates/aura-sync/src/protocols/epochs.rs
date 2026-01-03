@@ -171,8 +171,7 @@ impl EpochRotationCoordinator {
                 "epochs",
                 format!(
                     "Insufficient participants: {} < {}",
-                    participants_len,
-                    self.epoch_config.rotation_threshold
+                    participants_len, self.epoch_config.rotation_threshold
                 ),
             ));
         }

@@ -297,8 +297,7 @@ impl SnapshotProtocol {
                 "sync",
                 format!(
                     "insufficient approvals: {} < {}",
-                    approvals_len,
-                    self.config.approval_threshold
+                    approvals_len, self.config.approval_threshold
                 ),
             ));
         }

@@ -246,10 +246,7 @@ pub enum LeafRole {
 #[serde(tag = "variant", rename_all = "camelCase")]
 pub enum TreeOpKind {
     #[serde(rename = "addLeaf")]
-    AddLeaf {
-        public_key: Vec<u8>,
-        role: LeafRole,
-    },
+    AddLeaf { public_key: Vec<u8>, role: LeafRole },
     #[serde(rename = "removeLeaf")]
     RemoveLeaf { leaf_index: u64 },
     #[serde(rename = "updatePolicy")]
@@ -525,10 +522,11 @@ mod tests {
 
     #[test]
     fn test_byte_array32_hex_roundtrip() {
-        let bytes = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
-                     0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
-                     0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
-                     0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        let bytes = [
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+            0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x01, 0x02, 0x03, 0x04,
+            0x05, 0x06, 0x07, 0x08,
+        ];
         let arr = ByteArray32::new(bytes);
         let hex = arr.to_hex();
         let parsed = ByteArray32::from_hex(&hex).unwrap();
@@ -560,7 +558,9 @@ mod tests {
 
     #[test]
     fn test_namespace_json() {
-        let ns = LeanNamespace::Authority { id: ByteArray32::zero() };
+        let ns = LeanNamespace::Authority {
+            id: ByteArray32::zero(),
+        };
         let json = serde_json::to_string(&ns).unwrap();
         assert!(json.contains("authority"));
 
@@ -590,7 +590,9 @@ mod tests {
     #[test]
     fn test_journal_json() {
         let journal = LeanJournal {
-            namespace: LeanNamespace::Context { id: ByteArray32::zero() },
+            namespace: LeanNamespace::Context {
+                id: ByteArray32::zero(),
+            },
             facts: vec![],
         };
 

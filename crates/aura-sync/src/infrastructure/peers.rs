@@ -703,8 +703,7 @@ impl PeerManager {
             .count();
 
         PeerManagerStatistics {
-            total_tracked: u32::try_from(self.peers.len())
-                .expect("peer count exceeds u32::MAX"),
+            total_tracked: u32::try_from(self.peers.len()).expect("peer count exceeds u32::MAX"),
             connected_peers: u32::try_from(connected)
                 .expect("connected peer count exceeds u32::MAX"),
             available_peers: u32::try_from(available)

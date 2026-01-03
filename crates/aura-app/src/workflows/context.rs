@@ -178,7 +178,13 @@ pub async fn initialize_test_home(
     let context_id = ContextId::new_from_entropy(hash(format!("test-context:{name}").as_bytes()));
 
     // Create the home state
-    let home_state = HomeState::new(home_id, Some(name.to_string()), authority_id, timestamp_ms, context_id);
+    let home_state = HomeState::new(
+        home_id,
+        Some(name.to_string()),
+        authority_id,
+        timestamp_ms,
+        context_id,
+    );
 
     // Add to HOMES_SIGNAL
     let homes = {

@@ -245,10 +245,7 @@ fn journal_sync_peer_state_tracking() {
     ));
 
     // Set to synced
-    protocol.update_peer_state(
-        peer,
-        SyncState::synced_from_ms(1000, 42),
-    );
+    protocol.update_peer_state(peer, SyncState::synced_from_ms(1000, 42));
     match protocol.get_peer_state(&peer) {
         Some(SyncState::Synced { operations, .. }) => {
             assert_eq!(*operations, 42);

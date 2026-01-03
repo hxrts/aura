@@ -43,10 +43,9 @@ pub use lean_oracle::{
 // Full-fidelity types (v0.4.0+)
 #[cfg(feature = "lean")]
 pub use lean_types::{
-    AttestedOp, ByteArray32, ChannelCheckpoint, ChannelId, ChannelPolicy,
-    CommittedChannelEpochBump, ContextId, ConvergenceCert, DkgTranscriptCommit, Hash32,
-    LeafRole, LeanFact, LeanFactContent, LeanJournal, LeanJournalMergeResult,
-    LeanJournalReduceResult, LeanNamespace, LeanTimeStamp, LeakageFact, OrderTime,
-    ProposedChannelEpochBump, ProtocolRelationalFact, RelationalFact, ReversionFact,
-    RotateFact, SnapshotFact, TreeOpKind, AuthorityId,
+    AttestedOp, AuthorityId, ByteArray32, ChannelCheckpoint, ChannelId, ChannelPolicy,
+    CommittedChannelEpochBump, ContextId, ConvergenceCert, DkgTranscriptCommit, Hash32, LeafRole,
+    LeakageFact, LeanFact, LeanFactContent, LeanJournal, LeanJournalMergeResult,
+    LeanJournalReduceResult, LeanNamespace, LeanTimeStamp, OrderTime, ProposedChannelEpochBump,
+    ProtocolRelationalFact, RelationalFact, ReversionFact, RotateFact, SnapshotFact, TreeOpKind,
 };

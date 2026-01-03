@@ -206,7 +206,7 @@ fn test_order_time_total_ordering() -> LeanOracleResult<()> {
 #[ignore = "requires Lean oracle - run with just test-differential"]
 fn test_all_fact_content_variants() -> LeanOracleResult<()> {
     use aura_testkit::verification::lean_types::{
-        AttestedOp, LeafRole, RelationalFact, ProtocolRelationalFact, TreeOpKind,
+        AttestedOp, LeafRole, ProtocolRelationalFact, RelationalFact, TreeOpKind,
     };
 
     let oracle = LeanOracle::new()?;
@@ -317,7 +317,10 @@ fn test_all_timestamp_variants() -> LeanOracleResult<()> {
     let journal = LeanJournal::new(ns, facts);
     let result = oracle.verify_journal_reduce(&journal)?;
 
-    assert_eq!(result.count, 4, "All 4 timestamp variants should be processed");
+    assert_eq!(
+        result.count, 4,
+        "All 4 timestamp variants should be processed"
+    );
 
     Ok(())
 }
@@ -676,18 +679,10 @@ fn test_merge_associative() -> LeanOracleResult<()> {
     let r1_23 = oracle.verify_journal_merge(&j1, &r23.result)?;
 
     // Both should have same facts (as sets)
-    let ids_12_3: std::collections::HashSet<_> = r12_3
-        .result
-        .facts
-        .iter()
-        .map(|f| f.order.clone())
-        .collect();
-    let ids_1_23: std::collections::HashSet<_> = r1_23
-        .result
-        .facts
-        .iter()
-        .map(|f| f.order.clone())
-        .collect();
+    let ids_12_3: std::collections::HashSet<_> =
+        r12_3.result.facts.iter().map(|f| f.order.clone()).collect();
+    let ids_1_23: std::collections::HashSet<_> =
+        r1_23.result.facts.iter().map(|f| f.order.clone()).collect();
 
     assert_eq!(
         ids_12_3, ids_1_23,

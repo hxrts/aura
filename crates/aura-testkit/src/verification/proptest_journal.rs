@@ -71,9 +71,8 @@ pub fn order_clock_timestamp_strategy() -> impl Strategy<Value = LeanTimeStamp> 
 
 /// Strategy for Physical timestamps.
 pub fn physical_timestamp_strategy() -> impl Strategy<Value = LeanTimeStamp> {
-    (0u64..u64::MAX, prop::option::of(0u64..10000)).prop_map(|(ts_ms, uncertainty)| {
-        LeanTimeStamp::physical(ts_ms, uncertainty)
-    })
+    (0u64..u64::MAX, prop::option::of(0u64..10000))
+        .prop_map(|(ts_ms, uncertainty)| LeanTimeStamp::physical(ts_ms, uncertainty))
 }
 
 /// Strategy for Logical timestamps.
@@ -141,9 +140,11 @@ pub fn leaf_role_strategy() -> impl Strategy<Value = LeafRole> {
 /// Strategy for TreeOpKind.
 pub fn tree_op_kind_strategy() -> impl Strategy<Value = TreeOpKind> {
     prop_oneof![
-        (prop::collection::vec(any::<u8>(), 32..64), leaf_role_strategy()).prop_map(
-            |(public_key, role)| TreeOpKind::AddLeaf { public_key, role }
-        ),
+        (
+            prop::collection::vec(any::<u8>(), 32..64),
+            leaf_role_strategy()
+        )
+            .prop_map(|(public_key, role)| TreeOpKind::AddLeaf { public_key, role }),
         (0u64..1000).prop_map(|leaf_index| TreeOpKind::RemoveLeaf { leaf_index }),
         (1u64..10).prop_map(|threshold| TreeOpKind::UpdatePolicy { threshold }),
         Just(TreeOpKind::RotateEpoch),
@@ -178,13 +179,16 @@ pub fn attested_op_strategy() -> impl Strategy<Value = AttestedOp> {
 
 /// Strategy for ChannelCheckpoint.
 pub fn channel_checkpoint_strategy() -> impl Strategy<Value = ChannelCheckpoint> {
-    (byte_array32_strategy(), 0u64..10000, byte_array32_strategy()).prop_map(
-        |(channel_id, sequence, state_hash)| ChannelCheckpoint {
+    (
+        byte_array32_strategy(),
+        0u64..10000,
+        byte_array32_strategy(),
+    )
+        .prop_map(|(channel_id, sequence, state_hash)| ChannelCheckpoint {
             channel_id,
             sequence,
             state_hash,
-        },
-    )
+        })
 }
 
 /// Strategy for SnapshotFact.
@@ -297,14 +301,14 @@ pub fn rendezvous_receipt_content_strategy() -> impl Strategy<Value = LeanFactCo
         timestamp_strategy(),
         prop::collection::vec(any::<u8>(), 64..128),
     )
-        .prop_map(
-            |(envelope_id, authority_id, timestamp, signature)| LeanFactContent::RendezvousReceipt {
+        .prop_map(|(envelope_id, authority_id, timestamp, signature)| {
+            LeanFactContent::RendezvousReceipt {
                 envelope_id,
                 authority_id,
                 timestamp,
                 signature,
-            },
-        )
+            }
+        })
 }
 
 /// Strategy for any FactContent variant.
@@ -402,7 +406,10 @@ pub fn empty_journal_strategy() -> impl Strategy<Value = LeanJournal> {
 
 /// Strategy for generating a journal with random facts.
 pub fn journal_strategy() -> impl Strategy<Value = LeanJournal> {
-    (namespace_strategy(), prop::collection::vec(fact_strategy(), 0..10))
+    (
+        namespace_strategy(),
+        prop::collection::vec(fact_strategy(), 0..10),
+    )
         .prop_map(|(namespace, facts)| LeanJournal::new(namespace, facts))
 }
 
@@ -458,7 +465,8 @@ pub fn convertible_journal_strategy() -> impl Strategy<Value = LeanJournal> {
 }
 
 /// Strategy for generating two journals with different namespaces.
-pub fn different_namespace_journals_strategy() -> impl Strategy<Value = (LeanJournal, LeanJournal)> {
+pub fn different_namespace_journals_strategy() -> impl Strategy<Value = (LeanJournal, LeanJournal)>
+{
     (
         authority_namespace_strategy(),
         context_namespace_strategy(),
@@ -466,10 +474,7 @@ pub fn different_namespace_journals_strategy() -> impl Strategy<Value = (LeanJou
         prop::collection::vec(simple_fact_strategy(), 0..5),
     )
         .prop_map(|(ns1, ns2, facts1, facts2)| {
-            (
-                LeanJournal::new(ns1, facts1),
-                LeanJournal::new(ns2, facts2),
-            )
+            (LeanJournal::new(ns1, facts1), LeanJournal::new(ns2, facts2))
         })
 }
 
