@@ -16,8 +16,8 @@
 // Cryptographic Protocol Messages
 // ============================================================================
 
-use aura_core::identifiers::{AuthorityId, SessionId};
 use crate::facts::PublicKeyBytes;
+use aura_core::identifiers::{AuthorityId, SessionId};
 use serde::{Deserialize, Serialize};
 
 /// Unified cryptographic protocol message envelope

@@ -32,7 +32,7 @@ impl AmpChannelEffects for AuraEffectSystem {
             chan_epoch: 0,
             base_gen: 0,
             window,
-            ck_commitment: Default::default(),
+            ck_commitment: Hash32::default(),
             skip_window_override: Some(window),
         };
 

@@ -19,7 +19,7 @@ use std::sync::Arc;
 /// Cannot promote Owner (Owner is immutable).
 pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result<(), AuraError> {
     let mut core = app_core.write().await;
-    let mut homes = core.views().get_homes().clone();
+    let mut homes = core.views().get_homes();
 
     let home_state = homes
         .current_home_mut()
@@ -38,7 +38,7 @@ pub async fn grant_steward(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Res
     // Find and update the target resident
     let resident = home_state
         .resident_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {}", target)))?;
+        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {target}")))?;
 
     // Can't promote an Owner
     if matches!(resident.role, ResidentRole::Owner) {
@@ -65,7 +65,7 @@ pub async fn revoke_steward(
     target: &str,
 ) -> Result<(), AuraError> {
     let mut core = app_core.write().await;
-    let mut homes = core.views().get_homes().clone();
+    let mut homes = core.views().get_homes();
 
     let home_state = homes
         .current_home_mut()
@@ -84,7 +84,7 @@ pub async fn revoke_steward(
     // Find and update the target resident
     let resident = home_state
         .resident_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {}", target)))?;
+        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {target}")))?;
 
     // Can only demote Admin, not Owner
     if !matches!(resident.role, ResidentRole::Admin) {

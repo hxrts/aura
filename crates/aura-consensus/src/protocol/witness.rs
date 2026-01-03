@@ -45,10 +45,10 @@ impl ConsensusProtocol {
                 operation_bytes,
                 cached_commitments: _,
             } => {
-                let threshold = crate::core::state::ConsensusThreshold::new(self.config.threshold())
-                    .ok_or_else(|| AuraError::invalid("Consensus threshold must be >= 1"))?;
-                let witnesses: BTreeSet<_> =
-                    self.config.witness_set.iter().copied().collect();
+                let threshold =
+                    crate::core::state::ConsensusThreshold::new(self.config.threshold())
+                        .ok_or_else(|| AuraError::invalid("Consensus threshold must be >= 1"))?;
+                let witnesses: BTreeSet<_> = self.config.witness_set.iter().copied().collect();
                 let operation_id = OperationId::new_from_entropy(operation_hash.0);
 
                 // Initialize pure core state for invariant validation

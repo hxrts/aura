@@ -81,9 +81,7 @@ impl Prestate {
 
     /// Get the commitment for a specific authority
     pub fn get_authority_commitment(&self, authority_id: &AuthorityId) -> Option<Hash32> {
-        self.authority_commitments
-            .get(authority_id)
-            .copied()
+        self.authority_commitments.get(authority_id).copied()
     }
 
     /// Validate prestate invariants after deserialization.
@@ -117,8 +115,8 @@ impl Prestate {
         h.update(&prestate_hash.0);
 
         // Include serialized operation
-        let op_bytes =
-            serialization::to_vec(operation).map_err(|e| AuraError::serialization(e.to_string()))?;
+        let op_bytes = serialization::to_vec(operation)
+            .map_err(|e| AuraError::serialization(e.to_string()))?;
         h.update(&op_bytes);
 
         Ok(Hash32(h.finalize()))
@@ -233,11 +231,9 @@ mod tests {
         let context = Hash32([3u8; 32]);
 
         // Create two prestates with same data but different order
-        let prestate1 =
-            Prestate::new(vec![(auth1, commit1), (auth2, commit2)], context).unwrap();
+        let prestate1 = Prestate::new(vec![(auth1, commit1), (auth2, commit2)], context).unwrap();
 
-        let prestate2 =
-            Prestate::new(vec![(auth2, commit2), (auth1, commit1)], context).unwrap();
+        let prestate2 = Prestate::new(vec![(auth2, commit2), (auth1, commit1)], context).unwrap();
 
         // Hashes should be identical due to sorting
         assert_eq!(prestate1.compute_hash(), prestate2.compute_hash());

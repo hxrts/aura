@@ -6,7 +6,27 @@
 //!
 //! The oracle invokes the `aura_verifier` Lean executable with JSON input
 //! and parses the JSON output to compare against Rust implementations.
+//!
+//! ## Version History
+//!
+//! - 0.4.0: Full structured types (OrderTime, TimeStamp, FactContent, Journal with namespace)
+//! - 0.3.0: Previous version with simplified types
+//!
+//! ## Usage
+//!
+//! ```ignore
+//! use aura_testkit::verification::lean_oracle::LeanOracle;
+//! use aura_testkit::verification::lean_types::*;
+//!
+//! let oracle = LeanOracle::new()?;
+//! let j1 = LeanJournal::empty(LeanNamespace::Authority { id: ByteArray32::zero() });
+//! let j2 = LeanJournal::empty(LeanNamespace::Authority { id: ByteArray32::zero() });
+//! let result = oracle.verify_journal_merge(&j1, &j2)?;
+//! ```
 
+use super::lean_types::{
+    LeanJournal, LeanJournalMergeResult, LeanJournalReduceResult, LeanNamespace,
+};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
@@ -136,6 +156,23 @@ impl From<&str> for Ordering {
     }
 }
 
+// ============================================================================
+// Full-Fidelity Journal Types (v0.4.0+)
+// ============================================================================
+
+/// Full journal merge input with structured types.
+#[derive(Debug, Clone, Serialize)]
+pub struct FullJournalMergeInput {
+    pub journal1: LeanJournal,
+    pub journal2: LeanJournal,
+}
+
+/// Full journal reduce input with structured types.
+#[derive(Debug, Clone, Serialize)]
+pub struct FullJournalReduceInput {
+    pub journal: LeanJournal,
+}
+
 /// Lean Oracle for differential testing
 ///
 /// This struct wraps the Lean verifier executable and provides methods
@@ -174,7 +211,7 @@ impl LeanOracle {
 
         Ok(Self {
             lean_binary: path,
-            expected_version: "0.2.0".to_string(),
+            expected_version: "0.4.0".to_string(),
         })
     }
 
@@ -267,6 +304,62 @@ impl LeanOracle {
         Ok(Ordering::from(result.ordering.as_str()))
     }
 
+    // ========================================================================
+    // Full-Fidelity Journal Operations (v0.4.0+)
+    // ========================================================================
+
+    /// Verify full journal merge with namespace checking.
+    ///
+    /// This uses the structured Fact type with OrderTime, TimeStamp, and FactContent.
+    /// Journals must have the same namespace to merge successfully.
+    ///
+    /// Returns `Err(VerifierError)` with "namespace mismatch" if namespaces differ.
+    pub fn verify_journal_merge(
+        &self,
+        journal1: &LeanJournal,
+        journal2: &LeanJournal,
+    ) -> LeanOracleResult<LeanJournalMergeResult> {
+        let input = FullJournalMergeInput {
+            journal1: journal1.clone(),
+            journal2: journal2.clone(),
+        };
+        let input_json = serde_json::to_string(&input)?;
+        let output = self.run_command("journal-merge", &input_json)?;
+
+        // Check for namespace mismatch error
+        if let Ok(error_obj) = serde_json::from_str::<serde_json::Value>(&output) {
+            if error_obj.get("error").map(|e| e.as_str()) == Some(Some("namespace mismatch")) {
+                return Err(LeanOracleError::VerifierError {
+                    message: "namespace mismatch".to_string(),
+                });
+            }
+        }
+
+        self.parse_output(&output)
+    }
+
+    /// Verify full journal reduce with structured types.
+    ///
+    /// This uses the structured Fact type with OrderTime, TimeStamp, and FactContent.
+    pub fn verify_journal_reduce(
+        &self,
+        journal: &LeanJournal,
+    ) -> LeanOracleResult<LeanJournalReduceResult> {
+        let input = FullJournalReduceInput {
+            journal: journal.clone(),
+        };
+        let input_json = serde_json::to_string(&input)?;
+        let output = self.run_command("journal-reduce", &input_json)?;
+        self.parse_output(&output)
+    }
+
+    /// Check if two namespaces are equal.
+    ///
+    /// Helper method for determining if journals can be merged.
+    pub fn namespaces_equal(ns1: &LeanNamespace, ns2: &LeanNamespace) -> bool {
+        ns1 == ns2
+    }
+
     /// Run a command against the Lean verifier
     fn run_command(&self, command: &str, input: &str) -> LeanOracleResult<String> {
         let mut child = Command::new(&self.lean_binary)
@@ -327,7 +420,7 @@ mod tests {
     fn test_oracle_version() {
         let oracle = LeanOracle::new().expect("Failed to create oracle");
         let version = oracle.version().expect("Failed to get version");
-        assert_eq!(version.version, "0.2.0");
+        assert_eq!(version.version, "0.4.0");
         assert!(version.modules.contains(&"Journal".to_string()));
     }
 

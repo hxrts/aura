@@ -72,7 +72,9 @@ impl RendezvousManagerConfig {
             descriptor_validity: Duration::from_secs(300),
             auto_cleanup_enabled: true,
             cleanup_interval: Duration::from_secs(10),
-            default_transport_hints: vec![TransportHint::quic_direct("127.0.0.1:0").unwrap()],
+            default_transport_hints: vec![
+                TransportHint::quic_direct("127.0.0.1:0").expect("valid loopback address")
+            ],
             lan_discovery: LanDiscoveryConfig {
                 enabled: false, // Disabled by default in tests
                 ..Default::default()
@@ -145,20 +147,28 @@ impl RendezvousState {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if matches!(
-            self.status,
-            RendezvousManagerState::Running | RendezvousManagerState::Starting
-        ) && self.service.is_none()
-        {
+        // Running requires service; Stopping still has service while shutting down
+        if self.status == RendezvousManagerState::Running && self.service.is_none() {
             return Err("rendezvous running without service".to_string());
         }
+        // Service must be gone when fully stopped
         if self.status == RendezvousManagerState::Stopped && self.service.is_some() {
             return Err("rendezvous stopped with active service".to_string());
         }
-        if self.cleanup_task.is_some() && self.status != RendezvousManagerState::Running {
-            return Err("cleanup task active while not running".to_string());
+        // cleanup_task can exist during Running (active) and Stopping (being shut down)
+        if self.cleanup_task.is_some()
+            && !matches!(
+                self.status,
+                RendezvousManagerState::Running | RendezvousManagerState::Stopping
+            )
+        {
+            return Err("cleanup task active while not running or stopping".to_string());
         }
-        if self.lan_tasks.is_some() && self.lan_discovery.is_none() {
+        // lan_tasks can exist during Running and Stopping
+        if self.lan_tasks.is_some()
+            && self.lan_discovery.is_none()
+            && !matches!(self.status, RendezvousManagerState::Stopping)
+        {
             return Err("lan tasks active without discovery service".to_string());
         }
         Ok(())

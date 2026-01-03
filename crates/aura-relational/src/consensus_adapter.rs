@@ -161,8 +161,7 @@ mod tests {
     #[tokio::test]
     async fn test_consensus_adapter_delegation() {
         let auth = AuthorityId::new_from_entropy([54u8; 32]);
-        let prestate =
-            Prestate::new(vec![(auth, Hash32::default())], Hash32::default()).unwrap();
+        let prestate = Prestate::new(vec![(auth, Hash32::default())], Hash32::default()).unwrap();
 
         #[derive(serde::Serialize)]
         struct TestOp {

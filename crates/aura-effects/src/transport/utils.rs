@@ -42,7 +42,9 @@ impl AddressResolver {
 
         // Try parsing as IP address first
         if let Ok(ip) = host.parse::<IpAddr>() {
-            return Ok(TransportSocketAddr::from(std::net::SocketAddr::new(ip, port)));
+            return Ok(TransportSocketAddr::from(std::net::SocketAddr::new(
+                ip, port,
+            )));
         }
 
         // For hostnames, we'd need async resolution

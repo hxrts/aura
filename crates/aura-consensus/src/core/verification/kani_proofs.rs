@@ -154,7 +154,7 @@ fn any_valid_consensus_state() -> ConsensusState {
     let mut state = ConsensusState::new(
         ConsensusId(Hash32::new(kani::any::<[u8; 32]>())), // cid
         OperationId::new_from_entropy(kani::any::<[u8; 32]>()), // operation
-        Hash32::new(kani::any::<[u8; 32]>()), // prestate_hash
+        Hash32::new(kani::any::<[u8; 32]>()),              // prestate_hash
         threshold,
         witnesses.clone(),
         initiator,
@@ -474,9 +474,7 @@ fn threshold_met_matches_reference() {
     for p in &state.proposals {
         *counts.entry(&p.result_id).or_insert(0usize) += 1;
     }
-    let ref_threshold_met = counts
-        .values()
-        .any(|&c| c >= state.threshold.as_usize());
+    let ref_threshold_met = counts.values().any(|&c| c >= state.threshold.as_usize());
 
     // Production implementation
     let prod_threshold_met = state.threshold_met();

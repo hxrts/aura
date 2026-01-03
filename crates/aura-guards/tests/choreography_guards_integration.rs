@@ -40,11 +40,9 @@ impl aura_core::effects::guard::EffectInterpreter for MockEffectInterpreter {
         // Return appropriate success result
         match command {
             EffectCommand::GenerateNonce { .. } => Ok(EffectResult::Nonce(vec![1, 2, 3, 4])),
-            EffectCommand::ChargeBudget { amount, .. } => {
-                Ok(EffectResult::RemainingBudget(
-                    1000u32.saturating_sub(amount.value()),
-                ))
-            }
+            EffectCommand::ChargeBudget { amount, .. } => Ok(EffectResult::RemainingBudget(
+                1000u32.saturating_sub(amount.value()),
+            )),
             _ => Ok(EffectResult::Success),
         }
     }
@@ -256,18 +254,14 @@ async fn test_effect_error_handling() {
     impl aura_core::effects::guard::EffectInterpreter for FailingInterpreter {
         async fn execute(&self, command: EffectCommand) -> Result<EffectResult> {
             match command {
-                EffectCommand::ChargeBudget { amount, .. }
-                    if amount > FlowCost::new(1000) =>
-                {
+                EffectCommand::ChargeBudget { amount, .. } if amount > FlowCost::new(1000) => {
                     Err(AuraError::Internal {
                         message: "Insufficient budget".to_string(),
                     })
                 }
-                EffectCommand::ChargeBudget { amount, .. } => {
-                    Ok(EffectResult::RemainingBudget(
-                        1000u32.saturating_sub(amount.value()),
-                    ))
-                }
+                EffectCommand::ChargeBudget { amount, .. } => Ok(EffectResult::RemainingBudget(
+                    1000u32.saturating_sub(amount.value()),
+                )),
                 _ => Ok(EffectResult::Success),
             }
         }

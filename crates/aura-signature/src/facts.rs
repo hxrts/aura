@@ -624,6 +624,7 @@ impl FactDeltaReducer<VerifyFact, VerifyFactDelta> for VerifyFactReducer {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use aura_core::types::facts::FactDeltaReducer;
@@ -719,6 +720,7 @@ mod tests {
 
 /// Property tests for semilattice laws on VerifyFactDelta
 #[cfg(test)]
+#[allow(clippy::redundant_clone)]
 mod proptest_semilattice {
     use super::*;
     use aura_core::types::facts::FactDelta;

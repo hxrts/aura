@@ -1,5 +1,5 @@
 #![allow(warnings)]
-#![cfg(any())]  // Test file disabled - requires significant API updates to match refactored crates
+#![cfg(any())] // Test file disabled - requires significant API updates to match refactored crates
 #![allow(missing_docs)]
 //! Tests for effect handlers
 //!
@@ -274,10 +274,8 @@ async fn test_choreographic_effects() -> AuraResult<()> {
     let session_id = Uuid::from_u128(12345);
     let role1 = ChoreographicRole::new(device_id, RoleIndex::new(0).expect("role index"));
     let fixture2 = DeviceTestFixture::new(2);
-    let role2 = ChoreographicRole::new(
-        fixture2.device_id(),
-        RoleIndex::new(1).expect("role index"),
-    );
+    let role2 =
+        ChoreographicRole::new(fixture2.device_id(), RoleIndex::new(1).expect("role index"));
     let participants = vec![role1, role2];
 
     memory_handler

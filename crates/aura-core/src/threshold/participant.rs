@@ -4,6 +4,6 @@
 //! modules that should not depend on `crate::threshold` (e.g. low-level crypto).
 
 pub use crate::types::participants::{
-    NetworkAddress, NetworkAddressError, ParticipantEndpoint, ParticipantIdentity, SignerIndexError,
-    SigningParticipant,
+    NetworkAddress, NetworkAddressError, ParticipantEndpoint, ParticipantIdentity,
+    SignerIndexError, SigningParticipant,
 };

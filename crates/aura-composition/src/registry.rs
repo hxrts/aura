@@ -176,7 +176,8 @@ impl HandlerContext {
 
     /// Add effect-scoped metadata
     pub fn with_effect_metadata(mut self, effect: EffectType, value: String) -> Self {
-        self.metadata.insert(MetadataKey::Effect(effect.into()), value);
+        self.metadata
+            .insert(MetadataKey::Effect(effect.into()), value);
         self
     }
 

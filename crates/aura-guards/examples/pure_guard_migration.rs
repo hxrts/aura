@@ -35,8 +35,7 @@ impl Guard for DomainSpecificGuard {
         if operation_len > self.max_message_size {
             return GuardOutcome::denied(format!(
                 "Operation size {} exceeds limit {}",
-                operation_len,
-                self.max_message_size
+                operation_len, self.max_message_size
             ));
         }
 
@@ -137,9 +136,8 @@ async fn run_examples() -> AuraResult<()> {
         rng_seed: [0u8; 32],
     };
 
-    let request =
-        GuardRequest::new(authority, "send_message", FlowCost::new(100))
-            .with_context(b"Hello, World!".to_vec());
+    let request = GuardRequest::new(authority, "send_message", FlowCost::new(100))
+        .with_context(b"Hello, World!".to_vec());
 
     let mut interpreter = SimulationInterpreter::new();
     interpreter.set_budget(context, authority, FlowCost::new(1000));

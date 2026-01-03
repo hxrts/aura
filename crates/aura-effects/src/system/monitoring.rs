@@ -211,10 +211,7 @@ impl SystemEffects for MonitoringSystemHandler {
 
     async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {
         let mut info = HashMap::new();
-        info.insert(
-            "component".to_string(),
-            ComponentId::Monitoring.to_string(),
-        );
+        info.insert("component".to_string(), ComponentId::Monitoring.to_string());
         info.insert("max_alerts".to_string(), self.config.max_alerts.to_string());
         info.insert("status".to_string(), "operational".to_string());
         info.insert("total_health_checks".to_string(), "0".to_string());

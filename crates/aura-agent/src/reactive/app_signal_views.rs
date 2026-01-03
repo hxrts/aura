@@ -31,7 +31,9 @@ use tokio::sync::Mutex;
 use super::scheduler::ReactiveView;
 
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
-use aura_invitation::{InvitationFact, InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID};
+use aura_invitation::{
+    InvitationFact, InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID,
+};
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use aura_social::moderation::facts::{

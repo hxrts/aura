@@ -1,3 +1,6 @@
+//! End-to-end tests for reactive scheduler signals.
+#![allow(missing_docs)]
+
 use std::sync::Arc;
 use std::time::Duration;
 

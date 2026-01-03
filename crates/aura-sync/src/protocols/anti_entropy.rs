@@ -55,8 +55,8 @@ use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::scope::ResourceScope;
 use aura_core::types::Epoch;
 use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, FlowCost, Journal};
-use aura_guards::{BiscuitGuardEvaluator, GuardError};
 use aura_guards::types::CapabilityId;
+use aura_guards::{BiscuitGuardEvaluator, GuardError};
 
 // =============================================================================
 // Types
@@ -479,13 +479,9 @@ impl AntiEntropyProtocol {
             }
         } else {
             // No Biscuit authorization configured - deny access (authorization is required)
-            tracing::error!(
-                "Sync denied: no authorization configured for peer {}",
-                peer
-            );
+            tracing::error!("Sync denied: no authorization configured for peer {}", peer);
             Err(AuraError::permission_denied(format!(
-                "Authorization required for sync with peer {}. Configure Biscuit token manager and guard evaluator.",
-                peer
+                "Authorization required for sync with peer {peer}. Configure Biscuit token manager and guard evaluator."
             )))
         }
     }

@@ -58,7 +58,7 @@ fn reduce_context_emits_convergence_and_reversion_bindings() {
     assert!(state.bindings.iter().any(|binding| {
         matches!(
             binding.binding_type,
-            RelationalBindingType::Generic(ref name) if name == "convergence_cert"
+            RelationalBindingType::Generic(ref name) if name == "convergence-cert"
         ) && binding.context_id == ctx
             && binding.data == op_id.0.to_vec()
     }));
@@ -66,7 +66,7 @@ fn reduce_context_emits_convergence_and_reversion_bindings() {
     assert!(state.bindings.iter().any(|binding| {
         matches!(
             binding.binding_type,
-            RelationalBindingType::Generic(ref name) if name == "reversion_fact"
+            RelationalBindingType::Generic(ref name) if name == "reversion-fact"
         ) && binding.context_id == ctx
             && binding.data == op_id.0.to_vec()
     }));

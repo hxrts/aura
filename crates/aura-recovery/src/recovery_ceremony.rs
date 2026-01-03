@@ -1134,6 +1134,7 @@ mod tests {
     use proptest::prelude::*;
 
     /// Strategy to generate a valid ceremony state with configurable parameters
+    #[allow(dead_code)] // Reserved for future proptest expansion
     fn ceremony_state_strategy(
         num_guardians: usize,
         threshold: u16,
@@ -1371,8 +1372,8 @@ mod tests {
             };
 
             // Add approvals from guardians (bounded by actual guardian count)
-            for i in 0..num_approvals.min(num_guardians) {
-                let guardian = guardians[i];
+            for guardian in guardians.iter().take(num_approvals.min(num_guardians)) {
+                let guardian = *guardian;
                 let approval = RecoveryApproval {
                     ceremony_id: state.ceremony_id,
                     guardian,

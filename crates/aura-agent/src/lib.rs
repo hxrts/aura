@@ -13,6 +13,10 @@
 //! - Production, testing, and simulation execution modes
 //!
 //! ## Architecture Constraints
+
+#![allow(clippy::uninlined_format_args)] // Runtime code uses explicit format args for clarity
+#![allow(clippy::redundant_clone)] // Some clones needed for async context propagation
+#![allow(missing_docs)] // Runtime API documentation evolving with design
 //!
 //! This crate depends on:
 //! - **Layer 1-5**: All lower layers (core, domain crates, effects, protocols, features)

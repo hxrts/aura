@@ -133,11 +133,11 @@ impl From<IntentDispatchError> for IntentError {
             IntentDispatchError::Unauthorized { reason } => Self::Unauthorized { reason },
             IntentDispatchError::ValidationFailed { reason } => Self::ValidationFailed { reason },
             IntentDispatchError::FlowBudgetExceeded { reason } => Self::Unauthorized {
-                reason: format!("Flow budget exceeded: {}", reason),
+                reason: format!("Flow budget exceeded: {reason}"),
             },
             IntentDispatchError::JournalError { reason } => Self::JournalError { reason },
             IntentDispatchError::ReactiveError { reason } => Self::InternalError {
-                reason: format!("Reactive error: {}", reason),
+                reason: format!("Reactive error: {reason}"),
             },
             IntentDispatchError::InternalError { reason } => Self::InternalError { reason },
         }

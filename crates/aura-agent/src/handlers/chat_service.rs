@@ -372,7 +372,7 @@ impl ChatServiceApi {
             created_at,
             created_by: creator_id,
             members,
-            metadata: Default::default(),
+            metadata: std::collections::HashMap::default(),
         })
     }
 
@@ -544,7 +544,7 @@ impl ChatServiceApi {
                 joined_at: created_at_ts,
                 role: ChatRole::Admin,
             }],
-            metadata: Default::default(),
+            metadata: std::collections::HashMap::default(),
         }))
     }
 
@@ -616,7 +616,7 @@ impl ChatServiceApi {
                         joined_at: created_at_ts,
                         role: ChatRole::Admin,
                     }],
-                    metadata: Default::default(),
+                    metadata: std::collections::HashMap::default(),
                 }
             })
             .collect();
@@ -784,7 +784,7 @@ impl ChatServiceApi {
             message_type: aura_chat::types::MessageType::Edit,
             timestamp: TimeStamp::PhysicalClock(now),
             reply_to: None,
-            metadata: Default::default(),
+            metadata: std::collections::HashMap::default(),
         })
     }
 
@@ -883,7 +883,7 @@ impl ChatServiceApi {
             created_at: TimeStamp::PhysicalClock(now), // Would need to fetch actual created_at
             created_by: requester,                     // Would need to fetch actual creator
             members: vec![],                           // Would need to fetch actual members
-            metadata: Default::default(),
+            metadata: std::collections::HashMap::default(),
         })
     }
 }

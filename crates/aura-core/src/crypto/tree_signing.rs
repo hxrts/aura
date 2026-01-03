@@ -138,6 +138,7 @@ impl NonceToken {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 impl NonceToken {
     pub fn test_token() -> Self {
         use rand::SeedableRng;
@@ -951,6 +952,7 @@ impl SigningSession {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

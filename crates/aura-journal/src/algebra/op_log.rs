@@ -359,6 +359,7 @@ fn compute_operation_cid(op: &AttestedOp) -> Hash32 {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use aura_core::{LeafId, LeafNode, NodeIndex, TreeOp, TreeOpKind};

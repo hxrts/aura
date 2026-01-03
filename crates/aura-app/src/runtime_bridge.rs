@@ -198,6 +198,7 @@ pub struct LanPeerInfo {
 /// This is a minimal type for crossing the bridge boundary.
 /// Workflows convert this to view types with display fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(missing_docs)] // Field docs not required for bridge types
 pub enum InvitationBridgeType {
     /// Contact invitation with optional nickname
     Contact { nickname: Option<String> },
@@ -309,6 +310,7 @@ pub struct BridgeDeviceInfo {
 /// The primary implementation is in `aura-agent`, where `AuraAgent` implements
 /// this trait. For testing, mock implementations can be provided.
 #[async_trait]
+#[allow(missing_docs)] // Trait method docs evolving with API
 pub trait RuntimeBridge: Send + Sync {
     // =========================================================================
     // Identity & Authority

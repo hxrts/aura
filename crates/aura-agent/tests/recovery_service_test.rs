@@ -1,6 +1,7 @@
 //! Recovery Service Integration Tests
 //!
 //! Tests for the RecoveryServiceApi public API exposed through AuraAgent.
+#![allow(clippy::uninlined_format_args)] // Test code uses explicit format args for clarity
 
 use aura_agent::core::{AgentConfig, AuthorityContext};
 use aura_agent::handlers::RecoveryHandler;
@@ -301,7 +302,9 @@ async fn test_get_state_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Non-existent recovery should return None
-    let non_existent = recovery.get_state(&RecoveryId::new("non-existent-id")).await;
+    let non_existent = recovery
+        .get_state(&RecoveryId::new("non-existent-id"))
+        .await;
     assert!(non_existent.is_none());
     Ok(())
 }

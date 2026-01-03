@@ -62,7 +62,7 @@ pub struct SyncRequest {
     /// Facts already known (for delta sync and pagination)
     pub known_fact_ids: Vec<OrderTime>,
     /// Maximum facts to return per page
-    pub max_facts: usize,
+    pub max_facts: u32,
 }
 
 /// Synchronization response with facts
@@ -381,7 +381,7 @@ impl NamespacedSync {
         &self,
         facts: Vec<Fact>,
         known_fact_ids: &[OrderTime],
-        max_facts: usize,
+        max_facts: u32,
     ) -> SyncResponse {
         // Filter out already known facts
         let mut unknown_facts: Vec<Fact> = facts
@@ -393,6 +393,7 @@ impl NamespacedSync {
         unknown_facts.sort_by(|a, b| a.order.cmp(&b.order));
 
         let total_unknown = unknown_facts.len();
+        let max_facts = max_facts as usize;
 
         // Take the requested page size
         let page_facts: Vec<Fact> = unknown_facts.into_iter().take(max_facts).collect();
@@ -481,7 +482,7 @@ impl NamespacedAntiEntropy {
                 .iter_facts()
                 .map(|f| f.order.clone())
                 .collect(),
-            max_facts: self.config.protocols.anti_entropy.max_digest_entries as usize,
+            max_facts: self.config.protocols.anti_entropy.max_digest_entries,
         };
 
         // Send request to peer and get response

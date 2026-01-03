@@ -61,10 +61,10 @@ pub struct VerificationResult {
     pub valid: bool,
 
     /// Number of receipts verified
-    pub receipts_verified: usize,
+    pub receipts_verified: u32,
 
     /// Chain depth
-    pub chain_depth: usize,
+    pub chain_depth: u32,
 
     /// Devices in chain
     pub signers: Vec<DeviceId>,
@@ -81,7 +81,7 @@ pub struct VerificationResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiptVerificationConfig {
     /// Maximum chain depth to verify
-    pub max_chain_depth: usize,
+    pub max_chain_depth: u32,
 
     /// Require chronological ordering
     pub require_chronological: bool,
@@ -198,11 +198,14 @@ impl ReceiptVerificationProtocol {
             });
         }
 
-        if receipts.len() > self.config.max_chain_depth {
+        let receipts_len =
+            u32::try_from(receipts.len()).expect("receipt chain length exceeds u32::MAX");
+
+        if receipts_len > self.config.max_chain_depth {
             return Ok(VerificationResult {
                 valid: false,
                 receipts_verified: 0,
-                chain_depth: receipts.len(),
+                chain_depth: receipts_len,
                 signers: Vec::new(),
                 error: Some("Chain exceeds maximum depth".to_string()),
             });
@@ -214,10 +217,12 @@ impl ReceiptVerificationProtocol {
         for receipt in receipts {
             // Verify individual receipt cryptographically
             if !self.verify_receipt(receipt, crypto_effects).await? {
+                let signers_len =
+                    u32::try_from(signers.len()).expect("signer count exceeds u32::MAX");
                 return Ok(VerificationResult {
                     valid: false,
-                    receipts_verified: signers.len(),
-                    chain_depth: receipts.len(),
+                    receipts_verified: signers_len,
+                    chain_depth: receipts_len,
                     signers,
                     error: Some("Receipt signature verification failed".to_string()),
                 });
@@ -225,10 +230,12 @@ impl ReceiptVerificationProtocol {
 
             // Check chronological ordering
             if self.config.require_chronological && receipt.timestamp < last_timestamp {
+                let signers_len =
+                    u32::try_from(signers.len()).expect("signer count exceeds u32::MAX");
                 return Ok(VerificationResult {
                     valid: false,
-                    receipts_verified: signers.len(),
-                    chain_depth: receipts.len(),
+                    receipts_verified: signers_len,
+                    chain_depth: receipts_len,
                     signers,
                     error: Some("Receipts not in chronological order".to_string()),
                 });
@@ -237,10 +244,12 @@ impl ReceiptVerificationProtocol {
             // Verify chain linkage if this receipt references a previous one
             if let Some(ref prev) = receipt.previous_receipt {
                 if prev.timestamp > receipt.timestamp {
+                    let signers_len =
+                        u32::try_from(signers.len()).expect("signer count exceeds u32::MAX");
                     return Ok(VerificationResult {
                         valid: false,
-                        receipts_verified: signers.len(),
-                        chain_depth: receipts.len(),
+                        receipts_verified: signers_len,
+                        chain_depth: receipts_len,
                         signers,
                         error: Some("Previous receipt has later timestamp".to_string()),
                     });
@@ -248,10 +257,12 @@ impl ReceiptVerificationProtocol {
 
                 // Verify the previous receipt too
                 if !self.verify_receipt(prev, crypto_effects).await? {
+                    let signers_len =
+                        u32::try_from(signers.len()).expect("signer count exceeds u32::MAX");
                     return Ok(VerificationResult {
                         valid: false,
-                        receipts_verified: signers.len(),
-                        chain_depth: receipts.len(),
+                        receipts_verified: signers_len,
+                        chain_depth: receipts_len,
                         signers,
                         error: Some("Previous receipt verification failed".to_string()),
                     });
@@ -264,8 +275,8 @@ impl ReceiptVerificationProtocol {
 
         Ok(VerificationResult {
             valid: true,
-            receipts_verified: receipts.len(),
-            chain_depth: receipts.len(),
+            receipts_verified: receipts_len,
+            chain_depth: receipts_len,
             signers,
             error: None,
         })

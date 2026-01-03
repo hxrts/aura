@@ -19,7 +19,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorityJournalSyncConfig {
     /// Maximum facts to sync in one batch
-    pub batch_size: usize,
+    pub batch_size: u32,
     /// Sync timeout
     pub timeout: Duration,
     /// Retry policy for failed syncs
@@ -51,7 +51,7 @@ pub struct AuthorityJournalDigest {
     /// Authority ID this digest belongs to
     pub authority_id: AuthorityId,
     /// Number of facts in journal
-    pub fact_count: usize,
+    pub fact_count: u64,
     /// Merkle root of fact IDs
     pub fact_root: [u8; 32],
     /// Timestamp of digest creation
@@ -68,7 +68,7 @@ pub struct AuthoritySyncSession {
     /// Session ID
     pub session_id: String,
     /// Facts exchanged
-    pub facts_exchanged: usize,
+    pub facts_exchanged: u64,
 }
 
 /// Result of sync operation
@@ -223,7 +223,7 @@ impl AuthorityJournalSyncProtocol {
         timestamp: u64,
     ) -> AuthorityJournalDigest {
         let facts: Vec<&Fact> = journal.iter_facts().collect();
-        let fact_count = facts.len();
+        let fact_count = facts.len() as u64;
 
         let mut leaf_hashes: Vec<[u8; 32]> = facts
             .iter()
@@ -276,7 +276,7 @@ impl AuthorityJournalSyncProtocol {
         // Facts to send: present locally but not remotely
         let mut to_send: Vec<Fact> = local_set
             .difference(&remote_set)
-            .take(self.config.batch_size)
+            .take(self.config.batch_size as usize)
             .cloned()
             .collect();
 
@@ -284,7 +284,7 @@ impl AuthorityJournalSyncProtocol {
         let mut to_receive: Vec<OrderTime> = remote_set
             .difference(&local_set)
             .map(|f| f.order.clone())
-            .take(self.config.batch_size)
+            .take(self.config.batch_size as usize)
             .collect();
 
         to_send.shrink_to_fit();

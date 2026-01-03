@@ -3,11 +3,11 @@
 //! Provides identity verification logic for attested tree operations
 //! and authority management. Tracks authority lifecycle and organizational status.
 
+use crate::facts::{Confidence, PublicKeyBytes};
 use aura_core::{
     tree::{verify_attested_op, AttestedOp, BranchSigningKey},
     AccountId, AuraError, AuraResult, AuthorityId, Cap, Epoch, Hash32, Policy,
 };
-use crate::facts::{Confidence, PublicKeyBytes};
 use std::collections::HashMap;
 
 /// Type alias for identity operation results
@@ -98,8 +98,7 @@ impl AuthorityRegistry {
 
         let confidence = match authority_info.status {
             AuthorityStatus::Active => Confidence::MAX,
-            AuthorityStatus::Suspended => Confidence::new(0.5)
-                .unwrap_or(Confidence::MIN),
+            AuthorityStatus::Suspended => Confidence::new(0.5).unwrap_or(Confidence::MIN),
             AuthorityStatus::Revoked => Confidence::MIN,
         };
 
@@ -222,6 +221,7 @@ impl Default for AuthorityRegistry {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use aura_core::Cap;
@@ -282,7 +282,10 @@ mod tests {
 
         let result = verifier.verify_authority(authority_id).unwrap();
         assert!(!result.verified);
-        assert_eq!(result.confidence, Confidence::new(0.5).expect("valid confidence"));
+        assert_eq!(
+            result.confidence,
+            Confidence::new(0.5).expect("valid confidence")
+        );
     }
 
     #[test]
@@ -308,7 +311,10 @@ mod tests {
             .unwrap();
         let suspended = verifier.verify_authority(authority_id).unwrap();
         assert!(!suspended.verified);
-        assert_eq!(suspended.confidence, Confidence::new(0.5).expect("valid confidence"));
+        assert_eq!(
+            suspended.confidence,
+            Confidence::new(0.5).expect("valid confidence")
+        );
 
         verifier
             .update_authority_status(authority_id, AuthorityStatus::Revoked)

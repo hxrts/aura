@@ -569,7 +569,6 @@ fn parse_u64(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-
 fn parse_f64(key: &str, default: f64) -> f64 {
     env::var(key)
         .ok()

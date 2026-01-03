@@ -1,6 +1,7 @@
 //! Channel lifecycle and membership tests for AMP.
 //!
 //! Tests the channel types, membership facts, and domain fact serialization.
+#![allow(clippy::expect_used)] // Test code uses expect for clarity
 
 use aura_amp::channel::{ChannelMembershipFact, ChannelParticipantEvent};
 use aura_amp::config::AmpRuntimeConfig;

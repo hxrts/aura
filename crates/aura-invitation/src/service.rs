@@ -273,10 +273,9 @@ impl InvitationService {
     ) -> GuardOutcome {
         let policy = InvitationPolicy::for_snapshot(&self.config, snapshot);
         // Check base capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &CapabilityId::from(costs::CAP_INVITATION_SEND),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_SEND))
+        {
             return outcome;
         }
 
@@ -324,7 +323,7 @@ impl InvitationService {
             invitation_id: invitation_id.clone(),
             sender_id: snapshot.authority_id,
             receiver_id,
-            invitation_type: invitation_type.clone(),
+            invitation_type,
             sent_at: PhysicalTime {
                 ts_ms: snapshot.now_ms,
                 uncertainty: None,
@@ -368,10 +367,9 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &CapabilityId::from(costs::CAP_INVITATION_ACCEPT),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_ACCEPT))
+        {
             return outcome;
         }
 
@@ -418,10 +416,9 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &CapabilityId::from(costs::CAP_INVITATION_DECLINE),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_DECLINE))
+        {
             return outcome;
         }
 
@@ -468,10 +465,9 @@ impl InvitationService {
         invitation_id: &InvitationId,
     ) -> GuardOutcome {
         // Check capability
-        if let Some(outcome) = check_capability(
-            snapshot,
-            &CapabilityId::from(costs::CAP_INVITATION_CANCEL),
-        ) {
+        if let Some(outcome) =
+            check_capability(snapshot, &CapabilityId::from(costs::CAP_INVITATION_CANCEL))
+        {
             return outcome;
         }
 

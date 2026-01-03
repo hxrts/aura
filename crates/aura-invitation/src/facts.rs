@@ -36,6 +36,7 @@
 //! registry.register::<InvitationFact>("invitation", Box::new(InvitationFactReducer));
 //! ```
 
+use crate::InvitationType;
 use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId, InvitationId};
 use aura_core::threshold::AgreementMode;
 use aura_core::time::PhysicalTime;
@@ -45,7 +46,6 @@ use aura_journal::{
 };
 use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
-use crate::InvitationType;
 
 /// Type identifier for invitation facts
 pub const INVITATION_FACT_TYPE_ID: &str = "invitation";
@@ -66,6 +66,7 @@ pub struct InvitationFactKey {
     schema_version = 1,
     context_fn = "context_id_or_default"
 )]
+#[allow(clippy::large_enum_variant)] // Sent variant contains rich invitation data
 pub enum InvitationFact {
     /// Invitation sent from one authority to another
     Sent {

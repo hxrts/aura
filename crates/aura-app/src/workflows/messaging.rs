@@ -50,7 +50,7 @@ async fn messaging_backend(app_core: &Arc<RwLock<AppCore>>) -> MessagingBackend 
 
 /// Create a deterministic ChannelId from a DM channel descriptor string
 fn dm_channel_id(target: &str) -> ChannelId {
-    let descriptor = format!("dm:{}", target);
+    let descriptor = format!("dm:{target}");
     ChannelId::from_bytes(hash(descriptor.as_bytes()))
 }
 
@@ -129,7 +129,7 @@ pub async fn send_direct_message(
             let dm_channel = Channel {
                 id: channel_id,
                 name: format!("DM with {}", &target[..8.min(target.len())]),
-                topic: Some(format!("Direct messages with {}", target)),
+                topic: Some(format!("Direct messages with {target}")),
                 channel_type: ChannelType::DirectMessage,
                 unread_count: 0,
                 is_dm: true,
@@ -147,7 +147,7 @@ pub async fn send_direct_message(
         // Create the message with deterministic ID
         // Use AuthorityId::new_from_entropy([1u8; 32]) for self - in production this would be the actual user's ID
         let message = Message {
-            id: format!("msg-{}-{}", channel_id, now),
+            id: format!("msg-{channel_id}-{now}"),
             channel_id,
             sender_id: AuthorityId::new_from_entropy([1u8; 32]),
             sender_name: "You".to_string(),
@@ -199,7 +199,7 @@ pub async fn create_channel(
         channel_id = runtime
             .amp_create_channel(params)
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to create channel: {}", e)))?;
+            .map_err(|e| AuraError::agent(format!("Failed to create channel: {e}")))?;
 
         runtime
             .amp_join_channel(ChannelJoinParams {
@@ -208,7 +208,7 @@ pub async fn create_channel(
                 participant: runtime.authority_id(),
             })
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to join channel: {}", e)))?;
+            .map_err(|e| AuraError::agent(format!("Failed to join channel: {e}")))?;
 
         let fact = ChatFact::channel_created_ms(
             context_id,
@@ -224,7 +224,7 @@ pub async fn create_channel(
         runtime
             .commit_relational_facts(&[fact])
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to persist channel: {}", e)))?;
+            .map_err(|e| AuraError::agent(format!("Failed to persist channel: {e}")))?;
 
         // Rotate into a finalized AMP epoch when policy allows.
         if let Err(e) = runtime
@@ -273,8 +273,7 @@ pub async fn create_channel(
             normalize_channel_threshold(threshold_k, total_n)
         };
         let invitation_message = Some(format!(
-            "Group threshold: {}-of-{} (keys rotate after everyone accepts)",
-            threshold_k, total_n
+            "Group threshold: {threshold_k}-of-{total_n} (keys rotate after everyone accepts)"
         ));
 
         for member in members {
@@ -315,7 +314,7 @@ pub async fn join_channel(app_core: &Arc<RwLock<AppCore>>, channel: &str) -> Res
             participant: runtime.authority_id(),
         })
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to join channel: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to join channel: {e}")))?;
 
     Ok(())
 }
@@ -337,7 +336,7 @@ pub async fn leave_channel(
             participant: runtime.authority_id(),
         })
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to leave channel: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to leave channel: {e}")))?;
 
     Ok(())
 }
@@ -362,7 +361,7 @@ pub async fn close_channel(
             channel: channel_id,
         })
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to close channel: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to close channel: {e}")))?;
 
     let fact =
         ChatFact::channel_closed_ms(context_id, channel_id, timestamp_ms, runtime.authority_id())
@@ -371,7 +370,7 @@ pub async fn close_channel(
     runtime
         .commit_relational_facts(&[fact])
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to persist channel close: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to persist channel close: {e}")))?;
 
     Ok(())
 }
@@ -394,7 +393,7 @@ pub async fn set_topic(
     runtime
         .channel_set_topic(context_id, channel_id, text.to_string(), timestamp_ms)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to set channel topic: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to set channel topic: {e}")))?;
 
     Ok(())
 }
@@ -430,7 +429,7 @@ pub async fn send_message_ref(
         ChannelRef::Name(name) => name.clone(),
     };
 
-    let message_id = format!("msg-{}-{}", channel_id, timestamp_ms);
+    let message_id = format!("msg-{channel_id}-{timestamp_ms}");
     let backend = messaging_backend(app_core).await;
     let sender_id = if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
@@ -445,7 +444,7 @@ pub async fn send_message_ref(
                 reply_to: None,
             })
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to send message: {}", e)))?;
+            .map_err(|e| AuraError::agent(format!("Failed to send message: {e}")))?;
 
         let fact = ChatFact::message_sent_sealed_ms(
             context_id,
@@ -462,7 +461,7 @@ pub async fn send_message_ref(
         runtime
             .commit_relational_facts(&[fact])
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to persist message: {}", e)))?;
+            .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
 
         runtime.authority_id()
     } else {
@@ -550,7 +549,7 @@ pub async fn start_direct_chat(
     let dm_channel = Channel {
         id: channel_id,
         name: contact_name,
-        topic: Some(format!("Direct messages with {}", contact_id)),
+        topic: Some(format!("Direct messages with {contact_id}")),
         channel_type: ChannelType::DirectMessage,
         unread_count: 0,
         is_dm: true,
@@ -617,7 +616,7 @@ pub async fn send_action(
     action: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    let content = format!("* You {}", action);
+    let content = format!("* You {action}");
     send_message(app_core, channel_id_str, &content, timestamp_ms).await
 }
 

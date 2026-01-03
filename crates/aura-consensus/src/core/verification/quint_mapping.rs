@@ -42,15 +42,13 @@ fn parse_consensus_id(value: &str) -> Result<ConsensusId> {
 }
 
 fn parse_authority_id(value: &str) -> Result<AuthorityId> {
-    AuthorityId::from_str(value).or_else(|_| {
-        Ok(AuthorityId::new_from_entropy(hash::hash(value.as_bytes())))
-    })
+    AuthorityId::from_str(value)
+        .or_else(|_| Ok(AuthorityId::new_from_entropy(hash::hash(value.as_bytes()))))
 }
 
 fn parse_operation_id(value: &str) -> Result<OperationId> {
-    OperationId::from_str(value).or_else(|_| {
-        Ok(OperationId::new_from_entropy(hash::hash(value.as_bytes())))
-    })
+    OperationId::from_str(value)
+        .or_else(|_| Ok(OperationId::new_from_entropy(hash::hash(value.as_bytes()))))
 }
 
 impl QuintMappable for ConsensusPhase {
@@ -338,12 +336,10 @@ impl QuintMappable for ConsensusState {
             .get("threshold")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| aura_core::AuraError::invalid("missing threshold"))?;
-        let threshold_value = u16::try_from(threshold_value).map_err(|_| {
-            aura_core::AuraError::invalid("threshold must fit in u16")
-        })?;
-        let threshold = ConsensusThreshold::new(threshold_value).ok_or_else(|| {
-            aura_core::AuraError::invalid("threshold must be >= 1")
-        })?;
+        let threshold_value = u16::try_from(threshold_value)
+            .map_err(|_| aura_core::AuraError::invalid("threshold must fit in u16"))?;
+        let threshold = ConsensusThreshold::new(threshold_value)
+            .ok_or_else(|| aura_core::AuraError::invalid("threshold must be >= 1"))?;
 
         let witnesses: std::collections::BTreeSet<AuthorityId> = obj
             .get("witnesses")
@@ -352,8 +348,7 @@ impl QuintMappable for ConsensusState {
             .iter()
             .filter_map(|v| v.as_str())
             .map(parse_authority_id)
-            .collect::<Result<_>>()?;
-            .collect();
+            .collect::<Result<_, _>>()?;
 
         let initiator = obj
             .get("initiator")

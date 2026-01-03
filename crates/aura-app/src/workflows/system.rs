@@ -76,8 +76,7 @@ pub fn parse_upgrade_kind(s: &str) -> Result<UpgradeKindValue, AuraError> {
         "soft" => Ok(UpgradeKindValue::Soft),
         "hard" => Ok(UpgradeKindValue::Hard),
         _ => Err(AuraError::invalid(format!(
-            "Invalid upgrade kind: '{}'. Use 'soft' or 'hard'",
-            s
+            "Invalid upgrade kind: '{s}'. Use 'soft' or 'hard'"
         ))),
     }
 }

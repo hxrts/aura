@@ -21,8 +21,8 @@ use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::FlowCost;
 use aura_core::Receipt;
-use aura_invitation::guards::GuardSnapshot;
 use aura_guards::types::CapabilityId;
+use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
 use aura_journal::fact::{FactContent, RelationalFact};
@@ -294,7 +294,8 @@ impl InvitationHandler {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         // Generate unique invitation ID
-        let invitation_id = InvitationId::new(format!("inv-{}", effects.random_uuid().await.simple()));
+        let invitation_id =
+            InvitationId::new(format!("inv-{}", effects.random_uuid().await.simple()));
         let current_time = effects.current_timestamp().await.unwrap_or(0);
         let expires_at = expires_in_ms.map(|ms| current_time + ms);
 
@@ -486,7 +487,10 @@ impl InvitationHandler {
                 "content-type".to_string(),
                 "application/aura-device-enrollment-acceptance".to_string(),
             );
-            metadata.insert("ceremony-id".to_string(), enrollment.ceremony_id.to_string());
+            metadata.insert(
+                "ceremony-id".to_string(),
+                enrollment.ceremony_id.to_string(),
+            );
             metadata.insert(
                 "acceptor-device-id".to_string(),
                 enrollment.device_id.to_string(),
@@ -602,7 +606,10 @@ impl InvitationHandler {
             }
 
             // Only treat it as a "contact invitation" if the type is Contact.
-            if !matches!(invitation_type, aura_invitation::InvitationType::Contact { .. }) {
+            if !matches!(
+                invitation_type,
+                aura_invitation::InvitationType::Contact { .. }
+            ) {
                 return Ok(None);
             }
 

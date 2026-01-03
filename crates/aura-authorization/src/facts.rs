@@ -13,8 +13,8 @@ use aura_core::types::facts::{
     FactDelta, FactDeltaReducer, FactEncoding, FactEnvelope, FactError, FactTypeId,
     MAX_FACT_PAYLOAD_BYTES,
 };
-use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use aura_core::types::Epoch;
+use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use aura_core::Cap;
 use serde::{Deserialize, Serialize};
 
@@ -340,8 +340,8 @@ impl FactDeltaReducer<WotFact, WotFactDelta> for WotFactReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::types::facts::FactDeltaReducer;
     use aura_core::scope::ContextOp;
+    use aura_core::types::facts::FactDeltaReducer;
 
     fn pt(ts_ms: u64) -> PhysicalTime {
         PhysicalTime {

@@ -382,8 +382,9 @@ fn test_missing_capability_blocks_connect() {
 
     // Snapshot WITHOUT connect capability
     let mut snapshot = test_snapshot(alice, context);
-    snapshot.capabilities =
-        vec![aura_guards::types::CapabilityId::from(guards::CAP_RENDEZVOUS_PUBLISH)]; // Only publish
+    snapshot.capabilities = vec![aura_guards::types::CapabilityId::from(
+        guards::CAP_RENDEZVOUS_PUBLISH,
+    )]; // Only publish
 
     let result =
         service.prepare_establish_channel(&snapshot, context, bob, &psk, 1000, &bob_descriptor);

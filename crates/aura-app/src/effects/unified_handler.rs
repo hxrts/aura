@@ -343,7 +343,7 @@ impl QueryEffects for UnifiedHandler {
     }
 
     async fn invalidate(&self, predicate: &FactPredicate) {
-        self.query.invalidate(predicate).await
+        self.query.invalidate(predicate).await;
     }
 
     async fn query_with_isolation<Q: Query>(
@@ -429,7 +429,7 @@ impl ReactiveEffects for UnifiedHandler {
     }
 
     async fn invalidate_queries(&self, changed: &FactPredicate) {
-        self.reactive.invalidate_queries(changed).await
+        self.reactive.invalidate_queries(changed).await;
     }
 }
 

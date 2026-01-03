@@ -8,9 +8,9 @@ use crate::descriptor::{DescriptorBuilder, SelectedTransport, TransportSelector}
 use crate::facts::{RendezvousDescriptor, RendezvousFact, TransportHint};
 use crate::protocol::{guards, HandshakeComplete, HandshakeInit, NoiseHandshake};
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::FlowCost;
 use aura_core::{AuraError, AuraResult};
 use aura_guards::types;
-use aura_core::FlowCost;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 

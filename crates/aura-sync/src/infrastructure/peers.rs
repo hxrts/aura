@@ -56,8 +56,8 @@ fn test_time_now() -> PhysicalTime {
         uncertainty: None,
     }
 }
-use aura_guards::BiscuitGuardEvaluator;
 use aura_guards::types::CapabilityId;
+use aura_guards::BiscuitGuardEvaluator;
 
 // =============================================================================
 // Configuration
@@ -67,7 +67,7 @@ use aura_guards::types::CapabilityId;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerDiscoveryConfig {
     /// Maximum number of concurrent sync sessions per peer
-    pub max_concurrent_sessions: usize,
+    pub max_concurrent_sessions: u32,
 
     /// Timeout for peer discovery operations
     pub discovery_timeout: Duration,
@@ -80,7 +80,7 @@ pub struct PeerDiscoveryConfig {
     pub min_trust_level: u8,
 
     /// Maximum number of peers to track
-    pub max_tracked_peers: usize,
+    pub max_tracked_peers: u32,
 
     /// Enable capability-aware peer filtering
     pub capability_filtering: bool,
@@ -451,7 +451,8 @@ impl PeerManager {
     ///
     /// **Time System**: Uses `PhysicalTime` for timestamps.
     pub fn add_peer(&mut self, device_id: DeviceId, now: &PhysicalTime) -> SyncResult<()> {
-        if self.peers.len() >= self.config.max_tracked_peers {
+        let max_tracked_peers = self.config.max_tracked_peers as usize;
+        if self.peers.len() >= max_tracked_peers {
             return Err(sync_config_error("sync", "Maximum tracked peers exceeded"));
         }
 
@@ -619,10 +620,11 @@ impl PeerManager {
     ///
     /// Returns up to `count` peers sorted by score (highest first)
     pub fn select_sync_peers(&self, count: usize) -> Vec<DeviceId> {
+        let max_concurrent_sessions = self.config.max_concurrent_sessions as usize;
         let mut scored_peers: Vec<_> = self
             .peers
             .values()
-            .filter(|p| p.metadata.is_available(self.config.max_concurrent_sessions))
+            .filter(|p| p.metadata.is_available(max_concurrent_sessions))
             .filter(|p| !self.config.capability_filtering || p.metadata.has_sync_capability)
             .filter(|p| p.metadata.trust_level >= self.config.min_trust_level)
             .map(|p| (p.metadata.device_id, p.metadata.calculate_score()))
@@ -640,9 +642,10 @@ impl PeerManager {
 
     /// Check if a peer is available for sync
     pub fn is_peer_available(&self, device_id: &DeviceId) -> bool {
+        let max_concurrent_sessions = self.config.max_concurrent_sessions as usize;
         self.peers
             .get(device_id)
-            .map(|p| p.metadata.is_available(self.config.max_concurrent_sessions))
+            .map(|p| p.metadata.is_available(max_concurrent_sessions))
             .unwrap_or(false)
     }
 
@@ -680,6 +683,7 @@ impl PeerManager {
 
     /// Get statistics about tracked peers
     pub fn statistics(&self) -> PeerManagerStatistics {
+        let max_concurrent_sessions = self.config.max_concurrent_sessions as usize;
         let connected = self
             .peers
             .values()
@@ -689,7 +693,7 @@ impl PeerManager {
         let available = self
             .peers
             .values()
-            .filter(|p| p.metadata.is_available(self.config.max_concurrent_sessions))
+            .filter(|p| p.metadata.is_available(max_concurrent_sessions))
             .count();
 
         let with_capability = self
@@ -699,15 +703,21 @@ impl PeerManager {
             .count();
 
         PeerManagerStatistics {
-            total_tracked: self.peers.len(),
-            connected_peers: connected,
-            available_peers: available,
-            peers_with_sync_capability: with_capability,
-            total_active_sessions: self
-                .peers
-                .values()
-                .map(|p| p.metadata.active_sessions)
-                .sum(),
+            total_tracked: u32::try_from(self.peers.len())
+                .expect("peer count exceeds u32::MAX"),
+            connected_peers: u32::try_from(connected)
+                .expect("connected peer count exceeds u32::MAX"),
+            available_peers: u32::try_from(available)
+                .expect("available peer count exceeds u32::MAX"),
+            peers_with_sync_capability: u32::try_from(with_capability)
+                .expect("sync-capable peer count exceeds u32::MAX"),
+            total_active_sessions: u32::try_from(
+                self.peers
+                    .values()
+                    .map(|p| p.metadata.active_sessions)
+                    .sum::<usize>(),
+            )
+            .expect("active session count exceeds u32::MAX"),
         }
     }
 
@@ -870,19 +880,19 @@ impl PeerManager {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PeerManagerStatistics {
     /// Total number of tracked peers
-    pub total_tracked: usize,
+    pub total_tracked: u32,
 
     /// Number of connected peers
-    pub connected_peers: usize,
+    pub connected_peers: u32,
 
     /// Number of peers available for new sessions
-    pub available_peers: usize,
+    pub available_peers: u32,
 
     /// Number of peers with sync capability
-    pub peers_with_sync_capability: usize,
+    pub peers_with_sync_capability: u32,
 
     /// Total active sync sessions across all peers
-    pub total_active_sessions: usize,
+    pub total_active_sessions: u32,
 }
 
 // =============================================================================

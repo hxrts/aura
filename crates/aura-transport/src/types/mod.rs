@@ -17,9 +17,10 @@
 
 pub mod config;
 pub mod connection;
+/// Endpoint types and configuration.
 pub mod endpoint;
-pub mod ids;
 pub mod envelope;
+pub mod ids;
 
 // Public API - curated exports only
 pub use config::{PrivacyLevel, TransportConfig};

@@ -5,7 +5,11 @@ use crate::types::{Result, SimulatorContext, SimulatorOperation};
 /// Handler trait for simulator operations (internal use only)
 trait SimulatorHandler: Send + Sync {
     /// Handle a simulator operation
-    fn handle(&self, operation: SimulatorOperation, context: &SimulatorContext) -> Result<serde_json::Value>;
+    fn handle(
+        &self,
+        operation: SimulatorOperation,
+        context: &SimulatorContext,
+    ) -> Result<serde_json::Value>;
 
     /// Get the name of this handler
     fn name(&self) -> &str;

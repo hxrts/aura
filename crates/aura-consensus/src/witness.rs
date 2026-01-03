@@ -91,6 +91,11 @@ impl NonEmptyWitnessSet {
         self.witnesses.len()
     }
 
+    /// Always returns false since this set is guaranteed non-empty.
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     /// Check if we have sufficient witnesses for the threshold
     pub fn has_quorum(&self) -> bool {
         self.witnesses.len() >= self.threshold as usize

@@ -1,6 +1,7 @@
 //! Delta Application Tests
 //!
 //! These tests verify the ViewReduction → Delta → View pattern:
+#![allow(clippy::uninlined_format_args)] // Test code uses explicit format args for clarity
 //! - ViewReduction correctly transforms facts into deltas
 //! - ViewAdapter bridges ReactiveView and delta patterns
 //! - Deltas are applied correctly to view state

@@ -108,12 +108,7 @@ impl Envelope {
         context_id: ContextId,
         capability_hint: Option<String>,
     ) -> Self {
-        Self::new_scoped_with_id(
-            MessageId::new(),
-            payload,
-            context_id,
-            capability_hint,
-        )
+        Self::new_scoped_with_id(MessageId::new(), payload, context_id, capability_hint)
     }
 
     /// Create context-scoped envelope with specified message ID

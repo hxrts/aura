@@ -1,3 +1,7 @@
+//! Transport types round-trip tests.
+
+#![allow(clippy::expect_used, missing_docs)]
+
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{OrderTime, TimeStamp};
 use aura_core::util::serialization::{from_slice, to_vec};
@@ -16,7 +20,10 @@ fn envelope_round_trip() {
     let decoded: Envelope = from_slice(&encoded).expect("deserialize envelope");
 
     assert_eq!(decoded.message_id, envelope.message_id);
-    assert!(matches!(decoded.header.frame_type, FrameType::ContextScoped));
+    assert!(matches!(
+        decoded.header.frame_type,
+        FrameType::ContextScoped
+    ));
     assert!(matches!(
         decoded.header.privacy_level,
         PrivacyLevel::ContextScoped

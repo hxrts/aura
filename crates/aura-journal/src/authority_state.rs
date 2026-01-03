@@ -150,7 +150,6 @@ impl AuthorityState {
         sig_array.copy_from_slice(signature_bytes);
         Ok(Signature::from_bytes(&sig_array))
     }
-
 }
 
 /// Derived authority implementation

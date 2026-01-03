@@ -460,7 +460,8 @@ impl SessionOperations {
                 continue;
             }
 
-            self.enforce_guard(effects, "session:invite", FlowCost::new(50)).await?;
+            self.enforce_guard(effects, "session:invite", FlowCost::new(50))
+                .await?;
 
             let invitation = ParticipantInvitation {
                 session_id: request.session_id.clone(),

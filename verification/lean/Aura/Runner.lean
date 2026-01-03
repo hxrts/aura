@@ -1,3 +1,11 @@
+import Lean.Data.Json
+import Aura.Types
+import Aura.Journal
+import Aura.FlowBudget
+import Aura.TimeSystem
+import Aura.Consensus.Types
+import Aura.Consensus.Evidence
+
 /-!
 # Aura Verification Runner
 
@@ -21,12 +29,12 @@ Each command reads a JSON object from stdin and writes a JSON result to stdout.
 ### Commands
 
 - `journal-merge`: Merge two journals
-  - Input: `{"journal1": [...], "journal2": [...]}`
-  - Output: `{"result": [...], "count": n}`
+  - Input: `{"journal1": {...}, "journal2": {...}}`
+  - Output: `{"result": {...}, "count": n}` or `{"error": "namespace mismatch"}`
 
 - `journal-reduce`: Reduce journal to canonical form
-  - Input: `{"journal": [...]}`
-  - Output: `{"result": [...], "count": n}`
+  - Input: `{"journal": {...}}`
+  - Output: `{"result": {...}, "count": n}`
 
 - `flow-charge`: Charge cost against budget
   - Input: `{"budget": n, "cost": n}`
@@ -49,22 +57,15 @@ Each command reads a JSON object from stdin and writes a JSON result to stdout.
   - Output: `{"result": {...}, "votes_count": n, "equivocators_count": n}`
 
 - `version`: Show version and available modules
-  - Output: `{"version": "0.3.0", "modules": [...]}`
+  - Output: `{"version": "0.4.0", "modules": [...]}`
 -/
-
-import Lean.Data.Json
-import Aura.Journal
-import Aura.FlowBudget
-import Aura.TimeSystem
-import Aura.Consensus.Types
-import Aura.Consensus.Evidence
 
 namespace Aura.Runner
 
-open Lean
-open Aura.Journal (Fact FactId Journal merge reduce)
+open Lean (Json ToJson FromJson)
+open Aura.Journal (Fact Journal merge merge_safe reduce)
 open Aura.FlowBudget (Budget charge)
-open Aura.TimeSystem (TimeStamp Policy Ordering compare)
+open Aura.TimeSystem (Policy Ordering)
 open Aura.Consensus.Types
 open Aura.Consensus.Evidence (mergeEvidence)
 
@@ -74,41 +75,19 @@ open Aura.Consensus.Evidence (mergeEvidence)
 Version string for compatibility checking.
 -/
 
-/-- Runner version for compatibility checking. -/
-def version : String := "0.3.0"
+/-- Runner version for compatibility checking.
+    0.4.0: Updated to structured Fact/Journal with namespace support. -/
+def version : String := "0.4.0"
 
 /-!
 ## JSON Serialization
 
 Bidirectional JSON conversion for all model types.
 Field names must match Rust serde serialization.
+
+Note: Fact, Journal, and Types serialization is now provided in their
+respective modules (Aura/Types/*.lean and Aura/Journal.lean).
 -/
-
-instance : ToJson FactId where
-  toJson f := Json.num f.id
-
-instance : FromJson FactId where
-  fromJson? j := do
-    let n ← j.getNat?
-    pure { id := n }
-
-instance : ToJson Fact where
-  toJson f := Json.mkObj [("id", toJson f.id)]
-
-instance : FromJson Fact where
-  fromJson? j := do
-    let idVal ← j.getObjVal? "id"
-    let id ← FromJson.fromJson? idVal
-    pure { id := id }
-
-instance : ToJson Journal where
-  toJson j := Json.arr (j.map toJson).toArray
-
-instance : FromJson Journal where
-  fromJson? j := do
-    let arr ← j.getArr?
-    let facts ← arr.toList.mapM FromJson.fromJson?
-    pure facts
 
 instance : ToJson Budget where
   toJson b := Json.mkObj [("available", Json.num b.available)]
@@ -119,13 +98,15 @@ instance : FromJson Budget where
     let n ← avail.getNat?
     pure { available := n }
 
-instance : ToJson TimeStamp where
+/-- TimeStamp serialization for TimeSystem (legacy simplified version).
+    The full TimeStamp is in Aura.Types.TimeStamp. -/
+instance : ToJson Aura.TimeSystem.TimeStamp where
   toJson t := Json.mkObj [
     ("logical", Json.num t.logical),
     ("orderClock", Json.num t.orderClock)
   ]
 
-instance : FromJson TimeStamp where
+instance : FromJson Aura.TimeSystem.TimeStamp where
   fromJson? j := do
     let logVal ← j.getObjVal? "logical"
     let ocVal ← j.getObjVal? "orderClock"
@@ -142,7 +123,7 @@ instance : FromJson Policy where
     let ip ← ipVal.getBool?
     pure { ignorePhysical := ip }
 
-instance : ToJson TimeSystem.Ordering where
+instance : ToJson Aura.TimeSystem.Ordering where
   toJson o := match o with
     | .lt => Json.str "lt"
     | .eq => Json.str "eq"
@@ -154,7 +135,8 @@ instance : ToJson TimeSystem.Ordering where
 Each handler parses JSON input, runs the Lean model, and returns JSON output.
 -/
 
-/-- Merge two journals and return the result. -/
+/-- Merge two journals and return the result.
+    Returns error if namespaces don't match. -/
 def handleJournalMerge (input : String) : IO String := do
   match Json.parse input with
   | .error err =>
@@ -165,14 +147,26 @@ def handleJournalMerge (input : String) : IO String := do
     | .ok j1Val, .ok j2Val =>
       match FromJson.fromJson? (α := Journal) j1Val, FromJson.fromJson? (α := Journal) j2Val with
       | .ok j1, .ok j2 =>
-        let result := merge j1 j2
-        let resultJson := Json.mkObj [
-          ("result", toJson result),
-          ("count", Json.num result.length)
-        ]
-        pure resultJson.compress
-      | _, _ =>
-        let errJson := Json.mkObj [("error", Json.str "Failed to parse journals")]
+        -- Check namespace equality before merge
+        match merge_safe j1 j2 with
+        | some result =>
+          let resultJson := Json.mkObj [
+            ("result", ToJson.toJson result),
+            ("count", Json.num result.facts.length)
+          ]
+          pure resultJson.compress
+        | none =>
+          let errJson := Json.mkObj [
+            ("error", Json.str "namespace mismatch"),
+            ("j1_namespace", ToJson.toJson j1.ns),
+            ("j2_namespace", ToJson.toJson j2.ns)
+          ]
+          pure errJson.compress
+      | .error e1, _ =>
+        let errJson := Json.mkObj [("error", Json.str s!"Failed to parse journal1: {e1}")]
+        pure errJson.compress
+      | _, .error e2 =>
+        let errJson := Json.mkObj [("error", Json.str s!"Failed to parse journal2: {e2}")]
         pure errJson.compress
     | _, _ =>
       let errJson := Json.mkObj [("error", Json.str "Missing journal1 or journal2 field")]
@@ -191,12 +185,12 @@ def handleJournalReduce (input : String) : IO String := do
       | .ok journal =>
         let result := reduce journal
         let resultJson := Json.mkObj [
-          ("result", toJson result),
-          ("count", Json.num result.length)
+          ("result", ToJson.toJson result),
+          ("count", Json.num result.facts.length)
         ]
         pure resultJson.compress
-      | .error _ =>
-        let errJson := Json.mkObj [("error", Json.str "Failed to parse journal")]
+      | .error e =>
+        let errJson := Json.mkObj [("error", Json.str s!"Failed to parse journal: {e}")]
         pure errJson.compress
     | .error _ =>
       let errJson := Json.mkObj [("error", Json.str "Missing journal field")]
@@ -244,11 +238,11 @@ def handleTimestampCompare (input : String) : IO String := do
     match j.getObjVal? "policy", j.getObjVal? "a", j.getObjVal? "b" with
     | .ok pVal, .ok aVal, .ok bVal =>
       match FromJson.fromJson? (α := Policy) pVal,
-            FromJson.fromJson? (α := TimeStamp) aVal,
-            FromJson.fromJson? (α := TimeStamp) bVal with
+            FromJson.fromJson? (α := Aura.TimeSystem.TimeStamp) aVal,
+            FromJson.fromJson? (α := Aura.TimeSystem.TimeStamp) bVal with
       | .ok policy, .ok a, .ok b =>
-        let result := compare policy a b
-        let resultJson := Json.mkObj [("ordering", toJson result)]
+        let result := Aura.TimeSystem.compare policy a b
+        let resultJson := Json.mkObj [("ordering", ToJson.toJson result)]
         pure resultJson.compress
       | _, _, _ =>
         let errJson := Json.mkObj [("error", Json.str "Failed to parse policy or timestamps")]
@@ -268,7 +262,8 @@ def handleVersion : IO String := do
       Json.str "GuardChain",
       Json.str "Frost",
       Json.str "Evidence",
-      Json.str "KeyDerivation"
+      Json.str "KeyDerivation",
+      Json.str "Types"
     ])
   ]
   pure resultJson.compress
@@ -317,7 +312,7 @@ instance : FromJson WitnessVote where
 instance : ToJson Evidence where
   toJson e := Json.mkObj [
     ("consensusId", Json.str e.consensusId.value),
-    ("votes", Json.arr (e.votes.map toJson).toArray),
+    ("votes", Json.arr (e.votes.map ToJson.toJson).toArray),
     ("equivocators", Json.arr (e.equivocators.map (fun a => Json.str a.value)).toArray),
     ("hasCommit", Json.bool e.commitFact.isSome)
   ]
@@ -349,7 +344,7 @@ def handleEvidenceMerge (input : String) : IO String := do
       | .ok e1, .ok e2 =>
         let result := mergeEvidence e1 e2
         let resultJson := Json.mkObj [
-          ("result", toJson result),
+          ("result", ToJson.toJson result),
           ("votes_count", Json.num result.votes.length),
           ("equivocators_count", Json.num result.equivocators.length)
         ]
@@ -411,10 +406,11 @@ def handleGuardEvaluate (input : String) : IO String := do
           match s.getObjVal? "flow_cost" with
           | .ok fc => fc.getNat?.toOption
           | .error _ => none)
-        let totalCost := costs.foldl (· + ·) 0
+        let totalCost : Nat := costs.foldl (· + ·) 0
+        let stepCount : Nat := costs.length
         let resultJson := Json.mkObj [
           ("total_cost", Json.num totalCost),
-          ("step_count", Json.num costs.length),
+          ("step_count", Json.num stepCount),
           ("valid", Json.bool true)  -- All costs parsed successfully
         ]
         pure resultJson.compress

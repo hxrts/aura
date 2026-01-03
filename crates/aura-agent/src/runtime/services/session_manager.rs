@@ -34,7 +34,11 @@ impl SessionManager {
         Self::default()
     }
 
-    pub(crate) async fn register_session(&self, session_id: SessionId, participants: Vec<DeviceId>) {
+    pub(crate) async fn register_session(
+        &self,
+        session_id: SessionId,
+        participants: Vec<DeviceId>,
+    ) {
         with_state_mut_validated(
             &self.state,
             |state| {

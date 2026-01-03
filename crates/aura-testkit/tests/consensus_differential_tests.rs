@@ -2,6 +2,8 @@
 //!
 //! These tests verify that the production consensus core implementation
 //! matches the reference model (which directly corresponds to Lean theorems).
+#![allow(clippy::clone_on_copy)] // Clone used for clarity in test assertions
+#![allow(clippy::expect_used)] // Test helper functions use expect for clarity
 //!
 //! ## Testing Strategy
 //!
@@ -414,12 +416,12 @@ fn arb_evidence() -> impl Strategy<Value = Evidence> {
         prop::collection::hash_set(arb_authority(), 0..3)
             .prop_map(|set| set.into_iter().collect::<Vec<_>>()),
     )
-    .prop_map(|(consensus_id, votes, equivocators)| Evidence {
-        consensus_id,
-        votes,
-        equivocators,
-        commit_fact: None,
-    })
+        .prop_map(|(consensus_id, votes, equivocators)| Evidence {
+            consensus_id,
+            votes,
+            equivocators,
+            commit_fact: None,
+        })
 }
 
 proptest! {

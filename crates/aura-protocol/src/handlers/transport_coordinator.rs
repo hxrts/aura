@@ -180,12 +180,10 @@ where
         let transport_config = TransportConfig {
             connect_timeout: NonZeroDuration::from_duration(config.connection_timeout)
                 .unwrap_or_else(|| NonZeroDuration::from_secs(1).expect("non-zero timeout")),
-            read_timeout: NonZeroDuration::from_secs(60)
-                .expect("read timeout should be non-zero"),
+            read_timeout: NonZeroDuration::from_secs(60).expect("read timeout should be non-zero"),
             write_timeout: NonZeroDuration::from_secs(30)
                 .expect("write timeout should be non-zero"),
-            buffer_size: NonZeroUsize::new(64 * 1024)
-                .expect("buffer size should be non-zero"),
+            buffer_size: NonZeroUsize::new(64 * 1024).expect("buffer size should be non-zero"),
         };
 
         let transport_manager = RetryingTransportManager::new(transport_config, config.max_retries);

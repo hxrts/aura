@@ -60,7 +60,7 @@ pub async fn move_position(
     let mut core = app_core.write().await;
 
     // Get current neighborhood state
-    let mut neighborhood = core.views().get_neighborhood().clone();
+    let mut neighborhood = core.views().get_neighborhood();
 
     // Determine target home ID
     let target_home_id = if home_id == "home" {
@@ -114,7 +114,7 @@ pub async fn move_position(
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn get_neighborhood_state(app_core: &Arc<RwLock<AppCore>>) -> NeighborhoodState {
     let core = app_core.read().await;
-    core.views().get_neighborhood().clone()
+    core.views().get_neighborhood()
 }
 
 /// Get current home context id with a deterministic fallback.
@@ -151,7 +151,48 @@ pub fn default_relational_context() -> ContextId {
 pub async fn get_current_position(app_core: &Arc<RwLock<AppCore>>) -> Option<TraversalPosition> {
     let core = app_core.read().await;
     let neighborhood = core.views().get_neighborhood();
-    neighborhood.position.clone()
+    neighborhood.position
+}
+
+/// Initialize HOMES_SIGNAL with a default test home.
+///
+/// This is a test helper that creates a home and populates HOMES_SIGNAL
+/// so that tests have a valid current home available.
+///
+/// **Signal pattern**: Emits HOMES_SIGNAL
+pub async fn initialize_test_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    name: &str,
+    authority_id: aura_core::identifiers::AuthorityId,
+    timestamp_ms: u64,
+) -> Result<ChannelId, AuraError> {
+    use crate::signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME};
+    use crate::views::home::HomeState;
+    use crate::workflows::signals::emit_signal;
+    use aura_core::crypto::hash::hash;
+
+    // Create a deterministic home ID from the name
+    let home_id = ChannelId::from_bytes(hash(format!("test-home:{name}").as_bytes()));
+
+    // Create a context ID for the home
+    let context_id = ContextId::new_from_entropy(hash(format!("test-context:{name}").as_bytes()));
+
+    // Create the home state
+    let home_state = HomeState::new(home_id, Some(name.to_string()), authority_id, timestamp_ms, context_id);
+
+    // Add to HOMES_SIGNAL
+    let homes = {
+        let mut core = app_core.write().await;
+        let mut homes = core.views().get_homes();
+        homes.add_home(home_state);
+        core.views_mut().set_homes(homes.clone());
+        homes
+    };
+
+    // Emit to ReactiveEffects subscribers
+    emit_signal(app_core, &*HOMES_SIGNAL, homes, HOMES_SIGNAL_NAME).await?;
+
+    Ok(home_id)
 }
 
 #[cfg(test)]

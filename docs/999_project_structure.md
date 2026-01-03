@@ -1452,7 +1452,7 @@ Formal verification bridge to Quint model checker and property evaluator.
 - `harness_*.qnt`: Standard harness modules for simulator integration
 - `protocol_capability_properties.qnt`: Guard chain and authorization verification
 
-**Usage**: See `docs/807_verification_guide.md` for Quint specification patterns.
+**Usage**: See `verification/quint/` and `verification/lean/` for specification patterns and proof structure.
 
 ## Documents That Reference This Guide
 

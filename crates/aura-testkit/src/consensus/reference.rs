@@ -102,7 +102,7 @@ pub fn merge_evidence_ref(e1: &Evidence, e2: &Evidence) -> Evidence {
     }
 
     Evidence {
-        consensus_id: e1.consensus_id.clone(),
+        consensus_id: e1.consensus_id,
         votes: merge_lists(&e1.votes, &e2.votes),
         equivocators: merge_lists(&e1.equivocators, &e2.equivocators),
         // Lean: e1.commitFact.orElse (fun _ => e2.commitFact)
@@ -351,19 +351,19 @@ pub fn apply_share_ref(state: &ConsensusState, proposal: ShareProposal) -> Trans
         new_state.phase = ConsensusPhase::Committed;
 
         // Find the winning result
-    let winning_result = result_counts
-        .iter()
-        .find(|(_, &count)| count >= new_state.threshold.as_usize())
-        .map(|(&rid, _)| *rid);
+        let winning_result = result_counts
+            .iter()
+            .find(|(_, &count)| count >= new_state.threshold.as_usize())
+            .map(|(&rid, _)| *rid);
 
-    if let Some(rid) = winning_result {
-        new_state.commit_fact = Some(PureCommitFact {
-            cid: new_state.cid,
-            result_id: rid,
-            signature: "ref_agg_sig".to_string(),
-            prestate_hash: new_state.prestate_hash,
-        });
-    }
+        if let Some(rid) = winning_result {
+            new_state.commit_fact = Some(PureCommitFact {
+                cid: new_state.cid,
+                result_id: rid,
+                signature: "ref_agg_sig".to_string(),
+                prestate_hash: new_state.prestate_hash,
+            });
+        }
     }
 
     TransitionResultRef::Ok(new_state)

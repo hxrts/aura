@@ -204,11 +204,8 @@ pub trait SyncEffects: Send + Sync {
     /// Used for immediate neighbors or high-priority operations.
     ///
     /// **Note**: This should be rate-limited to prevent flooding.
-    async fn push_op_to_peers(
-        &self,
-        op: AttestedOp,
-        peers: Vec<DeviceId>,
-    ) -> Result<(), SyncError>;
+    async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<DeviceId>)
+        -> Result<(), SyncError>;
 
     /// Get list of currently connected peers
     ///
@@ -237,12 +234,10 @@ impl Default for AntiEntropyConfig {
         Self {
             min_sync_interval_ms: NonZeroU64::new(30_000)
                 .expect("min sync interval should be non-zero"),
-            max_ops_per_batch: NonZeroU32::new(100)
-                .expect("max ops per batch should be non-zero"),
+            max_ops_per_batch: NonZeroU32::new(100).expect("max ops per batch should be non-zero"),
             max_concurrent_syncs: NonZeroU32::new(5)
                 .expect("max concurrent syncs should be non-zero"),
-            sync_timeout_ms: NonZeroU64::new(10_000)
-                .expect("sync timeout should be non-zero"),
+            sync_timeout_ms: NonZeroU64::new(10_000).expect("sync timeout should be non-zero"),
         }
     }
 }

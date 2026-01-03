@@ -261,7 +261,7 @@ impl From<&crate::core::PerformanceConfig> for SessionResourceLimits {
     fn from(perf_config: &crate::core::PerformanceConfig) -> Self {
         Self {
             max_memory_per_session: (perf_config.memory_limit / 10) as usize, // 1/10th of total limit
-            max_session_duration: Duration::from_secs(3600),       // 1 hour
+            max_session_duration: Duration::from_secs(3600),                  // 1 hour
             max_operations_per_session: 10000,
         }
     }
@@ -1250,7 +1250,7 @@ mod tests {
                         10 * (i + 1),
                         100 * (i + 1),
                         HashMap::new(),
-                        &test_time(1000000 + 100 * (i as u64 + 1)),
+                        &test_time(1000000 + 100 * (i + 1)),
                     )
                     .unwrap();
             } else {

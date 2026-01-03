@@ -125,7 +125,6 @@ pub fn init_aura_extensions() -> rumpsteak_aura_choreography::extensions::Extens
 pub use ast_extraction::{
     extract_aura_annotations, generate_aura_choreography_code, AuraEffect, AuraExtractionError,
 };
-pub use ids::{MessageTypeId, NonEmptyRoleList, RoleId, SessionTypeId};
 /// Full-featured choreography! macro with ALL rumpsteak-aura features + Aura extensions
 ///
 /// This macro provides access to ALL rumpsteak-aura features plus Aura-specific extensions:
@@ -170,6 +169,7 @@ pub use ids::{MessageTypeId, NonEmptyRoleList, RoleId, SessionTypeId};
 /// Note: The choreography! macro is available in the aura-macros crate.
 /// Generated code uses types from this crate.
 pub use aura_core::{identifiers::DeviceId, AuraError, AuraResult, Cap, Journal, JournalEffects};
+pub use ids::{MessageTypeId, NonEmptyRoleList, RoleId, SessionTypeId};
 
 pub use journal::{JournalAnnotation, JournalCoupling};
 pub use session::LocalSessionType;

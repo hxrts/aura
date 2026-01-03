@@ -298,28 +298,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_chat_commands_fail_without_runtime() {
+    async fn test_chat_commands_work_in_local_mode() {
         let app_core = test_app_core().await;
         let handler = OperationalHandler::new(app_core);
 
-        // Without RuntimeBridge, SendMessage should fail gracefully
+        // Messaging commands now work in LocalOnly mode without RuntimeBridge
         let result = handler
             .execute(&EffectCommand::SendMessage {
                 channel: "general".to_string(),
                 content: "Hello".to_string(),
             })
             .await;
-        match result {
-            Some(Err(OpError::Failed(msg))) => {
-                assert!(
-                    msg.contains("Runtime bridge not available"),
-                    "Expected runtime bridge error, got: {msg}"
-                );
-            }
-            _ => panic!("Expected Failed error without RuntimeBridge, got: {result:?}"),
-        }
+        assert!(
+            matches!(result, Some(Ok(OpResponse::Data(_)))),
+            "SendMessage should succeed in LocalOnly mode, got: {result:?}"
+        );
 
-        // Without RuntimeBridge, CreateChannel should also fail gracefully
+        // CreateChannel should also succeed in LocalOnly mode
         let result = handler
             .execute(&EffectCommand::CreateChannel {
                 name: "Guardians".to_string(),
@@ -328,15 +323,10 @@ mod tests {
                 threshold_k: 2,
             })
             .await;
-        match result {
-            Some(Err(OpError::Failed(msg))) => {
-                assert!(
-                    msg.contains("Runtime bridge not available"),
-                    "Expected runtime bridge error, got: {msg}"
-                );
-            }
-            _ => panic!("Expected Failed error without RuntimeBridge, got: {result:?}"),
-        }
+        assert!(
+            matches!(result, Some(Ok(OpResponse::Data(_)))),
+            "CreateChannel should succeed in LocalOnly mode, got: {result:?}"
+        );
     }
 
     #[tokio::test]

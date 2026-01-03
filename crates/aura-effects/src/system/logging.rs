@@ -271,8 +271,16 @@ impl SystemEffects for LoggingSystemHandler {
             .collect();
         let parsed_level = LogLevel::try_from(level).unwrap_or(LogLevel::Info);
         let component_id = ComponentId::from(component);
-        self.log_structured(parsed_level, component_id, message, metadata, None, None, None)
-            .await
+        self.log_structured(
+            parsed_level,
+            component_id,
+            message,
+            metadata,
+            None,
+            None,
+            None,
+        )
+        .await
     }
 
     async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {

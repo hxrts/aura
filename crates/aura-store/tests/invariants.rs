@@ -1,3 +1,6 @@
+//! Storage invariant tests.
+#![allow(missing_docs)]
+
 use aura_core::time::PhysicalTime;
 use aura_core::{AuthorityId, ChunkId, ContentSize, ContextId};
 use aura_store::{ByteSize, ChunkLayout, ErasureConfig, StorageFact};

@@ -26,9 +26,9 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
+use aura_core::FlowCost;
 use aura_guards::types;
 use aura_signature::session::SessionScope;
-use aura_core::FlowCost;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -663,8 +663,7 @@ pub fn evaluate_request(snapshot: &GuardSnapshot, request: &GuardRequest) -> Gua
             if let Some(outcome) = check_capability(
                 snapshot,
                 &types::CapabilityId::from(costs::CAP_REQUEST_GUARDIAN_APPROVAL),
-            )
-            {
+            ) {
                 return outcome;
             }
 
@@ -813,8 +812,9 @@ mod tests {
 
     #[test]
     fn test_guard_outcome_allowed() {
-        let outcome =
-            GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget { cost: FlowCost::new(10) }]);
+        let outcome = GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget {
+            cost: FlowCost::new(10),
+        }]);
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 1);
     }

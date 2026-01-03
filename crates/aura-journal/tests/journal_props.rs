@@ -1,3 +1,7 @@
+//! Property tests for journal semantics.
+
+#![allow(clippy::expect_used, missing_docs)]
+
 use aura_core::{
     identifiers::{AuthorityId, ContextId},
     time::{OrderTime, TimeStamp},
@@ -56,7 +60,10 @@ fn normalize_bindings(bindings: &[RelationalBinding]) -> Vec<(String, [u8; 16], 
 }
 
 fn assert_relational_state_eq(left: &RelationalState, right: &RelationalState) {
-    assert_eq!(normalize_bindings(&left.bindings), normalize_bindings(&right.bindings));
+    assert_eq!(
+        normalize_bindings(&left.bindings),
+        normalize_bindings(&right.bindings)
+    );
     assert_eq!(left.flow_budgets, right.flow_budgets);
     assert_eq!(
         left.leakage_budget.external_consumed,
@@ -81,7 +88,7 @@ proptest! {
     ) {
         let namespace = JournalNamespace::Context(ContextId::new_from_entropy([1u8; 32]));
         let journal_a = journal_from_seeds(namespace.clone(), &seeds_a);
-        let journal_b = journal_from_seeds(namespace.clone(), &seeds_b);
+        let journal_b = journal_from_seeds(namespace, &seeds_b);
 
         prop_assert_eq!(journal_a.join(&journal_b), journal_b.join(&journal_a));
     }

@@ -125,7 +125,15 @@ impl Default for Epoch {
     }
 }
 
+/// Session-specific epoch counter.
+///
+/// This is an alias for [`Epoch`] that callers can use when they specifically
+/// mean the session epoch maintained by the effect API. Retaining the alias keeps
+/// call sites readable without introducing divergent implementations.
+pub type SessionEpoch = Epoch;
+
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -143,10 +151,3 @@ mod tests {
         assert!(err.to_string().contains("Epoch overflow"));
     }
 }
-
-/// Session-specific epoch counter.
-///
-/// This is an alias for [`Epoch`] that callers can use when they specifically
-/// mean the session epoch maintained by the effect API. Retaining the alias keeps
-/// call sites readable without introducing divergent implementations.
-pub type SessionEpoch = Epoch;

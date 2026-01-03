@@ -197,9 +197,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 vec![(authority_id, Hash32(tree_state.root_commitment))],
                 context_commitment,
             )
-            .map_err(|e| {
-                IntentError::internal_error(format!("Invalid AMP prestate: {e}"))
-            })?;
+            .map_err(|e| IntentError::internal_error(format!("Invalid AMP prestate: {e}")))?;
 
             let params = build_consensus_params(effects.as_ref(), authority_id, effects.as_ref())
                 .await
@@ -606,9 +604,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
     async fn sync_with_peer(&self, peer_id: &str) -> Result<(), IntentError> {
         if let Some(sync) = self.agent.runtime().sync() {
             // Parse peer_id into DeviceId
-            let device_id: DeviceId = peer_id.parse().map_err(|e| {
-                IntentError::validation_failed(format!("Invalid peer ID: {e}"))
-            })?;
+            let device_id: DeviceId = peer_id
+                .parse()
+                .map_err(|e| IntentError::validation_failed(format!("Invalid peer ID: {e}")))?;
 
             // Create a single-element vector for the target peer
             let peers = vec![device_id];
@@ -944,8 +942,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         static CEREMONY_NONCE: AtomicU64 = AtomicU64::new(0);
         let nonce = CEREMONY_NONCE.fetch_add(1, Ordering::Relaxed);
         let ceremony_id_hash = GuardianCeremonyId::new(prestate_hash, operation_hash, nonce);
-        let ceremony_id =
-            aura_core::identifiers::CeremonyId::new(ceremony_id_hash.to_string());
+        let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id_hash.to_string());
 
         tracing::info!(
             ceremony_id = %ceremony_id,

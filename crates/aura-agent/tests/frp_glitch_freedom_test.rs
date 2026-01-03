@@ -1,6 +1,7 @@
 //! FRP Glitch-Freedom Tests
 //!
 //! These tests verify that the FRP infrastructure maintains glitch-freedom:
+#![allow(clippy::uninlined_format_args)] // Test code uses explicit format args for clarity
 //! - Derived dynamics don't show intermediate inconsistent states
 //! - Topological ordering ensures downstream values see consistent state
 //! - Combined values are always computed from consistent snapshots
@@ -50,7 +51,7 @@ async fn test_map_no_intermediate_states() {
     // Record all observed values
     let observations = Arc::new(RwLock::new(Vec::new()));
     let obs_clone = observations.clone();
-    let mut rx = doubled.subscribe();
+    let mut rx = doubled.subscribe().await;
 
     tokio::spawn(async move {
         while let Ok(val) = rx.recv().await {
@@ -134,13 +135,15 @@ async fn test_chain_propagation() {
 async fn test_fold_accumulation_order() {
     // Test that fold accumulates values in order
     let events = Dynamic::new(0);
-    let history = events.fold(Vec::new(), |mut acc, x| {
-        acc.push(*x);
-        acc
-    });
+    let history = events
+        .fold(Vec::new(), |mut acc, x| {
+            acc.push(*x);
+            acc
+        })
+        .await;
 
     // Subscribe to trigger updates
-    let _rx = history.subscribe();
+    let _rx = history.subscribe().await;
 
     // Send ordered events
     events.set(1).await;

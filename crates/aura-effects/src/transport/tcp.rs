@@ -45,14 +45,12 @@ impl TcpTransportHandler {
             self.config.connect_timeout.get(),
             TcpStream::connect(*addr.as_socket_addr()),
         )
-            .await
-            .map_err(|_| TransportError::Timeout("TCP connect timeout".to_string()))?
-            .map_err(|e| TransportError::ConnectionFailed(format!("TCP connect failed: {e}")))?;
+        .await
+        .map_err(|_| TransportError::Timeout("TCP connect timeout".to_string()))?
+        .map_err(|e| TransportError::ConnectionFailed(format!("TCP connect failed: {e}")))?;
 
-        let local_addr =
-            TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
-        let remote_addr =
-            TransportAddress::from(TransportSocketAddr::from(stream.peer_addr()?));
+        let local_addr = TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
+        let remote_addr = TransportAddress::from(TransportSocketAddr::from(stream.peer_addr()?));
 
         let connection_id = ConnectionId::new(format!("tcp-{local_addr}-{remote_addr}"));
 
@@ -88,10 +86,8 @@ impl TcpTransportHandler {
             .await
             .map_err(|e| TransportError::ConnectionFailed(format!("TCP accept failed: {e}")))?;
 
-        let local_addr =
-            TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
-        let remote_addr =
-            TransportAddress::from(TransportSocketAddr::from(peer_addr));
+        let local_addr = TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
+        let remote_addr = TransportAddress::from(TransportSocketAddr::from(peer_addr));
         let connection_id = ConnectionId::new(format!("tcp-{local_addr}-{remote_addr}"));
 
         let metadata = TransportMetadata::tcp(true);
@@ -156,10 +152,13 @@ impl TcpTransportHandler {
     pub async fn receive_framed(&self, stream: &mut TcpStream) -> TransportResult<Vec<u8>> {
         // Read 4-byte length prefix
         let mut len_bytes = [0u8; 4];
-        timeout(self.config.read_timeout.get(), stream.read_exact(&mut len_bytes))
-            .await
-            .map_err(|_| TransportError::Timeout("TCP read length timeout".to_string()))?
-            .map_err(TransportError::Io)?;
+        timeout(
+            self.config.read_timeout.get(),
+            stream.read_exact(&mut len_bytes),
+        )
+        .await
+        .map_err(|_| TransportError::Timeout("TCP read length timeout".to_string()))?
+        .map_err(TransportError::Io)?;
 
         let len = u32::from_be_bytes(len_bytes) as usize;
 

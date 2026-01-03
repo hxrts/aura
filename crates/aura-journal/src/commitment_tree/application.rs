@@ -648,6 +648,7 @@ pub fn validate_invariants(state: &TreeState) -> ApplicationResult<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::LeafNode;

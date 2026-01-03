@@ -33,6 +33,7 @@ use crate::{InvitationFact, INVITATION_FACT_TYPE_ID};
 /// These deltas represent incremental changes to invitation UI state,
 /// derived from journal facts during view reduction.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)] // InvitationAdded variant contains rich invitation data
 pub enum InvitationDelta {
     /// A new invitation was created or received
     InvitationAdded {
@@ -545,7 +546,11 @@ mod tests {
         let compacted = compact_deltas(deltas);
         assert_eq!(compacted.len(), 1);
         match &compacted[0] {
-            InvitationDelta::InvitationStatusChanged { new_status, changed_at, .. } => {
+            InvitationDelta::InvitationStatusChanged {
+                new_status,
+                changed_at,
+                ..
+            } => {
                 assert_eq!(new_status, "cancelled");
                 assert_eq!(*changed_at, 200);
             }

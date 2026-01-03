@@ -1,3 +1,6 @@
+//! Biscuit token behavior tests.
+#![allow(clippy::expect_used)] // Test code uses expect for clarity
+
 use aura_authorization::{
     BiscuitAuthorizationBridge, BiscuitTokenManager, ContextOp, ResourceScope, TokenAuthority,
 };

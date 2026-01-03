@@ -149,12 +149,18 @@ pub enum ChatDelta {
     },
 }
 
+/// Keys for chat delta composition.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ChatDeltaKey {
+    /// Channel key (channel_id).
     Channel(String),
+    /// Message key (channel_id, message_id).
     Message(String, String),
+    /// Message delivery key (channel_id, message_id, recipient_id).
     MessageDelivery(String, String, String),
+    /// Message read key (channel_id, message_id, reader_id).
     MessageRead(String, String, String),
+    /// Message acknowledgment key (channel_id, message_id).
     MessageAck(String, String),
 }
 
@@ -197,11 +203,9 @@ impl ComposableDelta for ChatDelta {
                 message_id,
                 reader_id,
                 ..
-            } => ChatDeltaKey::MessageRead(
-                channel_id.clone(),
-                message_id.clone(),
-                reader_id.clone(),
-            ),
+            } => {
+                ChatDeltaKey::MessageRead(channel_id.clone(), message_id.clone(), reader_id.clone())
+            }
             ChatDelta::DeliveryAcknowledged {
                 channel_id,
                 message_id,
@@ -262,10 +266,7 @@ impl ComposableDelta for ChatDelta {
                 }
                 true
             }
-            (
-                ChatDelta::ChannelRemoved { .. },
-                ChatDelta::ChannelRemoved { .. },
-            ) => true,
+            (ChatDelta::ChannelRemoved { .. }, ChatDelta::ChannelRemoved { .. }) => true,
             (
                 ChatDelta::MessageAdded {
                     timestamp,
@@ -322,10 +323,7 @@ impl ComposableDelta for ChatDelta {
                 }
                 true
             }
-            (
-                ChatDelta::MessageRemoved { .. },
-                ChatDelta::MessageRemoved { .. },
-            ) => true,
+            (ChatDelta::MessageRemoved { .. }, ChatDelta::MessageRemoved { .. }) => true,
             (
                 ChatDelta::MessageDelivered {
                     delivered_at,
@@ -347,8 +345,7 @@ impl ComposableDelta for ChatDelta {
             (
                 ChatDelta::MessageRead { read_at, .. },
                 ChatDelta::MessageRead {
-                    read_at: other_ts,
-                    ..
+                    read_at: other_ts, ..
                 },
             ) => {
                 if other_ts >= *read_at {

@@ -206,9 +206,9 @@ pub struct OTACeremonyState {
     /// Readiness commitments by device
     pub commitments: HashMap<DeviceId, ReadinessCommitment>,
     /// Required threshold (M-of-N)
-    pub threshold: usize,
+    pub threshold: u32,
     /// Total quorum size
-    pub quorum_size: usize,
+    pub quorum_size: u32,
     /// Timestamp when ceremony started
     pub started_at_ms: u64,
     /// Timeout for ceremony completion (ms)
@@ -217,8 +217,9 @@ pub struct OTACeremonyState {
 
 impl OTACeremonyState {
     /// Count ready devices.
-    pub fn ready_count(&self) -> usize {
-        self.commitments.values().filter(|c| c.ready).count()
+    pub fn ready_count(&self) -> u32 {
+        let ready_count = self.commitments.values().filter(|c| c.ready).count();
+        u32::try_from(ready_count).expect("ready device count exceeds u32::MAX")
     }
 
     /// Check if threshold is met.
@@ -253,8 +254,8 @@ pub enum OTACeremonyFact {
         version: String,
         activation_epoch: Epoch,
         coordinator: String,
-        threshold: usize,
-        quorum_size: usize,
+        threshold: u32,
+        quorum_size: u32,
         timestamp_ms: u64,
     },
     /// Device commitment received
@@ -274,7 +275,7 @@ pub enum OTACeremonyFact {
         /// Optional trace identifier for ceremony correlation
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trace_id: Option<String>,
-        ready_count: usize,
+        ready_count: u32,
         ready_devices: Vec<String>,
         timestamp_ms: u64,
     },
@@ -354,9 +355,9 @@ impl OTACeremonyFact {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OTACeremonyConfig {
     /// Required threshold (M in M-of-N)
-    pub threshold: usize,
+    pub threshold: u32,
     /// Total quorum size (N in M-of-N)
-    pub quorum_size: usize,
+    pub quorum_size: u32,
     /// Timeout for ceremony completion (ms)
     pub timeout_ms: u64,
     /// Minimum advance notice for activation epoch (epochs)

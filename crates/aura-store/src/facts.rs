@@ -9,6 +9,7 @@
 //!
 //! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
+use crate::types::{ByteSize, ChunkCount, ChunkIndex, NodeId};
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::PhysicalTime;
 use aura_core::types::facts::{
@@ -17,7 +18,6 @@ use aura_core::types::facts::{
 };
 use aura_core::util::serialization::{from_slice, to_vec, SerializationError};
 use aura_core::{ChunkId, ContentId, ContextId};
-use crate::types::{ByteSize, ChunkCount, ChunkIndex, NodeId};
 use serde::{Deserialize, Serialize};
 
 /// Unique type ID for storage facts in the journal system
@@ -248,11 +248,13 @@ impl StorageFact {
 
         let fact = match envelope.encoding {
             FactEncoding::DagCbor => from_slice::<Self>(&envelope.payload)?,
-            FactEncoding::Json => serde_json::from_slice::<Self>(&envelope.payload).map_err(|err| {
-                FactError::Serialization(SerializationError::InvalidFormat(format!(
-                    "JSON decode failed: {err}"
-                )))
-            })?,
+            FactEncoding::Json => {
+                serde_json::from_slice::<Self>(&envelope.payload).map_err(|err| {
+                    FactError::Serialization(SerializationError::InvalidFormat(format!(
+                        "JSON decode failed: {err}"
+                    )))
+                })?
+            }
         };
         Ok(fact)
     }
@@ -490,6 +492,7 @@ mod tests {
 
 /// Property tests for semilattice laws on StorageFactDelta
 #[cfg(test)]
+#[allow(clippy::redundant_clone)] // Proptest code uses explicit clones for clarity
 mod proptest_semilattice {
     use super::*;
     use aura_core::types::facts::FactDelta;

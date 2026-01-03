@@ -3,8 +3,8 @@
 //! This module defines CRDT types for storage state management,
 //! implementing join and meet semilattice operations for convergence.
 
-use crate::SearchIndexEntry;
 use crate::types::NodeId;
+use crate::SearchIndexEntry;
 use aura_core::time::PhysicalTime;
 use aura_core::{AuthorityId, ChunkId, ContentId, JoinSemilattice};
 use serde::{Deserialize, Serialize};
@@ -96,7 +96,8 @@ impl JoinSemilattice for StorageIndex {
 
         Self {
             entries: merged_entries,
-            version: self.version.max(other.version) + 1,
+            // Take max version (do not increment - preserves idempotency: a ⊔ a = a)
+            version: self.version.max(other.version),
         }
     }
 }
@@ -124,6 +125,9 @@ impl StorageOpLog {
         // Update log counter to track the maximum counter seen
         self.counter = self.counter.max(op.counter);
         self.operations.push(op);
+        // Maintain canonical order by (authority, counter) for CRDT properties
+        self.operations
+            .sort_by(|a, b| (&a.authority, a.counter).cmp(&(&b.authority, b.counter)));
     }
 
     /// Get operations after a certain counter
@@ -151,21 +155,27 @@ impl Default for StorageOpLog {
 /// Join semilattice implementation for StorageOpLog (append operations)
 impl JoinSemilattice for StorageOpLog {
     fn join(&self, other: &Self) -> Self {
-        let mut merged_ops = self.operations.clone();
+        use std::collections::BTreeMap;
 
-        // Add operations from other that we don't have
-        let max_counter = self.counter;
-        for op in &other.operations {
-            if op.counter > max_counter {
-                merged_ops.push(op.clone());
-            }
+        // Use (authority, counter) as unique key - each authority has independent counters.
+        // BTreeMap ensures deterministic iteration order for commutativity.
+        let mut merged: BTreeMap<(AuthorityId, u64), StorageOperation> = BTreeMap::new();
+
+        for op in &self.operations {
+            merged.insert((op.authority.clone(), op.counter), op.clone());
         }
 
-        // Sort by counter to maintain ordering
-        merged_ops.sort_by_key(|op| op.counter);
+        for op in &other.operations {
+            let key = (op.authority.clone(), op.counter);
+            // Only insert if not present (first-write-wins for same key)
+            merged.entry(key).or_insert_with(|| op.clone());
+        }
+
+        // Collect in deterministic order (BTreeMap iteration is sorted by key)
+        let operations: Vec<StorageOperation> = merged.into_values().collect();
 
         Self {
-            operations: merged_ops,
+            operations,
             counter: self.counter.max(other.counter),
         }
     }

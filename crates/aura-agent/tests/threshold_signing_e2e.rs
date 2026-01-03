@@ -1,6 +1,7 @@
 //! Threshold Signing End-to-End Tests
 //!
 //! Tests the complete threshold signing flow with real FROST cryptography:
+#![allow(clippy::uninlined_format_args)] // Test code uses explicit format args for clarity
 //! - 8.7.1: Single-device account creation with threshold signing
 //! - 8.7.2: Guardian recovery approval with real FROST signatures
 //! - 8.7.3: Consensus with threshold signatures (verify integration)

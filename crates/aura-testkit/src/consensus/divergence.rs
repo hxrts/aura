@@ -1,6 +1,7 @@
 //! Divergence Reporting for Conformance Testing
 //!
 //! Provides detailed state diff reporting when ITF trace conformance tests fail.
+#![allow(clippy::needless_borrows_for_generic_args)] // Consistent borrowing for comparison functions
 //! This module helps identify exactly which fields diverged and why.
 //!
 //! ## Usage
@@ -578,8 +579,7 @@ mod tests {
     }
 
     fn make_test_state() -> ConsensusState {
-        let witnesses: BTreeSet<_> =
-            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
         ConsensusState::new(
             test_consensus_id(1),
             test_operation(2),

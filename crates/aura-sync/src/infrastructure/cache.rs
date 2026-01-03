@@ -219,7 +219,7 @@ impl CacheManager {
     pub fn apply_invalidation(&mut self, invalidation: &CacheInvalidation) {
         self.epoch_tracker.apply_invalidation(invalidation);
         self.stats.total_invalidations += 1;
-        self.stats.total_keys_invalidated += invalidation.keys.len();
+        self.stats.total_keys_invalidated += invalidation.keys.len() as u64;
     }
 
     /// Check if a key is fresh at the current epoch
@@ -240,7 +240,7 @@ impl CacheManager {
     pub fn invalidate_keys(&mut self, keys: &[impl AsRef<str>], epoch_floor: TreeEpoch) {
         self.epoch_tracker.invalidate_keys(keys, epoch_floor);
         self.stats.total_invalidations += 1;
-        self.stats.total_keys_invalidated += keys.len();
+        self.stats.total_keys_invalidated += keys.len() as u64;
     }
 
     /// Get epoch floor for a key
@@ -270,13 +270,13 @@ impl Default for CacheManager {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CacheStatistics {
     /// Total number of invalidation events processed
-    pub total_invalidations: usize,
+    pub total_invalidations: u64,
 
     /// Total number of keys invalidated
-    pub total_keys_invalidated: usize,
+    pub total_keys_invalidated: u64,
 
     /// Number of currently tracked keys
-    pub tracked_keys: usize,
+    pub tracked_keys: u32,
 }
 
 // =============================================================================

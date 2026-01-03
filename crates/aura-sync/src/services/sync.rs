@@ -541,7 +541,7 @@ impl SyncService {
 
             match result {
                 Ok(synced_operations) => {
-                    sync_results.push((peer, synced_operations as u64));
+                    sync_results.push((peer, synced_operations));
                     tracing::info!(
                         "Successfully synced {} operations with peer {}",
                         synced_operations,

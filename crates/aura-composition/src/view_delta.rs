@@ -299,18 +299,30 @@ mod tests {
     #[test]
     fn test_compact_deltas_merges_by_key() {
         let deltas = vec![
-            TestDelta::ItemAdded { id: "a".to_string() },
-            TestDelta::ItemAdded { id: "a".to_string() },
-            TestDelta::ItemRemoved { id: "b".to_string() },
-            TestDelta::ItemRemoved { id: "b".to_string() },
+            TestDelta::ItemAdded {
+                id: "a".to_string(),
+            },
+            TestDelta::ItemAdded {
+                id: "a".to_string(),
+            },
+            TestDelta::ItemRemoved {
+                id: "b".to_string(),
+            },
+            TestDelta::ItemRemoved {
+                id: "b".to_string(),
+            },
         ];
 
         let compacted = compact_deltas(deltas);
         assert_eq!(
             compacted,
             vec![
-                TestDelta::ItemAdded { id: "a".to_string() },
-                TestDelta::ItemRemoved { id: "b".to_string() },
+                TestDelta::ItemAdded {
+                    id: "a".to_string()
+                },
+                TestDelta::ItemRemoved {
+                    id: "b".to_string()
+                },
             ]
         );
     }

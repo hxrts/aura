@@ -7,7 +7,7 @@ use aura_core::AuraError;
 pub fn parse_authority_id(input: &str) -> Result<AuthorityId, AuraError> {
     input
         .parse::<AuthorityId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {}", input)))
+        .map_err(|_| AuraError::invalid(format!("Invalid authority ID: {input}")))
 }
 
 /// Parse a ContextId from user input.
@@ -20,5 +20,5 @@ pub fn parse_context_id(input: &str) -> Result<ContextId, AuraError> {
 
     trimmed
         .parse::<ContextId>()
-        .map_err(|_| AuraError::invalid(format!("Invalid context ID: {}", trimmed)))
+        .map_err(|_| AuraError::invalid(format!("Invalid context ID: {trimmed}")))
 }

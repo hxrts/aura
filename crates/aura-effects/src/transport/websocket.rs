@@ -8,7 +8,6 @@ use super::{
     ConnectionId, TransportAddress, TransportConfig, TransportConnection, TransportError,
     TransportMetadata, TransportResult, TransportSocketAddr, TransportUrl,
 };
-use url::Url;
 use async_trait::async_trait;
 use aura_core::effects::{
     NetworkCoreEffects, NetworkError, NetworkExtendedEffects, PeerEvent, PeerEventStream,
@@ -17,6 +16,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
+use url::Url;
 use uuid::Uuid;
 
 /// WebSocket transport handler implementation
@@ -86,10 +86,8 @@ impl WebSocketTransportHandler {
         &self,
         stream: TcpStream,
     ) -> TransportResult<(WebSocketStream<TcpStream>, TransportConnection)> {
-        let local_addr =
-            TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
-        let remote_addr =
-            TransportAddress::from(TransportSocketAddr::from(stream.peer_addr()?));
+        let local_addr = TransportAddress::from(TransportSocketAddr::from(stream.local_addr()?));
+        let remote_addr = TransportAddress::from(TransportSocketAddr::from(stream.peer_addr()?));
 
         let ws_stream = timeout(self.config.connect_timeout.get(), accept_async(stream))
             .await

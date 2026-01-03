@@ -79,7 +79,9 @@ impl<T> WireEnvelope<T> {
         }
 
         if self.timestamp.value() == 0 {
-            return Err(EnvelopeValidationError::InvalidTimestamp(self.timestamp.value()));
+            return Err(EnvelopeValidationError::InvalidTimestamp(
+                self.timestamp.value(),
+            ));
         }
 
         Ok(())
@@ -185,7 +187,10 @@ mod tests {
         let err = envelope
             .validate(Some(MessageSequence::new(5)))
             .unwrap_err();
-        assert!(matches!(err, EnvelopeValidationError::NonMonotonicSequence { .. }));
+        assert!(matches!(
+            err,
+            EnvelopeValidationError::NonMonotonicSequence { .. }
+        ));
     }
 
     #[test]

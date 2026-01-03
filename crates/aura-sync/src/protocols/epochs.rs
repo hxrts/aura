@@ -28,7 +28,7 @@ pub struct EpochRotationCoordinator {
 #[derive(Debug, Clone)]
 pub struct EpochConfig {
     pub epoch_duration: Duration,
-    pub rotation_threshold: usize, // Minimum participants for rotation
+    pub rotation_threshold: u32, // Minimum participants for rotation
     pub synchronization_timeout: Duration,
 }
 
@@ -164,20 +164,23 @@ impl EpochRotationCoordinator {
         _context_id: ContextId,
         now: &PhysicalTime,
     ) -> Result<String, AuraError> {
-        if participants.len() < self.epoch_config.rotation_threshold {
+        let participants_len =
+            u32::try_from(participants.len()).expect("participant count exceeds u32::MAX");
+        if participants_len < self.epoch_config.rotation_threshold {
             return Err(sync_protocol_error(
                 "epochs",
                 format!(
                     "Insufficient participants: {} < {}",
-                    participants.len(),
+                    participants_len,
                     self.epoch_config.rotation_threshold
                 ),
             ));
         }
 
-        let target_epoch = self.current_epoch.next().map_err(|e| {
-            sync_protocol_error("epochs", format!("epoch overflow: {e}"))
-        })?;
+        let target_epoch = self
+            .current_epoch
+            .next()
+            .map_err(|e| sync_protocol_error("epochs", format!("epoch overflow: {e}")))?;
         let rotation_id = format!("epoch-rotation-{}-{}", target_epoch.value(), now.ts_ms);
 
         let rotation = EpochRotation {
@@ -225,7 +228,9 @@ impl EpochRotationCoordinator {
             .insert(confirmation.participant_id, confirmation);
 
         // Check if we have enough confirmations
-        let ready_for_commit = rotation.confirmations.len() >= self.epoch_config.rotation_threshold;
+        let confirmations_len = u32::try_from(rotation.confirmations.len())
+            .expect("confirmation count exceeds u32::MAX");
+        let ready_for_commit = confirmations_len >= self.epoch_config.rotation_threshold;
 
         if ready_for_commit {
             rotation.status = RotationStatus::Synchronizing;

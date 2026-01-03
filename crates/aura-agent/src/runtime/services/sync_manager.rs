@@ -120,18 +120,22 @@ impl SyncState {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if matches!(
-            self.status,
-            SyncManagerState::Running | SyncManagerState::Starting
-        ) && self.service.is_none()
-        {
+        // Running requires service; Starting is transitional (service being created)
+        if self.status == SyncManagerState::Running && self.service.is_none() {
             return Err("sync state running without service".to_string());
         }
-        if matches!(self.status, SyncManagerState::Stopped) && self.service.is_some() {
+        // Service must be gone when fully stopped
+        if self.status == SyncManagerState::Stopped && self.service.is_some() {
             return Err("sync state stopped with active service".to_string());
         }
-        if self.background_task.is_some() && self.status != SyncManagerState::Running {
-            return Err("background task active while not running".to_string());
+        // background_task can exist during Running (active) and Stopping (being shut down)
+        if self.background_task.is_some()
+            && !matches!(
+                self.status,
+                SyncManagerState::Running | SyncManagerState::Stopping
+            )
+        {
+            return Err("background task active while not running or stopping".to_string());
         }
         Ok(())
     }
@@ -789,12 +793,12 @@ mod tests {
             time,
         );
 
-        // Create test fact
+        // Create test fact with required authority
         let fact = IndexedFact {
             id: FactId(1),
             predicate: "test".to_string(),
             value: FactValue::String("test_value".to_string()),
-            authority: None,
+            authority: Some(AuthorityId::new_from_entropy([1u8; 32])),
             timestamp: None,
         };
 

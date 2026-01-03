@@ -2,6 +2,8 @@
 //!
 //! Uses proptest to generate arbitrary inputs and verify that production
 //! code behaves identically to reference implementations.
+#![allow(clippy::expect_used)] // Test helper functions use expect for clarity
+#![allow(clippy::clone_on_copy)] // Proptest code uses clone for clarity
 //!
 //! ## Strategy
 //!

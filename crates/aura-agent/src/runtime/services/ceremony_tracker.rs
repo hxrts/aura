@@ -62,10 +62,7 @@ impl CeremonyTrackerState {
                     state.participants.len()
                 ));
             }
-            if !state
-                .accepted_participants
-                .is_subset(&state.participants)
-            {
+            if !state.accepted_participants.is_subset(&state.participants) {
                 return Err(format!(
                     "ceremony {} has accepted participants not in participant list",
                     ceremony_id
@@ -83,7 +80,8 @@ impl CeremonyTrackerState {
                     ceremony_id
                 ));
             }
-            if state.is_committed && state.accepted_participants.len() < state.threshold_k as usize {
+            if state.is_committed && state.accepted_participants.len() < state.threshold_k as usize
+            {
                 return Err(format!(
                     "ceremony {} committed without reaching threshold",
                     ceremony_id
@@ -650,7 +648,10 @@ impl CeremonyTracker {
     ///
     /// # Arguments
     /// * `ceremony_id` - The ceremony to get supersession history for
-    pub async fn get_supersession_chain(&self, ceremony_id: &CeremonyId) -> Vec<SupersessionRecord> {
+    pub async fn get_supersession_chain(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Vec<SupersessionRecord> {
         let ceremony_hash = Hash32::from_bytes(ceremony_id.as_str().as_bytes());
         let state = self.state.read().await;
 
@@ -1093,15 +1094,18 @@ mod tests {
     use proptest::prelude::*;
 
     /// Strategy to generate a valid CeremonyState
+    #[allow(dead_code)] // Reserved for future proptest expansion
     fn ceremony_state_strategy() -> impl Strategy<Value = CeremonyState> {
         (
-            2usize..=8,  // num_participants
-            1u16..=8,    // threshold (will be clamped)
+            2usize..=8, // num_participants
+            1u16..=8,   // threshold (will be clamped)
         )
             .prop_flat_map(|(num_participants, threshold)| {
                 let threshold = threshold.min(num_participants as u16);
                 let participants: Vec<ParticipantIdentity> = (0..num_participants)
-                    .map(|i| ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32])))
+                    .map(|i| {
+                        ParticipantIdentity::guardian(AuthorityId::new_from_entropy([i as u8; 32]))
+                    })
                     .collect();
 
                 // Generate a subset of participants to be accepted

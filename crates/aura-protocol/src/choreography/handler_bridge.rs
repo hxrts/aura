@@ -12,7 +12,7 @@ use aura_mpst::{NonEmptyRoleList, RoleId};
 use biscuit_auth::Biscuit;
 use rumpsteak_aura_choreography::effects::ChoreoHandler;
 use rumpsteak_aura_choreography::{ChoreographyError, Label};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -141,9 +141,7 @@ where
             .enumerate()
             .map(|(idx, device_id)| {
                 let role_index = RoleIndex::new(idx as u32).ok_or_else(|| {
-                    ChoreographyError::Transport(format!(
-                        "Invalid choreography role index {idx}"
-                    ))
+                    ChoreographyError::Transport(format!("Invalid choreography role index {idx}"))
                 })?;
                 Ok(ChoreographicRole::new(device_id, role_index))
             })

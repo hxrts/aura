@@ -37,9 +37,9 @@ use aura_consensus::core::state::{
     ConsensusPhase, ConsensusState, ConsensusThreshold, PathSelection, PureCommitFact, ShareData,
     ShareProposal,
 };
+use aura_consensus::core::transitions::{apply_share, trigger_fallback};
 use aura_consensus::types::ConsensusId;
 use aura_core::{hash, AuthorityId, Hash32, OperationId};
-use aura_consensus::core::transitions::{apply_share, trigger_fallback};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// Network partition configuration
@@ -300,10 +300,9 @@ impl ConsensusSimulation {
         let cid = Self::consensus_id_for_label("sim_consensus");
         let prestate = Self::hash_for_label("sim_prestate");
         let operation = Self::operation_for_label("sim_operation");
-        let consensus_threshold = ConsensusThreshold::new(
-            u16::try_from(threshold).expect("threshold fits in u16"),
-        )
-        .expect("threshold");
+        let consensus_threshold =
+            ConsensusThreshold::new(u16::try_from(threshold).expect("threshold fits in u16"))
+                .expect("threshold");
 
         let witness_set: BTreeSet<AuthorityId> = witnesses
             .iter()
@@ -375,8 +374,7 @@ impl ConsensusSimulation {
                     ByzantineBehavior::Equivocate => {
                         // Send conflicting proposal to half the witnesses
                         let mut alt_proposal = proposal.clone();
-                        alt_proposal.result_id =
-                            Self::hash_for_label(&format!("{result_id}_alt"));
+                        alt_proposal.result_id = Self::hash_for_label(&format!("{result_id}_alt"));
 
                         let witnesses: Vec<_> = self.states.keys().cloned().collect();
                         for (i, to) in witnesses.iter().enumerate() {
@@ -479,9 +477,7 @@ impl ConsensusSimulation {
             }
 
             // Check threshold consistency
-            if state.commit_fact.is_some()
-                && state.proposals.len() < state.threshold.as_usize()
-            {
+            if state.commit_fact.is_some() && state.proposals.len() < state.threshold.as_usize() {
                 violations.push(InvariantViolation {
                     witness: witness.clone(),
                     invariant: "CommitRequiresThreshold".to_string(),

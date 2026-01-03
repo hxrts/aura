@@ -1,3 +1,7 @@
+//! Tests for fact envelope encoding and decoding.
+
+#![allow(clippy::expect_used, missing_docs)]
+
 use aura_core::types::facts::{try_decode_fact, try_encode_fact, FactError, FactTypeId};
 use serde::{Deserialize, Serialize};
 
@@ -18,9 +22,8 @@ fn round_trip_registered_fact_envelopes() {
         };
         let bytes = try_encode_fact(&FactTypeId::new(type_id), *version, &fact)
             .expect("encode should succeed");
-        let decoded: TestFact =
-            try_decode_fact(&FactTypeId::new(type_id), *version, &bytes)
-                .expect("decode should succeed");
+        let decoded: TestFact = try_decode_fact(&FactTypeId::new(type_id), *version, &bytes)
+            .expect("decode should succeed");
         assert_eq!(decoded, fact);
     }
 }
@@ -31,8 +34,8 @@ fn rejects_version_mismatch() {
         id: 1,
         payload: vec![0, 1, 2],
     };
-    let bytes = try_encode_fact(&FactTypeId::new("test/v1"), 1, &fact)
-        .expect("encode should succeed");
+    let bytes =
+        try_encode_fact(&FactTypeId::new("test/v1"), 1, &fact).expect("encode should succeed");
     let err = try_decode_fact::<TestFact>(&FactTypeId::new("test/v1"), 2, &bytes)
         .expect_err("expected version mismatch");
     assert!(matches!(err, FactError::VersionMismatch { .. }));
@@ -44,8 +47,8 @@ fn rejects_type_mismatch() {
         id: 9,
         payload: vec![9, 9, 9],
     };
-    let bytes = try_encode_fact(&FactTypeId::new("test/v1"), 1, &fact)
-        .expect("encode should succeed");
+    let bytes =
+        try_encode_fact(&FactTypeId::new("test/v1"), 1, &fact).expect("encode should succeed");
     let err = try_decode_fact::<TestFact>(&FactTypeId::new("other/v1"), 1, &bytes)
         .expect_err("expected type mismatch");
     assert!(matches!(err, FactError::TypeMismatch { .. }));

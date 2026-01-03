@@ -195,6 +195,7 @@ impl fmt::Display for SyncStage {
 
 /// Categorized application errors
 #[derive(Clone, Debug)]
+#[allow(missing_docs)] // Struct field docs not required for error types
 pub enum AppError {
     /// Network-related failures
     Network {
@@ -331,19 +332,19 @@ impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Network { code, message, .. } => {
-                write!(f, "Network error ({}): {}", code, message)
+                write!(f, "Network error ({code}): {message}")
             }
             Self::Auth { reason, context } => {
-                write!(f, "Authentication failed ({}): {}", reason, context)
+                write!(f, "Authentication failed ({reason}): {context}")
             }
             Self::Sync { stage, details } => {
-                write!(f, "Sync failed at {} stage: {}", stage, details)
+                write!(f, "Sync failed at {stage} stage: {details}")
             }
             Self::UserAction { action, hint } => {
-                write!(f, "{} - {}", action, hint)
+                write!(f, "{action} - {hint}")
             }
             Self::Internal { source, message } => {
-                write!(f, "{}: {}", source, message)
+                write!(f, "{source}: {message}")
             }
         }
     }
@@ -429,10 +430,7 @@ mod tests {
     #[test]
     fn test_error_category_toast_severity() {
         assert_eq!(ErrorCategory::Input.toast_severity(), ToastLevel::Info);
-        assert_eq!(
-            ErrorCategory::Config.toast_severity(),
-            ToastLevel::Warning
-        );
+        assert_eq!(ErrorCategory::Config.toast_severity(), ToastLevel::Warning);
         assert_eq!(
             ErrorCategory::Capability.toast_severity(),
             ToastLevel::Error
@@ -441,18 +439,12 @@ mod tests {
             ErrorCategory::NotFound.toast_severity(),
             ToastLevel::Warning
         );
-        assert_eq!(
-            ErrorCategory::Network.toast_severity(),
-            ToastLevel::Warning
-        );
+        assert_eq!(ErrorCategory::Network.toast_severity(), ToastLevel::Warning);
         assert_eq!(
             ErrorCategory::NotImplemented.toast_severity(),
             ToastLevel::Info
         );
-        assert_eq!(
-            ErrorCategory::Operation.toast_severity(),
-            ToastLevel::Error
-        );
+        assert_eq!(ErrorCategory::Operation.toast_severity(), ToastLevel::Error);
     }
 
     #[test]

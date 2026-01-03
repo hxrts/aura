@@ -367,14 +367,12 @@ pub fn reduce_authority_with_validation(
                 // Validate that this operation builds on the current state
                 if op.parent_commitment == current_commitment {
                     // Apply the operation
-                    tree_state =
-                        apply_attested_op(&tree_state, op).map_err(|e| e.to_string())?;
+                    tree_state = apply_attested_op(&tree_state, op).map_err(|e| e.to_string())?;
                     current_commitment = tree_state.root_commitment();
                 } else {
                     // Try to apply anyway but note the inconsistency
                     // In practice, this might indicate concurrent operations
-                    tree_state =
-                        apply_attested_op(&tree_state, op).map_err(|e| e.to_string())?;
+                    tree_state = apply_attested_op(&tree_state, op).map_err(|e| e.to_string())?;
                     current_commitment = tree_state.root_commitment();
                 }
             }

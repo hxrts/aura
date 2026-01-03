@@ -3,10 +3,10 @@
 //! MPST choreography definitions for invitation exchange and guardian invitation.
 //! These define the message flow and guard annotations for invitation ceremonies.
 
+use crate::InvitationType;
 use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
-use crate::InvitationType;
 
 // =============================================================================
 // Protocol Message Types

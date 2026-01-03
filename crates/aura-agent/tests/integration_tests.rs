@@ -6,6 +6,8 @@
 //! - Runtime builder patterns
 //! - Authority-based identity model
 //! - Guard chain enforcement (when implemented)
+#![allow(clippy::expect_used)] // Test code uses expect for clarity
+#![allow(clippy::uninlined_format_args)] // Test code uses explicit format args for clarity
 
 use aura_composition::{CompositeHandler, Handler};
 use aura_core::{

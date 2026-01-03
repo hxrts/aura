@@ -119,10 +119,10 @@ pub struct SnapshotResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotConfig {
     /// Threshold M for M-of-N approval
-    pub approval_threshold: usize,
+    pub approval_threshold: u32,
 
     /// Total N devices in quorum
-    pub quorum_size: usize,
+    pub quorum_size: u32,
 
     /// Enable writer fence during snapshot
     pub use_writer_fence: bool,
@@ -290,12 +290,14 @@ impl SnapshotProtocol {
         }
 
         // Verify threshold
-        if approvals.len() < self.config.approval_threshold {
+        let approvals_len =
+            u32::try_from(approvals.len()).expect("approval count exceeds u32::MAX");
+        if approvals_len < self.config.approval_threshold {
             return Err(sync_protocol_error(
                 "sync",
                 format!(
                     "insufficient approvals: {} < {}",
-                    approvals.len(),
+                    approvals_len,
                     self.config.approval_threshold
                 ),
             ));

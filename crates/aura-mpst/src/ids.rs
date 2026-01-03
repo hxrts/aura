@@ -116,6 +116,11 @@ impl<T> NonEmptyRoleList<T> {
         self.0.len()
     }
 
+    /// Always returns false since this list is guaranteed non-empty.
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     /// Append a new item.
     pub fn push(&mut self, item: T) {
         self.0.push(item);

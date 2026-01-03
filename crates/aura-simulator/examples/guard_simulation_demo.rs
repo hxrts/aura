@@ -149,10 +149,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let context = context(2);
         let budgets_with_context: std::collections::HashMap<(ContextId, AuthorityId), FlowCost> =
             state
-            .flow_budgets
-            .iter()
-            .map(|(auth, amount)| ((context, *auth), *amount))
-            .collect();
+                .flow_budgets
+                .iter()
+                .map(|(auth, amount)| ((context, *auth), *amount))
+                .collect();
         let snapshot = GuardSnapshot {
             now: state.current_time,
             caps: Cap::new(),

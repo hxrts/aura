@@ -113,9 +113,9 @@ pub async fn list_peers(
         .unwrap_or_else(|_e| vec![]);
 
     // Combine into a list of strings
-    let mut peer_list: Vec<String> = sync_peers.iter().map(|d| format!("sync:{}", d)).collect();
+    let mut peer_list: Vec<String> = sync_peers.iter().map(|d| format!("sync:{d}")).collect();
 
-    peer_list.extend(discovered_peers.iter().map(|a| format!("discovered:{}", a)));
+    peer_list.extend(discovered_peers.iter().map(|a| format!("discovered:{a}")));
 
     // Emit discovered peers signal
     emit_discovered_peers_signal(app_core, timestamp_ms).await?;

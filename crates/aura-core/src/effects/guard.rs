@@ -387,7 +387,7 @@ mod tests {
 
         match deserialized {
             EffectCommand::ChargeBudget { amount, .. } => {
-                assert_eq!(amount, FlowCost::new(100))
+                assert_eq!(amount, FlowCost::new(100));
             }
             _ => panic!("Wrong command type"),
         }

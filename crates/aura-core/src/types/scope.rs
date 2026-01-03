@@ -291,9 +291,8 @@ impl ResourceScope {
                 })
             }
             "context" => {
-                let context_id = ContextId::from_str(id_part).map_err(|_| {
-                    ResourceScopeParseError::InvalidContextId(id_part.to_string())
-                })?;
+                let context_id = ContextId::from_str(id_part)
+                    .map_err(|_| ResourceScopeParseError::InvalidContextId(id_part.to_string()))?;
                 if remainder.contains('/') {
                     return Err(ResourceScopeParseError::InvalidOperation(
                         remainder.to_string(),

@@ -25,7 +25,7 @@ async fn simulator_amp_guard_chain_is_deterministic() {
         peer,
         FlowCost::new(1),
     )
-        .with_operation_id("amp_send_sim");
+    .with_operation_id("amp_send_sim");
     let result = guard
         .evaluate(effects.as_ref())
         .await

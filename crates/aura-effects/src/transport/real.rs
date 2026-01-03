@@ -107,6 +107,7 @@ impl TransportEffects for RealTransportHandler {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -128,8 +129,7 @@ mod tests {
                 .expect("non-zero read timeout"),
             write_timeout: crate::transport::NonZeroDuration::from_millis(5)
                 .expect("non-zero write timeout"),
-            buffer_size: std::num::NonZeroUsize::new(4096)
-                .expect("non-zero buffer size"),
+            buffer_size: std::num::NonZeroUsize::new(4096).expect("non-zero buffer size"),
         };
         let handler = RealTransportHandler::with_config(config.clone());
         assert_eq!(handler._config.buffer_size, config.buffer_size);

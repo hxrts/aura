@@ -121,7 +121,10 @@ async fn amp_consensus_success_path() {
 #[tokio::test]
 async fn amp_consensus_missing_keys_fails() {
     let prestate = aura_core::Prestate::new(
-        vec![(AuthorityId::new_from_entropy([31u8; 32]), aura_core::Hash32::default())],
+        vec![(
+            AuthorityId::new_from_entropy([31u8; 32]),
+            aura_core::Hash32::default(),
+        )],
         aura_core::Hash32::default(),
     )
     .unwrap();

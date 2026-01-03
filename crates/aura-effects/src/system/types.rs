@@ -8,13 +8,18 @@ use std::str::FromStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LogLevel {
+    /// Debug-level messages for development.
     Debug,
+    /// Informational messages.
     Info,
+    /// Warning messages.
     Warn,
+    /// Error messages.
     Error,
 }
 
 impl LogLevel {
+    /// Returns the log level as a string slice.
     pub fn as_str(&self) -> &'static str {
         match self {
             LogLevel::Debug => "debug",
@@ -57,22 +62,36 @@ impl TryFrom<&str> for LogLevel {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ComponentId {
+    /// Core system component.
     System,
+    /// Logging subsystem.
     Logging,
+    /// Monitoring subsystem.
     Monitoring,
+    /// Metrics collection.
     Metrics,
+    /// Transport layer.
     Transport,
+    /// Storage layer.
     Storage,
+    /// Cryptographic operations.
     Crypto,
+    /// Network layer.
     Network,
+    /// Protocol handling.
     Protocol,
+    /// Consensus layer.
     Consensus,
+    /// Guard chain.
     Guard,
+    /// Journal operations.
     Journal,
+    /// Custom component identifier.
     Custom(String),
 }
 
 impl ComponentId {
+    /// Returns the component ID as a string slice.
     pub fn as_str(&self) -> &str {
         match self {
             ComponentId::System => "system",
@@ -128,21 +147,34 @@ impl From<String> for ComponentId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AuditAction {
+    /// Resource creation.
     Create,
+    /// Resource read access.
     Read,
+    /// Resource update.
     Update,
+    /// Resource deletion.
     Delete,
+    /// Authentication attempt.
     Authenticate,
+    /// Authorization check.
     Authorize,
+    /// Key management operation.
     KeyOperation,
+    /// Key or credential rotation.
     Rotate,
+    /// Account or key recovery.
     Recover,
+    /// Invitation sent.
     Invite,
+    /// Permission or access revocation.
     Revoke,
+    /// Custom audit action.
     Custom(String),
 }
 
 impl AuditAction {
+    /// Returns the audit action as a string slice.
     pub fn as_str(&self) -> &str {
         match self {
             AuditAction::Create => "create",

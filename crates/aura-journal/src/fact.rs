@@ -590,9 +590,7 @@ impl ProtocolFactKey {
             ProtocolFactKey::Consensus { .. } => "consensus",
             ProtocolFactKey::AmpChannelCheckpoint { .. } => "amp-channel-checkpoint",
             ProtocolFactKey::AmpProposedChannelEpochBump { .. } => "amp-proposed-epoch-bump",
-            ProtocolFactKey::AmpCommittedChannelEpochBump { .. } => {
-                "amp-committed-epoch-bump"
-            }
+            ProtocolFactKey::AmpCommittedChannelEpochBump { .. } => "amp-committed-epoch-bump",
             ProtocolFactKey::AmpChannelPolicy { .. } => "amp-channel-policy",
             ProtocolFactKey::LeakageEvent { .. } => "leakage-event",
             ProtocolFactKey::DkgTranscriptCommit { .. } => "dkg-transcript-commit",
@@ -622,24 +620,17 @@ impl ProtocolFactKey {
                 channel,
                 chan_epoch,
                 ck_commitment,
-            } => aura_core::util::serialization::to_vec(&(
-                channel,
-                chan_epoch,
-                ck_commitment,
-            ))
-            .unwrap_or_default(),
+            } => aura_core::util::serialization::to_vec(&(channel, chan_epoch, ck_commitment))
+                .unwrap_or_default(),
             ProtocolFactKey::AmpProposedChannelEpochBump {
                 channel,
                 parent_epoch,
                 new_epoch,
                 bump_id,
-            } => aura_core::util::serialization::to_vec(&(
-                channel,
-                parent_epoch,
-                new_epoch,
-                bump_id,
-            ))
-            .unwrap_or_default(),
+            } => {
+                aura_core::util::serialization::to_vec(&(channel, parent_epoch, new_epoch, bump_id))
+                    .unwrap_or_default()
+            }
             ProtocolFactKey::AmpCommittedChannelEpochBump {
                 channel,
                 parent_epoch,

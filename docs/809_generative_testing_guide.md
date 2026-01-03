@@ -36,7 +36,7 @@ Each link in this chain adds verification value:
 
 ## Writing Quint Specs for Simulation
 
-See [Verification Guide](807_verification_guide.md) §Quint Syntax Patterns for detailed syntax requirements.
+See `verification/quint/` for Aura-specific Quint syntax patterns.
 
 ### Key Principles
 
@@ -179,6 +179,5 @@ The `aura-quint` runner classifies properties by keyword:
 ## Related Documentation
 
 - [Simulation Guide](806_simulation_guide.md) - Deterministic simulation and generative infrastructure
-- [Verification Guide](807_verification_guide.md) - Quint specifications and Lean proofs
 - [Testing Guide](805_testing_guide.md) - Unit, integration, and property testing
 - [Effect System Guide](106_effect_system_and_runtime.md) - Effect trait architecture

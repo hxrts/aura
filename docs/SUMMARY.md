@@ -32,7 +32,6 @@
 - [Development Patterns and Workflows](805_development_patterns.md)
 - [Testing Guide](805_testing_guide.md)
 - [Simulation Guide](806_simulation_guide.md)
-- [Verification Guide](807_verification_guide.md)
 - [Maintenance and OTA Guide](808_maintenance_guide.md)
 - [Generative Testing Guide](809_generative_testing_guide.md)
 - [Reactive Signals Guide](810_reactive_signals_guide.md)

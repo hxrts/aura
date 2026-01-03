@@ -21,11 +21,7 @@ use std::collections::HashMap;
 ///
 /// Default policy: all authorities in the prestate, threshold = f+1 (majority)
 fn default_witness_policy(prestate: &Prestate) -> (Vec<AuthorityId>, u16) {
-    let witnesses: Vec<AuthorityId> = prestate
-        .authority_commitments
-        .iter()
-        .map(|(id, _)| *id)
-        .collect();
+    let witnesses: Vec<AuthorityId> = prestate.authority_commitments.keys().copied().collect();
 
     let threshold = ((witnesses.len() as u16) / 2).saturating_add(1).max(1);
     (witnesses, threshold)

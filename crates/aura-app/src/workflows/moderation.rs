@@ -56,7 +56,7 @@ pub async fn kick_user(
             reason.map(|s| s.to_string()),
         )
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to kick user: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to kick user: {e}")))?;
 
     Ok(())
 }
@@ -86,7 +86,7 @@ pub async fn ban_user(
             reason.map(|s| s.to_string()),
         )
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to ban user: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to ban user: {e}")))?;
 
     Ok(())
 }
@@ -106,7 +106,7 @@ pub async fn unban_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Result
     runtime
         .moderation_unban(context_id, channel_id, target_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to unban user: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to unban user: {e}")))?;
 
     Ok(())
 }
@@ -131,7 +131,7 @@ pub async fn mute_user(
     runtime
         .moderation_mute(context_id, channel_id, target_id, duration_secs)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to mute user: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to mute user: {e}")))?;
 
     Ok(())
 }
@@ -151,7 +151,7 @@ pub async fn unmute_user(app_core: &Arc<RwLock<AppCore>>, target: &str) -> Resul
     runtime
         .moderation_unmute(context_id, channel_id, target_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to unmute user: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to unmute user: {e}")))?;
 
     Ok(())
 }
@@ -173,7 +173,7 @@ pub async fn pin_message(
     runtime
         .moderation_pin(context_id, channel_id, message_id.to_string())
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to pin message: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to pin message: {e}")))?;
 
     Ok(())
 }
@@ -195,7 +195,7 @@ pub async fn unpin_message(
     runtime
         .moderation_unpin(context_id, channel_id, message_id.to_string())
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to unpin message: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to unpin message: {e}")))?;
 
     Ok(())
 }

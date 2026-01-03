@@ -47,8 +47,13 @@ impl std::fmt::Display for CapabilityId {
 /// Structured guard violation reasons.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GuardViolation {
-    MissingCapability { capability: CapabilityId },
-    InsufficientFlowBudget { required: FlowCost, remaining: FlowCost },
+    MissingCapability {
+        capability: CapabilityId,
+    },
+    InsufficientFlowBudget {
+        required: FlowCost,
+        remaining: FlowCost,
+    },
     AuthorizationDenied,
     MissingAuthorizationDecision,
     CapabilityCheckFailed,
@@ -69,7 +74,10 @@ impl std::fmt::Display for GuardViolation {
             GuardViolation::MissingCapability { capability } => {
                 write!(f, "Missing capability: {capability}")
             }
-            GuardViolation::InsufficientFlowBudget { required, remaining } => write!(
+            GuardViolation::InsufficientFlowBudget {
+                required,
+                remaining,
+            } => write!(
                 f,
                 "Insufficient flow budget: need {required}, have {remaining}"
             ),
@@ -82,7 +90,10 @@ impl std::fmt::Display for GuardViolation {
                 write!(f, "charge command appears after a send command")
             }
             GuardViolation::MissingChargeBeforeSend => {
-                write!(f, "send command emitted without any preceding charge command")
+                write!(
+                    f,
+                    "send command emitted without any preceding charge command"
+                )
             }
             GuardViolation::Other(reason) => write!(f, "{reason}"),
         }
@@ -181,10 +192,7 @@ pub trait FlowBudgetSnapshot {
 }
 
 /// Check capability and return denied outcome if missing.
-pub fn check_capability<S, C>(
-    snapshot: &S,
-    required_cap: &CapabilityId,
-) -> Option<GuardOutcome<C>>
+pub fn check_capability<S, C>(snapshot: &S, required_cap: &CapabilityId) -> Option<GuardOutcome<C>>
 where
     S: CapabilitySnapshot,
 {
@@ -206,10 +214,12 @@ where
     if remaining >= required_cost {
         None
     } else {
-        Some(GuardOutcome::denied(GuardViolation::InsufficientFlowBudget {
-            required: required_cost,
-            remaining,
-        }))
+        Some(GuardOutcome::denied(
+            GuardViolation::InsufficientFlowBudget {
+                required: required_cost,
+                remaining,
+            },
+        ))
     }
 }
 

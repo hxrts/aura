@@ -34,9 +34,9 @@ impl<'de> Deserialize<'de> for Ed25519Signature {
             where
                 E: serde::de::Error,
             {
-                let arr: [u8; 64] = v.try_into().map_err(|_| {
-                    E::invalid_length(v.len(), &"64 bytes")
-                })?;
+                let arr: [u8; 64] = v
+                    .try_into()
+                    .map_err(|_| E::invalid_length(v.len(), &"64 bytes"))?;
                 Ok(Ed25519Signature(arr))
             }
 
@@ -218,6 +218,7 @@ pub fn ed25519_verifying_key(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::util::serialization;

@@ -47,8 +47,8 @@ impl ViewReduction<ChatDelta> for ChatReduction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_composition::IntoViewDelta;
     use aura_chat::ChatFact;
+    use aura_composition::IntoViewDelta;
     use aura_core::identifiers::{ChannelId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_journal::DomainFact;

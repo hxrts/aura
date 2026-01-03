@@ -92,10 +92,10 @@ pub struct PeerEndpoint {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolConfig {
     /// Maximum total connections across all peers
-    pub max_total_connections: usize,
+    pub max_total_connections: u32,
 
     /// Maximum connections per peer
-    pub max_connections_per_peer: usize,
+    pub max_connections_per_peer: u32,
 
     /// Idle timeout after which connections are closed
     pub idle_timeout: Duration,
@@ -365,7 +365,8 @@ impl ConnectionPool {
         }
 
         // Check limits before creating new connection
-        if self.total_connections >= self.config.max_total_connections {
+        let max_total_connections = self.config.max_total_connections as usize;
+        if self.total_connections >= max_total_connections {
             self.stats.connection_limit_hits += 1;
             return Err(sync_resource_exhausted(
                 "connections",
@@ -376,7 +377,8 @@ impl ConnectionPool {
         // Check peer connection limit before creating new connection
         {
             let peer_connections = self.connections.entry(peer_id).or_default();
-            if peer_connections.len() >= self.config.max_connections_per_peer {
+            let max_connections_per_peer = self.config.max_connections_per_peer as usize;
+            if peer_connections.len() >= max_connections_per_peer {
                 self.stats.connection_limit_hits += 1;
                 return Err(sync_resource_exhausted(
                     "connections",
@@ -507,7 +509,7 @@ impl ConnectionPool {
         // Remove peer entries with no connections
         self.connections.retain(|_, v| !v.is_empty());
 
-        self.stats.connections_evicted += evicted;
+        self.stats.connections_evicted += evicted as u64;
         evicted
     }
 
@@ -620,7 +622,7 @@ pub struct PoolStatistics {
     pub connections_closed: u64,
 
     /// Total connections evicted due to idle timeout
-    pub connections_evicted: usize,
+    pub connections_evicted: u64,
 
     /// Number of times connection limit was hit
     pub connection_limit_hits: u64,

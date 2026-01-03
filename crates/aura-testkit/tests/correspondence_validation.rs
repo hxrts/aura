@@ -1,6 +1,7 @@
 //! Correspondence Validation Tests
 //!
 //! Tests that validate the correspondence between Lean proofs and Rust implementation.
+#![allow(clippy::clone_on_copy)] // Proptest code uses clone for clarity
 //! These tests verify structural properties that must hold for the Lean theorems to apply.
 //!
 //! ## Lean Correspondence
@@ -102,12 +103,13 @@ fn arb_evidence() -> impl Strategy<Value = Evidence> {
 
 /// Generate a random vote
 fn arb_vote() -> impl Strategy<Value = Vote> {
-    ("[a-z]{2,4}", "r[0-9]{1,2}", "h[a-f0-9]{4}")
-        .prop_map(|(witness, result_id, prestate_hash)| Vote {
+    ("[a-z]{2,4}", "r[0-9]{1,2}", "h[a-f0-9]{4}").prop_map(|(witness, result_id, prestate_hash)| {
+        Vote {
             witness: authority_from_label(&witness),
             result_id: hash_from_label(&result_id),
             prestate_hash: hash_from_label(&prestate_hash),
-        })
+        }
+    })
 }
 
 proptest! {

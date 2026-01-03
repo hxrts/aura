@@ -402,9 +402,6 @@ mod tests {
     fn test_required_signers_invalid_threshold() {
         let policy = Policy::Threshold { m: 0, n: 3 };
         let err = policy.required_signers(3).unwrap_err();
-        assert!(matches!(
-            err,
-            PolicyError::InvalidThreshold { m: 0, n: 3 }
-        ));
+        assert!(matches!(err, PolicyError::InvalidThreshold { m: 0, n: 3 }));
     }
 }

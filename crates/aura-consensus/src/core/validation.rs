@@ -20,7 +20,7 @@ use super::state::{
     ConsensusPhase, ConsensusState, ConsensusThreshold, PureCommitFact, ShareData, ShareProposal,
 };
 use crate::types::ConsensusId;
-use aura_core::{AuthorityId, Hash32, OperationId};
+use aura_core::{AuthorityId, Hash32};
 
 /// Validation error types for detailed diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,11 +285,13 @@ pub fn check_threshold_met(state: &ConsensusState) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
     use crate::core::state::PathSelection;
+    use aura_core::OperationId;
 
     fn threshold(value: u16) -> ConsensusThreshold {
         ConsensusThreshold::new(value).expect("threshold")
@@ -378,8 +380,7 @@ mod tests {
 
     #[test]
     fn test_check_invariants_valid() {
-        let witnesses: BTreeSet<_> =
-            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let state = ConsensusState::new(
             test_consensus_id(1),

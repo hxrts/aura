@@ -19,9 +19,9 @@
 use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU16;
 
-use aura_core::{AuthorityId, Hash32, OperationId};
-use aura_core::epochs::Epoch;
 use crate::types::ConsensusId;
+use aura_core::epochs::Epoch;
+use aura_core::{AuthorityId, Hash32, OperationId};
 
 /// Consensus phase matching Quint's ConsensusPhase sum type.
 ///

@@ -836,11 +836,9 @@ mod tests {
             self.executed_commands.lock().await.push(cmd.clone());
 
             match cmd {
-                EffectCommand::ChargeBudget { amount, .. } => {
-                    Ok(EffectResult::RemainingBudget(
-                        1000u32.saturating_sub(amount.value()),
-                    ))
-                }
+                EffectCommand::ChargeBudget { amount, .. } => Ok(EffectResult::RemainingBudget(
+                    1000u32.saturating_sub(amount.value()),
+                )),
                 _ => Ok(EffectResult::Success),
             }
         }

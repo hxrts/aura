@@ -460,7 +460,7 @@ impl Fact {
             .filter_map(|op| match op {
                 FactOperation::Add {
                     key: op_key, op_id, ..
-                } if op_key == &key => Some(op_id.clone()),
+                } if op_key == &key => Some(*op_id),
                 _ => None,
             })
             .collect();
@@ -474,7 +474,7 @@ impl Fact {
                     timestamp,
                     actor_id: actor_id.clone(),
                     op_id,
-                    removed_op_id: (*removed_op_id).clone(),
+                    removed_op_id: *(*removed_op_id),
                 })
             })
             .count();
@@ -547,14 +547,14 @@ impl Fact {
                 FactOperation::Add {
                     key: op_key, op_id, ..
                 } if op_key.as_str() == key => {
-                    add_ops.insert(op_id.clone());
+                    add_ops.insert(*op_id);
                 }
                 FactOperation::Remove {
                     key: op_key,
                     removed_op_id,
                     ..
                 } if op_key.as_str() == key => {
-                    removed_ops.insert(removed_op_id.clone());
+                    removed_ops.insert(*removed_op_id);
                 }
                 _ => {}
             }
@@ -1273,6 +1273,7 @@ impl fmt::Display for Journal {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod semilattice_tests {
     use super::*;
 
@@ -1561,7 +1562,7 @@ mod semilattice_tests {
         )
         .expect("insert should succeed");
 
-        fact.remove_with_context(key.clone(), actor_a.clone(), FactTimestamp::new(3), None)
+        fact.remove_with_context(key.clone(), actor_a, FactTimestamp::new(3), None)
             .expect("remove should succeed");
         assert!(fact.get(key.as_str()).is_none(), "key should be removed");
 
@@ -1589,7 +1590,7 @@ mod semilattice_tests {
         fact.insert_with_context(
             key.clone(),
             FactValue::String("high".to_string()),
-            actor_high.clone(),
+            actor_high,
             ts,
             None,
         )
@@ -1624,7 +1625,7 @@ mod semilattice_tests {
         }
 
         let result = fact.insert(
-            format!("k{}", MAX_LWW_MAP_ENTRIES_COUNT),
+            format!("k{MAX_LWW_MAP_ENTRIES_COUNT}"),
             FactValue::Number(1),
         );
         assert!(result.is_err());

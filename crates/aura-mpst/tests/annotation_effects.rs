@@ -1,3 +1,7 @@
+//! Tests for Aura annotation extraction from choreographies.
+
+#![allow(clippy::expect_used, missing_docs)]
+
 use aura_mpst::{extract_aura_annotations, AuraEffect, RoleId};
 
 #[test]

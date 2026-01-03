@@ -219,9 +219,8 @@ impl DescriptorBuilder {
 
         // Add direct hints for each local address (validated)
         for addr_str in &local_addresses {
-            let hint = TransportHint::tcp_direct(addr_str).map_err(|e| {
-                AuraError::invalid(format!("Invalid transport address: {e}"))
-            })?;
+            let hint = TransportHint::tcp_direct(addr_str)
+                .map_err(|e| AuraError::invalid(format!("Invalid transport address: {e}")))?;
             hints.push(hint);
         }
 

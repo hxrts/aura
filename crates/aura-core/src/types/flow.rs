@@ -216,7 +216,7 @@ impl FlowBudget {
     /// Remaining headroom before the guard should block.
     #[must_use]
     pub fn headroom(&self) -> u64 {
-        self.limit.checked_sub(self.spent).unwrap_or(0)
+        self.limit.saturating_sub(self.spent)
     }
 
     /// Alias for headroom() - returns remaining budget
@@ -228,10 +228,13 @@ impl FlowBudget {
     /// Returns true if charging `cost` would still be within the budget.
     pub fn can_charge(&self, cost: FlowCost) -> Result<bool, BudgetError> {
         let cost_value = u64::from(cost);
-        let new_spent = self.spent.checked_add(cost_value).ok_or(BudgetError::Overflow {
-            spent: self.spent,
-            cost: cost_value,
-        })?;
+        let new_spent = self
+            .spent
+            .checked_add(cost_value)
+            .ok_or(BudgetError::Overflow {
+                spent: self.spent,
+                cost: cost_value,
+            })?;
         Ok(new_spent <= self.limit)
     }
 
@@ -241,10 +244,13 @@ impl FlowBudget {
     /// if the budget would be exceeded.
     pub fn record_charge(&mut self, cost: FlowCost) -> std::result::Result<(), BudgetError> {
         let cost_value = u64::from(cost);
-        let new_spent = self.spent.checked_add(cost_value).ok_or(BudgetError::Overflow {
-            spent: self.spent,
-            cost: cost_value,
-        })?;
+        let new_spent = self
+            .spent
+            .checked_add(cost_value)
+            .ok_or(BudgetError::Overflow {
+                spent: self.spent,
+                cost: cost_value,
+            })?;
         if new_spent <= self.limit {
             self.spent = new_spent;
             Ok(())
@@ -383,6 +389,7 @@ impl Receipt {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

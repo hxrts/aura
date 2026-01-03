@@ -15,7 +15,6 @@ use aura_core::{AuthorityId, DeviceId};
 
 /// Handles device enrollment ceremony messages
 pub struct EnrollmentHandler<'a> {
-    #[allow(dead_code)]
     authority_id: AuthorityId,
     effects: &'a AuraEffectSystem,
     ceremony_tracker: &'a CeremonyTracker,
@@ -268,14 +267,86 @@ impl<'a> EnrollmentHandler<'a> {
         };
 
         if threshold_reached {
-            // Enrollment ceremonies complete when all devices have their key packages
-            // The commit happens via a separate commit message
-            tracing::info!(
-                ceremony_id = %ceremony_id,
-                "Device enrollment threshold reached, awaiting commit"
-            );
+            // When threshold is reached, send commit to all participants
+            if let Err(e) = self.send_commit_to_participants(&ceremony_id).await {
+                tracing::error!(
+                    ceremony_id = %ceremony_id,
+                    error = ?e,
+                    "Failed to send enrollment commit messages"
+                );
+            }
         }
 
         ProcessResult::Processed
+    }
+
+    /// Send commit messages to all ceremony participants
+    async fn send_commit_to_participants(&self, ceremony_id: &CeremonyId) -> Result<(), String> {
+        use aura_core::effects::TransportEffects;
+
+        let ceremony_state = self
+            .ceremony_tracker
+            .get(ceremony_id)
+            .await
+            .map_err(|e| format!("Failed to get ceremony state: {e}"))?;
+
+        let context_entropy = {
+            let mut h = aura_core::hash::hasher();
+            h.update(b"DEVICE_ENROLLMENT_CONTEXT");
+            h.update(&self.authority_id.to_bytes());
+            h.update(ceremony_id.as_str().as_bytes());
+            h.finalize()
+        };
+        let ceremony_context = aura_core::identifiers::ContextId::new_from_entropy(context_entropy);
+
+        for participant in &ceremony_state.participants {
+            let aura_core::threshold::ParticipantIdentity::Device(device_id) = participant else {
+                continue;
+            };
+
+            let mut metadata = std::collections::HashMap::new();
+            metadata.insert(
+                "content-type".to_string(),
+                "application/aura-device-enrollment-commit".to_string(),
+            );
+            metadata.insert("ceremony-id".to_string(), ceremony_id.to_string());
+            metadata.insert(
+                "new-epoch".to_string(),
+                ceremony_state.new_epoch.to_string(),
+            );
+            metadata.insert(
+                "aura-destination-device-id".to_string(),
+                device_id.to_string(),
+            );
+
+            let commit_envelope = aura_core::effects::TransportEnvelope {
+                destination: self.authority_id,
+                source: self.authority_id,
+                context: ceremony_context,
+                payload: Vec::new(),
+                metadata,
+                receipt: None,
+            };
+
+            if let Err(e) = self.effects.send_envelope(commit_envelope).await {
+                tracing::warn!(
+                    ceremony_id = %ceremony_id,
+                    device_id = %device_id,
+                    error = %e,
+                    "Failed to send enrollment commit to device"
+                );
+            }
+        }
+
+        // Mark ceremony as committed
+        if let Err(e) = self.ceremony_tracker.mark_committed(ceremony_id).await {
+            tracing::warn!(
+                ceremony_id = %ceremony_id,
+                error = %e,
+                "Failed to mark ceremony as committed"
+            );
+        }
+
+        Ok(())
     }
 }

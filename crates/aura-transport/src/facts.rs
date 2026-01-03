@@ -147,7 +147,6 @@ pub enum TransportFact {
 }
 
 impl TransportFact {
-
     /// Get the context ID for this fact
     pub fn context_id(&self) -> ContextId {
         match self {

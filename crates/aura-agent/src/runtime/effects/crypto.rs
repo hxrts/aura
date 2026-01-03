@@ -94,7 +94,7 @@ impl CryptoCoreEffects for AuraEffectSystem {
     }
 
     fn secure_zero(&self, data: &mut [u8]) {
-        self.crypto.handler().secure_zero(data)
+        self.crypto.handler().secure_zero(data);
     }
 }
 

@@ -5,6 +5,8 @@
 //! providing algebraic effect-based access to application state.
 //!
 //! # Architecture
+
+#![allow(missing_docs)] // Signal statics and state types are self-documenting
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────┐

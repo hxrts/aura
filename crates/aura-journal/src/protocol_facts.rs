@@ -5,8 +5,9 @@
 //! `RelationalFact::Generic` + `FactRegistry` instead.
 
 use crate::fact::{
-    ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, ConvergenceCert, DkgTranscriptCommit,
-    LeakageFact, ProposedChannelEpochBump, ProtocolFactKey, ReversionFact, RotateFact,
+    ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, ConvergenceCert,
+    DkgTranscriptCommit, LeakageFact, ProposedChannelEpochBump, ProtocolFactKey, ReversionFact,
+    RotateFact,
 };
 use aura_core::{AuthorityId, Hash32};
 use serde::{Deserialize, Serialize};
@@ -116,11 +117,9 @@ impl ProtocolRelationalFact {
                     chosen_bump_id: bump.chosen_bump_id,
                 }
             }
-            ProtocolRelationalFact::AmpChannelPolicy(policy) => {
-                ProtocolFactKey::AmpChannelPolicy {
-                    channel: policy.channel,
-                }
-            }
+            ProtocolRelationalFact::AmpChannelPolicy(policy) => ProtocolFactKey::AmpChannelPolicy {
+                channel: policy.channel,
+            },
             ProtocolRelationalFact::LeakageEvent(event) => ProtocolFactKey::LeakageEvent {
                 source: event.source,
                 destination: event.destination,
@@ -131,9 +130,9 @@ impl ProtocolRelationalFact {
                     transcript_hash: commit.transcript_hash,
                 }
             }
-            ProtocolRelationalFact::ConvergenceCert(cert) => ProtocolFactKey::ConvergenceCert {
-                op_id: cert.op_id,
-            },
+            ProtocolRelationalFact::ConvergenceCert(cert) => {
+                ProtocolFactKey::ConvergenceCert { op_id: cert.op_id }
+            }
             ProtocolRelationalFact::ReversionFact(reversion) => ProtocolFactKey::ReversionFact {
                 op_id: reversion.op_id,
             },

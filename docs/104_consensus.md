@@ -701,7 +701,7 @@ These properties are formally verified through complementary approaches:
   - `InvariantEquivocationDetected`: Equivocation detection correctness
   - `InvariantProgressUnderSynchrony`: Liveness under partial synchrony
 
-See [Verification Guide](807_verification_guide.md) for details on running verification.
+See `verification/quint/` and `verification/lean/` for verification artifacts and run notes.
 
 ### Binding Message Security
 

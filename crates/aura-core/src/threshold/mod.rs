@@ -34,8 +34,8 @@ pub use lifecycle::{
     ThresholdLifecycle,
 };
 pub use participant::{
-    NetworkAddress, NetworkAddressError, ParticipantEndpoint, ParticipantIdentity, SignerIndexError,
-    SigningParticipant,
+    NetworkAddress, NetworkAddressError, ParticipantEndpoint, ParticipantIdentity,
+    SignerIndexError, SigningParticipant,
 };
 pub use policy::{policy_for, CeremonyFlow, CeremonyLifecyclePolicy, KeyGenerationPolicy};
 pub use signature::ThresholdSignature;

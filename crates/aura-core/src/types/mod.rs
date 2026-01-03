@@ -25,8 +25,8 @@ pub use identifiers::{
     MessageContext, NeighborhoodId, OperationId, RelayId, SessionId,
 };
 pub use participants::{
-    FrostThreshold, InvalidThresholdError, NetworkAddress, NetworkAddressError, ParticipantEndpoint,
-    ParticipantIdentity, SignerIndexError, SigningParticipant,
+    FrostThreshold, InvalidThresholdError, NetworkAddress, NetworkAddressError,
+    ParticipantEndpoint, ParticipantIdentity, SignerIndexError, SigningParticipant,
 };
 pub use relationships::*;
 pub use scope::{

@@ -14,6 +14,8 @@
 //!
 //! See docs/123_commitment_tree.md - Deterministic Reduction section
 
+#![allow(clippy::expect_used)]
+
 use aura_core::{Epoch, TreeOp, TreeOpKind};
 use aura_journal::algebra::{JoinSemilattice, OpLog};
 use aura_journal::commitment_tree::reduce;

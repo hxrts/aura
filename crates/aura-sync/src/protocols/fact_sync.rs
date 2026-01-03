@@ -551,7 +551,7 @@ mod tests {
             id: FactId(id),
             predicate: "test".to_string(),
             value: FactValue::String("test_value".to_string()),
-            authority: None,
+            authority: Some(AuthorityId::new_from_entropy([id as u8; 32])),
             timestamp: None,
         }
     }

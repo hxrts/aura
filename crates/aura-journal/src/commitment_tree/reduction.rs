@@ -620,6 +620,7 @@ fn get_tree_level(state: &TreeState, node: NodeIndex) -> u32 {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::TreeOp;
     use super::*;

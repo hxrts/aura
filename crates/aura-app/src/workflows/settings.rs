@@ -71,7 +71,7 @@ pub async fn update_mfa_policy(
     runtime
         .set_mfa_policy(policy)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to update MFA policy: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to update MFA policy: {e}")))?;
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())
@@ -91,7 +91,7 @@ pub async fn update_nickname(
     runtime
         .set_display_name(&name)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to update display name: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to update display name: {e}")))?;
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())

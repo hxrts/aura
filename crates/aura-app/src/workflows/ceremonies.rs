@@ -2,6 +2,8 @@
 //!
 //! Provides portable helpers for starting/polling/canceling Category C ceremonies.
 
+#![allow(missing_docs)] // Ceremony workflow types are self-documenting
+
 use std::sync::Arc;
 
 use async_lock::RwLock;
@@ -23,7 +25,7 @@ pub async fn start_guardian_ceremony(
     let core = app_core.read().await;
     core.initiate_guardian_ceremony(threshold_k, total_n, &guardian_ids)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to start guardian ceremony: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to start guardian ceremony: {e}")))
 }
 
 /// Start a device threshold (multifactor) ceremony.
@@ -36,7 +38,7 @@ pub async fn start_device_threshold_ceremony(
     let core = app_core.read().await;
     core.initiate_device_threshold_ceremony(threshold_k, total_n, &device_ids)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to start device threshold ceremony: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to start device threshold ceremony: {e}")))
 }
 
 /// Start a device enrollment ("add device") ceremony.
@@ -47,7 +49,7 @@ pub async fn start_device_enrollment_ceremony(
     let core = app_core.read().await;
     core.initiate_device_enrollment_ceremony(device_name)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to start device enrollment: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to start device enrollment: {e}")))
 }
 /// Start a device removal ("remove device") ceremony.
 pub async fn start_device_removal_ceremony(
@@ -57,7 +59,7 @@ pub async fn start_device_removal_ceremony(
     let core = app_core.read().await;
     core.initiate_device_removal_ceremony(device_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to start device removal: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to start device removal: {e}")))
 }
 
 /// Polling policy for ceremonies.
@@ -133,7 +135,7 @@ pub async fn get_key_rotation_ceremony_status(
     let core = app_core.read().await;
     core.get_key_rotation_ceremony_status(ceremony_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to get ceremony status: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to get ceremony status: {e}")))
 }
 
 /// Cancel a key rotation ceremony (best effort).
@@ -144,7 +146,7 @@ pub async fn cancel_key_rotation_ceremony(
     let core = app_core.read().await;
     core.cancel_key_rotation_ceremony(ceremony_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to cancel ceremony: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to cancel ceremony: {e}")))
 }
 
 /// Poll a key rotation ceremony until completion or failure using a policy.

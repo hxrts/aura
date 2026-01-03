@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![allow(clippy::expect_used)]
 //! VectorClock performance regression benchmarks
 //!
 //! These benchmarks detect performance regressions in VectorClock operations.

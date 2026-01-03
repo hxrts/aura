@@ -2,6 +2,7 @@
 //!
 //! This module contains the fundamental types used throughout the consensus system.
 
+use crate::witness::NonEmptyWitnessSet;
 use aura_core::{
     crypto::tree_signing::frost_verify_aggregate,
     epochs::Epoch,
@@ -9,7 +10,6 @@ use aura_core::{
     time::ProvenancedTime,
     AuraError, AuthorityId, Hash32, Result,
 };
-use crate::witness::NonEmptyWitnessSet;
 use frost_ed25519;
 use serde::{Deserialize, Serialize};
 use std::fmt;

@@ -90,7 +90,7 @@ pub async fn get_user_info(
     if matching.len() == 1 {
         Ok(matching[0].clone())
     } else if matching.is_empty() {
-        Err(AuraError::not_found(format!("User '{}' not found", target)))
+        Err(AuraError::not_found(format!("User '{target}' not found")))
     } else {
         let names: Vec<_> = matching.iter().map(|c| get_display_name(c)).collect();
         Err(AuraError::invalid(format!(

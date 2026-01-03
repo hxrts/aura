@@ -129,10 +129,8 @@ async fn start_recovery(
         guardian_set.iter().map(|g| g.authority_id).collect();
 
     // Create recovery request for serialization (terminal-layer type)
-    let new_public_key_bytes = hash::hash(
-        format!("recovery-new-key:{account_authority}").as_bytes(),
-    )
-    .to_vec();
+    let new_public_key_bytes =
+        hash::hash(format!("recovery-new-key:{account_authority}").as_bytes()).to_vec();
     let recovery_request = RecoveryRequest {
         recovery_id: RecoveryId::new(format!("recovery-{account_authority}")),
         account_authority,

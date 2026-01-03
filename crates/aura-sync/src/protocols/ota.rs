@@ -134,10 +134,10 @@ pub struct OTAResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OTAConfig {
     /// Readiness threshold (M-of-N)
-    pub readiness_threshold: usize,
+    pub readiness_threshold: u32,
 
     /// Total quorum size
-    pub quorum_size: usize,
+    pub quorum_size: u32,
 
     /// Require epoch fence for hard forks
     pub enforce_epoch_fence: bool,
@@ -231,7 +231,9 @@ impl OTAProtocol {
             .filter(|s| matches!(s, ReadinessStatus::Ready))
             .count();
 
-        ready_count >= self.config.readiness_threshold
+        let ready_count_u32 =
+            u32::try_from(ready_count).expect("ready device count exceeds u32::MAX");
+        ready_count_u32 >= self.config.readiness_threshold
     }
 
     /// Activate upgrade if threshold is met

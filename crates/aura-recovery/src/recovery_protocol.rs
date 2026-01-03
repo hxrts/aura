@@ -331,9 +331,8 @@ impl RecoveryProtocolHandler {
         approvals.insert(request.recovery_id.clone(), Vec::new());
 
         // Create context ID for this recovery ceremony
-        let context_id = ContextId::new_from_entropy(hash::hash(
-            request.recovery_id.as_str().as_bytes(),
-        ));
+        let context_id =
+            ContextId::new_from_entropy(hash::hash(request.recovery_id.as_str().as_bytes()));
 
         // Emit RecoveryInitiated fact
         let timestamp = time_effects.physical_time().await?.ts_ms;
@@ -367,9 +366,8 @@ impl RecoveryProtocolHandler {
         journal: &dyn JournalEffects,
     ) -> Result<bool> {
         // Create context ID for this recovery ceremony
-        let context_id = ContextId::new_from_entropy(hash::hash(
-            approval.recovery_id.as_str().as_bytes(),
-        ));
+        let context_id =
+            ContextId::new_from_entropy(hash::hash(approval.recovery_id.as_str().as_bytes()));
 
         // Emit RecoveryShareSubmitted fact
         let timestamp = time_effects.physical_time().await?.ts_ms;
@@ -524,8 +522,7 @@ impl RecoveryProtocolHandler {
         }
 
         // Create context ID for this recovery ceremony
-        let context_id =
-            ContextId::new_from_entropy(hash::hash(recovery_id.as_str().as_bytes()));
+        let context_id = ContextId::new_from_entropy(hash::hash(recovery_id.as_str().as_bytes()));
 
         // Emit RecoveryCompleted fact
         let timestamp = time_effects.physical_time().await?.ts_ms;

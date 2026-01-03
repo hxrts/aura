@@ -212,7 +212,9 @@ impl aura_core::ProtocolErrorCode for AuraHandlerError {
             AuraHandlerError::MiddlewareError { .. } => "handler_middleware",
             AuraHandlerError::RegistryError { .. } => "handler_registry",
             AuraHandlerError::UnsupportedOperation { .. } => "handler_unsupported_operation",
-            AuraHandlerError::ParameterDeserializationFailed { .. } => "handler_param_deserialization",
+            AuraHandlerError::ParameterDeserializationFailed { .. } => {
+                "handler_param_deserialization"
+            }
             AuraHandlerError::ExecutionFailed { .. } => "handler_execution",
             AuraHandlerError::AuthorizationFailed { .. } => "handler_authorization",
             AuraHandlerError::HandlerCreationFailed { .. } => "handler_creation",

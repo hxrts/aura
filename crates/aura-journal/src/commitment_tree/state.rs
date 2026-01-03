@@ -460,12 +460,13 @@ impl TreeState {
             .get_policy(index)
             .ok_or(TreeStateError::PolicyNotFound(*index))?;
         let child_count = self.get_children(*index).len();
-        let threshold = policy
-            .required_signers(child_count)
-            .map_err(|e| TreeStateError::InvalidPolicy {
-                node: *index,
-                source: e,
-            })?;
+        let threshold =
+            policy
+                .required_signers(child_count)
+                .map_err(|e| TreeStateError::InvalidPolicy {
+                    node: *index,
+                    source: e,
+                })?;
 
         Ok(SigningWitness::from_signing_key(key, threshold))
     }
@@ -545,6 +546,7 @@ pub enum TreeStateError {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

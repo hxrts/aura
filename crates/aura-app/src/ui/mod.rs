@@ -5,6 +5,8 @@
 //! - signals (read/subscribe)
 //! - core types (AppCore, AppConfig)
 
+#![allow(missing_docs)] // UI facade - documentation evolving with API
+
 use async_lock::RwLock;
 use std::sync::Arc;
 

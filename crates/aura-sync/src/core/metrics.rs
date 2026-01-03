@@ -976,8 +976,8 @@ mod tests {
                 collector_clone.record_sync_start(&format!("session_{i}"), now);
                 collector_clone.record_sync_completion(
                     &format!("session_{i}"),
-                    i,
-                    i * 100,
+                    i as u64,
+                    (i as u64) * 100,
                     now + 50,
                 );
             });

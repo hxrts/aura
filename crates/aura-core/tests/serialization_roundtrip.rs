@@ -3,7 +3,9 @@
 use aura_core::messages::{MessageSequence, MessageTimestamp, WireEnvelope};
 use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
 use aura_core::util::serialization::{from_slice, to_vec};
-use aura_core::{DeviceId, FlowCost, FlowNonce, NetworkAddress, ReceiptSig, SessionId, StoragePath};
+use aura_core::{
+    DeviceId, FlowCost, FlowNonce, NetworkAddress, ReceiptSig, SessionId, StoragePath,
+};
 
 #[test]
 fn storage_path_roundtrip_json() {

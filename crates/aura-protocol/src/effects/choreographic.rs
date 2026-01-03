@@ -65,10 +65,7 @@ pub struct RoleIndex(NonZeroU32);
 impl RoleIndex {
     /// Create a new role index from a 0-based index.
     pub fn new(index: u32) -> Option<Self> {
-        index
-            .checked_add(1)
-            .and_then(NonZeroU32::new)
-            .map(Self)
+        index.checked_add(1).and_then(NonZeroU32::new).map(Self)
     }
 
     /// Return the 0-based index value.
@@ -205,7 +202,9 @@ impl aura_core::ProtocolErrorCode for ChoreographyError {
             ChoreographyError::ProtocolViolation { .. } => "choreography_protocol_violation",
             ChoreographyError::SessionNotStarted => "choreography_session_not_started",
             ChoreographyError::SessionAlreadyExists { .. } => "choreography_session_exists",
-            ChoreographyError::InsufficientParticipants { .. } => "choreography_insufficient_participants",
+            ChoreographyError::InsufficientParticipants { .. } => {
+                "choreography_insufficient_participants"
+            }
             ChoreographyError::ByzantineBehavior { .. } => "choreography_byzantine",
             ChoreographyError::Transport { .. } => "choreography_transport",
             ChoreographyError::InternalError { .. } => "choreography_internal",

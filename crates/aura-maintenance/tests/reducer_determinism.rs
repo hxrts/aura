@@ -1,13 +1,17 @@
+//! Reducer determinism tests for maintenance facts.
+
+#![allow(clippy::expect_used, missing_docs)]
+
 use aura_core::types::facts::FactDelta;
-use aura_core::types::FactDeltaReducer;
 use aura_core::types::Epoch;
+use aura_core::types::FactDeltaReducer;
 use aura_core::{AuthorityId, ContextId, Hash32, SemanticVersion};
+use aura_journal::{DomainFact, FactReducer};
 use aura_maintenance::{
     CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceFact, MaintenanceFactDelta,
     MaintenanceFactReducer, SnapshotProposed, UpgradeActivated, UpgradeProposalMetadata,
     MAINTENANCE_FACT_TYPE_ID,
 };
-use aura_journal::{DomainFact, FactReducer};
 use uuid::Uuid;
 
 fn authority(seed: u8) -> AuthorityId {
@@ -34,7 +38,10 @@ fn reducer_apply_is_deterministic_and_order_independent() {
     ));
     let fact_b = MaintenanceFact::CacheInvalidated(CacheInvalidated::new(
         authority(2),
-        vec![CacheKey("cache-key".to_string()), CacheKey("other".to_string())],
+        vec![
+            CacheKey("cache-key".to_string()),
+            CacheKey("other".to_string()),
+        ],
         Epoch::new(1),
     ));
 

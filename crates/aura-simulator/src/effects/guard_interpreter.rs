@@ -201,7 +201,9 @@ impl SimulationEffectInterpreter {
                     remaining,
                     ..
                 } => {
-                    state.flow_budgets.insert(*authority, FlowCost::new(*remaining));
+                    state
+                        .flow_budgets
+                        .insert(*authority, FlowCost::new(*remaining));
                 }
                 SimulationEvent::JournalAppended { entry, .. } => {
                     state.journal.push(entry.clone());
@@ -257,7 +259,11 @@ impl EffectInterpreter for SimulationEffectInterpreter {
             EffectCommand::ChargeBudget {
                 authority, amount, ..
             } => {
-                debug!(?authority, amount = amount.value(), "Simulation: Charging flow budget");
+                debug!(
+                    ?authority,
+                    amount = amount.value(),
+                    "Simulation: Charging flow budget"
+                );
 
                 let current_budget = state.get_budget(&authority);
                 if current_budget < amount {

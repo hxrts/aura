@@ -15,8 +15,8 @@
 use aura_consensus::core::state::{ConsensusThreshold, PureCommitFact};
 use aura_consensus::core::{ConsensusPhase, ConsensusState, ShareData, ShareProposal};
 use aura_consensus::types::ConsensusId;
-use aura_core::{hash, AuthorityId, Hash32, OperationId};
 use aura_core::AuraError;
+use aura_core::{hash, AuthorityId, Hash32, OperationId};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -141,16 +141,14 @@ pub fn parse_consensus_id_label(value: &str) -> ConsensusId {
 
 /// Parse a string label into an AuthorityId.
 pub fn parse_authority_id_label(value: &str) -> AuthorityId {
-    AuthorityId::from_str(value).unwrap_or_else(|_| {
-        AuthorityId::new_from_entropy(hash::hash(value.as_bytes()))
-    })
+    AuthorityId::from_str(value)
+        .unwrap_or_else(|_| AuthorityId::new_from_entropy(hash::hash(value.as_bytes())))
 }
 
 /// Parse a string label into an OperationId.
 pub fn parse_operation_id_label(value: &str) -> OperationId {
-    OperationId::from_str(value).unwrap_or_else(|_| {
-        OperationId::new_from_entropy(hash::hash(value.as_bytes()))
-    })
+    OperationId::from_str(value)
+        .unwrap_or_else(|_| OperationId::new_from_entropy(hash::hash(value.as_bytes())))
 }
 
 fn parse_state(value: &Value) -> Result<ITFState, AuraError> {
@@ -198,6 +196,7 @@ fn parse_bigint(value: Option<&Value>) -> Option<u64> {
 }
 
 /// Parse a Quint #set value
+#[allow(dead_code)] // Reserved for future Quint set parsing
 fn parse_set_strings(value: Option<&Value>) -> BTreeSet<String> {
     value
         .and_then(|v| v.get("#set"))
@@ -214,7 +213,12 @@ fn parse_set_authorities(value: Option<&Value>) -> BTreeSet<AuthorityId> {
     value
         .and_then(|v| v.get("#set"))
         .and_then(|arr| arr.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str()).map(parse_authority_id_label).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(parse_authority_id_label)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -285,10 +289,7 @@ fn parse_instance(value: &Value) -> Result<ConsensusState, AuraError> {
         .ok_or_else(|| AuraError::invalid("missing cid"))?;
     let cid = parse_consensus_id_label(cid);
 
-    let operation = obj
-        .get("operation")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let operation = obj.get("operation").and_then(|v| v.as_str()).unwrap_or("");
     let operation = parse_operation_id_label(operation);
 
     let prestate_hash = obj
@@ -298,18 +299,14 @@ fn parse_instance(value: &Value) -> Result<ConsensusState, AuraError> {
     let prestate_hash = parse_hash32_label(prestate_hash);
 
     let threshold_value = parse_bigint(obj.get("threshold")).unwrap_or(1);
-    let threshold_value = u16::try_from(threshold_value).map_err(|_| {
-        AuraError::invalid("threshold must fit in u16")
-    })?;
+    let threshold_value = u16::try_from(threshold_value)
+        .map_err(|_| AuraError::invalid("threshold must fit in u16"))?;
     let threshold = ConsensusThreshold::new(threshold_value)
         .ok_or_else(|| AuraError::invalid("threshold must be >= 1"))?;
 
     let witnesses = parse_set_authorities(obj.get("witnesses"));
 
-    let initiator = obj
-        .get("initiator")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let initiator = obj.get("initiator").and_then(|v| v.as_str()).unwrap_or("");
     let initiator = parse_authority_id_label(initiator);
 
     let phase = parse_phase(obj.get("phase"))?;
@@ -372,16 +369,10 @@ fn parse_proposals(value: Option<&Value>) -> Result<Vec<ShareProposal>, AuraErro
                 .as_object()
                 .ok_or_else(|| AuraError::invalid("proposal is not object"))?;
 
-            let witness = obj
-                .get("witness")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let witness = obj.get("witness").and_then(|v| v.as_str()).unwrap_or("");
             let witness = parse_authority_id_label(witness);
 
-            let result_id = obj
-                .get("resultId")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let result_id = obj.get("resultId").and_then(|v| v.as_str()).unwrap_or("");
             let result_id = parse_hash32_label(result_id);
 
             let share = parse_share_data(obj.get("share"))?;
@@ -472,24 +463,21 @@ fn parse_commit_fact(value: Option<&Value>) -> Result<Option<PureCommitFact>, Au
         .and_then(|v| v.as_object())
         .ok_or_else(|| AuraError::invalid("commit fact value is not object"))?;
 
-    let cid_str = inner
-        .get("cid")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let cid_hash = Hash32::from_hex(cid_str).unwrap_or_else(|_| Hash32::from_bytes(cid_str.as_bytes()));
+    let cid_str = inner.get("cid").and_then(|v| v.as_str()).unwrap_or("");
+    let cid_hash =
+        Hash32::from_hex(cid_str).unwrap_or_else(|_| Hash32::from_bytes(cid_str.as_bytes()));
     let cid = ConsensusId(cid_hash);
 
-    let result_id_str = inner
-        .get("rid")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let result_id = Hash32::from_hex(result_id_str).unwrap_or_else(|_| Hash32::from_bytes(result_id_str.as_bytes()));
+    let result_id_str = inner.get("rid").and_then(|v| v.as_str()).unwrap_or("");
+    let result_id = Hash32::from_hex(result_id_str)
+        .unwrap_or_else(|_| Hash32::from_bytes(result_id_str.as_bytes()));
 
     let prestate_str = inner
         .get("prestateHash")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let prestate_hash = Hash32::from_hex(prestate_str).unwrap_or_else(|_| Hash32::from_bytes(prestate_str.as_bytes()));
+    let prestate_hash = Hash32::from_hex(prestate_str)
+        .unwrap_or_else(|_| Hash32::from_bytes(prestate_str.as_bytes()));
 
     let signature = inner
         .get("signature")

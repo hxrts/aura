@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![allow(clippy::expect_used)] // Test code uses expect for clarity
 use aura_core::{Fact, FactValue, Journal};
 use aura_sync::protocols::{AntiEntropyConfig, AntiEntropyProtocol, JournalDigest};
 

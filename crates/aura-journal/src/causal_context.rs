@@ -323,6 +323,7 @@ impl OperationId {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering};

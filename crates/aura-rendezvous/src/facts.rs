@@ -309,10 +309,12 @@ fn parse_transport_port(addr: &str) -> Result<u16, TransportAddressError> {
 
         let host = &remainder[..end];
         let after = &remainder[end + 1..];
-        let port_str = after.strip_prefix(':').ok_or_else(|| TransportAddressError {
-            input: addr.to_string(),
-            reason: "missing port separator ':'".to_string(),
-        })?;
+        let port_str = after
+            .strip_prefix(':')
+            .ok_or_else(|| TransportAddressError {
+                input: addr.to_string(),
+                reason: "missing port separator ':'".to_string(),
+            })?;
 
         if host.is_empty() {
             return Err(TransportAddressError {
@@ -399,10 +401,7 @@ impl TransportHint {
     }
 
     /// Create a QuicReflexive hint, validating both addresses.
-    pub fn quic_reflexive(
-        addr: &str,
-        stun_server: &str,
-    ) -> Result<Self, TransportAddressError> {
+    pub fn quic_reflexive(addr: &str, stun_server: &str) -> Result<Self, TransportAddressError> {
         Ok(TransportHint::QuicReflexive {
             addr: TransportAddress::new(addr)?,
             stun_server: TransportAddress::new(stun_server)?,

@@ -1,5 +1,6 @@
 //! Tests for consensus share ordering semantics.
 #![allow(missing_docs)]
+#![allow(clippy::expect_used)] // Test helper functions use expect for clarity
 
 use aura_consensus::core::state::{ConsensusThreshold, PathSelection, ShareData, ShareProposal};
 use aura_consensus::core::transitions::{apply_share, start_consensus, TransitionResult};

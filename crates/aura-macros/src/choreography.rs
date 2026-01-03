@@ -17,8 +17,8 @@ use rumpsteak_aura_choreography::{
     extensions::ExtensionRegistry,
     parse_and_generate_with_extensions,
 };
-use syn::{parse::Parse, Ident, Token};
 use std::collections::BTreeSet;
+use syn::{parse::Parse, Ident, Token};
 
 // Import Biscuit-related types for the updated annotation system
 use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
@@ -84,9 +84,8 @@ impl Parse for ChoreographyInput {
             let _: proc_macro2::TokenTree = content.parse()?;
         }
 
-        let aura_annotations = extract_aura_annotations(&full_input_str).map_err(|err| {
-            syn::Error::new(proc_macro2::Span::call_site(), err.to_string())
-        })?;
+        let aura_annotations = extract_aura_annotations(&full_input_str)
+            .map_err(|err| syn::Error::new(proc_macro2::Span::call_site(), err.to_string()))?;
 
         Ok(ChoreographyInput {
             _protocol_name: protocol_name,
@@ -235,11 +234,16 @@ fn to_screaming_snake(value: &str) -> String {
         let is_upper = ch.is_ascii_uppercase();
         let is_lower = ch.is_ascii_lowercase();
         let is_digit = ch.is_ascii_digit();
-        let next_is_lower = chars.peek().map(|c| c.is_ascii_lowercase()).unwrap_or(false);
+        let next_is_lower = chars
+            .peek()
+            .map(|c| c.is_ascii_lowercase())
+            .unwrap_or(false);
         if !out.is_empty() {
-            if is_upper && (prev_is_lower || (prev_is_upper && next_is_lower) || prev_is_digit) {
-                out.push('_');
-            } else if is_digit && (prev_is_lower || prev_is_upper) {
+            // Insert underscore before uppercase letters or digits when transitioning from different char types
+            let needs_separator = (is_upper
+                && (prev_is_lower || (prev_is_upper && next_is_lower) || prev_is_digit))
+                || (is_digit && (prev_is_lower || prev_is_upper));
+            if needs_separator {
                 out.push('_');
             }
         }

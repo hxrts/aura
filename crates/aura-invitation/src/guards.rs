@@ -169,6 +169,7 @@ pub type GuardDecision = types::GuardDecision;
 /// These commands are produced by pure guard evaluation and
 /// executed asynchronously by the effect system.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)] // InvitationFact in JournalAppend variant is inherently large
 pub enum EffectCommand {
     /// Append fact to journal
     JournalAppend {
@@ -302,15 +303,9 @@ mod tests {
     #[test]
     fn test_guard_snapshot_has_capability() {
         let snapshot = test_snapshot();
-        assert!(snapshot.has_capability(&types::CapabilityId::from(
-            costs::CAP_INVITATION_SEND
-        )));
-        assert!(snapshot.has_capability(&types::CapabilityId::from(
-            costs::CAP_INVITATION_ACCEPT
-        )));
-        assert!(!snapshot.has_capability(&types::CapabilityId::from(
-            costs::CAP_GUARDIAN_INVITE
-        )));
+        assert!(snapshot.has_capability(&types::CapabilityId::from(costs::CAP_INVITATION_SEND)));
+        assert!(snapshot.has_capability(&types::CapabilityId::from(costs::CAP_INVITATION_ACCEPT)));
+        assert!(!snapshot.has_capability(&types::CapabilityId::from(costs::CAP_GUARDIAN_INVITE)));
     }
 
     #[test]
@@ -342,8 +337,9 @@ mod tests {
 
     #[test]
     fn test_guard_outcome_allowed() {
-        let outcome =
-            GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget { cost: FlowCost::new(10) }]);
+        let outcome = GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget {
+            cost: FlowCost::new(10),
+        }]);
         assert!(outcome.is_allowed());
         assert_eq!(outcome.effects.len(), 1);
     }

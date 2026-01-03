@@ -75,14 +75,14 @@ pub fn format_ttl_display(hours: u64) -> String {
     match hours {
         0 => "No expiration".to_string(),
         1 => "1 hour".to_string(),
-        h if h < 24 => format!("{} hours", h),
+        h if h < 24 => format!("{h} hours"),
         24 => "1 day".to_string(),
         h if h < 168 => {
             let days = h / 24;
             if days == 1 {
                 "1 day".to_string()
             } else {
-                format!("{} days", days)
+                format!("{days} days")
             }
         }
         168 => "1 week".to_string(),
@@ -91,13 +91,13 @@ pub fn format_ttl_display(hours: u64) -> String {
             if weeks == 1 {
                 "1 week".to_string()
             } else {
-                format!("{} weeks", weeks)
+                format!("{weeks} weeks")
             }
         }
         720 => "30 days".to_string(),
         h => {
             let days = h / 24;
-            format!("{} days", days)
+            format!("{days} days")
         }
     }
 }
@@ -172,7 +172,7 @@ async fn yield_once() {
         }
     }
 
-    YieldOnce(false).await
+    YieldOnce(false).await;
 }
 
 // ============================================================================
@@ -196,7 +196,7 @@ pub async fn create_contact_invitation(
     runtime
         .create_contact_invitation(receiver, nickname, message, ttl_ms)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to create contact invitation: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to create contact invitation: {e}")))
 }
 
 /// Create a guardian invitation
@@ -216,7 +216,7 @@ pub async fn create_guardian_invitation(
     runtime
         .create_guardian_invitation(receiver, subject, message, ttl_ms)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to create guardian invitation: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to create guardian invitation: {e}")))
 }
 
 /// Create a channel invitation
@@ -236,7 +236,7 @@ pub async fn create_channel_invitation(
     runtime
         .create_channel_invitation(receiver, home_id, message, ttl_ms)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to create channel invitation: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to create channel invitation: {e}")))
 }
 
 // ============================================================================
@@ -274,7 +274,7 @@ pub async fn import_invitation_details(
     runtime
         .import_invitation(code)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to import invitation: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to import invitation: {e}")))
 }
 
 // ============================================================================
@@ -297,7 +297,7 @@ pub async fn export_invitation(
     runtime
         .export_invitation(invitation_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to export invitation: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to export invitation: {e}")))
 }
 
 /// Get current invitations state
@@ -346,7 +346,7 @@ pub async fn accept_invitation(
     runtime
         .accept_invitation(invitation_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {}", e)))?;
+        .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
 
     // Give the runtime fact pipeline a bounded chance to publish CONTACTS_SIGNAL before we refresh
     // derived UI signals like CONNECTION_STATUS_SIGNAL.
@@ -399,7 +399,7 @@ pub async fn decline_invitation(
     runtime
         .decline_invitation(invitation_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to decline invitation: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to decline invitation: {e}")))
 }
 
 /// Cancel an invitation
@@ -416,7 +416,7 @@ pub async fn cancel_invitation(
     runtime
         .cancel_invitation(invitation_id)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to cancel invitation: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to cancel invitation: {e}")))
 }
 
 /// Import an invitation from a shareable code
@@ -436,7 +436,7 @@ pub async fn import_invitation(
         .import_invitation(code)
         .await
         .map(|_| ()) // Discard InvitationInfo, just return success
-        .map_err(|e| AuraError::agent(format!("Failed to import invitation: {}", e)))
+        .map_err(|e| AuraError::agent(format!("Failed to import invitation: {e}")))
 }
 
 // ============================================================================
@@ -490,7 +490,7 @@ impl std::fmt::Display for InvitationRoleValue {
         match self {
             Self::Contact {
                 nickname: Some(name),
-            } => write!(f, "contact (nickname: {})", name),
+            } => write!(f, "contact (nickname: {name})"),
             Self::Contact { nickname: None } => write!(f, "contact"),
             Self::Guardian => write!(f, "guardian"),
             Self::Channel => write!(f, "channel"),
@@ -555,11 +555,11 @@ pub fn format_invitation_type(inv_type: InvitationType) -> &'static str {
 pub fn format_invitation_type_detailed(inv_type: InvitationType, context: Option<&str>) -> String {
     match (inv_type, context) {
         (InvitationType::Home, None) => "Home".to_string(),
-        (InvitationType::Home, Some(ctx)) => format!("Home ({})", ctx),
+        (InvitationType::Home, Some(ctx)) => format!("Home ({ctx})"),
         (InvitationType::Guardian, None) => "Guardian".to_string(),
-        (InvitationType::Guardian, Some(ctx)) => format!("Guardian (for: {})", ctx),
+        (InvitationType::Guardian, Some(ctx)) => format!("Guardian (for: {ctx})"),
         (InvitationType::Chat, None) => "Channel".to_string(),
-        (InvitationType::Chat, Some(ctx)) => format!("Channel ({})", ctx),
+        (InvitationType::Chat, Some(ctx)) => format!("Channel ({ctx})"),
     }
 }
 
@@ -595,7 +595,7 @@ pub async fn accept_pending_home_invitation(
             runtime
                 .accept_invitation(&inv.invitation_id)
                 .await
-                .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {}", e)))?;
+                .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
             Ok(inv.invitation_id.clone())
         }
         None => Err(AuraError::agent("No pending home invitation found")),

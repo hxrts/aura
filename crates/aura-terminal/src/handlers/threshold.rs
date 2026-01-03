@@ -485,6 +485,6 @@ total_devices = 3
         let mut output = CliOutput::new();
         let result = validate_threshold_params(&configs, 5, &mut output);
         assert!(result.is_err());
-        assert!(output.stderr_lines().iter().any(|l| l.contains("greater")));
+        assert!(output.stderr_lines().iter().any(|l| l.contains("exceed")));
     }
 }

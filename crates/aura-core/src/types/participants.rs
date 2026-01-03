@@ -214,16 +214,14 @@ impl NetworkAddress {
         if trimmed.is_empty() {
             return Err(NetworkAddressError::Empty);
         }
-        if trimmed
-            .chars()
-            .any(|c| c.is_control() || c.is_whitespace())
-        {
+        if trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
             return Err(NetworkAddressError::InvalidCharacters);
         }
 
-        let (host, port_str) = split_host_port(trimmed)
-            .ok_or(NetworkAddressError::MissingPort)?;
-        let port: u16 = port_str.parse().map_err(|_| NetworkAddressError::InvalidPort)?;
+        let (host, port_str) = split_host_port(trimmed).ok_or(NetworkAddressError::MissingPort)?;
+        let port: u16 = port_str
+            .parse()
+            .map_err(|_| NetworkAddressError::InvalidPort)?;
         if port == 0 {
             return Err(NetworkAddressError::InvalidPort);
         }
@@ -338,16 +336,12 @@ impl SigningParticipant {
         signer_index: u16,
         endpoint: ParticipantEndpoint,
     ) -> Result<Self, SignerIndexError> {
-        let signer_index =
-            NonZeroU16::new(signer_index).ok_or(SignerIndexError::Zero)?;
+        let signer_index = NonZeroU16::new(signer_index).ok_or(SignerIndexError::Zero)?;
         Ok(Self::new(identity, signer_index, endpoint))
     }
 
     /// Create a local device participant
-    pub fn local_device(
-        device_id: DeviceId,
-        signer_index: u16,
-    ) -> Result<Self, SignerIndexError> {
+    pub fn local_device(device_id: DeviceId, signer_index: u16) -> Result<Self, SignerIndexError> {
         Self::try_new(
             ParticipantIdentity::Device(device_id),
             signer_index,

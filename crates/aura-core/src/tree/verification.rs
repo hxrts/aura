@@ -315,9 +315,13 @@ pub fn check_attested_op<S: TreeStateView>(
         .get_policy(target_node)
         .ok_or(CheckError::PolicyNotFound(target_node))?;
     let child_count = state.child_count(target_node);
-    let threshold = policy
-        .required_signers(child_count)
-        .map_err(|e| CheckError::PolicyInvalid { node: target_node, source: e })?;
+    let threshold =
+        policy
+            .required_signers(child_count)
+            .map_err(|e| CheckError::PolicyInvalid {
+                node: target_node,
+                source: e,
+            })?;
 
     // 3. Get current epoch
     let current_epoch = state.current_epoch();
@@ -368,6 +372,7 @@ pub fn extract_target_node(op: &super::TreeOpKind) -> Option<NodeIndex> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::tree::{LeafId, LeafNode, TreeOp, TreeOpKind};

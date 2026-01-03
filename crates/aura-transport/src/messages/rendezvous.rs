@@ -39,22 +39,26 @@ pub struct AddressSet {
 }
 
 impl AddressSet {
+    /// Creates a new address set with local and reflexive addresses.
     pub fn new(local: Vec<String>, reflexive: Vec<String>) -> Self {
         Self { local, reflexive }
     }
 
+    /// Adds a reflexive address if not already present.
     pub fn add_reflexive_address(&mut self, reflexive_addr: String) {
         if !self.reflexive.contains(&reflexive_addr) {
             self.reflexive.push(reflexive_addr);
         }
     }
 
+    /// Returns all addresses (local first, then reflexive).
     pub fn all_addresses(&self) -> Vec<String> {
         let mut addresses = self.local.clone();
         addresses.extend(self.reflexive.clone());
         addresses
     }
 
+    /// Returns addresses with reflexive addresses prioritized first.
     pub fn priority_addresses(&self) -> Vec<String> {
         let mut addresses = self.reflexive.clone();
         addresses.extend(self.local.clone());

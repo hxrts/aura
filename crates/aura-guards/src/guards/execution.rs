@@ -239,8 +239,7 @@ where
                     .map_err(|e| {
                         error!(error = %e, "Failed to apply delta facts");
                         AuraError::internal(format!(
-                            "Delta application failed for operation '{}': {}",
-                            operation_id, e
+                            "Delta application failed for operation '{operation_id}': {e}"
                         ))
                     })?
             } else {

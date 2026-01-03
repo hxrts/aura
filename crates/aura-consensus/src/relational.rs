@@ -32,11 +32,7 @@ pub async fn run_consensus<T: Serialize>(
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<ConsensusProof> {
     // Extract witnesses from prestate
-    let witnesses: Vec<_> = prestate
-        .authority_commitments
-        .iter()
-        .map(|(id, _)| *id)
-        .collect();
+    let witnesses: Vec<_> = prestate.authority_commitments.keys().copied().collect();
 
     // Simple majority threshold
     let threshold = (witnesses.len() as u16).div_ceil(2).max(1);
@@ -68,11 +64,7 @@ pub async fn run_consensus_with_commit<T: Serialize>(
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(ConsensusProof, CommitFact)> {
-    let witnesses: Vec<_> = prestate
-        .authority_commitments
-        .iter()
-        .map(|(id, _)| *id)
-        .collect();
+    let witnesses: Vec<_> = prestate.authority_commitments.keys().copied().collect();
 
     let threshold = (witnesses.len() as u16).div_ceil(2).max(1);
     let config = ConsensusConfig::new(threshold, witnesses, epoch)?;
@@ -208,11 +200,7 @@ pub struct RelationalConsensusBuilder {
 impl RelationalConsensusBuilder {
     /// Create a new builder with witnesses from a prestate
     pub fn from_prestate(prestate: &Prestate, epoch: Epoch) -> Self {
-        let witnesses: Vec<_> = prestate
-            .authority_commitments
-            .iter()
-            .map(|(id, _)| *id)
-            .collect();
+        let witnesses: Vec<_> = prestate.authority_commitments.keys().copied().collect();
 
         Self {
             witnesses,
@@ -271,11 +259,8 @@ mod tests {
         ];
         let epoch = Epoch::from(1);
 
-        let prestate = Prestate::new(
-            vec![(witnesses[0], Hash32::default())],
-            Hash32::default(),
-        )
-        .unwrap();
+        let prestate =
+            Prestate::new(vec![(witnesses[0], Hash32::default())], Hash32::default()).unwrap();
         let config = RelationalConsensusBuilder::from_prestate(&prestate, epoch)
             .with_witnesses(witnesses.clone())
             .with_threshold(2)

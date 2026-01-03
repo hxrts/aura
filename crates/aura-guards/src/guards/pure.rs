@@ -6,12 +6,12 @@
 //! - Perform no I/O operations
 //! - Are fully deterministic and testable
 
+use super::types::GuardOperationId;
 use aura_core::{
     effects::{EffectCommand, GuardOutcome, GuardSnapshot, JournalEntry},
     identifiers::AuthorityId,
     Cap, Fact, FlowCost,
 };
-use super::types::GuardOperationId;
 use std::fmt::Debug;
 
 /// Request to be evaluated by guards
@@ -39,7 +39,11 @@ pub struct GuardRequest {
 
 impl GuardRequest {
     /// Create a new guard request
-    pub fn new(authority: AuthorityId, operation: impl Into<GuardOperationId>, cost: FlowCost) -> Self {
+    pub fn new(
+        authority: AuthorityId,
+        operation: impl Into<GuardOperationId>,
+        cost: FlowCost,
+    ) -> Self {
         Self {
             authority,
             context: aura_core::ContextId::new_from_entropy([2u8; 32]),
@@ -400,8 +404,8 @@ mod tests {
         assert!(outcome1.effects.is_empty());
 
         // Request with metadata leakage
-        let request2 =
-            GuardRequest::new(test_authority(), "test_op", FlowCost::new(100)).with_metadata_leakage(32);
+        let request2 = GuardRequest::new(test_authority(), "test_op", FlowCost::new(100))
+            .with_metadata_leakage(32);
         let outcome2 = guard.evaluate(&snapshot, &request2);
         assert!(outcome2.is_authorized());
         assert_eq!(outcome2.effects.len(), 1);

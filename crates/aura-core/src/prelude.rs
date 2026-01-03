@@ -29,8 +29,7 @@ pub use crate::errors::{AuraError, ProtocolErrorCode, Result as AuraResult};
 
 // === Core Identifiers ===
 pub use crate::types::identifiers::{
-    AccountId, AuthorityId, ChannelId, ContextId, DeviceId, GroupId, GuardianId, RelayId,
-    SessionId,
+    AccountId, AuthorityId, ChannelId, ContextId, DeviceId, GroupId, GuardianId, RelayId, SessionId,
 };
 
 // === Journal & CRDT Types ===

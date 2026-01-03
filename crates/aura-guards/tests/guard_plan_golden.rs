@@ -12,8 +12,7 @@ fn guard_plan_matches_choreography_request() {
     let peer = AuthorityId::new_from_entropy([2u8; 32]);
     let context = ContextId::new_from_entropy([3u8; 32]);
 
-    let send_guard =
-        create_send_guard_op(GuardOperation::AmpSend, context, peer, FlowCost::new(1));
+    let send_guard = create_send_guard_op(GuardOperation::AmpSend, context, peer, FlowCost::new(1));
     let plan = match GuardPlan::from_send_guard(&send_guard, authority) {
         Ok(plan) => plan,
         Err(err) => panic!("plan: {err}"),

@@ -1,5 +1,8 @@
-use aura_core::{AuthorityId, ContentId, JoinSemilattice};
+//! Storage state property tests.
+#![allow(missing_docs)]
+
 use aura_core::time::PhysicalTime;
+use aura_core::{AuthorityId, ContentId, JoinSemilattice};
 use aura_store::{SearchIndexEntry, StorageState};
 use proptest::prelude::*;
 use std::collections::BTreeSet;

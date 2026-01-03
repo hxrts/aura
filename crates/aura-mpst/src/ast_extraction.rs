@@ -4,6 +4,10 @@
 //! Follows the rumpsteak-aura demo pattern for clean, simple annotation processing.
 
 use crate::ids::RoleId;
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::{bracketed, parenthesized, Ident, LitBool, LitInt, LitStr, Token};
+
 /// Aura-specific effect that can be generated from annotations
 #[derive(Debug, Clone, PartialEq)]
 pub enum AuraEffect {
@@ -319,22 +323,20 @@ fn detect_annotations_in_text(
                         role: role.clone(),
                     });
                 }
-                "journal_merge" => {
-                    match item.value {
-                        None => {
-                            effects.push(AuraEffect::JournalMerge { role: role.clone() });
-                        }
-                        Some(AnnotationValue::Bool(true)) => {
-                            effects.push(AuraEffect::JournalMerge { role: role.clone() });
-                        }
-                        Some(AnnotationValue::Bool(false)) => {}
-                        Some(_) => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "journal_merge expects a boolean literal".to_string(),
-                            ))
-                        }
+                "journal_merge" => match item.value {
+                    None => {
+                        effects.push(AuraEffect::JournalMerge { role: role.clone() });
                     }
-                }
+                    Some(AnnotationValue::Bool(true)) => {
+                        effects.push(AuraEffect::JournalMerge { role: role.clone() });
+                    }
+                    Some(AnnotationValue::Bool(false)) => {}
+                    Some(_) => {
+                        return Err(AuraExtractionError::InvalidAnnotationValue(
+                            "journal_merge expects a boolean literal".to_string(),
+                        ))
+                    }
+                },
                 "audit_log" => {
                     let action = match item.value {
                         Some(AnnotationValue::Str(value)) => value,
@@ -355,41 +357,38 @@ fn detect_annotations_in_text(
                     });
                 }
                 "leak" => {
-                    let observers = match item.value {
-                        Some(AnnotationValue::IdentList(values)) => values,
-                        Some(AnnotationValue::Str(value)) => vec![value],
-                        Some(_) => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                    let observers =
+                        match item.value {
+                            Some(AnnotationValue::IdentList(values)) => values,
+                            Some(AnnotationValue::Str(value)) => vec![value],
+                            Some(_) => return Err(AuraExtractionError::InvalidAnnotationValue(
                                 "leak expects a parenthesized identifier list or string literal"
                                     .to_string(),
-                            ))
-                        }
-                        None => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "leak requires observers".to_string(),
-                            ))
-                        }
-                    };
+                            )),
+                            None => {
+                                return Err(AuraExtractionError::InvalidAnnotationValue(
+                                    "leak requires observers".to_string(),
+                                ))
+                            }
+                        };
                     effects.push(AuraEffect::Leakage {
                         observers,
                         role: role.clone(),
                     });
                 }
-                "leakage_budget" => {
-                    match item.value {
-                        Some(AnnotationValue::IntList(_values)) => {}
-                        Some(_) => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "leakage_budget expects a list of integers".to_string(),
-                            ))
-                        }
-                        None => {
-                            return Err(AuraExtractionError::InvalidAnnotationValue(
-                                "leakage_budget requires a list of integers".to_string(),
-                            ))
-                        }
+                "leakage_budget" => match item.value {
+                    Some(AnnotationValue::IntList(_values)) => {}
+                    Some(_) => {
+                        return Err(AuraExtractionError::InvalidAnnotationValue(
+                            "leakage_budget expects a list of integers".to_string(),
+                        ))
                     }
-                }
+                    None => {
+                        return Err(AuraExtractionError::InvalidAnnotationValue(
+                            "leakage_budget requires a list of integers".to_string(),
+                        ))
+                    }
+                },
                 other => {
                     return Err(AuraExtractionError::UnsupportedFeature(format!(
                         "Unknown annotation: {other}"
@@ -399,10 +398,7 @@ fn detect_annotations_in_text(
         }
 
         if has_role_annotation && !has_flow_cost {
-            effects.push(AuraEffect::FlowCost {
-                cost: 100,
-                role,
-            });
+            effects.push(AuraEffect::FlowCost { cost: 100, role });
         }
     }
 
@@ -521,7 +517,10 @@ mod tests {
     fn test_extract_role_from_line() {
         let line = r#"Alice[guard_capability = "send_message"] -> Bob: Message;"#;
         let role = extract_role_from_line(line);
-        assert_eq!(role.map(|role| role.as_str().to_string()), Some("Alice".to_string()));
+        assert_eq!(
+            role.map(|role| role.as_str().to_string()),
+            Some("Alice".to_string())
+        );
     }
 
     #[test]
@@ -679,6 +678,3 @@ mod tests {
         );
     }
 }
-use syn::parse::{Parse, ParseStream};
-use syn::punctuated::Punctuated;
-use syn::{bracketed, parenthesized, Ident, LitBool, LitInt, LitStr, Token};

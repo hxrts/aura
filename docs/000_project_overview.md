@@ -111,8 +111,7 @@ Additional documentation covers specific aspects of the system. The Foundation c
 [Testing Guide](805_testing_guide.md) describes property testing, simulation harnesses, and validation frameworks.
 
 [Simulation Guide](806_simulation_guide.md) covers deterministic simulation for verification and debugging.
-
-[Verification Guide](807_verification_guide.md) covers formal verification techniques and property validation.
+Verification artifacts live in `verification/` (Quint specs and Lean proofs).
 
 [Maintenance Guide](808_maintenance_guide.md) explains distributed maintenance, snapshots, garbage collection, and system evolution.
 

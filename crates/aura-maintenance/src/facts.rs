@@ -484,6 +484,7 @@ mod tests {
 
 /// Property tests for semilattice laws on MaintenanceFactDelta
 #[cfg(test)]
+#[allow(clippy::redundant_clone)]
 mod proptest_semilattice {
     use super::*;
     use aura_core::types::facts::FactDelta;

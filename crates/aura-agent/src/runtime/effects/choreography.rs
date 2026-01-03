@@ -7,8 +7,8 @@ use aura_core::{AuthorityId, ContextId, DeviceId, FlowCost};
 use aura_guards::prelude::create_send_guard_op;
 use aura_guards::{GuardOperation, JournalCoupler};
 use aura_protocol::effects::{
-    ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, RoleIndex,
-    ChoreographyMetrics,
+    ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
+    ChoreographyMetrics, RoleIndex,
 };
 use std::collections::HashMap;
 
@@ -160,12 +160,10 @@ impl ChoreographicEffects for AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     fn current_role(&self) -> ChoreographicRole {
         let state = self.choreography_state.read();
-        state
-            .current_role
-            .unwrap_or_else(|| {
-                let role_index = RoleIndex::new(0).expect("role index");
-                ChoreographicRole::new(DeviceId::from_uuid(self.authority_id.0), role_index)
-            })
+        state.current_role.unwrap_or_else(|| {
+            let role_index = RoleIndex::new(0).expect("role index");
+            ChoreographicRole::new(DeviceId::from_uuid(self.authority_id.0), role_index)
+        })
     }
 
     fn all_roles(&self) -> Vec<ChoreographicRole> {

@@ -417,7 +417,10 @@ mod tests {
         // Create a JSON envelope with unknown field (for testing deny_unknown_fields)
         let json_with_unknown = r#"{"type_id":"test/v1","schema_version":1,"encoding":"DagCbor","payload":[],"unknown_field":"bad"}"#;
         let result: Result<FactEnvelope, _> = serde_json::from_str(json_with_unknown);
-        assert!(result.is_err(), "Should reject unknown field 'unknown_field'");
+        assert!(
+            result.is_err(),
+            "Should reject unknown field 'unknown_field'"
+        );
     }
 
     #[test]

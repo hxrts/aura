@@ -118,8 +118,7 @@ pub fn validate_threshold_compatibility(configs: &[(&str, u32)]) -> Result<(), A
     for (identifier, threshold) in configs.iter().skip(1) {
         if *threshold != expected {
             return Err(AuraError::invalid(format!(
-                "Threshold mismatch in {}: expected {}, got {}",
-                identifier, expected, threshold
+                "Threshold mismatch in {identifier}: expected {expected}, got {threshold}"
             )));
         }
     }
@@ -471,7 +470,7 @@ mod tests {
                 assert_eq!(length, MAX_DISPLAY_NAME_LENGTH + 1);
                 assert_eq!(max, MAX_DISPLAY_NAME_LENGTH);
             }
-            other => panic!("Expected TooLong error, got {:?}", other),
+            other => panic!("Expected TooLong error, got {other:?}"),
         }
     }
 

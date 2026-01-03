@@ -40,6 +40,7 @@ use std::num::NonZeroUsize;
 pub struct NonZeroDuration(std::time::Duration);
 
 impl NonZeroDuration {
+    /// Creates a non-zero duration from a standard duration.
     pub fn from_duration(duration: std::time::Duration) -> Option<Self> {
         if duration.is_zero() {
             None
@@ -48,6 +49,7 @@ impl NonZeroDuration {
         }
     }
 
+    /// Creates a non-zero duration from seconds.
     pub fn from_secs(secs: u64) -> Option<Self> {
         if secs == 0 {
             None
@@ -56,6 +58,7 @@ impl NonZeroDuration {
         }
     }
 
+    /// Creates a non-zero duration from milliseconds.
     pub fn from_millis(ms: u64) -> Option<Self> {
         if ms == 0 {
             None
@@ -64,6 +67,7 @@ impl NonZeroDuration {
         }
     }
 
+    /// Returns the inner duration.
     pub fn get(self) -> std::time::Duration {
         self.0
     }
@@ -80,10 +84,12 @@ impl From<NonZeroDuration> for std::time::Duration {
 pub struct ConnectionId(String);
 
 impl ConnectionId {
+    /// Creates a new connection identifier.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 
+    /// Returns the connection ID as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -106,14 +112,17 @@ impl std::fmt::Display for ConnectionId {
 pub struct TransportSocketAddr(std::net::SocketAddr);
 
 impl TransportSocketAddr {
+    /// Creates a new transport socket address.
     pub fn new(value: std::net::SocketAddr) -> Self {
         Self(value)
     }
 
+    /// Returns a reference to the inner socket address.
     pub fn as_socket_addr(&self) -> &std::net::SocketAddr {
         &self.0
     }
 
+    /// Consumes self and returns the inner socket address.
     pub fn into_inner(self) -> std::net::SocketAddr {
         self.0
     }
@@ -142,18 +151,22 @@ impl std::fmt::Display for TransportSocketAddr {
 pub struct TransportUrl(url::Url);
 
 impl TransportUrl {
+    /// Creates a new transport URL wrapper.
     pub fn new(value: url::Url) -> Self {
         Self(value)
     }
 
+    /// Returns a reference to the inner URL.
     pub fn as_url(&self) -> &url::Url {
         &self.0
     }
 
+    /// Returns the URL as a string slice.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 
+    /// Consumes self and returns the inner URL.
     pub fn into_inner(self) -> url::Url {
         self.0
     }
@@ -176,10 +189,12 @@ impl std::fmt::Display for TransportUrl {
 pub struct TransportAddress(String);
 
 impl TransportAddress {
+    /// Creates a new transport address.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
 
+    /// Returns the address as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -218,9 +233,13 @@ impl std::fmt::Display for TransportAddress {
 /// Transport protocol classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportProtocol {
+    /// TCP transport.
     Tcp,
+    /// WebSocket transport.
     WebSocket,
+    /// In-memory transport for testing.
     Memory,
+    /// Unknown or unspecified transport.
     Unknown,
 }
 
@@ -233,22 +252,31 @@ impl Default for TransportProtocol {
 /// Connection role metadata for bidirectional transports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransportRole {
+    /// Client-side of the connection.
     Client,
+    /// Server-side of the connection.
     Server,
 }
 
 /// Typed connection metadata.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TransportMetadata {
+    /// The transport protocol in use.
     pub protocol: TransportProtocol,
+    /// TCP_NODELAY option, if applicable.
     pub nodelay: Option<bool>,
+    /// WebSocket URL, if applicable.
     pub url: Option<TransportUrl>,
+    /// HTTP status code for WebSocket connections.
     pub status: Option<u16>,
+    /// Client or server role.
     pub role: Option<TransportRole>,
+    /// WebSocket subprotocol negotiated.
     pub subprotocol: Option<String>,
 }
 
 impl TransportMetadata {
+    /// Creates TCP transport metadata.
     pub fn tcp(nodelay: bool) -> Self {
         Self {
             protocol: TransportProtocol::Tcp,
@@ -260,11 +288,8 @@ impl TransportMetadata {
         }
     }
 
-    pub fn websocket_client(
-        url: TransportUrl,
-        status: u16,
-        subprotocol: Option<String>,
-    ) -> Self {
+    /// Creates WebSocket client transport metadata.
+    pub fn websocket_client(url: TransportUrl, status: u16, subprotocol: Option<String>) -> Self {
         Self {
             protocol: TransportProtocol::WebSocket,
             nodelay: None,
@@ -275,6 +300,7 @@ impl TransportMetadata {
         }
     }
 
+    /// Creates WebSocket server transport metadata.
     pub fn websocket_server() -> Self {
         Self {
             protocol: TransportProtocol::WebSocket,
@@ -286,22 +312,10 @@ impl TransportMetadata {
         }
     }
 
+    /// Creates in-memory transport metadata.
     pub fn memory() -> Self {
         Self {
             protocol: TransportProtocol::Memory,
-            nodelay: None,
-            url: None,
-            status: None,
-            role: None,
-            subprotocol: None,
-        }
-    }
-}
-
-impl Default for TransportMetadata {
-    fn default() -> Self {
-        Self {
-            protocol: TransportProtocol::default(),
             nodelay: None,
             url: None,
             status: None,
@@ -324,17 +338,16 @@ pub struct TransportConfig {
     pub buffer_size: NonZeroUsize,
 }
 
+#[allow(clippy::expect_used)] // Constants (30, 60, 64*1024) are always non-zero
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
             connect_timeout: NonZeroDuration::from_secs(30)
                 .expect("connect timeout should be non-zero"),
-            read_timeout: NonZeroDuration::from_secs(60)
-                .expect("read timeout should be non-zero"),
+            read_timeout: NonZeroDuration::from_secs(60).expect("read timeout should be non-zero"),
             write_timeout: NonZeroDuration::from_secs(30)
                 .expect("write timeout should be non-zero"),
-            buffer_size: NonZeroUsize::new(64 * 1024)
-                .expect("buffer size should be non-zero"),
+            buffer_size: NonZeroUsize::new(64 * 1024).expect("buffer size should be non-zero"),
         }
     }
 }

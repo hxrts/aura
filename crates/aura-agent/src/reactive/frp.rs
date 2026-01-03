@@ -87,8 +87,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     }
 
     /// Subscribe to value changes
-    pub fn subscribe(&self) -> broadcast::Receiver<Arc<T>> {
-        self.state.blocking_read().updates.subscribe()
+    pub async fn subscribe(&self) -> broadcast::Receiver<Arc<T>> {
+        self.state.read().await.updates.subscribe()
     }
 
     /// Try to receive the latest update without blocking
@@ -116,7 +116,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let mapped = Dynamic::new(f(initial.as_ref()));
 
         // Subscribe BEFORE spawning to ensure we don't miss any updates
-        let mut rx = self.subscribe();
+        let mut rx = self.subscribe().await;
         let mapped_clone = mapped.clone();
         let state = self.state.clone();
         let f = Arc::new(f);
@@ -179,8 +179,8 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let b = other.get_arc().await;
         let combined = Dynamic::new(f(a.as_ref(), b.as_ref()));
 
-        let mut rx_self = self.subscribe();
-        let mut rx_other = other.subscribe();
+        let mut rx_self = self.subscribe().await;
+        let mut rx_other = other.subscribe().await;
         let combined_clone = combined.clone();
         let self_state = self.state.clone();
         let other_state = other.state.clone();
@@ -251,7 +251,7 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
         let initial = self.get().await;
         let filtered = Dynamic::new(initial);
 
-        let mut rx = self.subscribe();
+        let mut rx = self.subscribe().await;
         let filtered_clone = filtered.clone();
         let state = self.state.clone();
         let predicate = Arc::new(predicate);
@@ -293,21 +293,21 @@ impl<T: Clone + Send + Sync + 'static> Dynamic<T> {
     /// ## Example
     /// ```ignore
     /// let events = Dynamic::new(1);
-    /// let sum = events.fold(0, |acc, x| acc + x);  // Running sum
+    /// let sum = events.fold(0, |acc, x| acc + x).await;  // Running sum
     /// ```
-    pub fn fold<Acc, F>(&self, init: Acc, f: F) -> Dynamic<Acc>
+    pub async fn fold<Acc, F>(&self, init: Acc, f: F) -> Dynamic<Acc>
     where
         Acc: Clone + Send + Sync + 'static,
         F: Fn(Acc, &T) -> Acc + Send + Sync + 'static,
     {
         let folded = Dynamic::new(init);
-        let mut rx = self.subscribe();
+        let mut rx = self.subscribe().await;
         let folded_clone = folded.clone();
         let state = self.state.clone();
         let f = Arc::new(f);
 
         let tasks = {
-            let state = folded.state.blocking_read();
+            let state = folded.state.read().await;
             state.tasks.clone()
         };
         tasks.spawn_cancellable(async move {
@@ -389,7 +389,7 @@ mod tests {
     #[tokio::test]
     async fn test_dynamic_subscribe() {
         let dynamic = Dynamic::new(0);
-        let mut rx = dynamic.subscribe();
+        let mut rx = dynamic.subscribe().await;
 
         dynamic.set(5).await;
         let value = rx.recv().await.unwrap();
@@ -488,7 +488,7 @@ mod tests {
     #[tokio::test]
     async fn test_fold_combinator() {
         let events = Dynamic::new(1);
-        let sum = events.fold(0, |acc, x| acc + x);
+        let sum = events.fold(0, |acc, x| acc + x).await;
 
         sleep(Duration::from_millis(10)).await;
         assert_eq!(sum.get().await, 0); // Initial accumulator
@@ -524,8 +524,8 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_subscribers() {
         let source = Dynamic::new(0);
-        let mut rx1 = source.subscribe();
-        let mut rx2 = source.subscribe();
+        let mut rx1 = source.subscribe().await;
+        let mut rx2 = source.subscribe().await;
 
         source.set(42).await;
 
@@ -578,7 +578,7 @@ mod tests {
         let (count, sum) = (Dynamic::new(0), Dynamic::new(0));
 
         // Update count and sum on each new number
-        let mut rx = numbers.subscribe();
+        let mut rx = numbers.subscribe().await;
         let count_clone = count.clone();
         let sum_clone = sum.clone();
 

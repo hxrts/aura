@@ -198,7 +198,7 @@ impl JoinSemilattice for AccountState {
 
         Self {
             account_id: self.account_id,
-            group_public_key: self.group_public_key.clone(),
+            group_public_key: self.group_public_key,
             guardian_registry: self.guardian_registry.join(&other.guardian_registry),
             epoch_counter: self.epoch_counter.join(&other.epoch_counter),
             lamport_clock: self.lamport_clock.join(&other.lamport_clock),
@@ -207,6 +207,7 @@ impl JoinSemilattice for AccountState {
     }
 }
 
+#[allow(clippy::expect_used)] // Static key derivation from constant bytes never fails
 impl Bottom for AccountState {
     fn bottom() -> Self {
         let verifying_key = Ed25519SigningKey::from_bytes([0u8; 32])
@@ -280,6 +281,7 @@ impl Default for MaxCounter {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::clone_on_copy)]
 mod tests {
     use super::*;
 

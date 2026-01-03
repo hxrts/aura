@@ -827,7 +827,7 @@ The following Quint specs are available for generative simulation:
 | `protocol_groups.qnt` | Group membership | `verification/quint/` |
 | `protocol_sbb.qnt` | Gossip transport | `verification/quint/` |
 
-See [Verification Guide](807_verification_guide.md) for spec details and invariants.
+See `verification/quint/` for spec details and invariants.
 
 ## Simulation Best Practices
 

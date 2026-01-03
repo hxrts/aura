@@ -305,7 +305,7 @@ impl AppCore {
         if let Some(runtime) = self.runtime.as_ref() {
             if runtime.get_threshold_config().await.is_none() {
                 let _ = runtime.bootstrap_signing_keys().await.map_err(|e| {
-                    IntentError::internal_error(format!("Failed to bootstrap signing keys: {}", e))
+                    IntentError::internal_error(format!("Failed to bootstrap signing keys: {e}"))
                 })?;
             }
         }
@@ -320,7 +320,7 @@ impl AppCore {
         crate::signal_defs::register_app_signals(&self.reactive)
             .await
             .map_err(|e| {
-                IntentError::internal_error(format!("Failed to initialize signals: {}", e))
+                IntentError::internal_error(format!("Failed to initialize signals: {e}"))
             })?;
 
         Ok(())
@@ -490,7 +490,7 @@ impl AppCore {
 
                 let snapshot = self.snapshot();
                 let target = target_id.parse::<AuthorityId>().map_err(|_| {
-                    IntentError::validation_failed(format!("Invalid authority ID: {}", target_id))
+                    IntentError::validation_failed(format!("Invalid authority ID: {target_id}"))
                 })?;
 
                 let home = snapshot
@@ -508,8 +508,7 @@ impl AppCore {
 
                 let Some(resident) = home.resident(&target) else {
                     return Err(IntentError::validation_failed(format!(
-                        "Resident not found: {}",
-                        target_id
+                        "Resident not found: {target_id}"
                     )));
                 };
 
@@ -522,7 +521,7 @@ impl AppCore {
 
                 let snapshot = self.snapshot();
                 let target = target_id.parse::<AuthorityId>().map_err(|_| {
-                    IntentError::validation_failed(format!("Invalid authority ID: {}", target_id))
+                    IntentError::validation_failed(format!("Invalid authority ID: {target_id}"))
                 })?;
 
                 let home = snapshot
@@ -540,8 +539,7 @@ impl AppCore {
 
                 let Some(resident) = home.resident(&target) else {
                     return Err(IntentError::validation_failed(format!(
-                        "Resident not found: {}",
-                        target_id
+                        "Resident not found: {target_id}"
                     )));
                 };
 
@@ -1102,7 +1100,7 @@ impl ReactiveEffects for AppCore {
     }
 
     async fn invalidate_queries(&self, changed: &FactPredicate) {
-        self.reactive.invalidate_queries(changed).await
+        self.reactive.invalidate_queries(changed).await;
     }
 }
 

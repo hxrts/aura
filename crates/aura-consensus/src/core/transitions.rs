@@ -362,8 +362,7 @@ mod tests {
 
     #[test]
     fn test_start_consensus() {
-        let witnesses: BTreeSet<_> =
-            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let result = start_consensus(
             test_consensus_id(1),
@@ -400,8 +399,7 @@ mod tests {
 
     #[test]
     fn test_apply_share_reaches_threshold() {
-        let witnesses: BTreeSet<_> =
-            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
             test_consensus_id(1),
@@ -429,8 +427,7 @@ mod tests {
 
     #[test]
     fn test_apply_share_detects_equivocation() {
-        let witnesses: BTreeSet<_> =
-            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
             test_consensus_id(1),
@@ -443,7 +440,9 @@ mod tests {
         );
 
         // First share from w1
-        state.proposals.push(make_share(test_authority(1), test_hash(9)));
+        state
+            .proposals
+            .push(make_share(test_authority(1), test_hash(9)));
 
         // w1 tries to vote for different result - equivocation
         let result = apply_share(&state, make_share(test_authority(1), test_hash(10)));
@@ -453,8 +452,7 @@ mod tests {
 
     #[test]
     fn test_trigger_fallback() {
-        let witnesses: BTreeSet<_> =
-            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let state = ConsensusState::new(
             test_consensus_id(1),
@@ -475,8 +473,7 @@ mod tests {
 
     #[test]
     fn test_trigger_fallback_not_fast_path() {
-        let witnesses: BTreeSet<_> =
-            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let state = ConsensusState::new(
             test_consensus_id(1),
@@ -494,8 +491,7 @@ mod tests {
 
     #[test]
     fn test_complete_via_fallback() {
-        let witnesses: BTreeSet<_> =
-            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let mut state = ConsensusState::new(
             test_consensus_id(1),
@@ -521,8 +517,7 @@ mod tests {
 
     #[test]
     fn test_fail_consensus() {
-        let witnesses: BTreeSet<_> =
-            [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
+        let witnesses: BTreeSet<_> = [1u8, 2, 3].iter().map(|&s| test_authority(s)).collect();
 
         let state = ConsensusState::new(
             test_consensus_id(1),

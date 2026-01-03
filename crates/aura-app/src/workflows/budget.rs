@@ -304,7 +304,7 @@ impl BudgetBreakdown {
         } else if bytes >= KB {
             format!("{:.1} KB", bytes as f64 / KB as f64)
         } else {
-            format!("{} B", bytes)
+            format!("{bytes} B")
         }
     }
 }
@@ -349,11 +349,11 @@ impl fmt::Display for BudgetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ResidentCapacityExceeded { current, max } => {
-                write!(f, "Home at resident capacity ({}/{})", current, max)
+                write!(f, "Home at resident capacity ({current}/{max})")
             }
             Self::NoResidentsToRemove => write!(f, "No residents to remove"),
             Self::NeighborhoodCapacityExceeded { current, max } => {
-                write!(f, "Home at neighborhood capacity ({}/{})", current, max)
+                write!(f, "Home at neighborhood capacity ({current}/{max})")
             }
             Self::NoNeighborhoodsToLeave => write!(f, "No neighborhoods to leave"),
             Self::PinnedStorageExceeded {
@@ -445,8 +445,7 @@ pub async fn can_pin_content(
 
     if content_size_bytes > available {
         Err(AuraError::budget_exceeded(format!(
-            "Insufficient budget: need {} bytes, have {} available",
-            content_size_bytes, available
+            "Insufficient budget: need {content_size_bytes} bytes, have {available} available"
         )))
     } else {
         Ok(available)

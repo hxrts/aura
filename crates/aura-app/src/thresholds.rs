@@ -93,22 +93,19 @@ pub fn normalize_recovery_threshold(requested: u8, total_n: u8) -> u8 {
 pub fn validate_guardian_set(guardian_count: usize, threshold: u32) -> Result<(), AuraError> {
     if guardian_count < MIN_GUARDIANS {
         return Err(AuraError::invalid(format!(
-            "At least {} guardians required for threshold signing, got {}",
-            MIN_GUARDIANS, guardian_count
+            "At least {MIN_GUARDIANS} guardians required for threshold signing, got {guardian_count}"
         )));
     }
 
     if threshold < MIN_THRESHOLD {
         return Err(AuraError::invalid(format!(
-            "Threshold must be at least {}, got {}",
-            MIN_THRESHOLD, threshold
+            "Threshold must be at least {MIN_THRESHOLD}, got {threshold}"
         )));
     }
 
     if threshold as usize > guardian_count {
         return Err(AuraError::invalid(format!(
-            "Threshold {} exceeds guardian count {}",
-            threshold, guardian_count
+            "Threshold {threshold} exceeds guardian count {guardian_count}"
         )));
     }
 

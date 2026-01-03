@@ -60,8 +60,7 @@ use serde::Serialize;
 pub fn validate_dispute_window(hours: u64) -> Result<u64, AuraError> {
     if hours < DISPUTE_WINDOW_HOURS_MIN {
         return Err(AuraError::invalid(format!(
-            "Dispute window must be at least {} hour(s), got {}",
-            DISPUTE_WINDOW_HOURS_MIN, hours
+            "Dispute window must be at least {DISPUTE_WINDOW_HOURS_MIN} hour(s), got {hours}"
         )));
     }
 
@@ -100,8 +99,7 @@ pub fn validate_guardian_set_full(
     // Check for duplicates first
     if let Some(duplicate) = find_duplicate_guardian(guardians) {
         return Err(AuraError::invalid(format!(
-            "Duplicate guardian in set: {}",
-            duplicate
+            "Duplicate guardian in set: {duplicate}"
         )));
     }
 
@@ -329,7 +327,7 @@ pub async fn record_recovery_dispute<T: Serialize, E: JournalEffects + TimeEffec
         )));
     }
 
-    let dispute_key = format!("recovery_dispute.{}.{}", evidence_id, guardian_authority);
+    let dispute_key = format!("recovery_dispute.{evidence_id}.{guardian_authority}");
     record_recovery_fact(
         effects,
         context_id,

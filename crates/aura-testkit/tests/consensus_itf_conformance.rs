@@ -2,6 +2,7 @@
 //!
 //! These tests verify that the Rust consensus implementation matches
 //! the Quint specification by replaying ITF traces.
+#![allow(clippy::expect_used)] // Test helper functions use expect for clarity
 //!
 //! ## Conformance Testing Approach
 //!
@@ -285,7 +286,10 @@ enum InferredAction {
     /// New consensus instance created
     StartConsensus { cid: ConsensusId },
     /// Share proposal added
-    ApplyShare { cid: ConsensusId, witness: AuthorityId },
+    ApplyShare {
+        cid: ConsensusId,
+        witness: AuthorityId,
+    },
     /// Phase transitioned to fallback
     TriggerFallback { cid: ConsensusId },
     /// Phase transitioned to failed
@@ -697,7 +701,10 @@ fn test_divergence_report_format() {
         "Report should have header"
     );
     assert!(report.contains("step 5"), "Report should show step index");
-    assert!(report.contains("consensus:"), "Report should show instance id");
+    assert!(
+        report.contains("consensus:"),
+        "Report should show instance id"
+    );
     assert!(report.contains("phase"), "Report should show phase field");
 
     println!("Divergence report format test:\n{report}");

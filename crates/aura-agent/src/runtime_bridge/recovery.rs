@@ -31,7 +31,10 @@ pub(super) async fn respond_to_guardian_ceremony(
     } else {
         // Mark ceremony as failed due to decline
         tracker
-            .mark_failed(&ceremony_id, Some("Guardian declined invitation".to_string()))
+            .mark_failed(
+                &ceremony_id,
+                Some("Guardian declined invitation".to_string()),
+            )
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to record guardian decline: {}", e))

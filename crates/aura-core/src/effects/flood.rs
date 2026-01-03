@@ -621,10 +621,7 @@ mod tests {
             .neighborhood
             .can_charge(FlowCost::new(100))
             .unwrap_or(false));
-        assert!(budget
-            .home
-            .can_charge(FlowCost::new(100))
-            .unwrap_or(false));
+        assert!(budget.home.can_charge(FlowCost::new(100)).unwrap_or(false));
         assert!(budget
             .direct
             .can_charge(FlowCost::new(100))
