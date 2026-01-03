@@ -224,7 +224,7 @@ fn verify_frost_signature(
 
     // Use the tree_signing module's verification
     tree_signing::frost_verify_aggregate(&verifying_key, message, signature)
-        .map_err(VerificationError::SignatureFailed)
+        .map_err(|e| VerificationError::SignatureFailed(e.to_string()))
 }
 
 /// Signing witness extracted from TreeState for verification.

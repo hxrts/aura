@@ -25,6 +25,7 @@
 
 use crate::crypto::hash;
 use crate::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
+use crate::errors::AuraError;
 use crate::{AttestedOp, TreeOpKind};
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
@@ -80,22 +81,23 @@ impl Share {
     }
 
     /// Convert to FROST signing share for use in signing
-    pub fn to_frost(&self) -> Result<frost::keys::SigningShare, String> {
+    pub fn to_frost(&self) -> Result<frost::keys::SigningShare, AuraError> {
         if self.value.len() != 32 {
-            return Err(format!(
+            return Err(AuraError::crypto(format!(
                 "Invalid share length: {} (expected 32)",
                 self.value.len()
-            ));
+            )));
         }
         let mut array = [0u8; 32];
         array.copy_from_slice(&self.value);
         frost::keys::SigningShare::deserialize(array)
-            .map_err(|e| format!("Failed to deserialize signing share: {e}"))
+            .map_err(|e| AuraError::crypto(format!("Failed to deserialize signing share: {e}")))
     }
 
     /// Get FROST identifier
-    pub fn frost_identifier(&self) -> Result<frost::Identifier, String> {
-        frost::Identifier::try_from(self.identifier).map_err(|e| format!("Invalid identifier: {e}"))
+    pub fn frost_identifier(&self) -> Result<frost::Identifier, AuraError> {
+        frost::Identifier::try_from(self.identifier)
+            .map_err(|e| AuraError::crypto(format!("Invalid identifier: {e}")))
     }
 }
 
@@ -159,17 +161,17 @@ impl Nonce {
     /// # Arguments
     /// * `nonces` - The FROST signing nonces to wrap
     /// * `id` - A 32-byte random ID for tracking, should be generated via RandomEffects
-    pub fn from_frost(nonces: frost::round1::SigningNonces, id: [u8; 32]) -> Result<Self, String> {
+    pub fn from_frost(nonces: frost::round1::SigningNonces, id: [u8; 32]) -> Result<Self, AuraError> {
         // Serialize nonces for secure persistence or in-memory caching
         let value = nonces
             .serialize()
-            .map_err(|e| format!("Failed to serialize FROST nonces: {e}"))?;
+            .map_err(|e| AuraError::crypto(format!("Failed to serialize FROST nonces: {e}")))?;
         let value_bytes: &[u8] = value.as_ref();
         if value_bytes.len() != MAX_NONCE_BYTES {
-            return Err(format!(
+            return Err(AuraError::crypto(format!(
                 "Invalid nonce length: {} (expected {MAX_NONCE_BYTES})",
                 value_bytes.len(),
-            ));
+            )));
         }
 
         Ok(Self {
@@ -183,8 +185,8 @@ impl Nonce {
     /// This is a security limitation: FROST nonces should not be reconstructed
     /// from serialized data. Nonces must be generated fresh per signing operation,
     /// kept in-memory, and never persisted.
-    pub fn to_frost(&self) -> Result<frost::round1::SigningNonces, String> {
-        Err("FROST nonces cannot be reconstructed from serialized data for security reasons. Generate fresh nonces for each signing operation.".to_string())
+    pub fn to_frost(&self) -> Result<frost::round1::SigningNonces, AuraError> {
+        Err(AuraError::crypto("FROST nonces cannot be reconstructed from serialized data for security reasons. Generate fresh nonces for each signing operation."))
     }
 }
 
@@ -208,17 +210,17 @@ impl NonceCommitment {
     pub fn from_frost(
         identifier: frost::Identifier,
         commitments: frost::round1::SigningCommitments,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, AuraError> {
         let id_bytes = identifier.serialize();
         let commitment = commitments
             .serialize()
-            .map_err(|e| format!("Failed to serialize FROST commitments: {e}"))?;
+            .map_err(|e| AuraError::crypto(format!("Failed to serialize FROST commitments: {e}")))?;
         let commitment_bytes: &[u8] = commitment.as_ref();
         if commitment_bytes.len() != MAX_COMMITMENT_BYTES {
-            return Err(format!(
+            return Err(AuraError::crypto(format!(
                 "Invalid commitment length: {} (expected {MAX_COMMITMENT_BYTES})",
                 commitment_bytes.len(),
-            ));
+            )));
         }
 
         Ok(Self {
@@ -228,24 +230,25 @@ impl NonceCommitment {
     }
 
     /// Convert to FROST signing commitments
-    pub fn to_frost(&self) -> Result<frost::round1::SigningCommitments, String> {
+    pub fn to_frost(&self) -> Result<frost::round1::SigningCommitments, AuraError> {
         frost::round1::SigningCommitments::deserialize(&self.commitment)
-            .map_err(|e| format!("Failed to deserialize commitments: {e}"))
+            .map_err(|e| AuraError::crypto(format!("Failed to deserialize commitments: {e}")))
     }
 
     /// Get FROST identifier
-    pub fn frost_identifier(&self) -> Result<frost::Identifier, String> {
-        frost::Identifier::try_from(self.signer).map_err(|e| format!("Invalid identifier: {e}"))
+    pub fn frost_identifier(&self) -> Result<frost::Identifier, AuraError> {
+        frost::Identifier::try_from(self.signer)
+            .map_err(|e| AuraError::crypto(format!("Invalid identifier: {e}")))
     }
 
     /// Create from bytes (for testing and mock implementations)
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, AuraError> {
         // For mock implementations, create a simple commitment
         if bytes.len() != MAX_COMMITMENT_BYTES {
-            return Err(format!(
+            return Err(AuraError::crypto(format!(
                 "Invalid commitment length: {} (expected {MAX_COMMITMENT_BYTES})",
                 bytes.len(),
-            ));
+            )));
         }
 
         Ok(Self {
@@ -294,29 +297,30 @@ impl PartialSignature {
     }
 
     /// Convert to FROST signature share
-    pub fn to_frost(&self) -> Result<frost::round2::SignatureShare, String> {
+    pub fn to_frost(&self) -> Result<frost::round2::SignatureShare, AuraError> {
         if self.signature.len() != 32 {
-            return Err(format!(
+            return Err(AuraError::crypto(format!(
                 "Invalid signature length: {} (expected 32)",
                 self.signature.len()
-            ));
+            )));
         }
         let mut array = [0u8; 32];
         array.copy_from_slice(&self.signature);
         frost::round2::SignatureShare::deserialize(array)
-            .map_err(|e| format!("Failed to deserialize signature share: {e}"))
+            .map_err(|e| AuraError::crypto(format!("Failed to deserialize signature share: {e}")))
     }
 
     /// Get FROST identifier
-    pub fn frost_identifier(&self) -> Result<frost::Identifier, String> {
-        frost::Identifier::try_from(self.signer).map_err(|e| format!("Invalid identifier: {e}"))
+    pub fn frost_identifier(&self) -> Result<frost::Identifier, AuraError> {
+        frost::Identifier::try_from(self.signer)
+            .map_err(|e| AuraError::crypto(format!("Invalid identifier: {e}")))
     }
 
     /// Create from bytes (for testing and mock implementations)
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, String> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, AuraError> {
         // For mock implementations, create a simple partial signature
         if bytes.len() < 32 {
-            return Err("Partial signature too short".to_string());
+            return Err(AuraError::crypto("Partial signature too short"));
         }
 
         Ok(Self {
@@ -488,7 +492,7 @@ pub fn generate_nonce_with_share(
     signer_id: u16,
     signing_share: &frost::keys::SigningShare,
     rng: &mut (impl rand::RngCore + rand::CryptoRng),
-) -> Result<(Nonce, NonceCommitment), String> {
+) -> Result<(Nonce, NonceCommitment), AuraError> {
     // Use valid identifier - if signer_id is invalid, use 1 as fallback
     let identifier = if let Ok(id) = frost::Identifier::try_from(signer_id) {
         id
@@ -523,8 +527,7 @@ pub async fn generate_nonce_with_share_secure<E>(
 where
     E: SecureStorageEffects,
 {
-    let (nonce, commitment) = generate_nonce_with_share(signer_id, signing_share, rng)
-        .map_err(crate::AuraError::crypto)?;
+    let (nonce, commitment) = generate_nonce_with_share(signer_id, signing_share, rng)?;
     let location = SecureStorageLocation::frost_nonce(session_id, signer_id);
     storage
         .secure_store(
@@ -582,10 +585,10 @@ pub fn frost_sign_partial(
     _msg: &[u8],
     _nonce: &Nonce, // Ignored for security - we generate fresh nonces
     _commitments: &BTreeMap<u16, NonceCommitment>,
-) -> Result<PartialSignature, String> {
+) -> Result<PartialSignature, AuraError> {
     // For security reasons, this function requires a proper KeyPackage from DKG
     // rather than just a SigningShare. This prevents misuse of shares.
-    Err("FROST signing requires a complete KeyPackage from a DKG ceremony. Use frost_sign_partial_with_keypackage instead.".to_string())
+    Err(AuraError::crypto("FROST signing requires a complete KeyPackage from a DKG ceremony. Use frost_sign_partial_with_keypackage instead."))
 }
 
 /// Create a partial signature using FROST with a proper KeyPackage
@@ -597,7 +600,7 @@ pub fn frost_sign_partial_with_keypackage(
     msg: &[u8],
     commitments: &BTreeMap<u16, NonceCommitment>,
     rng: &mut (impl rand::RngCore + rand::CryptoRng),
-) -> Result<PartialSignature, String> {
+) -> Result<PartialSignature, AuraError> {
     let identifier = key_package.identifier();
 
     // Generate fresh nonces for this signing operation (secure approach)
@@ -607,7 +610,7 @@ pub fn frost_sign_partial_with_keypackage(
     let mut frost_commitments = BTreeMap::new();
     for (signer_id, commitment) in commitments {
         let frost_id = frost::Identifier::try_from(*signer_id)
-            .map_err(|e| format!("Invalid signer ID {signer_id}: {e}"))?;
+            .map_err(|e| AuraError::crypto(format!("Invalid signer ID {signer_id}: {e}")))?;
         let frost_commit = commitment.to_frost()?;
         frost_commitments.insert(frost_id, frost_commit);
     }
@@ -617,7 +620,7 @@ pub fn frost_sign_partial_with_keypackage(
 
     // Create partial signature using FROST protocol with KeyPackage
     let signature_share = frost::round2::sign(&signing_package, &frost_nonce, key_package)
-        .map_err(|e| format!("FROST signing failed: {e}"))?;
+        .map_err(|e| AuraError::crypto(format!("FROST signing failed: {e}")))?;
 
     // Convert to our format
     let _signer_id = u16::from_be_bytes([0, identifier.serialize()[0]]);
@@ -651,7 +654,7 @@ pub fn frost_aggregate(
     msg: &[u8],
     commitments: &BTreeMap<u16, NonceCommitment>,
     pubkey_package: &frost::keys::PublicKeyPackage,
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, AuraError> {
     // Convert partial signatures to FROST format
     let mut frost_shares = BTreeMap::new();
     for partial in partials {
@@ -664,7 +667,7 @@ pub fn frost_aggregate(
     let mut frost_commitments = BTreeMap::new();
     for (signer_id, commitment) in commitments {
         let frost_id = frost::Identifier::try_from(*signer_id)
-            .map_err(|e| format!("Invalid signer ID {signer_id}: {e}"))?;
+            .map_err(|e| AuraError::crypto(format!("Invalid signer ID {signer_id}: {e}")))?;
         let frost_commit = commitment.to_frost()?;
         frost_commitments.insert(frost_id, frost_commit);
     }
@@ -674,7 +677,7 @@ pub fn frost_aggregate(
 
     // Aggregate signature shares
     let group_signature = frost::aggregate(&signing_package, &frost_shares, pubkey_package)
-        .map_err(|e| format!("FROST aggregation failed: {e}"))?;
+        .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {e}")))?;
 
     // Return serialized signature
     Ok(group_signature.serialize().as_ref().to_vec())
@@ -693,28 +696,28 @@ pub fn frost_aggregate(
 ///
 /// ## Returns
 ///
-/// `Ok(())` if signature is valid, `Err(String)` otherwise
+/// `Ok(())` if signature is valid, `Err(AuraError)` otherwise
 pub fn frost_verify_aggregate(
     group_pk: &frost::VerifyingKey,
     msg: &[u8],
     signature: &[u8],
-) -> Result<(), String> {
+) -> Result<(), AuraError> {
     // Deserialize signature
     if signature.len() != 64 {
-        return Err(format!(
+        return Err(AuraError::crypto(format!(
             "Invalid signature length: {} (expected 64)",
             signature.len()
-        ));
+        )));
     }
     let mut sig_array = [0u8; 64];
     sig_array.copy_from_slice(signature);
     let sig = frost::Signature::deserialize(sig_array)
-        .map_err(|e| format!("Invalid signature format: {e}"))?;
+        .map_err(|e| AuraError::crypto(format!("Invalid signature format: {e}")))?;
 
     // Verify signature
     group_pk
         .verify(msg, &sig)
-        .map_err(|e| format!("Signature verification failed: {e}"))
+        .map_err(|e| AuraError::crypto(format!("Signature verification failed: {e}")))
 }
 
 /// Threshold signature result (aggregated signature)
@@ -799,41 +802,41 @@ impl From<frost_ed25519::keys::PublicKeyPackage> for PublicKeyPackage {
 }
 
 impl TryFrom<PublicKeyPackage> for frost_ed25519::keys::PublicKeyPackage {
-    type Error = String;
+    type Error = AuraError;
 
     fn try_from(aura_pkg: PublicKeyPackage) -> Result<Self, Self::Error> {
         // Parse the group verifying key
         if aura_pkg.group_public_key.len() != 32 {
-            return Err(format!(
+            return Err(AuraError::crypto(format!(
                 "Invalid group public key length: {} (expected 32)",
                 aura_pkg.group_public_key.len()
-            ));
+            )));
         }
         let mut group_key_bytes = [0u8; 32];
         group_key_bytes.copy_from_slice(&aura_pkg.group_public_key);
         let group_verifying_key = frost_ed25519::VerifyingKey::deserialize(group_key_bytes)
-            .map_err(|e| format!("Failed to deserialize group verifying key: {e}"))?;
+            .map_err(|e| AuraError::crypto(format!("Failed to deserialize group verifying key: {e}")))?;
 
         // Parse individual signer verifying shares
         let mut signer_verifying_keys = std::collections::BTreeMap::new();
         for (signer_id, key_bytes) in &aura_pkg.signer_public_keys {
             if key_bytes.len() != 32 {
-                return Err(format!(
+                return Err(AuraError::crypto(format!(
                     "Invalid signer key length for signer {}: {} (expected 32)",
                     signer_id,
                     key_bytes.len()
-                ));
+                )));
             }
 
             // Convert u16 signer ID to frost Identifier
             let frost_id = frost::Identifier::try_from(*signer_id)
-                .map_err(|e| format!("Invalid signer ID {signer_id}: {e}"))?;
+                .map_err(|e| AuraError::crypto(format!("Invalid signer ID {signer_id}: {e}")))?;
 
             let mut key_array = [0u8; 32];
             key_array.copy_from_slice(key_bytes);
             let verifying_share = frost_ed25519::keys::VerifyingShare::deserialize(key_array)
                 .map_err(|e| {
-                    format!("Failed to deserialize signer {signer_id} verifying share: {e}")
+                    AuraError::crypto(format!("Failed to deserialize signer {signer_id} verifying share: {e}"))
                 })?;
 
             signer_verifying_keys.insert(frost_id, verifying_share);
@@ -848,16 +851,16 @@ impl TryFrom<PublicKeyPackage> for frost_ed25519::keys::PublicKeyPackage {
 }
 
 /// Deserialize a FROST public key package from bytes.
-pub fn public_key_package_from_bytes(bytes: &[u8]) -> Result<PublicKeyPackage, String> {
+pub fn public_key_package_from_bytes(bytes: &[u8]) -> Result<PublicKeyPackage, AuraError> {
     let frost_pkg = frost_ed25519::keys::PublicKeyPackage::deserialize(bytes)
-        .map_err(|e| format!("Failed to deserialize public key package: {e}"))?;
+        .map_err(|e| AuraError::crypto(format!("Failed to deserialize public key package: {e}")))?;
     Ok(PublicKeyPackage::from(frost_pkg))
 }
 
 /// Deserialize a FROST key package from bytes and convert to an Aura signing share.
-pub fn share_from_key_package_bytes(bytes: &[u8]) -> Result<Share, String> {
+pub fn share_from_key_package_bytes(bytes: &[u8]) -> Result<Share, AuraError> {
     let frost_pkg = frost_ed25519::keys::KeyPackage::deserialize(bytes)
-        .map_err(|e| format!("Failed to deserialize key package: {e}"))?;
+        .map_err(|e| AuraError::crypto(format!("Failed to deserialize key package: {e}")))?;
     Ok(Share::from(frost_pkg))
 }
 
@@ -871,7 +874,7 @@ impl From<frost_ed25519::keys::KeyPackage> for Share {
 }
 
 impl TryFrom<Share> for frost_ed25519::keys::SigningShare {
-    type Error = String;
+    type Error = AuraError;
 
     fn try_from(aura_share: Share) -> Result<Self, Self::Error> {
         aura_share.to_frost()

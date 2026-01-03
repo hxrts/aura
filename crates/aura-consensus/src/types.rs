@@ -129,7 +129,7 @@ impl CommitFact {
             .ok_or_else(|| AuraError::invalid("Missing group public key for verification"))?;
 
         let frost_pkg: frost_ed25519::keys::PublicKeyPackage =
-            group_pkg.try_into().map_err(|e: String| {
+            group_pkg.try_into().map_err(|e: AuraError| {
                 AuraError::invalid(format!("Invalid group public key package: {e}"))
             })?;
 

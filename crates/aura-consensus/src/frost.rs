@@ -433,7 +433,7 @@ impl FrostConsensusOrchestrator {
             .group_public_key
             .clone()
             .try_into()
-            .map_err(|e: String| {
+            .map_err(|e: AuraError| {
                 AuraError::crypto(format!("Invalid group public key package: {e}"))
             })?;
 
@@ -492,7 +492,7 @@ impl FrostConsensusOrchestrator {
             .group_public_key
             .clone()
             .try_into()
-            .map_err(|e: String| {
+            .map_err(|e: AuraError| {
                 AuraError::crypto(format!("Invalid group public key package: {e}"))
             })?;
 

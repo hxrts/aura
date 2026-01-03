@@ -4,6 +4,7 @@
 //! crates and architectural layers, enabling clear cross-layer communication.
 
 use crate::domain::journal::Cap;
+use crate::errors::AuraError;
 
 // =============================================================================
 // CAP-BASED CONVERSION UTILITIES
@@ -37,7 +38,7 @@ pub trait FromJournalOperation: Sized {
 
 /// Cap-based implementations
 impl FromAuthorizationAction for Cap {
-    type Error = String;
+    type Error = AuraError;
 
     fn from_authorization_action(action: String) -> Result<Self, Self::Error> {
         // Note: These conversions cannot create real capabilities since they lack
@@ -52,7 +53,7 @@ impl FromAuthorizationAction for Cap {
 }
 
 impl FromJournalOperation for Cap {
-    type Error = String;
+    type Error = AuraError;
 
     fn from_journal_operation(
         category: &str,
