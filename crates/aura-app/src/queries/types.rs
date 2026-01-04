@@ -371,6 +371,8 @@ impl Query for MessagesQuery {
                     reply_to: get_optional_string(&row, "reply_to"),
                     is_own: false, // Determined at render time
                     is_read: get_bool(&row, "is_read"),
+                    delivery_status: Default::default(),
+                    is_finalized: false,
                 })
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
@@ -735,7 +737,7 @@ impl Query for ContactsQuery {
     }
 
     fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        use crate::views::contacts::{Contact, ContactsState};
+        use crate::views::contacts::{Contact, ContactsState, ReadReceiptPolicy};
 
         let contacts: Vec<Contact> = bindings
             .rows
@@ -758,6 +760,7 @@ impl Query for ContactsQuery {
                     is_resident: get_bool(&row, "is_resident"),
                     last_interaction,
                     is_online: get_bool(&row, "is_online"),
+                    read_receipt_policy: ReadReceiptPolicy::default(),
                 })
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
@@ -1326,8 +1329,8 @@ impl Query for ChatQuery {
 
         let mut state = ChatState::default();
         state.channels = channels;
-        state.selected_channel_id = None; // Set by caller
-        state.messages = Vec::new(); // Loaded separately
+        // Note: selected_channel_id is now UI state in the frontend
+        // Messages are loaded per-channel via messages_for_channel()
         state.total_unread = 0; // Calculated from channels
         state.loading_more = false;
         state.has_more = false;

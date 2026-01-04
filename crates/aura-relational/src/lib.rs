@@ -106,8 +106,8 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 // Export domain fact types
 pub use facts::{
     ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
-    RecoveryGrantDetailsFact, RecoveryGrantDetailsFactReducer, CONTACT_FACT_TYPE_ID,
-    GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
+    ReadReceiptPolicy, RecoveryGrantDetailsFact, RecoveryGrantDetailsFactReducer,
+    CONTACT_FACT_TYPE_ID, GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID, RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
 };
 
 // Export consensus functions from adapter

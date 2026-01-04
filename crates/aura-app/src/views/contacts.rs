@@ -3,6 +3,9 @@
 use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
+// Re-export ReadReceiptPolicy from aura-relational for convenience
+pub use aura_relational::ReadReceiptPolicy;
+
 // =============================================================================
 // Contact Suggestion Types
 // =============================================================================
@@ -52,6 +55,8 @@ pub struct Contact {
     pub last_interaction: Option<u64>,
     /// Whether contact is online
     pub is_online: bool,
+    /// Read receipt policy for this contact (privacy-first: disabled by default)
+    pub read_receipt_policy: ReadReceiptPolicy,
 }
 
 /// Contacts state
@@ -142,7 +147,26 @@ impl ContactsState {
                 is_resident: false,
                 last_interaction: None,
                 is_online: false,
+                read_receipt_policy: ReadReceiptPolicy::default(),
             });
         }
+    }
+
+    /// Set read receipt policy for a contact
+    ///
+    /// If the contact doesn't exist, this is a no-op.
+    pub fn set_read_receipt_policy(&mut self, contact_id: AuthorityId, policy: ReadReceiptPolicy) {
+        if let Some(contact) = self.contacts.iter_mut().find(|c| c.id == contact_id) {
+            contact.read_receipt_policy = policy;
+        }
+    }
+
+    /// Get read receipt policy for a contact
+    ///
+    /// Returns Disabled (privacy-first default) if contact not found.
+    pub fn get_read_receipt_policy(&self, contact_id: &AuthorityId) -> ReadReceiptPolicy {
+        self.contact(contact_id)
+            .map(|c| c.read_receipt_policy)
+            .unwrap_or_default()
     }
 }

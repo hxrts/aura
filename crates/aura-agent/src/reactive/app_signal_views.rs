@@ -13,7 +13,7 @@ use aura_app::signal_defs::{
     CHAT_SIGNAL, CONTACTS_SIGNAL, ERROR_SIGNAL, HOMES_SIGNAL, INVITATIONS_SIGNAL, RECOVERY_SIGNAL,
 };
 use aura_app::views::{
-    chat::{Channel, ChannelType, ChatState, Message},
+    chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
     contacts::{Contact, ContactsState},
     home::{BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
     invitations::{
@@ -37,7 +37,7 @@ use aura_invitation::{
     InvitationFact, InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID,
 };
 use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
-use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
+use aura_relational::{ContactFact, ReadReceiptPolicy, CONTACT_FACT_TYPE_ID};
 use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
@@ -335,6 +335,7 @@ impl ReactiveView for ContactsSignalView {
                                     is_resident: false,
                                     last_interaction: Some(added_at.ts_ms),
                                     is_online: false,
+                                    read_receipt_policy: ReadReceiptPolicy::default(),
                                 });
                             }
                             changed = true;
@@ -355,6 +356,12 @@ impl ReactiveView for ContactsSignalView {
                             {
                                 contact.last_interaction = Some(renamed_at.ts_ms);
                             }
+                            changed = true;
+                        }
+                        ContactFact::ReadReceiptPolicyUpdated {
+                            contact_id, policy, ..
+                        } => {
+                            state.set_read_receipt_policy(contact_id, policy);
                             changed = true;
                         }
                     }
@@ -790,6 +797,8 @@ impl ReactiveView for ChatSignalView {
                     let sealed_len = payload.len();
                     let payload_bytes = payload.clone();
                     let context = context_id;
+                    // Clone values needed for delivery acknowledgment before they're moved
+                    let msg_id_for_ack = message_id.clone();
                     drop(state);
                     let content = match amp_recv(self.effects.as_ref(), context, payload_bytes).await
                     {
@@ -806,6 +815,7 @@ impl ReactiveView for ChatSignalView {
                         }
                     };
                     state = self.state.lock().await;
+                    let is_own = sender_id == self.own_authority;
                     let message = Message {
                         id: message_id,
                         channel_id,
@@ -814,11 +824,47 @@ impl ReactiveView for ChatSignalView {
                         content,
                         timestamp: sent_at.ts_ms,
                         reply_to,
-                        is_own: sender_id == self.own_authority,
-                        is_read: sender_id == self.own_authority,
+                        is_own,
+                        is_read: is_own,
+                        // Received messages are already "Sent" from sender's perspective
+                        delivery_status: MessageDeliveryStatus::Sent,
+                        is_finalized: false,
                     };
                     state.apply_message(channel_id, message);
                     changed = true;
+
+                    // Emit delivery acknowledgment for received messages (not our own)
+                    if !is_own {
+                        let delivery_fact = ChatFact::message_delivered_ms(
+                            context,
+                            channel_id,
+                            msg_id_for_ack.clone(),
+                            self.own_authority,
+                            None, // device_id - TODO: Add when multi-device is implemented
+                            sent_at.ts_ms,
+                        );
+                        if let Err(e) = self
+                            .effects
+                            .commit_generic_fact_bytes(
+                                context,
+                                CHAT_FACT_TYPE_ID,
+                                delivery_fact.to_bytes(),
+                            )
+                            .await
+                        {
+                            tracing::warn!(
+                                message_id = %msg_id_for_ack,
+                                error = %e,
+                                "Failed to emit MessageDelivered fact"
+                            );
+                        } else {
+                            tracing::debug!(
+                                message_id = %msg_id_for_ack,
+                                channel_id = %channel_id,
+                                "Emitted MessageDelivered acknowledgment"
+                            );
+                        }
+                    }
                 }
                 ChatFact::MessageRead {
                     channel_id,
@@ -827,20 +873,34 @@ impl ReactiveView for ChatSignalView {
                     read_at,
                     ..
                 } => {
-                    // If the reader is us, this is a confirmation of our own read action.
-                    // If the reader is someone else, update the message as read by others.
-                    // For now, mark the message as read in our local state.
-                    if state.mark_message_read(&message_id) {
-                        state.decrement_unread(&channel_id);
-                        changed = true;
+                    // Two cases:
+                    // 1. Reader is us - mark message as read in our local state
+                    // 2. Reader is someone else - update our message's delivery_status to Read
+                    if reader_id == self.own_authority {
+                        // We read someone else's message
+                        if state.mark_message_read(&channel_id, &message_id) {
+                            state.decrement_unread(&channel_id);
+                            changed = true;
+                        }
+                        tracing::debug!(
+                            channel_id = %channel_id,
+                            message_id,
+                            read_at = read_at.ts_ms,
+                            "Message marked as read by us"
+                        );
+                    } else {
+                        // Someone else read our message - update delivery status
+                        if state.mark_read_by_recipient(&message_id) {
+                            tracing::debug!(
+                                channel_id = %channel_id,
+                                message_id,
+                                reader_id = %reader_id,
+                                read_at = read_at.ts_ms,
+                                "Message delivery status updated to Read"
+                            );
+                            changed = true;
+                        }
                     }
-                    tracing::debug!(
-                        channel_id = %channel_id,
-                        message_id,
-                        reader_id = %reader_id,
-                        read_at = read_at.ts_ms,
-                        "Message marked as read"
-                    );
                 }
                 ChatFact::MessageDelivered {
                     channel_id,
@@ -851,16 +911,28 @@ impl ReactiveView for ChatSignalView {
                     ..
                 } => {
                     // Message was delivered to a recipient's device (before they read it).
-                    // Currently the Message struct doesn't have a delivery status field,
-                    // so we just log this event. A future UI could show delivery checkmarks.
-                    tracing::debug!(
-                        channel_id = %channel_id,
-                        message_id,
-                        recipient_id = %recipient_id,
-                        device_id = ?device_id,
-                        delivered_at = delivered_at.ts_ms,
-                        "Message delivered to recipient device"
-                    );
+                    // Update the message's delivery_status if we are the sender.
+                    if state.mark_delivered(&message_id) {
+                        tracing::debug!(
+                            channel_id = %channel_id,
+                            message_id,
+                            recipient_id = %recipient_id,
+                            device_id = ?device_id,
+                            delivered_at = delivered_at.ts_ms,
+                            "Message delivery status updated to Delivered"
+                        );
+                        changed = true;
+                    } else {
+                        // Either we're not the sender, or the message wasn't found
+                        tracing::trace!(
+                            channel_id = %channel_id,
+                            message_id,
+                            recipient_id = %recipient_id,
+                            device_id = ?device_id,
+                            delivered_at = delivered_at.ts_ms,
+                            "Message delivered (not our message or already updated)"
+                        );
+                    }
                 }
                 ChatFact::DeliveryAcknowledged {
                     channel_id,
@@ -887,7 +959,7 @@ impl ReactiveView for ChatSignalView {
                 } => {
                     // Update the message content in local state
                     let new_content = String::from_utf8_lossy(&new_payload).to_string();
-                    if let Some(msg) = state.message_mut(&message_id) {
+                    if let Some(msg) = state.message_mut(&channel_id, &message_id) {
                         msg.content = new_content;
                     }
                     tracing::debug!(
@@ -907,7 +979,7 @@ impl ReactiveView for ChatSignalView {
                     ..
                 } => {
                     // Remove the message from local state
-                    state.remove_message(&message_id);
+                    state.remove_message(&channel_id, &message_id);
                     tracing::debug!(
                         channel_id = %channel_id,
                         message_id,

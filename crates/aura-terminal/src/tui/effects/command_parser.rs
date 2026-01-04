@@ -207,6 +207,8 @@ pub enum EffectCommand {
     InviteUser {
         /// Target user
         target: String,
+        /// Channel to invite to
+        channel: String,
     },
 
     // === Contact Commands ===

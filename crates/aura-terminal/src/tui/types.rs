@@ -116,7 +116,7 @@ impl DeliveryStatus {
     /// Get the status indicator character
     pub fn indicator(&self) -> &'static str {
         match self {
-            DeliveryStatus::Sending => "⏳",   // Hourglass
+            DeliveryStatus::Sending => "◐",    // Half-filled circle (pending)
             DeliveryStatus::Sent => "✓",       // Single check (gray)
             DeliveryStatus::Delivered => "✓✓", // Double check (gray)
             DeliveryStatus::Read => "✓✓",      // Double check (blue) - color applied separately
@@ -273,6 +273,8 @@ pub struct Message {
     pub is_own: bool,
     /// Delivery status for own messages
     pub delivery_status: DeliveryStatus,
+    /// Whether this message has been finalized by consensus
+    pub is_finalized: bool,
 }
 
 impl From<&AppMessage> for Message {
@@ -284,8 +286,8 @@ impl From<&AppMessage> for Message {
             content: msg.content.clone(),
             timestamp: format_timestamp(msg.timestamp),
             is_own: msg.is_own,
-            // Default to Delivered for messages loaded from storage
-            delivery_status: DeliveryStatus::Delivered,
+            delivery_status: DeliveryStatus::from(msg.delivery_status),
+            is_finalized: msg.is_finalized,
         }
     }
 }
@@ -304,6 +306,7 @@ impl Message {
             timestamp: String::new(),
             is_own: false,
             delivery_status: DeliveryStatus::default(),
+            is_finalized: false,
         }
     }
 
@@ -322,6 +325,7 @@ impl Message {
             timestamp: String::new(),
             is_own: true,
             delivery_status: DeliveryStatus::Sending,
+            is_finalized: false,
         }
     }
 
@@ -344,6 +348,12 @@ impl Message {
 
     pub fn own(mut self, is_own: bool) -> Self {
         self.is_own = is_own;
+        self
+    }
+
+    /// Builder method to set finalized status
+    pub fn with_finalized(mut self, is_finalized: bool) -> Self {
+        self.is_finalized = is_finalized;
         self
     }
 }
@@ -1163,6 +1173,44 @@ impl ContactStatus {
     }
 }
 
+/// Read receipt policy for a contact
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReadReceiptPolicy {
+    /// Read receipts are disabled (privacy-first default)
+    #[default]
+    Disabled,
+    /// Read receipts are enabled
+    Enabled,
+}
+
+impl ReadReceiptPolicy {
+    /// Label for the policy
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Disabled => "Disabled",
+            Self::Enabled => "Enabled",
+        }
+    }
+
+    /// Toggle to the opposite policy
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Disabled => Self::Enabled,
+            Self::Enabled => Self::Disabled,
+        }
+    }
+}
+
+/// Convert from app ReadReceiptPolicy
+impl From<aura_app::views::contacts::ReadReceiptPolicy> for ReadReceiptPolicy {
+    fn from(policy: aura_app::views::contacts::ReadReceiptPolicy) -> Self {
+        match policy {
+            aura_app::views::contacts::ReadReceiptPolicy::Disabled => Self::Disabled,
+            aura_app::views::contacts::ReadReceiptPolicy::Enabled => Self::Enabled,
+        }
+    }
+}
+
 /// A contact
 #[derive(Clone, Debug, Default)]
 pub struct Contact {
@@ -1171,6 +1219,8 @@ pub struct Contact {
     pub suggested_name: Option<String>,
     pub status: ContactStatus,
     pub is_guardian: bool,
+    /// Read receipt policy for this contact (privacy-first default: disabled)
+    pub read_receipt_policy: ReadReceiptPolicy,
 }
 
 impl Contact {
@@ -1378,6 +1428,7 @@ impl From<&AppContact> for Contact {
                 ContactStatus::Offline
             },
             is_guardian: c.is_guardian,
+            read_receipt_policy: c.read_receipt_policy.into(),
         }
     }
 }

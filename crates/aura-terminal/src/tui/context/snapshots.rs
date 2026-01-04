@@ -54,8 +54,9 @@ impl SnapshotHelper {
         if let Some(snapshot) = self.try_state_snapshot() {
             ChatSnapshot {
                 channels: snapshot.chat.channels,
-                selected_channel: snapshot.chat.selected_channel_id.map(|id| id.to_string()),
-                messages: snapshot.chat.messages,
+                // Selection and messages are managed at a different level now
+                selected_channel: None,
+                messages: Vec::new(),
             }
         } else {
             ChatSnapshot::default()

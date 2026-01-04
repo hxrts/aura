@@ -167,6 +167,7 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             ContactStatus::Blocked => "Blocked",
         };
         let guardian = if c.is_guardian { "Yes" } else { "No" };
+        let read_receipts = c.read_receipt_policy.label();
 
         vec![
             element! { KeyValue(label: "Nickname".to_string(), value: c.nickname.clone()) }
@@ -174,6 +175,8 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             element! { KeyValue(label: "Status".to_string(), value: status_label.to_string()) }
                 .into_any(),
             element! { KeyValue(label: "Guardian".to_string(), value: guardian.to_string()) }
+                .into_any(),
+            element! { KeyValue(label: "Read Receipts".to_string(), value: read_receipts.to_string()) }
                 .into_any(),
         ]
     } else {

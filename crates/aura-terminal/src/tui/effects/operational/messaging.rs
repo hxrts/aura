@@ -122,9 +122,9 @@ pub async fn handle_messaging(
             }
         }
 
-        EffectCommand::InviteUser { target } => {
-            // Invite user to current channel - use workflow
-            match invite_user_to_channel(app_core, target, None, None, None).await {
+        EffectCommand::InviteUser { target, channel } => {
+            // Invite user to channel - use workflow
+            match invite_user_to_channel(app_core, target, channel, None, None).await {
                 Ok(invitation_id) => Some(Ok(OpResponse::Data(format!(
                     "Invitation sent: {invitation_id}"
                 )))),

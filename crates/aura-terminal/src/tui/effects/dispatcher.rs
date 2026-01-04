@@ -351,7 +351,15 @@ impl CommandDispatcher {
 
             IrcCommand::Unmute { target } => Ok(EffectCommand::UnmuteUser { target }),
 
-            IrcCommand::Invite { target } => Ok(EffectCommand::InviteUser { target }),
+            IrcCommand::Invite { target } => {
+                let channel =
+                    self.current_channel
+                        .clone()
+                        .ok_or_else(|| DispatchError::NotFound {
+                            resource: "current channel".to_string(),
+                        })?;
+                Ok(EffectCommand::InviteUser { target, channel })
+            }
 
             IrcCommand::Topic { text } => {
                 let channel =

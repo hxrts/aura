@@ -53,6 +53,19 @@ pub struct ContactFactKey {
     pub data: Vec<u8>,
 }
 
+/// Read receipt policy for a contact
+///
+/// Determines whether read receipts are sent when viewing messages from this contact.
+/// Privacy-first default is Disabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ReadReceiptPolicy {
+    /// Do not send read receipts (privacy-first default)
+    #[default]
+    Disabled,
+    /// Send read receipts when messages are viewed
+    Enabled,
+}
+
 /// Contact domain fact types
 ///
 /// These facts represent contact-related state changes in the journal.
@@ -97,6 +110,19 @@ pub enum ContactFact {
         /// Timestamp when contact was renamed (uses unified time system)
         renamed_at: PhysicalTime,
     },
+    /// Read receipt policy updated for a contact
+    ReadReceiptPolicyUpdated {
+        /// Relational context for the contact relationship
+        context_id: ContextId,
+        /// Authority owning the contact list
+        owner_id: AuthorityId,
+        /// Contact whose policy is being updated
+        contact_id: AuthorityId,
+        /// New read receipt policy
+        policy: ReadReceiptPolicy,
+        /// Timestamp when policy was updated (uses unified time system)
+        updated_at: PhysicalTime,
+    },
 }
 
 impl ContactFact {
@@ -106,6 +132,7 @@ impl ContactFact {
             ContactFact::Added { contact_id, .. } => *contact_id,
             ContactFact::Removed { contact_id, .. } => *contact_id,
             ContactFact::Renamed { contact_id, .. } => *contact_id,
+            ContactFact::ReadReceiptPolicyUpdated { contact_id, .. } => *contact_id,
         }
     }
 
@@ -115,6 +142,7 @@ impl ContactFact {
             ContactFact::Added { owner_id, .. } => *owner_id,
             ContactFact::Removed { owner_id, .. } => *owner_id,
             ContactFact::Renamed { owner_id, .. } => *owner_id,
+            ContactFact::ReadReceiptPolicyUpdated { owner_id, .. } => *owner_id,
         }
     }
 
@@ -124,6 +152,7 @@ impl ContactFact {
             ContactFact::Added { added_at, .. } => added_at.ts_ms,
             ContactFact::Removed { removed_at, .. } => removed_at.ts_ms,
             ContactFact::Renamed { renamed_at, .. } => renamed_at.ts_ms,
+            ContactFact::ReadReceiptPolicyUpdated { updated_at, .. } => updated_at.ts_ms,
         }
     }
 
@@ -184,6 +213,26 @@ impl ContactFact {
             },
         }
     }
+
+    /// Create a ReadReceiptPolicyUpdated fact with millisecond timestamp
+    pub fn read_receipt_policy_updated_ms(
+        context_id: ContextId,
+        owner_id: AuthorityId,
+        contact_id: AuthorityId,
+        policy: ReadReceiptPolicy,
+        updated_at_ms: u64,
+    ) -> Self {
+        Self::ReadReceiptPolicyUpdated {
+            context_id,
+            owner_id,
+            contact_id,
+            policy,
+            updated_at: PhysicalTime {
+                ts_ms: updated_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
 }
 
 impl ContactFact {
@@ -203,6 +252,10 @@ impl ContactFact {
             },
             ContactFact::Renamed { contact_id, .. } => ContactFactKey {
                 sub_type: "contact-renamed",
+                data: contact_id.to_bytes().to_vec(),
+            },
+            ContactFact::ReadReceiptPolicyUpdated { contact_id, .. } => ContactFactKey {
+                sub_type: "contact-read-receipt-policy",
                 data: contact_id.to_bytes().to_vec(),
             },
         }
