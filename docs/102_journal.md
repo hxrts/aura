@@ -350,6 +350,7 @@ By clearly separating validation responsibilities, runtime authors know which ef
 ## See Also
 
 - [Database Architecture](113_database.md) - Query system for reading journal facts via Datalog
+- [Consistency Metadata](121_consistency_metadata.md) - Agreement, propagation, and acknowledgment tracking
 - [State Reduction](120_state_reduction.md) - Reduction pipeline details
 - [Maintenance](111_maintenance.md) - Snapshot and garbage collection pipeline
 - [Relational Contexts](103_relational_contexts.md) - Context journal structure

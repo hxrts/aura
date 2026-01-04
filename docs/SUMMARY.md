@@ -18,6 +18,7 @@
 - [Authorization](109_authorization.md)
 - [Rendezvous Architecture](110_rendezvous.md)
 - [State Reduction Flows](120_state_reduction.md)
+- [Consistency Metadata](121_consistency_metadata.md)
 - [Distributed Maintenance Architecture](111_maintenance.md)
 - [Aura Messaging Protocol (AMP)](112_amp.md)
 - [Database Architecture](113_database.md)

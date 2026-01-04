@@ -474,6 +474,7 @@ channel.set_effect_policy(RemoveFromChannel, EffectTiming::Immediate);
 
 ## Related Documentation
 
+- [Consistency Metadata](121_consistency_metadata.md) - Status types for each category (OptimisticStatus, DeferredStatus, CeremonyStatus)
 - [Consensus](104_consensus.md) - When Aura Consensus is required
 - [AMP Protocol](112_amp.md) - Channel encryption and key derivation
 - [Relational Contexts](103_relational_contexts.md) - Context vs channel distinction

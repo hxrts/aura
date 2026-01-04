@@ -708,7 +708,67 @@ let config = ScopeFinalityConfig::new(ScopeId::parse("authority:abc/payments")?)
 effects.configure_scope(config).await?;
 ```
 
-## 9. Implementation Location
+## 9. Consistency Metadata
+
+Query results include consistency metadata that tracks the agreement, propagation, and acknowledgment status of each fact.
+
+### 9.1 ConsistencyMap
+
+The `ConsistencyMap` type provides per-item consistency status in query results:
+
+```rust
+pub struct ConsistencyMap {
+    entries: HashMap<String, Consistency>,
+}
+
+impl ConsistencyMap {
+    pub fn get(&self, id: &str) -> Option<&Consistency>;
+    pub fn is_finalized(&self, id: &str) -> bool;
+    pub fn acked_by(&self, id: &str) -> Option<&[AckRecord]>;
+}
+```
+
+### 9.2 Querying with Consistency
+
+Use `query_with_consistency()` to get both results and consistency metadata:
+
+```rust
+let (messages, consistency) = handler.query_with_consistency(&MessagesQuery::default()).await?;
+
+for msg in &messages {
+    let status = if consistency.is_finalized(&msg.id) {
+        "finalized"
+    } else {
+        "pending"
+    };
+    println!("{}: {}", msg.content, status);
+}
+```
+
+### 9.3 QueryStats with Consistency
+
+`QueryStats` now includes a `ConsistencyMap` for tracking consistency of scanned facts:
+
+```rust
+let (result, stats) = handler.query_with_stats(&query).await?;
+if stats.consistency.any_finalized() {
+    println!("Some results are finalized");
+}
+```
+
+### 9.4 Consistency Dimensions
+
+Each `Consistency` entry tracks three orthogonal dimensions:
+
+| Dimension | Type | Purpose |
+|-----------|------|---------|
+| Agreement | `Agreement` | A1/A2/A3 finalization level |
+| Propagation | `Propagation` | Gossip/sync status to peers |
+| Acknowledgment | `Acknowledgment` | Per-peer delivery confirmation |
+
+See [Consistency Metadata](121_consistency_metadata.md) for full details on these types and their usage.
+
+## 10. Implementation Location
 
 | Component | Location |
 |-----------|----------|
@@ -719,6 +779,8 @@ effects.configure_scope(config).await?;
 | `QueryStats` | `aura-core/src/query.rs` |
 | `MutationReceipt` | `aura-core/src/query.rs` |
 | `ConsensusId`, `FactId` | `aura-core/src/query.rs` |
+| `ConsistencyMap` | `aura-core/src/domain/consistency.rs` |
+| `Agreement`, `Propagation` | `aura-core/src/domain/` |
 | Temporal types | `aura-core/src/domain/temporal.rs` |
 | `ScopeId`, `Finality` | `aura-core/src/domain/temporal.rs` |
 | `FactOp`, `Transaction` | `aura-core/src/domain/temporal.rs` |
@@ -731,6 +793,7 @@ effects.configure_scope(config).await?;
 ## See Also
 
 - [Journal System](102_journal.md) - Fact storage and reduction
+- [Consistency Metadata](121_consistency_metadata.md) - Agreement, propagation, acknowledgment
 - [State Reduction](120_state_reduction.md) - Reduction pipeline details
 - [Authorization](109_authorization.md) - Biscuit token evaluation
 - [Effect System](106_effect_system_and_runtime.md) - Effect implementation patterns
