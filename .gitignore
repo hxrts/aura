@@ -28,9 +28,7 @@ console/styles/*.rs
 *.swo
 *~
 .DS_Store
-# CLAUDE.md
 .claude/
-AGENTS.md
 GEMINI.md
 
 # Aura data directories (mode-specific)
