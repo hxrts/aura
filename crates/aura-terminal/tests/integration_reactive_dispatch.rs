@@ -235,7 +235,7 @@ fn test_contacts_added_after_render_are_visible() {
     harness.send_char('3');
 
     // At this point, in the old buggy code:
-    // - props.contacts was empty
+    // - props.all_contacts().cloned().collect::<Vec<_>>() was empty
     // - contacts_for_dispatch captured empty vec
     // - Any contacts added later would be invisible to dispatch handler
 

@@ -83,7 +83,7 @@ async fn context_id_for_channel(
 ) -> Result<ContextId, AuraError> {
     {
         let chat = chat_snapshot(app_core).await;
-        if let Some(channel) = chat.channels.iter().find(|c| c.id == channel_id) {
+        if let Some(channel) = chat.channel(&channel_id) {
             if let Some(ctx_id) = channel.context_id {
                 return Ok(ctx_id);
             }
@@ -136,7 +136,7 @@ pub async fn send_direct_message(
     let now = timestamp_ms;
     with_chat_state(app_core, |chat_state| {
         // Ensure the DM channel exists (create if needed)
-        if !chat_state.channels.iter().any(|c| c.id == channel_id) {
+        if !chat_state.has_channel(&channel_id) {
             let dm_channel = Channel {
                 id: channel_id,
                 context_id: None,
@@ -498,7 +498,7 @@ pub async fn send_message_ref(
 
     // Update UI state for responsiveness.
     with_chat_state(app_core, |chat_state| {
-        if !chat_state.channels.iter().any(|c| c.id == channel_id) {
+        if !chat_state.has_channel(&channel_id) {
             chat_state.add_channel(Channel {
                 id: channel_id,
                 context_id: channel_context,
@@ -570,9 +570,7 @@ pub async fn start_direct_chat(
 
     // Get contact name from ViewState for the channel name
     let contact_name = contacts
-        .contacts
-        .iter()
-        .find(|c| c.id == authority_id)
+        .contact(&authority_id)
         .map(|c| c.nickname.clone())
         .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]));
 
@@ -690,6 +688,6 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let state = get_chat_state(&app_core).await.unwrap();
-        assert!(state.channels.is_empty());
+        assert!(state.is_empty());
     }
 }

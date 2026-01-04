@@ -4,6 +4,32 @@ use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// =============================================================================
+// Serde Helper for HashMap<ChannelId, Channel>
+// =============================================================================
+
+/// Serialize HashMap as Vec for backward compatibility, deserialize from Vec.
+mod channel_map_serde {
+    use super::{Channel, ChannelId, HashMap};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(map: &HashMap<ChannelId, Channel>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let vec: Vec<&Channel> = map.values().collect();
+        vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<ChannelId, Channel>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec: Vec<Channel> = Vec::deserialize(deserializer)?;
+        Ok(vec.into_iter().map(|c| (c.id, c)).collect())
+    }
+}
+
 // ============================================================================
 // Message Delivery Status
 // ============================================================================
@@ -203,8 +229,9 @@ pub struct Message {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ChatState {
-    /// All available channels
-    pub channels: Vec<Channel>,
+    /// All available channels (keyed by ChannelId for O(1) lookup)
+    #[serde(with = "channel_map_serde", default)]
+    channels: HashMap<ChannelId, Channel>,
     /// Per-channel message storage
     #[serde(default)]
     channel_messages: HashMap<ChannelId, Vec<Message>>,
@@ -219,26 +246,77 @@ pub struct ChatState {
 impl ChatState {
     /// Maximum number of messages retained in-memory for the active channel.
     const MAX_ACTIVE_MESSAGES: usize = 500;
-    /// Get channel by ID
+
+    // ─── Constructors ────────────────────────────────────────────────────────
+
+    /// Create a new empty ChatState.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create ChatState from an iterator of channels.
+    #[must_use]
+    pub fn from_channels(channels: impl IntoIterator<Item = Channel>) -> Self {
+        Self {
+            channels: channels.into_iter().map(|c| (c.id, c)).collect(),
+            ..Default::default()
+        }
+    }
+
+    // ─── Query Methods ────────────────────────────────────────────────────────
+
+    /// Get channel by ID (O(1) lookup).
+    #[must_use]
     pub fn channel(&self, id: &ChannelId) -> Option<&Channel> {
-        self.channels.iter().find(|c| c.id == *id)
+        self.channels.get(id)
     }
 
-    /// Get mutable channel by ID
+    /// Get mutable channel by ID (O(1) lookup).
     pub fn channel_mut(&mut self, id: &ChannelId) -> Option<&mut Channel> {
-        self.channels.iter_mut().find(|c| c.id == *id)
+        self.channels.get_mut(id)
     }
 
-    /// Get unread count for a channel
+    /// Check if a channel exists.
+    #[must_use]
+    pub fn has_channel(&self, id: &ChannelId) -> bool {
+        self.channels.contains_key(id)
+    }
+
+    /// Get all channels as an iterator.
+    pub fn all_channels(&self) -> impl Iterator<Item = &Channel> {
+        self.channels.values()
+    }
+
+    /// Get mutable iterator over all channels.
+    pub fn all_channels_mut(&mut self) -> impl Iterator<Item = &mut Channel> {
+        self.channels.values_mut()
+    }
+
+    /// Get channel count.
+    #[must_use]
+    pub fn channel_count(&self) -> usize {
+        self.channels.len()
+    }
+
+    /// Check if there are no channels.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.channels.is_empty()
+    }
+
+    /// Get unread count for a channel.
+    #[must_use]
     pub fn unread_count(&self, channel_id: &ChannelId) -> u32 {
         self.channel(channel_id)
             .map(|c| c.unread_count)
             .unwrap_or(0)
     }
 
-    /// Get messages for a specific channel
+    /// Get messages for a specific channel.
     ///
     /// Returns an empty slice if the channel has no messages or doesn't exist.
+    #[must_use]
     pub fn messages_for_channel(&self, channel_id: &ChannelId) -> &[Message] {
         self.channel_messages
             .get(channel_id)
@@ -253,25 +331,37 @@ impl ChatState {
         self.channel_messages.values().flatten().collect()
     }
 
-    /// Get total message count across all channels
+    /// Get total message count across all channels.
     #[must_use]
     pub fn message_count(&self) -> usize {
         self.channel_messages.values().map(|v| v.len()).sum()
     }
 
-    /// Add a new channel
+    // ─── Mutation Methods ─────────────────────────────────────────────────────
+
+    /// Add a new channel (no-op if channel with same ID exists).
     pub fn add_channel(&mut self, channel: Channel) {
-        // Avoid duplicates
-        if self.channel(&channel.id).is_none() {
-            self.channels.push(channel);
-        }
+        // Entry API avoids duplicate check
+        self.channels.entry(channel.id).or_insert(channel);
     }
 
-    /// Remove a channel by ID
-    pub fn remove_channel(&mut self, channel_id: &ChannelId) {
-        self.channels.retain(|c| c.id != *channel_id);
+    /// Insert or update a channel.
+    pub fn upsert_channel(&mut self, channel: Channel) {
+        self.channels.insert(channel.id, channel);
+    }
+
+    /// Remove a channel by ID, returning it if it existed.
+    pub fn remove_channel(&mut self, channel_id: &ChannelId) -> Option<Channel> {
         // Remove messages from per-channel cache
         self.channel_messages.remove(channel_id);
+        self.channels.remove(channel_id)
+    }
+
+    /// Clear all channels and messages.
+    pub fn clear(&mut self) {
+        self.channels.clear();
+        self.channel_messages.clear();
+        self.total_unread = 0;
     }
 
     /// Mark a channel as joined (increment member count)

@@ -381,7 +381,7 @@ pub fn NeighborhoodScreen(
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contacts: Vec<Contact> =
-                    contacts_state.contacts.iter().map(Contact::from).collect();
+                    contacts_state.all_contacts().map(Contact::from).collect();
                 reactive_contacts.set(contacts);
             })
             .await;
@@ -428,13 +428,12 @@ pub fn NeighborhoodScreen(
                 let contacts = reactive_contacts.read().clone();
 
                 // Use first channel as default (selection is managed by TUI state)
-                if let Some(channel) = chat_state.channels.first() {
+                if let Some(channel) = chat_state.all_channels().next() {
                     reactive_channel_name.set(channel.name.clone());
                 }
 
                 let channel_list: Vec<ChannelSummary> = chat_state
-                    .channels
-                    .iter()
+                    .all_channels()
                     .map(|c| ChannelSummary {
                         id: c.id.to_string(),
                         name: c.name.clone(),
@@ -443,7 +442,7 @@ pub fn NeighborhoodScreen(
                 reactive_channels.set(channel_list);
 
                 // Get messages for first channel as default
-                let first_channel_id = chat_state.channels.first().map(|c| &c.id);
+                let first_channel_id = chat_state.all_channels().next().map(|c| &c.id);
                 let app_messages = first_channel_id
                     .map(|id| chat_state.messages_for_channel(id))
                     .unwrap_or(&[]);

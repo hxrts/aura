@@ -236,7 +236,7 @@ pub async fn refresh_connection_status_from_contacts(
 
     if let Some(runtime) = runtime {
         let mut online_contacts = 0usize;
-        for contact in &mut contacts_state.contacts {
+        for contact in contacts_state.all_contacts_mut() {
             contact.is_online = runtime.is_peer_online(contact.id).await;
             if contact.is_online {
                 online_contacts += 1;
@@ -249,12 +249,12 @@ pub async fn refresh_connection_status_from_contacts(
             core.sync_status().await.unwrap_or_default()
         };
         if online_contacts == 0
-            && !contacts_state.contacts.is_empty()
+            && !contacts_state.is_empty()
             && sync_status.connected_peers > 0
         {
             let fallback_online =
-                std::cmp::min(contacts_state.contacts.len(), sync_status.connected_peers);
-            for (idx, contact) in contacts_state.contacts.iter_mut().enumerate() {
+                std::cmp::min(contacts_state.contact_count(), sync_status.connected_peers);
+            for (idx, contact) in contacts_state.all_contacts_mut().enumerate() {
                 contact.is_online = idx < fallback_online;
             }
             online_contacts = fallback_online;

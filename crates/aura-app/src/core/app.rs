@@ -1159,8 +1159,8 @@ mod tests {
 
         // Verify initial state is empty
         let snapshot = app.snapshot();
-        assert!(snapshot.chat.channels.is_empty());
-        assert!(snapshot.chat.messages.is_empty());
+        assert!(snapshot.chat.is_empty());
+        assert_eq!(snapshot.chat.message_count(), 0);
 
         // Step 1: Create a channel
         let result = app.dispatch(Intent::CreateChannel {
@@ -1179,11 +1179,12 @@ mod tests {
 
         // Step 3: Verify channel appeared in ViewState
         let snapshot = app.snapshot();
-        assert_eq!(snapshot.chat.channels.len(), 1, "Expected 1 channel");
-        assert_eq!(snapshot.chat.channels[0].name, "test-channel");
+        assert_eq!(snapshot.chat.channel_count(), 1, "Expected 1 channel");
+        let first_channel = snapshot.chat.all_channels().next().unwrap();
+        assert_eq!(first_channel.name, "test-channel");
 
         // Step 4: Get the channel ID (generated from the fact content hash)
-        let _channel_id = snapshot.chat.channels[0].id;
+        let _channel_id = first_channel.id;
 
         // Step 5: Send a message to the channel
         // Note: Messages only appear in the messages vec when channel is selected,
@@ -1208,7 +1209,7 @@ mod tests {
         // The test verifies that the fact pipeline works correctly.
         let snapshot = app.snapshot();
         assert_eq!(
-            snapshot.chat.channels.len(),
+            snapshot.chat.channel_count(),
             1,
             "Channel should still exist"
         );
@@ -1250,10 +1251,10 @@ mod tests {
 
         // Verify ViewState updated
         let snapshot = app.snapshot();
-        assert_eq!(snapshot.chat.channels.len(), 2, "Should have 2 channels");
+        assert_eq!(snapshot.chat.channel_count(), 2, "Should have 2 channels");
 
         // Verify channel types
-        let channel_names: Vec<_> = snapshot.chat.channels.iter().map(|c| &c.name).collect();
+        let channel_names: Vec<_> = snapshot.chat.all_channels().map(|c| &c.name).collect();
         assert!(channel_names.contains(&&"channel-1".to_string()));
         assert!(channel_names.contains(&&"channel-2".to_string()));
     }

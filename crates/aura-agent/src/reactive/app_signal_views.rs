@@ -316,9 +316,7 @@ impl ReactiveView for ContactsSignalView {
                                 Some(nickname)
                             };
 
-                            if let Some(contact) =
-                                state.contacts.iter_mut().find(|c| c.id == contact_id)
-                            {
+                            if let Some(contact) = state.contact_mut(&contact_id) {
                                 // Preserve any user-set nickname; only fill suggestion if missing.
                                 if contact.suggested_name.is_none() {
                                     contact.suggested_name = suggested_name;
@@ -327,7 +325,7 @@ impl ReactiveView for ContactsSignalView {
                             } else {
                                 // Contact invitations carry an optional nickname, which we treat as
                                 // a suggested name. The user's nickname is a separate local label.
-                                state.contacts.push(Contact {
+                                state.apply_contact(Contact {
                                     id: contact_id,
                                     nickname: String::new(),
                                     suggested_name,
@@ -341,7 +339,7 @@ impl ReactiveView for ContactsSignalView {
                             changed = true;
                         }
                         ContactFact::Removed { contact_id, .. } => {
-                            state.contacts.retain(|c| c.id != contact_id);
+                            state.remove_contact(&contact_id);
                             changed = true;
                         }
                         ContactFact::Renamed {
@@ -351,9 +349,7 @@ impl ReactiveView for ContactsSignalView {
                             ..
                         } => {
                             state.set_nickname(contact_id, new_nickname);
-                            if let Some(contact) =
-                                state.contacts.iter_mut().find(|c| c.id == contact_id)
-                            {
+                            if let Some(contact) = state.contact_mut(&contact_id) {
                                 contact.last_interaction = Some(renamed_at.ts_ms);
                             }
                             changed = true;
@@ -361,7 +357,7 @@ impl ReactiveView for ContactsSignalView {
                         ContactFact::ReadReceiptPolicyUpdated {
                             contact_id, policy, ..
                         } => {
-                            state.set_read_receipt_policy(contact_id, policy);
+                            state.set_read_receipt_policy(&contact_id, policy);
                             changed = true;
                         }
                     }
@@ -370,7 +366,7 @@ impl ReactiveView for ContactsSignalView {
                     aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id, .. },
                 )) => {
                     // Reflect guardian status into contacts for details screens.
-                    state.set_guardian_status(*guardian_id, true);
+                    state.set_guardian_status(guardian_id, true);
                     changed = true;
                 }
                 _ => {}
@@ -416,10 +412,9 @@ impl RecoverySignalView {
     }
 
     fn ensure_guardian(state: &mut RecoveryState, guardian_id: AuthorityId) {
-        if let Some(guardian) = state.guardians.iter_mut().find(|g| g.id == guardian_id) {
-            guardian.status = GuardianStatus::Active;
-        } else {
-            state.guardians.push(Guardian {
+        // Try to activate existing guardian, otherwise add new one
+        if state.activate_guardian(&guardian_id).is_err() {
+            state.upsert_guardian(Guardian {
                 id: guardian_id,
                 name: String::new(),
                 status: GuardianStatus::Active,
@@ -427,10 +422,6 @@ impl RecoverySignalView {
                 last_seen: None,
             });
         }
-    }
-
-    fn update_guardian_count(state: &mut RecoveryState) {
-        state.guardian_count = state.guardians.len() as u32;
     }
 }
 
@@ -445,7 +436,6 @@ impl ReactiveView for RecoverySignalView {
                     aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id, .. },
                 )) => {
                     Self::ensure_guardian(&mut state, *guardian_id);
-                    Self::update_guardian_count(&mut state);
                     changed = true;
                 }
                 FactContent::Relational(RelationalFact::Generic {
@@ -474,8 +464,7 @@ impl ReactiveView for RecoverySignalView {
                             for guardian_id in guardian_ids {
                                 Self::ensure_guardian(&mut state, guardian_id);
                             }
-                            state.threshold = threshold as u32;
-                            Self::update_guardian_count(&mut state);
+                            state.set_threshold(threshold as u32);
                             changed = true;
                         }
                         RecoveryFact::GuardianSetupCompleted {
@@ -484,12 +473,11 @@ impl ReactiveView for RecoverySignalView {
                             ..
                         } => {
                             // Replace guardian set with the ceremony-completed list.
-                            state.guardians.retain(|g| guardian_ids.contains(&g.id));
+                            state.retain_guardians(&guardian_ids);
                             for guardian_id in guardian_ids {
                                 Self::ensure_guardian(&mut state, guardian_id);
                             }
-                            state.threshold = threshold as u32;
-                            Self::update_guardian_count(&mut state);
+                            state.set_threshold(threshold as u32);
                             changed = true;
                         }
                         RecoveryFact::MembershipChangeCompleted {
@@ -497,8 +485,12 @@ impl ReactiveView for RecoverySignalView {
                             new_threshold,
                             ..
                         } => {
-                            state.threshold = new_threshold as u32;
-                            state.guardian_count = new_guardian_ids.len() as u32;
+                            state.set_threshold(new_threshold as u32);
+                            // Update guardian set to match membership change
+                            state.retain_guardians(&new_guardian_ids);
+                            for guardian_id in new_guardian_ids {
+                                Self::ensure_guardian(&mut state, guardian_id);
+                            }
                             changed = true;
                         }
                         _ => {}
@@ -699,6 +691,7 @@ impl ChatSignalView {
 }
 
 impl ReactiveView for ChatSignalView {
+    #[allow(deprecated)] // MessageDelivered and DeliveryAcknowledged are deprecated
     async fn update(&self, facts: &[Fact]) {
         let mut state = self.state.lock().await;
         let mut changed = false;
@@ -849,7 +842,14 @@ impl ReactiveView for ChatSignalView {
                     changed = true;
 
                     // Emit delivery acknowledgment for received messages (not our own)
+                    // NOTE: This uses the deprecated MessageDelivered fact pattern.
+                    // TODO(consistency-metadata): Replace with generic Acknowledgment system:
+                    // 1. Sender marks MessageSentSealed as ack_tracked
+                    // 2. Transport layer automatically handles ack protocol
+                    // 3. Delivery status derived from Acknowledgment records
+                    // See docs/121_consistency_metadata.md for migration plan.
                     if !is_own {
+                        #[allow(deprecated)]
                         let delivery_fact = ChatFact::message_delivered_ms(
                             context,
                             channel_id,
@@ -917,6 +917,9 @@ impl ReactiveView for ChatSignalView {
                         }
                     }
                 }
+                // DEPRECATED: MessageDelivered facts are being replaced by generic Acknowledgment.
+                // This handler remains for backward compatibility with existing facts.
+                // See docs/121_consistency_metadata.md for migration plan.
                 ChatFact::MessageDelivered {
                     channel_id,
                     message_id,
@@ -949,6 +952,9 @@ impl ReactiveView for ChatSignalView {
                         );
                     }
                 }
+                // DEPRECATED: DeliveryAcknowledged facts are being replaced by DeliveryPolicy GC.
+                // This handler remains for backward compatibility with existing facts.
+                // See docs/121_consistency_metadata.md for migration plan.
                 ChatFact::DeliveryAcknowledged {
                     channel_id,
                     message_id,

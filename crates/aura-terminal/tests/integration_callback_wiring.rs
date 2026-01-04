@@ -454,9 +454,9 @@ async fn test_contacts_signal_contact_tracking() {
     println!("Phase 1: Get initial contacts");
     let initial_count = {
         let contacts = wait_for_contacts(&app_core, |_| true).await;
-        let contact_count = contacts.contacts.len();
+        let contact_count = contacts.contact_count();
         println!("  Initial contact count: {contact_count}");
-        contacts.contacts.len()
+        contacts.contact_count()
     };
 
     // Phase 2: Add a contact via signal
@@ -466,7 +466,7 @@ async fn test_contacts_signal_contact_tracking() {
         let core = app_core.read().await;
         let mut contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
 
-        contacts.contacts.push(ViewContact {
+        contacts.apply_contact(ViewContact {
             id: contact_alice_id.clone(),
             nickname: "Alice (Friend)".to_string(),
             suggested_name: Some("Alice".to_string()),
@@ -485,19 +485,18 @@ async fn test_contacts_signal_contact_tracking() {
     println!("\nPhase 3: Verify contact is preserved");
     {
         let contacts = wait_for_contacts(&app_core, |contacts| {
-            contacts.contacts.len() == initial_count + 1
+            contacts.contact_count() == initial_count + 1
         })
         .await;
 
         assert_eq!(
-            contacts.contacts.len(),
+            contacts.contact_count(),
             initial_count + 1,
             "Should have one more contact"
         );
 
         let alice = contacts
-            .contacts
-            .iter()
+            .all_contacts()
             .find(|c| c.id == contact_alice_id)
             .expect("Alice should exist in contacts");
 
@@ -526,14 +525,10 @@ async fn test_contacts_signal_contact_tracking() {
         let core = app_core.read().await;
         let mut contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
 
-        if let Some(alice) = contacts
-            .contacts
-            .iter_mut()
-            .find(|c| c.id == contact_alice_id)
-        {
+        contacts.update_contact(&contact_alice_id, |alice| {
             alice.is_guardian = true;
             alice.nickname = "Alice (Guardian)".to_string();
-        }
+        });
 
         core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();
         println!("  Updated Alice to guardian");
@@ -544,15 +539,13 @@ async fn test_contacts_signal_contact_tracking() {
     {
         let contacts = wait_for_contacts(&app_core, |contacts| {
             contacts
-                .contacts
-                .iter()
+                .all_contacts()
                 .any(|c| c.id == contact_alice_id && c.is_guardian)
         })
         .await;
 
         let alice = contacts
-            .contacts
-            .iter()
+            .all_contacts()
             .find(|c| c.id == contact_alice_id)
             .expect("Alice should still exist");
 
@@ -593,9 +586,9 @@ async fn test_recovery_signal_state_tracking() {
     // Phase 1: Verify no active recovery initially
     println!("Phase 1: Verify no active recovery initially");
     {
-        let recovery = wait_for_recovery(&app_core, |r| r.active_recovery.is_none()).await;
+        let recovery = wait_for_recovery(&app_core, |r| r.active_recovery().is_none()).await;
         assert!(
-            recovery.active_recovery.is_none(),
+            recovery.active_recovery().is_none(),
             "Should have no active recovery initially"
         );
         println!("  No active recovery initially");
@@ -607,7 +600,7 @@ async fn test_recovery_signal_state_tracking() {
         let core = app_core.read().await;
         let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
 
-        recovery.active_recovery = Some(RecoveryProcess {
+        recovery.set_active_recovery(Some(RecoveryProcess {
             id: "recovery-session-123".to_string(),
             account_id: AuthorityId::new_from_entropy([0xAC; 32]),
             status: RecoveryProcessStatus::WaitingForApprovals,
@@ -618,7 +611,7 @@ async fn test_recovery_signal_state_tracking() {
             initiated_at: 1234567890,
             expires_at: Some(1234657890),
             progress: 0,
-        });
+        }));
 
         core.emit(&*RECOVERY_SIGNAL, recovery).await.unwrap();
         println!("  Emitted active recovery to signal");
@@ -628,15 +621,13 @@ async fn test_recovery_signal_state_tracking() {
     println!("\nPhase 3: Verify recovery session exists");
     {
         let recovery = wait_for_recovery(&app_core, |r| {
-            r.active_recovery
-                .as_ref()
+            r.active_recovery()
                 .is_some_and(|a| a.id == "recovery-session-123")
         })
         .await;
 
         let active = recovery
-            .active_recovery
-            .as_ref()
+            .active_recovery()
             .expect("Should have active recovery");
 
         assert_eq!(active.id, "recovery-session-123", "Session ID should match");
@@ -662,7 +653,7 @@ async fn test_recovery_signal_state_tracking() {
         let core = app_core.read().await;
         let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
 
-        if let Some(ref mut active) = recovery.active_recovery {
+        if let Some(active) = recovery.active_recovery_mut() {
             active.approvals_received = 1;
             active.approved_by.push(guardian_alice_id.clone());
             active.progress = 50;
@@ -676,10 +667,10 @@ async fn test_recovery_signal_state_tracking() {
     println!("\nPhase 5: Verify approval was recorded");
     {
         let recovery = wait_for_recovery(&app_core, |r| {
-            r.active_recovery.as_ref().map(|a| a.approvals_received) == Some(1)
+            r.active_recovery().map(|a| a.approvals_received) == Some(1)
         })
         .await;
-        let active = recovery.active_recovery.as_ref().unwrap();
+        let active = recovery.active_recovery().unwrap();
 
         assert_eq!(active.approvals_received, 1, "Should have 1 approval");
         assert!(
@@ -704,7 +695,7 @@ async fn test_recovery_signal_state_tracking() {
         let core = app_core.read().await;
         let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
 
-        if let Some(ref mut active) = recovery.active_recovery {
+        if let Some(active) = recovery.active_recovery_mut() {
             active.approvals_received = 2;
             active.approved_by.push(guardian_bob_id.clone());
             active.status = RecoveryProcessStatus::Approved;
@@ -719,13 +710,13 @@ async fn test_recovery_signal_state_tracking() {
     println!("\nPhase 7: Verify recovery completed");
     {
         let recovery = wait_for_recovery(&app_core, |r| {
-            r.active_recovery.as_ref().is_some_and(|a| {
+            r.active_recovery().is_some_and(|a| {
                 a.approvals_received == 2
                     && matches!(a.status, aura_app::views::RecoveryProcessStatus::Approved)
             })
         })
         .await;
-        let active = recovery.active_recovery.as_ref().unwrap();
+        let active = recovery.active_recovery().unwrap();
 
         assert_eq!(active.approvals_received, 2, "Should have 2 approvals");
         assert!(
@@ -995,7 +986,7 @@ async fn test_invalid_operations_return_errors() {
         // Signals should still be readable
         let message_count = chat.message_count();
         println!("  Chat signal readable: {message_count} messages");
-        let active_recovery = recovery.active_recovery.is_some();
+        let active_recovery = recovery.active_recovery().is_some();
         println!("  Recovery signal readable: active={active_recovery}");
     }
 

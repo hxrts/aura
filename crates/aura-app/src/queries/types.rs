@@ -760,11 +760,7 @@ impl Query for ContactsQuery {
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
 
-        Ok(ContactsState {
-            contacts,
-            selected_contact_id: None, // Set by caller
-            search_filter: None,       // Set by caller
-        })
+        Ok(ContactsState::from_contacts(contacts))
     }
 }
 
@@ -954,14 +950,10 @@ impl Query for RecoveryQuery {
 
         let mut guardians_by_id: HashMap<AuthorityId, Guardian> = HashMap::new();
         let mut threshold = 0u32;
-        let mut guardian_count = 0u32;
 
         for row in bindings.rows.iter() {
             if threshold == 0 {
                 threshold = get_int(row, "threshold") as u32;
-            }
-            if guardian_count == 0 {
-                guardian_count = get_int(row, "guardian_count") as u32;
             }
 
             let guardian_id = get_authority_id(row, "contact_id")?;
@@ -994,18 +986,14 @@ impl Query for RecoveryQuery {
         }
 
         let guardians: Vec<Guardian> = guardians_by_id.into_values().collect();
-        if guardian_count == 0 && !guardians.is_empty() {
-            guardian_count = guardians.len() as u32;
-        }
 
-        Ok(RecoveryState {
+        Ok(RecoveryState::from_parts(
             guardians,
             threshold,
-            guardian_count,
-            active_recovery: None,
-            pending_requests: Vec::new(),
-            guardian_bindings: Vec::new(),
-        })
+            None,              // active_recovery
+            Vec::new(),        // pending_requests
+            Vec::new(),        // guardian_bindings
+        ))
     }
 }
 
@@ -1320,13 +1308,9 @@ impl Query for ChatQuery {
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
 
-        let mut state = ChatState::default();
-        state.channels = channels;
+        // Use from_channels() constructor since channels field is private
         // Note: selected_channel_id is now UI state in the frontend
         // Messages are loaded per-channel via messages_for_channel()
-        state.total_unread = 0; // Calculated from channels
-        state.loading_more = false;
-        state.has_more = false;
-        Ok(state)
+        Ok(ChatState::from_channels(channels))
     }
 }

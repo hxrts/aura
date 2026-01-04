@@ -57,7 +57,7 @@ pub use operations::{
 };
 pub use recovery::{
     classify_threshold_security, format_recovery_status, security_level_hint, CeremonyProgress,
-    Guardian, GuardianBinding, GuardianStatus, RecoveryApproval, RecoveryProcess,
+    Guardian, GuardianBinding, GuardianStatus, RecoveryApproval, RecoveryError, RecoveryProcess,
     RecoveryProcessStatus, RecoveryState, SecurityLevel,
 };
 pub use wizards::{

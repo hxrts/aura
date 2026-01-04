@@ -133,7 +133,7 @@ pub fn NotificationsScreen(
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |state| {
                 let mut items = Vec::new();
-                for req in &state.pending_requests {
+                for req in state.pending_requests() {
                     let pending = PendingRequest::from(req);
                     let progress = format!(
                         "{}/{} approvals",

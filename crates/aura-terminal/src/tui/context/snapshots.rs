@@ -53,7 +53,7 @@ impl SnapshotHelper {
     pub fn snapshot_chat(&self) -> ChatSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             ChatSnapshot {
-                channels: snapshot.chat.channels,
+                channels: snapshot.chat.all_channels().cloned().collect(),
                 // Selection and messages are managed at a different level now
                 selected_channel: None,
                 messages: Vec::new(),
@@ -66,11 +66,12 @@ impl SnapshotHelper {
     #[must_use]
     pub fn snapshot_guardians(&self) -> GuardiansSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
+            let guardian_count = snapshot.recovery.guardian_count();
             GuardiansSnapshot {
-                guardians: snapshot.recovery.guardians.clone(),
+                guardians: snapshot.recovery.all_guardians().cloned().collect(),
                 threshold: aura_core::threshold::ThresholdConfig::new(
-                    snapshot.recovery.threshold as u16,
-                    snapshot.recovery.guardian_count as u16,
+                    snapshot.recovery.threshold() as u16,
+                    guardian_count as u16,
                 )
                 .ok(),
             }
@@ -84,7 +85,7 @@ impl SnapshotHelper {
         if let Some(snapshot) = self.try_state_snapshot() {
             let (progress_percent, is_in_progress) = snapshot
                 .recovery
-                .active_recovery
+                .active_recovery()
                 .as_ref()
                 .map(|r| {
                     (
@@ -149,7 +150,7 @@ impl SnapshotHelper {
     pub fn snapshot_contacts(&self) -> ContactsSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             ContactsSnapshot {
-                contacts: snapshot.contacts.contacts,
+                contacts: snapshot.contacts.all_contacts().cloned().collect(),
             }
         } else {
             ContactsSnapshot::default()

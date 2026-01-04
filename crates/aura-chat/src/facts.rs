@@ -147,6 +147,21 @@ pub enum ChatFact {
     /// This fact is created when a message is successfully received by the
     /// recipient's device, before they have read it. It enables the sender
     /// to show "delivered" status (double checkmark) in the UI.
+    ///
+    /// # Deprecation
+    ///
+    /// This fact type is deprecated in favor of the generic `Acknowledgment` system.
+    /// New code should mark `MessageSentSealed` facts as `ack_tracked` instead of
+    /// creating separate `MessageDelivered` facts. The generic ack system provides:
+    /// - Automatic ack tracking via the transport layer
+    /// - Policy-based GC via `DeliveryPolicy`
+    /// - Unified consistency metadata via `Acknowledgment`
+    ///
+    /// See `docs/121_consistency_metadata.md` for migration guidance.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use ack_tracked MessageSentSealed facts instead. See docs/121_consistency_metadata.md"
+    )]
     MessageDelivered {
         /// Relational context of the message
         context_id: ContextId,
@@ -166,6 +181,17 @@ pub enum ChatFact {
     /// This fact is created when the sender acknowledges receipt of a
     /// `MessageDelivered` fact. This closes the delivery receipt loop
     /// and is used for garbage collection of pending receipts.
+    ///
+    /// # Deprecation
+    ///
+    /// This fact type is deprecated along with `MessageDelivered`. The generic
+    /// `Acknowledgment` system handles ack GC automatically via `DeliveryPolicy`.
+    ///
+    /// See `docs/121_consistency_metadata.md` for migration guidance.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use DeliveryPolicy-based GC instead. See docs/121_consistency_metadata.md"
+    )]
     DeliveryAcknowledged {
         /// Relational context of the message
         context_id: ContextId,
@@ -395,6 +421,15 @@ impl ChatFact {
     /// This fact records when a message was successfully received by the recipient's
     /// device, before they have read it. The optional `device_id` supports multi-device
     /// scenarios where delivery tracking is per-device.
+    ///
+    /// # Deprecation
+    ///
+    /// Use ack_tracked `MessageSentSealed` facts instead. See `docs/121_consistency_metadata.md`.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use ack_tracked MessageSentSealed facts instead"
+    )]
+    #[allow(deprecated)]
     pub fn message_delivered_ms(
         context_id: ContextId,
         channel_id: ChannelId,
@@ -421,6 +456,15 @@ impl ChatFact {
     /// This fact is created when the sender acknowledges receipt of a `MessageDelivered`
     /// fact, closing the delivery receipt loop. This enables garbage collection of
     /// pending delivery receipts.
+    ///
+    /// # Deprecation
+    ///
+    /// Use `DeliveryPolicy`-based GC instead. See `docs/121_consistency_metadata.md`.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use DeliveryPolicy-based GC instead"
+    )]
+    #[allow(deprecated)]
     pub fn delivery_acknowledged_ms(
         context_id: ContextId,
         channel_id: ChannelId,
@@ -666,6 +710,7 @@ mod tests {
                 test_authority_id(),
                 0,
             ),
+            #[allow(deprecated)]
             ChatFact::message_delivered_ms(
                 test_context_id(),
                 test_channel_id(),
@@ -674,6 +719,7 @@ mod tests {
                 Some("device-1".to_string()),
                 0,
             ),
+            #[allow(deprecated)]
             ChatFact::delivery_acknowledged_ms(
                 test_context_id(),
                 test_channel_id(),
@@ -688,6 +734,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_message_delivered_fact() {
         let fact = ChatFact::message_delivered_ms(
             test_context_id(),
@@ -722,6 +769,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_message_delivered_without_device() {
         // Test that device_id is optional
         let fact = ChatFact::message_delivered_ms(
@@ -740,6 +788,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_delivery_acknowledged_fact() {
         let fact = ChatFact::delivery_acknowledged_ms(
             test_context_id(),
@@ -798,6 +847,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_delivery_lifecycle_facts() {
         // Test the complete delivery lifecycle: Sent -> Delivered -> Read -> Acknowledged
         let context = test_context_id();

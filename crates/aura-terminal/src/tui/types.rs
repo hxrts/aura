@@ -1078,14 +1078,14 @@ impl From<&AppRecoveryApproval> for GuardianApproval {
 impl From<&AppRecoveryState> for RecoveryStatus {
     fn from(rs: &AppRecoveryState) -> Self {
         // Determine state from active_recovery if present
-        let (state, approvals_received, threshold, approvals) = match &rs.active_recovery {
+        let (state, approvals_received, threshold, approvals) = match rs.active_recovery() {
             Some(process) => (
                 process.status.into(),
                 process.approvals_received,
                 process.approvals_required,
                 process.approvals.iter().map(|a| a.into()).collect(),
             ),
-            None => (RecoveryState::None, 0, rs.threshold, Vec::new()),
+            None => (RecoveryState::None, 0, rs.threshold(), Vec::new()),
         };
 
         Self {

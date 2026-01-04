@@ -616,7 +616,7 @@ fn test_contact_select_state_machine() {
     // Show with contacts
     state.show("Select Guardian", contacts);
     assert!(state.visible);
-    assert_eq!(state.contacts.len(), 3);
+    assert_eq!(state.contact_count(), 3);
     assert_eq!(state.selected_index, 0);
     assert!(state.can_select());
 
@@ -3236,7 +3236,7 @@ async fn test_device_management() {
 async fn test_snapshot_data_accuracy() {
     use async_lock::RwLock;
     use aura_app::signal_defs::HOMES_SIGNAL;
-    use aura_app::views::contacts::{Contact, ContactsState};
+    use aura_app::views::contacts::{Contact, ContactsState, ReadReceiptPolicy};
     use aura_app::views::home::HomeState;
     use aura_app::AppCore;
     use aura_core::effects::reactive::ReactiveEffects;
@@ -3344,39 +3344,38 @@ async fn test_snapshot_data_accuracy() {
     let contact1_id = AuthorityId::new_from_entropy([11u8; 32]);
     let contact2_id = AuthorityId::new_from_entropy([12u8; 32]);
     let contact3_id = AuthorityId::new_from_entropy([13u8; 32]);
-    let contacts_state = ContactsState {
-        contacts: vec![
-            Contact {
-                id: contact1_id.clone(),
-                nickname: "Alice".to_string(),
-                suggested_name: Some("Alice Smith".to_string()), // Different from nickname
-                is_guardian: false,
-                is_resident: false,
-                last_interaction: Some(1702000000000),
-                is_online: true,
-            },
-            Contact {
-                id: contact2_id.clone(),
-                nickname: "Bob".to_string(),
-                suggested_name: Some("Bob".to_string()), // Same as nickname
-                is_guardian: false,
-                is_resident: false,
-                last_interaction: Some(1702000000000),
-                is_online: false,
-            },
-            Contact {
-                id: contact3_id.clone(),
-                nickname: "Carol".to_string(),
-                suggested_name: None, // No suggestion
-                is_guardian: false,
-                is_resident: false,
-                last_interaction: None,
-                is_online: false,
-            },
-        ],
-        selected_contact_id: None,
-        search_filter: None,
-    };
+    let contacts_state = ContactsState::from_contacts(vec![
+        Contact {
+            id: contact1_id.clone(),
+            nickname: "Alice".to_string(),
+            suggested_name: Some("Alice Smith".to_string()), // Different from nickname
+            is_guardian: false,
+            is_resident: false,
+            last_interaction: Some(1702000000000),
+            is_online: true,
+            read_receipt_policy: ReadReceiptPolicy::default(),
+        },
+        Contact {
+            id: contact2_id.clone(),
+            nickname: "Bob".to_string(),
+            suggested_name: Some("Bob".to_string()), // Same as nickname
+            is_guardian: false,
+            is_resident: false,
+            last_interaction: Some(1702000000000),
+            is_online: false,
+            read_receipt_policy: ReadReceiptPolicy::default(),
+        },
+        Contact {
+            id: contact3_id.clone(),
+            nickname: "Carol".to_string(),
+            suggested_name: None, // No suggestion
+            is_guardian: false,
+            is_resident: false,
+            last_interaction: None,
+            is_online: false,
+            read_receipt_policy: ReadReceiptPolicy::default(),
+        },
+    ]);
 
     // Seed contacts state via ViewState (signals are forwarded from ViewState)
     {
@@ -3388,7 +3387,7 @@ async fn test_snapshot_data_accuracy() {
     let contacts_snapshot = ctx.snapshot_contacts();
 
     // Verify has_pending_suggestion logic - computed by comparing suggested_name to nickname
-    for contact in &contacts_snapshot.contacts {
+    for contact in &contacts_snapshot.all_contacts().cloned().collect::<Vec<_>>() {
         // has_pending_suggestion is true when suggested_name differs from nickname
         let has_pending_suggestion = contact
             .suggested_name

@@ -92,14 +92,13 @@ pub async fn start_recovery(
         progress: 0,
     };
 
-    let state = RecoveryState {
+    let state = RecoveryState::from_parts(
         guardians,
-        threshold: threshold_k.value() as u32,
-        guardian_count: guardian_ids.len() as u32,
-        active_recovery: Some(recovery_process),
-        pending_requests: Vec::new(),
-        guardian_bindings: Vec::new(),
-    };
+        threshold_k.value() as u32,
+        Some(recovery_process),
+        Vec::new(),             // pending_requests
+        Vec::new(),             // guardian_bindings
+    );
 
     // Update ViewState - signal forwarding auto-propagates to RECOVERY_SIGNAL
     set_recovery_state(app_core, state).await?;
@@ -116,22 +115,22 @@ pub async fn start_recovery_from_state(
 ) -> Result<String, AuraError> {
     let state = get_recovery_status(app_core).await?;
 
-    if state.guardians.is_empty() {
+    if state.guardian_count() == 0 {
         return Err(AuraError::agent(
             "No guardians configured. Add guardians in Threshold settings first.",
         ));
     }
 
-    if state.active_recovery.is_some() {
+    if state.active_recovery().is_some() {
         return Err(AuraError::agent("Recovery already in progress"));
     }
 
-    let guardian_ids: Vec<String> = state.guardians.iter().map(|g| g.id.to_string()).collect();
+    let guardian_ids: Vec<String> = state.all_guardians().map(|g| g.id.to_string()).collect();
 
-    let threshold = FrostThreshold::new(state.threshold as u16).map_err(|e| {
+    let threshold = FrostThreshold::new(state.threshold() as u16).map_err(|e| {
         AuraError::invalid(format!(
             "Invalid recovery threshold {}: {e}",
-            state.threshold
+            state.threshold()
         ))
     })?;
 
@@ -309,8 +308,8 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let status = get_recovery_status(&app_core).await.unwrap();
-        assert!(status.active_recovery.is_none());
-        assert!(status.guardians.is_empty());
+        assert!(status.active_recovery().is_none());
+        assert_eq!(status.guardian_count(), 0);
     }
 
     #[tokio::test]
@@ -321,40 +320,35 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         // Set recovery state with active recovery process
-        let state = RecoveryState {
-            guardians: vec![Guardian {
-                id: AuthorityId::new_from_entropy([1u8; 32]),
-                name: "Alice".to_string(),
-                status: GuardianStatus::Active,
-                added_at: 1000,
-                last_seen: Some(2000),
-            }],
-            threshold: 2,
-            guardian_count: 3,
-            active_recovery: Some(RecoveryProcess {
-                id: "ceremony-123".to_string(),
-                account_id: AuthorityId::new_from_entropy([1u8; 32]),
-                status: RecoveryProcessStatus::WaitingForApprovals,
-                approvals_received: 0,
-                approvals_required: 2,
-                approved_by: vec![],
-                approvals: vec![],
-                initiated_at: 1000,
-                expires_at: Some(2000),
-                progress: 0,
-            }),
-            pending_requests: vec![],
-            guardian_bindings: vec![],
-        };
+        let guardians = vec![Guardian {
+            id: AuthorityId::new_from_entropy([1u8; 32]),
+            name: "Alice".to_string(),
+            status: GuardianStatus::Active,
+            added_at: 1000,
+            last_seen: Some(2000),
+        }];
+        let active_recovery = Some(RecoveryProcess {
+            id: "ceremony-123".to_string(),
+            account_id: AuthorityId::new_from_entropy([1u8; 32]),
+            status: RecoveryProcessStatus::WaitingForApprovals,
+            approvals_received: 0,
+            approvals_required: 2,
+            approved_by: vec![],
+            approvals: vec![],
+            initiated_at: 1000,
+            expires_at: Some(2000),
+            progress: 0,
+        });
+        let state = RecoveryState::from_parts(guardians, 2, active_recovery, vec![], vec![]);
 
         // Update ViewState directly
         set_recovery_state(&app_core, state.clone()).await.unwrap();
 
         // Verify state was set
         let retrieved = get_recovery_status(&app_core).await.unwrap();
-        assert!(retrieved.active_recovery.is_some());
+        assert!(retrieved.active_recovery().is_some());
         assert_eq!(
-            retrieved.active_recovery.as_ref().unwrap().id,
+            retrieved.active_recovery().unwrap().id,
             "ceremony-123"
         );
     }

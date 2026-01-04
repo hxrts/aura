@@ -166,8 +166,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contacts: Vec<Contact> = contacts_state
-                    .contacts
-                    .iter()
+                    .all_contacts()
                     .map(|c| Contact::from(c))
                     .collect();
                 reactive_contacts.set(contacts);
@@ -192,8 +191,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 // Channel selection is managed by TUI state, not app state
                 // All channels start unselected; TUI navigation handles selection
                 let channels: Vec<Channel> = chat_state
-                    .channels
-                    .iter()
+                    .all_channels()
                     .map(|c| {
                         Channel::new(c.id.to_string(), &c.name)
                             .with_unread(c.unread_count as usize)
@@ -202,7 +200,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
 
                 // Get messages for the first channel as default
                 // The shell's shared subscription handles proper selection-aware messages
-                let first_channel_id = chat_state.channels.first().map(|c| &c.id);
+                let first_channel_id = chat_state.all_channels().next().map(|c| &c.id);
                 let app_messages = first_channel_id
                     .map(|id| chat_state.messages_for_channel(id))
                     .unwrap_or(&[]);
@@ -230,13 +228,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 // Selection is managed by TUI state, not app state
                 if let Some(ref tx) = update_tx {
                     let total_messages: usize = chat_state
-                        .channels
-                        .iter()
+                        .all_channels()
                         .map(|c| chat_state.messages_for_channel(&c.id).len())
                         .sum();
 
                     let _ = tx.try_send(UiUpdate::ChatStateUpdated {
-                        channel_count: chat_state.channels.len(),
+                        channel_count: chat_state.channel_count(),
                         message_count: total_messages,
                         selected_index: None, // TUI manages selection
                     });

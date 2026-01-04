@@ -36,8 +36,7 @@ pub async fn list_participants(
     let channel_entry = match channel_ref {
         ChannelRef::Id(id) => chat.channel(&id),
         ChannelRef::Name(name) => chat
-            .channels
-            .iter()
+            .all_channels()
             .find(|c| c.name.eq_ignore_ascii_case(&name)),
     };
 
@@ -94,8 +93,7 @@ pub async fn get_user_info(
 
     // Try partial match by name
     let matching: Vec<_> = contacts
-        .filtered_contacts()
-        .into_iter()
+        .all_contacts()
         .filter(|c| {
             get_display_name(c)
                 .to_lowercase()
@@ -124,12 +122,7 @@ pub async fn get_user_info(
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
     let snapshot = full_snapshot(app_core).await;
-    snapshot
-        .contacts
-        .filtered_contacts()
-        .into_iter()
-        .cloned()
-        .collect()
+    snapshot.contacts.all_contacts().cloned().collect()
 }
 
 /// Helper function to get display name from contact

@@ -42,10 +42,10 @@ impl StateSnapshot {
 
     /// Check if the snapshot represents an uninitialized state
     pub fn is_empty(&self) -> bool {
-        self.chat.channels.is_empty()
-            && self.recovery.guardians.is_empty()
+        self.chat.is_empty()
+            && self.recovery.guardian_count() == 0
             && !self.invitations.has_pending()
-            && self.contacts.contacts.is_empty()
+            && self.contacts.is_empty()
             && self.homes.is_empty()
     }
 }
