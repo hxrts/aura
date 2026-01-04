@@ -691,7 +691,6 @@ impl ChatSignalView {
 }
 
 impl ReactiveView for ChatSignalView {
-    #[allow(deprecated)] // MessageDelivered and DeliveryAcknowledged are deprecated
     async fn update(&self, facts: &[Fact]) {
         let mut state = self.state.lock().await;
         let mut changed = false;
@@ -804,8 +803,6 @@ impl ReactiveView for ChatSignalView {
                     let sealed_len = payload.len();
                     let payload_bytes = payload.clone();
                     let context = context_id;
-                    // Clone values needed for delivery acknowledgment before they're moved
-                    let msg_id_for_ack = message_id.clone();
                     drop(state);
                     let content = match amp_recv(self.effects.as_ref(), context, payload_bytes).await
                     {
@@ -855,46 +852,6 @@ impl ReactiveView for ChatSignalView {
                     };
                     state.apply_message(channel_id, message);
                     changed = true;
-
-                    // Emit delivery acknowledgment for received messages (not our own)
-                    // NOTE: This uses the deprecated MessageDelivered fact pattern.
-                    // TODO(consistency-metadata): Replace with generic Acknowledgment system:
-                    // 1. Sender marks MessageSentSealed as ack_tracked
-                    // 2. Transport layer automatically handles ack protocol
-                    // 3. Delivery status derived from Acknowledgment records
-                    // See docs/121_consistency_metadata.md for migration plan.
-                    if !is_own {
-                        #[allow(deprecated)]
-                        let delivery_fact = ChatFact::message_delivered_ms(
-                            context,
-                            channel_id,
-                            msg_id_for_ack.clone(),
-                            self.own_authority,
-                            None, // device_id - TODO: Add when multi-device is implemented
-                            sent_at.ts_ms,
-                        );
-                        if let Err(e) = self
-                            .effects
-                            .commit_generic_fact_bytes(
-                                context,
-                                CHAT_FACT_TYPE_ID,
-                                delivery_fact.to_bytes(),
-                            )
-                            .await
-                        {
-                            tracing::warn!(
-                                message_id = %msg_id_for_ack,
-                                error = %e,
-                                "Failed to emit MessageDelivered fact"
-                            );
-                        } else {
-                            tracing::debug!(
-                                message_id = %msg_id_for_ack,
-                                channel_id = %channel_id,
-                                "Emitted MessageDelivered acknowledgment"
-                            );
-                        }
-                    }
                 }
                 ChatFact::MessageRead {
                     channel_id,
@@ -931,59 +888,6 @@ impl ReactiveView for ChatSignalView {
                             changed = true;
                         }
                     }
-                }
-                // DEPRECATED: MessageDelivered facts are being replaced by generic Acknowledgment.
-                // This handler remains for backward compatibility with existing facts.
-                // See docs/121_consistency_metadata.md for migration plan.
-                ChatFact::MessageDelivered {
-                    channel_id,
-                    message_id,
-                    recipient_id,
-                    device_id,
-                    delivered_at,
-                    ..
-                } => {
-                    // Message was delivered to a recipient's device (before they read it).
-                    // Update the message's delivery_status if we are the sender.
-                    if state.mark_delivered(&message_id) {
-                        tracing::debug!(
-                            channel_id = %channel_id,
-                            message_id,
-                            recipient_id = %recipient_id,
-                            device_id = ?device_id,
-                            delivered_at = delivered_at.ts_ms,
-                            "Message delivery status updated to Delivered"
-                        );
-                        changed = true;
-                    } else {
-                        // Either we're not the sender, or the message wasn't found
-                        tracing::trace!(
-                            channel_id = %channel_id,
-                            message_id,
-                            recipient_id = %recipient_id,
-                            device_id = ?device_id,
-                            delivered_at = delivered_at.ts_ms,
-                            "Message delivered (not our message or already updated)"
-                        );
-                    }
-                }
-                // DEPRECATED: DeliveryAcknowledged facts are being replaced by DeliveryPolicy GC.
-                // This handler remains for backward compatibility with existing facts.
-                // See docs/121_consistency_metadata.md for migration plan.
-                ChatFact::DeliveryAcknowledged {
-                    channel_id,
-                    message_id,
-                    acknowledged_at,
-                    ..
-                } => {
-                    // Sender acknowledged the delivery receipt - closes the receipt loop.
-                    // Used for internal state management and GC of pending receipts.
-                    tracing::trace!(
-                        channel_id = %channel_id,
-                        message_id,
-                        acknowledged_at = acknowledged_at.ts_ms,
-                        "Delivery receipt acknowledged"
-                    );
                 }
                 ChatFact::MessageEdited {
                     channel_id,

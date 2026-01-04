@@ -270,8 +270,6 @@ impl ChatServiceApi {
                 | aura_chat::ChatFact::ChannelUpdated { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageSentSealed { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageRead { channel_id: c, .. }
-                | aura_chat::ChatFact::MessageDelivered { channel_id: c, .. }
-                | aura_chat::ChatFact::DeliveryAcknowledged { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageEdited { channel_id: c, .. }
                 | aura_chat::ChatFact::MessageDeleted { channel_id: c, .. } => {
                     if *c != channel_id {

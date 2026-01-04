@@ -105,23 +105,6 @@ pub enum ChatDelta {
         /// Unix epoch milliseconds when the edit occurred.
         edited_at: u64,
     },
-    /// A message was delivered to a recipient's device
-    ///
-    /// This delta is emitted when we learn that a message has been
-    /// successfully received by the recipient (before they read it).
-    /// Used for showing "delivered" status indicators (double checkmark).
-    MessageDelivered {
-        /// Channel containing the message.
-        channel_id: String,
-        /// Identifier of the delivered message.
-        message_id: String,
-        /// AuthorityId string of the recipient who received the message.
-        recipient_id: String,
-        /// Optional device that received the message.
-        device_id: Option<String>,
-        /// Unix epoch milliseconds when the message was delivered.
-        delivered_at: u64,
-    },
     /// A message was read by a recipient
     ///
     /// This delta is emitted when a recipient has viewed the message.
@@ -136,19 +119,6 @@ pub enum ChatDelta {
         /// Unix epoch milliseconds when the message was read.
         read_at: u64,
     },
-    /// Delivery receipt was acknowledged by sender
-    ///
-    /// This delta is emitted when the sender acknowledges a delivery receipt,
-    /// closing the delivery receipt loop. Primarily used for internal state
-    /// management and garbage collection.
-    DeliveryAcknowledged {
-        /// Channel containing the message.
-        channel_id: String,
-        /// Identifier of the acknowledged message.
-        message_id: String,
-        /// Unix epoch milliseconds when the acknowledgment was sent.
-        acknowledged_at: u64,
-    },
 }
 
 /// Keys for chat delta composition.
@@ -158,12 +128,8 @@ pub enum ChatDeltaKey {
     Channel(String),
     /// Message key (channel_id, message_id).
     Message(String, String),
-    /// Message delivery key (channel_id, message_id, recipient_id).
-    MessageDelivery(String, String, String),
     /// Message read key (channel_id, message_id, reader_id).
     MessageRead(String, String, String),
-    /// Message acknowledgment key (channel_id, message_id).
-    MessageAck(String, String),
 }
 
 impl ComposableDelta for ChatDelta {
@@ -190,16 +156,6 @@ impl ComposableDelta for ChatDelta {
                 channel_id,
                 message_id,
             } => ChatDeltaKey::Message(channel_id.clone(), message_id.clone()),
-            ChatDelta::MessageDelivered {
-                channel_id,
-                message_id,
-                recipient_id,
-                ..
-            } => ChatDeltaKey::MessageDelivery(
-                channel_id.clone(),
-                message_id.clone(),
-                recipient_id.clone(),
-            ),
             ChatDelta::MessageRead {
                 channel_id,
                 message_id,
@@ -208,11 +164,6 @@ impl ComposableDelta for ChatDelta {
             } => {
                 ChatDeltaKey::MessageRead(channel_id.clone(), message_id.clone(), reader_id.clone())
             }
-            ChatDelta::DeliveryAcknowledged {
-                channel_id,
-                message_id,
-                ..
-            } => ChatDeltaKey::MessageAck(channel_id.clone(), message_id.clone()),
         }
     }
 
@@ -330,24 +281,6 @@ impl ComposableDelta for ChatDelta {
             }
             (ChatDelta::MessageRemoved { .. }, ChatDelta::MessageRemoved { .. }) => true,
             (
-                ChatDelta::MessageDelivered {
-                    delivered_at,
-                    device_id,
-                    ..
-                },
-                ChatDelta::MessageDelivered {
-                    delivered_at: other_ts,
-                    device_id: other_device,
-                    ..
-                },
-            ) => {
-                if other_ts >= *delivered_at {
-                    *delivered_at = other_ts;
-                    *device_id = other_device;
-                }
-                true
-            }
-            (
                 ChatDelta::MessageRead { read_at, .. },
                 ChatDelta::MessageRead {
                     read_at: other_ts, ..
@@ -355,20 +288,6 @@ impl ComposableDelta for ChatDelta {
             ) => {
                 if other_ts >= *read_at {
                     *read_at = other_ts;
-                }
-                true
-            }
-            (
-                ChatDelta::DeliveryAcknowledged {
-                    acknowledged_at, ..
-                },
-                ChatDelta::DeliveryAcknowledged {
-                    acknowledged_at: other_ts,
-                    ..
-                },
-            ) => {
-                if other_ts >= *acknowledged_at {
-                    *acknowledged_at = other_ts;
                 }
                 true
             }
@@ -387,7 +306,6 @@ impl ViewDeltaReducer for ChatViewReducer {
         CHAT_FACT_TYPE_ID
     }
 
-    #[allow(deprecated)] // MessageDelivered and DeliveryAcknowledged are deprecated
     fn reduce_fact(
         &self,
         binding_type: &str,
@@ -465,30 +383,6 @@ impl ViewDeltaReducer for ChatViewReducer {
                 message_id,
                 reader_id: reader_id.to_string(),
                 read_at: read_at.ts_ms,
-            }),
-            ChatFact::MessageDelivered {
-                channel_id,
-                message_id,
-                recipient_id,
-                device_id,
-                delivered_at,
-                ..
-            } => Some(ChatDelta::MessageDelivered {
-                channel_id: channel_id.to_string(),
-                message_id,
-                recipient_id: recipient_id.to_string(),
-                device_id,
-                delivered_at: delivered_at.ts_ms,
-            }),
-            ChatFact::DeliveryAcknowledged {
-                channel_id,
-                message_id,
-                acknowledged_at,
-                ..
-            } => Some(ChatDelta::DeliveryAcknowledged {
-                channel_id: channel_id.to_string(),
-                message_id,
-                acknowledged_at: acknowledged_at.ts_ms,
             }),
             ChatFact::MessageEdited {
                 channel_id,
