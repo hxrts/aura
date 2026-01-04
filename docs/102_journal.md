@@ -347,6 +347,62 @@ See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-op
 
 By clearly separating validation responsibilities, runtime authors know which effect handlers must participate before a fact mutation is committed. This structure keeps fact semantics consistent across authorities and contexts.
 
+## 11. Consistency Metadata Schema
+
+Facts carry consistency metadata for tracking agreement level, propagation status, and acknowledgments. See [Consistency Metadata](121_consistency_metadata.md) for the full type definitions.
+
+### 11.1 Fact Schema Fields
+
+```rust
+pub struct Fact {
+    pub order: OrderTime,
+    pub timestamp: TimeStamp,
+    pub content: FactContent,
+
+    // Consistency metadata (added via serde defaults for backwards compat)
+    #[serde(default)]
+    pub agreement: Agreement,      // Provisional, SoftSafe, or Finalized
+    #[serde(default)]
+    pub propagation: Propagation,  // Local, Syncing, Complete, or Failed
+    #[serde(default)]
+    pub ack_tracked: bool,         // Whether this fact requests acknowledgments
+}
+```
+
+- `agreement`: Tracks finalization level (A1/A2/A3 taxonomy)
+- `propagation`: Tracks anti-entropy sync status
+- `ack_tracked`: Opt-in flag for per-peer acknowledgment tracking
+
+### 11.2 Ack Storage Table
+
+For facts with `ack_tracked = true`, acknowledgments are stored in a separate table:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Ack Table                                                                │
+├─────────────┬─────────────────────────┬─────────────────────────────────┤
+│ fact_id     │ peer_id                 │ acked_at                        │
+├─────────────┼─────────────────────────┼─────────────────────────────────┤
+│ msg-001     │ alice_authority_id      │ 2024-01-15T10:30:00Z            │
+│ msg-001     │ bob_authority_id        │ 2024-01-15T10:30:05Z            │
+└─────────────┴─────────────────────────┴─────────────────────────────────┘
+```
+
+### 11.3 Journal API for Consistency
+
+```rust
+impl Journal {
+    // Record an acknowledgment from a peer
+    pub fn record_ack(&mut self, fact_id: &str, peer: AuthorityId, acked_at: PhysicalTime);
+
+    // Get all acks for a fact
+    pub fn get_acks(&self, fact_id: &str) -> Option<&Acknowledgment>;
+
+    // Garbage collect ack tracking based on policy
+    pub fn gc_ack_tracking(&mut self, policies: &PolicyRegistry);
+}
+```
+
 ## See Also
 
 - [Database Architecture](113_database.md) - Query system for reading journal facts via Datalog

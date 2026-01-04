@@ -743,11 +743,114 @@ The registry is integrated at the effect system level, not the trait level. This
 
 Protocol-level facts (Guardian, Recovery, Consensus, AMP) use the built-in reduction pipeline in `aura-journal/src/reduction.rs`. They do not require registry registration.
 
-## 14. AppCore: Unified Frontend Interface
+## 14. Delivery Policy and Acknowledgment GC
+
+The `DeliveryPolicy` trait enables domain crates to define custom acknowledgment retention and garbage collection behavior. This is an app-layer pattern that keeps policy decisions in the appropriate layer while the journal provides generic ack storage.
+
+### 14.1 DeliveryPolicy Trait
+
+Domain crates implement the `DeliveryPolicy` trait to control acknowledgment lifecycle:
+
+```rust
+pub trait DeliveryPolicy: Send + Sync {
+    /// Minimum time to retain acks after all expected peers have acked
+    fn min_retention(&self) -> Duration;
+
+    /// Maximum time to retain acks regardless of peer count
+    fn max_retention(&self) -> Duration;
+
+    /// Whether this fact type requires ack tracking
+    fn requires_ack(&self, fact: &Fact) -> bool;
+
+    /// Expected peers for acknowledgment (domain-specific)
+    fn expected_peers(&self, fact: &Fact) -> Vec<AuthorityId>;
+
+    /// Whether acks can be garbage collected
+    fn can_gc(&self, fact_id: &str, acks: &Acknowledgment, now: PhysicalTime) -> bool;
+}
+```
+
+### 14.2 Default Policies
+
+The journal provides sensible defaults that domains can override:
+
+```rust
+pub struct DefaultDeliveryPolicy {
+    min_retention: Duration,
+    max_retention: Duration,
+}
+
+impl Default for DefaultDeliveryPolicy {
+    fn default() -> Self {
+        Self {
+            min_retention: Duration::from_secs(24 * 60 * 60),  // 24 hours
+            max_retention: Duration::from_secs(7 * 24 * 60 * 60),  // 7 days
+        }
+    }
+}
+```
+
+### 14.3 Domain-Specific Policies
+
+Domain crates register their policies during effect system initialization:
+
+```rust
+// In aura-chat initialization
+let chat_policy = ChatDeliveryPolicy {
+    // Chat messages: retain acks until read receipt or 30 days
+    min_retention: Duration::from_secs(30 * 24 * 60 * 60),
+    max_retention: Duration::from_secs(90 * 24 * 60 * 60),
+};
+
+effect_system.register_delivery_policy("chat", Arc::new(chat_policy));
+
+// In aura-invitation initialization
+let invitation_policy = InvitationDeliveryPolicy {
+    // Invitations: retain acks for 7 days after acceptance
+    min_retention: Duration::from_secs(7 * 24 * 60 * 60),
+    max_retention: Duration::from_secs(14 * 24 * 60 * 60),
+};
+
+effect_system.register_delivery_policy("invitation", Arc::new(invitation_policy));
+```
+
+### 14.4 Integration with Maintenance Tasks
+
+The runtime maintenance system (section 6.1) uses registered policies during GC:
+
+```rust
+// In maintenance task
+async fn gc_acknowledgments(&self) {
+    let now = self.effects.physical_time().now().await;
+
+    for (domain, policy) in self.effects.delivery_policies() {
+        let candidates = self.journal.get_ack_gc_candidates(domain).await;
+
+        for (fact_id, acks) in candidates {
+            if policy.can_gc(&fact_id, &acks, now) {
+                self.journal.remove_acks(&fact_id).await;
+            }
+        }
+    }
+}
+```
+
+### 14.5 Design Rationale
+
+This pattern keeps:
+
+- **Policy in the right layer**: Domain crates define their own retention requirements
+- **Journal generic**: The ack storage table doesn't embed domain-specific logic
+- **GC configurable**: Different domains can have vastly different retention needs
+- **Testing isolated**: Policies can be mocked independently of journal storage
+
+See [Consistency Metadata](121_consistency_metadata.md) for the underlying ack tracking types and [Journal](102_journal.md) for the ack storage schema.
+
+## 15. AppCore: Unified Frontend Interface
 
 The `AppCore` in `aura-app` provides a unified, portable interface for all frontend platforms. It is headless and runtime-agnostic; it can run without a runtime bridge (offline/demo), or be wired to a concrete runtime via the `RuntimeBridge` trait. `aura-agent` is one such runtime implementation today; future runtimes (e.g. WASM-compatible) can also implement the bridge.
 
-### 14.1 Architecture
+### 15.1 Architecture
 
 AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and a runtime bridge:
 
@@ -778,7 +881,7 @@ AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and a runtime bridg
 
 Frontends import UI-facing types from `aura-app` and may additionally depend on a runtime crate (such as `aura-agent`) to obtain a concrete `RuntimeBridge`. This keeps `aura-app` portable while allowing multiple runtime backends.
 
-### 14.2 Construction Modes
+### 15.2 Construction Modes
 
 AppCore supports two construction modes for different use cases:
 
@@ -797,7 +900,7 @@ let app = AppCore::with_runtime(config, agent.as_runtime_bridge())?;
 
 Demo mode enables offline development and testing. Production mode provides full effect system capabilities.
 
-### 14.3 Push-Based Reactive Flow
+### 15.3 Push-Based Reactive Flow
 
 All state changes flow through the reactive pipeline:
 
@@ -813,7 +916,7 @@ Remote Sync ────┘                                      ↓
 
 Services emit facts, they never directly mutate ViewState. UI subscribes to signals using `signal.for_each()`. This preserves push semantics and avoids polling.
 
-### 14.4 Accessing the Agent
+### 15.4 Accessing the Agent
 
 When AppCore has a runtime, it provides access to runtime-backed operations:
 
@@ -828,16 +931,16 @@ if app.has_runtime() {
 
 The runtime bridge exposes async capabilities (sync, signing, protocols) while keeping `aura-app` decoupled from any specific runtime implementation.
 
-### 14.5 Re-exports
+### 15.5 Re-exports
 
 `aura-app` does **not** re-export runtime types. Frontends import app-facing types from `aura-app`, and runtime types (e.g., `AuraAgent`, `AgentBuilder`) directly from `aura-agent` or another runtime crate.
 
-## 15. Service Pattern for Domain Crates
+## 16. Service Pattern for Domain Crates
 
 Domain crates (Layer 5) define stateless handlers that take effect references per-call.
 The agent layer (Layer 6) wraps these with services that manage RwLock access.
 
-### 15.1 Handler Layer (Domain Crates)
+### 16.1 Handler Layer (Domain Crates)
 
 Handlers in `aura-chat`, `aura-invitation`, etc. are stateless and return `GuardOutcome` values (pure plans describing effect commands) rather than performing I/O directly:
 
@@ -864,7 +967,7 @@ impl ChatFactService {
 }
 ```
 
-### 15.2 Service Layer (Agent)
+### 16.2 Service Layer (Agent)
 
 Services in `aura-agent` wrap handlers, run guard evaluation, and interpret commands:
 
@@ -903,7 +1006,7 @@ impl ChatServiceApi {
 }
 ```
 
-### 15.3 Agent API
+### 16.3 Agent API
 
 The agent exposes services through clean accessor methods:
 
@@ -921,7 +1024,7 @@ impl AuraAgent {
 }
 ```
 
-### 15.4 Benefits
+### 16.4 Benefits
 
 This pattern keeps domain crates:
 
@@ -935,7 +1038,7 @@ The agent layer provides:
 - **Error normalization**: Convert domain errors to `AgentError`
 - **Factory methods**: Services created on-demand with no lazy-init overhead
 
-### 15.5 When to Use
+### 16.5 When to Use
 
 | Scenario | Location |
 |----------|----------|
@@ -943,6 +1046,6 @@ The agent layer provides:
 | Agent service wrapper | `aura-agent/src/handlers/*_service.rs` |
 | Agent API accessor | `aura-agent/src/core/api.rs` |
 
-## 16. Summary
+## 17. Summary
 
 The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems as services accessible through `AuraAgent`. Domain crates define stateless handlers that take effect references per-call, while the agent layer wraps these with services that provide shared access via `Arc<AuraEffectSystem>`. `AppCore` wraps the agent to provide a unified, platform-agnostic interface for all frontends. The `ReactiveScheduler` processes journal facts and drives UI signal updates. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior.

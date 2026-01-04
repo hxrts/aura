@@ -346,29 +346,80 @@ This runs the full `aura-terminal` test suite without network access.
 
 ## Message status indicators
 
-Chat messages display delivery status and finalization indicators in the message bubble header.
+Chat messages display delivery status and finalization indicators in the message bubble header. Status is derived from the unified consistency metadata types in `aura_core::domain`.
+
+### Status indicator legend
+
+```
+Symbol  Meaning              Color      Animation   Source
+────────────────────────────────────────────────────────────────
+  ◐     Syncing/Sending      Blue       Pulsing     Propagation::Local
+  ◌     Pending              Gray       None        Agreement::Provisional
+  ✓     Sent                 Green      None        Propagation::Complete
+  ✓✓    Delivered            Green      None        Acknowledgment.acked_by includes recipient
+  ✓✓    Read                 Blue       None        ChatFact::MessageRead
+  ⚠     Unconfirmed          Yellow     None        Agreement::SoftSafe (pending A3)
+  ✗     Failed               Red        None        Propagation::Failed
+  ◆     Finalized            Muted      None        Agreement::Finalized
+```
 
 ### Delivery status lifecycle
 
-Messages progress through the following delivery states:
+Messages progress through the following states:
 
-| Status | Icon | Color | Meaning |
-|--------|------|-------|---------|
-| Sending | ◐ | Muted | Message being transmitted |
-| Sent | ✓ | Muted | Message acknowledged by network |
-| Delivered | ✓✓ | Muted | Recipient's device received message |
-| Read | ✓✓ | Blue | Recipient viewed message (opt-in) |
-| Failed | ✗ | Red | Delivery failed |
+| Status | Icon | Meaning |
+|--------|------|---------|
+| Sending | ◐ | Message being transmitted (Propagation::Local) |
+| Sent | ✓ | Synced to all known peers (Propagation::Complete) |
+| Delivered | ✓✓ | Recipient acked via transport protocol |
+| Read | ✓✓ (blue) | Recipient viewed message (ChatFact::MessageRead) |
+| Failed | ✗ | Sync failed (Propagation::Failed with retry) |
 
-Delivery status is tracked via `MessageDelivered` facts. When a recipient's device successfully decrypts a message, it emits a `MessageDelivered` fact that syncs back to the sender. Read receipts are opt-in per contact and emit `MessageRead` facts.
+Delivery status is derived from `OptimisticStatus` consistency metadata:
 
-### Finalization indicator
+```rust
+use aura_core::domain::{Propagation, Acknowledgment, OptimisticStatus};
 
-The finalization indicator (◆) appears in muted color when a message achieves consensus finalization (A3 status with 2f+1 witnesses). This indicates the message is durably committed and cannot be rolled back. The finalization status is independent of delivery status and appears alongside it.
+fn delivery_icon(status: &OptimisticStatus, expected_peers: &[AuthorityId]) -> &'static str {
+    match &status.propagation {
+        Propagation::Local => "◐",
+        Propagation::Syncing { .. } => "◐",
+        Propagation::Failed { .. } => "✗",
+        Propagation::Complete => {
+            // Check if all expected peers have acked
+            let delivered = status.acknowledgment
+                .as_ref()
+                .map(|ack| expected_peers.iter().all(|p| ack.acked_by.contains(p)))
+                .unwrap_or(false);
+            if delivered { "✓✓" } else { "✓" }
+        }
+    }
+}
+```
+
+The transport layer implements ack tracking via `ack_tracked` on facts. When `ack_tracked = true`, recipients send `FactAck` responses that are recorded in the journal's ack table. Read receipts are semantic (user viewed) and use `ChatFact::MessageRead`.
+
+### Agreement and finalization
+
+Agreement level affects display:
+
+| Agreement | Display | Meaning |
+|-----------|---------|---------|
+| Provisional (A1) | Normal | Usable but may change |
+| SoftSafe (A2) | ⚠ badge | Coordinator-safe with convergence cert |
+| Finalized (A3) | ◆ badge | Consensus-finalized, durable |
+
+The finalization indicator (◆) appears when a message achieves A3 consensus (2f+1 witnesses). This indicates the message is durably committed and cannot be rolled back.
 
 ### Implementation notes
 
-Status indicators are rendered in `MessageBubble` (`crates/aura-terminal/src/tui/components/message_bubble.rs`). The delivery status and finalization state flow from `ChatState` through the `CHAT_SIGNAL` to the TUI. See [AMP Protocol](112_amp.md) for the full acknowledgment flow.
+Status indicators are rendered in `MessageBubble` (`crates/aura-terminal/src/tui/components/message_bubble.rs`). The consistency metadata flows from `ChatState` through the `CHAT_SIGNAL` to the TUI. The `ChatState` includes `OptimisticStatus` for each message, which contains:
+
+- `agreement`: Current A1/A2/A3 level
+- `propagation`: Sync status (Local, Syncing, Complete, Failed)
+- `acknowledgment`: Which peers have acked (for delivery tracking)
+
+See [Consistency Metadata](121_consistency_metadata.md) for the full type definitions and [AMP Protocol](112_amp.md) for the acknowledgment flow.
 
 ## See also
 

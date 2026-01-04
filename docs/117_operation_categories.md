@@ -322,55 +322,53 @@ User waits. Cannot proceed until ceremony completes.
 
 ## Status Tracking
 
-### SyncStatus (Category A)
+Status tracking uses the unified consistency metadata types from `aura-core::domain`. See [Consistency Metadata](121_consistency_metadata.md) for full details.
+
+### Category A: OptimisticStatus
 
 ```rust
-pub enum SyncStatus {
-    /// Fact committed locally, not yet synced
-    LocalOnly,
-    /// Fact synced to some peers
-    Syncing { peers_synced: u16, peers_total: u16 },
-    /// Fact synced to all known peers
-    Synced,
-    /// Sync failed, will retry
-    SyncFailed { retry_at_ms: u64, retry_count: u32, error: Option<String> },
-}
+use aura_core::domain::{Agreement, Propagation, Acknowledgment, OptimisticStatus};
+
+// OptimisticStatus combines agreement, propagation, and optional acknowledgment
+let status = OptimisticStatus {
+    agreement: Agreement::Provisional,      // or SoftSafe, Finalized
+    propagation: Propagation::Complete,     // Local, Syncing, Complete, Failed
+    acknowledgment: Some(Acknowledgment { acked_by: vec![...] }),
+};
+
+// Quick UI checks
+status.is_finalized()                       // Has A3 consensus?
+status.is_delivered(&expected_peers)        // All expected peers acked?
 ```
 
-### DeliveryStatus (Messages)
+### Category B: DeferredStatus
 
 ```rust
-pub enum DeliveryStatus {
-    /// Message queued locally
-    Sending,
-    /// Message reached at least one recipient
-    Sent { sent_at_ms: u64 },
-    /// Message reached all online recipients
-    Delivered { sent_at_ms: u64, delivered_at_ms: u64 },
-    /// Recipient viewed message
-    Read { sent_at_ms: u64, delivered_at_ms: u64, read_at_ms: u64 },
-    /// Delivery failed
-    Failed { error: String, retry_count: u32 },
-}
+use aura_core::domain::{DeferredStatus, ProposalState, ApprovalProgress};
+
+// DeferredStatus tracks proposal lifecycle
+let status = DeferredStatus {
+    proposal_id,
+    state: ProposalState::Pending,          // or Approved, Rejected, Expired, Superseded
+    approvals: ApprovalProgress { required, received },
+    applied_agreement: None,                // Set when effect applied
+    expires_at,
+};
 ```
 
-### ConfirmationStatus (Category B)
+### Category C: CeremonyStatus
 
 ```rust
-pub enum ConfirmationStatus {
-    /// Applied locally only, no confirmation ceremony started
-    LocalOnly,
-    /// Background confirmation ceremony in progress
-    Confirming { confirmed_count: u16, total_parties: u16, started_at_ms: u64 },
-    /// All required parties confirmed
-    Confirmed { confirmed_at_ms: u64 },
-    /// Some parties confirmed, some declined or unavailable
-    PartiallyConfirmed { confirmed_count: u16, declined_count: u16, unavailable_count: u16 },
-    /// Confirmation failed or was rejected
-    Unconfirmed { reason: String, retry_count: u32, next_retry_at_ms: Option<u64> },
-    /// Operation was rolled back due to conflict or rejection
-    RolledBack { reason: String, rolled_back_at_ms: u64 },
-}
+use aura_core::domain::status::{CeremonyStatus, CeremonyState};
+
+// CeremonyStatus tracks ceremony lifecycle
+let status = CeremonyStatus {
+    ceremony_id,
+    state: CeremonyState::PendingEpoch { ... },  // or Preparing, Committing, Committed, Aborted, Superseded
+    responses: vec![...],
+    prestate_hash,
+    committed_agreement: None,              // Set to Agreement::Finalized on commit
+};
 ```
 
 ## Effect Policy Configuration

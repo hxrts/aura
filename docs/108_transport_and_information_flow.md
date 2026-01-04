@@ -225,25 +225,27 @@ The combination ensures that:
 
 ## 9. Sync Status and Delivery Tracking
 
-Category A (optimistic) operations require UI feedback for sync and delivery status. Anti-entropy provides the underlying sync mechanism, but users need visibility into progress.
+Category A (optimistic) operations require UI feedback for sync and delivery status. Anti-entropy provides the underlying sync mechanism, but users need visibility into progress. See [Consistency Metadata](121_consistency_metadata.md) for the full type definitions.
 
-### 9.1 Sync Status Model
+### 9.1 Propagation Status
 
-Sync status tracks journal fact propagation:
+Propagation status tracks journal fact sync via anti-entropy:
 
 ```rust
-pub enum SyncStatus {
-    /// Fact committed locally, not yet synced
-    LocalOnly,
+use aura_core::domain::Propagation;
 
-    /// Fact synced to at least one peer
-    Syncing { peers_synced: usize, peers_total: usize },
+pub enum Propagation {
+    /// Fact committed locally, not yet synced
+    Local,
+
+    /// Fact synced to some peers
+    Syncing { peers_reached: u16, peers_known: u16 },
 
     /// Fact synced to all known peers
-    Synced,
+    Complete,
 
     /// Sync failed, will retry
-    SyncFailed { retry_at: u64 },
+    Failed { retry_at: PhysicalTime, retry_count: u32, error: String },
 }
 ```
 
@@ -254,36 +256,54 @@ Anti-entropy provides callbacks via `SyncProgressEvent` to track progress:
 - `PeerCompleted` - sync finished with one peer
 - `AllCompleted` - all peers synced
 
-### 9.2 Message Delivery Status
+### 9.2 Acknowledgment Protocol
 
-Message delivery extends sync status with read receipts:
+For facts with `ack_tracked = true`, the transport layer implements the ack protocol:
 
+**Transmission Envelope:**
 ```rust
-pub enum DeliveryStatus {
-    /// Message queued locally
-    Sending,
-
-    /// Message reached at least one recipient device
-    Sent,
-
-    /// Message reached all online recipients
-    Delivered,
-
-    /// Recipient viewed the message
-    Read,
-
-    /// Delivery permanently failed
-    Failed { reason: String },
+pub struct FactEnvelope {
+    pub fact: Fact,
+    pub ack_requested: bool,  // Set when fact.ack_tracked = true
 }
 ```
 
-Delivery status progresses: `Sending → Sent → Delivered → Read`
+**FactAck Response:**
+```rust
+pub struct FactAck {
+    pub fact_id: String,
+    pub peer: AuthorityId,
+    pub acked_at: PhysicalTime,
+}
+```
 
-The `aura-chat` crate provides fact types for delivery tracking:
-- `MessageDelivered` - records when message reaches recipient device
-- `DeliveryAcknowledged` - sender's acknowledgment, enables GC
+**Protocol Flow:**
+1. Sender marks fact as `ack_tracked` when committing
+2. Transport includes `ack_requested: true` in envelope
+3. Receiver processes fact and sends `FactAck` response
+4. Sender records ack in journal's ack table
+5. `Acknowledgment` records are queryable for delivery status
 
-### 9.3 UI Status Indicators
+### 9.3 Message Delivery Status
+
+Message delivery derives from consistency metadata:
+
+```rust
+use aura_core::domain::{Propagation, Acknowledgment, OptimisticStatus};
+
+// Delivery status is derived, not stored directly
+let is_sending = matches!(status.propagation, Propagation::Local);
+let is_sent = matches!(status.propagation, Propagation::Complete);
+let is_delivered = status.acknowledgment
+    .map(|ack| expected_peers.iter().all(|p| ack.contains(p)))
+    .unwrap_or(false);
+```
+
+Status progression: `Sending (◐) → Sent (✓) → Delivered (✓✓) → Read (✓✓ blue)`
+
+Read receipts are semantic (user viewed) and distinct from delivery (device received). They use `ChatFact::MessageRead` rather than the acknowledgment system.
+
+### 9.4 UI Status Indicators
 
 Status indicators provide user feedback:
 

@@ -4,7 +4,7 @@ Aura treats *membership changes* and *key rotations* as Category C ceremonies: b
 
 ## Why ceremonies?
 
-Operations like “add a device”, “add/remove guardians”, “change group membership”, or “change home membership” all change who can produce valid signatures (or who is expected to participate in signing). These operations:
+Operations like "add a device", "add/remove guardians", "change group membership", or "change home membership" all change who can produce valid signatures (or who is expected to participate in signing). These operations:
 
 - require multi-party participation and explicit consent,
 - must be bound to a prestate to avoid TOCTOU / replay,
@@ -13,6 +13,28 @@ Operations like “add a device”, “add/remove guardians”, “change group 
 See `docs/117_operation_categories.md` for the Category C requirements.
 
 Finalization rule: Provisional or coordinator fast paths may be used to stage intent, but key rotation is only durable once consensus finalizes the ceremony (commit facts + transcript commit).
+
+### Ceremony Status Tracking
+
+Ceremonies use `CeremonyStatus` from `aura_core::domain::status` for unified status tracking:
+
+```rust
+use aura_core::domain::status::{CeremonyStatus, CeremonyState, CeremonyResponse};
+use aura_core::domain::Agreement;
+
+let status = CeremonyStatus {
+    ceremony_id,
+    state: CeremonyState::Committed {
+        consensus_id,
+        committed_at,
+    },
+    responses: vec![...],
+    prestate_hash,
+    committed_agreement: Some(Agreement::Finalized { consensus_id }),
+};
+```
+
+When a ceremony commits successfully, `committed_agreement` is set to `Agreement::Finalized` with the consensus ID, indicating A3 durability.
 
 ## Shared contract
 
@@ -161,11 +183,21 @@ When a new ceremony replaces an old one (e.g., due to prestate changes, explicit
 
 ### Supersession Reasons
 
-- **PrestateStale**: The prestate changed while the ceremony was pending, invalidating it.
-- **NewerRequest**: An explicit newer request from the same initiator supersedes the old one.
-- **ExplicitCancel**: Manual cancellation by an authorized participant.
-- **Timeout**: The ceremony exceeded its validity window.
-- **Precedence**: A concurrent ceremony won (conflict resolution).
+The `SupersessionReason` enum from `aura_core::domain::status` defines the canonical reasons:
+
+```rust
+use aura_core::domain::status::SupersessionReason;
+
+pub enum SupersessionReason {
+    PrestateStale,   // Prestate changed while ceremony was pending
+    NewerRequest,    // Explicit newer request from same initiator
+    ExplicitCancel,  // Manual cancellation by authorized participant
+    Timeout,         // Ceremony exceeded validity window
+    Precedence,      // Concurrent ceremony won (conflict resolution)
+}
+```
+
+When a ceremony is superseded, its `CeremonyState` transitions to `Superseded { by, reason }`.
 
 ### Supersession Facts
 
@@ -192,3 +224,9 @@ The `CeremonyTracker` maintains supersession records for auditability:
 ### Propagation
 
 Supersession facts propagate via the existing anti-entropy mechanism—no special protocol is required. Peers receiving a `CeremonySuperseded` fact update their local ceremony state accordingly.
+
+## See Also
+
+- [Consistency Metadata](121_consistency_metadata.md) - `CeremonyStatus` type and A1/A2/A3 taxonomy
+- [Operation Categories](117_operation_categories.md) - Category C requirements
+- [Consensus](104_consensus.md) - A3 finalization mechanism
