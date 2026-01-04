@@ -12,13 +12,14 @@
 use crate::protocol_facts::ProtocolRelationalFact;
 pub use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
 use aura_core::{
+    domain::{Acknowledgment, Agreement, Consistency, OperationCategory, Propagation},
     identifiers::{AuthorityId, ChannelId, ContextId},
     semilattice::JoinSemilattice,
-    time::{OrderTime, TimeStamp},
+    time::{OrderTime, PhysicalTime, TimeStamp},
     Hash32, Result,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Journal namespace for scoping facts
 ///
@@ -111,10 +112,234 @@ impl Journal {
         );
         self.facts.extend(other.facts.clone());
     }
+
+    /// Add a fact with options
+    ///
+    /// This allows configuring metadata like ack tracking when adding facts.
+    pub fn add_fact_with_options(&mut self, mut fact: Fact, options: FactOptions) -> Result<()> {
+        // Apply options to fact metadata
+        fact.ack_tracked = options.request_acks;
+        if let Some(agreement) = options.initial_agreement {
+            fact.agreement = agreement;
+        }
+        self.facts.insert(fact);
+        Ok(())
+    }
+
+    /// Get a fact by its order ID
+    pub fn get_fact(&self, order: &OrderTime) -> Option<&Fact> {
+        self.facts.iter().find(|f| &f.order == order)
+    }
+
+    /// Get a mutable reference to a fact by its order ID
+    ///
+    /// Note: This removes and re-inserts the fact since BTreeSet doesn't allow
+    /// mutable access. Only metadata fields should be modified.
+    pub fn get_fact_mut(&mut self, order: &OrderTime) -> Option<Fact> {
+        // Find and remove the fact
+        let fact = self.facts.iter().find(|f| &f.order == order).cloned();
+        if let Some(f) = fact.as_ref() {
+            // Clone the fact for comparison (to remove by value)
+            self.facts.remove(f);
+        }
+        fact
+    }
+
+    /// Re-insert a fact after modification
+    ///
+    /// This is used after modifying metadata with get_fact_mut.
+    pub fn update_fact(&mut self, fact: Fact) {
+        self.facts.insert(fact);
+    }
+
+    /// Get all facts that have ack tracking enabled
+    pub fn ack_tracked_facts(&self) -> impl Iterator<Item = &Fact> {
+        self.facts.iter().filter(|f| f.ack_tracked)
+    }
+
+    /// Get all facts that are not yet finalized
+    pub fn provisional_facts(&self) -> impl Iterator<Item = &Fact> {
+        self.facts
+            .iter()
+            .filter(|f| f.agreement.is_provisional())
+    }
+
+    /// Get all facts that are finalized
+    pub fn finalized_facts(&self) -> impl Iterator<Item = &Fact> {
+        self.facts.iter().filter(|f| f.agreement.is_finalized())
+    }
+
+    /// Get agreement level for a fact
+    pub fn get_agreement(&self, order: &OrderTime) -> Option<Agreement> {
+        self.get_fact(order).map(|f| f.agreement.clone())
+    }
+
+    /// Get propagation status for a fact
+    pub fn get_propagation(&self, order: &OrderTime) -> Option<Propagation> {
+        self.get_fact(order).map(|f| f.propagation.clone())
+    }
+
+    /// Check if a fact has ack tracking enabled
+    pub fn is_ack_tracked(&self, order: &OrderTime) -> bool {
+        self.get_fact(order).map(|f| f.ack_tracked).unwrap_or(false)
+    }
+
+    /// Update agreement level for a fact
+    pub fn update_agreement(&mut self, order: &OrderTime, agreement: Agreement) -> Result<()> {
+        if let Some(mut fact) = self.get_fact_mut(order) {
+            fact.agreement = agreement;
+            self.update_fact(fact);
+            Ok(())
+        } else {
+            Err(aura_core::AuraError::not_found(format!(
+                "Fact with order {:?} not found",
+                order
+            )))
+        }
+    }
+
+    /// Update propagation status for a fact
+    pub fn update_propagation(
+        &mut self,
+        order: &OrderTime,
+        propagation: Propagation,
+    ) -> Result<()> {
+        if let Some(mut fact) = self.get_fact_mut(order) {
+            fact.propagation = propagation;
+            self.update_fact(fact);
+            Ok(())
+        } else {
+            Err(aura_core::AuraError::not_found(format!(
+                "Fact with order {:?} not found",
+                order
+            )))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ack Storage
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Storage for acknowledgments.
+///
+/// Acks are stored separately from facts because:
+/// 1. Acks are more dynamic (frequently updated)
+/// 2. Acks don't participate in CRDT semantics
+/// 3. Acks can be garbage collected independently
+///
+/// This is an in-memory implementation. Production systems should persist
+/// acks to a database or storage layer.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AckStorage {
+    /// Map from fact OrderTime to acknowledgments
+    acks: BTreeMap<OrderTime, Acknowledgment>,
+}
+
+impl AckStorage {
+    /// Create new empty ack storage
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record an acknowledgment from a peer
+    pub fn record_ack(
+        &mut self,
+        fact_id: &OrderTime,
+        peer: AuthorityId,
+        timestamp: PhysicalTime,
+    ) -> Result<()> {
+        let ack = self.acks.entry(fact_id.clone()).or_default();
+        *ack = ack.clone().add_ack(peer, timestamp);
+        Ok(())
+    }
+
+    /// Get acknowledgments for a fact
+    pub fn get_acks(&self, fact_id: &OrderTime) -> Option<&Acknowledgment> {
+        self.acks.get(fact_id)
+    }
+
+    /// Check if a peer has acknowledged a fact
+    pub fn has_acked(&self, fact_id: &OrderTime, peer: &AuthorityId) -> bool {
+        self.acks
+            .get(fact_id)
+            .map(|a| a.contains(peer))
+            .unwrap_or(false)
+    }
+
+    /// Get ack count for a fact
+    pub fn ack_count(&self, fact_id: &OrderTime) -> usize {
+        self.acks.get(fact_id).map(|a| a.count()).unwrap_or(0)
+    }
+
+    /// Delete acks for a fact (GC)
+    pub fn delete_acks(&mut self, fact_id: &OrderTime) {
+        self.acks.remove(fact_id);
+    }
+
+    /// Check if all expected peers have acknowledged
+    pub fn all_acked(&self, fact_id: &OrderTime, expected: &[AuthorityId]) -> bool {
+        self.acks
+            .get(fact_id)
+            .map(|a| a.all_acked(expected))
+            .unwrap_or(false)
+    }
+
+    /// Get all fact IDs with acks
+    pub fn fact_ids(&self) -> impl Iterator<Item = &OrderTime> {
+        self.acks.keys()
+    }
+
+    /// Get number of facts with acks
+    pub fn len(&self) -> usize {
+        self.acks.len()
+    }
+
+    /// Check if storage is empty
+    pub fn is_empty(&self) -> bool {
+        self.acks.is_empty()
+    }
+
+    /// Get consistency for a fact, combining journal metadata and ack storage
+    pub fn get_consistency(&self, journal: &Journal, fact_id: &OrderTime) -> Option<Consistency> {
+        journal.get_fact(fact_id).map(|fact| {
+            let mut consistency = Consistency::new(OperationCategory::Optimistic)
+                .with_agreement(fact.agreement.clone())
+                .with_propagation(fact.propagation.clone());
+
+            if fact.ack_tracked {
+                if let Some(ack) = self.get_acks(fact_id) {
+                    consistency = consistency.with_acknowledgment(ack.clone());
+                } else {
+                    consistency = consistency.with_ack_tracking();
+                }
+            }
+
+            consistency
+        })
+    }
+
+    /// Merge acks from another storage
+    pub fn merge(&mut self, other: &AckStorage) {
+        for (fact_id, other_ack) in &other.acks {
+            if let Some(self_ack) = self.acks.get_mut(fact_id) {
+                *self_ack = self_ack.clone().merge(other_ack);
+            } else {
+                self.acks.insert(fact_id.clone(), other_ack.clone());
+            }
+        }
+    }
 }
 
 /// Core fact structure (timestamp-driven identity)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// # Identity vs Metadata
+///
+/// A fact's identity is determined by its `order`, `timestamp`, and `content` fields.
+/// The metadata fields (`agreement`, `propagation`, `ack_tracked`) are mutable and
+/// do NOT affect equality or hashing. This allows facts to be stored in BTreeSet
+/// while their metadata can be updated without affecting set membership.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fact {
     /// Opaque total order for deterministic merges
     pub order: OrderTime,
@@ -122,6 +347,112 @@ pub struct Fact {
     pub timestamp: TimeStamp,
     /// Content of the fact
     pub content: FactContent,
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Consistency Metadata (mutable, not part of identity)
+    // ─────────────────────────────────────────────────────────────────────────
+    /// Agreement level (A1/A2/A3)
+    /// - Provisional: Usable immediately, may be superseded
+    /// - SoftSafe: Bounded divergence with convergence certificate
+    /// - Finalized: Consensus-confirmed, durable, non-forkable
+    #[serde(default)]
+    pub agreement: Agreement,
+
+    /// Propagation status for anti-entropy sync
+    /// - Local: Only on this device
+    /// - Syncing: Sync in progress to peers
+    /// - Complete: Reached all known peers
+    /// - Failed: Sync failed, will retry
+    #[serde(default)]
+    pub propagation: Propagation,
+
+    /// Whether this fact requests acknowledgment tracking
+    /// When true, the journal will track per-peer acknowledgments
+    #[serde(default)]
+    pub ack_tracked: bool,
+}
+
+// Manual PartialEq implementation that excludes metadata from identity
+impl PartialEq for Fact {
+    fn eq(&self, other: &Self) -> bool {
+        // Only compare core identity fields, not metadata
+        self.order == other.order
+            && self.timestamp == other.timestamp
+            && self.content == other.content
+    }
+}
+
+impl Eq for Fact {}
+
+impl Fact {
+    /// Create a new fact with default metadata (Provisional, Local, no ack tracking)
+    pub fn new(order: OrderTime, timestamp: TimeStamp, content: FactContent) -> Self {
+        Self {
+            order,
+            timestamp,
+            content,
+            agreement: Agreement::default(),
+            propagation: Propagation::default(),
+            ack_tracked: false,
+        }
+    }
+
+    /// Create a new fact with ack tracking enabled
+    pub fn new_with_ack_tracking(
+        order: OrderTime,
+        timestamp: TimeStamp,
+        content: FactContent,
+    ) -> Self {
+        Self {
+            order,
+            timestamp,
+            content,
+            agreement: Agreement::default(),
+            propagation: Propagation::default(),
+            ack_tracked: true,
+        }
+    }
+
+    /// Set the agreement level (builder pattern)
+    #[must_use]
+    pub fn with_agreement(mut self, agreement: Agreement) -> Self {
+        self.agreement = agreement;
+        self
+    }
+
+    /// Set the propagation status (builder pattern)
+    #[must_use]
+    pub fn with_propagation(mut self, propagation: Propagation) -> Self {
+        self.propagation = propagation;
+        self
+    }
+
+    /// Enable ack tracking (builder pattern)
+    #[must_use]
+    pub fn with_ack_tracking(mut self) -> Self {
+        self.ack_tracked = true;
+        self
+    }
+
+    /// Get the fact's unique identifier (OrderTime)
+    pub fn id(&self) -> &OrderTime {
+        &self.order
+    }
+
+    /// Check if this fact is finalized (A3)
+    pub fn is_finalized(&self) -> bool {
+        self.agreement.is_finalized()
+    }
+
+    /// Check if this fact is at least safe (A2+)
+    pub fn is_safe(&self) -> bool {
+        self.agreement.is_safe()
+    }
+
+    /// Check if propagation is complete
+    pub fn is_propagated(&self) -> bool {
+        self.propagation.is_complete()
+    }
 }
 
 impl PartialOrd for Fact {
@@ -133,6 +464,66 @@ impl PartialOrd for Fact {
 impl Ord for Fact {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.order.cmp(&other.order)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fact Options
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Options for creating facts.
+///
+/// Controls metadata and behavior when adding facts to a journal.
+/// This struct uses the builder pattern for ergonomic configuration.
+///
+/// # Example
+///
+/// ```ignore
+/// use aura_journal::fact::FactOptions;
+///
+/// let options = FactOptions::default()
+///     .with_ack_tracking();  // Enable acknowledgment tracking
+///
+/// journal.add_fact_with_options(fact, options)?;
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct FactOptions {
+    /// Request acknowledgment tracking for this fact
+    ///
+    /// When true, the journal will track per-peer acknowledgments
+    /// for this fact. This enables delivery confirmation checking.
+    pub request_acks: bool,
+
+    /// Initial agreement level (defaults to Provisional)
+    ///
+    /// Most facts start as Provisional and transition to higher
+    /// agreement levels as consensus progresses.
+    pub initial_agreement: Option<Agreement>,
+}
+
+impl FactOptions {
+    /// Create new default options
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enable ack tracking for this fact
+    #[must_use]
+    pub fn with_ack_tracking(mut self) -> Self {
+        self.request_acks = true;
+        self
+    }
+
+    /// Set initial agreement level
+    #[must_use]
+    pub fn with_agreement(mut self, agreement: Agreement) -> Self {
+        self.initial_agreement = Some(agreement);
+        self
+    }
+
+    /// Check if ack tracking is requested
+    pub fn has_ack_tracking(&self) -> bool {
+        self.request_acks
     }
 }
 
@@ -732,25 +1123,25 @@ mod tests {
         let mut journal2 = Journal::new(namespace);
 
         // Add different facts to each journal
-        let fact1 = Fact {
-            order: OrderTime([1u8; 32]),
-            timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            content: FactContent::Snapshot(SnapshotFact {
+        let fact1 = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
                 state_hash: Hash32::default(),
                 superseded_facts: vec![],
                 sequence: 1,
             }),
-        };
+        );
 
-        let fact2 = Fact {
-            order: OrderTime([2u8; 32]),
-            timestamp: TimeStamp::OrderClock(OrderTime([2u8; 32])),
-            content: FactContent::Snapshot(SnapshotFact {
+        let fact2 = Fact::new(
+            OrderTime([2u8; 32]),
+            TimeStamp::OrderClock(OrderTime([2u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
                 state_hash: Hash32::default(),
                 superseded_facts: vec![],
                 sequence: 2,
             }),
-        };
+        );
 
         journal1.add_fact(fact1.clone()).unwrap();
         journal2.add_fact(fact2.clone()).unwrap();
@@ -774,5 +1165,127 @@ mod tests {
 
         // This should panic
         let _ = journal1.join(&journal2);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Fact Metadata Tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fact_default_metadata() {
+        let fact = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        );
+
+        // Default metadata
+        assert!(fact.agreement.is_provisional());
+        assert!(fact.propagation.is_local());
+        assert!(!fact.ack_tracked);
+        assert!(!fact.is_finalized());
+        assert!(!fact.is_propagated());
+    }
+
+    #[test]
+    fn test_fact_with_ack_tracking() {
+        let fact = Fact::new_with_ack_tracking(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        );
+
+        assert!(fact.ack_tracked);
+    }
+
+    #[test]
+    fn test_fact_builder_pattern() {
+        use aura_core::query::ConsensusId;
+
+        let consensus_id = ConsensusId::new([1u8; 32]);
+        let fact = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        )
+        .with_agreement(Agreement::finalized(consensus_id))
+        .with_propagation(Propagation::complete())
+        .with_ack_tracking();
+
+        assert!(fact.is_finalized());
+        assert!(fact.is_propagated());
+        assert!(fact.ack_tracked);
+    }
+
+    #[test]
+    fn test_fact_equality_ignores_metadata() {
+        use aura_core::query::ConsensusId;
+
+        // Create two facts with same identity but different metadata
+        let fact1 = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        );
+
+        let fact2 = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        )
+        .with_agreement(Agreement::finalized(ConsensusId::new([2u8; 32])))
+        .with_propagation(Propagation::complete())
+        .with_ack_tracking();
+
+        // Facts should be equal despite different metadata
+        assert_eq!(fact1, fact2);
+    }
+
+    #[test]
+    fn test_fact_ordering_ignores_metadata() {
+        // Create facts with same order but different metadata
+        let fact1 = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        );
+
+        let fact2 = Fact::new(
+            OrderTime([2u8; 32]),
+            TimeStamp::OrderClock(OrderTime([2u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 2,
+            }),
+        )
+        .with_propagation(Propagation::complete());
+
+        // Ordering should be based on order field only
+        assert!(fact1 < fact2);
     }
 }

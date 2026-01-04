@@ -446,11 +446,11 @@ impl AuraEffectSystem {
                 .await
                 .map_err(|e| AuraError::internal(format!("order_time: {e}")))?;
 
-            let fact = TypedFact {
-                order: order.clone(),
-                timestamp: aura_core::time::TimeStamp::OrderClock(order.clone()),
-                content: FactContent::Relational(rel),
-            };
+            let fact = TypedFact::new(
+                order.clone(),
+                aura_core::time::TimeStamp::OrderClock(order.clone()),
+                FactContent::Relational(rel),
+            );
 
             let key = Self::typed_fact_storage_key(self.authority_id, &order);
             let bytes = aura_core::util::serialization::to_vec(&fact)

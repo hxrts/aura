@@ -951,17 +951,17 @@ mod tests {
         let mut journal = Journal::new(JournalNamespace::Context(ctx_id));
 
         // Add a guardian binding fact
-        let fact = Fact {
-            order: OrderTime([1u8; 32]),
-            timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            content: FactContent::Relational(RelationalFact::Protocol(
+        let fact = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Relational(RelationalFact::Protocol(
                 crate::protocol_facts::ProtocolRelationalFact::GuardianBinding {
                     account_id: AuthorityId::new_from_entropy([15u8; 32]),
                     guardian_id: AuthorityId::new_from_entropy([16u8; 32]),
                     binding_hash: Hash32::default(),
                 },
             )),
-        };
+        );
 
         journal.add_fact(fact).unwrap();
 
@@ -999,24 +999,24 @@ mod tests {
         };
 
         journal
-            .add_fact(Fact {
-                order: OrderTime([9u8; 32]),
-                timestamp: TimeStamp::OrderClock(OrderTime([9u8; 32])),
-                content: FactContent::Relational(RelationalFact::Protocol(
+            .add_fact(Fact::new(
+                OrderTime([9u8; 32]),
+                TimeStamp::OrderClock(OrderTime([9u8; 32])),
+                FactContent::Relational(RelationalFact::Protocol(
                     crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
                 )),
-            })
+            ))
             .unwrap();
         journal
-            .add_fact(Fact {
-                order: OrderTime([10u8; 32]),
-                timestamp: TimeStamp::OrderClock(OrderTime([10u8; 32])),
-                content: FactContent::Relational(RelationalFact::Protocol(
+            .add_fact(Fact::new(
+                OrderTime([10u8; 32]),
+                TimeStamp::OrderClock(OrderTime([10u8; 32])),
+                FactContent::Relational(RelationalFact::Protocol(
                     crate::protocol_facts::ProtocolRelationalFact::AmpProposedChannelEpochBump(
                         proposed,
                     ),
                 )),
-            })
+            ))
             .unwrap();
 
         let state = reduce_context(&journal).unwrap();
@@ -1052,24 +1052,24 @@ mod tests {
         };
 
         journal
-            .add_fact(Fact {
-                order: OrderTime([11u8; 32]),
-                timestamp: TimeStamp::OrderClock(OrderTime([11u8; 32])),
-                content: FactContent::Relational(RelationalFact::Protocol(
+            .add_fact(Fact::new(
+                OrderTime([11u8; 32]),
+                TimeStamp::OrderClock(OrderTime([11u8; 32])),
+                FactContent::Relational(RelationalFact::Protocol(
                     crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
                 )),
-            })
+            ))
             .unwrap();
         journal
-            .add_fact(Fact {
-                order: OrderTime([12u8; 32]),
-                timestamp: TimeStamp::OrderClock(OrderTime([12u8; 32])),
-                content: FactContent::Relational(RelationalFact::Protocol(
+            .add_fact(Fact::new(
+                OrderTime([12u8; 32]),
+                TimeStamp::OrderClock(OrderTime([12u8; 32])),
+                FactContent::Relational(RelationalFact::Protocol(
                     crate::protocol_facts::ProtocolRelationalFact::AmpProposedChannelEpochBump(
                         emergency,
                     ),
                 )),
-            })
+            ))
             .unwrap();
 
         let state = reduce_context(&journal).unwrap();
@@ -1095,10 +1095,10 @@ mod tests {
         let ctx = ContextId::new_from_entropy([20u8; 32]);
         let channel = ChannelId::from_bytes([7u8; 32]);
 
-        let checkpoint = Fact {
-            order: OrderTime([1u8; 32]),
-            timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
-            content: FactContent::Relational(RelationalFact::Protocol(
+        let checkpoint = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Relational(RelationalFact::Protocol(
                 crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(
                     ChannelCheckpoint {
                         context: ctx,
@@ -1111,12 +1111,12 @@ mod tests {
                     },
                 ),
             )),
-        };
+        );
 
-        let proposed = Fact {
-            order: OrderTime([2u8; 32]),
-            timestamp: TimeStamp::OrderClock(OrderTime([2u8; 32])),
-            content: FactContent::Relational(RelationalFact::Protocol(
+        let proposed = Fact::new(
+            OrderTime([2u8; 32]),
+            TimeStamp::OrderClock(OrderTime([2u8; 32])),
+            FactContent::Relational(RelationalFact::Protocol(
                 crate::protocol_facts::ProtocolRelationalFact::AmpProposedChannelEpochBump(
                     ProposedChannelEpochBump {
                         context: ctx,
@@ -1128,7 +1128,7 @@ mod tests {
                     },
                 ),
             )),
-        };
+        );
 
         let mut journal_a = Journal::new(JournalNamespace::Context(ctx));
         journal_a.add_fact(checkpoint.clone()).unwrap();

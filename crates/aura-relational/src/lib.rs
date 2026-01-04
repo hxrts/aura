@@ -177,11 +177,11 @@ impl RelationalContext {
             .map_err(|_| aura_core::AuraError::internal("Failed to acquire journal lock"))?;
 
         let order = Self::derive_order(&fact)?;
-        let typed = Fact {
-            order: order.clone(),
-            timestamp: TimeStamp::OrderClock(order),
-            content: FactContent::Relational(fact),
-        };
+        let typed = Fact::new(
+            order.clone(),
+            TimeStamp::OrderClock(order),
+            FactContent::Relational(fact),
+        );
 
         journal.add_fact(typed)
     }

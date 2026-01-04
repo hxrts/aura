@@ -12,10 +12,10 @@ fn recovery_from_journal_reconstructs_channel_state() {
     let ctx = ContextId::new_from_entropy([21u8; 32]);
     let channel = ChannelId::from_bytes([5u8; 32]);
 
-    let checkpoint = Fact {
-        order: OrderTime([1u8; 32]),
-        timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
-        content: FactContent::Relational(RelationalFact::Protocol(
+    let checkpoint = Fact::new(
+        OrderTime([1u8; 32]),
+        TimeStamp::OrderClock(OrderTime([1u8; 32])),
+        FactContent::Relational(RelationalFact::Protocol(
             ProtocolRelationalFact::AmpChannelCheckpoint(ChannelCheckpoint {
                 context: ctx,
                 channel,
@@ -26,12 +26,12 @@ fn recovery_from_journal_reconstructs_channel_state() {
                 skip_window_override: Some(32),
             }),
         )),
-    };
+    );
 
-    let committed = Fact {
-        order: OrderTime([2u8; 32]),
-        timestamp: TimeStamp::OrderClock(OrderTime([2u8; 32])),
-        content: FactContent::Relational(RelationalFact::Protocol(
+    let committed = Fact::new(
+        OrderTime([2u8; 32]),
+        TimeStamp::OrderClock(OrderTime([2u8; 32])),
+        FactContent::Relational(RelationalFact::Protocol(
             ProtocolRelationalFact::AmpCommittedChannelEpochBump(CommittedChannelEpochBump {
                 context: ctx,
                 channel,
@@ -42,7 +42,7 @@ fn recovery_from_journal_reconstructs_channel_state() {
                 transcript_ref: None,
             }),
         )),
-    };
+    );
 
     let mut journal = Journal::new(JournalNamespace::Context(ctx));
     journal.add_fact(checkpoint).unwrap();
