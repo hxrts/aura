@@ -335,6 +335,7 @@ async fn test_chat_signal_message_accumulation() {
             is_read: false,
             reply_to: None,
             delivery_status: MessageDeliveryStatus::default(),
+            epoch_hint: None,
             is_finalized: false,
         });
 
@@ -350,6 +351,7 @@ async fn test_chat_signal_message_accumulation() {
             is_read: true,
             reply_to: None,
             delivery_status: MessageDeliveryStatus::default(),
+            epoch_hint: None,
             is_finalized: false,
         });
 
@@ -412,6 +414,7 @@ async fn test_chat_signal_message_accumulation() {
                 is_read: false,
                 reply_to: None,
                 delivery_status: MessageDeliveryStatus::default(),
+                epoch_hint: None,
                 is_finalized: false,
             });
         }
