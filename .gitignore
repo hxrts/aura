@@ -72,8 +72,9 @@ verification/lean/build/
 verification/lean/Generated/
 verification/lean/.lean_build/
 
-# Quint ITF trace outputs (generated)
-verification/traces/
+# Quint ITF trace outputs (generated, but keep README)
+verification/traces/*.itf.json
+verification/traces/*.json
 
 # Apalache model checker artifacts
 _apalache-out/
