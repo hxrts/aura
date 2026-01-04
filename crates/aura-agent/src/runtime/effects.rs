@@ -40,11 +40,14 @@ use aura_journal::extensibility::FactRegistry;
 use aura_journal::fact::{DkgTranscriptCommit, Fact as TypedFact, FactContent, RelationalFact};
 use aura_journal::protocol_facts::ProtocolRelationalFact;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
-use biscuit_auth::{Biscuit, KeyPair, PublicKey};
+use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
 use parking_lot::RwLock;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use std::sync::{Arc, Once};
+use std::sync::Arc;
+#[cfg(debug_assertions)]
+use std::sync::Once;
+#[cfg(debug_assertions)]
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -70,6 +73,7 @@ const DEFAULT_WINDOW: u32 = 1024;
 const TYPED_FACT_STORAGE_PREFIX: &str = "journal/facts";
 const DEFAULT_CHOREO_FLOW_COST: u32 = 1;
 const CHOREO_FLOW_COST_PER_KB: u32 = 1;
+const AMP_CONTENT_TYPE: &str = "application/aura-amp";
 
 /// Concrete effect system combining all effects for runtime usage
 ///
@@ -837,7 +841,22 @@ impl AuraEffectSystem {
         Option<Vec<u8>>,
     ) {
         let keypair = KeyPair::new();
-        match Biscuit::builder().build(&keypair) {
+        let authority = authority_id.to_string();
+        let token = biscuit!(
+            r#"
+            authority({authority});
+            role("owner");
+            capability("read");
+            capability("write");
+            capability("execute");
+            capability("delegate");
+            capability("admin");
+            capability("flow_charge");
+        "#
+        )
+        .build(&keypair);
+
+        match token {
             Ok(token) => {
                 let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
                 let verifying_key = keypair.public().to_bytes().to_vec();

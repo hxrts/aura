@@ -10,9 +10,12 @@ use crate::core::{nonce_from_header, ratchet_from_epoch_state};
 use crate::get_channel_state;
 use crate::wire::{deserialize_message, serialize_message, AmpMessage};
 use crate::{AmpEvidenceEffects, AmpJournalEffects};
-use aura_core::effects::amp::AmpHeader as CoreAmpHeader;
+use aura_core::effects::amp::{AmpCiphertext, AmpHeader as CoreAmpHeader};
 use aura_core::effects::time::PhysicalTimeEffects;
-use aura_core::effects::{CryptoEffects, NetworkEffects, RandomEffects};
+use aura_core::effects::{
+    CryptoEffects, NetworkEffects, RandomEffects, SecureStorageCapability, SecureStorageEffects,
+    SecureStorageLocation,
+};
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
@@ -22,6 +25,7 @@ use aura_guards::{GuardEffects, GuardOperation, GuardOperationId};
 use aura_journal::fact::{
     DkgTranscriptCommit, FactContent, ProposedChannelEpochBump, RelationalFact,
 };
+use aura_journal::ChannelEpochState;
 use aura_transport::amp::{
     derive_for_recv, derive_for_send, AmpError, AmpHeader as TransportAmpHeader, RatchetDerivation,
 };
@@ -132,6 +136,40 @@ fn latest_transcript_ref_from_context(
     latest.and_then(|commit| commit.blob_ref.or(Some(commit.transcript_hash)))
 }
 
+async fn derive_bootstrap_message_key<E: SecureStorageEffects>(
+    effects: &E,
+    context: ContextId,
+    channel: ChannelId,
+    bootstrap_id: aura_core::Hash32,
+    header: &TransportAmpHeader,
+) -> Result<aura_core::Hash32> {
+    let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
+    let key_bytes = effects
+        .secure_retrieve(&location, &[SecureStorageCapability::Read])
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to read AMP bootstrap key: {e}")))?;
+
+    if key_bytes.len() != 32 {
+        return Err(AuraError::invalid(format!(
+            "AMP bootstrap key has invalid length: {}",
+            key_bytes.len()
+        )));
+    }
+
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&key_bytes);
+    let master_key = aura_core::Hash32::new(key);
+
+    aura_core::crypto::amp::derive_message_key(
+        &master_key,
+        context.as_bytes(),
+        channel.as_bytes(),
+        header.chan_epoch,
+        header.ratchet_gen,
+    )
+    .map_err(|e| AuraError::crypto(format!("AMP bootstrap KDF failed: {e}")))
+}
+
 // ============================================================================
 // Low-level Operations
 // ============================================================================
@@ -141,20 +179,20 @@ pub async fn prepare_send<E: AmpJournalEffects>(
     effects: &E,
     context: ContextId,
     channel: ChannelId,
-) -> Result<RatchetDerivation> {
+) -> Result<(ChannelEpochState, RatchetDerivation)> {
     let state = get_channel_state(effects, context, channel).await?;
     let ratchet_state = ratchet_from_epoch_state(&state);
-    derive_for_send(context, channel, &ratchet_state, state.current_gen).map_err(map_amp_error)
+    let deriv =
+        derive_for_send(context, channel, &ratchet_state, state.current_gen).map_err(map_amp_error)?;
+    Ok((state, deriv))
 }
 
 /// Validate an incoming AMP header against reduced state and derive recv keys.
-pub async fn validate_header<E: AmpJournalEffects>(
-    effects: &E,
-    context: ContextId,
+pub fn validate_header(
+    state: &ChannelEpochState,
     header: TransportAmpHeader,
 ) -> Result<(RatchetDerivation, (u64, u64))> {
-    let state = get_channel_state(effects, context, header.channel).await?;
-    let ratchet_state = ratchet_from_epoch_state(&state);
+    let ratchet_state = ratchet_from_epoch_state(state);
     let bounds = aura_transport::amp::window_bounds(
         ratchet_state.last_checkpoint_gen,
         ratchet_state.skip_window,
@@ -245,34 +283,56 @@ pub async fn commit_bump_with_consensus<
 // ============================================================================
 
 /// High-level send path: reduce, derive header/key, encrypt, guard, and broadcast.
+///
+/// Returns the AMP ciphertext (header + sealed payload) for local persistence.
 #[instrument(skip(effects, payload, config), fields(context = %context, channel = %channel))]
 pub async fn amp_send<E>(
-    effects: &mut E,
+    effects: &E,
     context: ContextId,
     channel: ChannelId,
     payload: Vec<u8>,
     config: &AmpRuntimeConfig,
-) -> Result<TransportAmpHeader>
+) -> Result<AmpCiphertext>
 where
     E: AmpJournalEffects
         + NetworkEffects
         + GuardEffects
         + GuardContextProvider
         + CryptoEffects
+        + SecureStorageEffects
         + aura_core::PhysicalTimeEffects
         + aura_core::TimeEffects,
 {
     let payload_size = payload.len();
 
     // Phase 1: Prepare send (journal reduction and ratchet derivation)
-    let deriv = prepare_send(effects, context, channel).await.map_err(|e| {
+    let (state, deriv) = prepare_send(effects, context, channel).await.map_err(|e| {
         AMP_TELEMETRY.log_send_failure(context, channel, &e);
         e
     })?;
     let header = deriv.header;
 
     // Phase 2: AEAD encryption
-    let key = deriv.message_key.0;
+    let message_key = if header.chan_epoch == 0 {
+        match state.bootstrap.as_ref() {
+            Some(bootstrap) => derive_bootstrap_message_key(
+                effects,
+                context,
+                channel,
+                bootstrap.bootstrap_id,
+                &header,
+            )
+            .await
+            .map_err(|e| {
+                AMP_TELEMETRY.log_send_failure(context, channel, &e);
+                e
+            })?,
+            None => deriv.message_key,
+        }
+    } else {
+        deriv.message_key
+    };
+    let key = message_key.0;
     let nonce = nonce_from_header(&header);
     let sealed = effects
         .aes_gcm_encrypt(&payload, &key, &nonce)
@@ -284,7 +344,8 @@ where
         })?;
 
     // Phase 3: Serialize
-    let msg = AmpMessage::new(to_core_header(header), sealed.clone());
+    let core_header = to_core_header(header);
+    let msg = AmpMessage::new(core_header.clone(), sealed.clone());
     let bytes = serialize_message(&msg).map_err(|e| {
         AMP_TELEMETRY.log_send_failure(context, channel, &e);
         e
@@ -340,14 +401,17 @@ where
         guard_result.receipt.as_ref(),
     );
 
-    Ok(header)
+    Ok(AmpCiphertext {
+        header: core_header,
+        ciphertext: sealed,
+    })
 }
 
 /// High-level recv path: decode, validate header/window, and decrypt.
 #[instrument(skip(effects, bytes), fields(context = %context))]
 pub async fn amp_recv<E>(effects: &E, context: ContextId, bytes: Vec<u8>) -> Result<AmpMessage>
 where
-    E: AmpJournalEffects + CryptoEffects,
+    E: AmpJournalEffects + CryptoEffects + SecureStorageEffects,
 {
     let wire_size = bytes.len();
 
@@ -367,9 +431,9 @@ where
 
     // Phase 3: Window/epoch validation
     let transport_header = to_transport_header(&wire.header);
-    let (deriv, window_validation) = validate_and_build_result(effects, context, transport_header)
-        .await
-        .map_err(|(e, validation)| {
+    let state = get_channel_state(effects, context, transport_header.channel).await?;
+    let (deriv, window_validation) =
+        validate_and_build_result(&state, transport_header).map_err(|(e, validation)| {
             AMP_TELEMETRY.log_receive_failure(
                 context,
                 Some(&transport_header),
@@ -380,7 +444,31 @@ where
         })?;
 
     // Phase 4: AEAD decryption
-    let key = deriv.message_key.0;
+    let message_key = if transport_header.chan_epoch == 0 {
+        match state.bootstrap.as_ref() {
+            Some(bootstrap) => derive_bootstrap_message_key(
+                effects,
+                context,
+                transport_header.channel,
+                bootstrap.bootstrap_id,
+                &transport_header,
+            )
+            .await
+            .map_err(|e| {
+                AMP_TELEMETRY.log_receive_failure(
+                    context,
+                    Some(&transport_header),
+                    Some(&window_validation),
+                    &e,
+                );
+                e
+            })?,
+            None => deriv.message_key,
+        }
+    } else {
+        deriv.message_key
+    };
+    let key = message_key.0;
     let nonce = nonce_from_header(&transport_header);
     let opened = effects
         .aes_gcm_decrypt(&wire.payload, &key, &nonce)
@@ -409,15 +497,14 @@ where
 }
 
 /// Helper to validate header and build window validation result.
-async fn validate_and_build_result<E: AmpJournalEffects>(
-    effects: &E,
-    context: ContextId,
+fn validate_and_build_result(
+    state: &ChannelEpochState,
     header: TransportAmpHeader,
 ) -> std::result::Result<
     (RatchetDerivation, WindowValidationResult),
     (AuraError, Option<WindowValidationResult>),
 > {
-    match validate_header(effects, context, header).await {
+    match validate_header(state, header) {
         Ok((deriv, bounds)) => {
             let validation =
                 create_window_validation_result(true, true, bounds, header.ratchet_gen, None);
@@ -452,7 +539,7 @@ pub async fn amp_recv_with_receipt<E>(
     bytes: Vec<u8>,
 ) -> Result<AmpDelivery>
 where
-    E: AmpJournalEffects + CryptoEffects,
+    E: AmpJournalEffects + CryptoEffects + SecureStorageEffects,
 {
     let msg = amp_recv(effects, context, bytes).await?;
     Ok(AmpDelivery {

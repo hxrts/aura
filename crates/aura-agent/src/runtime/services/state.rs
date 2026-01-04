@@ -13,6 +13,7 @@ where
 }
 
 /// Mutate state and run a debug-only validation hook.
+#[allow(unused_variables)] // validate only used in debug builds
 pub async fn with_state_mut_validated<State, F, V, R>(
     state: &Arc<RwLock<State>>,
     mutator: F,

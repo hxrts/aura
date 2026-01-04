@@ -5,9 +5,9 @@
 use crate::error::{TerminalError, TerminalResult};
 use aura_agent::handlers::{
     GuardianProfile, GuardianSet, GuardianSetupCoordinator, RecoveryContext, RecoveryOperationType,
-    RecoveryRequest,
 };
 use aura_agent::AgentConfig;
+use aura_recovery::RecoveryRequest;
 use aura_core::effects::PhysicalTimeEffects;
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 use std::collections::HashMap;

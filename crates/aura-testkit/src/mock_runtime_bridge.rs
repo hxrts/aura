@@ -25,8 +25,8 @@ use aura_app::IntentError;
 use aura_app::ReactiveHandler;
 use aura_core::domain::Hash32;
 use aura_core::effects::amp::{
-    AmpCiphertext, AmpHeader, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
-    ChannelLeaveParams, ChannelSendParams,
+    AmpCiphertext, AmpHeader, ChannelBootstrapPackage, ChannelCloseParams, ChannelCreateParams,
+    ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -289,6 +289,18 @@ impl RuntimeBridge for MockRuntimeBridge {
         _params: ChannelCreateParams,
     ) -> Result<ChannelId, IntentError> {
         Ok(ChannelId::new(Hash32::default()))
+    }
+
+    async fn amp_create_channel_bootstrap(
+        &self,
+        _context: ContextId,
+        _channel: ChannelId,
+        _recipients: Vec<AuthorityId>,
+    ) -> Result<ChannelBootstrapPackage, IntentError> {
+        Ok(ChannelBootstrapPackage {
+            bootstrap_id: Hash32::default(),
+            key: vec![0u8; 32],
+        })
     }
 
     async fn amp_close_channel(&self, _params: ChannelCloseParams) -> Result<(), IntentError> {
@@ -775,6 +787,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         receiver: AuthorityId,
         home_id: String,
+        _bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {

@@ -404,6 +404,7 @@ async fn test_channel_invitation() -> TestResult {
         .invite_to_channel(
             invitee,
             "channel-xyz-123".to_string(),
+            None,
             Some("Join our discussion channel".to_string()),
             None,
         )
@@ -415,7 +416,7 @@ async fn test_channel_invitation() -> TestResult {
     let shareable = InvitationServiceApi::import_code(&code)?;
 
     match shareable.invitation_type {
-        InvitationType::Channel { home_id } => {
+        InvitationType::Channel { home_id, .. } => {
             assert_eq!(home_id, "channel-xyz-123");
         }
         _ => panic!("Expected Channel invitation type"),

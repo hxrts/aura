@@ -58,13 +58,14 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
                 max_width: 70pct,
                 border_style: Borders::PRIMARY,
                 border_color: border_color,
-                padding: Spacing::PANEL_PADDING,
+                padding_left: Spacing::PANEL_PADDING,
+                padding_right: Spacing::PANEL_PADDING,
             ) {
                 // Header: sender + timestamp
                 View(
                     flex_direction: FlexDirection::Row,
                     justify_content: JustifyContent::SpaceBetween,
-                    margin_bottom: Spacing::XS,
+                    gap: Spacing::SM,
                 ) {
                     Text(content: sender, weight: Weight::Bold, color: Theme::TEXT_HIGHLIGHT)
                     View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {

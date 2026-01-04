@@ -29,6 +29,7 @@ use aura_core::{
 };
 use aura_journal::DomainFact;
 use std::sync::Arc;
+use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 
 /// Messaging backend policy (runtime-backed vs UI-local).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,6 +81,14 @@ async fn context_id_for_channel(
     channel_id: ChannelId,
 ) -> Result<ContextId, AuraError> {
     {
+        let chat = chat_snapshot(app_core).await;
+        if let Some(channel) = chat.channels.iter().find(|c| c.id == channel_id) {
+            if let Some(ctx_id) = channel.context_id {
+                return Ok(ctx_id);
+            }
+        }
+    }
+    {
         let core = app_core.read().await;
         let homes = core.views().get_homes();
         if let Some(home_state) = homes.home_state(&channel_id) {
@@ -121,6 +130,7 @@ pub async fn send_direct_message(
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
     let channel_id = dm_channel_id(target);
+    let target_id = parse_authority_id(target).ok();
 
     let now = timestamp_ms;
     with_chat_state(app_core, |chat_state| {
@@ -128,12 +138,14 @@ pub async fn send_direct_message(
         if !chat_state.channels.iter().any(|c| c.id == channel_id) {
             let dm_channel = Channel {
                 id: channel_id,
+                context_id: None,
                 name: format!("DM with {}", &target[..8.min(target.len())]),
                 topic: Some(format!("Direct messages with {target}")),
                 channel_type: ChannelType::DirectMessage,
                 unread_count: 0,
                 is_dm: true,
-                member_count: 2, // Self + target
+                member_ids: target_id.clone().into_iter().collect(),
+                member_count: target_id.map_or(1, |_| 2), // Self + target (if known)
                 last_message: None,
                 last_message_time: None,
                 last_activity: now,
@@ -183,11 +195,17 @@ pub async fn create_channel(
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
     let backend = messaging_backend(app_core).await;
+    let member_ids: Vec<AuthorityId> = members
+        .iter()
+        .map(|member| parse_authority_id(member))
+        .collect::<Result<Vec<_>, AuraError>>()?;
     let mut channel_id = ChannelId::from_bytes(hash(format!("local:{timestamp_ms}").as_bytes()));
+    let mut channel_context: Option<ContextId> = None;
 
     if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
         let context_id = current_home_context_or_fallback(app_core).await?;
+        channel_context = Some(context_id);
         let channel_hint = (!name.trim().is_empty()).then(|| channel_id_from_input(name));
         let params = ChannelCreateParams {
             context: context_id,
@@ -226,16 +244,6 @@ pub async fn create_channel(
             .await
             .map_err(|e| AuraError::agent(format!("Failed to persist channel: {e}")))?;
 
-        // Rotate into a finalized AMP epoch when policy allows.
-        if let Err(e) = runtime
-            .bump_channel_epoch(context_id, channel_id, "amp-bootstrap-finalize".to_string())
-            .await
-        {
-            #[cfg(feature = "instrumented")]
-            tracing::warn!(error = %e, "AMP bootstrap finalize bump failed");
-            #[cfg(not(feature = "instrumented"))]
-            let _ = e;
-        }
     } else if !name.trim().is_empty() {
         channel_id = channel_id_from_input(name);
     }
@@ -244,12 +252,14 @@ pub async fn create_channel(
     with_chat_state(app_core, |chat_state| {
         let channel = Channel {
             id: channel_id,
+            context_id: channel_context,
             name: name.to_string(),
             topic,
             channel_type: ChannelType::Home,
             unread_count: 0,
             is_dm: false,
-            member_count: 0,
+            member_ids: member_ids.clone(),
+            member_count: (member_ids.len() as u32).saturating_add(1),
             last_message: None,
             last_message_time: None,
             last_activity: timestamp_ms,
@@ -261,12 +271,12 @@ pub async fn create_channel(
     .await?;
 
     // Create channel invitations for selected members (if any).
-    if backend == MessagingBackend::Runtime && !members.is_empty() {
+    if backend == MessagingBackend::Runtime && !member_ids.is_empty() {
         let runtime = require_runtime(app_core).await?;
         let context_id = current_home_context_or_fallback(app_core).await?;
 
         let mut invitation_ids = Vec::new();
-        let total_n = (members.len() + 1) as u8;
+        let total_n = (member_ids.len() + 1) as u8;
         let threshold_k = if threshold_k == 0 {
             default_channel_threshold(total_n)
         } else {
@@ -276,12 +286,17 @@ pub async fn create_channel(
             "Group threshold: {threshold_k}-of-{total_n} (keys rotate after everyone accepts)"
         ));
 
-        for member in members {
-            let receiver = parse_authority_id(member)?;
+        let bootstrap = runtime
+            .amp_create_channel_bootstrap(context_id, channel_id, member_ids.clone())
+            .await
+            .map_err(|e| AuraError::agent(format!("Failed to bootstrap channel: {e}")))?;
+
+        for receiver in &member_ids {
             let invitation = crate::workflows::invitation::create_channel_invitation(
                 app_core,
-                receiver,
+                *receiver,
                 channel_id.to_string(),
+                Some(bootstrap.clone()),
                 invitation_message.clone(),
                 None,
             )
@@ -431,9 +446,11 @@ pub async fn send_message_ref(
 
     let message_id = format!("msg-{channel_id}-{timestamp_ms}");
     let backend = messaging_backend(app_core).await;
+    let mut channel_context: Option<ContextId> = None;
     let sender_id = if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
         let context_id = context_id_for_channel(app_core, channel_id).await?;
+        channel_context = Some(context_id);
 
         let cipher = runtime
             .amp_send_message(ChannelSendParams {
@@ -446,13 +463,17 @@ pub async fn send_message_ref(
             .await
             .map_err(|e| AuraError::agent(format!("Failed to send message: {e}")))?;
 
+        let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
+        let sealed = serialize_amp_message(&wire)
+            .map_err(|e| AuraError::agent(format!("Failed to encode AMP message: {e}")))?;
+
         let fact = ChatFact::message_sent_sealed_ms(
             context_id,
             channel_id,
             message_id.clone(),
             runtime.authority_id(),
             "You".to_string(),
-            cipher.ciphertext,
+            sealed,
             timestamp_ms,
             None,
         )
@@ -473,11 +494,13 @@ pub async fn send_message_ref(
         if !chat_state.channels.iter().any(|c| c.id == channel_id) {
             chat_state.add_channel(Channel {
                 id: channel_id,
+                context_id: channel_context,
                 name: channel_label,
                 topic: None,
                 channel_type: ChannelType::Home,
                 unread_count: 0,
                 is_dm: false,
+                member_ids: Vec::new(),
                 member_count: 1,
                 last_message: None,
                 last_message_time: None,
@@ -548,11 +571,13 @@ pub async fn start_direct_chat(
     // Create the DM channel
     let dm_channel = Channel {
         id: channel_id,
+        context_id: None,
         name: contact_name,
         topic: Some(format!("Direct messages with {contact_id}")),
         channel_type: ChannelType::DirectMessage,
         unread_count: 0,
         is_dm: true,
+        member_ids: vec![authority_id],
         member_count: 2, // Self + contact
         last_message: None,
         last_message_time: None,
@@ -664,6 +689,7 @@ pub async fn invite_user_to_channel(
         app_core,
         receiver,
         channel.clone(),
+        None,
         message,
         ttl_ms,
     )

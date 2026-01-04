@@ -30,8 +30,9 @@
 //! - Device attestation certificates
 //! - Critical configuration data
 
+use crate::identifiers::{ChannelId, ContextId};
 use crate::time::PhysicalTime;
-use crate::AuraError;
+use crate::{AuraError, Hash32};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -348,6 +349,19 @@ impl SecureStorageLocation {
     pub fn device_attestation(device_id: &str) -> Self {
         Self::new("device_attestation", device_id)
     }
+
+    /// Create a location for AMP channel bootstrap keys.
+    pub fn amp_bootstrap_key(
+        context: &ContextId,
+        channel: &ChannelId,
+        bootstrap_id: &Hash32,
+    ) -> Self {
+        Self::with_sub_key(
+            "amp_bootstrap_keys",
+            format!("{context}:{channel}"),
+            bootstrap_id.to_hex(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -395,5 +409,16 @@ mod tests {
         assert_eq!(location.namespace, "device_attestation");
         assert_eq!(location.key, "device789");
         assert_eq!(location.full_path(), "device_attestation/device789");
+    }
+
+    #[test]
+    fn test_amp_bootstrap_location() {
+        let context = ContextId::new_from_entropy([1u8; 32]);
+        let channel = ChannelId::from_bytes([2u8; 32]);
+        let bootstrap_id = Hash32::new([3u8; 32]);
+        let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
+        assert_eq!(location.namespace, "amp_bootstrap_keys");
+        assert_eq!(location.key, format!("{context}:{channel}"));
+        assert_eq!(location.sub_key, Some(bootstrap_id.to_hex()));
     }
 }

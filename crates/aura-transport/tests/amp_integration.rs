@@ -1,1 +1,28 @@
-//! Integration-ish tests for AMP transport helpers using simulated state.\n+\n+use aura_core::identifiers::{ChannelId, ContextId};\n+use aura_transport::amp::{derive_for_recv, derive_for_send, AmpHeader};\n+use aura_journal::ChannelEpochState;\n+\n+#[test]\n+fn dual_window_out_of_order_accepts_within_span() {\n+    let ctx = ContextId::new_from_entropy([1u8; 32]);\n+    let channel = ChannelId::from_bytes([2u8; 32]);\n+    let state = ChannelEpochState {\n+        chan_epoch: 0,\n+        pending_bump: None,\n+        last_checkpoint_gen: 0,\n+        current_gen: 0,\n+        skip_window: 4,\n+    };\n+\n+    // Send establishes gen 0..2\n+    let send0 = derive_for_send(ctx, channel, &state).unwrap();\n+    assert_eq!(send0.header.ratchet_gen, 0);\n+\n+    // Receive out-of-order but within 2W window\n+    let header = AmpHeader {\n+        context: ctx,\n+        channel,\n+        chan_epoch: 0,\n+        ratchet_gen: 6, // within 2 * window (8)\n+    };\n+\n+    assert!(derive_for_recv(&state, header).is_ok());\n+}\n+\n*** End Patch
+//! Integration-ish tests for AMP transport helpers using simulated state.
+
+use aura_core::identifiers::{ChannelId, ContextId};
+use aura_transport::amp::{derive_for_recv, derive_for_send, AmpHeader, AmpRatchetState};
+
+#[test]
+fn dual_window_out_of_order_accepts_within_span() {
+    let ctx = ContextId::new_from_entropy([1u8; 32]);
+    let channel = ChannelId::from_bytes([2u8; 32]);
+    let state = AmpRatchetState {
+        chan_epoch: 0,
+        last_checkpoint_gen: 0,
+        skip_window: 4,
+        pending_epoch: None,
+    };
+
+    let send0 = derive_for_send(ctx, channel, &state, 0).unwrap();
+    assert_eq!(send0.header.ratchet_gen, 0);
+
+    let header = AmpHeader {
+        context: ctx,
+        channel,
+        chan_epoch: 0,
+        ratchet_gen: 6, // within 2 * window (8)
+    };
+
+    assert!(derive_for_recv(&state, header).is_ok());
+}

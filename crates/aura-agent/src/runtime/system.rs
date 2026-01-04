@@ -309,6 +309,7 @@ impl RuntimeSystem {
             SchedulerConfig::default(),
             self.effect_system.fact_registry(),
             time_effects,
+            self.effect_system.clone(),
             self.authority_id,
             self.effect_system.reactive_handler(),
         );

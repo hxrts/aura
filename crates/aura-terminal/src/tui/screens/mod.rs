@@ -11,7 +11,7 @@ pub mod app;
 mod chat;
 mod contacts;
 mod invitations;
-mod neighborhood_v2;
+mod neighborhood;
 mod notifications;
 mod recovery;
 mod router;
@@ -33,9 +33,9 @@ pub use settings::MfaCallback;
 pub use app::{run_app_with_context, IoApp};
 pub use chat::{run_chat_screen, ChatFocus, ChatScreen};
 pub use contacts::{run_contacts_screen, ContactsScreen};
-pub use neighborhood_v2::home_create_modal::HomeCreateModal;
-pub use neighborhood_v2::{
-    run_neighborhood_screen_v2, NeighborhoodScreenV2, NeighborhoodScreenV2Props,
+pub use neighborhood::home_create_modal::HomeCreateModal;
+pub use neighborhood::{
+    run_neighborhood_screen, NeighborhoodScreen, NeighborhoodScreenProps,
 };
 pub use notifications::{run_notifications_screen, NotificationsScreen};
 pub use router::{NavAction, Router, Screen};

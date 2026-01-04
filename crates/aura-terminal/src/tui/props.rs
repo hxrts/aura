@@ -60,6 +60,7 @@ pub struct ChatViewProps {
     pub info_modal_visible: bool,
     pub info_modal_channel_name: String,
     pub info_modal_topic: String,
+    pub info_modal_participants: Vec<String>,
 }
 
 /// Extract ChatScreen view props from TuiState
@@ -129,10 +130,16 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
         _ => (false, String::new()),
     };
 
-    let (info_visible, info_channel_name, info_topic) = match state.modal_queue.current() {
-        Some(QueuedModal::ChatInfo(s)) => (true, s.channel_name.clone(), s.topic.clone()),
-        _ => (false, String::new(), String::new()),
-    };
+    let (info_visible, info_channel_name, info_topic, info_participants) =
+        match state.modal_queue.current() {
+            Some(QueuedModal::ChatInfo(s)) => (
+                true,
+                s.channel_name.clone(),
+                s.topic.clone(),
+                s.participants.clone(),
+            ),
+            _ => (false, String::new(), String::new(), Vec::new()),
+        };
 
     ChatViewProps {
         focus,
@@ -161,6 +168,7 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
         info_modal_visible: info_visible,
         info_modal_channel_name: info_channel_name,
         info_modal_topic: info_topic,
+        info_modal_participants: info_participants,
     }
 }
 

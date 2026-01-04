@@ -169,7 +169,7 @@ fn format_invitation_type(shareable: &ShareableInvitation) -> String {
         aura_agent::handlers::InvitationType::Guardian { subject_authority } => {
             format!("Guardian (for: {subject_authority})")
         }
-        aura_agent::handlers::InvitationType::Channel { home_id } => {
+        aura_agent::handlers::InvitationType::Channel { home_id, .. } => {
             format!("Channel (home: {home_id})")
         }
         aura_agent::handlers::InvitationType::DeviceEnrollment {
@@ -217,7 +217,7 @@ async fn create_invitation(
             .await
             .map_err(|e| TerminalError::Operation(e.to_string())),
         InvitationRoleValue::Channel => service
-            .invite_to_channel(receiver_id, "channel".to_string(), None, expires_ms)
+            .invite_to_channel(receiver_id, "channel".to_string(), None, None, expires_ms)
             .await
             .map_err(|e| TerminalError::Operation(e.to_string())),
         InvitationRoleValue::Contact { nickname } => service
@@ -275,6 +275,7 @@ mod tests {
     fn test_format_invitation_type_channel() {
         let shareable = test_shareable(InvitationType::Channel {
             home_id: "home-123".to_string(),
+            bootstrap: None,
         });
         let result = format_invitation_type(&shareable);
         assert_eq!(result, "Channel (home: home-123)");

@@ -583,11 +583,11 @@ jobs:
       - name: Run ITF conformance tests
         run: |
           echo "Running ITF conformance tests..."
-          cargo test -p aura-protocol --test consensus_itf_conformance -- --nocapture
+          cargo test -p aura-testkit --test consensus_itf_conformance -- --nocapture
       - name: Run differential tests
         run: |
           echo "Running differential tests (production vs reference)..."
-          cargo test -p aura-protocol --test consensus_differential -- --nocapture
+          cargo test -p aura-testkit --test consensus_differential -- --nocapture
       - name: Report conformance status
         if: always()
         run: |

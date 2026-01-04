@@ -21,6 +21,7 @@ use crate::facts::InvitationFact;
 use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
 };
+use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
@@ -101,6 +102,9 @@ pub enum InvitationType {
     Channel {
         /// Home/channel identifier
         home_id: String,
+        /// Optional bootstrap key package for provisional AMP messaging.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bootstrap: Option<ChannelBootstrapPackage>,
     },
     /// Invitation to become a guardian
     Guardian {
@@ -666,7 +670,8 @@ mod tests {
     fn test_invitation_type_as_string() {
         assert_eq!(
             InvitationType::Channel {
-                home_id: "b".to_string()
+                home_id: "b".to_string(),
+                bootstrap: None,
             }
             .as_type_string(),
             "channel"

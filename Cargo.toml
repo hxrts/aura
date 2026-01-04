@@ -124,6 +124,7 @@ tokio-stream = "0.1"
 # Development and testing
 tokio-test = "0.4"
 tempfile = "3.8"
+assert_matches = "1.5"
 serial_test = "3.0"
 trybuild = "1.0"
 biscuit-auth = "5.0"

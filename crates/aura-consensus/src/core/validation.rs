@@ -284,6 +284,43 @@ pub fn check_threshold_met(state: &ConsensusState) -> bool {
     }
 }
 
+/// Check equivocator exclusion invariant: equivocators are not attesters.
+///
+/// Quint: `InvariantEquivocatorsExcluded`
+///
+/// Lean: Aura.Consensus.Equivocation.exclusion_correctness
+pub fn check_equivocators_excluded(state: &ConsensusState) -> bool {
+    match &state.commit_fact {
+        Some(_cf) => {
+            // In the pure model, attesters are derived from proposals
+            // so we verify no equivocator is in the proposals set
+            let proposal_witnesses: std::collections::BTreeSet<_> =
+                state.proposals.iter().map(|p| p.witness).collect();
+            // No equivocator should be in proposals (they are filtered in apply_share)
+            state
+                .equivocators
+                .iter()
+                .all(|eq| !proposal_witnesses.contains(eq))
+        }
+        None => true, // No commit to check
+    }
+}
+
+/// Check all critical invariants at once.
+///
+/// Combines:
+/// - InvariantUniqueCommitPerInstance (via check_agreement on committed facts)
+/// - InvariantCommitRequiresThreshold
+/// - InvariantEquivocatorsExcluded
+/// - WellFormedState (via check_invariants)
+///
+/// Used by debug_assert! in transition functions.
+pub fn check_all_invariants(state: &ConsensusState) -> bool {
+    check_invariants(state).is_ok()
+        && check_threshold_met(state)
+        && check_equivocators_excluded(state)
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

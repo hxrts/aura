@@ -296,7 +296,7 @@ impl SendGuardChain {
         }
     }
 
-    /// Evaluate the guard chain and, if authorized, apply journal coupling hooks (requires &mut).
+    /// Evaluate the guard chain and, if authorized, apply journal coupling hooks.
     pub async fn evaluate_with_coupling<
         E: GuardEffects
             + GuardContextProvider
@@ -304,7 +304,7 @@ impl SendGuardChain {
             + aura_core::PhysicalTimeEffects,
     >(
         &self,
-        effect_system: &mut E,
+        effect_system: &E,
     ) -> AuraResult<SendGuardResult> {
         let result = self.evaluate(effect_system).await?;
 

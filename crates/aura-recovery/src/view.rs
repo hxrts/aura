@@ -741,6 +741,7 @@ impl ViewDeltaReducer for RecoveryViewReducer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use aura_composition::compact_deltas;
     use aura_composition::downcast_delta;
     use aura_core::{identifiers::ContextId, time::PhysicalTime, Hash32};
@@ -786,18 +787,11 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
-        match delta {
-            RecoveryDelta::GuardianSetupStarted {
-                guardian_count,
-                threshold,
-                started_at,
-            } => {
-                assert_eq!(*guardian_count, 3);
-                assert_eq!(*threshold, 2);
-                assert_eq!(*started_at, 1234567890);
-            }
-            _ => panic!("Expected GuardianSetupStarted delta"),
-        }
+        assert_matches!(
+            delta,
+            RecoveryDelta::GuardianSetupStarted { guardian_count, threshold, started_at }
+                if *guardian_count == 3 && *threshold == 2 && *started_at == 1234567890
+        );
     }
 
     #[test]
@@ -816,12 +810,7 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
-        match delta {
-            RecoveryDelta::GuardianResponded { accepted, .. } => {
-                assert!(*accepted);
-            }
-            _ => panic!("Expected GuardianResponded delta"),
-        }
+        assert_matches!(delta, RecoveryDelta::GuardianResponded { accepted, .. } if *accepted);
     }
 
     #[test]
@@ -840,12 +829,7 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
-        match delta {
-            RecoveryDelta::GuardianResponded { accepted, .. } => {
-                assert!(!*accepted);
-            }
-            _ => panic!("Expected GuardianResponded delta"),
-        }
+        assert_matches!(delta, RecoveryDelta::GuardianResponded { accepted, .. } if !*accepted);
     }
 
     #[test]
@@ -865,12 +849,11 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
-        match delta {
-            RecoveryDelta::RecoverySucceeded { completed_at, .. } => {
-                assert_eq!(*completed_at, 1234567999);
-            }
-            _ => panic!("Expected RecoverySucceeded delta"),
-        }
+        assert_matches!(
+            delta,
+            RecoveryDelta::RecoverySucceeded { completed_at, .. }
+                if *completed_at == 1234567999
+        );
     }
 
     #[test]
@@ -890,12 +873,11 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
-        match delta {
-            RecoveryDelta::RecoveryApproved { approved_at, .. } => {
-                assert_eq!(*approved_at, 1234567990);
-            }
-            _ => panic!("Expected RecoveryApproved delta"),
-        }
+        assert_matches!(
+            delta,
+            RecoveryDelta::RecoveryApproved { approved_at, .. }
+                if *approved_at == 1234567990
+        );
     }
 
     #[test]
@@ -916,15 +898,11 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
-        match delta {
-            RecoveryDelta::MembershipProposalCreated {
-                change_description, ..
-            } => {
-                assert!(change_description.contains("threshold"));
-                assert!(change_description.contains("3"));
-            }
-            _ => panic!("Expected MembershipProposalCreated delta"),
-        }
+        let RecoveryDelta::MembershipProposalCreated { change_description, .. } = delta else {
+            panic!("Expected MembershipProposalCreated delta");
+        };
+        assert!(change_description.contains("threshold"));
+        assert!(change_description.contains("3"));
     }
 
     #[test]
@@ -1024,17 +1002,10 @@ mod tests {
 
         let compacted = compact_deltas(deltas);
         assert_eq!(compacted.len(), 1);
-        match &compacted[0] {
-            RecoveryDelta::GuardianSetupProgress {
-                accepted_count,
-                total_count,
-                threshold,
-            } => {
-                assert_eq!(*accepted_count, 2);
-                assert_eq!(*total_count, 3);
-                assert_eq!(*threshold, 2);
-            }
-            _ => panic!("Expected GuardianSetupProgress after compaction"),
-        }
+        assert_matches!(
+            &compacted[0],
+            RecoveryDelta::GuardianSetupProgress { accepted_count, total_count, threshold }
+                if *accepted_count == 2 && *total_count == 3 && *threshold == 2
+        );
     }
 }

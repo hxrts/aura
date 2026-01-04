@@ -7,17 +7,19 @@
 //! guard chain integration. Types are re-exported from `aura_invitation`.
 
 use super::shared::{HandlerContext, HandlerUtilities};
-use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::core::{default_context_id_for_authority, AgentError, AgentResult, AuthorityContext};
 use crate::runtime::services::InvitationManager;
 use crate::runtime::AuraEffectSystem;
 use crate::InvitationServiceApi;
+use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::effects::{
     FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportReceipt,
 };
 use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
-use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
+use aura_core::hash::hash;
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::time::PhysicalTime;
 use aura_core::FlowCost;
 use aura_core::Receipt;
@@ -30,6 +32,7 @@ use aura_journal::DomainFact;
 use aura_protocol::effects::EffectApiEffects;
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use std::collections::HashMap;
+use std::str::FromStr;
 
 // Re-export types from aura_invitation for public API
 pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
@@ -48,6 +51,17 @@ pub struct InvitationResult {
     pub new_status: Option<InvitationStatus>,
     /// Error message if action failed
     pub error: Option<String>,
+}
+
+struct ChannelBootstrapInvite {
+    context_id: ContextId,
+    channel_id: ChannelId,
+    package: ChannelBootstrapPackage,
+}
+
+fn channel_id_from_home_id(home_id: &str) -> ChannelId {
+    ChannelId::from_str(home_id)
+        .unwrap_or_else(|_| ChannelId::from_bytes(hash(home_id.as_bytes())))
 }
 
 /// Invitation handler
@@ -392,6 +406,43 @@ impl InvitationHandler {
                 })?;
         }
 
+        if let Some(channel_invite) = self
+            .resolve_channel_invitation(effects, invitation_id)
+            .await?
+        {
+            let ChannelBootstrapPackage { bootstrap_id, key } = channel_invite.package;
+
+            if key.len() != 32 {
+                return Err(crate::core::AgentError::invalid(format!(
+                    "AMP bootstrap key has invalid length: {}",
+                    key.len()
+                )));
+            }
+
+            let location = SecureStorageLocation::amp_bootstrap_key(
+                &channel_invite.context_id,
+                &channel_invite.channel_id,
+                &bootstrap_id,
+            );
+
+            effects
+                .secure_store(
+                    &location,
+                    &key,
+                    &[
+                        SecureStorageCapability::Read,
+                        SecureStorageCapability::Write,
+                    ],
+                )
+                .await
+                .map_err(|e| {
+                    crate::core::AgentError::effects(format!(
+                        "store AMP bootstrap key: {e}"
+                    ))
+                })?;
+
+        }
+
         // Device enrollment: install share + notify initiator device runtime.
         if let Some(enrollment) = self
             .resolve_device_enrollment_invitation(effects, invitation_id)
@@ -698,6 +749,103 @@ impl InvitationHandler {
         Ok(None)
     }
 
+    async fn resolve_channel_invitation(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<Option<ChannelBootstrapInvite>> {
+        let own_id = self.context.authority.authority_id();
+
+        if let Some(inv) = self.invitation_cache.get_invitation(invitation_id).await {
+            if let InvitationType::Channel {
+                home_id,
+                bootstrap: Some(package),
+            } = &inv.invitation_type
+            {
+                return Ok(Some(ChannelBootstrapInvite {
+                    context_id: inv.context_id,
+                    channel_id: channel_id_from_home_id(home_id),
+                    package: package.clone(),
+                }));
+            }
+        }
+
+        if let Some(shareable) =
+            Self::load_imported_invitation(effects, own_id, invitation_id).await
+        {
+            if let InvitationType::Channel {
+                home_id,
+                bootstrap: Some(package),
+            } = shareable.invitation_type
+            {
+                return Ok(Some(ChannelBootstrapInvite {
+                    context_id: default_context_id_for_authority(shareable.sender_id),
+                    channel_id: channel_id_from_home_id(&home_id),
+                    package,
+                }));
+            }
+        }
+
+        let Ok(facts) = effects.load_committed_facts(own_id).await else {
+            return Ok(None);
+        };
+
+        for fact in facts.iter().rev() {
+            let FactContent::Relational(RelationalFact::Generic {
+                binding_type,
+                binding_data,
+                ..
+            }) = &fact.content
+            else {
+                continue;
+            };
+
+            if binding_type != INVITATION_FACT_TYPE_ID {
+                continue;
+            }
+
+            let Some(inv_fact) = InvitationFact::from_bytes(binding_data) else {
+                continue;
+            };
+
+            let InvitationFact::Sent {
+                invitation_id: seen_id,
+                sender_id,
+                receiver_id,
+                invitation_type,
+                context_id,
+                ..
+            } = inv_fact
+            else {
+                continue;
+            };
+
+            if seen_id != *invitation_id {
+                continue;
+            }
+
+            if receiver_id != own_id {
+                return Ok(None);
+            }
+
+            if let InvitationType::Channel {
+                home_id,
+                bootstrap: Some(package),
+            } = invitation_type
+            {
+                return Ok(Some(ChannelBootstrapInvite {
+                    context_id,
+                    channel_id: channel_id_from_home_id(&home_id),
+                    package,
+                }));
+            }
+
+            return Ok(None);
+        }
+
+        Ok(None)
+    }
+
     /// Import an invitation from a shareable code into the local cache.
     ///
     /// This is a best-effort, local-only operation used for out-of-band invite
@@ -730,11 +878,17 @@ impl InvitationHandler {
         }
 
         let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let context_id = match &shareable.invitation_type {
+            InvitationType::Channel { .. } => {
+                default_context_id_for_authority(shareable.sender_id)
+            }
+            _ => self.context.effect_context.context_id(),
+        };
 
         // Imported invitations are "received" by the current authority.
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
-            context_id: self.context.effect_context.context_id(),
+            context_id,
             sender_id: shareable.sender_id,
             receiver_id: self.context.authority.authority_id(),
             invitation_type: shareable.invitation_type,
@@ -1454,6 +1608,7 @@ mod tests {
                 receiver_id,
                 InvitationType::Channel {
                     home_id: "home-123".to_string(),
+                    bootstrap: None,
                 },
                 None,
                 None,
@@ -1813,6 +1968,7 @@ mod tests {
             sender_id,
             invitation_type: InvitationType::Channel {
                 home_id: "home-xyz".to_string(),
+                bootstrap: None,
             },
             expires_at: Some(1800000000000),
             message: Some("Join my channel!".to_string()),
@@ -1822,7 +1978,7 @@ mod tests {
         let decoded = ShareableInvitation::from_code(&code).unwrap();
 
         match decoded.invitation_type {
-            InvitationType::Channel { home_id } => {
+            InvitationType::Channel { home_id, .. } => {
                 assert_eq!(home_id, "home-xyz");
             }
             _ => panic!("wrong invitation type"),

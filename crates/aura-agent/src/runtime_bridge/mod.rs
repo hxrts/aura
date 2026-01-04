@@ -19,8 +19,8 @@ use aura_app::IntentError;
 use aura_app::ReactiveHandler;
 use aura_core::effects::{
     amp::{
-        AmpChannelEffects, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
-        ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
+        AmpChannelEffects, AmpCiphertext, ChannelBootstrapPackage, ChannelCloseParams,
+        ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
     },
     random::RandomCoreEffects,
     reactive::ReactiveEffects,
@@ -38,7 +38,9 @@ use aura_core::DeviceId;
 use aura_core::EffectContext;
 use aura_core::Hash32;
 use aura_core::Prestate;
-use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump, RelationalFact};
+use aura_journal::fact::{
+    ChannelBootstrap, ChannelBumpReason, ProposedChannelEpochBump, RelationalFact,
+};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects};
 use aura_protocol::effects::TreeEffects;
@@ -46,6 +48,7 @@ use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
 use aura_social::moderation::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact,
 };
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::core::default_context_id_for_authority;
@@ -137,6 +140,112 @@ impl RuntimeBridge for AgentRuntimeBridge {
     ) -> Result<ChannelId, IntentError> {
         let effects = self.agent.runtime().effects();
         effects.create_channel(params).await.map_err(map_amp_error)
+    }
+
+    async fn amp_create_channel_bootstrap(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+        recipients: Vec<AuthorityId>,
+    ) -> Result<ChannelBootstrapPackage, IntentError> {
+        if recipients.is_empty() {
+            return Err(IntentError::internal_error(
+                "bootstrap recipients cannot be empty".to_string(),
+            ));
+        }
+
+        let effects = self.agent.runtime().effects();
+        let state = aura_protocol::amp::get_channel_state(&effects, context, channel)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("AMP state lookup failed: {e}")))?;
+
+        let mut requested_recipients = BTreeSet::new();
+        for recipient in recipients {
+            requested_recipients.insert(recipient);
+        }
+
+        if let Some(existing) = state.bootstrap.clone() {
+            if !requested_recipients.is_empty() {
+                let existing_recipients: BTreeSet<_> =
+                    existing.recipients.iter().copied().collect();
+                if !requested_recipients.is_subset(&existing_recipients) {
+                    return Err(IntentError::validation_failed(
+                        "AMP bootstrap already exists; refusing to add new recipients (late joiners cannot receive bootstrap keys)",
+                    ));
+                }
+            }
+
+            let location =
+                SecureStorageLocation::amp_bootstrap_key(&context, &channel, &existing.bootstrap_id);
+            let key = effects
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to load AMP bootstrap key: {e}"
+                    ))
+                })?;
+            if key.len() != 32 {
+                return Err(IntentError::internal_error(format!(
+                    "AMP bootstrap key has invalid length: {}",
+                    key.len()
+                )));
+            }
+
+            return Ok(ChannelBootstrapPackage {
+                bootstrap_id: existing.bootstrap_id,
+                key,
+            });
+        }
+
+        let key_bytes = effects.random_bytes_32().await;
+        let bootstrap_id = Hash32::from_bytes(&key_bytes);
+
+        let location = SecureStorageLocation::amp_bootstrap_key(&context, &channel, &bootstrap_id);
+        effects
+            .secure_store(
+                &location,
+                &key_bytes,
+                &[
+                    SecureStorageCapability::Read,
+                    SecureStorageCapability::Write,
+                ],
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to store AMP bootstrap key: {e}"))
+            })?;
+
+        let now = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?;
+
+        let bootstrap_fact = ChannelBootstrap {
+            context,
+            channel,
+            bootstrap_id,
+            dealer: self.agent.authority_id(),
+            recipients: requested_recipients.into_iter().collect(),
+            created_at: now,
+            expires_at: None,
+        };
+
+        effects
+            .insert_relational_fact(RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpChannelBootstrap(bootstrap_fact),
+            ))
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to commit AMP bootstrap fact: {e}"
+                ))
+            })?;
+
+        Ok(ChannelBootstrapPackage {
+            bootstrap_id,
+            key: key_bytes.to_vec(),
+        })
     }
 
     async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError> {
@@ -2183,6 +2292,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         &self,
         receiver: AuthorityId,
         home_id: String,
+        bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
@@ -2192,7 +2302,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
         let invitation = invitation_service
-            .invite_to_channel(receiver, home_id, message, ttl_ms)
+            .invite_to_channel(receiver, home_id, bootstrap, message, ttl_ms)
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to create channel invitation: {}", e))

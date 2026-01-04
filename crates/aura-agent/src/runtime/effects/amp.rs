@@ -1,8 +1,8 @@
 use super::{AuraEffectSystem, DEFAULT_WINDOW};
 use async_trait::async_trait;
 use aura_core::effects::{
-    AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, ChannelCloseParams,
-    ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
+    AmpChannelEffects, AmpChannelError, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
+    ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
     RandomCoreEffects, RandomExtendedEffects,
 };
 use aura_core::hash::hash;
@@ -194,23 +194,16 @@ impl AmpChannelEffects for AuraEffectSystem {
         &self,
         params: ChannelSendParams,
     ) -> Result<AmpCiphertext, AmpChannelError> {
-        let state = aura_protocol::amp::get_channel_state(self, params.context, params.channel)
-            .await
-            .map_err(map_amp_err)?;
-
-        let header = AmpHeader {
-            context: params.context,
-            channel: params.channel,
-            chan_epoch: state.chan_epoch,
-            ratchet_gen: 0,
-        };
-
-        let cipher = AmpCiphertext {
-            header,
-            ciphertext: params.plaintext.clone(),
-        };
-
-        Ok(cipher)
+        let config = aura_protocol::amp::config::AmpRuntimeConfig::default();
+        aura_protocol::amp::amp_send(
+            self,
+            params.context,
+            params.channel,
+            params.plaintext,
+            &config,
+        )
+        .await
+        .map_err(map_amp_err)
     }
 }
 

@@ -255,9 +255,7 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                     commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
                         content,
                     }));
-                    state.chat.insert_mode = false;
-                    state.chat.insert_mode_entry_char = None;
-                    state.chat.focus = ChatFocus::Input;
+                    // Stay in insert mode so user can continue typing
                 }
             }
             Screen::Neighborhood => {
@@ -267,9 +265,7 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                     commands.push(TuiCommand::Dispatch(DispatchCommand::SendHomeMessage {
                         content,
                     }));
-                    state.neighborhood.insert_mode = false;
-                    state.neighborhood.insert_mode_entry_char = None;
-                    state.neighborhood.detail_focus = DetailFocus::Input;
+                    // Stay in insert mode so user can continue typing
                 }
             }
             _ => {}

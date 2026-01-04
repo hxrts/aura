@@ -17,7 +17,7 @@
 
 use iocraft::prelude::*;
 
-use aura_app::ui::signals::CHAT_SIGNAL;
+use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL};
 use aura_app::ui::types::format_timestamp;
 
 use crate::tui::callbacks::{
@@ -29,7 +29,8 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ChatViewProps;
 use crate::tui::theme::{list_item_colors, Spacing, Theme};
-use crate::tui::types::{Channel, Message};
+use crate::tui::types::{format_contact_name, Channel, Contact, Message};
+use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
 /// Which panel is focused
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -130,6 +131,8 @@ pub struct ChatScreenProps {
     pub on_retry_message: Option<RetryMessageCallback>,
     /// Callback when setting channel topic (channel_id, topic)
     pub on_set_topic: Option<SetTopicCallback>,
+    /// UI update sender for syncing navigation state
+    pub update_tx: Option<UiUpdateSender>,
 }
 
 /// The main chat screen component
@@ -154,16 +157,38 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Initialize reactive state with defaults - will be populated by signal subscriptions
     let reactive_channels = hooks.use_state(Vec::new);
     let reactive_messages = hooks.use_state(Vec::new);
+    let reactive_contacts: State<Vec<Contact>> = hooks.use_state(Vec::new);
+
+    // Subscribe to contacts signal for nickname lookup
+    hooks.use_future({
+        let mut reactive_contacts = reactive_contacts.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
+                let contacts: Vec<Contact> = contacts_state
+                    .contacts
+                    .iter()
+                    .map(|c| Contact::from(c))
+                    .collect();
+                reactive_contacts.set(contacts);
+            })
+            .await;
+        }
+    });
 
     // Subscribe to chat signal updates
     // Uses the unified ReactiveEffects system from aura-core
     hooks.use_future({
         let mut reactive_channels = reactive_channels.clone();
         let mut reactive_messages = reactive_messages.clone();
+        let reactive_contacts = reactive_contacts.clone();
         let app_core = app_ctx.app_core.clone();
+        let update_tx = props.update_tx.clone();
         async move {
-            // Helper closure to convert ChatState to TUI types
-            let convert_chat_state = |chat_state: &aura_app::ui::types::ChatState| {
+            subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
+                // Read current contacts for nickname lookup
+                let contacts = reactive_contacts.read().clone();
+
                 let channels: Vec<Channel> = chat_state
                     .channels
                     .iter()
@@ -179,19 +204,33 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                     .iter()
                     .map(|m| {
                         let ts_str = format_timestamp(m.timestamp);
-                        Message::new(&m.id, &m.sender_name, &m.content)
+                        // Use contact lookup for sender display name (convert AuthorityId to string)
+                        let sender_id_str = m.sender_id.to_string();
+                        let sender_display = format_contact_name(&sender_id_str, &contacts);
+                        Message::new(&m.id, &sender_display, &m.content)
                             .with_timestamp(ts_str)
                             .own(m.is_own)
                     })
                     .collect();
 
-                (channels, messages)
-            };
-
-            subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let (channels, messages) = convert_chat_state(&chat_state);
                 reactive_channels.set(channels);
                 reactive_messages.set(messages);
+
+                // Sync navigation state via UiUpdate channel
+                // This ensures channel_count is updated when channels change
+                if let Some(ref tx) = update_tx {
+                    let selected_index = chat_state
+                        .selected_channel_id
+                        .as_ref()
+                        .and_then(|id| chat_state.channels.iter().position(|c| c.id == *id));
+
+                    let _ = tx.try_send(UiUpdate::ChatStateUpdated {
+                        channel_count: chat_state.channels.len(),
+                        message_count: chat_state.messages.len(),
+                        selected_index: selected_index
+                            .or((!chat_state.channels.is_empty()).then_some(0)),
+                    });
+                }
             })
             .await;
         }
@@ -231,16 +270,22 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 overflow: Overflow::Hidden,
                 gap: dim::TWO_PANEL_GAP,
             ) {
-                ChannelList(
-                    channels: channels,
-                    selected_index: current_channel_idx,
-                    focused: false,
-                )
-                MessagePanel(
-                    messages: messages,
-                    title: Some("Messages".to_string()),
-                    empty_message: Some(empty_message),
-                )
+                // Left panel: Channel list (matches other two-panel screens)
+                View(width: dim::TWO_PANEL_LEFT_WIDTH, height: 22) {
+                    ChannelList(
+                        channels: channels,
+                        selected_index: current_channel_idx,
+                        focused: false,
+                    )
+                }
+                // Right panel: Messages (matches other two-panel screens)
+                View(width: dim::TWO_PANEL_RIGHT_WIDTH, height: 22) {
+                    MessagePanel(
+                        messages: messages,
+                        title: Some("Messages".to_string()),
+                        empty_message: Some(empty_message),
+                    )
+                }
             }
 
             // Message input (3 rows) - full width

@@ -304,7 +304,7 @@ impl DemoSignalCoordinator {
                 // This flows through the scheduler to update CONTACTS_SIGNAL.
                 if core.runtime().is_some() {
                     match aura_app::ui::workflows::recovery::commit_guardian_binding(
-                        self.app_core.raw(),
+                        &self.app_core,
                         self.bob_authority,
                         authority_id.clone(),
                         Hash32::default(), // Demo uses empty hash

@@ -5,6 +5,7 @@
 //! module must remain interface-only (no state or OS access).
 
 use crate::identifiers::{AuthorityId, ChannelId, ContextId};
+use crate::Hash32;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +59,13 @@ pub struct AmpHeader {
 pub struct AmpCiphertext {
     pub header: AmpHeader,
     pub ciphertext: Vec<u8>,
+}
+
+/// Bootstrap package for provisional AMP channel encryption.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelBootstrapPackage {
+    pub bootstrap_id: Hash32,
+    pub key: Vec<u8>,
 }
 
 /// Optional parameters for channel creation

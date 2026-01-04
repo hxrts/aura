@@ -19,6 +19,7 @@
 //! ```
 
 pub mod action_registry;
+pub mod amp_channel_handlers;
 pub mod ast_parser;
 pub mod aura_state_extractors;
 pub mod byzantine_mapper;
@@ -100,6 +101,7 @@ pub use action_registry::{
     ActionBuilder, ActionHandler, ActionRegistry, ClosureActionHandler, FailHandler, LogHandler,
     NoOpHandler,
 };
+pub use amp_channel_handlers::{amp_channel_registry, AmpChannelHarness};
 pub use domain_handlers::{
     capability_properties_initial_state, capability_properties_registry, AttenuateTokenHandler,
     CompleteTransportOpHandler, InitAuthorityHandler, InitContextHandler,

@@ -15,6 +15,17 @@
 //! 2. No side effects: all I/O happens in calling layer
 //! 3. Deterministic: same inputs always produce same outputs
 //! 4. Verifiable: each function maps to exactly one Quint action
+//!
+//! ## Invariant Checking
+//! All transition functions include `debug_assert!` calls that verify Quint
+//! invariants after state transitions. These are only active in debug builds
+//! and provide early detection of invariant violations during development.
+//!
+//! Checked invariants (Quint correspondence):
+//! - `InvariantCommitRequiresThreshold` - commits have threshold attesters
+//! - `InvariantEquivocatorsExcluded` - equivocators excluded from attestation
+//! - `InvariantProposalsFromWitnesses` - proposals only from witnesses
+//! - `InvariantCommittedHasCommitFact` - committed phase implies commit fact
 
 use std::collections::BTreeSet;
 
@@ -22,6 +33,7 @@ use super::state::{
     ConsensusPhase, ConsensusState, ConsensusThreshold, PathSelection, PureCommitFact,
     ShareProposal,
 };
+use super::validation::check_all_invariants;
 use crate::types::ConsensusId;
 use aura_core::{AuthorityId, Hash32, OperationId};
 
@@ -88,6 +100,12 @@ pub fn start_consensus(
         witnesses,
         initiator,
         path,
+    );
+
+    // Quint: WellFormedState invariant after startConsensus
+    debug_assert!(
+        check_all_invariants(&state),
+        "start_consensus: invariant violation on new state"
     );
 
     TransitionResult::Ok(state)
@@ -175,6 +193,12 @@ pub fn apply_share(state: &ConsensusState, proposal: ShareProposal) -> Transitio
         }
     }
 
+    // Quint: InvariantEquivocatorsExcluded, InvariantCommitRequiresThreshold
+    debug_assert!(
+        check_all_invariants(&new_state),
+        "apply_share: invariant violation after share application"
+    );
+
     TransitionResult::Ok(new_state)
 }
 
@@ -197,6 +221,12 @@ pub fn trigger_fallback(state: &ConsensusState) -> TransitionResult {
     let mut new_state = state.clone();
     new_state.phase = ConsensusPhase::FallbackActive;
     new_state.fallback_timer_active = true;
+
+    // Quint: WellFormedState invariant after triggerFallback
+    debug_assert!(
+        check_all_invariants(&new_state),
+        "trigger_fallback: invariant violation after phase transition"
+    );
 
     TransitionResult::Ok(new_state)
 }
@@ -243,6 +273,12 @@ pub fn gossip_shares(state: &ConsensusState, shares: Vec<ShareProposal>) -> Tran
             "threshold reached, use complete_via_fallback".to_string(),
         );
     }
+
+    // Quint: WellFormedState invariant after gossipShares
+    debug_assert!(
+        check_all_invariants(&new_state),
+        "gossip_shares: invariant violation after share gossip"
+    );
 
     TransitionResult::Ok(new_state)
 }
@@ -293,6 +329,12 @@ pub fn complete_via_fallback(state: &ConsensusState, winning_rid: &Hash32) -> Tr
         prestate_hash: state.prestate_hash,
     });
 
+    // Quint: InvariantCommitRequiresThreshold, InvariantCommittedHasCommitFact
+    debug_assert!(
+        check_all_invariants(&new_state),
+        "complete_via_fallback: invariant violation after commit"
+    );
+
     TransitionResult::Ok(new_state)
 }
 
@@ -319,6 +361,12 @@ pub fn fail_consensus(state: &ConsensusState) -> TransitionResult {
 
     let mut new_state = state.clone();
     new_state.phase = ConsensusPhase::Failed;
+
+    // Quint: WellFormedState invariant after failConsensus
+    debug_assert!(
+        check_all_invariants(&new_state),
+        "fail_consensus: invariant violation after failure"
+    );
 
     TransitionResult::Ok(new_state)
 }

@@ -4,8 +4,9 @@
 //! authority state and relational state from journal facts.
 
 use crate::fact::{
-    AttestedOp, ChannelBumpReason, ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump,
-    FactContent, Journal, JournalNamespace, ProposedChannelEpochBump, RelationalFact,
+    AttestedOp, ChannelBootstrap, ChannelBumpReason, ChannelCheckpoint, ChannelPolicy,
+    CommittedChannelEpochBump, FactContent, Journal, JournalNamespace, ProposedChannelEpochBump,
+    RelationalFact,
 };
 use aura_core::{
     authority::TreeStateSummary,
@@ -426,6 +427,8 @@ pub struct ChannelEpochState {
     pub chan_epoch: u64,
     /// Pending bump if one exists (e→e+1)
     pub pending_bump: Option<PendingBump>,
+    /// Optional bootstrap metadata for epoch 0 (dealer key)
+    pub bootstrap: Option<ChannelBootstrap>,
     /// Base generation from the last checkpoint
     pub last_checkpoint_gen: u64,
     /// Current generation derived from facts (not a local counter)
@@ -488,6 +491,7 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
             let mut proposed_bumps = Vec::new();
             let mut committed_bumps = Vec::new();
             let mut channel_policies: BTreeMap<ChannelId, ChannelPolicy> = BTreeMap::new();
+            let mut channel_bootstraps: BTreeMap<ChannelId, ChannelBootstrap> = BTreeMap::new();
 
             for fact in &journal.facts {
                 if let FactContent::Relational(rf) = &fact.content {
@@ -556,6 +560,10 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                     }
                                 })
                                 .or_insert_with(|| policy.clone());
+                            continue;
+                            }
+                            crate::protocol_facts::ProtocolRelationalFact::AmpChannelBootstrap(bootstrap) => {
+                            channel_bootstraps.insert(bootstrap.channel, bootstrap.clone());
                             continue;
                             }
                             crate::protocol_facts::ProtocolRelationalFact::LeakageEvent(event) => {
@@ -633,6 +641,7 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
             channel_ids.extend(proposed_bumps.iter().map(|b| b.channel));
             channel_ids.extend(committed_bumps.iter().map(|b| b.channel));
             channel_ids.extend(channel_policies.keys().copied());
+            channel_ids.extend(channel_bootstraps.keys().copied());
 
             for channel in channel_ids {
                 let chan_epoch = highest_committed_epoch(channel, &committed_bumps);
@@ -656,12 +665,14 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                     skip_window,
                     &proposed_bumps,
                 );
+                let bootstrap = channel_bootstraps.get(&channel).cloned();
 
                 channel_epochs.insert(
                     channel,
                     ChannelEpochState {
                         chan_epoch,
                         pending_bump,
+                        bootstrap,
                         last_checkpoint_gen,
                         current_gen,
                         skip_window,

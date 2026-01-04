@@ -47,6 +47,10 @@ Ceremonies establish shared cryptographic context. Operations within that contex
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+**Bootstrap exception (dealer key):**
+
+When creating a *new* group/channel before the group key ceremony completes, Aura allows a **bootstrap epoch** using a trusted-dealer key (K2/A1). The dealer distributes a bootstrap key with the channel invite, enabling immediate encrypted messaging. This is explicitly **provisional** and superseded by the consensus-finalized group key (K3/A3) once the ceremony completes.
+
 ## Category A: Optimistic Operations
 
 **Characteristics:**

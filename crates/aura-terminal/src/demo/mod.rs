@@ -31,6 +31,7 @@ pub mod simulator;
 pub use hints::DemoHints;
 pub use signal_coordinator::DemoSignalCoordinator;
 pub use simulator::DemoSimulator;
+pub use simulator::spawn_amp_echo_listener;
 
 use crate::error::{TerminalError, TerminalResult};
 use aura_core::time::{PhysicalTime, TimeStamp};
@@ -385,106 +386,118 @@ impl SimulatedAgent {
         use aura_core::effects::TransportEffects;
 
         let mut responses = Vec::new();
+        // Collect guardian bindings to add after releasing the lock
+        let mut guardian_bindings_to_add: Vec<(AuthorityId, ContextId)> = Vec::new();
 
-        // Poll for incoming messages
-        let env = self.environment.lock().await;
-        let effects = env.effect_system();
+        // Poll for incoming messages (scope to release lock before add_guardian_for)
+        {
+            let env = self.environment.lock().await;
+            let effects = env.effect_system();
 
-        // Try to receive messages (non-blocking via NoMessage error)
-        loop {
-            match effects.receive_envelope().await {
-                Ok(envelope) => {
-                    // Check if this is a guardian ceremony invitation
-                    if envelope.metadata.get("content-type")
-                        == Some(&"application/aura-guardian-proposal".to_string())
-                    {
-                        tracing::info!(
-                            "{} received guardian ceremony invitation from {}",
-                            self.name,
-                            envelope.source
-                        );
-
-                        // In demo mode, auto-accept guardian invitations
-                        if let Some(ceremony_id) = envelope.metadata.get("ceremony-id") {
+            // Try to receive messages (non-blocking via NoMessage error)
+            loop {
+                match effects.receive_envelope().await {
+                    Ok(envelope) => {
+                        // Check if this is a guardian ceremony invitation
+                        if envelope.metadata.get("content-type")
+                            == Some(&"application/aura-guardian-proposal".to_string())
+                        {
                             tracing::info!(
-                                "{} auto-accepting guardian ceremony {}",
+                                "{} received guardian ceremony invitation from {}",
                                 self.name,
-                                ceremony_id
+                                envelope.source
                             );
 
-                            // Add guardian binding for the initiator (using portable type)
-                            self.add_guardian_for(envelope.source, envelope.context);
-
-                            // Send acceptance response back through transport
-                            let mut response_metadata = std::collections::HashMap::new();
-                            response_metadata.insert(
-                                "content-type".to_string(),
-                                "application/aura-guardian-acceptance".to_string(),
-                            );
-                            response_metadata
-                                .insert("ceremony-id".to_string(), ceremony_id.clone());
-                            response_metadata
-                                .insert("guardian-id".to_string(), self.authority_id.to_string());
-
-                            // Create ceremony acceptance data with guardian's commitment
-                            // In a real implementation, this would include a FROST key share contribution
-                            let acceptance = GuardianAcceptance {
-                                guardian_id: self.authority_id,
-                                setup_id: ceremony_id.clone(),
-                                accepted: true,
-                                // Demo uses authority ID bytes as public key
-                                // Real implementations use guardian's actual FROST key share
-                                public_key: self.authority_id.to_bytes().to_vec(),
-                                timestamp: TimeStamp::PhysicalClock(PhysicalTime {
-                                    ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
-                                    uncertainty: None,
-                                }),
-                            };
-
-                            // Serialize ceremony acceptance data for transport
-                            let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
-
-                            let response_envelope = aura_core::effects::TransportEnvelope {
-                                destination: envelope.source, // Send back to initiator (Bob)
-                                source: self.authority_id,
-                                context: envelope.context,
-                                payload,
-                                metadata: response_metadata,
-                                receipt: None,
-                            };
-
-                            // Send through transport effects
-                            if let Err(e) = effects.send_envelope(response_envelope).await {
-                                tracing::error!(
-                                    "{} failed to send acceptance response: {}",
-                                    self.name,
-                                    e
-                                );
-                            } else {
+                            // In demo mode, auto-accept guardian invitations
+                            if let Some(ceremony_id) = envelope.metadata.get("ceremony-id") {
                                 tracing::info!(
-                                    "{} sent acceptance response for ceremony {}",
+                                    "{} auto-accepting guardian ceremony {}",
                                     self.name,
                                     ceremony_id
                                 );
-                            }
 
-                            // Generate acceptance response for local processing
-                            responses.push(AgentResponse::AcceptGuardianBinding {
-                                account: envelope.source,
-                                context_id: envelope.context,
-                            });
+                                // Defer guardian binding until after lock is released
+                                guardian_bindings_to_add
+                                    .push((envelope.source, envelope.context));
+
+                                // Send acceptance response back through transport
+                                let mut response_metadata = std::collections::HashMap::new();
+                                response_metadata.insert(
+                                    "content-type".to_string(),
+                                    "application/aura-guardian-acceptance".to_string(),
+                                );
+                                response_metadata
+                                    .insert("ceremony-id".to_string(), ceremony_id.clone());
+                                response_metadata.insert(
+                                    "guardian-id".to_string(),
+                                    self.authority_id.to_string(),
+                                );
+
+                                // Create ceremony acceptance data with guardian's commitment
+                                // In a real implementation, this would include a FROST key share contribution
+                                let acceptance = GuardianAcceptance {
+                                    guardian_id: self.authority_id,
+                                    setup_id: ceremony_id.clone(),
+                                    accepted: true,
+                                    // Demo uses authority ID bytes as public key
+                                    // Real implementations use guardian's actual FROST key share
+                                    public_key: self.authority_id.to_bytes().to_vec(),
+                                    timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                                        ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
+                                        uncertainty: None,
+                                    }),
+                                };
+
+                                // Serialize ceremony acceptance data for transport
+                                let payload = serde_json::to_vec(&acceptance).unwrap_or_default();
+
+                                let response_envelope = aura_core::effects::TransportEnvelope {
+                                    destination: envelope.source, // Send back to initiator (Bob)
+                                    source: self.authority_id,
+                                    context: envelope.context,
+                                    payload,
+                                    metadata: response_metadata,
+                                    receipt: None,
+                                };
+
+                                // Send through transport effects
+                                if let Err(e) = effects.send_envelope(response_envelope).await {
+                                    tracing::error!(
+                                        "{} failed to send acceptance response: {}",
+                                        self.name,
+                                        e
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        "{} sent acceptance response for ceremony {}",
+                                        self.name,
+                                        ceremony_id
+                                    );
+                                }
+
+                                // Generate acceptance response for local processing
+                                responses.push(AgentResponse::AcceptGuardianBinding {
+                                    account: envelope.source,
+                                    context_id: envelope.context,
+                                });
+                            }
                         }
                     }
-                }
-                Err(aura_core::effects::TransportError::NoMessage) => {
-                    // No more messages
-                    break;
-                }
-                Err(e) => {
-                    tracing::warn!("{} error receiving transport message: {}", self.name, e);
-                    break;
+                    Err(aura_core::effects::TransportError::NoMessage) => {
+                        // No more messages
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::warn!("{} error receiving transport message: {}", self.name, e);
+                        break;
+                    }
                 }
             }
+        } // env lock released here
+
+        // Add guardian bindings now that the lock is released
+        for (source, context) in guardian_bindings_to_add {
+            self.add_guardian_for(source, context);
         }
 
         // Keep transport-driven responses consistent with event-driven ones:
@@ -804,6 +817,7 @@ impl SimulatedAgent {
         let uptime = self
             .state
             .last_action_time
+            .as_ref()
             .map(|t| now.ts_ms.saturating_sub(t.ts_ms))
             .map(std::time::Duration::from_millis)
             .unwrap_or_default();
@@ -1085,14 +1099,22 @@ impl SimulatedBridge {
                         topic: topic.clone(),
                     };
                     if let Ok(channel_id) = amp.create_channel(params).await {
+                        let member_ids: Vec<AuthorityId> = members
+                            .iter()
+                            .filter_map(|member| AuthorityId::from_str(member).ok())
+                            .collect();
+                        let member_count = (member_ids.len() as u32).saturating_add(1);
+                        let is_dm = member_ids.len() == 1;
                         let channel = aura_app::ui::types::chat::Channel {
                             id: channel_id,
+                            context_id: Some(context),
                             name: name.clone(),
                             topic: topic.clone(),
                             channel_type: aura_app::ui::types::ChannelType::Home,
                             unread_count: 0,
-                            is_dm: members.len() == 1,
-                            member_count: (members.len() as u32).saturating_add(1),
+                            is_dm,
+                            member_ids,
+                            member_count,
                             last_message: None,
                             last_message_time: None,
                             last_activity: PhysicalTimeHandler::new().physical_time_now_ms(),

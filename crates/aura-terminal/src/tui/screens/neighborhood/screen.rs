@@ -1,4 +1,4 @@
-//! Unified Neighborhood Screen (v2).
+//! Unified Neighborhood Screen.
 
 use iocraft::prelude::*;
 
@@ -10,12 +10,14 @@ use crate::tui::layout::dim;
 use crate::tui::props::NeighborhoodViewProps;
 use crate::tui::state_machine::{DetailFocus, NeighborhoodMode};
 use crate::tui::theme::Theme;
-use crate::tui::types::TraversalDepth;
-use crate::tui::types::{format_timestamp, Contact, HomeBudget, HomeSummary, Message, Resident};
+use crate::tui::types::{
+    format_contact_name, format_timestamp, short_id, Contact, HomeBudget, HomeSummary, Message,
+    Resident, TraversalDepth,
+};
 
-pub async fn run_neighborhood_screen_v2() -> std::io::Result<()> {
+pub async fn run_neighborhood_screen() -> std::io::Result<()> {
     element! {
-        NeighborhoodScreenV2(
+        NeighborhoodScreen(
             view: NeighborhoodViewProps::default(),
         )
     }
@@ -24,7 +26,7 @@ pub async fn run_neighborhood_screen_v2() -> std::io::Result<()> {
 }
 
 #[derive(Default, Props)]
-pub struct NeighborhoodScreenV2Props {
+pub struct NeighborhoodScreenProps {
     pub view: NeighborhoodViewProps,
 }
 
@@ -267,15 +269,6 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
     }
 }
 
-fn short_id(id: &str, len: usize) -> String {
-    let trimmed = id.trim();
-    if trimmed.len() <= len {
-        trimmed.to_string()
-    } else {
-        trimmed.chars().take(len).collect()
-    }
-}
-
 fn is_steward_role(role: aura_app::ui::types::home::ResidentRole) -> bool {
     matches!(
         role,
@@ -305,20 +298,6 @@ fn convert_budget(
     }
 }
 
-fn format_contact_name(authority_id: &str, contacts: &[Contact]) -> String {
-    if let Some(contact) = contacts.iter().find(|c| c.id == authority_id) {
-        if !contact.nickname.is_empty() {
-            return contact.nickname.clone();
-        }
-        if let Some(name) = contact.suggested_name.as_ref() {
-            if !name.is_empty() {
-                return name.clone();
-            }
-        }
-    }
-    short_id(authority_id, 8)
-}
-
 #[allow(clippy::trivially_copy_pass_by_ref)] // ChannelId is at the 32-byte limit boundary
 fn convert_neighbor_home(
     n: &aura_app::ui::types::NeighborHome,
@@ -343,8 +322,8 @@ fn convert_traversal_depth(depth: u32) -> TraversalDepth {
 }
 
 #[component]
-pub fn NeighborhoodScreenV2(
-    props: &NeighborhoodScreenV2Props,
+pub fn NeighborhoodScreen(
+    props: &NeighborhoodScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
     let app_ctx = hooks.use_context::<AppCoreContext>();

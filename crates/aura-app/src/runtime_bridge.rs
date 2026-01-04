@@ -37,8 +37,8 @@ use crate::core::IntentError;
 use crate::ReactiveHandler;
 use async_trait::async_trait;
 use aura_core::effects::amp::{
-    AmpCiphertext, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
-    ChannelSendParams,
+    AmpCiphertext, ChannelBootstrapPackage, ChannelCloseParams, ChannelCreateParams,
+    ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -360,6 +360,14 @@ pub trait RuntimeBridge: Send + Sync {
         &self,
         params: ChannelCreateParams,
     ) -> Result<ChannelId, IntentError>;
+
+    /// Create or retrieve a bootstrap key for provisional AMP messaging.
+    async fn amp_create_channel_bootstrap(
+        &self,
+        context: ContextId,
+        channel: ChannelId,
+        recipients: Vec<AuthorityId>,
+    ) -> Result<ChannelBootstrapPackage, IntentError>;
 
     async fn amp_close_channel(&self, params: ChannelCloseParams) -> Result<(), IntentError>;
 
@@ -718,12 +726,14 @@ pub trait RuntimeBridge: Send + Sync {
     /// # Arguments
     /// * `receiver` - Authority to invite to channel
     /// * `home_id` - Home/channel identifier
+    /// * `bootstrap` - Optional bootstrap key package for provisional AMP
     /// * `message` - Optional message to include
     /// * `ttl_ms` - Optional time-to-live in milliseconds
     async fn create_channel_invitation(
         &self,
         receiver: AuthorityId,
         home_id: String,
+        bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError>;
@@ -883,6 +893,17 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         _params: ChannelCreateParams,
     ) -> Result<ChannelId, IntentError> {
         Err(IntentError::no_agent("AMP not available in offline mode"))
+    }
+
+    async fn amp_create_channel_bootstrap(
+        &self,
+        _context: ContextId,
+        _channel: ChannelId,
+        _recipients: Vec<AuthorityId>,
+    ) -> Result<ChannelBootstrapPackage, IntentError> {
+        Err(IntentError::no_agent(
+            "AMP bootstrap not available in offline mode",
+        ))
     }
 
     async fn amp_close_channel(&self, _params: ChannelCloseParams) -> Result<(), IntentError> {
@@ -1218,6 +1239,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         &self,
         _receiver: AuthorityId,
         _home_id: String,
+        _bootstrap: Option<ChannelBootstrapPackage>,
         _message: Option<String>,
         _ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {

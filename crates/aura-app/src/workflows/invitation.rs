@@ -146,6 +146,7 @@ use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::RwLock;
 #[cfg(feature = "signals")]
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::identifiers::AuthorityId;
 use aura_core::AuraError;
 use std::sync::Arc;
@@ -228,13 +229,14 @@ pub async fn create_channel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
     receiver: AuthorityId,
     home_id: String,
+    bootstrap: Option<ChannelBootstrapPackage>,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationInfo, AuraError> {
     let runtime = require_runtime(app_core).await?;
 
     runtime
-        .create_channel_invitation(receiver, home_id, message, ttl_ms)
+        .create_channel_invitation(receiver, home_id, bootstrap, message, ttl_ms)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to create channel invitation: {e}")))
 }

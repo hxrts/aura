@@ -253,11 +253,13 @@ impl Query for ChannelsQuery {
 
                 Ok(Channel {
                     id: get_channel_id(&row, "id")?,
+                    context_id: None,
                     name: get_string(&row, "name"),
                     topic: get_optional_string(&row, "topic"),
                     channel_type,
                     is_dm: channel_type == ChannelType::DirectMessage,
                     unread_count: get_int(&row, "unread_count") as u32,
+                    member_ids: Vec::new(),
                     member_count: get_int(&row, "member_count") as u32,
                     last_message: get_optional_string(&row, "last_message"),
                     last_message_time: {
@@ -1307,11 +1309,13 @@ impl Query for ChatQuery {
 
                 Ok(Channel {
                     id: get_channel_id(&row, "id")?,
+                    context_id: None,
                     name: get_string(&row, "name"),
                     topic: get_optional_string(&row, "topic"),
                     channel_type,
                     is_dm: channel_type == ChannelType::DirectMessage,
                     unread_count: get_int(&row, "unread_count") as u32,
+                    member_ids: Vec::new(),
                     member_count: 0,
                     last_message: None,
                     last_message_time: None,
@@ -1320,13 +1324,13 @@ impl Query for ChatQuery {
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
 
-        Ok(ChatState {
-            channels,
-            selected_channel_id: None, // Set by caller
-            messages: Vec::new(),      // Loaded separately
-            total_unread: 0,           // Calculated from channels
-            loading_more: false,
-            has_more: false,
-        })
+        let mut state = ChatState::default();
+        state.channels = channels;
+        state.selected_channel_id = None; // Set by caller
+        state.messages = Vec::new(); // Loaded separately
+        state.total_unread = 0; // Calculated from channels
+        state.loading_more = false;
+        state.has_more = false;
+        Ok(state)
     }
 }

@@ -24,7 +24,7 @@
 //!
 //! Then run tests:
 //! ```bash
-//! cargo test -p aura-consensus --test consensus_itf_conformance
+//! cargo test -p aura-testkit --test consensus_itf_conformance
 //! ```
 
 use aura_consensus::core::{

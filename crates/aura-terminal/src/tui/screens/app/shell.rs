@@ -23,6 +23,10 @@ use super::modal_overlays::{
 use iocraft::prelude::*;
 use std::sync::Arc;
 
+use aura_app::ceremonies::{
+    ChannelError, GuardianSetupError, MfaSetupError, RecoveryError, MIN_CHANNEL_PARTICIPANTS,
+    MIN_MFA_DEVICES,
+};
 use aura_app::ui::prelude::*;
 use aura_app::ui::signals::{NetworkStatus, ERROR_SIGNAL, SETTINGS_SIGNAL};
 use aura_app::ui::workflows::ceremonies::{
@@ -47,7 +51,7 @@ use crate::tui::screens::app::subscriptions::{
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
-    ChatScreen, ContactsScreen, NeighborhoodScreenV2, NotificationsScreen, SettingsScreen,
+    ChatScreen, ContactsScreen, NeighborhoodScreen, NotificationsScreen, SettingsScreen,
 };
 use crate::tui::types::{
     Channel, Contact, Device, Guardian, HomeSummary, Invitation, KeyHint, Message, MfaPolicy,
@@ -344,14 +348,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Notifications subscription: keep notification count in sync for navigation
     // =========================================================================
-    use_notifications_subscription(&mut hooks, &app_ctx, update_tx_holder);
+    use_notifications_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Threshold subscription: SharedThreshold for dispatch handlers to read
     // =========================================================================
-    // Threshold values from settings - currently unused since threshold changes
-    // now go through OpenGuardianSetup. Kept for future direct display updates.
-    let _shared_threshold = use_threshold_subscription(&mut hooks, &app_ctx);
+    // Threshold values from settings - used for recovery eligibility checks
+    let shared_threshold = use_threshold_subscription(&mut hooks, &app_ctx);
+    let shared_threshold_for_dispatch = shared_threshold.clone();
 
     // =========================================================================
     // ERROR_SIGNAL subscription: central domain error surfacing
@@ -485,6 +489,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let app_core = app_ctx.app_core.clone();
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let mut tui = tui.clone();
+            let shared_contacts_for_updates = shared_contacts.clone();
             async move {
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
@@ -849,11 +854,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         // Chat / messaging
                         // =========================================================================
-                        UiUpdate::MessageSent { channel, .. } => {
-                            enqueue_toast!(
-                                format!("Message sent to {}", channel),
-                                crate::tui::state_machine::ToastLevel::Info
-                            );
+                        UiUpdate::MessageSent { .. } => {
+                            // No toast for successful message sends - user can see the message in the chat
                         }
                         UiUpdate::MessageRetried { message_id: _ } => {
                             enqueue_toast!(
@@ -903,12 +905,37 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             channel_id,
                             participants,
                         } => {
+                            let mapped_participants = if let Ok(contacts) =
+                                shared_contacts_for_updates.read()
+                            {
+                                participants
+                                    .iter()
+                                    .map(|entry| {
+                                        if entry == "You" {
+                                            return entry.clone();
+                                        }
+                                        if let Some(contact) =
+                                            contacts.iter().find(|c| c.id == *entry)
+                                        {
+                                            if !contact.nickname.is_empty() {
+                                                return contact.nickname.clone();
+                                            }
+                                            if let Some(name) = &contact.suggested_name {
+                                                return name.clone();
+                                            }
+                                        }
+                                        entry.clone()
+                                    })
+                                    .collect::<Vec<_>>()
+                            } else {
+                                participants.clone()
+                            };
                             tui.with_mut(|state| {
                                 state.modal_queue.update_active(|modal| {
                                     if let crate::tui::state_machine::QueuedModal::ChatInfo(ref mut info) = modal {
                                         if info.channel_id == channel_id
-                                            && (participants.len() > 1 || info.participants.len() <= 1) {
-                                                info.participants = participants.clone();
+                                            && (mapped_participants.len() > 1 || info.participants.len() <= 1) {
+                                                info.participants = mapped_participants.clone();
                                             }
                                     }
                                 });
@@ -1129,14 +1156,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         // Home operations
                         // =========================================================================
-                        UiUpdate::HomeMessageSent {
-                            home_id: _,
-                            content: _,
-                        } => {
-                            enqueue_toast!(
-                                "Home message sent".to_string(),
-                                crate::tui::state_machine::ToastLevel::Success
-                            );
+                        UiUpdate::HomeMessageSent { .. } => {
+                            // No toast for successful message sends - user can see the message in the chat
                         }
                         UiUpdate::HomeInviteSent { contact_id: _ } => {
                             enqueue_toast!(
@@ -1425,6 +1446,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_messages_for_dispatch = shared_messages;
         // Used to map device selection for MFA wizard
         let shared_devices_for_dispatch = shared_devices;
+        // Used for recovery eligibility checks
+        let shared_threshold_for_dispatch = shared_threshold_for_dispatch;
         move |event| {
             // Convert iocraft event to aura-core event and run through state machine
             if let Some(core_event) = convert_iocraft_event(event) {
@@ -1532,38 +1555,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                     channel.topic.as_deref(),
                                                 );
 
-                                                // Best-effort: populate participants from locally-known contacts.
+                                                // Best-effort: start with self; authoritative list arrives via list_participants.
                                                 let mut participants = vec!["You".to_string()];
-                                                if let Ok(contacts) = shared_contacts_for_dispatch.read() {
-                                                    if channel.id.starts_with("dm:") {
-                                                        let target = channel.id.trim_start_matches("dm:");
-                                                        let name = contacts
-                                                            .iter()
-                                                            .find(|c| c.id == target)
-                                                            .map(|c| {
-                                                                if !c.nickname.is_empty() {
-                                                                    c.nickname.clone()
-                                                                } else if let Some(s) = &c.suggested_name {
-                                                                    s.clone()
-                                                                } else {
-                                                                    c.id.chars().take(8).collect::<String>() + "..."
-                                                                }
-                                                            })
-                                                            .unwrap_or_else(|| target.to_string());
-                                                        participants.push(name);
-                                                    } else {
-                                                        for c in contacts.iter() {
-                                                            let name = if !c.nickname.is_empty() {
-                                                                c.nickname.clone()
-                                                            } else if let Some(s) = &c.suggested_name {
-                                                                s.clone()
-                                                            } else {
-                                                                c.id.chars().take(8).collect::<String>() + "..."
-                                                            };
-                                                            participants.push(name);
-                                                        }
-                                                    }
-                                                }
 
                                                 if participants.len() <= 1 && channel.member_count > 1 {
                                                     let extra = channel
@@ -1593,6 +1586,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .read()
                                             .map(|guard| guard.clone())
                                             .unwrap_or_default();
+
+                                        // Validate: need at least 1 contact (+ self = 2 participants)
+                                        if current_contacts.is_empty() {
+                                            new_state.toast_error(
+                                                &ChannelError::InsufficientParticipants {
+                                                    required: MIN_CHANNEL_PARTICIPANTS,
+                                                    available: 1, // Just self
+                                                }
+                                                .to_string(),
+                                            );
+                                            continue;
+                                        }
 
                                         let candidates: Vec<crate::tui::state_machine::ChatMemberCandidate> =
                                             current_contacts
@@ -1759,6 +1764,37 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                     // === Recovery Commands ===
                                     DispatchCommand::StartRecovery => {
+                                        // Check recovery eligibility before starting
+                                        let (threshold_k, _threshold_n) = shared_threshold_for_dispatch
+                                            .read()
+                                            .map(|guard| *guard)
+                                            .unwrap_or((0, 0));
+
+                                        // Check if threshold is configured
+                                        if threshold_k == 0 {
+                                            new_state.toast_error(
+                                                &RecoveryError::NoThresholdConfigured.to_string(),
+                                            );
+                                            continue;
+                                        }
+
+                                        // Check if we have enough guardians
+                                        let guardian_count = shared_contacts_for_dispatch
+                                            .read()
+                                            .map(|guard| guard.iter().filter(|c| c.is_guardian).count())
+                                            .unwrap_or(0);
+
+                                        if guardian_count < threshold_k as usize {
+                                            new_state.toast_error(
+                                                &RecoveryError::InsufficientGuardians {
+                                                    required: threshold_k,
+                                                    available: guardian_count,
+                                                }
+                                                .to_string(),
+                                            );
+                                            continue;
+                                        }
+
                                         (cb.recovery.on_start_recovery)();
                                     }
                                     DispatchCommand::ApproveRecovery => {
@@ -1782,6 +1818,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .read()
                                             .map(|guard| guard.clone())
                                             .unwrap_or_default();
+
+                                        // Validate using type-safe ceremony error
+                                        if current_contacts.is_empty() {
+                                            new_state.toast_error(
+                                                &GuardianSetupError::NoContacts.to_string(),
+                                            );
+                                            continue;
+                                        }
 
                                         // Populate candidates from current contacts
                                         // Note: nickname is already populated with suggested_name if empty (see Contact::from)
@@ -1817,11 +1861,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .map(|guard| guard.clone())
                                             .unwrap_or_default();
 
-                                        // Require at least 2 devices to set up multi-factor authority
-                                        if current_devices.len() < 2 {
+                                        // Validate using type-safe ceremony error
+                                        if current_devices.len() < MIN_MFA_DEVICES {
                                             new_state.toast_error(
-                                                "You must add a device to set up a multi-factor authority. \
-                                                 Go to Devices → Add device first.",
+                                                &MfaSetupError::InsufficientDevices {
+                                                    required: MIN_MFA_DEVICES,
+                                                    available: current_devices.len(),
+                                                }
+                                                .to_string(),
                                             );
                                             continue;
                                         }
@@ -2358,6 +2405,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 on_channel_select: on_channel_select.clone(),
                                 on_create_channel: on_create_channel.clone(),
                                 on_set_topic: on_set_topic.clone(),
+                                update_tx: update_tx_holder.clone(),
                             )
                         }
                     }],
@@ -2374,7 +2422,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     }],
                     Screen::Neighborhood => vec![element! {
                         View(width: 100pct, height: 100pct) {
-                            NeighborhoodScreenV2(
+                            NeighborhoodScreen(
                                 view: neighborhood_props.clone(),
                             )
                         }
@@ -2498,7 +2546,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     // - ChatScreen subscribes to CHAT_SIGNAL
     // - NotificationsScreen subscribes to INVITATIONS_SIGNAL + RECOVERY_SIGNAL
     // - ContactsScreen subscribes to CONTACTS_SIGNAL + DISCOVERED_PEERS_SIGNAL
-    // - NeighborhoodScreenV2 subscribes to NEIGHBORHOOD_SIGNAL + HOMES_SIGNAL + CHAT_SIGNAL + CONTACTS_SIGNAL
+    // - NeighborhoodScreen subscribes to NEIGHBORHOOD_SIGNAL + HOMES_SIGNAL + CHAT_SIGNAL + CONTACTS_SIGNAL
     // - SettingsScreen subscribes to SETTINGS_SIGNAL (+ RECOVERY_SIGNAL for recovery data)
     //
     // Props passed below are ONLY used as empty/default initial values.

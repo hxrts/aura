@@ -32,6 +32,7 @@ struct LanDiscoveryState {
 }
 
 impl LanDiscoveryState {
+    #[allow(dead_code)] // For use with with_state_mut_validated
     fn validate(&self) -> Result<(), String> {
         Ok(())
     }

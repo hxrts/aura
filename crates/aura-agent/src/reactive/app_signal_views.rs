@@ -26,7 +26,9 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
+use aura_protocol::amp::amp_recv;
 use tokio::sync::Mutex;
+use std::sync::Arc;
 
 use super::scheduler::ReactiveView;
 
@@ -44,6 +46,7 @@ use aura_social::moderation::{
     HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
     HOME_UNMUTE_FACT_TYPE_ID,
 };
+use crate::runtime::AuraEffectSystem;
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
     let _ = reactive
@@ -671,14 +674,20 @@ pub struct ChatSignalView {
     own_authority: AuthorityId,
     reactive: ReactiveHandler,
     state: Mutex<ChatState>,
+    effects: Arc<AuraEffectSystem>,
 }
 
 impl ChatSignalView {
-    pub fn new(own_authority: AuthorityId, reactive: ReactiveHandler) -> Self {
+    pub fn new(
+        own_authority: AuthorityId,
+        reactive: ReactiveHandler,
+        effects: Arc<AuraEffectSystem>,
+    ) -> Self {
         Self {
             own_authority,
             reactive,
             state: Mutex::new(ChatState::default()),
+            effects,
         }
     }
 }
@@ -717,6 +726,7 @@ impl ReactiveView for ChatSignalView {
             match chat_fact {
                 ChatFact::ChannelCreated {
                     channel_id,
+                    context_id,
                     name,
                     topic,
                     is_dm,
@@ -725,6 +735,7 @@ impl ReactiveView for ChatSignalView {
                 } => {
                     let channel = Channel {
                         id: channel_id,
+                        context_id: Some(context_id),
                         name,
                         topic,
                         channel_type: if is_dm {
@@ -734,6 +745,7 @@ impl ReactiveView for ChatSignalView {
                         },
                         unread_count: 0,
                         is_dm,
+                        member_ids: Vec::new(),
                         member_count: 0,
                         last_message: None,
                         last_message_time: None,
@@ -765,6 +777,7 @@ impl ReactiveView for ChatSignalView {
                     changed = true;
                 }
                 ChatFact::MessageSentSealed {
+                    context_id,
                     channel_id,
                     message_id,
                     sender_id,
@@ -774,8 +787,25 @@ impl ReactiveView for ChatSignalView {
                     reply_to,
                     ..
                 } => {
-                    // Sealed messages are opaque at this layer; decoding/decryption belongs above.
-                    let content = format!("[sealed: {} bytes]", payload.len());
+                    let sealed_len = payload.len();
+                    let payload_bytes = payload.clone();
+                    let context = context_id;
+                    drop(state);
+                    let content = match amp_recv(self.effects.as_ref(), context, payload_bytes).await
+                    {
+                        Ok(msg) => String::from_utf8(msg.payload)
+                            .unwrap_or_else(|_| format!("[sealed: {} bytes]", sealed_len)),
+                        Err(err) => {
+                            tracing::debug!(
+                                channel_id = %channel_id,
+                                message_id = %message_id,
+                                error = %err,
+                                "AMP decrypt failed; rendering sealed payload"
+                            );
+                            format!("[sealed: {} bytes]", sealed_len)
+                        }
+                    };
+                    state = self.state.lock().await;
                     let message = Message {
                         id: message_id,
                         channel_id,

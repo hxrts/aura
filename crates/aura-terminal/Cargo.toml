@@ -29,6 +29,10 @@ name = "demo_peer_count"
 required-features = ["development"]
 
 [[test]]
+name = "demo_amp_channel_echo"
+required-features = ["development"]
+
+[[test]]
 name = "e2e_terminal_state"
 required-features = ["testing"]
 
@@ -120,3 +124,4 @@ tempfile = { workspace = true }
 insta = "1.34"  # Snapshot testing for TUI render tests
 futures = "0.3"  # For mock terminal testing with streams
 proptest = { workspace = true }  # Property-based testing for TUI state machine
+assert_matches = { workspace = true }

@@ -1641,3 +1641,39 @@ impl ConfirmationStatus {
         matches!(self, Self::Unconfirmed { .. } | Self::RolledBack { .. })
     }
 }
+
+// =============================================================================
+// Display Helpers
+// =============================================================================
+
+/// Truncate an ID string to the specified length.
+///
+/// Used to display short versions of authority IDs and other identifiers.
+pub fn short_id(id: &str, len: usize) -> String {
+    let trimmed = id.trim();
+    if trimmed.len() <= len {
+        trimmed.to_string()
+    } else {
+        trimmed.chars().take(len).collect()
+    }
+}
+
+/// Format a display name for an authority ID using contact information.
+///
+/// Tries to find a contact with a matching ID and returns:
+/// 1. The contact's nickname if set
+/// 2. The contact's suggested name if available
+/// 3. Falls back to a shortened ID if no contact info found
+pub fn format_contact_name(authority_id: &str, contacts: &[Contact]) -> String {
+    if let Some(contact) = contacts.iter().find(|c| c.id == authority_id) {
+        if !contact.nickname.is_empty() {
+            return contact.nickname.clone();
+        }
+        if let Some(name) = contact.suggested_name.as_ref() {
+            if !name.is_empty() {
+                return name.clone();
+            }
+        }
+    }
+    short_id(authority_id, 8)
+}

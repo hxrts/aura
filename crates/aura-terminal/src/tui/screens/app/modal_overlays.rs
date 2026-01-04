@@ -422,7 +422,7 @@ pub fn render_channel_info_modal(chat: &ChatViewProps) -> Option<AnyElement<'sta
                         visible: true,
                         channel_name: chat.info_modal_channel_name.clone(),
                         topic: chat.info_modal_topic.clone(),
-                        participants: vec!["You".to_string()],
+                        participants: chat.info_modal_participants.clone(),
                     )
                 }
             }

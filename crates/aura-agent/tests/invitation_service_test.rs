@@ -109,12 +109,12 @@ async fn test_invite_to_channel_via_agent() -> Result<(), Box<dyn std::error::Er
 
     let receiver_id = AuthorityId::new_from_entropy([76u8; 32]);
     let invitation = invitations
-        .invite_to_channel(receiver_id, "channel-123".to_string(), None, None)
+        .invite_to_channel(receiver_id, "channel-123".to_string(), None, None, None)
         .await?;
 
     assert!(invitation.invitation_id.as_str().starts_with("inv-"));
     match &invitation.invitation_type {
-        InvitationType::Channel { home_id } => {
+        InvitationType::Channel { home_id, .. } => {
             assert_eq!(home_id, "channel-123");
         }
         _ => panic!("Expected Channel invitation type"),

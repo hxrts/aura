@@ -5,21 +5,25 @@
 //! Mobile device peer and runs a small automation loop on their behalf (e.g.,
 //! auto-accept guardian setup).
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use async_lock::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 
 use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::handlers::InvitationType;
-use aura_agent::{AuraAgent, EffectContext, SharedTransport};
+use aura_agent::{AuraAgent, AuraEffectSystem, EffectContext, SharedTransport};
+use aura_app::AppCore;
 use aura_core::effects::{AmpChannelEffects, ChannelJoinParams, ExecutionMode, TransportEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_effects::time::PhysicalTimeHandler;
+use aura_effects::ReactiveEffects;
 use serde::Serialize;
 use std::str::FromStr;
 
@@ -300,7 +304,7 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                         }
                     };
 
-                    if let InvitationType::Channel { home_id } = invitation.invitation_type {
+                    if let InvitationType::Channel { home_id, .. } = invitation.invitation_type {
                         if let Err(err) = invitation_service.accept(&invitation.invitation_id).await
                         {
                             tracing::warn!(
@@ -353,6 +357,77 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
     }
 
     Ok(())
+}
+
+/// Spawn a background listener that echoes messages from Bob back through demo peers.
+///
+/// This listens to chat state changes and when Bob sends a message, Alice and Carol
+/// will respond with an echo message through the AMP channel.
+pub fn spawn_amp_echo_listener(
+    _shared_transport: SharedTransport,
+    bob_authority: AuthorityId,
+    _bob_device_id: String,
+    app_core: Arc<RwLock<AppCore>>,
+    effects: Arc<AuraEffectSystem>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        use aura_app::ui::signals::{CHAT_SIGNAL, HOMES_SIGNAL};
+        use aura_core::effects::amp::ChannelSendParams;
+
+        let mut chat_stream = {
+            let core = app_core.read().await;
+            core.subscribe(&*CHAT_SIGNAL)
+        };
+
+        let mut seen_messages: HashSet<String> = HashSet::new();
+
+        loop {
+            let chat_state = match chat_stream.recv().await {
+                Ok(state) => state,
+                Err(_) => break,
+            };
+
+            for msg in &chat_state.messages {
+                // Only echo Bob's messages
+                if msg.sender_id != bob_authority {
+                    continue;
+                }
+                // Don't echo the same message twice
+                if !seen_messages.insert(msg.id.clone()) {
+                    continue;
+                }
+
+                let context_id = {
+                    let core = app_core.read().await;
+                    let homes = core.read(&*HOMES_SIGNAL).await.unwrap_or_default();
+                    homes
+                        .home_state(&msg.channel_id)
+                        .and_then(|home| home.context_id)
+                        .unwrap_or_else(|| {
+                            EffectContext::with_authority(bob_authority).context_id()
+                        })
+                };
+
+                let reply = format!("received: {}", msg.content);
+
+                // Send echo reply through AMP effects
+                let params = ChannelSendParams {
+                    context: context_id,
+                    channel: msg.channel_id,
+                    sender: bob_authority, // Echo as if from Bob's perspective
+                    plaintext: reply.as_bytes().to_vec(),
+                    reply_to: None,
+                };
+
+                if let Err(err) = effects.send_message(params).await {
+                    tracing::warn!(
+                        error = %err,
+                        "Demo echo send failed"
+                    );
+                }
+            }
+        }
+    })
 }
 
 #[cfg(test)]

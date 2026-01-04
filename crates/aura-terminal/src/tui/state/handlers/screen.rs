@@ -330,14 +330,20 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             }
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            if state.settings.focus.is_list() {
-                state.settings.section = state.settings.section.prev();
+            // Always allow section navigation with Up/Down
+            // If in Detail focus, reset to List and navigate
+            if state.settings.focus.is_detail() {
+                state.settings.focus = state.settings.focus.toggle();
             }
+            state.settings.section = state.settings.section.prev();
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if state.settings.focus.is_list() {
-                state.settings.section = state.settings.section.next();
+            // Always allow section navigation with Up/Down
+            // If in Detail focus, reset to List and navigate
+            if state.settings.focus.is_detail() {
+                state.settings.focus = state.settings.focus.toggle();
             }
+            state.settings.section = state.settings.section.next();
         }
         KeyCode::Char(' ') => {
             if state.settings.section == SettingsSection::Authority {

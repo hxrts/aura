@@ -986,18 +986,12 @@ mod tests {
 
         let generic = fact.to_generic();
 
-        if let aura_journal::RelationalFact::Generic {
-            binding_type,
-            binding_data,
-            ..
-        } = generic
-        {
-            assert_eq!(binding_type, RECOVERY_FACT_TYPE_ID);
-            let restored = RecoveryFact::from_bytes(&binding_data);
-            assert!(restored.is_some());
-        } else {
+        let aura_journal::RelationalFact::Generic { binding_type, binding_data, .. } = generic else {
             panic!("Expected Generic variant");
-        }
+        };
+        assert_eq!(binding_type, RECOVERY_FACT_TYPE_ID);
+        let restored = RecoveryFact::from_bytes(&binding_data);
+        assert!(restored.is_some());
     }
 
     #[test]

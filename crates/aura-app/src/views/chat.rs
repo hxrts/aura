@@ -1,7 +1,8 @@
 //! # Chat View State
 
-use aura_core::identifiers::{AuthorityId, ChannelId};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ============================================================================
 // Message Delivery Status
@@ -127,6 +128,9 @@ impl ChannelType {
 pub struct Channel {
     /// Channel identifier
     pub id: ChannelId,
+    /// Relational context for this channel (when known).
+    #[serde(default)]
+    pub context_id: Option<ContextId>,
     /// Channel name
     pub name: String,
     /// Channel topic/description
@@ -137,6 +141,11 @@ pub struct Channel {
     pub unread_count: u32,
     /// Whether this is a direct message channel
     pub is_dm: bool,
+    /// Known channel members (excluding self).
+    ///
+    /// This is populated from UI flows or runtime-backed membership facts.
+    #[serde(default)]
+    pub member_ids: Vec<AuthorityId>,
     /// Member count (for group channels)
     pub member_count: u32,
     /// Last message preview
@@ -179,8 +188,11 @@ pub struct ChatState {
     pub channels: Vec<Channel>,
     /// Currently selected channel ID
     pub selected_channel_id: Option<ChannelId>,
-    /// Messages in the selected channel
+    /// Messages in the selected channel (view into channel_messages)
     pub messages: Vec<Message>,
+    /// Per-channel message storage (messages persist when switching channels)
+    #[serde(default)]
+    channel_messages: HashMap<ChannelId, Vec<Message>>,
     /// Total unread count across all channels
     pub total_unread: u32,
     /// Whether more messages are loading
@@ -241,6 +253,8 @@ impl ChatState {
     /// Remove a channel by ID
     pub fn remove_channel(&mut self, channel_id: &ChannelId) {
         self.channels.retain(|c| c.id != *channel_id);
+        // Remove messages from per-channel cache
+        self.channel_messages.remove(channel_id);
         // Clear messages if this was the selected channel
         if self.selected_channel_id.as_ref() == Some(channel_id) {
             self.selected_channel_id = None;
@@ -294,15 +308,21 @@ impl ChatState {
             self.total_unread = self.total_unread.saturating_add(1);
         }
 
-        // Add message to list if this is the selected channel
+        // Always store message in per-channel cache
+        let channel_msgs = self.channel_messages.entry(channel_id).or_default();
+        if !channel_msgs.iter().any(|m| m.id == message.id) {
+            channel_msgs.push(message.clone());
+            if channel_msgs.len() > Self::MAX_ACTIVE_MESSAGES {
+                let overflow = channel_msgs.len() - Self::MAX_ACTIVE_MESSAGES;
+                channel_msgs.drain(0..overflow);
+            }
+        }
+
+        // Update the messages view if this is the selected channel
         if is_selected {
-            // Avoid duplicates
-            if !self.messages.iter().any(|m| m.id == message.id) {
-                self.messages.push(message);
-                if self.messages.len() > Self::MAX_ACTIVE_MESSAGES {
-                    let overflow = self.messages.len() - Self::MAX_ACTIVE_MESSAGES;
-                    self.messages.drain(0..overflow);
-                }
+            // Sync from channel_messages to messages view
+            if let Some(msgs) = self.channel_messages.get(&channel_id) {
+                self.messages = msgs.clone();
             }
         }
     }
@@ -321,9 +341,14 @@ impl ChatState {
         }
 
         if self.selected_channel_id != next {
-            // Clear old messages
-            self.messages.clear();
-            self.selected_channel_id = next;
+            self.selected_channel_id = next.clone();
+
+            // Load messages from per-channel cache (or empty if no messages yet)
+            self.messages = next
+                .as_ref()
+                .and_then(|id| self.channel_messages.get(id))
+                .cloned()
+                .unwrap_or_default();
 
             // Mark as read - first get the unread count, then update both fields
             if let Some(id) = &next {

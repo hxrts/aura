@@ -40,7 +40,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
-use crate::demo::DemoSimulator;
+use crate::demo::{spawn_amp_echo_listener, DemoSimulator};
 use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
 use crate::tui::{
     context::{InitializedAppCore, IoContext},
@@ -668,77 +668,27 @@ async fn handle_tui_launch(
             });
             stdio.println(format_args!("Ceremony acceptance processor started"));
 
-            // Auto-respond to Bob's AMP messages from demo peers.
-            let app_core_for_replies = app_core.raw().clone();
-            let bob_authority = authority_id;
-            let alice_agent = sim.alice_agent();
-            let carol_agent = sim.carol_agent();
-            tokio::spawn(async move {
-                use aura_app::ui::signals::{CHAT_SIGNAL, HOMES_SIGNAL};
-                use aura_core::effects::amp::ChannelSendParams;
-                use aura_core::identifiers::ContextId;
-                use aura_core::EffectContext;
-                use std::collections::HashSet;
-
-                let mut chat_stream = {
-                    let core = app_core_for_replies.read().await;
-                    core.subscribe(&*CHAT_SIGNAL)
-                };
-
-                let mut seen_messages: HashSet<String> = HashSet::new();
-
-                loop {
-                    let chat_state = match chat_stream.recv().await {
-                        Ok(state) => state,
-                        Err(_) => break,
-                    };
-
-                    for msg in &chat_state.messages {
-                        if msg.sender_id != bob_authority {
-                            continue;
-                        }
-                        if !seen_messages.insert(msg.id.clone()) {
-                            continue;
-                        }
-
-                        let context_id = {
-                            let core = app_core_for_replies.read().await;
-                            let homes = core.read(&*HOMES_SIGNAL).await.unwrap_or_default();
-                            homes
-                                .home_state(&msg.channel_id)
-                                .map(|home| home.context_id)
-                                .unwrap_or_else(|| {
-                                    EffectContext::with_authority(bob_authority).context_id()
-                                })
-                        };
-
-                        let reply = format!("received: {}", msg.content);
-                        for agent in [&alice_agent, &carol_agent] {
-                            let params = ChannelSendParams {
-                                context: context_id,
-                                channel: msg.channel_id,
-                                sender: agent.authority_id(),
-                                plaintext: reply.as_bytes().to_vec(),
-                                reply_to: None,
-                            };
-
-                            if let Err(err) = agent.runtime().effects().send_message(params).await {
-                                tracing::warn!(
-                                    agent = %agent.authority_id(),
-                                    error = %err,
-                                    "Demo auto-reply send failed"
-                                );
-                            }
-                        }
-                    }
-                }
-            });
-            stdio.println(format_args!("Demo auto-reply loop started"));
-
             Some(sim)
         }
         TuiMode::Production => None,
     };
+
+    #[cfg(feature = "development")]
+    if let TuiMode::Demo { .. } = mode {
+        if let Some(sim) = &simulator {
+            let shared_transport = sim.shared_transport();
+            let bob_device_id = device_id_for_account.to_string();
+            let app_core_for_echo = app_core.raw().clone();
+            let effects = agent.runtime().effects();
+            let _amp_echo_handle = spawn_amp_echo_listener(
+                shared_transport,
+                authority_id,
+                bob_device_id,
+                app_core_for_echo,
+                effects,
+            );
+        }
+    }
 
     // Create IoContext with AppCore integration
     // Pass has_existing_account so the TUI knows whether to show the account setup modal

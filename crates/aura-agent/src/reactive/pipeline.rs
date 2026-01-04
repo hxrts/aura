@@ -20,6 +20,7 @@ use super::{
     ChatSignalView, ContactsSignalView, HomeSignalView, InvitationsSignalView, RecoverySignalView,
 };
 use super::{FactSource, ReactiveScheduler, SchedulerConfig};
+use crate::runtime::AuraEffectSystem;
 
 /// Owns the running scheduler + the single fact publication mechanism.
 ///
@@ -42,6 +43,7 @@ impl ReactivePipeline {
         scheduler_config: SchedulerConfig,
         fact_registry: Arc<FactRegistry>,
         time_effects: Arc<dyn PhysicalTimeEffects>,
+        effects: Arc<AuraEffectSystem>,
         own_authority: AuthorityId,
         reactive: ReactiveHandler,
     ) -> Self {
@@ -52,6 +54,7 @@ impl ReactivePipeline {
         scheduler.register_view(Arc::new(ChatSignalView::new(
             own_authority,
             reactive.clone(),
+            effects.clone(),
         )));
         scheduler.register_view(Arc::new(InvitationsSignalView::new(
             own_authority,

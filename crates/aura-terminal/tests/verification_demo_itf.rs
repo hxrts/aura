@@ -298,6 +298,15 @@ fn test_final_guardian_state() {
 /// Test full demo flow trace validation
 #[test]
 fn test_full_demo_flow_trace() {
+    let spec_path = std::path::Path::new("../../verification/quint/cli_recovery_demo.qnt");
+    if !spec_path.exists() {
+        eprintln!(
+            "Skipping: Quint spec not found at {}",
+            spec_path.display()
+        );
+        return;
+    }
+
     // Generate fresh trace from fullCliRecoveryDemoTest
     // Call quint directly (CI installs via npm, local dev uses nix)
     let output = std::process::Command::new("quint")

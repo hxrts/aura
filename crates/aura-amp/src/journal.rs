@@ -156,6 +156,7 @@ pub(crate) fn fact_context(fact: &RelationalFact) -> Result<ContextId> {
             Ok(b.context)
         }
         RelationalFact::Protocol(ProtocolRelationalFact::AmpChannelPolicy(p)) => Ok(p.context),
+        RelationalFact::Protocol(ProtocolRelationalFact::AmpChannelBootstrap(b)) => Ok(b.context),
         RelationalFact::Generic {
             context_id,
             binding_type,

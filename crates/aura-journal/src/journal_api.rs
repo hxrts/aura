@@ -323,6 +323,9 @@ impl Journal {
                         crate::fact::RelationalFact::Protocol(
                             crate::protocol_facts::ProtocolRelationalFact::RotateFact(..),
                         ) => "RotateFact".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::AmpChannelBootstrap(..),
+                        ) => "AmpChannelBootstrap".to_string(),
                         crate::fact::RelationalFact::Generic { binding_type, .. } => {
                             format!("Generic:{binding_type}")
                         }

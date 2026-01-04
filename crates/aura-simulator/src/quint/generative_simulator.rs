@@ -292,8 +292,18 @@ impl GenerativeSimulator {
             }
 
             // Extract action and nondet picks
-            let action_name = itf_state
-                .action_taken
+            let mut action_name = itf_state.action_taken.clone();
+            if action_name
+                .as_deref()
+                .is_some_and(|name| name == "init" || name == "step")
+                || action_name.is_none()
+            {
+                if let Some(Value::String(name)) = itf_state.variables.get("action_name") {
+                    action_name = Some(name.clone());
+                }
+            }
+
+            let action_name = action_name
                 .as_ref()
                 .ok_or_else(|| aura_core::AuraError::invalid("ITF state missing action_taken"))?;
 

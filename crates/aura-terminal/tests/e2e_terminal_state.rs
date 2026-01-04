@@ -29,6 +29,7 @@
 // Component State Tests (non-PTY, for faster CI)
 // ============================================================================
 
+use assert_matches::assert_matches;
 use aura_terminal::tui::components::{AccountSetupState, ContactSelectState, TextInputState};
 use aura_terminal::tui::effects::EffectCommand;
 use aura_terminal::tui::screens::Screen;
@@ -685,25 +686,14 @@ fn test_effect_commands() {
     let cmd = EffectCommand::CreateAccount {
         display_name: "Bob".to_string(),
     };
-    match cmd {
-        EffectCommand::CreateAccount { display_name } => {
-            assert_eq!(display_name, "Bob");
-        }
-        _ => panic!("Expected CreateAccount"),
-    }
+    assert_matches!(cmd, EffectCommand::CreateAccount { display_name } if display_name == "Bob");
 
     // SendMessage
     let cmd = EffectCommand::SendMessage {
         channel: "general".to_string(),
         content: "Hello!".to_string(),
     };
-    match cmd {
-        EffectCommand::SendMessage { channel, content } => {
-            assert_eq!(channel, "general");
-            assert_eq!(content, "Hello!");
-        }
-        _ => panic!("Expected SendMessage"),
-    }
+    assert_matches!(cmd, EffectCommand::SendMessage { channel, content } if channel == "general" && content == "Hello!");
 
     // CreateInvitation
     let cmd = EffectCommand::CreateInvitation {
@@ -712,20 +702,14 @@ fn test_effect_commands() {
         message: Some("Be my guardian".to_string()),
         ttl_secs: Some(3600),
     };
-    match cmd {
-        EffectCommand::CreateInvitation {
-            receiver_id,
-            invitation_type,
-            message,
-            ttl_secs,
-        } => {
-            assert_eq!(receiver_id, "receiver");
-            assert_eq!(invitation_type, "Guardian");
-            assert_eq!(message, Some("Be my guardian".to_string()));
-            assert_eq!(ttl_secs, Some(3600));
-        }
-        _ => panic!("Expected CreateInvitation"),
-    }
+    assert_matches!(
+        cmd,
+        EffectCommand::CreateInvitation { receiver_id, invitation_type, message, ttl_secs }
+            if receiver_id == "receiver"
+                && invitation_type == "Guardian"
+                && message == Some("Be my guardian".to_string())
+                && ttl_secs == Some(3600)
+    );
 
     println!("✓ Effect commands structure is correct");
 }
@@ -1791,15 +1775,14 @@ async fn test_steward_role_flow() {
         })
         .await;
 
-    if let Err(ref e) = result {
-        assert!(
-            e.contains("Owner") || e.contains("modify"),
-            "Should fail for Owner"
-        );
-        println!("  ✓ Cannot grant steward to Owner (expected error)");
-    } else {
+    let Err(e) = result else {
         panic!("Expected error when granting steward to Owner");
-    }
+    };
+    assert!(
+        e.contains("Owner") || e.contains("modify"),
+        "Should fail for Owner"
+    );
+    println!("  ✓ Cannot grant steward to Owner (expected error)");
 
     // Can't revoke non-Admin
     let result = ctx
@@ -1808,15 +1791,14 @@ async fn test_steward_role_flow() {
         })
         .await;
 
-    if let Err(ref e) = result {
-        assert!(
-            e.contains("Admin") || e.contains("revoke"),
-            "Should fail for non-Admin"
-        );
-        println!("  ✓ Cannot revoke steward from non-Admin (expected error)");
-    } else {
+    let Err(e) = result else {
         panic!("Expected error when revoking steward from non-Admin");
-    }
+    };
+    assert!(
+        e.contains("Admin") || e.contains("revoke"),
+        "Should fail for non-Admin"
+    );
+    println!("  ✓ Cannot revoke steward from non-Admin (expected error)");
 
     // Can't find non-existent resident
     let result = ctx
@@ -1825,15 +1807,14 @@ async fn test_steward_role_flow() {
         })
         .await;
 
-    if let Err(ref e) = result {
-        assert!(
-            e.contains("not found") || e.contains("Resident"),
-            "Should fail for non-existent resident"
-        );
-        println!("  ✓ Cannot grant steward to non-existent resident (expected error)");
-    } else {
+    let Err(e) = result else {
         panic!("Expected error when granting steward to non-existent resident");
-    }
+    };
+    assert!(
+        e.contains("not found") || e.contains("Resident"),
+        "Should fail for non-existent resident"
+    );
+    println!("  ✓ Cannot grant steward to non-existent resident (expected error)");
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&test_dir);
@@ -2196,19 +2177,12 @@ async fn test_retry_message_command() {
     };
 
     // Verify command can be created
-    if let EffectCommand::RetryMessage {
-        message_id,
-        channel,
-        content,
-    } = &retry_cmd
-    {
-        assert_eq!(message_id, "msg-123");
-        assert_eq!(channel, "general");
-        assert_eq!(content, "Hello, retry!");
-        println!("  ✓ RetryMessage command created with correct fields");
-    } else {
-        panic!("Expected RetryMessage command");
-    }
+    assert_matches!(
+        &retry_cmd,
+        EffectCommand::RetryMessage { message_id, channel, content }
+            if message_id == "msg-123" && channel == "general" && content == "Hello, retry!"
+    );
+    println!("  ✓ RetryMessage command created with correct fields");
 
     // Phase 2: Test authorization level is Basic
     println!("\nPhase 2: Testing authorization level");
@@ -2305,13 +2279,12 @@ async fn test_channel_mode_operations() {
         channel: "general".to_string(),
         flags: "+mpt".to_string(),
     };
-    if let EffectCommand::SetChannelMode { channel, flags } = &cmd {
-        assert_eq!(channel, "general");
-        assert_eq!(flags, "+mpt");
-        println!("  ✓ SetChannelMode command created correctly");
-    } else {
-        panic!("Expected SetChannelMode command");
-    }
+    assert_matches!(
+        &cmd,
+        EffectCommand::SetChannelMode { channel, flags }
+            if channel == "general" && flags == "+mpt"
+    );
+    println!("  ✓ SetChannelMode command created correctly");
 
     // Phase 5: Test IoContext channel mode storage
     println!("\nPhase 5: Testing IoContext channel mode storage");
@@ -2423,12 +2396,8 @@ async fn test_request_state_sync() {
     let cmd = EffectCommand::RequestState {
         peer_id: "peer123".to_string(),
     };
-    if let EffectCommand::RequestState { peer_id } = &cmd {
-        assert_eq!(peer_id, "peer123");
-        println!("  ✓ RequestState command created correctly");
-    } else {
-        panic!("Expected RequestState command");
-    }
+    assert_matches!(&cmd, EffectCommand::RequestState { peer_id } if peer_id == "peer123");
+    println!("  ✓ RequestState command created correctly");
 
     // Phase 2: Test with different peer IDs
     println!("\nPhase 2: Testing with various peer IDs");

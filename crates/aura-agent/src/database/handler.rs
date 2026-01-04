@@ -55,6 +55,7 @@ struct DatabaseState {
 }
 
 impl DatabaseState {
+    #[allow(dead_code)] // For use with with_state_mut_validated
     fn validate(&self) -> Result<(), String> {
         if self.bloom_filter.element_count < self.fact_hashes.len() as u64 {
             return Err(format!(

@@ -3,6 +3,7 @@
 //! This module contains query operations that are portable across all frontends.
 //! These are read-only operations that query contact and channel state.
 
+use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::snapshot_policy::full_snapshot;
 use crate::{views::Contact, AppCore};
@@ -16,21 +17,42 @@ use std::sync::Arc;
 /// **Returns**: List of participant names
 /// **Signal pattern**: Read-only operation (no emission)
 ///
-/// For DM channels (format: "dm:<contact_id>"), returns self + that contact.
-/// For group channels, returns self + all contacts (as potential participants).
+/// For DM channels, returns self + that contact when known.
+/// For group channels, returns self + known members from channel state.
 pub async fn list_participants(
     app_core: &Arc<RwLock<AppCore>>,
     channel: &str,
 ) -> Result<Vec<String>, AuraError> {
     let snapshot = full_snapshot(app_core).await;
     let contacts = &snapshot.contacts;
+    let chat = &snapshot.chat;
 
     let mut participants = Vec::new();
 
     // Always include self (current user)
     participants.push("You".to_string());
 
-    // For DM channels (format: "dm:<contact_id>"), include just that contact
+    let channel_ref = ChannelRef::parse(channel);
+    let channel_entry = match channel_ref {
+        ChannelRef::Id(id) => chat.channel(&id),
+        ChannelRef::Name(name) => chat
+            .channels
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(&name)),
+    };
+
+    if let Some(channel_entry) = channel_entry {
+        for member_id in &channel_entry.member_ids {
+            if let Some(contact) = contacts.contact(member_id) {
+                participants.push(get_display_name(contact));
+            } else {
+                participants.push(member_id.to_string());
+            }
+        }
+        return Ok(participants);
+    }
+
+    // Backwards-compatible fallback: DM channels encoded as "dm:<contact_id>".
     if channel.starts_with("dm:") {
         let contact_id_str = channel.strip_prefix("dm:").unwrap_or("");
         if let Ok(contact_id) = parse_authority_id(contact_id_str) {
@@ -41,12 +63,6 @@ pub async fn list_participants(
             }
         } else {
             participants.push(contact_id_str.to_string());
-        }
-    } else {
-        // For group channels, include all contacts as potential participants
-        // (In a real implementation, this would query actual channel membership)
-        for contact in contacts.filtered_contacts() {
-            participants.push(get_display_name(contact));
         }
     }
 

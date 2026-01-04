@@ -39,6 +39,7 @@ struct SharedTransportState {
 }
 
 impl SharedTransportState {
+    #[allow(dead_code)] // For use with with_state_mut_validated
     fn validate(&self) -> Result<(), String> {
         for authority_id in &self.online {
             if !self.inboxes.contains_key(authority_id) {
@@ -129,6 +130,15 @@ impl SharedTransport {
                 .iter()
                 .filter(|id| **id != self_authority)
                 .count()
+        })
+    }
+
+    /// List all authorities currently registered as online.
+    pub fn online_peers(&self) -> Vec<AuthorityId> {
+        self.with_state(|state| {
+            let mut peers: Vec<AuthorityId> = state.online.iter().copied().collect();
+            peers.sort();
+            peers
         })
     }
 

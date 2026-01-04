@@ -123,6 +123,7 @@ uniffi::custom_type!(ContextId, String);
 
 pub mod authorization;
 pub mod bridge;
+pub mod ceremonies;
 pub mod core;
 pub mod effects;
 pub mod errors;

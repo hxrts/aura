@@ -111,6 +111,9 @@ pub mod effects;
 // Simulation handlers
 pub mod handlers;
 
+// Bounded liveness checking infrastructure
+pub mod liveness;
+
 // AMP scenario helpers
 pub mod amp;
 
@@ -153,6 +156,12 @@ pub use testkit_bridge::{MiddlewareConfig as HandlerConfig, TestkitSimulatorBrid
 
 // Re-export scenario types for convenience
 pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};
+
+// Re-export liveness checking types
+pub use liveness::{
+    BoundedLivenessChecker, BoundedLivenessProperty, LivenessCheckResult,
+    SynchronyAssumption, check_consensus_terminates_within, consensus_liveness_checker,
+};
 
 // Re-export Duration for convenience
 pub use std::time::Duration;

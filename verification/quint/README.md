@@ -67,6 +67,8 @@ verification/quint/
 │   ├── core.qnt                # Session lifecycle
 │   ├── groups.qnt              # Group membership management
 │   └── locking.qnt             # Distributed locking
+├── amp/                        # AMP channel lifecycle specs
+│   └── channel.qnt             # Channel invites, membership, messaging, epoch bump
 ├── liveness/                   # Liveness analysis specs
 │   ├── timing.qnt              # Synchrony model and timing
 │   ├── connectivity.qnt        # Gossip graph connectivity
@@ -74,7 +76,8 @@ verification/quint/
 ├── harness/                    # Simulator harness modules
 │   ├── dkg.qnt, resharing.qnt, recovery.qnt
 │   ├── locking.qnt, counter.qnt, groups.qnt
-│   └── flows.qnt               # TUI flow harness
+│   ├── flows.qnt               # TUI flow harness
+│   └── amp_channel.qnt         # AMP channel lifecycle harness
 └── tui/                        # TUI state machine specs
     ├── flows.qnt               # TUI flow specifications
     └── cli_recovery_demo.qnt   # CLI recovery demo
@@ -100,6 +103,7 @@ Core protocol state machines modeling Aura's distributed protocols:
 | `sessions/` | `core.qnt` | Session lifecycle and presence | [MPST Guide](../../docs/107_mpst_and_choreography.md) |
 | `sessions/` | `groups.qnt` | Group membership management | [Social Architecture](../../docs/114_social_architecture.md) |
 | `sessions/` | `locking.qnt` | Distributed locking protocol | - |
+| `amp/` | `channel.qnt` | AMP channel lifecycle (invite/join/send/leave/rotate) | [AMP](../../docs/112_amp.md) |
 | `.` | `recovery.qnt` | Guardian-based recovery flows | [Relational Contexts](../../docs/103_relational_contexts.md) |
 | `.` | `authorization.qnt` | Guard chain authorization, budget verification | [Information Flow](../../docs/003_information_flow_contract.md) |
 | `.` | `epochs.qnt` | Epoch transitions and receipt validity windows | [Transport](../../docs/108_transport_and_information_flow.md) |
@@ -120,6 +124,7 @@ Standard entry points for simulator integration (in `harness/`):
 | `locking.qnt` | Locking | `register`, `requestLock`, `complete`, `abort` |
 | `counter.qnt` | Counter | `register`, `increment`, `complete`, `abort` |
 | `groups.qnt` | Groups | `register`, `addMember`, `removeMember`, `complete`, `abort` |
+| `amp_channel.qnt` | AMP Channel | `ampChannelLifecycle` |
 
 ### Test Specifications
 
@@ -239,6 +244,7 @@ Model-based testing traces are generated in `traces/`:
 | `cross_interaction.itf.json` | `interaction.qnt` | Concurrent protocol safety |
 | `anti_entropy.itf.json` | `journal/anti_entropy.qnt` | CRDT synchronization |
 | `epochs.itf.json` | `epochs.qnt` | Epoch transitions and receipts |
+| `amp_channel.itf.json` | `harness/amp_channel.qnt` | AMP channel lifecycle (create/invite/join/send/leave/rotate) |
 
 Generate traces with:
 
@@ -247,6 +253,16 @@ quint run verification/quint/consensus/core.qnt \
   --main=protocol_consensus \
   --max-samples=5 --max-steps=20 \
   --out-itf=traces/consensus.itf.json
+```
+
+AMP channel lifecycle traces require MBT metadata so the simulator can replay action names:
+
+```bash
+quint run verification/quint/harness/amp_channel.qnt \
+  --main=harness_amp_channel \
+  --max-samples=1 --max-steps=20 \
+  --mbt \
+  --out-itf=traces/amp_channel.itf.json
 ```
 
 ## Rust Integration

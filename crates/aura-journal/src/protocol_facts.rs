@@ -5,7 +5,7 @@
 //! `RelationalFact::Generic` + `FactRegistry` instead.
 
 use crate::fact::{
-    ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, ConvergenceCert,
+    ChannelBootstrap, ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump, ConvergenceCert,
     DkgTranscriptCommit, LeakageFact, ProposedChannelEpochBump, ProtocolFactKey, ReversionFact,
     RotateFact,
 };
@@ -52,6 +52,8 @@ pub enum ProtocolRelationalFact {
     AmpCommittedChannelEpochBump(CommittedChannelEpochBump),
     /// Channel policy overrides
     AmpChannelPolicy(ChannelPolicy),
+    /// AMP channel bootstrap metadata (dealer key)
+    AmpChannelBootstrap(ChannelBootstrap),
     /// Leakage tracking event (privacy budget accounting)
     LeakageEvent(LeakageFact),
     /// Finalized DKG transcript commit
@@ -120,6 +122,12 @@ impl ProtocolRelationalFact {
             ProtocolRelationalFact::AmpChannelPolicy(policy) => ProtocolFactKey::AmpChannelPolicy {
                 channel: policy.channel,
             },
+            ProtocolRelationalFact::AmpChannelBootstrap(bootstrap) => {
+                ProtocolFactKey::AmpChannelBootstrap {
+                    channel: bootstrap.channel,
+                    bootstrap_id: bootstrap.bootstrap_id,
+                }
+            }
             ProtocolRelationalFact::LeakageEvent(event) => ProtocolFactKey::LeakageEvent {
                 source: event.source,
                 destination: event.destination,

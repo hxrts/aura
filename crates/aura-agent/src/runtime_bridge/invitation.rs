@@ -32,7 +32,7 @@ pub(super) fn convert_invitation_type_to_bridge(
                 subject_authority: *subject_authority,
             }
         }
-        crate::handlers::invitation::InvitationType::Channel { home_id } => {
+        crate::handlers::invitation::InvitationType::Channel { home_id, .. } => {
             InvitationBridgeType::Channel {
                 home_id: home_id.clone(),
             }

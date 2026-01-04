@@ -342,6 +342,28 @@ pub struct ChannelPolicy {
     pub skip_window: Option<u32>,
 }
 
+/// Provisional AMP channel bootstrap (dealer key metadata).
+///
+/// Records the bootstrap key identifier and recipients without exposing
+/// the bootstrap key material in the journal.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ChannelBootstrap {
+    /// Relational context containing this channel
+    pub context: ContextId,
+    /// Channel identifier for this bootstrap
+    pub channel: ChannelId,
+    /// Hash identifier for the bootstrap key material
+    pub bootstrap_id: Hash32,
+    /// Authority acting as the bootstrap dealer
+    pub dealer: AuthorityId,
+    /// Intended recipients of the bootstrap key
+    pub recipients: Vec<AuthorityId>,
+    /// Timestamp when bootstrap was created
+    pub created_at: aura_core::time::PhysicalTime,
+    /// Optional expiration time for the bootstrap key
+    pub expires_at: Option<aura_core::time::PhysicalTime>,
+}
+
 /// Observer classes for leakage tracking in journals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum LeakageObserverClass {
@@ -411,6 +433,7 @@ pub struct LeakageFact {
 /// - `Protocol(AmpProposedChannelEpochBump)` - Optimistic epoch transitions
 /// - `Protocol(AmpCommittedChannelEpochBump)` - Finalized epoch transitions
 /// - `Protocol(AmpChannelPolicy)` - Channel-level policy overrides
+/// - `Protocol(AmpChannelBootstrap)` - Channel bootstrap key metadata
 /// - `Protocol(DkgTranscriptCommit)` - Consensus-finalized DKG transcript
 /// - `Protocol(ConvergenceCert)` - Soft-safe convergence certificate
 /// - `Protocol(ReversionFact)` - Soft-safe explicit reversion
@@ -550,6 +573,13 @@ pub enum ProtocolFactKey {
         /// The channel identifier.
         channel: ChannelId,
     },
+    /// AMP channel bootstrap metadata.
+    AmpChannelBootstrap {
+        /// The channel identifier.
+        channel: ChannelId,
+        /// Bootstrap key identifier.
+        bootstrap_id: Hash32,
+    },
     /// Leakage accounting event.
     LeakageEvent {
         /// Source authority of the leakage.
@@ -592,6 +622,7 @@ impl ProtocolFactKey {
             ProtocolFactKey::AmpProposedChannelEpochBump { .. } => "amp-proposed-epoch-bump",
             ProtocolFactKey::AmpCommittedChannelEpochBump { .. } => "amp-committed-epoch-bump",
             ProtocolFactKey::AmpChannelPolicy { .. } => "amp-channel-policy",
+            ProtocolFactKey::AmpChannelBootstrap { .. } => "amp-channel-bootstrap",
             ProtocolFactKey::LeakageEvent { .. } => "leakage-event",
             ProtocolFactKey::DkgTranscriptCommit { .. } => "dkg-transcript-commit",
             ProtocolFactKey::ConvergenceCert { .. } => "convergence-cert",
@@ -646,6 +677,11 @@ impl ProtocolFactKey {
             ProtocolFactKey::AmpChannelPolicy { channel } => {
                 aura_core::util::serialization::to_vec(channel).unwrap_or_default()
             }
+            ProtocolFactKey::AmpChannelBootstrap {
+                channel,
+                bootstrap_id,
+            } => aura_core::util::serialization::to_vec(&(channel, bootstrap_id))
+                .unwrap_or_default(),
             ProtocolFactKey::LeakageEvent {
                 source,
                 destination,

@@ -1222,6 +1222,21 @@ quint-generate-traces:
     echo "Trace generation complete. Files in verification/traces/"
     ls -la verification/traces/*.itf.json 2>/dev/null || echo "No traces generated"
 
+# Check Quint-Rust type correspondence
+# Detects drift between Quint type definitions and Rust QuintMappable implementations
+quint-check-types verbose="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    ./scripts/check-quint-rust-types.sh {{verbose}}
+
+# Generate verification coverage report
+# Usage: just verification-coverage        # Markdown to stdout
+# Usage: just verification-coverage --json # JSON metrics
+verification-coverage format="--md":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    ./scripts/verification-coverage.sh {{format}}
+
 # Execute any aura CLI command with nix build
 # Usage: just aura init -n 3 -t 2 -o test-account
 # Usage: just aura status -c test-account/configs/device_1.toml

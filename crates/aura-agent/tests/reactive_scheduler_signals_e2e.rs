@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use aura_agent::fact_registry::build_fact_registry;
 use aura_agent::reactive::{ReactivePipeline, SchedulerConfig, ViewUpdate};
+use aura_agent::{core::AgentConfig, AuraEffectSystem};
 use aura_app::signal_defs::{register_app_signals, CONTACTS_SIGNAL, ERROR_SIGNAL};
 use aura_app::ReactiveHandler;
 use aura_core::effects::reactive::ReactiveEffects;
@@ -44,11 +45,14 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
 
     let time_effects = Arc::new(ControllableTimeSource::new(0));
     let own_authority = AuthorityId::new_from_entropy([42u8; 32]);
+    let config = AgentConfig::default();
+    let effects = Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
 
     let pipeline = ReactivePipeline::start(
         SchedulerConfig::default(),
         Arc::new(build_fact_registry()),
         time_effects,
+        effects,
         own_authority,
         reactive.clone(),
     );
@@ -102,11 +106,14 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
 
     let time_effects = Arc::new(ControllableTimeSource::new(0));
     let own_authority = AuthorityId::new_from_entropy([43u8; 32]);
+    let config = AgentConfig::default();
+    let effects = Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
 
     let pipeline = ReactivePipeline::start(
         SchedulerConfig::default(),
         Arc::new(build_fact_registry()),
         time_effects,
+        effects,
         own_authority,
         reactive.clone(),
     );
@@ -162,11 +169,14 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
 
     let time_effects = Arc::new(ControllableTimeSource::new(0));
     let own_authority = AuthorityId::new_from_entropy([44u8; 32]);
+    let config = AgentConfig::default();
+    let effects = Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
 
     let pipeline = ReactivePipeline::start(
         SchedulerConfig::default(),
         Arc::new(build_fact_registry()),
         time_effects,
+        effects,
         own_authority,
         reactive.clone(),
     );

@@ -9,6 +9,7 @@ use super::invitation::{
 };
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
+use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
 use aura_core::DeviceId;
 use std::sync::Arc;
@@ -53,6 +54,7 @@ impl InvitationServiceApi {
         &self,
         receiver_id: AuthorityId,
         home_id: String,
+        bootstrap: Option<ChannelBootstrapPackage>,
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
@@ -60,7 +62,7 @@ impl InvitationServiceApi {
             .create_invitation(
                 &self.effects,
                 receiver_id,
-                InvitationType::Channel { home_id },
+                InvitationType::Channel { home_id, bootstrap },
                 message,
                 expires_in_ms,
             )
@@ -385,7 +387,7 @@ mod tests {
 
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
         let invitation = service
-            .invite_to_channel(receiver_id, "channel-123".to_string(), None, None)
+            .invite_to_channel(receiver_id, "channel-123".to_string(), None, None, None)
             .await
             .unwrap();
 

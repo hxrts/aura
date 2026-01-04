@@ -126,6 +126,7 @@ pub async fn handle_invitations(
                         app_core,
                         receiver,
                         home_id,
+                        None,
                         message.clone(),
                         ttl_ms,
                     )
@@ -184,7 +185,7 @@ pub async fn handle_invitations(
                 }
             };
 
-            match create_channel_invitation(app_core, receiver, home_id, None, None).await {
+            match create_channel_invitation(app_core, receiver, home_id, None, None, None).await {
                 Ok(info) => Some(Ok(OpResponse::Data(format!(
                     "Home invitation sent: {}",
                     info.invitation_id
