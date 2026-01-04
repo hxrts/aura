@@ -823,6 +823,22 @@ impl ReactiveView for ChatSignalView {
                     };
                     state = self.state.lock().await;
                     let is_own = sender_id == self.own_authority;
+
+                    // Derive delivery status from fact's consistency metadata
+                    let delivery_status = if is_own {
+                        // For messages we sent, derive status from agreement level
+                        // Finalized (A3) messages have consensus confirmation = Delivered
+                        // Ack-tracked messages will transition based on acknowledgments
+                        if fact.is_finalized() {
+                            MessageDeliveryStatus::Delivered
+                        } else {
+                            MessageDeliveryStatus::Sent
+                        }
+                    } else {
+                        // Messages we received are already delivered to us
+                        MessageDeliveryStatus::Delivered
+                    };
+
                     let message = Message {
                         id: message_id,
                         channel_id,
@@ -833,10 +849,9 @@ impl ReactiveView for ChatSignalView {
                         reply_to,
                         is_own,
                         is_read: is_own,
-                        // Received messages are already "Sent" from sender's perspective
-                        delivery_status: MessageDeliveryStatus::Sent,
+                        delivery_status,
                         epoch_hint,
-                        is_finalized: false,
+                        is_finalized: fact.is_finalized(),
                     };
                     state.apply_message(channel_id, message);
                     changed = true;

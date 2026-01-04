@@ -39,7 +39,7 @@ use aura_core::EffectContext;
 use aura_core::Hash32;
 use aura_core::Prestate;
 use aura_journal::fact::{
-    ChannelBootstrap, ChannelBumpReason, ProposedChannelEpochBump, RelationalFact,
+    ChannelBootstrap, ChannelBumpReason, FactOptions, ProposedChannelEpochBump, RelationalFact,
 };
 use aura_journal::DomainFact;
 use aura_protocol::amp::{commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects};
@@ -131,6 +131,25 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         Ok(())
     }
+
+    async fn commit_relational_facts_with_options(
+        &self,
+        facts: &[RelationalFact],
+        options: FactOptions,
+    ) -> Result<(), IntentError> {
+        if facts.is_empty() {
+            return Ok(());
+        }
+
+        let effects = self.agent.runtime().effects();
+        effects
+            .commit_relational_facts_with_options(facts.to_vec(), options)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to commit facts: {e}")))?;
+
+        Ok(())
+    }
+
     // AMP Channel Operations
     // =========================================================================
 

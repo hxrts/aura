@@ -654,7 +654,7 @@ async fn test_neighborhood_formation_flow() {
     );
     println!(
         "  Neighbors: {count}",
-        count = bob_neighborhood.neighbors.len()
+        count = bob_neighborhood.neighbor_count()
     );
 
     // Note: Neighborhood commands would be added here when implemented

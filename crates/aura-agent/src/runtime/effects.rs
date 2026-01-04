@@ -37,7 +37,9 @@ use aura_effects::{
     time::{OrderClockHandler, PhysicalTimeHandler},
 };
 use aura_journal::extensibility::FactRegistry;
-use aura_journal::fact::{DkgTranscriptCommit, Fact as TypedFact, FactContent, RelationalFact};
+use aura_journal::fact::{
+    DkgTranscriptCommit, Fact as TypedFact, FactContent, FactOptions, RelationalFact,
+};
 use aura_journal::protocol_facts::ProtocolRelationalFact;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
@@ -451,6 +453,55 @@ impl AuraEffectSystem {
                 aura_core::time::TimeStamp::OrderClock(order.clone()),
                 FactContent::Relational(rel),
             );
+
+            let key = Self::typed_fact_storage_key(self.authority_id, &order);
+            let bytes = aura_core::util::serialization::to_vec(&fact)
+                .map_err(|e| AuraError::internal(format!("serialize fact: {e}")))?;
+            self.store(&key, bytes)
+                .await
+                .map_err(|e| AuraError::storage(format!("persist fact: {e}")))?;
+
+            committed.push(fact);
+        }
+
+        // Publish after persistence so subscribers can always recover from storage.
+        self.publish_typed_facts(committed.clone()).await?;
+
+        Ok(committed)
+    }
+
+    /// Commit a batch of typed relational facts with options.
+    ///
+    /// Same as `commit_relational_facts` but allows specifying options like ack tracking.
+    pub async fn commit_relational_facts_with_options(
+        &self,
+        facts: Vec<RelationalFact>,
+        options: FactOptions,
+    ) -> Result<Vec<TypedFact>, AuraError> {
+        if facts.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut committed: Vec<TypedFact> = Vec::with_capacity(facts.len());
+        for rel in facts {
+            let order = self
+                .order_time()
+                .await
+                .map_err(|e| AuraError::internal(format!("order_time: {e}")))?;
+
+            let mut fact = TypedFact::new(
+                order.clone(),
+                aura_core::time::TimeStamp::OrderClock(order.clone()),
+                FactContent::Relational(rel),
+            );
+
+            // Apply options
+            if options.request_acks {
+                fact = fact.with_ack_tracking();
+            }
+            if let Some(agreement) = &options.initial_agreement {
+                fact = fact.with_agreement(agreement.clone());
+            }
 
             let key = Self::typed_fact_storage_key(self.authority_id, &order);
             let bytes = aura_core::util::serialization::to_vec(&fact)

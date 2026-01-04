@@ -1214,15 +1214,12 @@ impl Query for NeighborhoodQuery {
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
 
-        Ok(NeighborhoodState {
-            home_home_id: ChannelId::default(), // Set by caller
-            home_name: String::new(),           // Set by caller
-            position: None,
+        // Uses ChannelId::default() and empty name - caller should set these
+        Ok(NeighborhoodState::from_parts(
+            ChannelId::default(),
+            String::new(),
             neighbors,
-            max_depth: 3,
-            loading: false,
-            connected_peers: std::collections::HashSet::new(),
-        })
+        ))
     }
 }
 

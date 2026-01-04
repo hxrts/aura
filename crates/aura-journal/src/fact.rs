@@ -545,6 +545,29 @@ impl Fact {
     pub fn is_propagated(&self) -> bool {
         self.propagation.is_complete()
     }
+
+    /// Get the consistency metadata for this fact.
+    ///
+    /// Returns a Consistency object constructed from the fact's agreement and
+    /// propagation fields. If the fact has ack_tracked=true, the acknowledgment
+    /// field will be set to a default (empty) Acknowledgment; callers should
+    /// populate this from the journal's ack storage if needed.
+    ///
+    /// Note: This is a convenience method for cases where you need a Consistency
+    /// object. For full consistency tracking including acknowledgments, use the
+    /// journal's query methods which populate acknowledgment data.
+    pub fn consistency(&self) -> Consistency {
+        Consistency {
+            category: OperationCategory::Optimistic, // Default category
+            agreement: self.agreement.clone(),
+            propagation: self.propagation.clone(),
+            acknowledgment: if self.ack_tracked {
+                Some(Acknowledgment::default())
+            } else {
+                None
+            },
+        }
+    }
 }
 
 impl PartialOrd for Fact {

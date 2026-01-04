@@ -27,6 +27,7 @@ use aura_core::{
     identifiers::{AuthorityId, ChannelId, ContextId},
     AuraError,
 };
+use aura_journal::fact::FactOptions;
 use aura_journal::DomainFact;
 use std::sync::Arc;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
@@ -486,8 +487,12 @@ pub async fn send_message_ref(
         )
         .to_generic();
 
+        // Enable ack tracking for message facts to support delivery confirmation
         runtime
-            .commit_relational_facts(&[fact])
+            .commit_relational_facts_with_options(
+                &[fact],
+                FactOptions::default().with_ack_tracking(),
+            )
             .await
             .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
 

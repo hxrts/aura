@@ -49,7 +49,7 @@ use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
 use aura_effects::PhysicalTimeHandler;
-use aura_journal::fact::RelationalFact;
+use aura_journal::fact::{FactOptions, RelationalFact};
 use std::sync::Arc;
 
 /// Status of the runtime's sync service
@@ -351,6 +351,24 @@ pub trait RuntimeBridge: Send + Sync {
     /// - Persisting the committed facts
     /// - Publishing them to the ReactiveScheduler for UI signal updates
     async fn commit_relational_facts(&self, facts: &[RelationalFact]) -> Result<(), IntentError>;
+
+    /// Commit typed relational facts with additional options.
+    ///
+    /// Same as `commit_relational_facts` but allows specifying options like
+    /// ack tracking. Uses default options if not specified.
+    ///
+    /// # Arguments
+    /// * `facts` - The facts to commit
+    /// * `options` - Options controlling fact behavior (e.g., ack tracking)
+    async fn commit_relational_facts_with_options(
+        &self,
+        facts: &[RelationalFact],
+        options: FactOptions,
+    ) -> Result<(), IntentError> {
+        // Default implementation ignores options (for backward compatibility)
+        let _ = options;
+        self.commit_relational_facts(facts).await
+    }
 
     // =========================================================================
     // AMP Channel Operations
