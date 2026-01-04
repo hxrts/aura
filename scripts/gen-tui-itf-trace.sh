@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-OUT="${1:-$ROOT/verification/traces/tui_trace.itf.json}"
+OUT="${1:-$ROOT/verification/quint/traces/tui_trace.itf.json}"
 SEED="${TUI_ITF_SEED:-424242}"
 MAX_STEPS="${TUI_ITF_MAX_STEPS:-50}"
 

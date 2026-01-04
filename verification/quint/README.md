@@ -233,7 +233,7 @@ Quint Spec (.qnt)
 
 ### Generated ITF Traces
 
-Model-based testing traces are generated in `traces/`:
+Model-based testing traces are generated in `verification/quint/traces/`:
 
 | Trace File | Source Spec | Description |
 |------------|-------------|-------------|
@@ -252,7 +252,7 @@ Generate traces with:
 quint run verification/quint/consensus/core.qnt \
   --main=protocol_consensus \
   --max-samples=5 --max-steps=20 \
-  --out-itf=traces/consensus.itf.json
+  --out-itf=verification/quint/traces/consensus.itf.json
 ```
 
 AMP channel lifecycle traces require MBT metadata so the simulator can replay action names:
@@ -262,7 +262,7 @@ quint run verification/quint/harness/amp_channel.qnt \
   --main=harness_amp_channel \
   --max-samples=1 --max-steps=20 \
   --mbt \
-  --out-itf=traces/amp_channel.itf.json
+  --out-itf=verification/quint/traces/amp_channel.itf.json
 ```
 
 ## Rust Integration

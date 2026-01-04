@@ -168,12 +168,12 @@ fn load_trace(path: impl AsRef<Path>) -> Result<ITFTrace, String> {
 /// Test that validates CLI recovery demo invariants from ITF trace
 #[test]
 fn test_cli_recovery_demo_invariants() {
-    let trace_path = "../../verification/traces/cli_recovery_demo.itf.json";
+    let trace_path = "../../verification/quint/traces/cli_recovery_demo.itf.json";
 
     // Skip if trace file doesn't exist
     if !std::path::Path::new(trace_path).exists() {
         eprintln!(
-            "Skipping: trace file not found at {trace_path}. Run: nix develop -c quint run --out-itf=verification/traces/cli_recovery_demo.itf.json --max-samples=1 --init=init --step=guardianRequestFlowTest verification/quint/cli_recovery_demo.qnt"
+            "Skipping: trace file not found at {trace_path}. Run: nix develop -c quint run --out-itf=verification/quint/traces/cli_recovery_demo.itf.json --max-samples=1 --init=init --step=guardianRequestFlowTest verification/quint/cli_recovery_demo.qnt"
         );
         return;
     }
@@ -245,7 +245,7 @@ fn test_cli_recovery_demo_invariants() {
 /// Test that validates the final state has correct guardian setup
 #[test]
 fn test_final_guardian_state() {
-    let trace_path = "../../verification/traces/cli_recovery_demo.itf.json";
+    let trace_path = "../../verification/quint/traces/cli_recovery_demo.itf.json";
 
     // Skip if trace file doesn't exist
     if !std::path::Path::new(trace_path).exists() {
@@ -312,7 +312,7 @@ fn test_full_demo_flow_trace() {
     let output = std::process::Command::new("quint")
         .args([
             "run",
-            "--out-itf=verification/traces/full_demo.itf.json",
+            "--out-itf=verification/quint/traces/full_demo.itf.json",
             "--max-samples=1",
             "--init=init",
             "--step=fullCliRecoveryDemoTest",
@@ -340,7 +340,7 @@ fn test_full_demo_flow_trace() {
         panic!("Quint run failed: {stderr}");
     }
 
-    let trace_path = "../../verification/traces/full_demo.itf.json";
+    let trace_path = "../../verification/quint/traces/full_demo.itf.json";
     let trace = load_trace(trace_path).expect("Failed to load trace");
 
     println!(

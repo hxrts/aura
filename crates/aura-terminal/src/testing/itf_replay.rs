@@ -9,7 +9,7 @@
 //! use aura_terminal::testing::itf_replay::{ITFTraceReplayer, TuiITFState};
 //!
 //! let replayer = ITFTraceReplayer::new();
-//! let results = replayer.replay_trace_file("verification/traces/tui_trace.itf.json")?;
+//! let results = replayer.replay_trace_file("verification/quint/traces/tui_trace.itf.json")?;
 //! assert!(results.all_states_match);
 //! ```
 

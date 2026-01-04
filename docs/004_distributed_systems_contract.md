@@ -271,7 +271,7 @@ This contract's guarantees are formally verified:
 | Model checking | Quint + Apalache | `verification/quint/` |
 | Theorem proofs | Lean 4 | `verification/lean/` |
 | Differential testing | Rust + Lean oracle | `crates/aura-testkit/` |
-| ITF conformance | Quint traces | `verification/traces/` |
+| ITF conformance | Quint traces | `verification/quint/traces/` |
 
 See [Verification Coverage Report](998_verification_coverage.md) for metrics and [verification/README.md](../verification/README.md) for the Quint-Lean correspondence map.
 

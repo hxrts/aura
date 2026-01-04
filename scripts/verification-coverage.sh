@@ -100,7 +100,7 @@ count_verified_specs() {
 
 # Count ITF trace coverage
 count_itf_traces() {
-    find "$PROJECT_ROOT/verification/traces" -name "*.itf.json" -type f 2>/dev/null | wc -l | tr -d ' '
+    find "$PROJECT_ROOT/verification/quint/traces" -name "*.itf.json" -type f 2>/dev/null | wc -l | tr -d ' '
 }
 
 # Count differential test coverage

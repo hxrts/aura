@@ -8,7 +8,7 @@ use aura_terminal::testing::itf_replay::ITFTraceReplayer;
 /// Test replaying the generated TUI trace
 #[test]
 fn test_replay_tui_trace() {
-    let trace_path = "../../verification/traces/tui_trace.itf.json";
+    let trace_path = "../../verification/quint/traces/tui_trace.itf.json";
 
     // Skip if trace file doesn't exist
     if !std::path::Path::new(trace_path).exists() {
@@ -157,7 +157,7 @@ fn test_generative_trace_replay() {
             "run",
             "--max-samples=100",
             "--max-steps=50",
-            "--out-itf=verification/traces/tui_generative.itf.json",
+            "--out-itf=verification/quint/traces/tui_generative.itf.json",
             "verification/quint/tui_state_machine.qnt",
         ])
         .current_dir("../../")
@@ -172,7 +172,7 @@ fn test_generative_trace_replay() {
         return;
     }
 
-    let trace_path = "../../verification/traces/tui_generative.itf.json";
+    let trace_path = "../../verification/quint/traces/tui_generative.itf.json";
     let replayer = ITFTraceReplayer::new();
     let result = replayer
         .replay_trace_file(trace_path)
@@ -207,7 +207,7 @@ fn test_multi_seed_generative_replay() {
     let replayer = ITFTraceReplayer::new();
 
     for run in 0..NUM_RUNS {
-        let trace_file = format!("verification/traces/tui_gen_{}.itf.json", run);
+        let trace_file = format!("verification/quint/traces/tui_gen_{}.itf.json", run);
 
         // Generate trace with different seed each run
         let output = Command::new("nix")
@@ -297,7 +297,7 @@ fn test_high_volume_generative() {
             "run",
             "--max-samples=1000",
             "--max-steps=100",
-            "--out-itf=verification/traces/tui_stress.itf.json",
+            "--out-itf=verification/quint/traces/tui_stress.itf.json",
             "verification/quint/tui_state_machine.qnt",
         ])
         .current_dir("../../")
@@ -309,7 +309,7 @@ fn test_high_volume_generative() {
         panic!("Quint high-volume run failed: {}", stderr);
     }
 
-    let trace_path = "../../verification/traces/tui_stress.itf.json";
+    let trace_path = "../../verification/quint/traces/tui_stress.itf.json";
     let replayer = ITFTraceReplayer::new();
     let result = replayer
         .replay_trace_file(trace_path)

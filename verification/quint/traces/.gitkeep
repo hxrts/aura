@@ -18,7 +18,7 @@ The `quint run` command with `--out-itf` generates trace files:
 
 ```bash
 quint run verification/quint/demo_flow.qnt \
-  --out-itf verification/traces/full_demo.itf.json \
+  --out-itf verification/quint/traces/full_demo.itf.json \
   --max-steps 50
 ```
 

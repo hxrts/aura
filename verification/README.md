@@ -32,8 +32,9 @@ verification/
 │   ├── sessions/             # Session and group specs
 │   ├── liveness/             # Liveness analysis specs
 │   ├── harness/              # Simulator harness modules
-│   └── tui/                  # TUI state machine specs
-└── traces/                   # Generated ITF traces for testing
+│   ├── tui/                  # TUI state machine specs
+│   └── traces/               # Generated ITF traces for testing
+└── lean/                     # Lean 4 theorem proofs (see above)
 ```
 
 ## Verification Approach

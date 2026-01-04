@@ -965,12 +965,12 @@ fn test_social_graph_flow_state_extraction() {
 #[test]
 #[ignore] // Run with: cargo test --ignored
 fn test_replay_flow_trace() {
-    let trace_path = "../../verification/traces/tui_flows_trace.itf.json";
+    let trace_path = "../../verification/quint/traces/tui_flows_trace.itf.json";
 
     // Skip if trace file doesn't exist
     if !std::path::Path::new(trace_path).exists() {
         eprintln!("Skipping: trace file not found at {trace_path}");
-        eprintln!("Generate it with: quint run --max-samples=100 --max-steps=50 --out-itf=verification/traces/tui_flows_trace.itf.json verification/quint/tui_flows.qnt");
+        eprintln!("Generate it with: quint run --max-samples=100 --max-steps=50 --out-itf=verification/quint/traces/tui_flows_trace.itf.json verification/quint/tui_flows.qnt");
         return;
     }
 
@@ -1008,7 +1008,7 @@ fn test_generative_flow_replay() {
     println!("\n=== Generative Flow Test ===\n");
 
     // Generate trace with Quint
-    let trace_file = "verification/traces/tui_flows_gen.itf.json";
+    let trace_file = "verification/quint/traces/tui_flows_gen.itf.json";
     println!("Generating trace with Quint...");
 
     let output = Command::new("nix")
