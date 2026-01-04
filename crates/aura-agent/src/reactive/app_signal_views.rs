@@ -716,6 +716,7 @@ impl ChatSignalView {
 }
 
 impl ReactiveView for ChatSignalView {
+    #[allow(deprecated)] // MessageDelivered and DeliveryAcknowledged are deprecated
     async fn update(&self, facts: &[Fact]) {
         let mut state = self.state.lock().await;
         let mut changed = false;

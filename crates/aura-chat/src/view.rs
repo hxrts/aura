@@ -387,6 +387,7 @@ impl ViewDeltaReducer for ChatViewReducer {
         CHAT_FACT_TYPE_ID
     }
 
+    #[allow(deprecated)] // MessageDelivered and DeliveryAcknowledged are deprecated
     fn reduce_fact(
         &self,
         binding_type: &str,
