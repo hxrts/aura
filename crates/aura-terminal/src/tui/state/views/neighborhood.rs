@@ -1,6 +1,7 @@
 //! Neighborhood screen view state
 
 use crate::tui::navigation::GridNav;
+use crate::tui::state::form::{Validatable, ValidationError};
 use crate::tui::types::TraversalDepth;
 
 /// Neighborhood screen mode
@@ -173,5 +174,33 @@ impl HomeCreateModalState {
         } else {
             Some(&self.description)
         }
+    }
+}
+
+// ============================================================================
+// Form Data Types with Validation
+// ============================================================================
+
+/// Form data for home creation (portable, validatable)
+#[derive(Clone, Debug, Default)]
+pub struct HomeFormData {
+    /// Home name (required)
+    pub name: String,
+    /// Optional description
+    pub description: String,
+}
+
+impl Validatable for HomeFormData {
+    fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = vec![];
+        if self.name.trim().is_empty() {
+            errors.push(ValidationError::required("name"));
+        } else if self.name.len() > 100 {
+            errors.push(ValidationError::too_long("name", 100));
+        }
+        if self.description.len() > 500 {
+            errors.push(ValidationError::too_long("description", 500));
+        }
+        errors
     }
 }

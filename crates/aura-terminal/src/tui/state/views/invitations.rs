@@ -5,6 +5,8 @@
 //!
 //! TTL presets and formatting are re-exported from aura-app for consistency.
 
+use crate::tui::state::form::{Validatable, ValidationError};
+
 // Re-export TTL constants from aura-app for use by TUI components
 pub use aura_app::ui::types::{
     format_ttl_display, next_ttl_preset, prev_ttl_preset, ttl_hours_to_ms, ttl_preset_index,
@@ -236,5 +238,52 @@ impl InvitationCodeModalState {
         self.code.clear();
         self.loading = false;
         self.error = None;
+    }
+}
+
+// ============================================================================
+// Form Data Types with Validation
+// ============================================================================
+
+/// Form data for invitation import (portable, validatable)
+#[derive(Clone, Debug, Default)]
+pub struct ImportInvitationFormData {
+    /// Invitation code (required)
+    pub code: String,
+}
+
+impl Validatable for ImportInvitationFormData {
+    fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = vec![];
+        if self.code.trim().is_empty() {
+            errors.push(ValidationError::required("code"));
+        }
+        errors
+    }
+}
+
+/// Form data for invitation creation (portable, validatable)
+#[derive(Clone, Debug, Default)]
+pub struct CreateInvitationFormData {
+    /// Receiver authority ID (required)
+    pub receiver_id: String,
+    /// Invitation type index
+    pub type_index: usize,
+    /// Optional message
+    pub message: String,
+    /// TTL in hours
+    pub ttl_hours: u64,
+}
+
+impl Validatable for CreateInvitationFormData {
+    fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = vec![];
+        if self.receiver_id.trim().is_empty() {
+            errors.push(ValidationError::required("receiver"));
+        }
+        if self.message.len() > 500 {
+            errors.push(ValidationError::too_long("message", 500));
+        }
+        errors
     }
 }

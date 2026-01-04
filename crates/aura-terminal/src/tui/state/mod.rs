@@ -26,6 +26,7 @@
 //! All modals MUST be shown via `modal_queue.enqueue()`.
 
 pub mod commands;
+pub mod form;
 mod handlers;
 pub mod modal_queue;
 pub mod toast;
@@ -34,6 +35,7 @@ pub mod views;
 
 // Re-export all public types for backwards compatibility
 pub use commands::{DispatchCommand, TuiCommand};
+pub use form::{FormDraft, FormPhase, Validatable, ValidationError};
 pub use modal_queue::{
     ChatMemberSelectModalState, ConfirmAction, ContactSelectModalState, ModalQueue, ModalType,
     QueuedModal,

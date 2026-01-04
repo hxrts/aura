@@ -1,6 +1,7 @@
 //! Chat screen view state
 
 /// Chat screen focus
+use crate::tui::state::form::{Validatable, ValidationError};
 use aura_app::ui::prelude::*;
 
 // Re-export portable wizard step type
@@ -210,5 +211,55 @@ impl ChannelInfoModalState {
         self.channel_name.clear();
         self.topic.clear();
         self.participants.clear();
+    }
+}
+
+// ============================================================================
+// Form Data Types with Validation
+// ============================================================================
+
+/// Form data for channel creation (portable, validatable)
+///
+/// This is the pure data portion of `CreateChannelModalState`, suitable for
+/// use with `FormDraft<T>` when form lifecycle tracking is needed.
+#[derive(Clone, Debug, Default)]
+pub struct ChannelFormData {
+    /// Channel name (required)
+    pub name: String,
+    /// Optional topic
+    pub topic: String,
+    /// Selected member IDs
+    pub member_ids: Vec<String>,
+}
+
+impl Validatable for ChannelFormData {
+    fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = vec![];
+        if self.name.trim().is_empty() {
+            errors.push(ValidationError::required("name"));
+        } else if self.name.len() > 100 {
+            errors.push(ValidationError::too_long("name", 100));
+        }
+        if self.topic.len() > 500 {
+            errors.push(ValidationError::too_long("topic", 500));
+        }
+        errors
+    }
+}
+
+/// Form data for topic editing (portable, validatable)
+#[derive(Clone, Debug, Default)]
+pub struct TopicFormData {
+    /// Topic value
+    pub value: String,
+}
+
+impl Validatable for TopicFormData {
+    fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = vec![];
+        if self.value.len() > 500 {
+            errors.push(ValidationError::too_long("topic", 500));
+        }
+        errors
     }
 }

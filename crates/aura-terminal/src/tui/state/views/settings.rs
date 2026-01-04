@@ -2,6 +2,7 @@
 
 use super::KeyRotationCeremonyUiState;
 use crate::tui::navigation::TwoPanelFocus;
+use crate::tui::state::form::{Validatable, ValidationError};
 use crate::tui::types::{AuthorityInfo, AuthoritySubSection, MfaPolicy, SettingsSection};
 use aura_core::types::Epoch;
 
@@ -185,5 +186,47 @@ impl ConfirmRemoveModalState {
 
     pub fn toggle_focus(&mut self) {
         self.confirm_focused = !self.confirm_focused;
+    }
+}
+
+// ============================================================================
+// Form Data Types with Validation
+// ============================================================================
+
+/// Form data for display name editing (portable, validatable)
+#[derive(Clone, Debug, Default)]
+pub struct DisplayNameFormData {
+    /// Display name value (required)
+    pub value: String,
+}
+
+impl Validatable for DisplayNameFormData {
+    fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = vec![];
+        if self.value.trim().is_empty() {
+            errors.push(ValidationError::required("display_name"));
+        } else if self.value.len() > 100 {
+            errors.push(ValidationError::too_long("display_name", 100));
+        }
+        errors
+    }
+}
+
+/// Form data for device name (portable, validatable)
+#[derive(Clone, Debug, Default)]
+pub struct DeviceNameFormData {
+    /// Device name (required)
+    pub name: String,
+}
+
+impl Validatable for DeviceNameFormData {
+    fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = vec![];
+        if self.name.trim().is_empty() {
+            errors.push(ValidationError::required("name"));
+        } else if self.name.len() > 50 {
+            errors.push(ValidationError::too_long("name", 50));
+        }
+        errors
     }
 }

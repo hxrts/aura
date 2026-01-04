@@ -1,6 +1,7 @@
 //! Contacts screen view state
 
 use crate::tui::navigation::TwoPanelFocus;
+use crate::tui::state::form::{Validatable, ValidationError};
 
 /// Contacts screen state
 #[derive(Clone, Debug, Default)]
@@ -68,5 +69,26 @@ impl NicknameModalState {
         // Allow empty nicknames as "clear nickname" so the suggested name can
         // become visible again.
         !self.contact_id.trim().is_empty() && self.value.trim().len() <= 100
+    }
+}
+
+// ============================================================================
+// Form Data Types with Validation
+// ============================================================================
+
+/// Form data for nickname editing (portable, validatable)
+#[derive(Clone, Debug, Default)]
+pub struct NicknameFormData {
+    /// Nickname value (can be empty to clear)
+    pub value: String,
+}
+
+impl Validatable for NicknameFormData {
+    fn validate(&self) -> Vec<ValidationError> {
+        let mut errors = vec![];
+        if self.value.len() > 100 {
+            errors.push(ValidationError::too_long("nickname", 100));
+        }
+        errors
     }
 }
