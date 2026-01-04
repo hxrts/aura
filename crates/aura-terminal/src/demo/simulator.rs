@@ -387,7 +387,7 @@ pub fn spawn_amp_echo_listener(
                 Err(_) => break,
             };
 
-            for msg in &chat_state.messages {
+            for msg in chat_state.all_messages() {
                 // Only echo Bob's messages
                 if msg.sender_id != bob_authority {
                     continue;

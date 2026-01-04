@@ -417,7 +417,7 @@ async fn test_chat_flow_sends_message() {
     println!("\nInitial chat state:");
     let bob_chat = env.get_agent("bob").read_chat().await;
     println!("  Channels: {count}", count = bob_chat.channels.len());
-    println!("  Messages: {count}", count = bob_chat.messages.len());
+    println!("  Messages: {count}", count = bob_chat.message_count());
 
     // Try to start DM (should work - creates channel)
     println!("\nStarting DM with alice...");
@@ -470,7 +470,7 @@ async fn test_chat_flow_sends_message() {
     let bob_chat_final = env.get_agent("bob").read_chat().await;
     println!("\nFinal chat state:");
     println!("  Channels: {count}", count = bob_chat_final.channels.len());
-    println!("  Messages: {count}", count = bob_chat_final.messages.len());
+    println!("  Messages: {count}", count = bob_chat_final.message_count());
 
     // Verify signal tracking
     println!("\nSignal emissions:");

@@ -10,7 +10,7 @@
 //! use crate::support::signals::{wait_for_chat, wait_for_contacts};
 //!
 //! // Wait for a specific chat state
-//! let chat = wait_for_chat(&app_core, |s| !s.messages.is_empty()).await;
+//! let chat = wait_for_chat(&app_core, |s| s.message_count() > 0).await;
 //!
 //! // Wait for a contact to appear
 //! wait_for_contact(&app_core, contact_id).await;
@@ -136,12 +136,12 @@ pub async fn wait_for_chat_extended(
     .await
 }
 
-/// Wait for a message to appear in chat.
+/// Wait for a message to appear in any chat channel.
 pub async fn wait_for_message(
     app_core: &Arc<RwLock<AppCore>>,
     predicate: impl Fn(&aura_app::views::Message) -> bool,
 ) -> ChatState {
-    wait_for_chat(app_core, |state| state.messages.iter().any(&predicate)).await
+    wait_for_chat(app_core, |state| state.all_messages().iter().any(|m| predicate(m))).await
 }
 
 // ============================================================================

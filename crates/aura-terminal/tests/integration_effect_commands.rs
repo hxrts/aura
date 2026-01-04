@@ -849,7 +849,7 @@ async fn test_send_message_propagates_to_chat_signal() {
     // Get initial message count
     let initial_messages = {
         let core = app_core.read().await;
-        core.read(&*CHAT_SIGNAL).await.unwrap().messages.len()
+        core.read(&*CHAT_SIGNAL).await.unwrap().message_count()
     };
     println!("  Initial messages: {}", initial_messages);
 
@@ -867,11 +867,11 @@ async fn test_send_message_propagates_to_chat_signal() {
     let final_messages = {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
-        println!("  Final messages: {}", chat.messages.len());
-        for msg in &chat.messages {
+        println!("  Final messages: {}", chat.message_count());
+        for msg in chat.all_messages() {
             println!("    - [{}] {}", msg.channel_id, msg.content);
         }
-        chat.messages.len()
+        chat.message_count()
     };
 
     // If command succeeded, verify message was added

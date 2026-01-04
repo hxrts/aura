@@ -27,8 +27,6 @@ use aura_core::effects::reactive::{
 };
 use aura_core::hash;
 use aura_core::identifiers::AuthorityId;
-#[cfg(feature = "signals")]
-use aura_core::identifiers::ChannelId;
 use aura_core::query::{FactPredicate, Query};
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
@@ -668,15 +666,6 @@ impl AppCore {
         self.views.neighborhood_signal()
     }
 
-    /// Select a channel (UI-only, not journaled)
-    ///
-    /// This updates the selected channel in ChatState and triggers
-    /// the chat signal for UI updates. Channel selection is a UI
-    /// concern and doesn't need to be persisted to the journal.
-    #[cfg(feature = "signals")]
-    pub fn select_channel(&self, channel_id: Option<ChannelId>) {
-        self.views.select_channel(channel_id);
-    }
 }
 
 // =============================================================================

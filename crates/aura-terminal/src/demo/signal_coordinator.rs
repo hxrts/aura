@@ -138,19 +138,16 @@ impl DemoSignalCoordinator {
 
     /// Handle chat state updates - detect new messages from Bob
     async fn handle_chat_update(&self, chat_state: &ChatState) {
-        let current_count = chat_state.messages.len();
+        let current_count = chat_state.message_count();
         let mut last_count = self.last_message_count.lock().await;
 
         if current_count > *last_count {
             // New messages - check if any are from Bob
-            for msg in chat_state.messages.iter().skip(*last_count) {
+            // Note: all_messages() returns refs in arbitrary order, so we check all
+            // This is a demo approximation; production code would track per-channel
+            for msg in chat_state.all_messages() {
                 if msg.sender_id == self.bob_authority {
-                    // Use sender_name as best-effort contact label; channel id as fallback
-                    let channel = chat_state
-                        .selected_channel_id
-                        .as_ref()
-                        .map(|id| id.to_string())
-                        .unwrap_or_else(|| msg.channel_id.to_string());
+                    let channel = msg.channel_id.to_string();
 
                     let agent_event = AgentEvent::MessageReceived {
                         from: self.bob_authority,
@@ -245,10 +242,12 @@ impl DemoSignalCoordinator {
                     is_own: false,
                     reply_to: None,
                     is_read: false,
+                    delivery_status: Default::default(),
+                    is_finalized: false,
                 };
 
                 let mut chat_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
-                chat_state.messages.push(new_message);
+                chat_state.apply_message(channel_id, new_message);
 
                 if let Err(e) = core.emit(&*CHAT_SIGNAL, chat_state).await {
                     tracing::warn!("Demo: Failed to emit CHAT_SIGNAL: {}", e);

@@ -33,7 +33,7 @@ impl MessageDeliveryStatus {
     #[must_use]
     pub fn indicator(&self) -> &'static str {
         match self {
-            Self::Sending => "⏳",   // Hourglass
+            Self::Sending => "◐",    // Half-filled circle (pending)
             Self::Sent => "✓",       // Single check (gray)
             Self::Delivered => "✓✓", // Double check (gray)
             Self::Read => "✓✓",      // Double check (blue) - color applied by frontend
@@ -178,26 +178,36 @@ pub struct Message {
     pub is_own: bool,
     /// Whether this message has been read
     pub is_read: bool,
+    /// Delivery status for own messages (Sending → Sent → Delivered → Read)
+    #[serde(default)]
+    pub delivery_status: MessageDeliveryStatus,
+    /// Channel epoch when message was sent (for consensus finalization tracking)
+    #[serde(default)]
+    pub epoch_hint: Option<u32>,
+    /// Whether this message has been finalized by consensus (A3)
+    #[serde(default)]
+    pub is_finalized: bool,
 }
 
 /// Chat state
+///
+/// Note: This type does NOT track channel selection. Selection is UI state
+/// that belongs in the frontend (TUI, mobile app, etc.). All message operations
+/// require an explicit channel_id to avoid race conditions between UI navigation
+/// and async operations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ChatState {
     /// All available channels
     pub channels: Vec<Channel>,
-    /// Currently selected channel ID
-    pub selected_channel_id: Option<ChannelId>,
-    /// Messages in the selected channel (view into channel_messages)
-    pub messages: Vec<Message>,
-    /// Per-channel message storage (messages persist when switching channels)
+    /// Per-channel message storage
     #[serde(default)]
     channel_messages: HashMap<ChannelId, Vec<Message>>,
     /// Total unread count across all channels
     pub total_unread: u32,
-    /// Whether more messages are loading
+    /// Whether more messages are loading (per-channel state managed by caller)
     pub loading_more: bool,
-    /// Whether there are more messages to load
+    /// Whether there are more messages to load (per-channel state managed by caller)
     pub has_more: bool,
 }
 
@@ -221,24 +231,27 @@ impl ChatState {
             .unwrap_or(0)
     }
 
-    /// Ensure a valid selection when channels exist.
-    pub fn ensure_selection(&mut self) {
-        if self.channels.is_empty() {
-            self.selected_channel_id = None;
-            self.messages.clear();
-            return;
-        }
+    /// Get messages for a specific channel
+    ///
+    /// Returns an empty slice if the channel has no messages or doesn't exist.
+    pub fn messages_for_channel(&self, channel_id: &ChannelId) -> &[Message] {
+        self.channel_messages
+            .get(channel_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
 
-        let has_selected = self
-            .selected_channel_id
-            .as_ref()
-            .map(|id| self.channel(id).is_some())
-            .unwrap_or(false);
+    /// Get all messages across all channels (primarily for test backwards compatibility).
+    /// Returns messages in arbitrary order - use `messages_for_channel()` for production code.
+    #[must_use]
+    pub fn all_messages(&self) -> Vec<&Message> {
+        self.channel_messages.values().flatten().collect()
+    }
 
-        if !has_selected {
-            let first_id = self.channels[0].id;
-            self.select_channel(Some(first_id));
-        }
+    /// Get total message count across all channels
+    #[must_use]
+    pub fn message_count(&self) -> usize {
+        self.channel_messages.values().map(|v| v.len()).sum()
     }
 
     /// Add a new channel
@@ -247,7 +260,6 @@ impl ChatState {
         if self.channel(&channel.id).is_none() {
             self.channels.push(channel);
         }
-        self.ensure_selection();
     }
 
     /// Remove a channel by ID
@@ -255,13 +267,6 @@ impl ChatState {
         self.channels.retain(|c| c.id != *channel_id);
         // Remove messages from per-channel cache
         self.channel_messages.remove(channel_id);
-        // Clear messages if this was the selected channel
-        if self.selected_channel_id.as_ref() == Some(channel_id) {
-            self.selected_channel_id = None;
-            self.messages.clear();
-        }
-
-        self.ensure_selection();
     }
 
     /// Mark a channel as joined (increment member count)
@@ -286,95 +291,57 @@ impl ChatState {
     }
 
     /// Apply a new message to the state
+    ///
+    /// Note: Unread counting is caller's responsibility since ChatState doesn't
+    /// track selection. The caller should call `increment_unread()` if the channel
+    /// is not currently selected in the UI.
     pub fn apply_message(&mut self, channel_id: ChannelId, message: Message) {
-        // Check if this is the selected channel before mutable borrow
-        let is_selected = self.selected_channel_id.as_ref() == Some(&channel_id);
-        let should_increment_unread = !message.is_own && !is_selected;
-
         // Update channel metadata
         if let Some(channel) = self.channel_mut(&channel_id) {
             channel.last_message = Some(message.content.clone());
             channel.last_message_time = Some(message.timestamp);
             channel.last_activity = message.timestamp;
-
-            // Increment unread if not own message and not selected channel
-            if should_increment_unread {
-                channel.unread_count = channel.unread_count.saturating_add(1);
-            }
         }
 
-        // Update total unread after channel borrow is released
-        if should_increment_unread {
-            self.total_unread = self.total_unread.saturating_add(1);
-        }
-
-        // Always store message in per-channel cache
+        // Store message in per-channel cache
         let channel_msgs = self.channel_messages.entry(channel_id).or_default();
         if !channel_msgs.iter().any(|m| m.id == message.id) {
-            channel_msgs.push(message.clone());
+            channel_msgs.push(message);
             if channel_msgs.len() > Self::MAX_ACTIVE_MESSAGES {
                 let overflow = channel_msgs.len() - Self::MAX_ACTIVE_MESSAGES;
                 channel_msgs.drain(0..overflow);
             }
         }
+    }
 
-        // Update the messages view if this is the selected channel
-        if is_selected {
-            // Sync from channel_messages to messages view
-            if let Some(msgs) = self.channel_messages.get(&channel_id) {
-                self.messages = msgs.clone();
-            }
+    /// Increment unread count for a channel (call when message arrives for non-selected channel)
+    pub fn increment_unread(&mut self, channel_id: &ChannelId) {
+        if let Some(channel) = self.channel_mut(channel_id) {
+            channel.unread_count = channel.unread_count.saturating_add(1);
+        }
+        self.total_unread = self.total_unread.saturating_add(1);
+    }
+
+    /// Clear unread count for a channel (call when channel is selected/viewed)
+    pub fn clear_unread(&mut self, channel_id: &ChannelId) {
+        if let Some(channel) = self.channel_mut(channel_id) {
+            let count = channel.unread_count;
+            channel.unread_count = 0;
+            self.total_unread = self.total_unread.saturating_sub(count);
         }
     }
 
-    /// Select a channel and load its messages
-    pub fn select_channel(&mut self, channel_id: Option<ChannelId>) {
-        let mut next = channel_id;
-        if next.is_none() && !self.channels.is_empty() {
-            next = Some(self.channels[0].id);
-        }
-
-        if let Some(id) = &next {
-            if self.channel(id).is_none() && !self.channels.is_empty() {
-                next = Some(self.channels[0].id);
-            }
-        }
-
-        if self.selected_channel_id != next {
-            self.selected_channel_id = next.clone();
-
-            // Load messages from per-channel cache (or empty if no messages yet)
-            self.messages = next
-                .as_ref()
-                .and_then(|id| self.channel_messages.get(id))
-                .cloned()
-                .unwrap_or_default();
-
-            // Mark as read - first get the unread count, then update both fields
-            if let Some(id) = &next {
-                // Get the unread count first (immutable borrow)
-                let unread_to_subtract = self.channel(id).map(|c| c.unread_count).unwrap_or(0);
-
-                // Update total_unread before mutable borrow
-                self.total_unread = self.total_unread.saturating_sub(unread_to_subtract);
-
-                // Now update the channel's unread count
-                if let Some(channel) = self.channel_mut(id) {
-                    channel.unread_count = 0;
-                }
-            }
-        }
-    }
-
-    /// Mark a specific message as read by its ID
+    /// Mark a specific message as read by its ID in a specific channel
     ///
     /// Returns true if the message was found and marked as read,
-    /// false if the message was not found in current messages.
-    pub fn mark_message_read(&mut self, message_id: &str) -> bool {
-        if let Some(message) = self.messages.iter_mut().find(|m| m.id == message_id) {
-            if !message.is_read {
-                message.is_read = true;
-                return true;
+    /// false if the message was not found.
+    pub fn mark_message_read(&mut self, channel_id: &ChannelId, message_id: &str) -> bool {
+        if let Some(msgs) = self.channel_messages.get_mut(channel_id) {
+            if let Some(message) = msgs.iter_mut().find(|m| m.id == message_id) {
+                if !message.is_read {
+                    message.is_read = true;
+                    return true;
+                }
             }
         }
         false
@@ -390,14 +357,73 @@ impl ChatState {
         }
     }
 
-    /// Get mutable reference to a message by ID
-    pub fn message_mut(&mut self, message_id: &str) -> Option<&mut Message> {
-        self.messages.iter_mut().find(|m| m.id == message_id)
+    /// Get mutable reference to a message by ID in a specific channel
+    pub fn message_mut(&mut self, channel_id: &ChannelId, message_id: &str) -> Option<&mut Message> {
+        self.channel_messages
+            .get_mut(channel_id)
+            .and_then(|msgs| msgs.iter_mut().find(|m| m.id == message_id))
     }
 
-    /// Remove a message by ID
-    pub fn remove_message(&mut self, message_id: &str) {
-        self.messages.retain(|m| m.id != message_id);
+    /// Remove a message by ID from a specific channel
+    pub fn remove_message(&mut self, channel_id: &ChannelId, message_id: &str) {
+        if let Some(msgs) = self.channel_messages.get_mut(channel_id) {
+            msgs.retain(|m| m.id != message_id);
+        }
+    }
+
+    /// Mark a message as delivered (update delivery_status from Sent to Delivered)
+    ///
+    /// This is called when a MessageDelivered fact is received, indicating that
+    /// the recipient's device has received the message. Only updates own messages
+    /// that are currently in Sent status.
+    ///
+    /// Returns true if the message was found and updated.
+    pub fn mark_delivered(&mut self, message_id: &str) -> bool {
+        for msgs in self.channel_messages.values_mut() {
+            if let Some(msg) = msgs.iter_mut().find(|m| m.id == message_id && m.is_own) {
+                if msg.delivery_status == MessageDeliveryStatus::Sent {
+                    msg.delivery_status = MessageDeliveryStatus::Delivered;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Mark a message as read by recipient (update delivery_status to Read)
+    ///
+    /// This is called when a MessageRead fact is received, indicating that
+    /// the recipient has viewed the message. Only updates own messages.
+    ///
+    /// Returns true if the message was found and updated.
+    pub fn mark_read_by_recipient(&mut self, message_id: &str) -> bool {
+        for msgs in self.channel_messages.values_mut() {
+            if let Some(msg) = msgs.iter_mut().find(|m| m.id == message_id && m.is_own) {
+                if msg.delivery_status != MessageDeliveryStatus::Read {
+                    msg.delivery_status = MessageDeliveryStatus::Read;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Mark a message as finalized by consensus (A3 status)
+    ///
+    /// This is called when consensus confirms the message has been durably
+    /// committed with 2f+1 witnesses.
+    ///
+    /// Returns true if the message was found and updated.
+    pub fn mark_finalized(&mut self, message_id: &str) -> bool {
+        for msgs in self.channel_messages.values_mut() {
+            if let Some(msg) = msgs.iter_mut().find(|m| m.id == message_id) {
+                if !msg.is_finalized {
+                    msg.is_finalized = true;
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -407,7 +433,7 @@ mod tests {
 
     #[test]
     fn test_delivery_status_indicators() {
-        assert_eq!(MessageDeliveryStatus::Sending.indicator(), "⏳");
+        assert_eq!(MessageDeliveryStatus::Sending.indicator(), "◐");
         assert_eq!(MessageDeliveryStatus::Sent.indicator(), "✓");
         assert_eq!(MessageDeliveryStatus::Delivered.indicator(), "✓✓");
         assert_eq!(MessageDeliveryStatus::Read.indicator(), "✓✓");

@@ -263,9 +263,7 @@ async fn test_start_direct_chat_creates_dm_channel() {
     println!("\nPhase 3: Verify DM channel was created");
     let expected_channel_id = dm_channel_id(contact_id);
     let chat = wait_for_chat(&app_core, |chat| {
-        let has_channel = chat.channels.iter().any(|c| c.id == expected_channel_id);
-        let selected = chat.selected_channel_id.as_ref() == Some(&expected_channel_id);
-        has_channel && selected
+        chat.channels.iter().any(|c| c.id == expected_channel_id)
     })
     .await;
 
@@ -286,17 +284,9 @@ async fn test_start_direct_chat_creates_dm_channel() {
     println!("  Channel name: {name}", name = dm.name);
     println!("  Is DM: {is_dm}", is_dm = dm.is_dm);
 
-    // Phase 4: Verify channel is selected
-    println!("\nPhase 4: Verify channel is selected");
-    assert_eq!(
-        chat.selected_channel_id.as_ref(),
-        Some(&expected_channel_id),
-        "DM channel should be selected"
-    );
-    println!(
-        "  Selected channel: {selected_channel:?}",
-        selected_channel = chat.selected_channel_id
-    );
+    // Note: Channel selection is now UI-only state, managed by the TUI.
+    // The ChatState no longer tracks selection; that's handled in TuiState.
+    println!("\n(Channel selection now handled by TUI state)");
 
     cleanup_test_dir("dm-start");
     println!("\n=== Start Direct Chat Creates DM Channel Test PASSED ===\n");
@@ -323,7 +313,7 @@ async fn test_send_direct_message_adds_message() {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
         let channel_count = chat.channels.len();
-        let message_count = chat.messages.len();
+        let message_count = chat.message_count();
         println!("  Initial channel count: {channel_count}");
         println!("  Initial message count: {message_count}");
         (channel_count, message_count)
@@ -350,10 +340,7 @@ async fn test_send_direct_message_adds_message() {
     let expected_channel_id = dm_channel_id(target);
     let chat = wait_for_chat(&app_core, |chat| {
         chat.channels.iter().any(|c| c.id == expected_channel_id)
-            && chat
-                .messages
-                .iter()
-                .any(|m| m.channel_id == expected_channel_id)
+            && !chat.messages_for_channel(&expected_channel_id).is_empty()
     })
     .await;
 
@@ -377,15 +364,13 @@ async fn test_send_direct_message_adds_message() {
 
     // Phase 4: Verify message was added
     println!("\nPhase 4: Verify message was added");
+    let channel_messages = chat.messages_for_channel(&expected_channel_id);
     assert!(
-        chat.messages.len() > initial_message_count,
+        chat.message_count() > initial_message_count,
         "Should have more messages after send"
     );
 
-    let message = chat
-        .messages
-        .iter()
-        .find(|m| m.channel_id == expected_channel_id);
+    let message = channel_messages.first();
     assert!(message.is_some(), "Message should exist in DM channel");
 
     let msg = message.unwrap();
@@ -849,7 +834,7 @@ async fn test_all_snapshots_consistent() {
     let guardians = ctx.snapshot_guardians();
 
     let chat_channels = chat.channels.len();
-    let chat_messages = chat.messages.len();
+    let chat_messages = chat.messages.len();  // ChatSnapshot has messages field directly
     println!("  Chat: {chat_channels} channels, {chat_messages} messages");
     let contact_count = contacts.contacts.len();
     println!("  Contacts: {contact_count} contacts");
@@ -947,11 +932,7 @@ async fn test_complete_dm_flow() {
         let dm_channel_id = dm_channel.id;
 
         // Count messages in DM channel
-        let dm_messages: Vec<_> = chat
-            .messages
-            .iter()
-            .filter(|m| m.channel_id == dm_channel_id)
-            .collect();
+        let dm_messages = chat.messages_for_channel(&dm_channel_id);
         assert_eq!(dm_messages.len(), 2, "Should have 2 messages in DM");
 
         // Verify content
@@ -967,7 +948,7 @@ async fn test_complete_dm_flow() {
         println!("  DM channel: {dm_channel_id}");
         let message_count = dm_messages.len();
         println!("  Messages in channel: {message_count}");
-        for msg in &dm_messages {
+        for msg in dm_messages {
             println!("    - '{content}'", content = msg.content);
         }
     }

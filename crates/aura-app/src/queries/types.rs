@@ -1247,12 +1247,12 @@ impl Query for NeighborhoodQuery {
 }
 
 /// Query for chat state (combines channels and messages)
+///
+/// Note: Channel selection is UI-only state managed by the frontend.
+/// Messages are loaded per-channel via `ChatState::messages_for_channel()`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct ChatQuery {
-    /// Currently selected channel ID
-    pub selected_channel_id: Option<String>,
-}
+pub struct ChatQuery {}
 
 impl Query for ChatQuery {
     type Result = crate::views::chat::ChatState;

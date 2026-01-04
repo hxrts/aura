@@ -37,7 +37,7 @@ use async_lock::RwLock;
 use std::sync::Arc;
 
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL};
-use aura_app::views::{Contact as ViewContact, Message, RecoveryProcess, RecoveryProcessStatus};
+use aura_app::views::{Contact as ViewContact, Message, MessageDeliveryStatus, ReadReceiptPolicy, RecoveryProcess, RecoveryProcessStatus};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ChannelId};
@@ -307,10 +307,11 @@ async fn test_chat_signal_message_accumulation() {
 
     // Phase 1: Verify initial state is empty
     println!("Phase 1: Verify initial chat state is empty");
+    let test_channel_id = ChannelId::from_bytes([0x10; 32]);
     {
-        let chat = wait_for_chat(&app_core, |chat| chat.messages.is_empty()).await;
+        let chat = wait_for_chat(&app_core, |chat| chat.message_count() == 0).await;
         assert!(
-            chat.messages.is_empty(),
+            chat.message_count() == 0,
             "Initial chat should have no messages"
         );
         println!("  Initial message count: 0");
@@ -323,9 +324,9 @@ async fn test_chat_signal_message_accumulation() {
         let mut chat = core.read(&*CHAT_SIGNAL).await.unwrap();
 
         // Add first message
-        chat.messages.push(Message {
+        chat.apply_message(test_channel_id, Message {
             id: "msg-1".to_string(),
-            channel_id: ChannelId::from_bytes([0x10; 32]),
+            channel_id: test_channel_id,
             sender_id: AuthorityId::new_from_entropy([0xAA; 32]),
             sender_name: "Alice".to_string(),
             content: "Hello world!".to_string(),
@@ -333,12 +334,14 @@ async fn test_chat_signal_message_accumulation() {
             is_own: false,
             is_read: false,
             reply_to: None,
+            delivery_status: MessageDeliveryStatus::default(),
+            is_finalized: false,
         });
 
         // Add second message
-        chat.messages.push(Message {
+        chat.apply_message(test_channel_id, Message {
             id: "msg-2".to_string(),
-            channel_id: ChannelId::from_bytes([0x10; 32]),
+            channel_id: test_channel_id,
             sender_id: AuthorityId::new_from_entropy([0xBB; 32]),
             sender_name: "Bob".to_string(),
             content: "Hi Alice!".to_string(),
@@ -346,6 +349,8 @@ async fn test_chat_signal_message_accumulation() {
             is_own: true,
             is_read: true,
             reply_to: None,
+            delivery_status: MessageDeliveryStatus::default(),
+            is_finalized: false,
         });
 
         core.emit(&*CHAT_SIGNAL, chat).await.unwrap();
@@ -355,32 +360,33 @@ async fn test_chat_signal_message_accumulation() {
     // Phase 3: Verify messages are preserved
     println!("\nPhase 3: Verify messages are preserved");
     {
-        let chat = wait_for_chat(&app_core, |chat| chat.messages.len() == 2).await;
+        let chat = wait_for_chat(&app_core, |chat| chat.message_count() == 2).await;
+        let messages = chat.messages_for_channel(&test_channel_id);
 
-        assert_eq!(chat.messages.len(), 2, "Should have 2 messages");
+        assert_eq!(messages.len(), 2, "Should have 2 messages");
         assert_eq!(
-            chat.messages[0].content, "Hello world!",
+            messages[0].content, "Hello world!",
             "First message content should match"
         );
         assert_eq!(
-            chat.messages[1].content, "Hi Alice!",
+            messages[1].content, "Hi Alice!",
             "Second message content should match"
         );
         assert_eq!(
-            chat.messages[0].sender_name, "Alice",
+            messages[0].sender_name, "Alice",
             "First sender should be Alice"
         );
-        assert!(chat.messages[1].is_own, "Second message should be own");
+        assert!(messages[1].is_own, "Second message should be own");
 
-        let message_count = chat.messages.len();
+        let message_count = messages.len();
         println!("  Message count: {message_count}");
-        let message1 = &chat.messages[0];
+        let message1 = &messages[0];
         println!(
             "  Message 1: '{content}' from {sender}",
             content = message1.content,
             sender = message1.sender_name
         );
-        let message2 = &chat.messages[1];
+        let message2 = &messages[1];
         println!(
             "  Message 2: '{content}' from {sender}",
             content = message2.content,
@@ -395,9 +401,9 @@ async fn test_chat_signal_message_accumulation() {
         let mut chat = core.read(&*CHAT_SIGNAL).await.unwrap();
 
         for i in 3..6 {
-            chat.messages.push(Message {
+            chat.apply_message(test_channel_id, Message {
                 id: format!("msg-{i}"),
-                channel_id: "general".parse::<ChannelId>().unwrap_or_default(),
+                channel_id: test_channel_id,
                 sender_id: AuthorityId::new_from_entropy([i as u8; 32]),
                 sender_name: format!("User{i}"),
                 content: format!("Message number {i}"),
@@ -405,6 +411,8 @@ async fn test_chat_signal_message_accumulation() {
                 is_own: false,
                 is_read: false,
                 reply_to: None,
+                delivery_status: MessageDeliveryStatus::default(),
+                is_finalized: false,
             });
         }
 
@@ -412,9 +420,9 @@ async fn test_chat_signal_message_accumulation() {
     }
 
     {
-        let chat = wait_for_chat(&app_core, |chat| chat.messages.len() == 5).await;
-        assert_eq!(chat.messages.len(), 5, "Should now have 5 messages");
-        let total_messages = chat.messages.len();
+        let chat = wait_for_chat(&app_core, |chat| chat.message_count() == 5).await;
+        assert_eq!(chat.message_count(), 5, "Should now have 5 messages");
+        let total_messages = chat.message_count();
         println!("  Total messages after accumulation: {total_messages}");
     }
 
@@ -463,6 +471,7 @@ async fn test_contacts_signal_contact_tracking() {
             is_resident: false,
             last_interaction: None,
             is_online: true,
+            read_receipt_policy: ReadReceiptPolicy::default(),
         });
 
         core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();
@@ -981,7 +990,7 @@ async fn test_invalid_operations_return_errors() {
         let recovery = wait_for_recovery(&app_core, |_recovery| true).await;
 
         // Signals should still be readable
-        let message_count = chat.messages.len();
+        let message_count = chat.message_count();
         println!("  Chat signal readable: {message_count} messages");
         let active_recovery = recovery.active_recovery.is_some();
         println!("  Recovery signal readable: active={active_recovery}");

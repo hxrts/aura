@@ -26,7 +26,7 @@ pub use state::ViewState;
 // Re-export state types for convenience
 pub use account::{AccountBackup, AccountConfig, BACKUP_PREFIX, BACKUP_VERSION};
 pub use chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus};
-pub use contacts::{Contact, ContactsState, MySuggestion, SuggestionPolicy};
+pub use contacts::{Contact, ContactsState, MySuggestion, ReadReceiptPolicy, SuggestionPolicy};
 pub use display::{
     format_network_status, format_network_status_with_severity, format_relative_time,
     format_relative_time_from, format_relative_time_ms, format_timestamp, format_timestamp_full,

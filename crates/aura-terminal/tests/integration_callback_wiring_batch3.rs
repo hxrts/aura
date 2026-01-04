@@ -632,9 +632,9 @@ async fn test_retry_message() {
     println!("\nPhase 3: Verify message in chat state");
     let core = app_core.read().await;
     if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
-        let message_count = chat_state.messages.len();
+        let message_count = chat_state.message_count();
         println!("  Messages in current view: {message_count}");
-        for msg in &chat_state.messages {
+        for msg in chat_state.all_messages() {
             if msg.content.contains("Retried") {
                 println!(
                     "    Found retried message: {content}",
@@ -1329,7 +1329,7 @@ async fn test_complete_contact_to_guardian_flow() {
                 channel_id = channel.id
             );
         }
-        let message_count = chat_state.messages.len();
+        let message_count = chat_state.message_count();
         println!("  Total messages: {message_count}");
     }
 

@@ -111,7 +111,7 @@ async fn demo_amp_channel_echoes_peer_message() {
     // Expect an auto-echo from Alice or Carol in the same channel.
     wait_for_chat_extended(&app_core, |state| {
         state
-            .messages
+            .all_messages()
             .iter()
             .any(|msg| msg.content == content && msg.sender_id != bob_authority)
     })

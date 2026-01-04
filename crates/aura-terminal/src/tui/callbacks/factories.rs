@@ -16,7 +16,6 @@ use crate::tui::effects::EffectCommand;
 use crate::tui::effects::{CapabilityPolicy, CommandDispatcher};
 use crate::tui::types::{MfaPolicy, TraversalDepth};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
-use aura_core::identifiers::ChannelId;
 
 use super::types::*;
 
@@ -69,6 +68,9 @@ impl ChatCallbacks {
             let content_clone = content;
 
             spawn_ctx(ctx.clone(), async move {
+                // Channel ID is now passed from the TUI's selected_channel to avoid
+                // race conditions with async channel selection updates
+
                 let trimmed = content_clone.trim_start();
                 if trimmed.starts_with("/") {
                     // IRC-style command path
@@ -212,29 +214,17 @@ impl ChatCallbacks {
     }
 
     fn make_channel_select(
-        ctx: Arc<IoContext>,
-        app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
-        tx: UiUpdateSender,
+        _ctx: Arc<IoContext>,
+        _app_core: Arc<async_lock::RwLock<aura_app::ui::types::AppCore>>,
+        _tx: UiUpdateSender,
     ) -> ChannelSelectCallback {
-        Arc::new(move |channel_id: String| {
-            let ctx = ctx.clone();
-            let app_core = app_core.clone();
-            let tx = tx.clone();
-            let channel_id_clone = channel_id.clone();
-            spawn_ctx(ctx, async move {
-                // Parse channel_id string to ChannelId
-                let channel_id_typed = channel_id.parse::<ChannelId>().ok();
-                if let Err(err) =
-                    aura_app::ui::workflows::messaging::select_channel(&app_core, channel_id_typed)
-                        .await
-                {
-                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                        "channel",
-                        err.to_string(),
-                    )));
-                }
-                let _ = tx.try_send(UiUpdate::ChannelSelected(channel_id_clone));
-            });
+        // Channel selection is now UI-only state. The callback just needs to notify
+        // the UI that a channel was selected. The actual TUI state update happens
+        // in the shell via DispatchCommand::SelectChannel.
+        Arc::new(move |_channel_id: String| {
+            // Selection is handled synchronously by the TUI state machine now.
+            // This callback exists for interface compatibility but doesn't need
+            // to do async work since selection is UI-local state.
         })
     }
 
@@ -965,7 +955,7 @@ impl SettingsCallbacks {
                     Ok(()) => {
                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
                             "devices",
-                            "Mobile device accepted enrollment",
+                            "Mobile device accepted enrollment invitation",
                         )));
                     }
                     Err(e) => {
@@ -1011,15 +1001,22 @@ impl HomeCallbacks {
             let tx = tx.clone();
             let content_clone = content;
             spawn_ctx(ctx.clone(), async move {
+                // Use the current home channel for home messaging
                 let channel = match aura_app::ui::workflows::messaging::current_home_channel_id(
                     ctx.app_core_raw(),
                 )
                 .await
                 {
-                    Ok(channel) => channel,
-                    Err(_) => "home:home".to_string(),
+                    Ok(channel_id) => channel_id,
+                    Err(e) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                            "send",
+                            format!("Failed to get channel: {e}"),
+                        )));
+                        return;
+                    }
                 };
-                let home_id_clone = channel.strip_prefix("home:").unwrap_or("home").to_string();
+                let home_id_clone = channel.clone();
 
                 let trimmed = content_clone.trim_start();
                 if trimmed.starts_with("/") {

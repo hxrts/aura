@@ -204,10 +204,10 @@ async fn wait_for_message(
         let core = app_core.read().await;
         if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
             if let Some(channel) = chat_state.channels.iter().find(|c| c.name == channel_name) {
-                if chat_state
-                    .messages
+                let channel_messages = chat_state.messages_for_channel(&channel.id);
+                if channel_messages
                     .iter()
-                    .any(|m| m.channel_id == channel.id && m.content.contains(content_snippet))
+                    .any(|m| m.content.contains(content_snippet))
                 {
                     return;
                 }
@@ -517,12 +517,12 @@ async fn test_complete_demo_invitation_flow() {
         guardians.member_count, 0,
         "Guardians member count is unknown until membership facts are tracked"
     );
+    let guardian_messages = chat_state.messages_for_channel(&guardians.id);
     assert!(
-        chat_state
-            .messages
+        guardian_messages
             .iter()
-            .any(|m| m.channel_id == guardians.id && m.content.contains("Hello Alice and Carol!")),
-        "Expected the greeting message to appear in the selected channel messages"
+            .any(|m| m.content.contains("Hello Alice and Carol!")),
+        "Expected the greeting message to appear in the guardians channel messages"
     );
 
     // Check invitations state

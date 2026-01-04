@@ -16,7 +16,7 @@ use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, RECOVERY_SIGNAL,
     SYNC_STATUS_SIGNAL,
 };
-use aura_app::views::{Message, RecoveryProcess, RecoveryProcessStatus};
+use aura_app::views::{Message, MessageDeliveryStatus, RecoveryProcess, RecoveryProcessStatus};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ChannelId};
@@ -125,16 +125,17 @@ async fn test_sync_status_signal() {
 async fn test_chat_signal_state_updates() {
     let app_core = test_app_core().await;
     let core = app_core.read().await;
+    let test_channel_id = ChannelId::from_bytes([0x40; 32]);
 
     // Read initial chat state
     let initial = core.read(&*CHAT_SIGNAL).await.unwrap();
-    assert!(initial.messages.is_empty());
+    assert!(initial.message_count() == 0);
 
     // Create updated state with a message
     let mut updated_state = initial.clone();
-    updated_state.messages.push(Message {
+    updated_state.apply_message(test_channel_id, Message {
         id: "msg-1".to_string(),
-        channel_id: ChannelId::from_bytes([0x40; 32]),
+        channel_id: test_channel_id,
         sender_id: AuthorityId::new_from_entropy([0xAA; 32]),
         sender_name: "Alice".to_string(),
         content: "Hello, world!".to_string(),
@@ -142,6 +143,8 @@ async fn test_chat_signal_state_updates() {
         is_own: false,
         is_read: false,
         reply_to: None,
+        delivery_status: MessageDeliveryStatus::default(),
+        is_finalized: false,
     });
 
     // Emit updated state
@@ -149,9 +152,10 @@ async fn test_chat_signal_state_updates() {
 
     // Read and verify
     drop(core);
-    let read_state = wait_for_chat_signal(&app_core, |chat| chat.messages.len() == 1).await;
-    assert_eq!(read_state.messages.len(), 1);
-    assert_eq!(read_state.messages[0].content, "Hello, world!");
+    let read_state = wait_for_chat_signal(&app_core, |chat| chat.message_count() == 1).await;
+    let messages = read_state.messages_for_channel(&test_channel_id);
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].content, "Hello, world!");
 }
 
 #[tokio::test]
@@ -256,13 +260,14 @@ async fn test_connection_status_transitions() {
 async fn test_chat_message_accumulation() {
     let app_core = test_app_core().await;
     let core = app_core.read().await;
+    let test_channel_id = ChannelId::from_bytes([0x10; 32]);
 
-    // Add multiple messages
+    // Add multiple messages to same channel
     for i in 0..5 {
         let mut state = core.read(&*CHAT_SIGNAL).await.unwrap();
-        state.messages.push(Message {
+        state.apply_message(test_channel_id, Message {
             id: format!("msg-{i}"),
-            channel_id: ChannelId::from_bytes([0x10 + i as u8; 32]),
+            channel_id: test_channel_id,
             sender_id: AuthorityId::new_from_entropy([0x20 + (i % 3) as u8; 32]),
             sender_name: format!("User{}", i % 3),
             content: format!("Message number {i}"),
@@ -270,13 +275,16 @@ async fn test_chat_message_accumulation() {
             is_own: i % 2 == 0,
             is_read: true,
             reply_to: None,
+            delivery_status: MessageDeliveryStatus::default(),
+            is_finalized: false,
         });
         core.emit(&*CHAT_SIGNAL, state).await.unwrap();
     }
 
     // Verify all messages were accumulated
     drop(core);
-    let final_state = wait_for_chat_signal(&app_core, |chat| chat.messages.len() == 5).await;
-    assert_eq!(final_state.messages.len(), 5);
-    assert_eq!(final_state.messages[4].content, "Message number 4");
+    let final_state = wait_for_chat_signal(&app_core, |chat| chat.message_count() == 5).await;
+    let messages = final_state.messages_for_channel(&test_channel_id);
+    assert_eq!(messages.len(), 5);
+    assert_eq!(messages[4].content, "Message number 4");
 }
