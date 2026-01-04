@@ -67,3 +67,6 @@ pub use persistent::PersistentSyncHandler;
 
 // Re-export storage constants for shared access
 pub use aura_journal::commitment_tree::storage::{TREE_OPS_INDEX_KEY, TREE_OPS_PREFIX};
+
+// Re-export wire format types
+pub use wire::{FactAck, OpWithAckRequest, SyncWireMessage, SyncWirePayload};

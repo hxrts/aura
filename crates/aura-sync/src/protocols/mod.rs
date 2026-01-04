@@ -47,6 +47,7 @@ pub mod fact_sync;
 pub mod journal;
 pub mod ota;
 pub mod ota_ceremony;
+pub mod propagation;
 pub mod receipts;
 pub mod snapshots;
 
@@ -110,3 +111,8 @@ pub use ota_ceremony::{
 };
 
 pub use fact_sync::{FactSyncConfig, FactSyncProtocol, FactSyncResult, FactSyncStats};
+
+pub use propagation::{
+    FailedPeerInfo, LoggingPropagationCallback, NoOpPropagationCallback, PropagationCallback,
+    PropagationEvent, PropagationTracker,
+};
