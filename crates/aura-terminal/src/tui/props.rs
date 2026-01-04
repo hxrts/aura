@@ -312,23 +312,29 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
     ) = match state.modal_queue.current() {
         Some(QueuedModal::GuardianSetup(s)) => (
             true,
-            s.step.clone(),
-            s.contacts
-                .iter()
-                .map(|c| GuardianCandidateViewProps {
-                    id: c.id.clone(),
-                    name: c.name.clone(),
-                    is_current_guardian: c.is_current_guardian,
+            s.step(),
+            s.contacts()
+                .map(|contacts| {
+                    contacts
+                        .iter()
+                        .map(|c| GuardianCandidateViewProps {
+                            id: c.id.clone(),
+                            name: c.name.clone(),
+                            is_current_guardian: c.is_current_guardian,
+                        })
+                        .collect()
                 })
-                .collect(),
-            s.selected_indices.clone(),
-            s.focused_index,
-            s.threshold_k,
+                .unwrap_or_default(),
+            s.selected_indices()
+                .map(|v| v.to_vec())
+                .unwrap_or_default(),
+            s.focused_index(),
+            s.threshold_k(),
             s.threshold_n(),
-            s.ceremony_responses.clone(),
-            s.ceremony.agreement_mode,
-            s.ceremony.reversion_risk,
-            s.error.clone().unwrap_or_default(),
+            s.ceremony_responses_vec(),
+            s.ceremony_agreement_mode(),
+            s.ceremony_reversion_risk(),
+            s.error().unwrap_or_default().to_string(),
         ),
         _ => (
             false,
@@ -581,23 +587,29 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     ) = match state.modal_queue.current() {
         Some(QueuedModal::MfaSetup(s)) => (
             true,
-            s.step.clone(),
-            s.contacts
-                .iter()
-                .map(|c| GuardianCandidateViewProps {
-                    id: c.id.clone(),
-                    name: c.name.clone(),
-                    is_current_guardian: c.is_current_guardian,
+            s.step(),
+            s.contacts()
+                .map(|contacts| {
+                    contacts
+                        .iter()
+                        .map(|c| GuardianCandidateViewProps {
+                            id: c.id.clone(),
+                            name: c.name.clone(),
+                            is_current_guardian: c.is_current_guardian,
+                        })
+                        .collect()
                 })
-                .collect(),
-            s.selected_indices.clone(),
-            s.focused_index,
-            s.threshold_k,
+                .unwrap_or_default(),
+            s.selected_indices()
+                .map(|v| v.to_vec())
+                .unwrap_or_default(),
+            s.focused_index(),
+            s.threshold_k(),
             s.threshold_n(),
-            s.ceremony_responses.clone(),
-            s.ceremony.agreement_mode,
-            s.ceremony.reversion_risk,
-            s.error.clone().unwrap_or_default(),
+            s.ceremony_responses_vec(),
+            s.ceremony_agreement_mode(),
+            s.ceremony_reversion_risk(),
+            s.error().unwrap_or_default().to_string(),
         ),
         _ => (
             false,

@@ -950,34 +950,36 @@ mod modals {
         ));
         assert!(tui.state.is_guardian_setup_modal_active());
 
-        // Set up contacts for navigation to work (must modify the queued modal)
-        if let Some(QueuedModal::GuardianSetup(ref mut state)) = tui.state.modal_queue.current_mut()
-        {
-            state.contacts = vec![
-                aura_terminal::tui::state_machine::GuardianCandidate {
-                    id: "id1".to_string(),
-                    name: "Contact 1".to_string(),
-                    is_current_guardian: false,
-                },
-                aura_terminal::tui::state_machine::GuardianCandidate {
-                    id: "id2".to_string(),
-                    name: "Contact 2".to_string(),
-                    is_current_guardian: false,
-                },
-            ];
-        }
+        // Dismiss and re-enqueue with populated contacts for navigation test
+        tui.state.modal_queue.dismiss();
+        let contacts = vec![
+            aura_terminal::tui::state_machine::GuardianCandidate {
+                id: "id1".to_string(),
+                name: "Contact 1".to_string(),
+                is_current_guardian: false,
+            },
+            aura_terminal::tui::state_machine::GuardianCandidate {
+                id: "id2".to_string(),
+                name: "Contact 2".to_string(),
+                is_current_guardian: false,
+            },
+        ];
+        tui.state.modal_queue.enqueue(QueuedModal::GuardianSetup(
+            aura_terminal::tui::state_machine::GuardianSetupModalState::from_contacts_with_selection(contacts, vec![]),
+        ));
 
-        // Verify focused index updates
+        // Verify focused index updates (initial should be 0)
         if let Some(QueuedModal::GuardianSetup(state)) = tui.state.modal_queue.current() {
-            assert_eq!(state.focused_index, 0);
+            assert_eq!(state.focused_index(), 0);
         }
+        // Move focus down
         tui.state.modal_queue.update_active(|modal| {
             if let QueuedModal::GuardianSetup(state) = modal {
-                state.focused_index = 1;
+                state.move_focus_down();
             }
         });
         if let Some(QueuedModal::GuardianSetup(state)) = tui.state.modal_queue.current() {
-            assert_eq!(state.focused_index, 1);
+            assert_eq!(state.focused_index(), 1);
         }
     }
 }
@@ -1426,22 +1428,23 @@ mod integration {
         ));
         assert!(tui.state.is_guardian_setup_modal_active());
 
-        // 2b. Populate contacts in the modal (shell would normally do this)
-        if let Some(QueuedModal::GuardianSetup(ref mut state)) = tui.state.modal_queue.current_mut()
-        {
-            state.contacts = vec![
-                aura_terminal::tui::state_machine::GuardianCandidate {
-                    id: "id1".to_string(),
-                    name: "Contact 1".to_string(),
-                    is_current_guardian: false,
-                },
-                aura_terminal::tui::state_machine::GuardianCandidate {
-                    id: "id2".to_string(),
-                    name: "Contact 2".to_string(),
-                    is_current_guardian: false,
-                },
-            ];
-        }
+        // 2b. Dismiss and re-enqueue with populated contacts (shell would normally do this)
+        tui.state.modal_queue.dismiss();
+        let contacts = vec![
+            aura_terminal::tui::state_machine::GuardianCandidate {
+                id: "id1".to_string(),
+                name: "Contact 1".to_string(),
+                is_current_guardian: false,
+            },
+            aura_terminal::tui::state_machine::GuardianCandidate {
+                id: "id2".to_string(),
+                name: "Contact 2".to_string(),
+                is_current_guardian: false,
+            },
+        ];
+        tui.state.modal_queue.enqueue(QueuedModal::GuardianSetup(
+            aura_terminal::tui::state_machine::GuardianSetupModalState::from_contacts_with_selection(contacts, vec![]),
+        ));
 
         // 3. Select two contacts
         tui.send_char(' '); // Select first contact
@@ -1452,7 +1455,7 @@ mod integration {
         tui.send_enter();
         if let Some(QueuedModal::GuardianSetup(state)) = tui.state.modal_queue.current() {
             assert_eq!(
-                state.step,
+                state.step(),
                 aura_terminal::tui::state_machine::GuardianSetupStep::ChooseThreshold
             );
         } else {

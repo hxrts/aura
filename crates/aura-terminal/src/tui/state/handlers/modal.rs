@@ -970,7 +970,7 @@ fn handle_guardian_setup_key_queue(
     key: KeyEvent,
     modal_state: GuardianSetupModalState,
 ) {
-    match modal_state.step {
+    match modal_state.step() {
         GuardianSetupStep::SelectContacts => {
             match key.code {
                 KeyCode::Esc => {
@@ -979,18 +979,14 @@ fn handle_guardian_setup_key_queue(
                 KeyCode::Up | KeyCode::Char('k') => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::GuardianSetup(ref mut s) = modal {
-                            if s.focused_index > 0 {
-                                s.focused_index -= 1;
-                            }
+                            s.move_focus_up();
                         }
                     });
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::GuardianSetup(ref mut s) = modal {
-                            if s.focused_index + 1 < s.contacts.len() {
-                                s.focused_index += 1;
-                            }
+                            s.move_focus_down();
                         }
                     });
                 }
@@ -1006,7 +1002,7 @@ fn handle_guardian_setup_key_queue(
                     if modal_state.can_proceed_to_threshold() {
                         state.modal_queue.update_active(|modal| {
                             if let QueuedModal::GuardianSetup(ref mut s) = modal {
-                                s.step = GuardianSetupStep::ChooseThreshold;
+                                s.advance_to_threshold();
                             }
                         });
                     }
@@ -1020,7 +1016,7 @@ fn handle_guardian_setup_key_queue(
                     // Go back to contact selection
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::GuardianSetup(ref mut s) = modal {
-                            s.step = GuardianSetupStep::SelectContacts;
+                            s.back_to_selection();
                         }
                     });
                 }
@@ -1044,7 +1040,7 @@ fn handle_guardian_setup_key_queue(
                         commands.push(TuiCommand::Dispatch(
                             DispatchCommand::StartGuardianCeremony {
                                 contact_ids: modal_state.selected_contact_ids(),
-                                threshold_k: modal_state.threshold_k,
+                                threshold_k: modal_state.threshold_k(),
                             },
                         ));
 
@@ -1060,10 +1056,12 @@ fn handle_guardian_setup_key_queue(
                 _ => {}
             }
         }
-        GuardianSetupStep::CeremonyInProgress => {
+        GuardianSetupStep::CeremonyInProgress
+        | GuardianSetupStep::Complete
+        | GuardianSetupStep::Error => {
             // During ceremony, allow escape to cancel once the ceremony has started.
             if key.code == KeyCode::Esc {
-                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id {
+                if let Some(ceremony_id) = modal_state.ceremony_id().cloned() {
                     commands.push(TuiCommand::Dispatch(
                         DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
                     ));
@@ -1091,7 +1089,7 @@ fn handle_mfa_setup_key_queue(
 ) {
     let is_ctrl_m =
         key.modifiers.ctrl() && matches!(key.code, KeyCode::Char('m') | KeyCode::Char('M'));
-    match modal_state.step {
+    match modal_state.step() {
         GuardianSetupStep::SelectContacts => {
             if is_ctrl_m {
                 let mobile_id = state.settings.demo_mobile_device_id.clone();
@@ -1099,13 +1097,7 @@ fn handle_mfa_setup_key_queue(
                     let mut found = false;
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::MfaSetup(ref mut s) = modal {
-                            if let Some(idx) = s.contacts.iter().position(|c| c.id == mobile_id) {
-                                found = true;
-                                if !s.selected_indices.contains(&idx) {
-                                    s.selected_indices.push(idx);
-                                }
-                                s.focused_index = idx;
-                            }
+                            found = s.select_by_id(&mobile_id);
                         }
                     });
                     if !found {
@@ -1134,18 +1126,14 @@ fn handle_mfa_setup_key_queue(
                 KeyCode::Up | KeyCode::Char('k') => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::MfaSetup(ref mut s) = modal {
-                            if s.focused_index > 0 {
-                                s.focused_index -= 1;
-                            }
+                            s.move_focus_up();
                         }
                     });
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     state.modal_queue.update_active(|modal| {
                         if let QueuedModal::MfaSetup(ref mut s) = modal {
-                            if s.focused_index + 1 < s.contacts.len() {
-                                s.focused_index += 1;
-                            }
+                            s.move_focus_down();
                         }
                     });
                 }
@@ -1160,7 +1148,7 @@ fn handle_mfa_setup_key_queue(
                     if modal_state.can_proceed_to_threshold() {
                         state.modal_queue.update_active(|modal| {
                             if let QueuedModal::MfaSetup(ref mut s) = modal {
-                                s.step = GuardianSetupStep::ChooseThreshold;
+                                s.advance_to_threshold();
                             }
                         });
                     }
@@ -1172,7 +1160,7 @@ fn handle_mfa_setup_key_queue(
             KeyCode::Esc => {
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::MfaSetup(ref mut s) = modal {
-                        s.step = GuardianSetupStep::SelectContacts;
+                        s.back_to_selection();
                     }
                 });
             }
@@ -1194,7 +1182,7 @@ fn handle_mfa_setup_key_queue(
                 if modal_state.can_start_ceremony() {
                     commands.push(TuiCommand::Dispatch(DispatchCommand::StartMfaCeremony {
                         device_ids: modal_state.selected_contact_ids(),
-                        threshold_k: modal_state.threshold_k,
+                        threshold_k: modal_state.threshold_k(),
                     }));
 
                     state.modal_queue.update_active(|modal| {
@@ -1206,9 +1194,11 @@ fn handle_mfa_setup_key_queue(
             }
             _ => {}
         },
-        GuardianSetupStep::CeremonyInProgress => {
+        GuardianSetupStep::CeremonyInProgress
+        | GuardianSetupStep::Complete
+        | GuardianSetupStep::Error => {
             if key.code == KeyCode::Esc {
-                if let Some(ceremony_id) = modal_state.ceremony.ceremony_id {
+                if let Some(ceremony_id) = modal_state.ceremony_id().cloned() {
                     commands.push(TuiCommand::Dispatch(
                         DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
                     ));

@@ -648,15 +648,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     } else if let crate::tui::state_machine::QueuedModal::GuardianSetup(ref mut s) = modal {
                                         if matches!(
-                                            s.step,
+                                            s.step(),
                                             crate::tui::state_machine::GuardianSetupStep::CeremonyInProgress
                                         ) {
                                             // Ensure ceremony id is set for cancel UX.
-                                            if s.ceremony.ceremony_id.is_none() {
-                                                s.ceremony.set_ceremony_id(ceremony_id.clone());
-                                            }
+                                            s.ensure_ceremony_id(ceremony_id.clone());
 
-                                            s.ceremony.update_from_status(
+                                            s.update_ceremony_from_status(
                                                 accepted_count,
                                                 total_count,
                                                 threshold,
@@ -678,25 +676,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 })
                                                 .collect();
 
-                                            for (id, _name, response) in &mut s.ceremony_responses {
-                                                if accepted_guardians.iter().any(|g| g == id) {
-                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Accepted;
-                                                } else if matches!(
-                                                    response,
-                                                    crate::tui::state_machine::GuardianCeremonyResponse::Accepted
-                                                ) {
-                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Pending;
-                                                }
-                                            }
+                                            s.update_responses_from_accepted(&accepted_guardians);
 
                                             if has_failed {
                                                 let msg = error_message
                                                     .clone()
                                                     .unwrap_or_else(|| "Guardian ceremony failed".to_string());
                                                 // Return to threshold selection so the user can retry.
-                                                s.step = crate::tui::state_machine::GuardianSetupStep::ChooseThreshold;
-                                                s.ceremony.clear();
-                                                s.ceremony_responses.clear();
+                                                s.reset_to_threshold_after_failure();
 
                                                 toast = Some((msg, crate::tui::state_machine::ToastLevel::Error));
                                                 dismiss_ceremony_started_toast = true;
@@ -738,14 +725,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     } else if let crate::tui::state_machine::QueuedModal::MfaSetup(ref mut s) = modal {
                                         if matches!(
-                                            s.step,
+                                            s.step(),
                                             crate::tui::state_machine::GuardianSetupStep::CeremonyInProgress
                                         ) {
-                                            if s.ceremony.ceremony_id.is_none() {
-                                                s.ceremony.set_ceremony_id(ceremony_id.clone());
-                                            }
+                                            s.ensure_ceremony_id(ceremony_id.clone());
 
-                                            s.ceremony.update_from_status(
+                                            s.update_ceremony_from_status(
                                                 accepted_count,
                                                 total_count,
                                                 threshold,
@@ -766,24 +751,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 })
                                                 .collect();
 
-                                            for (id, _name, response) in &mut s.ceremony_responses {
-                                                if accepted_devices.iter().any(|d| d == id) {
-                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Accepted;
-                                                } else if matches!(
-                                                    response,
-                                                    crate::tui::state_machine::GuardianCeremonyResponse::Accepted
-                                                ) {
-                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Pending;
-                                                }
-                                            }
+                                            s.update_responses_from_accepted(&accepted_devices);
 
                                             if has_failed {
                                                 let msg = error_message
                                                     .clone()
                                                     .unwrap_or_else(|| "Multifactor ceremony failed".to_string());
-                                                s.step = crate::tui::state_machine::GuardianSetupStep::ChooseThreshold;
-                                                s.ceremony.clear();
-                                                s.ceremony_responses.clear();
+                                                s.reset_to_threshold_after_failure();
 
                                                 toast = Some((msg, crate::tui::state_machine::ToastLevel::Error));
                                                 dismiss_ceremony_started_toast = true;
@@ -1084,14 +1058,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 state.modal_queue.update_active(|modal| {
                                     if let crate::tui::state_machine::QueuedModal::GuardianSetup(ref mut s) = modal {
                                         if matches!(
-                                            s.step,
+                                            s.step(),
                                             crate::tui::state_machine::GuardianSetupStep::CeremonyInProgress
                                         ) {
-                                            if s.ceremony.ceremony_id.is_none() {
-                                                s.ceremony.set_ceremony_id(ceremony_id.clone());
-                                            }
+                                            s.ensure_ceremony_id(ceremony_id.clone());
 
-                                            s.ceremony.update_from_status(
+                                            s.update_ceremony_from_status(
                                                 accepted_guardians.len() as u16,
                                                 total_count,
                                                 threshold,
@@ -1103,25 +1075,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 reversion_risk,
                                             );
 
-                                            for (id, _name, response) in &mut s.ceremony_responses {
-                                                if accepted_guardians.iter().any(|g| g == id) {
-                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Accepted;
-                                                } else if matches!(
-                                                    response,
-                                                    crate::tui::state_machine::GuardianCeremonyResponse::Accepted
-                                                ) {
-                                                    *response = crate::tui::state_machine::GuardianCeremonyResponse::Pending;
-                                                }
-                                            }
+                                            s.update_responses_from_accepted(&accepted_guardians);
 
                                             if has_failed {
                                                 let msg = error_message
                                                     .clone()
                                                     .unwrap_or_else(|| "Guardian ceremony failed".to_string());
                                                 // Return to threshold selection so the user can retry.
-                                                s.step = crate::tui::state_machine::GuardianSetupStep::ChooseThreshold;
-                                                s.ceremony.clear();
-                                                s.ceremony_responses.clear();
+                                                s.reset_to_threshold_after_failure();
 
                                                 toast = Some((
                                                     msg,
@@ -1895,10 +1856,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             .map(|(i, _)| i)
                                             .collect();
 
-                                        // Create populated modal state
-                                        let mut modal_state = crate::tui::state_machine::GuardianSetupModalState::default();
-                                        modal_state.contacts = candidates;
-                                        modal_state.selected_indices = selected;
+                                        // Create populated modal state using factory
+                                        let modal_state = crate::tui::state_machine::GuardianSetupModalState::from_contacts_with_selection(candidates, selected);
 
                                         // Enqueue the modal to new_state (not tui_state, which gets overwritten)
                                         new_state.modal_queue.enqueue(crate::tui::state_machine::QueuedModal::GuardianSetup(modal_state));
@@ -1939,15 +1898,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             })
                                             .collect();
 
-                                        let selected: Vec<usize> = (0..candidates.len()).collect();
-                                        let n = selected.len() as u8;
+                                        let n = candidates.len() as u8;
                                         let threshold_k = aura_app::ui::types::default_guardian_threshold(n);
 
-                                        let mut modal_state =
-                                            crate::tui::state_machine::GuardianSetupModalState::default();
-                                        modal_state.contacts = candidates;
-                                        modal_state.selected_indices = selected;
-                                        modal_state.threshold_k = threshold_k;
+                                        // Create modal state for MFA setup (pre-selects all, sets threshold)
+                                        let modal_state =
+                                            crate::tui::state_machine::GuardianSetupModalState::for_mfa_setup(candidates, threshold_k);
 
                                         if !new_state.settings.demo_mobile_device_id.is_empty() {
                                             new_state.toast_info(

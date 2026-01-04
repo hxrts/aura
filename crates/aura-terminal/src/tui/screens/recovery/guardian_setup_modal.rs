@@ -119,6 +119,8 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
         GuardianSetupStep::SelectContacts => 1,
         GuardianSetupStep::ChooseThreshold => 2,
         GuardianSetupStep::CeremonyInProgress => 3,
+        GuardianSetupStep::Complete => 3, // Show as step 3 (completed)
+        GuardianSetupStep::Error => 3,    // Show as step 3 (error occurred)
     };
     let header_props = ModalHeaderProps::new(copy.title).with_step(step_num, 3);
 
@@ -156,7 +158,9 @@ pub fn GuardianSetupModal(props: &GuardianSetupModalProps) -> impl Into<AnyEleme
                 #(match step {
                     GuardianSetupStep::SelectContacts => render_select_contacts(props),
                     GuardianSetupStep::ChooseThreshold => render_choose_threshold(props),
-                    GuardianSetupStep::CeremonyInProgress => render_ceremony_progress(props),
+                    GuardianSetupStep::CeremonyInProgress
+                    | GuardianSetupStep::Complete
+                    | GuardianSetupStep::Error => render_ceremony_progress(props),
                 })
             }
 
@@ -343,7 +347,9 @@ fn get_footer_hints(step: &GuardianSetupStep) -> ModalFooterProps {
             KeyHint::new("Enter", "Confirm"),
             KeyHint::new("Esc", "Back"),
         ],
-        GuardianSetupStep::CeremonyInProgress => vec![KeyHint::new("Esc", "Cancel")],
+        GuardianSetupStep::CeremonyInProgress
+        | GuardianSetupStep::Complete
+        | GuardianSetupStep::Error => vec![KeyHint::new("Esc", "Cancel")],
     };
     ModalFooterProps::new(hints)
 }

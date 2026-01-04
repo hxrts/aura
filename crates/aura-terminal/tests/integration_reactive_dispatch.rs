@@ -122,10 +122,8 @@ impl DispatchTestHarness {
                     .map(|(i, _)| i)
                     .collect();
 
-                let mut modal_state =
-                    aura_terminal::tui::state_machine::GuardianSetupModalState::default();
-                modal_state.contacts = candidates;
-                modal_state.selected_indices = selected;
+                // Use the factory constructor for proper initialization
+                let modal_state = aura_terminal::tui::state_machine::GuardianSetupModalState::from_contacts_with_selection(candidates, selected);
 
                 // IMPORTANT: Modify new_state, not some other state object
                 new_state
@@ -187,16 +185,18 @@ fn test_guardian_setup_receives_reactive_contacts() {
         2,
         "Modal should have 2 contacts from reactive subscription"
     );
-    assert_eq!(modal.contacts[0].name, "Alice");
-    assert_eq!(modal.contacts[1].name, "Carol");
+    let contacts = modal.contacts().expect("Should have contacts");
+    assert_eq!(contacts[0].name, "Alice");
+    assert_eq!(contacts[1].name, "Carol");
 
     // Alice should be pre-selected (is_guardian = true)
+    let selected = modal.selected_indices().expect("Should have selected indices");
     assert!(
-        modal.selected_indices.contains(&0),
+        selected.contains(&0),
         "Alice (index 0) should be pre-selected as guardian"
     );
     assert!(
-        !modal.selected_indices.contains(&1),
+        !selected.contains(&1),
         "Carol (index 1) should not be pre-selected"
     );
 }
@@ -218,7 +218,7 @@ fn test_guardian_setup_empty_when_no_contacts() {
 
     assert!(modal.is_empty(), "Modal should have no contacts");
     assert!(
-        modal.selected_indices.is_empty(),
+        modal.selected_indices().map_or(true, |v| v.is_empty()),
         "No contacts means no selections"
     );
 }
@@ -258,7 +258,10 @@ fn test_contacts_added_after_render_are_visible() {
         1,
         "Modal should see Bob who was added after render"
     );
-    assert_eq!(modal.contacts[0].name, "Bob");
+    assert_eq!(
+        modal.contacts().map(|c| c[0].name.clone()).unwrap_or_default(),
+        "Bob"
+    );
 }
 
 /// Test: State machine produces OpenGuardianSetup dispatch command.
@@ -301,9 +304,9 @@ fn test_guardian_ceremony_in_progress_escape_cancels() {
     state = new_state;
 
     // Enqueue an in-progress guardian ceremony modal
-    let mut modal = aura_terminal::tui::state_machine::GuardianSetupModalState::default();
-    modal.step = aura_terminal::tui::state_machine::GuardianSetupStep::CeremonyInProgress;
-    modal.ceremony.ceremony_id = Some("ceremony-123".to_string());
+    let modal = aura_terminal::tui::state_machine::GuardianSetupModalState::in_ceremony(
+        Some("ceremony-123".to_string()),
+    );
     state
         .modal_queue
         .enqueue(aura_terminal::tui::state_machine::QueuedModal::GuardianSetup(modal));
@@ -416,7 +419,7 @@ proptest! {
                 .collect();
 
             prop_assert_eq!(
-                modal.selected_indices.clone(),
+                modal.selected_indices().map(|v| v.to_vec()).unwrap_or_default(),
                 expected_guardians,
                 "Pre-selected guardians must match is_guardian flags"
             );
