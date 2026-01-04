@@ -21,6 +21,15 @@ use aura_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Serde default for legacy facts that don't have propagation metadata.
+///
+/// Legacy facts (created before consistency metadata was added) were already
+/// synced, so they should be treated as `Complete`. New facts are created
+/// via `Fact::new()` with `Local` status.
+fn propagation_legacy_default() -> Propagation {
+    Propagation::Complete
+}
+
 /// Journal namespace for scoping facts
 ///
 /// Facts are scoped to either an authority's namespace or a relational
@@ -455,7 +464,11 @@ pub struct Fact {
     /// - Syncing: Sync in progress to peers
     /// - Complete: Reached all known peers
     /// - Failed: Sync failed, will retry
-    #[serde(default)]
+    ///
+    /// Note: Legacy facts (created before consistency metadata was added) will
+    /// deserialize with `Complete` since they were already synced. New facts
+    /// are created via `Fact::new()` with `Local` status.
+    #[serde(default = "propagation_legacy_default")]
     pub propagation: Propagation,
 
     /// Whether this fact requests acknowledgment tracking
@@ -1535,5 +1548,48 @@ mod tests {
         // Provisional fact should still have ack tracking
         let remaining_fact = journal.get_fact(&fact2.order).unwrap();
         assert!(remaining_fact.ack_tracked);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Legacy Fact Migration Tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_legacy_fact_deserializes_with_complete_propagation() {
+        // Simulate a legacy fact that was created before consistency metadata was added.
+        // It should NOT have agreement, propagation, or ack_tracked fields.
+        let legacy_json = r#"{
+            "order": [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "timestamp": { "OrderClock": [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+            "content": { "Snapshot": { "state_hash": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "superseded_facts": [], "sequence": 1 } }
+        }"#;
+
+        let fact: Fact = serde_json::from_str(legacy_json)
+            .expect("Failed to deserialize legacy fact");
+
+        // Legacy facts should get:
+        // - agreement: Provisional (the default)
+        // - propagation: Complete (migration default - since they were already synced)
+        // - ack_tracked: false (the default)
+        assert!(fact.agreement.is_provisional(), "Legacy facts should be Provisional");
+        assert!(fact.propagation.is_complete(), "Legacy facts should be Complete (already synced)");
+        assert!(!fact.ack_tracked, "Legacy facts should not have ack tracking");
+    }
+
+    #[test]
+    fn test_new_fact_has_local_propagation() {
+        // New facts created via Fact::new() should have Local propagation
+        let fact = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        );
+
+        // New facts should start as Local (not yet synced)
+        assert!(fact.propagation.is_local(), "New facts should be Local");
     }
 }

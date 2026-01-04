@@ -16,13 +16,25 @@
 //! accept invitations (via `GuardianBinding` facts in the journal), the ceremony
 //! state is updated. Once threshold is reached, the ceremony is marked complete
 //! and `commit_guardian_key_rotation()` is triggered.
+//!
+//! ## Status Types
+//!
+//! This module uses `TrackedCeremony` for internal runtime state tracking, which
+//! can be converted to `CeremonyStatus` (from `aura-core::domain::status`) for
+//! UI display and consistency tracking.
 
 use super::state::with_state_mut_validated;
 use aura_app::core::IntentError;
 use aura_app::runtime_bridge::CeremonyKind;
 use aura_core::ceremony::{SupersessionReason, SupersessionRecord};
+use aura_core::domain::status::{
+    CeremonyResponse, CeremonyState as StatusCeremonyState, CeremonyStatus, ParticipantResponse,
+    SupersessionReason as StatusSupersessionReason,
+};
 use aura_core::identifiers::CeremonyId;
+use aura_core::query::ConsensusId;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity};
+use aura_core::time::PhysicalTime;
 use aura_core::{DeviceId, Hash32};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -37,7 +49,7 @@ pub struct CeremonyTracker {
 
 #[derive(Debug, Default)]
 struct CeremonyTrackerState {
-    ceremonies: HashMap<CeremonyId, CeremonyState>,
+    ceremonies: HashMap<CeremonyId, TrackedCeremony>,
     /// Supersession records for audit trail
     supersession_records: Vec<SupersessionRecord>,
 }
@@ -92,9 +104,15 @@ impl CeremonyTrackerState {
     }
 }
 
-/// State of a guardian ceremony
+/// Internal state of a tracked ceremony.
+///
+/// This struct holds runtime-specific data for ceremony tracking. For UI display
+/// and consistency tracking, convert to `CeremonyStatus` using `to_status()`.
 #[derive(Debug, Clone)]
-pub struct CeremonyState {
+pub struct TrackedCeremony {
+    /// Unique ceremony identifier
+    pub ceremony_id: CeremonyId,
+
     /// Ceremony kind
     pub kind: CeremonyKind,
 
@@ -145,6 +163,103 @@ pub struct CeremonyState {
 
     /// Prestate hash at ceremony initiation (for supersession detection)
     pub prestate_hash: Option<Hash32>,
+
+    /// Timestamp when committed (if committed)
+    pub committed_at: Option<PhysicalTime>,
+
+    /// Consensus ID when committed (if committed)
+    pub committed_consensus_id: Option<ConsensusId>,
+}
+
+impl TrackedCeremony {
+    /// Convert to `CeremonyStatus` for UI display and consistency tracking.
+    pub fn to_status(&self) -> CeremonyStatus {
+        // Helper to create a zero physical time (for cases where we don't have the actual time)
+        let zero_time = PhysicalTime {
+            ts_ms: 0,
+            uncertainty: None,
+        };
+        let zero_consensus_id = ConsensusId::new([0; 32]);
+
+        // Convert internal state to StatusCeremonyState enum
+        let state = if self.is_committed {
+            StatusCeremonyState::Committed {
+                consensus_id: self
+                    .committed_consensus_id
+                    .clone()
+                    .unwrap_or(zero_consensus_id),
+                committed_at: self.committed_at.clone().unwrap_or(zero_time.clone()),
+            }
+        } else if self.is_superseded {
+            StatusCeremonyState::Superseded {
+                by: self
+                    .superseded_by
+                    .clone()
+                    .unwrap_or_else(|| CeremonyId::new("unknown")),
+                reason: StatusSupersessionReason::NewerRequest,
+            }
+        } else if self.has_failed {
+            StatusCeremonyState::Aborted {
+                reason: self
+                    .error_message
+                    .clone()
+                    .unwrap_or_else(|| "Unknown error".to_string()),
+                aborted_at: zero_time.clone(),
+            }
+        } else if self.accepted_participants.len() >= self.threshold_k as usize {
+            StatusCeremonyState::Committing
+        } else if !self.accepted_participants.is_empty() {
+            StatusCeremonyState::PendingEpoch {
+                pending_epoch: aura_core::types::Epoch::new(self.new_epoch),
+                required_responses: self.threshold_k,
+                received_responses: self.accepted_participants.len() as u16,
+            }
+        } else {
+            StatusCeremonyState::Preparing
+        };
+
+        // Convert accepted participants to responses (guardians only for status)
+        // Devices and group members are tracked internally but don't map cleanly to AuthorityId
+        let responses: Vec<ParticipantResponse> = self
+            .accepted_participants
+            .iter()
+            .filter_map(|p| match p {
+                ParticipantIdentity::Guardian(auth_id) => Some(ParticipantResponse {
+                    participant: auth_id.clone(),
+                    response: CeremonyResponse::Accept,
+                    responded_at: zero_time.clone(), // We don't track individual response times
+                }),
+                ParticipantIdentity::Device(_device_id) => {
+                    // Skip devices for status - tracked internally
+                    None
+                }
+                ParticipantIdentity::GroupMember { .. } => {
+                    // Skip group members for status - tracked internally
+                    None
+                }
+            })
+            .collect();
+
+        // Get committed agreement if applicable
+        let committed_agreement = if self.is_committed {
+            Some(aura_core::domain::Agreement::Finalized {
+                consensus_id: self
+                    .committed_consensus_id
+                    .clone()
+                    .unwrap_or(zero_consensus_id),
+            })
+        } else {
+            None
+        };
+
+        CeremonyStatus {
+            ceremony_id: self.ceremony_id.clone(),
+            state,
+            responses,
+            prestate_hash: self.prestate_hash.unwrap_or(Hash32([0; 32])),
+            committed_agreement,
+        }
+    }
 }
 
 impl CeremonyTracker {
@@ -224,7 +339,8 @@ impl CeremonyTracker {
             )));
         }
 
-        let state = CeremonyState {
+        let state = TrackedCeremony {
+            ceremony_id: ceremony_id.clone(),
             kind,
             threshold_k,
             total_n,
@@ -242,6 +358,8 @@ impl CeremonyTracker {
             error_message: None,
             timeout: Duration::from_secs(30),
             prestate_hash,
+            committed_at: None,
+            committed_consensus_id: None,
         };
 
         let result = with_state_mut_validated(
@@ -279,12 +397,23 @@ impl CeremonyTracker {
     ///
     /// # Returns
     /// The current ceremony state
-    pub async fn get(&self, ceremony_id: &CeremonyId) -> Result<CeremonyState, IntentError> {
+    pub async fn get(&self, ceremony_id: &CeremonyId) -> Result<TrackedCeremony, IntentError> {
         let state = self.state.read().await;
 
         state.ceremonies.get(ceremony_id).cloned().ok_or_else(|| {
             IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
         })
+    }
+
+    /// Get ceremony status for UI display
+    ///
+    /// # Arguments
+    /// * `ceremony_id` - The ceremony identifier
+    ///
+    /// # Returns
+    /// The ceremony status for UI display
+    pub async fn get_status(&self, ceremony_id: &CeremonyId) -> Result<CeremonyStatus, IntentError> {
+        self.get(ceremony_id).await.map(|c| c.to_status())
     }
 
     /// Mark a guardian as having accepted the invitation
@@ -462,12 +591,12 @@ impl CeremonyTracker {
     ///
     /// # Returns
     /// Vector of (ceremony_id, state) tuples
-    pub async fn list_active(&self) -> Vec<(CeremonyId, CeremonyState)> {
+    pub async fn list_active(&self) -> Vec<(CeremonyId, TrackedCeremony)> {
         let state = self.state.read().await;
         state
             .ceremonies
             .iter()
-            .map(|(id, state)| (id.clone(), state.clone()))
+            .map(|(id, ceremony)| (id.clone(), ceremony.clone()))
             .collect()
     }
 
@@ -1093,9 +1222,9 @@ mod tests {
 
     use proptest::prelude::*;
 
-    /// Strategy to generate a valid CeremonyState
+    /// Strategy to generate a valid TrackedCeremony
     #[allow(dead_code)] // Reserved for future proptest expansion
-    fn ceremony_state_strategy() -> impl Strategy<Value = CeremonyState> {
+    fn tracked_ceremony_strategy() -> impl Strategy<Value = TrackedCeremony> {
         (
             2usize..=8, // num_participants
             1u16..=8,   // threshold (will be clamped)
@@ -1118,7 +1247,8 @@ mod tests {
                     participants.iter().take(num_accepted).cloned().collect();
                 let participants_set: HashSet<_> = participants.into_iter().collect();
 
-                CeremonyState {
+                TrackedCeremony {
+                    ceremony_id: CeremonyId::new("proptest"),
                     kind: CeremonyKind::GuardianRotation,
                     threshold_k: threshold,
                     total_n: participants_set.len() as u16,
@@ -1136,6 +1266,8 @@ mod tests {
                     error_message: None,
                     timeout: Duration::from_secs(30),
                     prestate_hash: None,
+                    committed_at: None,
+                    committed_consensus_id: None,
                 }
             })
     }
@@ -1155,7 +1287,8 @@ mod tests {
             let state = CeremonyTrackerState {
                 ceremonies: {
                     let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), CeremonyState {
+                    map.insert(test_ceremony_id("test"), TrackedCeremony {
+                        ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
                         threshold_k: 1,
                         total_n: participants_set.len() as u16,
@@ -1173,6 +1306,8 @@ mod tests {
                         error_message: None,
                         timeout: Duration::from_secs(30),
                         prestate_hash: None,
+                        committed_at: None,
+                        committed_consensus_id: None,
                     });
                     map
                 },
@@ -1205,7 +1340,8 @@ mod tests {
             let state = CeremonyTrackerState {
                 ceremonies: {
                     let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), CeremonyState {
+                    map.insert(test_ceremony_id("test"), TrackedCeremony {
+                        ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
                         threshold_k: 1,
                         total_n: num_participants as u16,
@@ -1223,6 +1359,8 @@ mod tests {
                         error_message: None,
                         timeout: Duration::from_secs(30),
                         prestate_hash: None,
+                        committed_at: None,
+                        committed_consensus_id: None,
                     });
                     map
                 },
@@ -1250,7 +1388,8 @@ mod tests {
             let state = CeremonyTrackerState {
                 ceremonies: {
                     let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), CeremonyState {
+                    map.insert(test_ceremony_id("test"), TrackedCeremony {
+                        ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
                         threshold_k: threshold,
                         total_n: num_participants as u16,
@@ -1268,6 +1407,8 @@ mod tests {
                         error_message: None,
                         timeout: Duration::from_secs(30),
                         prestate_hash: None,
+                        committed_at: None,
+                        committed_consensus_id: None,
                     });
                     map
                 },
@@ -1306,7 +1447,8 @@ mod tests {
             let state = CeremonyTrackerState {
                 ceremonies: {
                     let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), CeremonyState {
+                    map.insert(test_ceremony_id("test"), TrackedCeremony {
+                        ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
                         threshold_k: threshold,
                         total_n: num_participants as u16,
@@ -1324,6 +1466,8 @@ mod tests {
                         error_message: None,
                         timeout: Duration::from_secs(30),
                         prestate_hash: None,
+                        committed_at: None,
+                        committed_consensus_id: None,
                     });
                     map
                 },
@@ -1358,7 +1502,8 @@ mod tests {
             let state = CeremonyTrackerState {
                 ceremonies: {
                     let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), CeremonyState {
+                    map.insert(test_ceremony_id("test"), TrackedCeremony {
+                        ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
                         threshold_k: 2,
                         total_n: 2,
@@ -1380,6 +1525,8 @@ mod tests {
                         error_message: if has_failed { Some("test".to_string()) } else { None },
                         timeout: Duration::from_secs(30),
                         prestate_hash: None,
+                        committed_at: None,
+                        committed_consensus_id: None,
                     });
                     map
                 },
@@ -1412,7 +1559,8 @@ mod tests {
             let state = CeremonyTrackerState {
                 ceremonies: {
                     let mut map = HashMap::new();
-                    map.insert(test_ceremony_id("test"), CeremonyState {
+                    map.insert(test_ceremony_id("test"), TrackedCeremony {
+                        ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
                         threshold_k: 2,
                         total_n: 2,
@@ -1438,6 +1586,8 @@ mod tests {
                         error_message: None,
                         timeout: Duration::from_secs(30),
                         prestate_hash: None,
+                        committed_at: None,
+                        committed_consensus_id: None,
                     });
                     map
                 },
