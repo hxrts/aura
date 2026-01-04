@@ -37,6 +37,7 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
+use aura_core::domain::ConsistencyMap;
 use aura_core::effects::{
     indexed::IndexedJournalEffects,
     query::{QueryEffects, QueryError, QuerySubscription},
@@ -359,6 +360,13 @@ impl QueryEffects for UnifiedHandler {
         query: &Q,
     ) -> Result<(Q::Result, QueryStats), QueryError> {
         self.query.query_with_stats(query).await
+    }
+
+    async fn query_with_consistency<Q: Query>(
+        &self,
+        query: &Q,
+    ) -> Result<(Q::Result, ConsistencyMap), QueryError> {
+        self.query.query_with_consistency(query).await
     }
 
     async fn query_full<Q: Query>(

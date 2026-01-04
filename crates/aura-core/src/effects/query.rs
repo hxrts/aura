@@ -30,6 +30,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::domain::ConsistencyMap;
 use crate::effects::reactive::SignalStream;
 use crate::effects::reactive::{ReactiveEffects, ReactiveError, Signal, SignalId};
 use crate::query::{
@@ -248,6 +249,29 @@ pub trait QueryEffects: Send + Sync {
         query: &Q,
     ) -> Result<(Q::Result, QueryStats), QueryError>;
 
+    /// Execute a query and return results with consistency metadata.
+    ///
+    /// Returns both the query results and a `ConsistencyMap` containing
+    /// the consistency status (agreement, propagation, acknowledgment)
+    /// for each matched fact.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let (messages, consistency) = handler.query_with_consistency(&MessagesQuery::default()).await?;
+    /// for msg in &messages {
+    ///     if consistency.is_finalized(&msg.id) {
+    ///         println!("{}: finalized", msg.content);
+    ///     } else {
+    ///         println!("{}: pending", msg.content);
+    ///     }
+    /// }
+    /// ```
+    async fn query_with_consistency<Q: Query>(
+        &self,
+        query: &Q,
+    ) -> Result<(Q::Result, ConsistencyMap), QueryError>;
+
     /// Execute a query with both isolation level and statistics.
     ///
     /// Combines `query_with_isolation` and `query_with_stats`.
@@ -385,6 +409,13 @@ impl<T: QueryEffects + ?Sized> QueryEffects for Arc<T> {
         query: &Q,
     ) -> Result<(Q::Result, QueryStats), QueryError> {
         (**self).query_with_stats(query).await
+    }
+
+    async fn query_with_consistency<Q: Query>(
+        &self,
+        query: &Q,
+    ) -> Result<(Q::Result, ConsistencyMap), QueryError> {
+        (**self).query_with_consistency(query).await
     }
 
     async fn query_full<Q: Query>(

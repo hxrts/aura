@@ -10,6 +10,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 
 use aura_core::domain::journal::FactValue;
+use aura_core::domain::ConsistencyMap;
 use aura_core::effects::reactive::SignalId;
 use aura_core::effects::{
     indexed::IndexedJournalEffects,
@@ -944,6 +945,21 @@ impl QueryEffects for QueryHandler {
             .with_isolation(QueryIsolation::ReadUncommitted);
 
         Ok((result, stats))
+    }
+
+    async fn query_with_consistency<Q: Query>(
+        &self,
+        query: &Q,
+    ) -> Result<(Q::Result, ConsistencyMap), QueryError> {
+        // Execute the query
+        let result = self.query(query).await?;
+
+        // Build consistency map from facts
+        // TODO: In a full implementation, this would look up actual consistency metadata
+        // from the journal for each matched fact. For now, return empty map.
+        let consistency = ConsistencyMap::new();
+
+        Ok((result, consistency))
     }
 
     #[allow(clippy::disallowed_methods)] // Instant::now() legitimate for internal performance measurement

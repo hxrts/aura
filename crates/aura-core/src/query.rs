@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::Duration;
 
+use crate::domain::ConsistencyMap;
 use crate::time::PhysicalTime;
 use crate::Hash32;
 use crate::ResourceScope;
@@ -290,6 +291,12 @@ pub struct QueryStats {
 
     /// Time spent waiting for consensus (if any)
     pub consensus_wait_time: Option<Duration>,
+
+    /// Consistency metadata for matched facts.
+    ///
+    /// Maps fact identifiers (or result item IDs) to their consistency status.
+    /// Empty if consistency tracking was not requested.
+    pub consistency: ConsistencyMap,
 }
 
 impl Default for QueryStats {
@@ -301,6 +308,7 @@ impl Default for QueryStats {
             cache_hit: false,
             isolation_used: QueryIsolation::default(),
             consensus_wait_time: None,
+            consistency: ConsistencyMap::new(),
         }
     }
 }
@@ -349,6 +357,13 @@ impl QueryStats {
         self
     }
 
+    /// Set consistency metadata for matched facts
+    #[must_use]
+    pub fn with_consistency(mut self, consistency: ConsistencyMap) -> Self {
+        self.consistency = consistency;
+        self
+    }
+
     /// Calculate selectivity (matched / scanned)
     pub fn selectivity(&self) -> f64 {
         if self.facts_scanned == 0 {
@@ -356,6 +371,16 @@ impl QueryStats {
         } else {
             self.facts_matched as f64 / self.facts_scanned as f64
         }
+    }
+
+    /// Check if any matched fact is finalized
+    pub fn any_finalized(&self) -> bool {
+        self.consistency.iter().any(|(_, c)| c.agreement.is_finalized())
+    }
+
+    /// Check if all matched facts are finalized
+    pub fn all_finalized(&self) -> bool {
+        self.consistency.len() > 0 && self.consistency.iter().all(|(_, c)| c.agreement.is_finalized())
     }
 }
 
