@@ -1053,7 +1053,7 @@ mod tests {
         );
 
         let mut homes = HomesState::new();
-        homes.add_home(home_state);
+        homes.add_home_with_auto_select(home_state);
         reactive.emit(&*HOMES_SIGNAL, homes.clone()).await.unwrap();
         homes
     }
