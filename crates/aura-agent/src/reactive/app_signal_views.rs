@@ -25,7 +25,7 @@ use aura_app::ReactiveHandler;
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
-use aura_journal::DomainFact;
+use aura_journal::{DomainFact, ProtocolRelationalFact};
 use aura_protocol::amp::amp_recv;
 use tokio::sync::Mutex;
 use std::sync::Arc;
@@ -156,15 +156,15 @@ impl ReactiveView for InvitationsSignalView {
                     changed = true;
                 }
                 InvitationFact::Accepted { invitation_id, .. } => {
-                    state.accept_invitation(invitation_id.as_str());
+                    let _ = state.accept_invitation(invitation_id.as_str());
                     changed = true;
                 }
                 InvitationFact::Declined { invitation_id, .. } => {
-                    state.reject_invitation(invitation_id.as_str());
+                    let _ = state.reject_invitation(invitation_id.as_str());
                     changed = true;
                 }
                 InvitationFact::Cancelled { invitation_id, .. } => {
-                    state.revoke_invitation(invitation_id.as_str());
+                    let _ = state.revoke_invitation(invitation_id.as_str());
                     changed = true;
                 }
                 InvitationFact::CeremonyInitiated {
@@ -547,8 +547,7 @@ impl HomeSignalView {
         context_id: &ContextId,
     ) -> Option<&'a mut HomeState> {
         homes
-            .homes
-            .values_mut()
+            .all_homes_mut()
             .find(|home_state| home_state.context_id.as_ref() == Some(context_id))
     }
 }
@@ -705,32 +704,46 @@ impl ReactiveView for ChatSignalView {
         let mut changed = false;
 
         for fact in facts {
-            let FactContent::Relational(RelationalFact::Generic {
-                binding_type,
-                binding_data,
-                ..
-            }) = &fact.content
-            else {
-                continue;
-            };
+            match &fact.content {
+                // Handle consensus finalization: mark messages as finalized when epoch is committed
+                FactContent::Relational(RelationalFact::Protocol(
+                    ProtocolRelationalFact::AmpCommittedChannelEpochBump(bump),
+                )) => {
+                    // When a channel epoch is committed, all messages with epoch_hint <= parent_epoch are finalized
+                    let count =
+                        state.mark_finalized_up_to_epoch(&bump.channel, bump.parent_epoch as u32);
+                    if count > 0 {
+                        tracing::debug!(
+                            channel_id = %bump.channel,
+                            parent_epoch = bump.parent_epoch,
+                            new_epoch = bump.new_epoch,
+                            finalized_count = count,
+                            "Finalized messages up to epoch"
+                        );
+                        changed = true;
+                    }
+                    continue;
+                }
 
-            if binding_type != CHAT_FACT_TYPE_ID {
-                continue;
-            }
+                // Handle generic chat facts
+                FactContent::Relational(RelationalFact::Generic {
+                    binding_type,
+                    binding_data,
+                    ..
+                }) if binding_type == CHAT_FACT_TYPE_ID => {
+                    let Some(chat_fact) = ChatFact::from_bytes(binding_data) else {
+                        emit_internal_error(
+                            &self.reactive,
+                            format!(
+                                "Failed to decode ChatFact bytes (len={})",
+                                binding_data.len()
+                            ),
+                        )
+                        .await;
+                        continue;
+                    };
 
-            let Some(chat_fact) = ChatFact::from_bytes(binding_data) else {
-                emit_internal_error(
-                    &self.reactive,
-                    format!(
-                        "Failed to decode ChatFact bytes (len={})",
-                        binding_data.len()
-                    ),
-                )
-                .await;
-                continue;
-            };
-
-            match chat_fact {
+                    match chat_fact {
                 ChatFact::ChannelCreated {
                     channel_id,
                     context_id,
@@ -757,6 +770,7 @@ impl ReactiveView for ChatSignalView {
                         last_message: None,
                         last_message_time: None,
                         last_activity: created_at.ts_ms,
+                        last_finalized_epoch: 0,
                     };
                     state.add_channel(channel);
                     changed = true;
@@ -792,7 +806,7 @@ impl ReactiveView for ChatSignalView {
                     payload,
                     sent_at,
                     reply_to,
-                    ..
+                    epoch_hint,
                 } => {
                     let sealed_len = payload.len();
                     let payload_bytes = payload.clone();
@@ -828,6 +842,7 @@ impl ReactiveView for ChatSignalView {
                         is_read: is_own,
                         // Received messages are already "Sent" from sender's perspective
                         delivery_status: MessageDeliveryStatus::Sent,
+                        epoch_hint,
                         is_finalized: false,
                     };
                     state.apply_message(channel_id, message);
@@ -989,6 +1004,11 @@ impl ReactiveView for ChatSignalView {
                     );
                     changed = true;
                 }
+                    }
+                }
+
+                // Ignore other fact types in ChatSignalView
+                _ => {}
             }
         }
 

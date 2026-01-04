@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::{AppConfig, AppCore};
+use aura_app::ui::workflows::messaging::create_channel;
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::callbacks::ChatCallbacks;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
@@ -53,10 +54,17 @@ async fn next_toast(rx: &mut UiUpdateReceiver) -> aura_terminal::tui::components
     .expect("Timed out waiting for toast")
 }
 
+async fn ensure_chat_channel(ctx: &Arc<IoContext>) {
+    create_channel(ctx.app_core_raw(), "channel:general", None, &[], 0, 0)
+        .await
+        .expect("Failed to create chat channel for tests");
+}
+
 #[tokio::test]
 async fn slash_who_emits_participants_toast() {
     let (ctx, tx, mut rx, _dir) = setup_ctx("who").await;
     let callbacks = ChatCallbacks::new(ctx.clone(), tx, ctx.app_core_raw().clone());
+    ensure_chat_channel(&ctx).await;
 
     let on_send = callbacks.on_send.clone();
     on_send("channel:general".to_string(), "/who".to_string());
@@ -69,12 +77,10 @@ async fn slash_who_emits_participants_toast() {
 async fn slash_whois_emits_whois_toast() {
     let (ctx, tx, mut rx, _dir) = setup_ctx("whois").await;
     let callbacks = ChatCallbacks::new(ctx.clone(), tx, ctx.app_core_raw().clone());
+    ensure_chat_channel(&ctx).await;
 
     let on_send = callbacks.on_send.clone();
-    on_send(
-        "channel:general".to_string(),
-        "/whois test-user".to_string(),
-    );
+    on_send("channel:general".to_string(), "/whois test-user".to_string());
 
     let toast = next_toast(&mut rx).await;
     assert_eq!(toast.id, "whois");

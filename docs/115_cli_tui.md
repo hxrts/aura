@@ -344,8 +344,36 @@ CARGO_NET_OFFLINE=true cargo test -p aura-terminal --tests --offline
 
 This runs the full `aura-terminal` test suite without network access.
 
+## Message status indicators
+
+Chat messages display delivery status and finalization indicators in the message bubble header.
+
+### Delivery status lifecycle
+
+Messages progress through the following delivery states:
+
+| Status | Icon | Color | Meaning |
+|--------|------|-------|---------|
+| Sending | ◐ | Muted | Message being transmitted |
+| Sent | ✓ | Muted | Message acknowledged by network |
+| Delivered | ✓✓ | Muted | Recipient's device received message |
+| Read | ✓✓ | Blue | Recipient viewed message (opt-in) |
+| Failed | ✗ | Red | Delivery failed |
+
+Delivery status is tracked via `MessageDelivered` facts. When a recipient's device successfully decrypts a message, it emits a `MessageDelivered` fact that syncs back to the sender. Read receipts are opt-in per contact and emit `MessageRead` facts.
+
+### Finalization indicator
+
+The finalization indicator (◆) appears in muted color when a message achieves consensus finalization (A3 status with 2f+1 witnesses). This indicates the message is durably committed and cannot be rolled back. The finalization status is independent of delivery status and appears alongside it.
+
+### Implementation notes
+
+Status indicators are rendered in `MessageBubble` (`crates/aura-terminal/src/tui/components/message_bubble.rs`). The delivery status and finalization state flow from `ChatState` through the `CHAT_SIGNAL` to the TUI. See [AMP Protocol](112_amp.md) for the full acknowledgment flow.
+
 ## See also
 
 - [Aura System Architecture](001_system_architecture.md)
 - [Privacy and Information Flow](003_information_flow_contract.md)
 - [Effect System and Runtime](106_effect_system_and_runtime.md)
+- [AMP Protocol](112_amp.md) for message delivery acknowledgments
+- [Operation Categories](117_operation_categories.md) for status tracking patterns

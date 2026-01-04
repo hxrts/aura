@@ -90,7 +90,7 @@ pub mod recovery;
 pub mod recovery_cli;
 pub(crate) mod runtime;
 pub mod settings;
-pub(crate) mod signals;
+pub mod signals;
 pub mod snapshot;
 pub(crate) mod snapshot_policy;
 pub(crate) mod state_helpers;

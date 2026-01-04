@@ -274,14 +274,17 @@ Does this operation establish or modify cryptographic relationships?
 ### Category A: Instant Result with Sync Indicator
 
 ```
-┌─────────────────────────────────┐
-│ You: Hello everyone!         ✓✓ │  ← Delivered
-│ You: Check this out          ✓  │  ← Sent
-│ You: New idea                ◐  │  ← Sending
-└─────────────────────────────────┘
+┌───────────────────────────────────┐
+│ You: Hello everyone!         ◆ ✓✓ │  ← Finalized + Delivered
+│ You: Check this out            ✓✓ │  ← Delivered (not yet finalized)
+│ You: Another thought           ✓  │  ← Sent
+│ You: New idea                  ◐  │  ← Sending
+└───────────────────────────────────┘
 ```
 
-Effect already applied. Indicator shows sync/delivery status.
+Effect already applied. Indicators show:
+- Delivery status: ◐ (sending) → ✓ (sent) → ✓✓ (delivered) → ✓✓ blue (read)
+- Finalization: ◆ appears when message achieves A3 consensus (2f+1 witnesses)
 
 ### Category B: Pending Indicator
 

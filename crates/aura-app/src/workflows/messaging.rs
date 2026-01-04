@@ -13,7 +13,7 @@ use crate::workflows::state_helpers::with_chat_state;
 use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     thresholds::{default_channel_threshold, normalize_channel_threshold},
-    views::chat::{Channel, ChannelType, ChatState, Message},
+    views::chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
     AppCore,
 };
 use async_lock::RwLock;
@@ -70,11 +70,12 @@ pub async fn current_home_channel_id(app_core: &Arc<RwLock<AppCore>>) -> Result<
         .await
         .ok();
     let home_id = homes
-        .and_then(|homes| homes.current_home_id.as_ref().map(|id| id.to_string()))
+        .and_then(|homes| homes.current_home_id().map(|id| id.to_string()))
         .unwrap_or_else(|| "home".to_string());
 
     Ok(format!("home:{home_id}"))
 }
+
 
 async fn context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
@@ -149,12 +150,10 @@ pub async fn send_direct_message(
                 last_message: None,
                 last_message_time: None,
                 last_activity: now,
+                last_finalized_epoch: 0,
             };
             chat_state.add_channel(dm_channel);
         }
-
-        // Select this channel so messages are visible
-        chat_state.selected_channel_id = Some(channel_id);
 
         // Create the message with deterministic ID
         // Use AuthorityId::new_from_entropy([1u8; 32]) for self - in production this would be the actual user's ID
@@ -168,6 +167,9 @@ pub async fn send_direct_message(
             reply_to: None,
             is_own: true,
             is_read: true,
+            delivery_status: MessageDeliveryStatus::Sent,
+            epoch_hint: None,
+            is_finalized: false,
         };
 
         // Apply message to state
@@ -263,10 +265,10 @@ pub async fn create_channel(
             last_message: None,
             last_message_time: None,
             last_activity: timestamp_ms,
+            last_finalized_epoch: 0,
         };
 
         chat_state.add_channel(channel);
-        chat_state.selected_channel_id = Some(channel_id);
     })
     .await?;
 
@@ -447,6 +449,7 @@ pub async fn send_message_ref(
     let message_id = format!("msg-{channel_id}-{timestamp_ms}");
     let backend = messaging_backend(app_core).await;
     let mut channel_context: Option<ContextId> = None;
+    let mut epoch_hint: Option<u32> = None;
     let sender_id = if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
         let context_id = context_id_for_channel(app_core, channel_id).await?;
@@ -467,6 +470,9 @@ pub async fn send_message_ref(
         let sealed = serialize_amp_message(&wire)
             .map_err(|e| AuraError::agent(format!("Failed to encode AMP message: {e}")))?;
 
+        // Extract epoch from the AMP header (used for consensus finalization tracking)
+        epoch_hint = Some(cipher.header.chan_epoch as u32);
+
         let fact = ChatFact::message_sent_sealed_ms(
             context_id,
             channel_id,
@@ -476,6 +482,7 @@ pub async fn send_message_ref(
             sealed,
             timestamp_ms,
             None,
+            epoch_hint,
         )
         .to_generic();
 
@@ -505,10 +512,10 @@ pub async fn send_message_ref(
                 last_message: None,
                 last_message_time: None,
                 last_activity: timestamp_ms,
+                last_finalized_epoch: 0,
             });
         }
 
-        chat_state.selected_channel_id = Some(channel_id);
         chat_state.apply_message(
             channel_id,
             Message {
@@ -521,6 +528,9 @@ pub async fn send_message_ref(
                 reply_to: None,
                 is_own: true,
                 is_read: true,
+                delivery_status: MessageDeliveryStatus::Sent,
+                epoch_hint,
+                is_finalized: false,
             },
         );
     })
@@ -582,14 +592,12 @@ pub async fn start_direct_chat(
         last_message: None,
         last_message_time: None,
         last_activity: now,
+        last_finalized_epoch: 0,
     };
 
     with_chat_state(app_core, |chat_state| {
         // Add the DM channel (add_channel avoids duplicates)
         chat_state.add_channel(dm_channel);
-
-        // Select this channel (don't clear messages - retain history)
-        chat_state.selected_channel_id = Some(channel_id);
     })
     .await?;
 
@@ -605,21 +613,6 @@ pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> Result<ChatState
     Ok(chat_snapshot(app_core).await)
 }
 
-/// Select a channel in chat state and emit CHAT_SIGNAL.
-///
-/// **What it does**: Updates selected channel and clears/loads messages in state.
-/// **Signal pattern**: Updates `CHAT_SIGNAL` directly
-pub async fn select_channel(
-    app_core: &Arc<RwLock<AppCore>>,
-    channel_id: Option<ChannelId>,
-) -> Result<(), AuraError> {
-    with_chat_state(app_core, |chat_state| {
-        chat_state.select_channel(channel_id);
-    })
-    .await?;
-
-    Ok(())
-}
 
 /// Send an action/emote message to a channel
 ///
@@ -645,7 +638,7 @@ pub async fn send_action(
     send_message(app_core, channel_id_str, &content, timestamp_ms).await
 }
 
-/// Invite a user to join the current channel
+/// Invite a user to join a channel
 ///
 /// **What it does**: Creates a channel invitation for the target user
 /// **Returns**: Invitation ID
@@ -657,30 +650,16 @@ pub async fn send_action(
 /// # Arguments
 /// * `app_core` - The application core
 /// * `target_user_id` - Target user's authority ID
-/// * `channel_id` - Channel to invite user to (use current selected if None)
+/// * `channel_id` - Channel to invite user to (required - UI manages selection)
 /// * `message` - Optional invitation message
 /// * `ttl_ms` - Optional time-to-live for the invitation
 pub async fn invite_user_to_channel(
     app_core: &Arc<RwLock<AppCore>>,
     target_user_id: &str,
-    channel_id: Option<&str>,
+    channel_id: &str,
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<String, AuraError> {
-    // Determine channel ID - use provided or get current selected
-    let channel = match channel_id {
-        Some(id) => id.to_string(),
-        None => {
-            let chat_state = get_chat_state(app_core).await?;
-            chat_state
-                .selected_channel_id
-                .map(|id| id.to_string())
-                .ok_or_else(|| {
-                    AuraError::agent("No channel selected. Please select a channel first.")
-                })?
-        }
-    };
-
     // Parse target user ID as AuthorityId
     let receiver = parse_authority_id(target_user_id)?;
 
@@ -688,7 +667,7 @@ pub async fn invite_user_to_channel(
     let invitation = crate::workflows::invitation::create_channel_invitation(
         app_core,
         receiver,
-        channel.clone(),
+        channel_id.to_string(),
         None,
         message,
         ttl_ms,
@@ -712,6 +691,5 @@ mod tests {
 
         let state = get_chat_state(&app_core).await.unwrap();
         assert!(state.channels.is_empty());
-        assert!(state.messages.is_empty());
     }
 }

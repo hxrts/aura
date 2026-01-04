@@ -394,6 +394,12 @@ impl ChatServiceApi {
         let message_uuid = self.effects.random_uuid().await;
         let message_id = message_uuid.to_string();
 
+        // Get AMP channel state for epoch tracking (for consensus finalization)
+        let channel_state = get_channel_state(self.effects.as_ref(), context_id, channel_id)
+            .await
+            .map_err(|e| AgentError::effects(format!("AMP state lookup failed: {e}")))?;
+        let epoch_hint = Some(channel_state.chan_epoch as u32);
+
         // Validate the AMP channel exists (created in create_group)
         // Transport-layer encryption will use AMP when syncing to peers
         let amp = self.amp_coordinator();
@@ -416,6 +422,7 @@ impl ChatServiceApi {
             sender_id.to_string(),
             content.clone().into_bytes(),
             None,
+            epoch_hint,
         );
         self.execute_outcome(outcome).await?;
 

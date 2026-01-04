@@ -493,8 +493,7 @@ impl AppCore {
 
                 let home = snapshot
                     .homes
-                    .homes
-                    .values()
+                    .all_homes()
                     .find(|b| b.context_id == Some(*home_id))
                     .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
 
@@ -524,8 +523,7 @@ impl AppCore {
 
                 let home = snapshot
                     .homes
-                    .homes
-                    .values()
+                    .all_homes()
                     .find(|b| b.context_id == Some(*home_id))
                     .ok_or_else(|| IntentError::validation_failed("Home not found"))?;
 

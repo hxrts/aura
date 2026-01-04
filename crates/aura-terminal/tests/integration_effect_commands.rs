@@ -695,7 +695,7 @@ async fn test_accept_invitation_propagates_to_signals() {
         let core = app_core.read().await;
         let inv = core.read(&*INVITATIONS_SIGNAL).await.unwrap();
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        (inv.pending.len(), contacts.contacts.len())
+        (inv.pending_count(), contacts.contacts.len())
     };
     println!("  Initial pending invitations: {}", initial_pending);
     println!("  Initial contacts: {}", initial_contacts);
@@ -714,7 +714,7 @@ async fn test_accept_invitation_propagates_to_signals() {
         let core = app_core.read().await;
         let inv = core.read(&*INVITATIONS_SIGNAL).await.unwrap();
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        (inv.pending.len(), contacts.contacts.len())
+        (inv.pending_count(), contacts.contacts.len())
     };
     println!("  Final pending invitations: {}", final_pending);
     println!("  Final contacts: {}", final_contacts);

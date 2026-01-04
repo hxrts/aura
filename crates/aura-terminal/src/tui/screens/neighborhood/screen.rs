@@ -427,11 +427,9 @@ pub fn NeighborhoodScreen(
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let contacts = reactive_contacts.read().clone();
 
-                if let Some(channel_id) = &chat_state.selected_channel_id {
-                    if let Some(channel) = chat_state.channels.iter().find(|c| &c.id == channel_id)
-                    {
-                        reactive_channel_name.set(channel.name.clone());
-                    }
+                // Use first channel as default (selection is managed by TUI state)
+                if let Some(channel) = chat_state.channels.first() {
+                    reactive_channel_name.set(channel.name.clone());
                 }
 
                 let channel_list: Vec<ChannelSummary> = chat_state
@@ -444,8 +442,13 @@ pub fn NeighborhoodScreen(
                     .collect();
                 reactive_channels.set(channel_list);
 
-                let messages: Vec<Message> = chat_state
-                    .messages
+                // Get messages for first channel as default
+                let first_channel_id = chat_state.channels.first().map(|c| &c.id);
+                let app_messages = first_channel_id
+                    .map(|id| chat_state.messages_for_channel(id))
+                    .unwrap_or(&[]);
+
+                let messages: Vec<Message> = app_messages
                     .iter()
                     .map(|m| {
                         let sender_name = format_contact_name(&m.sender_id.to_string(), &contacts);
@@ -560,9 +563,11 @@ pub fn NeighborhoodScreen(
                     })
                 }
                 MessagePanel(
-                    messages: messages,
+                    messages: messages.clone(),
                     title: Some(context_bar),
                     empty_message: Some("No messages yet".to_string()),
+                    scroll_offset: props.view.message_scroll,
+                    message_count: messages.len(),
                 )
             }
             View(height: 3, width: dim::TOTAL_WIDTH) {

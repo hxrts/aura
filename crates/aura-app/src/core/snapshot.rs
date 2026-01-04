@@ -44,7 +44,7 @@ impl StateSnapshot {
     pub fn is_empty(&self) -> bool {
         self.chat.channels.is_empty()
             && self.recovery.guardians.is_empty()
-            && self.invitations.pending.is_empty()
+            && !self.invitations.has_pending()
             && self.contacts.contacts.is_empty()
             && self.homes.is_empty()
     }

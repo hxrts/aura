@@ -527,8 +527,8 @@ async fn test_complete_demo_invitation_flow() {
 
     // Check invitations state
     if let Ok(inv_state) = core.read(&*INVITATIONS_SIGNAL).await {
-        let pending_count = inv_state.pending.len();
-        let sent_count = inv_state.sent.len();
+        let pending_count = inv_state.pending_count();
+        let sent_count = inv_state.sent_count();
         println!("  Pending invitations: {pending_count}");
         println!("  Sent invitations: {sent_count}");
     }

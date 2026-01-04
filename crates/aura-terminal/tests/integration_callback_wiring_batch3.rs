@@ -120,15 +120,15 @@ async fn test_home_signals_initialization() {
     match homes_state {
         Ok(state) => {
             println!("  HOMES_SIGNAL initialized");
-            let home_count = state.homes.len();
+            let home_count = state.count();
             println!("  Total homes: {home_count}");
             println!(
                 "  Current home ID: {current_home_id:?}",
-                current_home_id = state.current_home_id
+                current_home_id = state.current_home_id()
             );
             // Should start with no homes
             assert!(
-                state.homes.is_empty(),
+                state.is_empty(),
                 "Initial homes state should be empty"
             );
         }
@@ -156,7 +156,7 @@ async fn test_create_home_updates_signals() {
     let initial_homes = core
         .read(&*HOMES_SIGNAL)
         .await
-        .map(|s| s.homes.len())
+        .map(|s| s.count())
         .unwrap_or(0);
     println!("  Initial homes count: {initial_homes}");
     drop(core);
@@ -191,12 +191,12 @@ async fn test_create_home_updates_signals() {
     let homes_state = core.read(&*HOMES_SIGNAL).await;
 
     if let Ok(state) = homes_state {
-        let home_count = state.homes.len();
+        let home_count = state.count();
         println!("  Homes count after create: {home_count}");
-        if state.homes.len() > initial_homes {
+        if state.count() > initial_homes {
             println!("  New home was created successfully");
             // Find the new home
-            for (id, home_state) in &state.homes {
+            for (id, home_state) in state.iter() {
                 println!(
                     "    Home: {name} ({home_id})",
                     name = home_state.name,
@@ -859,8 +859,8 @@ async fn test_auxiliary_signals() {
     let invitations = core.read(&*INVITATIONS_SIGNAL).await;
     match invitations {
         Ok(inv_state) => {
-            let sent_count = inv_state.sent.len();
-            let pending_count = inv_state.pending.len();
+            let sent_count = inv_state.sent_count();
+            let pending_count = inv_state.pending_count();
             println!("  Sent invitations: {sent_count}");
             println!("  Pending invitations: {pending_count}");
         }

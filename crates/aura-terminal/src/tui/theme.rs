@@ -135,6 +135,10 @@ impl Icons {
     /// Info circle
     pub const INFO: &'static str = "\u{2139}"; // ℹ
 
+    // Consensus status
+    /// Diamond for consensus-finalized
+    pub const FINALIZED: &'static str = "\u{25C6}"; // ◆
+
     // Online/offline status
     /// Filled circle for online
     pub const ONLINE: &'static str = "\u{25CF}"; // ●

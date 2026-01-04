@@ -45,6 +45,8 @@ pub type CreateInvitationCallbackType =
 // =============================================================================
 
 // --- Chat Screen ---
+/// Send callback takes channel_id and content - channel is obtained from TUI's selected_channel
+/// to avoid race conditions with async channel selection updates.
 pub type SendCallback = TwoStringCallback;
 pub type ChannelSelectCallback = IdCallback;
 pub type CreateChannelCallback = StringOptStringVecU8Callback;

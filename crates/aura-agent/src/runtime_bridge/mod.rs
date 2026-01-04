@@ -2094,10 +2094,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 version: 1,
             };
 
-            let attested = aura_core::tree::AttestedOp {
-                op,
-                agg_sig: Vec::new(),
-                signer_count: 1,
+            let attested = match self.sign_tree_op(&op).await {
+                Ok(attested) => attested,
+                Err(e) => {
+                    let _ = tracker
+                        .mark_failed(&ceremony_id, Some(format!("Failed to sign tree op: {e}")))
+                        .await;
+                    return Err(IntentError::internal_error(format!(
+                        "Failed to sign tree op: {e}"
+                    )));
+                }
             };
 
             if let Err(e) = effects.apply_attested_op(attested).await {

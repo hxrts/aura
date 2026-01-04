@@ -810,7 +810,7 @@ impl InvitationHandler {
 
             let InvitationFact::Sent {
                 invitation_id: seen_id,
-                sender_id,
+                sender_id: _,
                 receiver_id,
                 invitation_type,
                 context_id,

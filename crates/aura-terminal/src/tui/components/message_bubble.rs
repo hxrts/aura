@@ -20,6 +20,8 @@ pub struct MessageBubbleProps {
     pub is_own: bool,
     /// Delivery status for own messages
     pub delivery_status: DeliveryStatus,
+    /// Whether this message has been finalized by consensus (A3)
+    pub is_finalized: bool,
 }
 
 /// An enhanced message bubble with status indicators
@@ -30,8 +32,10 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
     let timestamp = props.timestamp.clone();
 
     let (border_color, align) = if props.is_own {
-        (Theme::PRIMARY, AlignItems::FlexEnd)
+        // Blue border for local user's messages, right-aligned
+        (Theme::ACCENT, AlignItems::FlexEnd)
     } else {
+        // Default border for other users' messages, left-aligned
         (Theme::BORDER, AlignItems::FlexStart)
     };
 
@@ -44,6 +48,13 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
             DeliveryStatus::Read => Some((Icons::CHECK_DOUBLE, Theme::INFO)), // Blue double check
             DeliveryStatus::Failed => Some((Icons::CROSS, Theme::ERROR)),
         }
+    } else {
+        None
+    };
+
+    // Finalization indicator (for consensus-confirmed messages)
+    let finalized_icon = if props.is_finalized {
+        Some((Icons::FINALIZED, Theme::TEXT_MUTED))
     } else {
         None
     };
@@ -61,7 +72,7 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
                 padding_left: Spacing::PANEL_PADDING,
                 padding_right: Spacing::PANEL_PADDING,
             ) {
-                // Header: sender + timestamp
+                // Header: sender + timestamp + status indicators
                 View(
                     flex_direction: FlexDirection::Row,
                     justify_content: JustifyContent::SpaceBetween,
@@ -71,6 +82,9 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
                     View(flex_direction: FlexDirection::Row, gap: Spacing::XS) {
                         Text(content: timestamp, color: Theme::TEXT_MUTED)
                         #(status_icon.map(|(icon, color)| element! {
+                            Text(content: icon, color: color)
+                        }))
+                        #(finalized_icon.map(|(icon, color)| element! {
                             Text(content: icon, color: color)
                         }))
                     }
@@ -100,8 +114,10 @@ pub fn CompactMessage(props: &CompactMessageProps) -> impl Into<AnyElement<'stat
     let timestamp = props.timestamp.clone();
 
     let border_color = if props.is_own {
-        Theme::PRIMARY
+        // Blue border for local user's messages
+        Theme::ACCENT
     } else {
+        // Default border for other users' messages
         Theme::BORDER
     };
 

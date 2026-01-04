@@ -271,6 +271,7 @@ impl Query for ChannelsQuery {
                         }
                     },
                     last_activity: get_int(&row, "last_activity") as u64,
+                    last_finalized_epoch: 0,
                 })
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
@@ -372,6 +373,7 @@ impl Query for MessagesQuery {
                     is_own: false, // Determined at render time
                     is_read: get_bool(&row, "is_read"),
                     delivery_status: Default::default(),
+                    epoch_hint: None, // Not available from Datalog query
                     is_finalized: false,
                 })
             })
@@ -649,14 +651,7 @@ impl Query for InvitationsQuery {
             .cloned()
             .collect();
 
-        let pending_count = pending.len() as u32;
-
-        Ok(InvitationsState {
-            pending,
-            sent,
-            history,
-            pending_count,
-        })
+        Ok(InvitationsState::from_parts(pending, sent, history))
     }
 }
 
@@ -1145,10 +1140,7 @@ impl Query for HomesQuery {
             current_home_id = homes.keys().next().cloned();
         }
 
-        Ok(HomesState {
-            homes,
-            current_home_id,
-        })
+        Ok(HomesState::from_parts(homes, current_home_id))
     }
 }
 
@@ -1323,6 +1315,7 @@ impl Query for ChatQuery {
                     last_message: None,
                     last_message_time: None,
                     last_activity: 0,
+                    last_finalized_epoch: 0,
                 })
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;

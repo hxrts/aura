@@ -51,11 +51,10 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
                 );
             }
             ChatFocus::Messages => {
-                state.chat.message_scroll = navigate_list(
-                    state.chat.message_scroll,
-                    state.chat.message_count,
-                    NavKey::Up,
-                );
+                // Scroll toward newer messages (reduce offset toward bottom).
+                if state.chat.message_scroll > 0 {
+                    state.chat.message_scroll = state.chat.message_scroll.saturating_sub(1);
+                }
             }
             _ => {}
         },
@@ -68,11 +67,12 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
                 );
             }
             ChatFocus::Messages => {
-                state.chat.message_scroll = navigate_list(
-                    state.chat.message_scroll,
-                    state.chat.message_count,
-                    NavKey::Down,
-                );
+                // Scroll toward older messages (increase offset away from bottom).
+                let max_scroll = state.chat.message_count.saturating_sub(18);
+                if state.chat.message_scroll < max_scroll {
+                    state.chat.message_scroll =
+                        state.chat.message_scroll.saturating_add(1).min(max_scroll);
+                }
             }
             _ => {}
         },
@@ -266,8 +266,12 @@ pub fn handle_neighborhood_key(
                     );
                 }
                 DetailFocus::Messages => {
-                    state.neighborhood.message_scroll =
-                        state.neighborhood.message_scroll.saturating_sub(1);
+                    // Scroll up = increase offset (show older messages)
+                    // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
+                    let max_scroll = state.neighborhood.message_count.saturating_sub(18);
+                    if state.neighborhood.message_scroll < max_scroll {
+                        state.neighborhood.message_scroll = state.neighborhood.message_scroll.saturating_add(1).min(max_scroll);
+                    }
                 }
                 DetailFocus::Input => {}
             },
@@ -287,8 +291,11 @@ pub fn handle_neighborhood_key(
                     );
                 }
                 DetailFocus::Messages => {
-                    state.neighborhood.message_scroll =
-                        state.neighborhood.message_scroll.saturating_add(1);
+                    // Scroll down = decrease offset (show newer messages, toward bottom)
+                    // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
+                    if state.neighborhood.message_scroll > 0 {
+                        state.neighborhood.message_scroll = state.neighborhood.message_scroll.saturating_sub(1);
+                    }
                 }
                 DetailFocus::Input => {}
             },

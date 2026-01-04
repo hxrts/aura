@@ -65,6 +65,7 @@ pub mod workflows {
     pub use crate::workflows::query;
     pub use crate::workflows::recovery_cli;
     pub use crate::workflows::settings;
+    pub use crate::workflows::signals;
     pub use crate::workflows::snapshot;
     pub use crate::workflows::steward;
     pub use crate::workflows::sync;

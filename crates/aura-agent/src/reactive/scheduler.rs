@@ -865,6 +865,7 @@ mod tests {
             b"Hello, world!".to_vec(),
             1234567900,
             None,
+            Some(1), // epoch_hint
         );
 
         // Test with facts that should produce deltas
@@ -921,6 +922,7 @@ mod tests {
             b"Reply here".to_vec(),
             1234567910,
             Some("msg-123".to_string()),
+            Some(1), // epoch_hint
         );
 
         let mut more_facts = facts.clone();

@@ -110,13 +110,13 @@ impl SnapshotHelper {
     #[must_use]
     pub fn snapshot_invitations(&self) -> InvitationsSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
-            let pending_count = snapshot.invitations.pending_count as usize;
+            let pending_count = snapshot.invitations.pending_count();
             let invitations = snapshot
                 .invitations
-                .pending
+                .all_pending()
                 .iter()
-                .chain(snapshot.invitations.sent.iter())
-                .chain(snapshot.invitations.history.iter())
+                .chain(snapshot.invitations.all_sent().iter())
+                .chain(snapshot.invitations.all_history().iter())
                 .cloned()
                 .collect();
             InvitationsSnapshot {

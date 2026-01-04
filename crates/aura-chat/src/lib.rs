@@ -67,6 +67,7 @@
 //!     b"encrypted message bytes".to_vec(),
 //!     1700000000000, // sent_at_ms
 //!     None,          // reply_to
+//!     None,          // epoch_hint (for consensus finalization tracking)
 //! );
 //! let _generic = fact.to_generic();
 //! ```

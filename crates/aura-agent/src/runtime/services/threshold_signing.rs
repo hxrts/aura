@@ -24,7 +24,8 @@ use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_consensus::dkg::recovery::recover_share_from_transcript;
 use aura_consensus::dkg::{DkgTranscript, DkgTranscriptStore, StorageTranscriptStore};
-use aura_core::crypto::single_signer::SigningMode;
+use aura_core::crypto::single_signer::{SigningMode, SingleSignerPublicKeyPackage};
+use aura_core::crypto::tree_signing;
 use aura_core::effects::{
     crypto::KeyGenerationMethod, CryptoExtendedEffects, SecureStorageCapability,
     SecureStorageEffects, SecureStorageLocation,
@@ -37,8 +38,9 @@ use aura_core::threshold::{
 use aura_core::{
     effects::{PhysicalTimeEffects, ThresholdSigningEffects},
     threshold::{ConvergenceCert, ReversionFact},
-    AuraError, ContextId, Hash32,
+    AuraError, ContextId, Epoch, Hash32,
 };
+use aura_core::tree::{AttestedOp, TreeOp};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -375,6 +377,54 @@ impl ThresholdSigningService {
             .map_err(|e| AuraError::internal(format!("Failed to serialize operation: {}", e)))
     }
 
+    /// Compute a binding message for tree operations that matches tree verification.
+    fn tree_op_message(op: &TreeOp, state: &SigningContextState) -> Result<Vec<u8>, AuraError> {
+        let group_public_key = Self::group_public_key_bytes(state)?;
+        let attested = AttestedOp {
+            op: op.clone(),
+            agg_sig: Vec::new(),
+            signer_count: 0,
+        };
+
+        Ok(tree_signing::tree_op_binding_message(
+            &attested,
+            Epoch::new(state.epoch),
+            &group_public_key,
+        ))
+    }
+
+    /// Extract the group public key bytes for binding messages.
+    fn group_public_key_bytes(state: &SigningContextState) -> Result<[u8; 32], AuraError> {
+        match state.mode {
+            SigningMode::SingleSigner => {
+                let package = SingleSignerPublicKeyPackage::from_bytes(&state.public_key_package)
+                    .map_err(|e| {
+                        AuraError::internal(format!(
+                            "Failed to decode single-signer public key package: {e}"
+                        ))
+                    })?;
+                package
+                    .verifying_key()
+                    .try_into()
+                    .map_err(|_| AuraError::internal("Single-signer public key length mismatch"))
+            }
+            SigningMode::Threshold => {
+                let package =
+                    tree_signing::public_key_package_from_bytes(&state.public_key_package)
+                        .map_err(|e| {
+                            AuraError::internal(format!(
+                                "Failed to decode threshold public key package: {e}"
+                            ))
+                        })?;
+                package
+                    .group_public_key
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| AuraError::internal("Threshold public key length mismatch"))
+            }
+        }
+    }
+
     /// Route single-device signing.
     async fn sign_solo(
         &self,
@@ -383,6 +433,119 @@ impl ThresholdSigningService {
         state: &SigningContextState,
     ) -> Result<ThresholdSignature, AuraError> {
         self.sign_solo_ed25519(authority, message, state).await
+    }
+
+    /// Aggregate a threshold signature using locally available shares.
+    async fn sign_threshold_local(
+        &self,
+        authority: &AuthorityId,
+        message: &[u8],
+        state: &SigningContextState,
+    ) -> Result<ThresholdSignature, AuraError> {
+        use aura_core::effects::SecureStorageCapability;
+        use aura_core::effects::SecureStorageLocation;
+
+        struct SignerMaterial {
+            signer_id: u16,
+            key_package: Vec<u8>,
+        }
+
+        let mut signers: Vec<SignerMaterial> = Vec::new();
+        let mut missing = Vec::new();
+
+        for participant in &state.participants {
+            let location = SecureStorageLocation::with_sub_key(
+                "participant_shares",
+                format!("{}/{}", authority, state.epoch),
+                participant.storage_key(),
+            );
+
+            match self
+                .effects
+                .secure_retrieve(&location, &[SecureStorageCapability::Read])
+                .await
+            {
+                Ok(key_package) => {
+                    let share = tree_signing::share_from_key_package_bytes(&key_package)
+                        .map_err(|e| {
+                            AuraError::internal(format!(
+                                "Failed to decode key package for {}: {e}",
+                                participant.display_name()
+                            ))
+                        })?;
+                    signers.push(SignerMaterial {
+                        signer_id: share.identifier,
+                        key_package,
+                    });
+                }
+                Err(_) => missing.push(participant.display_name()),
+            }
+        }
+
+        if signers.len() < state.config.threshold as usize {
+            return Err(AuraError::internal(format!(
+                "Insufficient local shares for threshold signing (need {}, have {}, missing: {})",
+                state.config.threshold,
+                signers.len(),
+                if missing.is_empty() {
+                    "none".to_string()
+                } else {
+                    missing.join(", ")
+                }
+            )));
+        }
+
+        signers.sort_by_key(|s| s.signer_id);
+        let participant_ids: Vec<u16> = signers.iter().map(|s| s.signer_id).collect();
+
+        let mut nonces = Vec::with_capacity(signers.len());
+        for signer in &signers {
+            let nonce = self
+                .effects
+                .frost_generate_nonces(&signer.key_package)
+                .await
+                .map_err(|e| {
+                    AuraError::internal(format!("Failed to generate FROST nonces: {e}"))
+                })?;
+            nonces.push(nonce);
+        }
+
+        let signing_package = self
+            .effects
+            .frost_create_signing_package(
+                message,
+                &nonces,
+                &participant_ids,
+                &state.public_key_package,
+            )
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to create signing package: {e}")))?;
+
+        let mut partials = Vec::with_capacity(signers.len());
+        for (signer, nonce) in signers.iter().zip(nonces.iter()) {
+            let partial = self
+                .effects
+                .frost_sign_share(&signing_package, &signer.key_package, nonce)
+                .await
+                .map_err(|e| {
+                    AuraError::internal(format!("Failed to sign share {}: {e}", signer.signer_id))
+                })?;
+            partials.push(partial);
+        }
+
+        let signature = self
+            .effects
+            .frost_aggregate_signatures(&signing_package, &partials)
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to aggregate signatures: {e}")))?;
+
+        Ok(ThresholdSignature::new(
+            signature,
+            participant_ids.len() as u16,
+            participant_ids,
+            state.public_key_package.clone(),
+            state.epoch,
+        ))
     }
 }
 
@@ -565,8 +728,11 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             ));
         }
 
-        // Serialize the operation
-        let message = Self::serialize_operation(&context.operation)?;
+        // Serialize or bind the operation for signing
+        let message = match &context.operation {
+            SignableOperation::TreeOp(op) => Self::tree_op_message(op, &state)?,
+            _ => Self::serialize_operation(&context.operation)?,
+        };
 
         // Log the approval context for audit
         match &context.approval_context {
@@ -602,26 +768,9 @@ impl ThresholdSigningEffects for ThresholdSigningService {
             return self.sign_solo(&context.authority, &message, &state).await;
         }
 
-        // Multi-device coordination via choreography
-        // For threshold > 1, we need to coordinate with other signers via network
-        // This requires:
-        // 1. Commitment exchange round (share nonces)
-        // 2. Signing round (create/share partial signatures)
-        // 3. Aggregation (combine into final signature)
-        //
-        // The coordination happens through the protocol layer's session types.
-        // For now, return an informative error explaining the requirements.
-        let required_signers = state.config.threshold;
-        let total_signers = state.config.total_participants;
-
-        Err(AuraError::internal(format!(
-            "Multi-device signing requires {}/{} signers to coordinate via network. \
-             Single-device signing (threshold=1) works locally. \
-             For multi-device signing, ensure {} other devices are online and participating.",
-            required_signers,
-            total_signers,
-            required_signers - 1
-        )))
+        // Threshold signing via local share aggregation (demo/prototyping path).
+        self.sign_threshold_local(&context.authority, &message, &state)
+            .await
     }
 
     async fn threshold_config(&self, authority: &AuthorityId) -> Option<ThresholdConfig> {

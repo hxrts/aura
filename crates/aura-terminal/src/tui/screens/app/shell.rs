@@ -319,21 +319,35 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let shared_contacts = use_contacts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
+    // Channels subscription: SharedChannels for dispatch handlers to read
+    // =========================================================================
+    // Must be created before messages subscription since messages depend on channels
+    let shared_channels = use_channels_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+
+    // =========================================================================
+    // Shared selection state for messages subscription
+    // =========================================================================
+    // The TUI state's selected_channel index, shared so the messages subscription
+    // can read which channel's messages to fetch.
+    let tui_selected_ref = hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(0_usize)));
+    let tui_selected: std::sync::Arc<std::sync::RwLock<usize>> = tui_selected_ref.read().clone();
+
+    // =========================================================================
     // Messages subscription: SharedMessages for dispatch handlers to read
     // =========================================================================
     // Used to look up failed messages by ID for retry operations.
     // The Arc is kept up-to-date by a reactive subscription to CHAT_SIGNAL.
-    let shared_messages = use_messages_subscription(&mut hooks, &app_ctx);
+    let shared_messages = use_messages_subscription(
+        &mut hooks,
+        &app_ctx,
+        shared_channels.clone(),
+        tui_selected.clone(),
+    );
 
     // =========================================================================
     // Devices subscription: SharedDevices for dispatch handlers to read
     // =========================================================================
     let shared_devices = use_devices_subscription(&mut hooks, &app_ctx);
-
-    // =========================================================================
-    // Channels subscription: SharedChannels for dispatch handlers to read
-    // =========================================================================
-    let shared_channels = use_channels_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Neighborhood homes subscription: SharedNeighborhoodHomes for dispatch handlers to read
@@ -490,6 +504,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let mut tui = tui.clone();
             let shared_contacts_for_updates = shared_contacts.clone();
+            // Shared selection state for messages subscription synchronization
+            let tui_selected_for_updates = tui_selected.clone();
             async move {
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
@@ -624,6 +640,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 let app_core = app_core.raw().clone();
                                                 let tasks = tasks_for_updates.clone();
                                                 tasks.spawn(async move {
+                                                    // Small delay to allow commitment tree update to propagate
+                                                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                                                     let _ = refresh_settings_from_runtime(&app_core).await;
                                                 });
                                             }
@@ -798,6 +816,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 let app_core = app_core.raw().clone();
                                 let tasks = tasks_for_updates.clone();
                                 tasks.spawn(async move {
+                                    // Small delay to allow commitment tree update to propagate
+                                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                                     let _ = refresh_settings_from_runtime(&app_core).await;
                                 });
                                 if is_complete {
@@ -855,7 +875,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // Chat / messaging
                         // =========================================================================
                         UiUpdate::MessageSent { .. } => {
-                            // No toast for successful message sends - user can see the message in the chat
+                            // Auto-scroll to bottom (show latest messages including the one just sent)
+                            tui.with_mut(|state| {
+                                state.chat.message_scroll = 0;
+                            });
                         }
                         UiUpdate::MessageRetried { message_id: _ } => {
                             enqueue_toast!(
@@ -875,6 +898,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             selected_index,
                         } => {
                             tui.with_mut(|state| {
+                                let prev_channel_count = state.chat.channel_count;
                                 state.chat.channel_count = channel_count;
                                 state.chat.message_count = message_count;
 
@@ -884,11 +908,28 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     return;
                                 }
 
-                                let mut idx = selected_index.unwrap_or(0);
-                                if idx >= channel_count {
-                                    idx = channel_count.saturating_sub(1);
+                                // Only update selected_channel from app layer when:
+                                // 1. Current selection is out of bounds, OR
+                                // 2. Channel count changed (channels added/removed), OR
+                                // 3. No valid selection yet (selected_channel >= channel_count)
+                                // This prevents the app layer from overwriting user navigation
+                                let current_selection_invalid =
+                                    state.chat.selected_channel >= channel_count;
+                                let channel_list_changed = prev_channel_count != channel_count;
+
+                                if current_selection_invalid || channel_list_changed {
+                                    let mut idx = selected_index.unwrap_or(0);
+                                    if idx >= channel_count {
+                                        idx = channel_count.saturating_sub(1);
+                                    }
+                                    state.chat.selected_channel = idx;
                                 }
-                                state.chat.selected_channel = idx;
+
+                                // Sync the shared selection state so message subscription
+                                // knows which channel's messages to fetch
+                                if let Ok(mut guard) = tui_selected_for_updates.write() {
+                                    *guard = state.chat.selected_channel;
+                                }
 
                                 if state.chat.message_scroll >= message_count {
                                     state.chat.message_scroll = message_count.saturating_sub(1);
@@ -1157,7 +1198,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // Home operations
                         // =========================================================================
                         UiUpdate::HomeMessageSent { .. } => {
-                            // No toast for successful message sends - user can see the message in the chat
+                            // Auto-scroll to bottom (show latest messages including the one just sent)
+                            tui.with_mut(|state| {
+                                state.neighborhood.message_scroll = 0;
+                            });
                         }
                         UiUpdate::HomeInviteSent { contact_id: _ } => {
                             enqueue_toast!(
@@ -1498,10 +1542,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.chat.on_channel_select)(channel_id);
                                     }
                                     DispatchCommand::SendChatMessage { content } => {
+                                        // Get channel_id from TUI's selected_channel to avoid
+                                        // race condition with async channel selection updates
                                         let idx = new_state.chat.selected_channel;
                                         if let Ok(guard) = shared_channels_for_dispatch.read() {
                                             if let Some(channel) = guard.get(idx) {
-                                                (cb.chat.on_send)(channel.id.clone(), content);
+                                                (cb.chat.on_send)(
+                                                    channel.id.to_string(),
+                                                    content,
+                                                );
                                             } else {
                                                 new_state.toast_error("No channel selected");
                                             }

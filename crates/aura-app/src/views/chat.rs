@@ -154,6 +154,11 @@ pub struct Channel {
     pub last_message_time: Option<u64>,
     /// Last activity timestamp (ms since epoch)
     pub last_activity: u64,
+    /// Last finalized channel epoch (for consensus finalization tracking)
+    ///
+    /// Messages with epoch_hint <= this value are considered finalized.
+    #[serde(default)]
+    pub last_finalized_epoch: u32,
 }
 
 /// A chat message
@@ -425,6 +430,36 @@ impl ChatState {
         }
         false
     }
+
+    /// Mark all messages in a channel up to a given epoch as finalized.
+    ///
+    /// This is called when a `CommittedChannelEpochBump` fact is observed.
+    /// Messages with epoch_hint <= parent_epoch are considered finalized.
+    ///
+    /// Updates the channel's last_finalized_epoch and marks individual messages.
+    /// Returns the number of messages that were updated.
+    pub fn mark_finalized_up_to_epoch(&mut self, channel_id: &ChannelId, epoch: u32) -> u32 {
+        // Update the channel's finalized epoch
+        if let Some(channel) = self.channel_mut(channel_id) {
+            if epoch > channel.last_finalized_epoch {
+                channel.last_finalized_epoch = epoch;
+            }
+        }
+
+        // Mark all messages with epoch_hint <= epoch as finalized
+        let mut count = 0u32;
+        if let Some(msgs) = self.channel_messages.get_mut(channel_id) {
+            for msg in msgs.iter_mut() {
+                if let Some(hint) = msg.epoch_hint {
+                    if hint <= epoch && !msg.is_finalized {
+                        msg.is_finalized = true;
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
+    }
 }
 
 #[cfg(test)]
@@ -513,5 +548,138 @@ mod tests {
         );
         assert_eq!(MessageDeliveryStatus::Read.label_lowercase(), "read");
         assert_eq!(MessageDeliveryStatus::Failed.label_lowercase(), "failed");
+    }
+
+    fn make_test_message(id: &str, epoch_hint: Option<u32>) -> Message {
+        Message {
+            id: id.to_string(),
+            channel_id: ChannelId::from_bytes([1u8; 32]),
+            sender_id: AuthorityId::new_from_entropy([2u8; 32]),
+            sender_name: "Test".to_string(),
+            content: "Hello".to_string(),
+            timestamp: 1000,
+            reply_to: None,
+            is_own: true,
+            is_read: false,
+            delivery_status: MessageDeliveryStatus::Sent,
+            epoch_hint,
+            is_finalized: false,
+        }
+    }
+
+    fn make_test_channel(id: ChannelId) -> Channel {
+        Channel {
+            id,
+            context_id: None,
+            name: "Test Channel".to_string(),
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: Vec::new(),
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        }
+    }
+
+    #[test]
+    fn test_mark_finalized_up_to_epoch_marks_messages() {
+        let mut state = ChatState::default();
+        let channel_id = ChannelId::from_bytes([1u8; 32]);
+        state.add_channel(make_test_channel(channel_id));
+
+        // Add messages with various epoch hints
+        let mut msg1 = make_test_message("msg1", Some(1));
+        msg1.channel_id = channel_id;
+        let mut msg2 = make_test_message("msg2", Some(2));
+        msg2.channel_id = channel_id;
+        let mut msg3 = make_test_message("msg3", Some(3));
+        msg3.channel_id = channel_id;
+        let mut msg4 = make_test_message("msg4", None); // No epoch hint
+        msg4.channel_id = channel_id;
+
+        state.apply_message(channel_id, msg1);
+        state.apply_message(channel_id, msg2);
+        state.apply_message(channel_id, msg3);
+        state.apply_message(channel_id, msg4);
+
+        // Finalize up to epoch 2 (should mark msg1 and msg2)
+        let count = state.mark_finalized_up_to_epoch(&channel_id, 2);
+        assert_eq!(count, 2);
+
+        // Check message finalization states
+        let messages = state.channel_messages.get(&channel_id).unwrap();
+        assert!(
+            messages.iter().find(|m| m.id == "msg1").unwrap().is_finalized,
+            "msg1 should be finalized"
+        );
+        assert!(
+            messages.iter().find(|m| m.id == "msg2").unwrap().is_finalized,
+            "msg2 should be finalized"
+        );
+        assert!(
+            !messages.iter().find(|m| m.id == "msg3").unwrap().is_finalized,
+            "msg3 should NOT be finalized (epoch 3 > 2)"
+        );
+        assert!(
+            !messages.iter().find(|m| m.id == "msg4").unwrap().is_finalized,
+            "msg4 should NOT be finalized (no epoch hint)"
+        );
+    }
+
+    #[test]
+    fn test_mark_finalized_updates_channel_epoch() {
+        let mut state = ChatState::default();
+        let channel_id = ChannelId::from_bytes([1u8; 32]);
+        state.add_channel(make_test_channel(channel_id));
+
+        assert_eq!(state.channel(&channel_id).unwrap().last_finalized_epoch, 0);
+
+        state.mark_finalized_up_to_epoch(&channel_id, 5);
+        assert_eq!(state.channel(&channel_id).unwrap().last_finalized_epoch, 5);
+
+        // Should update to higher epoch
+        state.mark_finalized_up_to_epoch(&channel_id, 10);
+        assert_eq!(state.channel(&channel_id).unwrap().last_finalized_epoch, 10);
+
+        // Should NOT update to lower epoch
+        state.mark_finalized_up_to_epoch(&channel_id, 7);
+        assert_eq!(
+            state.channel(&channel_id).unwrap().last_finalized_epoch,
+            10,
+            "Should not regress to lower epoch"
+        );
+    }
+
+    #[test]
+    fn test_mark_finalized_idempotent() {
+        let mut state = ChatState::default();
+        let channel_id = ChannelId::from_bytes([1u8; 32]);
+        state.add_channel(make_test_channel(channel_id));
+
+        let mut msg = make_test_message("msg1", Some(1));
+        msg.channel_id = channel_id;
+        state.apply_message(channel_id, msg);
+
+        // First finalization
+        let count1 = state.mark_finalized_up_to_epoch(&channel_id, 5);
+        assert_eq!(count1, 1);
+
+        // Second finalization of same messages should return 0
+        let count2 = state.mark_finalized_up_to_epoch(&channel_id, 5);
+        assert_eq!(count2, 0, "Already-finalized messages should not be counted again");
+    }
+
+    #[test]
+    fn test_mark_finalized_unknown_channel() {
+        let mut state = ChatState::default();
+        let unknown_channel = ChannelId::from_bytes([99u8; 32]);
+
+        // Should not panic on unknown channel
+        let count = state.mark_finalized_up_to_epoch(&unknown_channel, 10);
+        assert_eq!(count, 0);
     }
 }

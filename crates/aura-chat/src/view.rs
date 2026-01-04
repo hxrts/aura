@@ -82,6 +82,8 @@ pub enum ChatDelta {
         timestamp: u64,
         /// Optional message this one replies to.
         reply_to: Option<String>,
+        /// Channel epoch when message was sent (for consensus finalization tracking).
+        epoch_hint: Option<u32>,
     },
     /// A message was removed/deleted
     MessageRemoved {
@@ -276,6 +278,7 @@ impl ComposableDelta for ChatDelta {
                     sender_name: name,
                     content: body,
                     reply_to: reply,
+                    epoch_hint: epoch,
                 },
                 ChatDelta::MessageAdded {
                     timestamp: other_ts,
@@ -285,6 +288,7 @@ impl ComposableDelta for ChatDelta {
                     sender_name,
                     content,
                     reply_to,
+                    epoch_hint: other_epoch,
                 },
             ) => {
                 if other_ts >= *timestamp {
@@ -295,6 +299,7 @@ impl ComposableDelta for ChatDelta {
                     *name = sender_name;
                     *body = content;
                     *reply = reply_to;
+                    *epoch = other_epoch;
                 }
                 true
             }
@@ -436,6 +441,7 @@ impl ViewDeltaReducer for ChatViewReducer {
                 payload: _,
                 sent_at,
                 reply_to,
+                epoch_hint,
                 ..
             } => Some(ChatDelta::MessageAdded {
                 channel_id: channel_id.to_string(),
@@ -445,6 +451,7 @@ impl ViewDeltaReducer for ChatViewReducer {
                 content: "<sealed message>".to_string(),
                 timestamp: sent_at.ts_ms,
                 reply_to,
+                epoch_hint,
             }),
             ChatFact::MessageRead {
                 channel_id,
@@ -605,6 +612,7 @@ mod tests {
             b"Hello, world!".to_vec(),
             1234567890,
             None,
+            None, // epoch_hint
         );
 
         let bytes = fact.to_bytes();

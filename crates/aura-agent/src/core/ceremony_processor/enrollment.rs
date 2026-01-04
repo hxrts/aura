@@ -9,9 +9,12 @@ use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::CeremonyTracker;
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
-use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
+use aura_core::effects::{
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
+};
 use aura_core::identifiers::CeremonyId;
-use aura_core::{AuthorityId, DeviceId};
+use aura_core::{AttestedOp, AuthorityId, DeviceId, LeafId, LeafNode, NodeIndex, TreeOp};
+use aura_protocol::effects::TreeEffects;
 
 /// Handles device enrollment ceremony messages
 pub struct EnrollmentHandler<'a> {
@@ -267,6 +270,13 @@ impl<'a> EnrollmentHandler<'a> {
         };
 
         if threshold_reached {
+            if let Err(e) = self.finalize_enrollment(&ceremony_id).await {
+                tracing::warn!(
+                    ceremony_id = %ceremony_id,
+                    error = %e,
+                    "Failed to finalize device enrollment locally"
+                );
+            }
             // When threshold is reached, send commit to all participants
             if let Err(e) = self.send_commit_to_participants(&ceremony_id).await {
                 tracing::error!(
@@ -278,6 +288,156 @@ impl<'a> EnrollmentHandler<'a> {
         }
 
         ProcessResult::Processed
+    }
+
+    async fn finalize_enrollment(&self, ceremony_id: &CeremonyId) -> Result<(), String> {
+        let ceremony_state = self
+            .ceremony_tracker
+            .get(ceremony_id)
+            .await
+            .map_err(|e| format!("Failed to load ceremony state: {e}"))?;
+
+        let Some(device_id) = ceremony_state.enrollment_device_id else {
+            return Ok(());
+        };
+
+        let tree_state = self
+            .effects
+            .get_current_state()
+            .await
+            .map_err(|e| format!("Failed to read tree state: {e}"))?;
+
+        if tree_state
+            .leaves
+            .values()
+            .any(|leaf| leaf.device_id == device_id)
+        {
+            // Leaf already present; still commit the pending epoch below.
+            tracing::debug!(
+                ceremony_id = %ceremony_id,
+                device_id = %device_id,
+                "Enrollment leaf already present; skipping add-leaf op"
+            );
+        } else {
+            use aura_core::crypto::tree_signing::{
+                public_key_package_from_bytes, share_from_key_package_bytes,
+            };
+            use aura_core::effects::{
+                SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+                ThresholdSigningEffects,
+            };
+            use aura_core::threshold::{ParticipantIdentity, SigningContext};
+
+            let participant = ParticipantIdentity::device(device_id);
+            let key_location = SecureStorageLocation::with_sub_key(
+                "participant_shares",
+                format!("{}/{}", self.authority_id, ceremony_state.new_epoch),
+                participant.storage_key(),
+            );
+
+            let key_package = self
+                .effects
+                .secure_retrieve(&key_location, &[SecureStorageCapability::Read])
+                .await
+                .map_err(|e| format!("Failed to load enrollment key package: {e}"))?;
+
+            let share = share_from_key_package_bytes(&key_package)
+                .map_err(|e| format!("Failed to decode enrollment key package: {e}"))?;
+
+            let pubkey_location = SecureStorageLocation::with_sub_key(
+                "threshold_pubkey",
+                format!("{}", self.authority_id),
+                format!("{}", ceremony_state.new_epoch),
+            );
+            let pubkey_bytes = self
+                .effects
+                .secure_retrieve(&pubkey_location, &[SecureStorageCapability::Read])
+                .await
+                .map_err(|e| format!("Failed to load enrollment public key package: {e}"))?;
+
+            let public_key_package = public_key_package_from_bytes(&pubkey_bytes)
+                .map_err(|e| format!("Failed to decode enrollment public key package: {e}"))?;
+
+            let public_key_bytes = public_key_package
+                .signer_public_keys
+                .get(&share.identifier)
+                .ok_or_else(|| {
+                    format!(
+                        "Missing verifying share for signer {} in public key package",
+                        share.identifier
+                    )
+                })?
+                .clone();
+
+            let next_leaf_id = tree_state
+                .leaves
+                .keys()
+                .map(|leaf_id| leaf_id.0)
+                .max()
+                .map(|id| id + 1)
+                .unwrap_or(0);
+
+            let leaf =
+                LeafNode::new_device(LeafId(next_leaf_id), device_id, public_key_bytes)
+                    .map_err(|e| format!("Failed to build device leaf: {e}"))?;
+
+            let op_kind = self
+                .effects
+                .add_leaf(leaf, NodeIndex(0))
+                .await
+                .map_err(|e| format!("Failed to build add-leaf op: {e}"))?;
+
+            let op = TreeOp {
+                parent_epoch: tree_state.epoch,
+                parent_commitment: tree_state.root_commitment,
+                op: op_kind,
+                version: 1,
+            };
+
+            let context = SigningContext::self_tree_op(self.authority_id, op.clone());
+            let signature = self
+                .signing_service
+                .sign(context)
+                .await
+                .map_err(|e| format!("Failed to sign enrollment tree op: {e}"))?;
+
+            let attested = AttestedOp {
+                op,
+                agg_sig: signature.signature,
+                signer_count: signature.signer_count,
+            };
+
+            self.effects
+                .apply_attested_op(attested)
+                .await
+                .map_err(|e| format!("Failed to apply device leaf op: {e}"))?;
+        }
+
+        // Commit key rotation locally for the initiator device.
+        if let Err(e) = self
+            .effects
+            .commit_key_rotation(&self.authority_id, ceremony_state.new_epoch)
+            .await
+        {
+            tracing::warn!(
+                ceremony_id = %ceremony_id,
+                error = %e,
+                "Failed to commit key rotation on initiator"
+            );
+        }
+        if let Err(e) = self
+            .signing_service
+            .commit_key_rotation(&self.authority_id, ceremony_state.new_epoch)
+            .await
+        {
+            tracing::warn!(
+                ceremony_id = %ceremony_id,
+                error = %e,
+                "Failed to commit signing context on initiator"
+            );
+        }
+
+        Ok(())
     }
 
     /// Send commit messages to all ceremony participants

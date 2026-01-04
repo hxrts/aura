@@ -110,8 +110,7 @@ pub async fn handle_invitations(
                             .await
                             .unwrap_or_default();
                         homes_state
-                            .current_home_id
-                            .as_ref()
+                            .current_home_id()
                             .map(|id| id.to_string())
                             .unwrap_or_else(|| "home".to_string())
                     };
@@ -176,8 +175,7 @@ pub async fn handle_invitations(
 
                 if let Ok(homes) = core.read(&*aura_app::ui::signals::HOMES_SIGNAL).await {
                     homes
-                        .current_home_id
-                        .as_ref()
+                        .current_home_id()
                         .map(|id| id.to_string())
                         .unwrap_or_else(|| "home".to_string())
                 } else {

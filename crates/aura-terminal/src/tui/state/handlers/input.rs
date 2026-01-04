@@ -28,8 +28,12 @@ pub fn handle_mouse_event(
             match state.screen() {
                 Screen::Chat => {
                     // Scroll messages up (show older messages)
-                    if state.chat.focus == ChatFocus::Messages && state.chat.message_scroll > 0 {
-                        state.chat.message_scroll = state.chat.message_scroll.saturating_sub(3);
+                    // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
+                    if state.chat.focus == ChatFocus::Messages {
+                        let max_scroll = state.chat.message_count.saturating_sub(18);
+                        if state.chat.message_scroll < max_scroll {
+                            state.chat.message_scroll = state.chat.message_scroll.saturating_add(3).min(max_scroll);
+                        }
                     }
                 }
                 Screen::Contacts => {
@@ -40,12 +44,14 @@ pub fn handle_mouse_event(
                     }
                 }
                 Screen::Neighborhood => {
+                    // Scroll messages up (show older messages)
                     if state.neighborhood.mode == NeighborhoodMode::Detail
                         && state.neighborhood.detail_focus == DetailFocus::Messages
-                        && state.neighborhood.message_scroll > 0
                     {
-                        state.neighborhood.message_scroll =
-                            state.neighborhood.message_scroll.saturating_sub(3);
+                        let max_scroll = state.neighborhood.message_count.saturating_sub(18);
+                        if state.neighborhood.message_scroll < max_scroll {
+                            state.neighborhood.message_scroll = state.neighborhood.message_scroll.saturating_add(3).min(max_scroll);
+                        }
                     }
                 }
                 Screen::Settings => {
@@ -62,9 +68,10 @@ pub fn handle_mouse_event(
             // Scroll down in the current list/view
             match state.screen() {
                 Screen::Chat => {
-                    // Scroll messages down (show newer messages)
-                    if state.chat.focus == ChatFocus::Messages {
-                        state.chat.message_scroll = state.chat.message_scroll.saturating_add(3);
+                    // Scroll messages down (show newer messages, toward bottom)
+                    // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
+                    if state.chat.focus == ChatFocus::Messages && state.chat.message_scroll > 0 {
+                        state.chat.message_scroll = state.chat.message_scroll.saturating_sub(3);
                     }
                 }
                 Screen::Contacts => {
@@ -72,11 +79,13 @@ pub fn handle_mouse_event(
                     state.contacts.selected_index = state.contacts.selected_index.saturating_add(1);
                 }
                 Screen::Neighborhood => {
+                    // Scroll messages down (show newer messages, toward bottom)
                     if state.neighborhood.mode == NeighborhoodMode::Detail
                         && state.neighborhood.detail_focus == DetailFocus::Messages
+                        && state.neighborhood.message_scroll > 0
                     {
                         state.neighborhood.message_scroll =
-                            state.neighborhood.message_scroll.saturating_add(3);
+                            state.neighborhood.message_scroll.saturating_sub(3);
                     }
                 }
                 Screen::Settings => {
@@ -188,17 +197,22 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
     // Capture screen type once to avoid borrow conflicts
     let screen = state.screen();
 
-    // Escape exits insert mode
+    // Escape exits insert mode and scrolls to bottom
     if key.code == KeyCode::Esc {
         match screen {
             Screen::Chat => {
                 state.chat.insert_mode = false;
                 state.chat.insert_mode_entry_char = None;
+                state.chat.focus = ChatFocus::Channels;
+                // Auto-scroll to bottom (show latest messages)
+                state.chat.message_scroll = 0;
             }
             Screen::Neighborhood => {
                 state.neighborhood.insert_mode = false;
                 state.neighborhood.insert_mode_entry_char = None;
-                state.neighborhood.detail_focus = DetailFocus::Messages;
+                state.neighborhood.detail_focus = DetailFocus::Channels;
+                // Auto-scroll to bottom (show latest messages)
+                state.neighborhood.message_scroll = 0;
             }
             _ => {}
         }
@@ -265,7 +279,10 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                     commands.push(TuiCommand::Dispatch(DispatchCommand::SendHomeMessage {
                         content,
                     }));
-                    // Stay in insert mode so user can continue typing
+                    state.neighborhood.insert_mode = false;
+                    state.neighborhood.insert_mode_entry_char = None;
+                    state.neighborhood.detail_focus = DetailFocus::Messages;
+                    state.neighborhood.message_scroll = 0;
                 }
             }
             _ => {}

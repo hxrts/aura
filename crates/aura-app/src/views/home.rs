@@ -358,21 +358,62 @@ impl HomeState {
 // Multi-Home State
 // =============================================================================
 
+/// Result returned when adding a home
+#[derive(Debug, Clone)]
+pub struct AddHomeResult {
+    /// The ID of the added home
+    pub home_id: ChannelId,
+    /// True if this was the first home (caller may want to auto-select)
+    pub was_first: bool,
+}
+
+/// Result returned when removing a home
+#[derive(Debug, Clone)]
+pub struct RemoveHomeResult {
+    /// The removed home state (if it existed)
+    pub removed: Option<HomeState>,
+    /// True if the removed home was the currently selected one
+    pub was_selected: bool,
+}
+
 /// State for managing multiple homes
+///
+/// Note: Fields are private to prevent direct mutation that could
+/// cause sync issues. Use accessor and mutation methods instead.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct HomesState {
     /// All homes the user has created or joined (keyed by home ID)
     #[serde(default)]
-    pub homes: HashMap<ChannelId, HomeState>,
+    homes: HashMap<ChannelId, HomeState>,
     /// Currently selected home ID
-    pub current_home_id: Option<ChannelId>,
+    current_home_id: Option<ChannelId>,
 }
 
 impl HomesState {
     /// Create a new empty HomesState
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create HomesState from component parts.
+    ///
+    /// This is useful for query results and deserialization.
+    pub fn from_parts(
+        homes: HashMap<ChannelId, HomeState>,
+        current_home_id: Option<ChannelId>,
+    ) -> Self {
+        Self {
+            homes,
+            current_home_id,
+        }
+    }
+
+    // ─── Queries (Read Access) ─────────────────────────────────
+
+    /// Get the currently selected home ID.
+    pub fn current_home_id(&self) -> Option<&ChannelId> {
+        self.current_home_id.as_ref()
     }
 
     /// Get the current home
@@ -401,32 +442,6 @@ impl HomesState {
         self.homes.get_mut(id)
     }
 
-    /// Add a home
-    pub fn add_home(&mut self, home_state: HomeState) {
-        let is_first = self.homes.is_empty();
-        let id = home_state.id;
-        self.homes.insert(id, home_state);
-        // Auto-select first home
-        if is_first {
-            self.current_home_id = Some(id);
-        }
-    }
-
-    /// Remove a home
-    pub fn remove_home(&mut self, id: &ChannelId) -> Option<HomeState> {
-        let home = self.homes.remove(id);
-        // Clear selection if current home was removed
-        if self.current_home_id.as_ref() == Some(id) {
-            self.current_home_id = self.homes.keys().next().cloned();
-        }
-        home
-    }
-
-    /// Select a home by ID
-    pub fn select_home(&mut self, id: Option<ChannelId>) {
-        self.current_home_id = id;
-    }
-
     /// Check if a home exists
     pub fn has_home(&self, id: &ChannelId) -> bool {
         self.homes.contains_key(id)
@@ -447,7 +462,12 @@ impl HomesState {
         self.homes.keys().collect()
     }
 
-    /// Iterate over all homes
+    /// Get an iterator over all homes
+    pub fn all_homes(&self) -> impl Iterator<Item = &HomeState> {
+        self.homes.values()
+    }
+
+    /// Iterate over all homes with IDs
     pub fn iter(&self) -> impl Iterator<Item = (&ChannelId, &HomeState)> {
         self.homes.iter()
     }
@@ -455,5 +475,81 @@ impl HomesState {
     /// Iterate over all homes mutably
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&ChannelId, &mut HomeState)> {
         self.homes.iter_mut()
+    }
+
+    /// Get mutable iterator over all home values
+    pub fn all_homes_mut(&mut self) -> impl Iterator<Item = &mut HomeState> {
+        self.homes.values_mut()
+    }
+
+    /// Get the first available home ID (for fallback selection).
+    pub fn first_home_id(&self) -> Option<ChannelId> {
+        self.homes.keys().next().cloned()
+    }
+
+    // ─── Mutations (Write Access) ──────────────────────────────
+
+    /// Add a home.
+    ///
+    /// Returns an `AddHomeResult` with information about the operation.
+    /// **Note**: Does NOT auto-select. Caller must explicitly call
+    /// `select_home()` if desired.
+    pub fn add_home(&mut self, home_state: HomeState) -> AddHomeResult {
+        let was_first = self.homes.is_empty();
+        let home_id = home_state.id;
+        self.homes.insert(home_id, home_state);
+        AddHomeResult { home_id, was_first }
+    }
+
+    /// Remove a home.
+    ///
+    /// Returns a `RemoveHomeResult` with the removed home and whether
+    /// it was the current selection.
+    /// **Note**: Does NOT auto-reassign selection. Caller must explicitly
+    /// call `select_home()` with a fallback if needed.
+    pub fn remove_home(&mut self, id: &ChannelId) -> RemoveHomeResult {
+        let was_selected = self.current_home_id.as_ref() == Some(id);
+        let removed = self.homes.remove(id);
+        // Clear selection if removed home was selected
+        if was_selected {
+            self.current_home_id = None;
+        }
+        RemoveHomeResult {
+            removed,
+            was_selected,
+        }
+    }
+
+    /// Select a home by ID.
+    pub fn select_home(&mut self, id: Option<ChannelId>) {
+        self.current_home_id = id;
+    }
+
+    /// Select the first available home (helper for common fallback pattern).
+    pub fn select_first_available(&mut self) {
+        self.current_home_id = self.first_home_id();
+    }
+
+    /// Helper: Add a home and auto-select if it's the first one.
+    ///
+    /// This is a convenience method that preserves the previous behavior
+    /// for callers that want auto-selection.
+    pub fn add_home_with_auto_select(&mut self, home_state: HomeState) {
+        let result = self.add_home(home_state);
+        if result.was_first {
+            self.select_home(Some(result.home_id));
+        }
+    }
+
+    /// Helper: Remove a home and auto-select fallback if needed.
+    ///
+    /// This is a convenience method that preserves the previous behavior
+    /// for callers that want auto-reassignment.
+    pub fn remove_home_with_fallback(&mut self, id: &ChannelId) -> Option<HomeState> {
+        let result = self.remove_home(id);
+        if result.was_selected {
+            self.select_first_available();
+        }
+        result.removed
     }
 }

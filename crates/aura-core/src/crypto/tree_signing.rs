@@ -413,7 +413,7 @@ pub fn tree_op_binding_message(
     let mut h = hash::hasher();
 
     // Domain separator
-    h.update(b"TREE_OP_SIG");
+    h.update(b"TREE_OP_VERIFY");
 
     // Parent metadata
     h.update(&u64::from(attested.op.parent_epoch).to_le_bytes());
@@ -421,7 +421,7 @@ pub fn tree_op_binding_message(
     h.update(&attested.op.version.to_le_bytes());
 
     // Current epoch
-    h.update(&u64::from(current_epoch).to_be_bytes());
+    h.update(&u64::from(current_epoch).to_le_bytes());
 
     // Group public key binds signature to signing group
     h.update(group_public_key);
@@ -441,15 +441,17 @@ fn serialize_tree_op_for_binding(op: &TreeOpKind) -> Vec<u8> {
             buffer.extend_from_slice(b"AddLeaf");
             buffer.extend_from_slice(&leaf.leaf_id.0.to_le_bytes());
             buffer.extend_from_slice(&under.0.to_le_bytes());
+            buffer.extend_from_slice(&leaf.public_key);
         }
         TreeOpKind::RemoveLeaf { leaf, reason } => {
             buffer.extend_from_slice(b"RemoveLeaf");
             buffer.extend_from_slice(&leaf.0.to_le_bytes());
             buffer.push(*reason);
         }
-        TreeOpKind::ChangePolicy { node, .. } => {
+        TreeOpKind::ChangePolicy { node, new_policy } => {
             buffer.extend_from_slice(b"ChangePolicy");
             buffer.extend_from_slice(&node.0.to_le_bytes());
+            buffer.extend_from_slice(&crate::tree::commitment::policy_hash(new_policy));
         }
         TreeOpKind::RotateEpoch { affected } => {
             buffer.extend_from_slice(b"RotateEpoch");

@@ -189,18 +189,25 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 // Read current contacts for nickname lookup
                 let contacts = reactive_contacts.read().clone();
 
+                // Channel selection is managed by TUI state, not app state
+                // All channels start unselected; TUI navigation handles selection
                 let channels: Vec<Channel> = chat_state
                     .channels
                     .iter()
                     .map(|c| {
                         Channel::new(c.id.to_string(), &c.name)
                             .with_unread(c.unread_count as usize)
-                            .selected(Some(c.id.clone()) == chat_state.selected_channel_id)
                     })
                     .collect();
 
-                let messages: Vec<Message> = chat_state
-                    .messages
+                // Get messages for the first channel as default
+                // The shell's shared subscription handles proper selection-aware messages
+                let first_channel_id = chat_state.channels.first().map(|c| &c.id);
+                let app_messages = first_channel_id
+                    .map(|id| chat_state.messages_for_channel(id))
+                    .unwrap_or(&[]);
+
+                let messages: Vec<Message> = app_messages
                     .iter()
                     .map(|m| {
                         let ts_str = format_timestamp(m.timestamp);
@@ -210,6 +217,8 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         Message::new(&m.id, &sender_display, &m.content)
                             .with_timestamp(ts_str)
                             .own(m.is_own)
+                            .with_status(m.delivery_status.into())
+                            .with_finalized(m.is_finalized)
                     })
                     .collect();
 
@@ -218,17 +227,18 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
 
                 // Sync navigation state via UiUpdate channel
                 // This ensures channel_count is updated when channels change
+                // Selection is managed by TUI state, not app state
                 if let Some(ref tx) = update_tx {
-                    let selected_index = chat_state
-                        .selected_channel_id
-                        .as_ref()
-                        .and_then(|id| chat_state.channels.iter().position(|c| c.id == *id));
+                    let total_messages: usize = chat_state
+                        .channels
+                        .iter()
+                        .map(|c| chat_state.messages_for_channel(&c.id).len())
+                        .sum();
 
                     let _ = tx.try_send(UiUpdate::ChatStateUpdated {
                         channel_count: chat_state.channels.len(),
-                        message_count: chat_state.messages.len(),
-                        selected_index: selected_index
-                            .or((!chat_state.channels.is_empty()).then_some(0)),
+                        message_count: total_messages,
+                        selected_index: None, // TUI manages selection
                     });
                 }
             })
@@ -281,9 +291,11 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 // Right panel: Messages (matches other two-panel screens)
                 View(width: dim::TWO_PANEL_RIGHT_WIDTH, height: 22) {
                     MessagePanel(
-                        messages: messages,
+                        messages: messages.clone(),
                         title: Some("Messages".to_string()),
                         empty_message: Some(empty_message),
+                        scroll_offset: props.view.message_scroll,
+                        message_count: messages.len(),
                     )
                 }
             }

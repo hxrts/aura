@@ -149,17 +149,7 @@ cfg_if! {
 
             /// Update chat state
             pub fn set_chat(&self, state: ChatState) {
-                let mut state = state;
-                state.ensure_selection();
                 self.chat.set(state);
-            }
-
-            /// Select a channel (UI-only, not journaled)
-            ///
-            /// This updates the selected channel in ChatState and triggers
-            /// the chat signal for UI updates.
-            pub fn select_channel(&self, channel_id: Option<ChannelId>) {
-                self.chat.lock_mut().select_channel(channel_id);
             }
 
             /// Update recovery state
@@ -195,14 +185,14 @@ cfg_if! {
                 self.homes.lock_mut().select_home(home_id);
             }
 
-            /// Add a home to the homes state
+            /// Add a home (with auto-select if first)
             pub fn add_home(&self, home: HomeState) {
-                self.homes.lock_mut().add_home(home);
+                self.homes.lock_mut().add_home_with_auto_select(home);
             }
 
-            /// Remove a home from the homes state
+            /// Remove a home from the homes state (with auto-select fallback)
             pub fn remove_home(&self, home_id: &ChannelId) -> Option<HomeState> {
-                self.homes.lock_mut().remove_home(home_id)
+                self.homes.lock_mut().remove_home_with_fallback(home_id)
             }
         }
     }
@@ -256,8 +246,6 @@ cfg_if! {
 
             /// Update chat state
             pub fn set_chat(&mut self, state: ChatState) {
-                let mut state = state;
-                state.ensure_selection();
                 self.chat = state;
             }
 

@@ -84,7 +84,7 @@ pub fn NotificationsScreen(
         async move {
             subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |state| {
                 let mut items = Vec::new();
-                for inv in &state.pending {
+                for inv in state.all_pending() {
                     if inv.direction != InvitationDirection::Received
                         || inv.status != InvitationStatus::Pending
                     {

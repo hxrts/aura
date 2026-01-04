@@ -122,6 +122,7 @@ mod tests {
                 content: "Hello".to_string(),
                 timestamp: 2,
                 reply_to: None,
+                epoch_hint: Some(1),
             }
             .into_view_delta(),
         ];

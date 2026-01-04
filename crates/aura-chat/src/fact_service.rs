@@ -67,6 +67,7 @@ impl ChatFactService {
         sender_name: String,
         payload: Vec<u8>,
         reply_to: Option<String>,
+        epoch_hint: Option<u32>,
     ) -> GuardOutcome {
         if let Some(outcome) = check_capability(
             snapshot,
@@ -87,6 +88,7 @@ impl ChatFactService {
             payload,
             snapshot.now_ms,
             reply_to,
+            epoch_hint,
         );
 
         GuardOutcome::allowed(vec![
@@ -148,6 +150,7 @@ mod tests {
             "Alice".to_string(),
             vec![1, 2, 3],
             None,
+            Some(1), // epoch_hint for test
         );
 
         assert!(matches!(out.decision, crate::guards::GuardDecision::Allow));

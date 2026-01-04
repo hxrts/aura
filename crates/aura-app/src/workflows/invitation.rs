@@ -817,7 +817,7 @@ mod tests {
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
         let invitations = list_invitations(&app_core).await;
-        assert!(invitations.sent.is_empty());
-        assert!(invitations.pending.is_empty());
+        assert_eq!(invitations.sent_count(), 0);
+        assert_eq!(invitations.pending_count(), 0);
     }
 }

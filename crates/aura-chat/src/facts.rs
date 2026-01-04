@@ -126,6 +126,8 @@ pub enum ChatFact {
         sent_at: PhysicalTime,
         /// Optional message ID this is replying to
         reply_to: Option<String>,
+        /// Channel epoch when message was sent (for consensus finalization tracking)
+        epoch_hint: Option<u32>,
     },
     /// Message read by an authority
     MessageRead {
@@ -350,6 +352,7 @@ impl ChatFact {
         payload: Vec<u8>,
         sent_at_ms: u64,
         reply_to: Option<String>,
+        epoch_hint: Option<u32>,
     ) -> Self {
         Self::MessageSentSealed {
             context_id,
@@ -363,6 +366,7 @@ impl ChatFact {
                 uncertainty: None,
             },
             reply_to,
+            epoch_hint,
         }
     }
 
@@ -581,6 +585,7 @@ mod tests {
             b"Hello, world!".to_vec(),
             1234567890,
             None,
+            None, // epoch_hint
         );
 
         let generic = fact.to_generic();
@@ -652,6 +657,7 @@ mod tests {
                 b"Hello".to_vec(),
                 0,
                 None,
+                None, // epoch_hint
             ),
             ChatFact::message_read_ms(
                 test_context_id(),
@@ -810,6 +816,7 @@ mod tests {
             b"Hello".to_vec(),
             1000,
             None,
+            Some(1), // epoch_hint
         );
         assert_eq!(sent.timestamp_ms(), 1000);
 

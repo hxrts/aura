@@ -351,7 +351,7 @@ async fn test_invitation_flow_creates_contact() {
     let bob_contacts_after = env.get_agent("bob").read_contacts().await;
     println!(
         "  Bob pending invitations: {count}",
-        count = bob_inv.pending.len()
+        count = bob_inv.pending_count()
     );
     println!(
         "  Bob contacts after import: {count}",

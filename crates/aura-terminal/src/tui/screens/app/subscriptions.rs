@@ -237,7 +237,12 @@ pub type SharedMessages = Arc<RwLock<Vec<Message>>>;
 /// contents whenever chat state changes, so readers always get current data.
 ///
 /// Uses std::sync::RwLock so dispatch handlers can read synchronously.
-pub fn use_messages_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -> SharedMessages {
+pub fn use_messages_subscription(
+    hooks: &mut Hooks,
+    app_ctx: &AppCoreContext,
+    shared_channels: SharedChannels,
+    tui_selected: Arc<RwLock<usize>>,
+) -> SharedMessages {
     // Create the shared messages holder - use_ref ensures it persists across renders.
     let shared_messages_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_messages: SharedMessages = shared_messages_ref.read().clone();
@@ -247,8 +252,41 @@ pub fn use_messages_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) ->
         let messages = shared_messages.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let message_list: Vec<Message> =
-                    chat_state.messages.iter().map(Message::from).collect();
+                // Get the selected channel from TUI state
+                let selected_idx = tui_selected.read().map(|g| *g).unwrap_or(0);
+
+                // Look up the channel ID from shared channels
+                let channel_id = shared_channels
+                    .read()
+                    .ok()
+                    .and_then(|guard| guard.get(selected_idx).map(|c| c.id.clone()));
+
+                // Get messages for that channel (or empty if none selected)
+                let message_list: Vec<Message> = if let Some(channel_id) = channel_id {
+                    if let Ok(cid) = channel_id.parse::<aura_core::identifiers::ChannelId>() {
+                        chat_state
+                            .messages_for_channel(&cid)
+                            .iter()
+                            .map(Message::from)
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    // Fallback: get messages for first channel if available
+                    chat_state
+                        .channels
+                        .first()
+                        .map(|c| {
+                            chat_state
+                                .messages_for_channel(&c.id)
+                                .iter()
+                                .map(Message::from)
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
+
                 if let Ok(mut guard) = messages.write() {
                     *guard = message_list;
                 }
@@ -279,23 +317,27 @@ pub fn use_channels_subscription(
         let channels = shared_channels.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let selected_index = chat_state
-                    .selected_channel_id
-                    .as_ref()
-                    .and_then(|id| chat_state.channels.iter().position(|c| c.id == *id));
-
                 let channel_list: Vec<Channel> =
                     chat_state.channels.iter().map(Channel::from).collect();
+
+                // Count total messages across all channels for display purposes
+                let total_messages: usize = chat_state
+                    .channels
+                    .iter()
+                    .map(|c| chat_state.messages_for_channel(&c.id).len())
+                    .sum();
+
                 if let Ok(mut guard) = channels.write() {
                     *guard = channel_list;
                 }
 
                 if let Some(ref tx) = update_tx {
+                    // Selection is managed by the TUI, not the app layer.
+                    // Send None for selected_index - the shell will manage selection locally.
                     let _ = tx.try_send(UiUpdate::ChatStateUpdated {
                         channel_count: chat_state.channels.len(),
-                        message_count: chat_state.messages.len(),
-                        selected_index: selected_index
-                            .or((!chat_state.channels.is_empty()).then_some(0)),
+                        message_count: total_messages,
+                        selected_index: None,
                     });
                 }
             })
@@ -325,10 +367,10 @@ pub fn use_invitations_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |inv_state| {
                 let all: Vec<Invitation> = inv_state
-                    .pending
+                    .all_pending()
                     .iter()
-                    .chain(inv_state.sent.iter())
-                    .chain(inv_state.history.iter())
+                    .chain(inv_state.all_sent().iter())
+                    .chain(inv_state.all_history().iter())
                     .map(Invitation::from)
                     .collect();
 
