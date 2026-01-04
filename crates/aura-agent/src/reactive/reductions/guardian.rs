@@ -85,11 +85,7 @@ mod tests {
             ts_ms: 1000 + order_index,
             uncertainty: None,
         });
-        Fact {
-            order,
-            timestamp,
-            content,
-        }
+        Fact::new(order, timestamp, content)
     }
 
     #[test]

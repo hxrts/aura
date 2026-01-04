@@ -760,7 +760,7 @@ impl Query for ContactsQuery {
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
 
-        Ok(ContactsState::from_iter(contacts))
+        Ok(ContactsState::from_contacts(contacts))
     }
 }
 
@@ -955,7 +955,6 @@ impl Query for RecoveryQuery {
             if threshold == 0 {
                 threshold = get_int(row, "threshold") as u32;
             }
-            // Note: guardian_count is now computed from guardians.len()
 
             let guardian_id = get_authority_id(row, "contact_id")?;
             let nickname = get_string(row, "contact_nickname");
@@ -986,13 +985,14 @@ impl Query for RecoveryQuery {
             });
         }
 
-        // Use the HashMap directly - RecoveryState now uses HashMap<AuthorityId, Guardian>
+        let guardians: Vec<Guardian> = guardians_by_id.into_values().collect();
+
         Ok(RecoveryState::from_parts(
-            guardians_by_id,
+            guardians,
             threshold,
-            None,
-            Vec::new(),
-            Vec::new(),
+            None,              // active_recovery
+            Vec::new(),        // pending_requests
+            Vec::new(),        // guardian_bindings
         ))
     }
 }
@@ -1214,14 +1214,15 @@ impl Query for NeighborhoodQuery {
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
 
-        // Use factory constructor for partial initialization
-        let mut state = NeighborhoodState::from_parts(
-            ChannelId::default(), // Set by caller
-            String::new(),        // Set by caller
+        Ok(NeighborhoodState {
+            home_home_id: ChannelId::default(), // Set by caller
+            home_name: String::new(),           // Set by caller
+            position: None,
             neighbors,
-        );
-        state.max_depth = 3;
-        Ok(state)
+            max_depth: 3,
+            loading: false,
+            connected_peers: std::collections::HashSet::new(),
+        })
     }
 }
 
@@ -1307,6 +1308,7 @@ impl Query for ChatQuery {
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
 
+        // Use from_channels() constructor since channels field is private
         // Note: selected_channel_id is now UI state in the frontend
         // Messages are loaded per-channel via messages_for_channel()
         Ok(ChatState::from_channels(channels))

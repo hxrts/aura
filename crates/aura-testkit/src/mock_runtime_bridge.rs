@@ -123,7 +123,7 @@ impl MockRuntimeBridge {
     /// Helper to emit CONTACTS_SIGNAL with current contacts
     async fn emit_contacts_signal(&self) {
         let contacts = self.contacts.read().await.clone();
-        let state = ContactsState::from_iter(contacts);
+        let state = ContactsState::from_contacts(contacts);
         // Ignore errors - signal may not be registered yet during initialization
         let _ = self.reactive_handler.emit(&*CONTACTS_SIGNAL, state).await;
     }

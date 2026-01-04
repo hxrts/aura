@@ -8,53 +8,6 @@ use std::collections::HashMap;
 pub use aura_relational::ReadReceiptPolicy;
 
 // =============================================================================
-// Error Types
-// =============================================================================
-
-/// Error type for contact operations.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ContactError {
-    /// The specified contact was not found
-    ContactNotFound(AuthorityId),
-    /// Contact already exists (for add operations)
-    ContactAlreadyExists(AuthorityId),
-}
-
-impl std::fmt::Display for ContactError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ContactNotFound(id) => write!(f, "Contact not found: {id}"),
-            Self::ContactAlreadyExists(id) => write!(f, "Contact already exists: {id}"),
-        }
-    }
-}
-
-impl std::error::Error for ContactError {}
-
-// =============================================================================
-// Contact Update Types
-// =============================================================================
-
-/// Update operations for contacts (explicit mutations).
-#[derive(Debug, Clone)]
-pub enum ContactUpdate {
-    /// Set the nickname
-    SetNickname(String),
-    /// Set the suggested name
-    SetSuggestedName(Option<String>),
-    /// Set guardian status
-    SetGuardian(bool),
-    /// Set resident status
-    SetResident(bool),
-    /// Update last interaction time
-    SetLastInteraction(Option<u64>),
-    /// Set online status
-    SetOnline(bool),
-    /// Set read receipt policy
-    SetReadReceiptPolicy(ReadReceiptPolicy),
-}
-
-// =============================================================================
 // Contact Suggestion Types
 // =============================================================================
 
@@ -107,32 +60,19 @@ pub struct Contact {
     pub read_receipt_policy: ReadReceiptPolicy,
 }
 
-/// Contacts state
-///
-/// Domain state for contacts. UI concerns like selection and search filter
-/// are maintained separately in the TUI layer.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct ContactsState {
-    /// All contacts, keyed by authority ID (private)
-    #[serde(with = "contacts_serde")]
-    contacts: HashMap<AuthorityId, Contact>,
-}
+// =============================================================================
+// Serde Helper for HashMap<AuthorityId, Contact>
+// =============================================================================
 
-// Custom serde for HashMap<AuthorityId, Contact> to maintain compatibility
-mod contacts_serde {
-    use super::*;
-    use serde::{Deserializer, Serializer};
+mod contact_map_serde {
+    use super::{AuthorityId, Contact, HashMap};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S>(
-        contacts: &HashMap<AuthorityId, Contact>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(map: &HashMap<AuthorityId, Contact>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // Serialize as Vec for backward compatibility
-        let vec: Vec<&Contact> = contacts.values().collect();
+        let vec: Vec<&Contact> = map.values().collect();
         vec.serialize(serializer)
     }
 
@@ -140,10 +80,25 @@ mod contacts_serde {
     where
         D: Deserializer<'de>,
     {
-        // Deserialize from Vec for backward compatibility
         let vec: Vec<Contact> = Vec::deserialize(deserializer)?;
         Ok(vec.into_iter().map(|c| (c.id, c)).collect())
     }
+}
+
+// =============================================================================
+// ContactsState
+// =============================================================================
+
+/// Contacts state
+///
+/// Stores contacts in a HashMap for O(1) lookup by ID. Selection and filtering
+/// are UI concerns and should be stored in TuiState, not here.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ContactsState {
+    /// All contacts, keyed by authority ID
+    #[serde(with = "contact_map_serde")]
+    contacts: HashMap<AuthorityId, Contact>,
 }
 
 impl ContactsState {
@@ -151,27 +106,20 @@ impl ContactsState {
     // Constructors
     // =========================================================================
 
-    /// Create a new empty ContactsState.
+    /// Create a new empty contacts state.
     pub fn new() -> Self {
-        Self {
-            contacts: HashMap::new(),
-        }
+        Self::default()
     }
 
-    /// Create ContactsState from an iterator of contacts.
-    pub fn from_iter(contacts: impl IntoIterator<Item = Contact>) -> Self {
+    /// Create from a collection of contacts.
+    pub fn from_contacts(contacts: impl IntoIterator<Item = Contact>) -> Self {
         Self {
             contacts: contacts.into_iter().map(|c| (c.id, c)).collect(),
         }
     }
 
-    /// Create ContactsState from a HashMap (factory method).
-    pub fn from_parts(contacts: HashMap<AuthorityId, Contact>) -> Self {
-        Self { contacts }
-    }
-
     // =========================================================================
-    // Accessors (Query Methods)
+    // Query Methods
     // =========================================================================
 
     /// Get contact by ID.
@@ -179,14 +127,9 @@ impl ContactsState {
         self.contacts.get(id)
     }
 
-    /// Get mutable reference to contact by ID.
+    /// Get mutable contact by ID.
     pub fn contact_mut(&mut self, id: &AuthorityId) -> Option<&mut Contact> {
         self.contacts.get_mut(id)
-    }
-
-    /// Check if a contact exists.
-    pub fn has_contact(&self, id: &AuthorityId) -> bool {
-        self.contacts.contains_key(id)
     }
 
     /// Get all contacts as an iterator.
@@ -194,9 +137,24 @@ impl ContactsState {
         self.contacts.values()
     }
 
-    /// Get contact count.
+    /// Get all contacts as a mutable iterator.
+    pub fn all_contacts_mut(&mut self) -> impl Iterator<Item = &mut Contact> {
+        self.contacts.values_mut()
+    }
+
+    /// Get all contact IDs.
+    pub fn contact_ids(&self) -> impl Iterator<Item = &AuthorityId> {
+        self.contacts.keys()
+    }
+
+    /// Get the number of contacts.
     pub fn contact_count(&self) -> usize {
         self.contacts.len()
+    }
+
+    /// Check if a contact exists.
+    pub fn has_contact(&self, id: &AuthorityId) -> bool {
+        self.contacts.contains_key(id)
     }
 
     /// Check if there are no contacts.
@@ -204,10 +162,11 @@ impl ContactsState {
         self.contacts.is_empty()
     }
 
-    /// Get contacts matching a search filter.
+    /// Filter contacts by a search term.
     ///
     /// Matches against nickname and suggested_name (case-insensitive).
-    pub fn contacts_matching(&self, filter: &str) -> Vec<&Contact> {
+    /// Returns all contacts if filter is empty.
+    pub fn filter_by(&self, filter: &str) -> Vec<&Contact> {
         if filter.is_empty() {
             return self.contacts.values().collect();
         }
@@ -225,13 +184,13 @@ impl ContactsState {
     }
 
     /// Get guardian contacts.
-    pub fn guardians(&self) -> Vec<&Contact> {
-        self.contacts.values().filter(|c| c.is_guardian).collect()
+    pub fn guardians(&self) -> impl Iterator<Item = &Contact> {
+        self.contacts.values().filter(|c| c.is_guardian)
     }
 
     /// Get resident contacts.
-    pub fn residents(&self) -> Vec<&Contact> {
-        self.contacts.values().filter(|c| c.is_resident).collect()
+    pub fn residents(&self) -> impl Iterator<Item = &Contact> {
+        self.contacts.values().filter(|c| c.is_resident)
     }
 
     /// Get display name for a contact.
@@ -262,80 +221,36 @@ impl ContactsState {
     // Mutation Methods
     // =========================================================================
 
-    /// Apply a contact (upsert - insert or replace).
-    ///
-    /// This is an idempotent operation suitable for CRDT-style updates.
+    /// Apply a contact (upsert semantics).
     pub fn apply_contact(&mut self, contact: Contact) {
         self.contacts.insert(contact.id, contact);
     }
 
-    /// Add a new contact (fails if already exists).
-    pub fn add_contact(&mut self, contact: Contact) -> Result<(), ContactError> {
-        if self.contacts.contains_key(&contact.id) {
-            return Err(ContactError::ContactAlreadyExists(contact.id));
-        }
-        self.contacts.insert(contact.id, contact);
-        Ok(())
-    }
-
-    /// Update a contact with a specific update operation.
-    pub fn update_contact(
-        &mut self,
-        id: &AuthorityId,
-        update: ContactUpdate,
-    ) -> Result<(), ContactError> {
-        let contact = self
-            .contacts
-            .get_mut(id)
-            .ok_or_else(|| ContactError::ContactNotFound(*id))?;
-
-        match update {
-            ContactUpdate::SetNickname(nickname) => contact.nickname = nickname,
-            ContactUpdate::SetSuggestedName(name) => contact.suggested_name = name,
-            ContactUpdate::SetGuardian(is_guardian) => contact.is_guardian = is_guardian,
-            ContactUpdate::SetResident(is_resident) => contact.is_resident = is_resident,
-            ContactUpdate::SetLastInteraction(time) => contact.last_interaction = time,
-            ContactUpdate::SetOnline(is_online) => contact.is_online = is_online,
-            ContactUpdate::SetReadReceiptPolicy(policy) => contact.read_receipt_policy = policy,
-        }
-        Ok(())
-    }
-
     /// Remove a contact.
-    pub fn remove_contact(&mut self, id: &AuthorityId) -> Result<Contact, ContactError> {
-        self.contacts
-            .remove(id)
-            .ok_or_else(|| ContactError::ContactNotFound(*id))
+    pub fn remove_contact(&mut self, id: &AuthorityId) -> Option<Contact> {
+        self.contacts.remove(id)
     }
 
-    /// Retain only contacts matching a predicate.
-    pub fn retain(&mut self, f: impl FnMut(&AuthorityId, &mut Contact) -> bool) {
-        self.contacts.retain(f);
+    /// Update a contact if it exists.
+    pub fn update_contact(&mut self, id: &AuthorityId, f: impl FnOnce(&mut Contact)) -> bool {
+        if let Some(contact) = self.contacts.get_mut(id) {
+            f(contact);
+            true
+        } else {
+            false
+        }
     }
-
-    /// Clear all contacts.
-    pub fn clear(&mut self) {
-        self.contacts.clear();
-    }
-
-    // =========================================================================
-    // Legacy Methods (Deprecated - Backward Compatibility)
-    // =========================================================================
 
     /// Set guardian status for a contact.
     ///
     /// Updates the is_guardian flag on the contact if it exists.
-    #[deprecated(since = "0.2.0", note = "Use update_contact with ContactUpdate::SetGuardian")]
-    pub fn set_guardian_status(&mut self, contact_id: AuthorityId, is_guardian: bool) {
-        if let Some(contact) = self.contacts.get_mut(&contact_id) {
-            contact.is_guardian = is_guardian;
-        }
+    pub fn set_guardian_status(&mut self, contact_id: &AuthorityId, is_guardian: bool) {
+        self.update_contact(contact_id, |c| c.is_guardian = is_guardian);
     }
 
     /// Set nickname for a contact.
     ///
     /// If the contact doesn't exist, creates a new contact entry.
-    #[deprecated(since = "0.2.0", note = "Use update_contact or apply_contact instead")]
     pub fn set_nickname(&mut self, target: AuthorityId, nickname: String) {
         if let Some(contact) = self.contacts.get_mut(&target) {
             contact.nickname = nickname;
@@ -360,10 +275,12 @@ impl ContactsState {
     /// Set read receipt policy for a contact.
     ///
     /// If the contact doesn't exist, this is a no-op.
-    #[deprecated(since = "0.2.0", note = "Use update_contact with ContactUpdate::SetReadReceiptPolicy")]
-    pub fn set_read_receipt_policy(&mut self, contact_id: AuthorityId, policy: ReadReceiptPolicy) {
-        if let Some(contact) = self.contacts.get_mut(&contact_id) {
-            contact.read_receipt_policy = policy;
-        }
+    pub fn set_read_receipt_policy(&mut self, contact_id: &AuthorityId, policy: ReadReceiptPolicy) {
+        self.update_contact(contact_id, |c| c.read_receipt_policy = policy);
+    }
+
+    /// Clear all contacts.
+    pub fn clear(&mut self) {
+        self.contacts.clear();
     }
 }

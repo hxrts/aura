@@ -688,6 +688,6 @@ mod tests {
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         let state = get_chat_state(&app_core).await.unwrap();
-        assert!(state.channels_is_empty());
+        assert!(state.is_empty());
     }
 }

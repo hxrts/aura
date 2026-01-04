@@ -23,6 +23,7 @@ aura-authorization = { path = "../aura-authorization" }
 aura-maintenance = { path = "../aura-maintenance" }
 aura-rendezvous = { path = "../aura-rendezvous" }
 aura-effects = { path = "../aura-effects" }
+aura-anti-entropy = { path = "../aura-anti-entropy" }
 
 # Note: aura-macros and aura-mpst intentionally omitted
 # This crate demonstrates semantic library independence by using

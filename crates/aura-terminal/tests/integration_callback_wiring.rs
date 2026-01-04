@@ -37,7 +37,7 @@ use async_lock::RwLock;
 use std::sync::Arc;
 
 use aura_app::signal_defs::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL, RECOVERY_SIGNAL};
-use aura_app::views::{Contact as ViewContact, Message, MessageDeliveryStatus, ReadReceiptPolicy, RecoveryProcess, RecoveryProcessStatus, RecoveryState};
+use aura_app::views::{Contact as ViewContact, Message, MessageDeliveryStatus, ReadReceiptPolicy, RecoveryProcess, RecoveryProcessStatus};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ChannelId};
@@ -496,7 +496,8 @@ async fn test_contacts_signal_contact_tracking() {
         );
 
         let alice = contacts
-            .contact(&contact_alice_id)
+            .all_contacts()
+            .find(|c| c.id == contact_alice_id)
             .expect("Alice should exist in contacts");
 
         assert_eq!(
@@ -524,10 +525,10 @@ async fn test_contacts_signal_contact_tracking() {
         let core = app_core.read().await;
         let mut contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
 
-        if let Some(alice) = contacts.contact_mut(&contact_alice_id) {
+        contacts.update_contact(&contact_alice_id, |alice| {
             alice.is_guardian = true;
             alice.nickname = "Alice (Guardian)".to_string();
-        }
+        });
 
         core.emit(&*CONTACTS_SIGNAL, contacts).await.unwrap();
         println!("  Updated Alice to guardian");
@@ -538,14 +539,14 @@ async fn test_contacts_signal_contact_tracking() {
     {
         let contacts = wait_for_contacts(&app_core, |contacts| {
             contacts
-                .contact(&contact_alice_id)
-                .map(|c| c.is_guardian)
-                .unwrap_or(false)
+                .all_contacts()
+                .any(|c| c.id == contact_alice_id && c.is_guardian)
         })
         .await;
 
         let alice = contacts
-            .contact(&contact_alice_id)
+            .all_contacts()
+            .find(|c| c.id == contact_alice_id)
             .expect("Alice should still exist");
 
         assert!(alice.is_guardian, "Alice should now be guardian");
@@ -597,25 +598,20 @@ async fn test_recovery_signal_state_tracking() {
     println!("\nPhase 2: Start recovery session via signal");
     {
         let core = app_core.read().await;
+        let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
 
-        let recovery = RecoveryState::from_parts(
-            std::collections::HashMap::new(),
-            2,
-            Some(RecoveryProcess {
-                id: "recovery-session-123".to_string(),
-                account_id: AuthorityId::new_from_entropy([0xAC; 32]),
-                status: RecoveryProcessStatus::WaitingForApprovals,
-                approvals_received: 0,
-                approvals_required: 2,
-                approved_by: vec![],
-                approvals: vec![],
-                initiated_at: 1234567890,
-                expires_at: Some(1234657890),
-                progress: 0,
-            }),
-            vec![],
-            vec![],
-        );
+        recovery.set_active_recovery(Some(RecoveryProcess {
+            id: "recovery-session-123".to_string(),
+            account_id: AuthorityId::new_from_entropy([0xAC; 32]),
+            status: RecoveryProcessStatus::WaitingForApprovals,
+            approvals_received: 0,
+            approvals_required: 2,
+            approved_by: vec![],
+            approvals: vec![],
+            initiated_at: 1234567890,
+            expires_at: Some(1234657890),
+            progress: 0,
+        }));
 
         core.emit(&*RECOVERY_SIGNAL, recovery).await.unwrap();
         println!("  Emitted active recovery to signal");
@@ -659,7 +655,7 @@ async fn test_recovery_signal_state_tracking() {
 
         if let Some(active) = recovery.active_recovery_mut() {
             active.approvals_received = 1;
-            active.approved_by.push(guardian_alice_id);
+            active.approved_by.push(guardian_alice_id.clone());
             active.progress = 50;
         }
 
@@ -701,7 +697,7 @@ async fn test_recovery_signal_state_tracking() {
 
         if let Some(active) = recovery.active_recovery_mut() {
             active.approvals_received = 2;
-            active.approved_by.push(guardian_bob_id);
+            active.approved_by.push(guardian_bob_id.clone());
             active.status = RecoveryProcessStatus::Approved;
             active.progress = 100;
         }
@@ -780,7 +776,7 @@ async fn test_neighborhood_position_tracking() {
 
         println!("  Home: {home_id:?}", home_id = neighborhood.home_home_id);
         println!("  Position: {position:?}", position = neighborhood.position);
-        let neighbor_count = neighborhood.neighbor_count();
+        let neighbor_count = neighborhood.neighbors.len();
         println!("  Neighbors: {neighbor_count} entries");
 
         // Verify some position data exists (exact values depend on impl)
@@ -1056,7 +1052,7 @@ async fn test_snapshot_methods_return_current_state() {
     println!("  Chat snapshot: {chat_count} messages");
 
     let contacts = ctx.snapshot_contacts();
-    let contact_count = contacts.contact_count();
+    let contact_count = contacts.contacts.len();
     println!("  Contacts snapshot: {contact_count} contacts");
 
     let recovery = ctx.snapshot_recovery();

@@ -235,17 +235,11 @@ pub async fn refresh_connection_status_from_contacts(
     }
 
     if let Some(runtime) = runtime {
-        // Collect contact IDs for iteration (since we need to borrow mutably later)
-        let contact_ids: Vec<_> = contacts_state.all_contacts().map(|c| c.id).collect();
-
         let mut online_contacts = 0usize;
-        for contact_id in &contact_ids {
-            let is_online = runtime.is_peer_online(*contact_id).await;
-            if let Some(contact) = contacts_state.contact_mut(contact_id) {
-                contact.is_online = is_online;
-                if is_online {
-                    online_contacts += 1;
-                }
+        for contact in contacts_state.all_contacts_mut() {
+            contact.is_online = runtime.is_peer_online(contact.id).await;
+            if contact.is_online {
+                online_contacts += 1;
             }
         }
 
@@ -260,10 +254,8 @@ pub async fn refresh_connection_status_from_contacts(
         {
             let fallback_online =
                 std::cmp::min(contacts_state.contact_count(), sync_status.connected_peers);
-            for (idx, contact_id) in contact_ids.iter().enumerate() {
-                if let Some(contact) = contacts_state.contact_mut(contact_id) {
-                    contact.is_online = idx < fallback_online;
-                }
+            for (idx, contact) in contacts_state.all_contacts_mut().enumerate() {
+                contact.is_online = idx < fallback_online;
             }
             online_contacts = fallback_online;
         }

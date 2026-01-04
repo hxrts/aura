@@ -5,32 +5,58 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ============================================================================
-// Recovery Error Types
+// Error Types
 // ============================================================================
 
-/// Error type for recovery state operations.
+/// Errors that can occur during recovery state operations.
 ///
-/// These errors replace silent no-ops, making failures explicit and debuggable.
+/// These errors represent precondition failures and invalid operations,
+/// allowing callers to handle them explicitly rather than silently ignoring.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecoveryError {
     /// No active recovery process exists
     NoActiveRecovery,
     /// The specified recovery was not found
-    RecoveryNotFound(String),
+    NoSuchRecovery(String),
     /// The specified guardian was not found
-    GuardianNotFound(AuthorityId),
-    /// The guardian has already approved this recovery
+    NoSuchGuardian(AuthorityId),
+    /// Guardian has already approved this recovery
     AlreadyApproved(AuthorityId),
-    /// Recovery is not in a state that allows this operation
-    InvalidState {
-        /// The expected state description
-        expected: &'static str,
-        /// The actual current status
-        actual: RecoveryProcessStatus,
-    },
-    /// Guardian already exists (for add operations)
+    /// Cannot add guardian - already exists
     GuardianAlreadyExists(AuthorityId),
+    /// Cannot update guardian - not found
+    GuardianNotFound(AuthorityId),
+    /// Invalid threshold configuration
+    InvalidThreshold {
+        /// The requested threshold value
+        threshold: u32,
+        /// The current guardian count
+        guardian_count: u32,
+    },
 }
+
+impl std::fmt::Display for RecoveryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoActiveRecovery => write!(f, "No active recovery process"),
+            Self::NoSuchRecovery(id) => write!(f, "Recovery not found: {}", id),
+            Self::NoSuchGuardian(id) => write!(f, "Guardian not found: {:?}", id),
+            Self::AlreadyApproved(id) => write!(f, "Guardian already approved: {:?}", id),
+            Self::GuardianAlreadyExists(id) => write!(f, "Guardian already exists: {:?}", id),
+            Self::GuardianNotFound(id) => write!(f, "Guardian not found: {:?}", id),
+            Self::InvalidThreshold {
+                threshold,
+                guardian_count,
+            } => write!(
+                f,
+                "Invalid threshold: {} of {} guardians",
+                threshold, guardian_count
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RecoveryError {}
 
 // ============================================================================
 // Ceremony Progress Tracking
@@ -399,7 +425,7 @@ impl RecoveryProcess {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct RecoveryState {
     /// All guardians (guardians protecting our account) - keyed by AuthorityId
-    #[serde(default)]
+    #[serde(with = "guardian_map_serde")]
     guardians: HashMap<AuthorityId, Guardian>,
     /// Current threshold (M of N)
     threshold: u32,
@@ -411,24 +437,51 @@ pub struct RecoveryState {
     guardian_bindings: Vec<GuardianBinding>,
 }
 
+/// Serde helper for HashMap<AuthorityId, Guardian>
+mod guardian_map_serde {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<S>(
+        map: &HashMap<AuthorityId, Guardian>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let vec: Vec<&Guardian> = map.values().collect();
+        vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<AuthorityId, Guardian>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec: Vec<Guardian> = Vec::deserialize(deserializer)?;
+        Ok(vec.into_iter().map(|g| (g.id, g)).collect())
+    }
+}
+
 impl RecoveryState {
     // =========================================================================
     // Constructors
     // =========================================================================
 
-    /// Create a new RecoveryState from its parts.
-    ///
-    /// Used by query results and tests.
-    #[must_use]
+    /// Create a new empty recovery state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a recovery state from parts (for query results).
     pub fn from_parts(
-        guardians: HashMap<AuthorityId, Guardian>,
+        guardians: impl IntoIterator<Item = Guardian>,
         threshold: u32,
         active_recovery: Option<RecoveryProcess>,
         pending_requests: Vec<RecoveryProcess>,
         guardian_bindings: Vec<GuardianBinding>,
     ) -> Self {
         Self {
-            guardians,
+            guardians: guardians.into_iter().map(|g| (g.id, g)).collect(),
             threshold,
             active_recovery,
             pending_requests,
@@ -437,43 +490,25 @@ impl RecoveryState {
     }
 
     // =========================================================================
-    // Query Methods (Accessors)
+    // Query Methods
     // =========================================================================
 
-    /// Get the current threshold (M of N).
-    #[must_use]
-    pub fn threshold(&self) -> u32 {
-        self.threshold
-    }
-
-    /// Get the total number of guardians.
-    #[must_use]
-    pub fn guardian_count(&self) -> usize {
-        self.guardians.len()
-    }
-
-    /// Get the number of active guardians.
-    #[must_use]
-    pub fn active_guardian_count(&self) -> usize {
-        self.guardians
+    /// Check if recovery is possible (enough active guardians).
+    pub fn can_recover(&self) -> bool {
+        let active_count = self
+            .guardians
             .values()
             .filter(|g| g.status == GuardianStatus::Active)
-            .count()
-    }
-
-    /// Check if recovery is possible (enough active guardians).
-    #[must_use]
-    pub fn can_recover(&self) -> bool {
-        self.active_guardian_count() as u32 >= self.threshold
+            .count() as u32;
+        active_count >= self.threshold
     }
 
     /// Get guardian by ID.
-    #[must_use]
     pub fn guardian(&self, id: &AuthorityId) -> Option<&Guardian> {
         self.guardians.get(id)
     }
 
-    /// Get mutable guardian by ID.
+    /// Get mutable reference to guardian by ID.
     pub fn guardian_mut(&mut self, id: &AuthorityId) -> Option<&mut Guardian> {
         self.guardians.get_mut(id)
     }
@@ -483,19 +518,39 @@ impl RecoveryState {
         self.guardians.values()
     }
 
+    /// Get all guardian IDs.
+    pub fn guardian_ids(&self) -> impl Iterator<Item = &AuthorityId> {
+        self.guardians.keys()
+    }
+
+    /// Get guardian count.
+    pub fn guardian_count(&self) -> usize {
+        self.guardians.len()
+    }
+
     /// Check if a guardian exists.
-    #[must_use]
     pub fn has_guardian(&self, id: &AuthorityId) -> bool {
         self.guardians.contains_key(id)
     }
 
+    /// Get active guardians only.
+    pub fn active_guardians(&self) -> impl Iterator<Item = &Guardian> {
+        self.guardians
+            .values()
+            .filter(|g| g.status == GuardianStatus::Active)
+    }
+
+    /// Get the current threshold.
+    pub fn threshold(&self) -> u32 {
+        self.threshold
+    }
+
     /// Get the active recovery process (if any).
-    #[must_use]
     pub fn active_recovery(&self) -> Option<&RecoveryProcess> {
         self.active_recovery.as_ref()
     }
 
-    /// Get mutable access to the active recovery process.
+    /// Get mutable reference to active recovery.
     pub fn active_recovery_mut(&mut self) -> Option<&mut RecoveryProcess> {
         self.active_recovery.as_mut()
     }
@@ -505,35 +560,22 @@ impl RecoveryState {
         &self.pending_requests
     }
 
-    /// Get mutable access to pending requests.
+    /// Get mutable reference to pending requests.
     pub fn pending_requests_mut(&mut self) -> &mut Vec<RecoveryProcess> {
         &mut self.pending_requests
     }
 
     // =========================================================================
-    // Recovery Process Management
+    // Recovery Process Mutations (with Result)
     // =========================================================================
 
     /// Initiate a recovery process.
-    ///
-    /// Returns error if a recovery is already active.
     pub fn initiate_recovery(
         &mut self,
         session_id: String,
         account_id: AuthorityId,
         initiated_at: u64,
-    ) -> Result<(), RecoveryError> {
-        if self.active_recovery.is_some() {
-            return Err(RecoveryError::InvalidState {
-                expected: "no active recovery",
-                actual: self
-                    .active_recovery
-                    .as_ref()
-                    .map(|r| r.status)
-                    .unwrap_or_default(),
-            });
-        }
-
+    ) {
         self.active_recovery = Some(RecoveryProcess {
             id: session_id,
             account_id,
@@ -546,24 +588,23 @@ impl RecoveryState {
             expires_at: None,
             progress: 0,
         });
-        Ok(())
     }
 
     /// Add a guardian approval to the active recovery.
     ///
-    /// Returns error if:
+    /// Returns an error if:
     /// - No active recovery exists
-    /// - Guardian has already approved
-    pub fn add_approval(&mut self, guardian_id: AuthorityId) -> Result<(), RecoveryError> {
-        self.add_approval_with_timestamp(guardian_id, 0)
+    /// - The guardian has already approved
+    pub fn add_guardian_approval(&mut self, guardian_id: AuthorityId) -> Result<(), RecoveryError> {
+        self.add_guardian_approval_with_timestamp(guardian_id, 0)
     }
 
     /// Add a guardian approval with timestamp to the active recovery.
     ///
-    /// Returns error if:
+    /// Returns an error if:
     /// - No active recovery exists
-    /// - Guardian has already approved
-    pub fn add_approval_with_timestamp(
+    /// - The guardian has already approved
+    pub fn add_guardian_approval_with_timestamp(
         &mut self,
         guardian_id: AuthorityId,
         timestamp: u64,
@@ -602,7 +643,7 @@ impl RecoveryState {
 
     /// Complete the active recovery process.
     ///
-    /// Returns error if no active recovery exists.
+    /// Returns an error if no active recovery exists.
     pub fn complete_recovery(&mut self) -> Result<(), RecoveryError> {
         let recovery = self
             .active_recovery
@@ -616,7 +657,7 @@ impl RecoveryState {
 
     /// Fail/cancel the active recovery process.
     ///
-    /// Returns error if no active recovery exists.
+    /// Returns an error if no active recovery exists.
     pub fn fail_recovery(&mut self) -> Result<(), RecoveryError> {
         let recovery = self
             .active_recovery
@@ -632,14 +673,19 @@ impl RecoveryState {
         self.active_recovery = None;
     }
 
+    /// Set the active recovery (for signal updates and testing).
+    pub fn set_active_recovery(&mut self, recovery: Option<RecoveryProcess>) {
+        self.active_recovery = recovery;
+    }
+
     // =========================================================================
-    // Guardian Management
+    // Guardian Mutations (with Result)
     // =========================================================================
 
     /// Add a new guardian.
     ///
-    /// Returns error if guardian already exists.
-    pub fn add_guardian(&mut self, guardian: Guardian) -> Result<(), RecoveryError> {
+    /// Returns an error if the guardian already exists.
+    pub fn apply_guardian(&mut self, guardian: Guardian) -> Result<(), RecoveryError> {
         if self.guardians.contains_key(&guardian.id) {
             return Err(RecoveryError::GuardianAlreadyExists(guardian.id));
         }
@@ -647,16 +693,14 @@ impl RecoveryState {
         Ok(())
     }
 
-    /// Apply a guardian (insert or replace).
-    ///
-    /// Unlike `add_guardian`, this always succeeds and replaces existing.
-    pub fn apply_guardian(&mut self, guardian: Guardian) {
+    /// Add or update a guardian (upsert semantics for signal updates).
+    pub fn upsert_guardian(&mut self, guardian: Guardian) {
         self.guardians.insert(guardian.id, guardian);
     }
 
     /// Update an existing guardian.
     ///
-    /// Returns error if guardian doesn't exist.
+    /// Returns an error if the guardian doesn't exist.
     pub fn update_guardian(
         &mut self,
         id: &AuthorityId,
@@ -670,25 +714,56 @@ impl RecoveryState {
         Ok(())
     }
 
-    /// Revoke a guardian's status.
+    /// Remove a guardian entirely.
+    pub fn remove_guardian(&mut self, id: &AuthorityId) -> Option<Guardian> {
+        self.guardians.remove(id)
+    }
+
+    /// Revoke a guardian's status (keeps history).
     ///
-    /// Returns error if guardian doesn't exist.
+    /// Returns an error if the guardian doesn't exist.
     pub fn revoke_guardian(&mut self, id: &AuthorityId) -> Result<(), RecoveryError> {
         self.update_guardian(id, |g| g.status = GuardianStatus::Revoked)
     }
 
-    /// Reactivate a revoked guardian.
+    /// Activate a guardian.
     ///
-    /// Returns error if guardian doesn't exist.
-    pub fn reactivate_guardian(&mut self, id: &AuthorityId) -> Result<(), RecoveryError> {
+    /// Returns an error if the guardian doesn't exist.
+    pub fn activate_guardian(&mut self, id: &AuthorityId) -> Result<(), RecoveryError> {
         self.update_guardian(id, |g| g.status = GuardianStatus::Active)
     }
 
-    /// Remove a guardian completely.
+    /// Toggle guardian status for a contact (legacy compatibility).
     ///
-    /// Returns the removed guardian, or None if not found.
-    pub fn remove_guardian(&mut self, id: &AuthorityId) -> Option<Guardian> {
-        self.guardians.remove(id)
+    /// If is_guardian is true, adds/activates the guardian.
+    /// If is_guardian is false, removes/revokes the guardian.
+    #[deprecated(since = "0.2.0", note = "Use apply_guardian/revoke_guardian instead")]
+    pub fn toggle_guardian(&mut self, contact_id: AuthorityId, is_guardian: bool) {
+        if is_guardian {
+            // Check if guardian already exists
+            if let Some(guardian) = self.guardians.get_mut(&contact_id) {
+                // Reactivate existing guardian
+                guardian.status = GuardianStatus::Active;
+            } else {
+                // Add new guardian
+                self.guardians.insert(
+                    contact_id,
+                    Guardian {
+                        id: contact_id,
+                        name: String::new(), // Will be resolved from contacts
+                        status: GuardianStatus::Active,
+                        added_at: 0, // Timestamp would come from fact
+                        last_seen: None,
+                    },
+                );
+            }
+        } else {
+            // Revoke guardian status
+            if let Some(guardian) = self.guardians.get_mut(&contact_id) {
+                guardian.status = GuardianStatus::Revoked;
+                // Note: We don't remove from list to preserve history
+            }
+        }
     }
 
     /// Set the recovery threshold.
@@ -696,66 +771,23 @@ impl RecoveryState {
         self.threshold = threshold;
     }
 
-    // =========================================================================
-    // Legacy Compatibility Methods
-    // =========================================================================
-
-    /// Toggle guardian status for a contact (legacy method).
+    /// Retain only guardians whose IDs are in the given set.
     ///
-    /// **Deprecated**: Prefer `add_guardian()`, `revoke_guardian()`, or `reactivate_guardian()`.
-    ///
-    /// If is_guardian is true, adds/activates the guardian.
-    /// If is_guardian is false, revokes the guardian.
-    #[deprecated(note = "Use add_guardian/revoke_guardian/reactivate_guardian instead")]
-    pub fn toggle_guardian(&mut self, contact_id: AuthorityId, is_guardian: bool) {
-        if is_guardian {
-            if self.guardians.contains_key(&contact_id) {
-                // Reactivate existing guardian
-                let _ = self.reactivate_guardian(&contact_id);
-            } else {
-                // Add new guardian
-                let _ = self.add_guardian(Guardian {
-                    id: contact_id,
-                    name: String::new(),
-                    status: GuardianStatus::Active,
-                    added_at: 0,
-                    last_seen: None,
-                });
-            }
-        } else {
-            // Revoke guardian status
-            let _ = self.revoke_guardian(&contact_id);
-        }
+    /// This is useful when replacing the guardian set after a ceremony completion.
+    pub fn retain_guardians(&mut self, ids: &[AuthorityId]) {
+        self.guardians.retain(|id, _| ids.contains(id));
     }
 
-    /// Add a guardian approval to the active recovery (legacy method).
-    ///
-    /// **Deprecated**: Prefer `add_approval()` which returns Result.
-    ///
-    /// Silently ignores if no active recovery or already approved.
-    #[deprecated(note = "Use add_approval() which returns Result")]
-    pub fn add_guardian_approval(&mut self, guardian_id: AuthorityId) {
-        let _ = self.add_approval(guardian_id);
+    /// Clear all guardians.
+    pub fn clear_guardians(&mut self) {
+        self.guardians.clear();
     }
 
-    /// Add a guardian approval with timestamp (legacy method).
-    ///
-    /// **Deprecated**: Prefer `add_approval_with_timestamp()` which returns Result.
-    #[deprecated(note = "Use add_approval_with_timestamp() which returns Result")]
-    pub fn add_guardian_approval_with_timestamp(
-        &mut self,
-        guardian_id: AuthorityId,
-        timestamp: u64,
-    ) {
-        let _ = self.add_approval_with_timestamp(guardian_id, timestamp);
-    }
-
-    // =========================================================================
-    // Guardian Binding Methods (accounts we are guardian for)
-    // =========================================================================
+    // === Guardian Binding Methods (accounts we are guardian for) ===
 
     /// Check if we are a guardian for a specific account.
-    #[must_use]
+    ///
+    /// Returns true if we have an active guardian binding for the account.
     pub fn is_guardian_for(&self, account: &AuthorityId) -> bool {
         self.guardian_bindings
             .iter()
@@ -764,8 +796,10 @@ impl RecoveryState {
 
     /// Add a guardian binding (we become guardian for an account).
     ///
-    /// Duplicate bindings are prevented (silently ignored).
+    /// This records that we can approve recovery requests for the specified account.
+    /// Duplicate bindings are prevented.
     pub fn add_guardian_for(&mut self, account: AuthorityId, context_id: ContextId, bound_at: u64) {
+        // Prevent duplicate bindings
         if !self.is_guardian_for(&account) {
             self.guardian_bindings
                 .push(GuardianBinding::new(account, context_id, bound_at));
@@ -780,6 +814,7 @@ impl RecoveryState {
         bound_at: u64,
         account_name: impl Into<String>,
     ) {
+        // Prevent duplicate bindings
         if !self.is_guardian_for(&account) {
             self.guardian_bindings.push(GuardianBinding::with_name(
                 account,
@@ -797,7 +832,6 @@ impl RecoveryState {
     }
 
     /// Get a guardian binding by account.
-    #[must_use]
     pub fn guardian_binding_for(&self, account: &AuthorityId) -> Option<&GuardianBinding> {
         self.guardian_bindings
             .iter()
@@ -805,14 +839,8 @@ impl RecoveryState {
     }
 
     /// Get the number of accounts we are guardian for.
-    #[must_use]
     pub fn guardian_binding_count(&self) -> usize {
         self.guardian_bindings.len()
-    }
-
-    /// Get all guardian bindings.
-    pub fn all_guardian_bindings(&self) -> &[GuardianBinding] {
-        &self.guardian_bindings
     }
 }
 

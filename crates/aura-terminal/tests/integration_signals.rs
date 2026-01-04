@@ -16,7 +16,7 @@ use aura_app::signal_defs::{
     ConnectionStatus, SyncStatus, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, RECOVERY_SIGNAL,
     SYNC_STATUS_SIGNAL,
 };
-use aura_app::views::{Message, MessageDeliveryStatus, RecoveryProcess, RecoveryProcessStatus, RecoveryState};
+use aura_app::views::{Message, MessageDeliveryStatus, RecoveryProcess, RecoveryProcessStatus};
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::identifiers::{AuthorityId, ChannelId};
@@ -168,25 +168,20 @@ async fn test_recovery_signal_state_updates() {
     let initial = core.read(&*RECOVERY_SIGNAL).await.unwrap();
     assert!(initial.active_recovery().is_none());
 
-    // Create recovery state with active session using from_parts
-    let updated_state = RecoveryState::from_parts(
-        std::collections::HashMap::new(),
-        2,
-        Some(RecoveryProcess {
-            id: "recovery-123".to_string(),
-            account_id: AuthorityId::new_from_entropy([0x45; 32]),
-            status: RecoveryProcessStatus::WaitingForApprovals,
-            approvals_received: 0,
-            approvals_required: 2,
-            approved_by: vec![],
-            approvals: vec![],
-            initiated_at: 1234567890,
-            expires_at: None,
-            progress: 0,
-        }),
-        vec![],
-        vec![],
-    );
+    // Create recovery state with active session
+    let mut updated_state = initial.clone();
+    updated_state.set_active_recovery(Some(RecoveryProcess {
+        id: "recovery-123".to_string(),
+        account_id: AuthorityId::new_from_entropy([0x45; 32]),
+        status: RecoveryProcessStatus::WaitingForApprovals,
+        approvals_received: 0,
+        approvals_required: 2,
+        approved_by: vec![],
+        approvals: vec![],
+        initiated_at: 1234567890,
+        expires_at: None,
+        progress: 0,
+    }));
 
     // Emit updated state
     core.emit(&*RECOVERY_SIGNAL, updated_state).await.unwrap();

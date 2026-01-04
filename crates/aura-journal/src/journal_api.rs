@@ -170,15 +170,15 @@ impl Journal {
             // If not order clock, synthesize an order token for deterministic insertion
             _ => OrderTime(aura_core::hash::hash(format!("{:?}", &ts).as_bytes())),
         };
-        let fact = Fact {
-            timestamp: ts,
+        let fact = Fact::new(
             order,
-            content: FactContent::Relational(crate::fact::RelationalFact::Generic {
+            ts,
+            FactContent::Relational(crate::fact::RelationalFact::Generic {
                 context_id: derive_context_for_fact(&journal_fact),
                 binding_type: journal_fact.content.clone(),
                 binding_data: journal_fact.content.clone().into_bytes(),
             }),
-        };
+        );
 
         self.fact_journal.add_fact(fact)?;
         Ok(())
@@ -215,11 +215,11 @@ impl Journal {
         let timestamp = TimeStamp::OrderClock(order.clone());
 
         // Construct the fact with the relational content
-        let fact = crate::fact::Fact {
-            timestamp,
+        let fact = crate::fact::Fact::new(
             order,
-            content: FactContent::Relational(relational_fact),
-        };
+            timestamp,
+            FactContent::Relational(relational_fact),
+        );
 
         self.fact_journal.add_fact(fact.clone())?;
         Ok(fact)

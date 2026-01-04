@@ -66,11 +66,12 @@ impl SnapshotHelper {
     #[must_use]
     pub fn snapshot_guardians(&self) -> GuardiansSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
+            let guardian_count = snapshot.recovery.guardian_count();
             GuardiansSnapshot {
                 guardians: snapshot.recovery.all_guardians().cloned().collect(),
                 threshold: aura_core::threshold::ThresholdConfig::new(
                     snapshot.recovery.threshold() as u16,
-                    snapshot.recovery.guardian_count() as u16,
+                    guardian_count as u16,
                 )
                 .ok(),
             }
@@ -85,6 +86,7 @@ impl SnapshotHelper {
             let (progress_percent, is_in_progress) = snapshot
                 .recovery
                 .active_recovery()
+                .as_ref()
                 .map(|r| {
                     (
                         r.progress,
@@ -160,8 +162,7 @@ impl SnapshotHelper {
         if let Some(snapshot) = self.try_state_snapshot() {
             let home_id = snapshot.neighborhood.home_home_id.clone();
             let home_name = snapshot.neighborhood.home_name.clone();
-            let homes: Vec<_> = snapshot.neighborhood.all_neighbors().cloned().collect();
-            let position = snapshot.neighborhood.position.clone().unwrap_or_else(|| {
+            let position = snapshot.neighborhood.position.unwrap_or_else(|| {
                 aura_app::ui::types::neighborhood::TraversalPosition {
                     current_home_id: home_id.clone(),
                     current_home_name: home_name.clone(),
@@ -172,7 +173,7 @@ impl SnapshotHelper {
             NeighborhoodSnapshot {
                 neighborhood_id: Some(home_id.to_string()),
                 neighborhood_name: Some(home_name),
-                homes,
+                homes: snapshot.neighborhood.neighbors,
                 position,
             }
         } else {

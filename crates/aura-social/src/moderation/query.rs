@@ -256,11 +256,11 @@ mod tests {
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
 
     fn create_test_fact(content: RelationalFact, order_index: u64) -> Fact {
-        Fact {
-            order: OrderTime([order_index as u8; 32]),
-            timestamp: TimeStamp::OrderClock(OrderTime([order_index as u8; 32])),
-            content: FactContent::Relational(content),
-        }
+        Fact::new(
+            OrderTime([order_index as u8; 32]),
+            TimeStamp::OrderClock(OrderTime([order_index as u8; 32])),
+            FactContent::Relational(content),
+        )
     }
 
     /// Create a test context ID

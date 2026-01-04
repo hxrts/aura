@@ -88,29 +88,29 @@ fn make_timestamp(ms: u64) -> TimeStamp {
 }
 
 fn make_guardian_fact(account_seed: u8, guardian_seed: u8, index: u64) -> Fact {
-    Fact {
-        order: make_order_time(index),
-        timestamp: make_timestamp(1000 + index),
-        content: FactContent::Relational(RelationalFact::Protocol(
+    Fact::new(
+        make_order_time(index),
+        make_timestamp(1000 + index),
+        FactContent::Relational(RelationalFact::Protocol(
             aura_journal::ProtocolRelationalFact::GuardianBinding {
                 account_id: AuthorityId::new_from_entropy([account_seed; 32]),
                 guardian_id: AuthorityId::new_from_entropy([guardian_seed; 32]),
                 binding_hash: Hash32([0u8; 32]),
             },
         )),
-    }
+    )
 }
 
 fn make_generic_fact(binding_type: &str, index: u64) -> Fact {
-    Fact {
-        order: make_order_time(index),
-        timestamp: make_timestamp(1000 + index),
-        content: FactContent::Relational(RelationalFact::Generic {
+    Fact::new(
+        make_order_time(index),
+        make_timestamp(1000 + index),
+        FactContent::Relational(RelationalFact::Generic {
             context_id: ContextId::new_from_entropy([0u8; 32]),
             binding_type: binding_type.to_string(),
             binding_data: vec![index as u8],
         }),
-    }
+    )
 }
 
 fn scheduler_with_registry(

@@ -153,41 +153,41 @@ fn make_guardian_fact(index: u64) -> Fact {
     use aura_core::identifiers::AuthorityId;
     use aura_core::Hash32;
 
-    Fact {
-        order: make_order_time(index),
-        timestamp: make_timestamp(1000 + index),
-        content: FactContent::Relational(RelationalFact::Protocol(
+    Fact::new(
+        make_order_time(index),
+        make_timestamp(1000 + index),
+        FactContent::Relational(RelationalFact::Protocol(
             aura_journal::ProtocolRelationalFact::GuardianBinding {
                 account_id: AuthorityId::new_from_entropy([1u8; 32]),
                 guardian_id: AuthorityId::new_from_entropy([index as u8; 32]),
                 binding_hash: Hash32([0u8; 32]),
             },
         )),
-    }
+    )
 }
 
 fn make_message_fact(message: &str, index: u64) -> Fact {
-    Fact {
-        order: make_order_time(index),
-        timestamp: make_timestamp(1000 + index),
-        content: FactContent::Relational(RelationalFact::Generic {
+    Fact::new(
+        make_order_time(index),
+        make_timestamp(1000 + index),
+        FactContent::Relational(RelationalFact::Generic {
             context_id: ContextId::new_from_entropy([0u8; 32]),
             binding_type: format!("message:{}", message),
             binding_data: vec![],
         }),
-    }
+    )
 }
 
 fn make_generic_fact(binding_type: &str, index: u64) -> Fact {
-    Fact {
-        order: make_order_time(index),
-        timestamp: make_timestamp(1000 + index),
-        content: FactContent::Relational(RelationalFact::Generic {
+    Fact::new(
+        make_order_time(index),
+        make_timestamp(1000 + index),
+        FactContent::Relational(RelationalFact::Generic {
             context_id: ContextId::new_from_entropy([0u8; 32]),
             binding_type: binding_type.to_string(),
             binding_data: vec![],
         }),
-    }
+    )
 }
 
 // =============================================================================

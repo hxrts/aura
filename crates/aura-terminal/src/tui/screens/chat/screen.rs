@@ -200,7 +200,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
 
                 // Get messages for the first channel as default
                 // The shell's shared subscription handles proper selection-aware messages
-                let first_channel_id = chat_state.first_channel().map(|c| &c.id);
+                let first_channel_id = chat_state.all_channels().next().map(|c| &c.id);
                 let app_messages = first_channel_id
                     .map(|id| chat_state.messages_for_channel(id))
                     .unwrap_or(&[]);

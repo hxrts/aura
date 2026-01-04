@@ -46,12 +46,12 @@ impl TreeOp {
         let id = OrderTime(random.random_bytes_32().await);
         let ts = TimeStamp::OrderClock(id.clone());
 
-        Ok(Fact {
-            order: id,
-            timestamp: ts,
+        Ok(Fact::new(
+            id,
+            ts,
             // Note: authority_id removed - facts are scoped by Journal namespace
-            content: FactContent::AttestedOp(attested),
-        })
+            FactContent::AttestedOp(attested),
+        ))
     }
 
     /// Convert tree operation to a journal fact with deterministic ID for testing
@@ -78,11 +78,11 @@ impl TreeOp {
 
         let id = OrderTime(fact_id_bytes);
         let ts = TimeStamp::OrderClock(id.clone());
-        Fact {
-            order: id,
-            timestamp: ts,
+        Fact::new(
+            id,
+            ts,
             // Note: authority_id removed - facts are scoped by Journal namespace
-            content: FactContent::AttestedOp(attested),
-        }
+            FactContent::AttestedOp(attested),
+        )
     }
 }

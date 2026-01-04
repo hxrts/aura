@@ -33,21 +33,21 @@ fn reduce_context_emits_convergence_and_reversion_bindings() {
         coord_epoch: 8,
     };
 
-    let cert_fact = Fact {
-        order: OrderTime([1u8; 32]),
-        timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
-        content: FactContent::Relational(RelationalFact::Protocol(
+    let cert_fact = Fact::new(
+        OrderTime([1u8; 32]),
+        TimeStamp::OrderClock(OrderTime([1u8; 32])),
+        FactContent::Relational(RelationalFact::Protocol(
             ProtocolRelationalFact::ConvergenceCert(cert),
         )),
-    };
+    );
 
-    let revert_fact = Fact {
-        order: OrderTime([2u8; 32]),
-        timestamp: TimeStamp::OrderClock(OrderTime([2u8; 32])),
-        content: FactContent::Relational(RelationalFact::Protocol(
+    let revert_fact = Fact::new(
+        OrderTime([2u8; 32]),
+        TimeStamp::OrderClock(OrderTime([2u8; 32])),
+        FactContent::Relational(RelationalFact::Protocol(
             ProtocolRelationalFact::ReversionFact(reversion),
         )),
-    };
+    );
 
     let mut journal = Journal::new(JournalNamespace::Context(ctx));
     journal.add_fact(cert_fact).unwrap();

@@ -297,18 +297,18 @@ async fn test_scheduler_topological_update_order() {
     tokio::spawn(scheduler.run());
 
     // Create a test fact
-    let fact = Fact {
-        order: OrderTime([0u8; 32]),
-        timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+    let fact = Fact::new(
+        OrderTime([0u8; 32]),
+        TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 1000,
             uncertainty: None,
         }),
-        content: FactContent::Relational(RelationalFact::Generic {
+        FactContent::Relational(RelationalFact::Generic {
             context_id: ContextId::new_from_entropy([0u8; 32]),
             binding_type: "test".to_string(),
             binding_data: vec![1],
         }),
-    };
+    );
 
     // Send fact
     fact_tx.send(FactSource::Journal(vec![fact])).await.unwrap();

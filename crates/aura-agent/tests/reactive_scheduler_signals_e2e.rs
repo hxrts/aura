@@ -24,11 +24,7 @@ fn order(n: u8) -> OrderTime {
 
 fn fact(order_n: u8, content: FactContent) -> Fact {
     let o = order(order_n);
-    Fact {
-        order: o.clone(),
-        timestamp: TimeStamp::OrderClock(o),
-        content,
-    }
+    Fact::new(o.clone(), TimeStamp::OrderClock(o), content)
 }
 
 fn t(ms: u64) -> PhysicalTime {

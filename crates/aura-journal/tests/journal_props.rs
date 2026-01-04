@@ -29,11 +29,7 @@ fn fact_from_seed(seed: [u8; 32]) -> Fact {
             binding_hash,
         },
     ));
-    Fact {
-        order,
-        timestamp,
-        content,
-    }
+    Fact::new(order, timestamp, content)
 }
 
 fn journal_from_seeds(namespace: JournalNamespace, seeds: &[[u8; 32]]) -> Journal {

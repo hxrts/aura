@@ -61,18 +61,15 @@ pub async fn start_recovery(
     let guardians = guardian_ids
         .iter()
         .map(|id| {
-            parse_authority_id(id).map(|authority| {
-                let guardian = crate::views::recovery::Guardian {
-                    id: authority,
-                    name: String::new(),
-                    status: crate::views::recovery::GuardianStatus::Pending,
-                    added_at: initiated_at,
-                    last_seen: None,
-                };
-                (authority, guardian)
+            parse_authority_id(id).map(|authority| crate::views::recovery::Guardian {
+                id: authority,
+                name: String::new(),
+                status: crate::views::recovery::GuardianStatus::Pending,
+                added_at: initiated_at,
+                last_seen: None,
             })
         })
-        .collect::<Result<std::collections::HashMap<_, _>, AuraError>>()?;
+        .collect::<Result<Vec<_>, AuraError>>()?;
 
     // Initiate guardian ceremony via runtime bridge
     let total_n = guardian_ids.len() as u16;
@@ -99,8 +96,8 @@ pub async fn start_recovery(
         guardians,
         threshold_k.value() as u32,
         Some(recovery_process),
-        Vec::new(),
-        Vec::new(),
+        Vec::new(),             // pending_requests
+        Vec::new(),             // guardian_bindings
     );
 
     // Update ViewState - signal forwarding auto-propagates to RECOVERY_SIGNAL
@@ -317,43 +314,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_recovery_state() {
-        use std::collections::HashMap;
-
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
         let app_core = Arc::new(RwLock::new(core));
         AppCore::init_signals_with_hooks(&app_core).await.unwrap();
 
         // Set recovery state with active recovery process
-        let guardian_id = AuthorityId::new_from_entropy([1u8; 32]);
-        let guardian = Guardian {
-            id: guardian_id,
+        let guardians = vec![Guardian {
+            id: AuthorityId::new_from_entropy([1u8; 32]),
             name: "Alice".to_string(),
             status: GuardianStatus::Active,
             added_at: 1000,
             last_seen: Some(2000),
-        };
-        let mut guardians = HashMap::new();
-        guardians.insert(guardian_id, guardian);
-
-        let state = RecoveryState::from_parts(
-            guardians,
-            2,
-            Some(RecoveryProcess {
-                id: "ceremony-123".to_string(),
-                account_id: AuthorityId::new_from_entropy([1u8; 32]),
-                status: RecoveryProcessStatus::WaitingForApprovals,
-                approvals_received: 0,
-                approvals_required: 2,
-                approved_by: vec![],
-                approvals: vec![],
-                initiated_at: 1000,
-                expires_at: Some(2000),
-                progress: 0,
-            }),
-            vec![],
-            vec![],
-        );
+        }];
+        let active_recovery = Some(RecoveryProcess {
+            id: "ceremony-123".to_string(),
+            account_id: AuthorityId::new_from_entropy([1u8; 32]),
+            status: RecoveryProcessStatus::WaitingForApprovals,
+            approvals_received: 0,
+            approvals_required: 2,
+            approved_by: vec![],
+            approvals: vec![],
+            initiated_at: 1000,
+            expires_at: Some(2000),
+            progress: 0,
+        });
+        let state = RecoveryState::from_parts(guardians, 2, active_recovery, vec![], vec![]);
 
         // Update ViewState directly
         set_recovery_state(&app_core, state.clone()).await.unwrap();

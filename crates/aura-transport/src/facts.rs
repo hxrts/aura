@@ -144,6 +144,18 @@ pub enum TransportFact {
         /// Timestamp when hole punch completed (uses unified time system)
         completed_at: PhysicalTime,
     },
+
+    /// Fact acknowledged by a peer
+    FactAcknowledged {
+        /// Context of the fact
+        context_id: ContextId,
+        /// Identifier of the fact being acknowledged (OrderTime bytes)
+        fact_id: [u8; 32],
+        /// Authority that acknowledged the fact
+        acknowledger: AuthorityId,
+        /// Timestamp when the acknowledgment was received (uses unified time system)
+        acked_at: PhysicalTime,
+    },
 }
 
 impl TransportFact {
@@ -158,6 +170,7 @@ impl TransportFact {
             TransportFact::ConnectionFailed { context_id, .. } => *context_id,
             TransportFact::FlowBudgetCharged { context_id, .. } => *context_id,
             TransportFact::HolePunchCompleted { context_id, .. } => *context_id,
+            TransportFact::FactAcknowledged { context_id, .. } => *context_id,
         }
     }
 
@@ -172,6 +185,7 @@ impl TransportFact {
             TransportFact::ConnectionFailed { failed_at, .. } => failed_at.ts_ms,
             TransportFact::FlowBudgetCharged { charged_at, .. } => charged_at.ts_ms,
             TransportFact::HolePunchCompleted { completed_at, .. } => completed_at.ts_ms,
+            TransportFact::FactAcknowledged { acked_at, .. } => acked_at.ts_ms,
         }
     }
 
@@ -337,6 +351,24 @@ impl TransportFact {
         }
     }
 
+    /// Create a FactAcknowledged fact with millisecond timestamp (backward compatibility)
+    pub fn fact_acknowledged_ms(
+        context_id: ContextId,
+        fact_id: [u8; 32],
+        acknowledger: AuthorityId,
+        acked_at_ms: u64,
+    ) -> Self {
+        Self::FactAcknowledged {
+            context_id,
+            fact_id,
+            acknowledger,
+            acked_at: PhysicalTime {
+                ts_ms: acked_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
     /// Get the fact type name for journal keying
     pub fn fact_type(&self) -> &'static str {
         match self {
@@ -348,6 +380,7 @@ impl TransportFact {
             TransportFact::ConnectionFailed { .. } => "connection_failed",
             TransportFact::FlowBudgetCharged { .. } => "flow_budget_charged",
             TransportFact::HolePunchCompleted { .. } => "hole_punch_completed",
+            TransportFact::FactAcknowledged { .. } => "fact_acknowledged",
         }
     }
 
@@ -491,7 +524,9 @@ impl FactDeltaReducer<TransportFact, TransportFactDelta> for TransportFactReduce
             TransportFact::FlowBudgetCharged { amount, .. } => {
                 delta.flow_budget_charged += *amount as u64;
             }
-            TransportFact::ConnectionFailed { .. } | TransportFact::HolePunchCompleted { .. } => {
+            TransportFact::ConnectionFailed { .. }
+            | TransportFact::HolePunchCompleted { .. }
+            | TransportFact::FactAcknowledged { .. } => {
                 // These don't produce cumulative deltas
             }
         }

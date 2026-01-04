@@ -654,7 +654,7 @@ async fn test_neighborhood_formation_flow() {
     );
     println!(
         "  Neighbors: {count}",
-        count = bob_neighborhood.neighbor_count()
+        count = bob_neighborhood.neighbors.len()
     );
 
     // Note: Neighborhood commands would be added here when implemented
@@ -720,7 +720,7 @@ async fn test_social_graph_flow() {
         "  Bob's contacts: {count}",
         count = bob_contacts.contact_count()
     );
-    for c in bob_contacts.all_contacts() {
+    for c in &bob_contacts.all_contacts().cloned().collect::<Vec<_>>() {
         let name = if !c.nickname.is_empty() {
             c.nickname.clone()
         } else if let Some(s) = &c.suggested_name {
@@ -763,7 +763,7 @@ async fn test_social_graph_flow() {
 
     // Read contacts again to verify nickname update
     let bob_contacts_after_nickname = env.get_agent("bob").read_contacts().await;
-    for c in bob_contacts_after_nickname.all_contacts() {
+    for c in &bob_contacts_after_nickname.all_contacts().cloned().collect::<Vec<_>>() {
         let name = if !c.nickname.is_empty() {
             c.nickname.clone()
         } else if let Some(s) = &c.suggested_name {
@@ -904,7 +904,7 @@ async fn test_social_graph_contact_home_view() {
     // Read contacts
     let bob_contacts = env.get_agent("bob").read_contacts().await;
     println!("Bob's contacts:");
-    for c in bob_contacts.all_contacts() {
+    for c in &bob_contacts.all_contacts().cloned().collect::<Vec<_>>() {
         println!("  - {name} (id: {id})", name = c.nickname, id = c.id);
     }
 

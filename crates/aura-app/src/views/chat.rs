@@ -4,7 +4,31 @@ use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::collection::DomainCollection;
+// =============================================================================
+// Serde Helper for HashMap<ChannelId, Channel>
+// =============================================================================
+
+/// Serialize HashMap as Vec for backward compatibility, deserialize from Vec.
+mod channel_map_serde {
+    use super::{Channel, ChannelId, HashMap};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(map: &HashMap<ChannelId, Channel>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let vec: Vec<&Channel> = map.values().collect();
+        vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<ChannelId, Channel>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec: Vec<Channel> = Vec::deserialize(deserializer)?;
+        Ok(vec.into_iter().map(|c| (c.id, c)).collect())
+    }
+}
 
 // ============================================================================
 // Message Delivery Status
@@ -196,35 +220,6 @@ pub struct Message {
     pub is_finalized: bool,
 }
 
-/// Custom serde module for backward-compatible channel serialization.
-///
-/// Serializes DomainCollection as Vec for wire format compatibility.
-mod channels_serde {
-    use super::{Channel, ChannelId, DomainCollection};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S>(
-        channels: &DomainCollection<ChannelId, Channel>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let vec: Vec<&Channel> = channels.all().collect();
-        vec.serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<DomainCollection<ChannelId, Channel>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let vec: Vec<Channel> = Vec::deserialize(deserializer)?;
-        Ok(DomainCollection::from_iter(vec.into_iter().map(|c| (c.id.clone(), c))))
-    }
-}
-
 /// Chat state
 ///
 /// Note: This type does NOT track channel selection. Selection is UI state
@@ -234,9 +229,9 @@ mod channels_serde {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ChatState {
-    /// All available channels (private, use accessor methods)
-    #[serde(with = "channels_serde")]
-    channels: DomainCollection<ChannelId, Channel>,
+    /// All available channels (keyed by ChannelId for O(1) lookup)
+    #[serde(with = "channel_map_serde", default)]
+    channels: HashMap<ChannelId, Channel>,
     /// Per-channel message storage
     #[serde(default)]
     channel_messages: HashMap<ChannelId, Vec<Message>>,
@@ -252,79 +247,76 @@ impl ChatState {
     /// Maximum number of messages retained in-memory for the active channel.
     const MAX_ACTIVE_MESSAGES: usize = 500;
 
-    // ========================================================================
-    // Factory Methods
-    // ========================================================================
+    // ─── Constructors ────────────────────────────────────────────────────────
 
-    /// Create a ChatState from a list of channels
+    /// Create a new empty ChatState.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create ChatState from an iterator of channels.
     #[must_use]
     pub fn from_channels(channels: impl IntoIterator<Item = Channel>) -> Self {
         Self {
-            channels: DomainCollection::from_iter(
-                channels.into_iter().map(|c| (c.id.clone(), c)),
-            ),
-            channel_messages: HashMap::new(),
-            total_unread: 0,
-            loading_more: false,
-            has_more: false,
+            channels: channels.into_iter().map(|c| (c.id, c)).collect(),
+            ..Default::default()
         }
     }
 
-    // ========================================================================
-    // Channel Accessors
-    // ========================================================================
+    // ─── Query Methods ────────────────────────────────────────────────────────
 
-    /// Get channel by ID
+    /// Get channel by ID (O(1) lookup).
     #[must_use]
     pub fn channel(&self, id: &ChannelId) -> Option<&Channel> {
         self.channels.get(id)
     }
 
-    /// Get mutable channel by ID
+    /// Get mutable channel by ID (O(1) lookup).
     pub fn channel_mut(&mut self, id: &ChannelId) -> Option<&mut Channel> {
         self.channels.get_mut(id)
     }
 
-    /// Check if a channel exists
+    /// Check if a channel exists.
     #[must_use]
     pub fn has_channel(&self, id: &ChannelId) -> bool {
-        self.channels.contains(id)
+        self.channels.contains_key(id)
     }
 
-    /// Get all channels as an iterator
-    #[must_use]
+    /// Get all channels as an iterator.
     pub fn all_channels(&self) -> impl Iterator<Item = &Channel> {
-        self.channels.all()
+        self.channels.values()
     }
 
-    /// Get the number of channels
+    /// Get mutable iterator over all channels.
+    pub fn all_channels_mut(&mut self) -> impl Iterator<Item = &mut Channel> {
+        self.channels.values_mut()
+    }
+
+    /// Get channel count.
     #[must_use]
     pub fn channel_count(&self) -> usize {
-        self.channels.count()
+        self.channels.len()
     }
 
-    /// Check if there are no channels
+    /// Check if there are no channels.
     #[must_use]
-    pub fn channels_is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.channels.is_empty()
     }
 
-    /// Get the first channel (for default selection)
+    /// Get unread count for a channel.
     #[must_use]
-    pub fn first_channel(&self) -> Option<&Channel> {
-        self.channels.all().next()
-    }
-
-    /// Get unread count for a channel
     pub fn unread_count(&self, channel_id: &ChannelId) -> u32 {
         self.channel(channel_id)
             .map(|c| c.unread_count)
             .unwrap_or(0)
     }
 
-    /// Get messages for a specific channel
+    /// Get messages for a specific channel.
     ///
     /// Returns an empty slice if the channel has no messages or doesn't exist.
+    #[must_use]
     pub fn messages_for_channel(&self, channel_id: &ChannelId) -> &[Message] {
         self.channel_messages
             .get(channel_id)
@@ -339,22 +331,37 @@ impl ChatState {
         self.channel_messages.values().flatten().collect()
     }
 
-    /// Get total message count across all channels
+    /// Get total message count across all channels.
     #[must_use]
     pub fn message_count(&self) -> usize {
         self.channel_messages.values().map(|v| v.len()).sum()
     }
 
-    /// Add or update a channel
+    // ─── Mutation Methods ─────────────────────────────────────────────────────
+
+    /// Add a new channel (no-op if channel with same ID exists).
     pub fn add_channel(&mut self, channel: Channel) {
-        self.channels.apply(channel.id.clone(), channel);
+        // Entry API avoids duplicate check
+        self.channels.entry(channel.id).or_insert(channel);
     }
 
-    /// Remove a channel by ID
-    pub fn remove_channel(&mut self, channel_id: &ChannelId) {
-        self.channels.remove(channel_id);
+    /// Insert or update a channel.
+    pub fn upsert_channel(&mut self, channel: Channel) {
+        self.channels.insert(channel.id, channel);
+    }
+
+    /// Remove a channel by ID, returning it if it existed.
+    pub fn remove_channel(&mut self, channel_id: &ChannelId) -> Option<Channel> {
         // Remove messages from per-channel cache
         self.channel_messages.remove(channel_id);
+        self.channels.remove(channel_id)
+    }
+
+    /// Clear all channels and messages.
+    pub fn clear(&mut self) {
+        self.channels.clear();
+        self.channel_messages.clear();
+        self.total_unread = 0;
     }
 
     /// Mark a channel as joined (increment member count)

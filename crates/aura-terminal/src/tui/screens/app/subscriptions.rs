@@ -275,7 +275,8 @@ pub fn use_messages_subscription(
                 } else {
                     // Fallback: get messages for first channel if available
                     chat_state
-                        .first_channel()
+                        .all_channels()
+                        .next()
                         .map(|c| {
                             chat_state
                                 .messages_for_channel(&c.id)
@@ -401,10 +402,11 @@ pub fn use_neighborhood_homes_subscription(
         let homes = shared_homes.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
-                let mut ids: Vec<String> = Vec::with_capacity(n.neighbor_count() + 1);
+                let mut ids: Vec<String> = Vec::with_capacity(n.neighbors.len() + 1);
                 ids.push(n.home_home_id.to_string());
                 ids.extend(
-                    n.all_neighbors()
+                    n.neighbors
+                        .iter()
                         .filter(|b| b.id != n.home_home_id)
                         .map(|b| b.id.to_string()),
                 );

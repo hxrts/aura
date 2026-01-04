@@ -213,11 +213,7 @@ fn build_context_journal(
             let bytes = serde_json::to_vec(&content).unwrap_or_default();
             let order = order_hint.unwrap_or_else(|| OrderTime(hash(&bytes)));
             let timestamp = TimeStamp::OrderClock(order.clone());
-            facts.insert(Fact {
-                order,
-                timestamp,
-                content,
-            });
+            facts.insert(Fact::new(order, timestamp, content));
         }
     }
 

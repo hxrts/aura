@@ -83,15 +83,15 @@ mod tests {
     }
 
     fn make_fact(order_byte: u8) -> Fact {
-        Fact {
-            order: OrderTime([order_byte; 32]),
-            timestamp: TimeStamp::OrderClock(OrderTime([order_byte; 32])),
-            content: FactContent::Snapshot(SnapshotFact {
+        Fact::new(
+            OrderTime([order_byte; 32]),
+            TimeStamp::OrderClock(OrderTime([order_byte; 32])),
+            FactContent::Snapshot(SnapshotFact {
                 state_hash: Hash32::default(),
                 superseded_facts: vec![],
                 sequence: order_byte as u64,
             }),
-        }
+        )
     }
 
     #[test]

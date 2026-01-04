@@ -127,6 +127,7 @@ pub mod ceremonies;
 pub mod core;
 pub mod effects;
 pub mod errors;
+pub mod policies;
 pub mod queries;
 pub mod runtime_bridge;
 pub mod signal_defs;
