@@ -46,6 +46,7 @@ pub use views::*;
 pub use views::{ChatMemberCandidate, CreateChannelModalState, CreateChannelStep};
 
 use crate::tui::screens::{Router, Screen};
+use crate::tui::types::AuthorityInfo;
 
 /// Complete TUI state
 ///
@@ -106,6 +107,16 @@ pub struct TuiState {
     /// Whether the terminal window has focus
     /// Used to pause animations and show visual indicator when unfocused
     pub window_focused: bool,
+
+    // ========================================================================
+    // Authority Context (app-global, affects all screens)
+    // ========================================================================
+    /// Available authorities for this device (populated by signal)
+    pub authorities: Vec<AuthorityInfo>,
+
+    /// Index of the currently active authority in the authorities list
+    /// This is app-global context, not screen-specific state.
+    pub current_authority_index: usize,
 }
 
 impl TuiState {

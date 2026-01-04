@@ -3,10 +3,13 @@
 use super::KeyRotationCeremonyUiState;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::state::form::{Validatable, ValidationError};
-use crate::tui::types::{AuthorityInfo, AuthoritySubSection, MfaPolicy, SettingsSection};
+use crate::tui::types::{AuthoritySubSection, MfaPolicy, SettingsSection};
 use aura_core::types::Epoch;
 
 /// Settings screen state
+///
+/// Note: Authority context (authorities list, current_authority_index) is stored
+/// in TuiState root since authority switching is app-global and affects all screens.
 #[derive(Clone, Debug, Default)]
 pub struct SettingsViewState {
     /// Panel focus (menu or detail)
@@ -24,16 +27,15 @@ pub struct SettingsViewState {
     /// Whether to auto-fill the next device enrollment code into the import modal
     pub pending_mobile_enrollment_autofill: bool,
 
-    // === Authority panel state ===
+    // === Authority panel state (screen-local navigation) ===
     /// Sub-section within Authority panel (Info or Mfa)
     pub authority_sub_section: AuthoritySubSection,
-    /// Available authorities for this device
-    pub authorities: Vec<AuthorityInfo>,
-    /// Index of the currently active authority in the authorities list
-    pub current_authority_index: usize,
     // Note: Modal state is now stored in ModalQueue, not here.
     // Use modal_queue.enqueue(QueuedModal::SettingsDisplayName/AddDevice/RemoveDevice(...)) to show modals.
     // For threshold/guardian changes, use OpenGuardianSetup dispatch which shows GuardianSetup modal.
+    //
+    // Note: Authority list and current authority index are now in TuiState root,
+    // not here, since authority switching is app-global context.
 }
 
 /// State for display name edit modal (settings screen)

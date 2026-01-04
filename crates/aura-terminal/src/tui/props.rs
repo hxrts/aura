@@ -633,8 +633,9 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         mfa_policy: state.settings.mfa_policy,
         // Authority panel state
         authority_sub_section: state.settings.authority_sub_section,
-        authorities: state.settings.authorities.clone(),
-        current_authority_index: state.settings.current_authority_index,
+        // Authority context is app-global, in TuiState root
+        authorities: state.authorities.clone(),
+        current_authority_index: state.current_authority_index,
         // Authority picker modal (from queue)
         authority_picker_modal_visible: authority_picker_visible,
         authority_picker_modal_contacts: authority_picker_contacts,

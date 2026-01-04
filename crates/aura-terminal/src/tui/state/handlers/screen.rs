@@ -391,8 +391,8 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                     use crate::tui::types::AuthoritySubSection;
                     match state.settings.authority_sub_section {
                         AuthoritySubSection::Info => {
-                            // Open authority picker if multiple authorities
-                            if state.settings.authorities.len() > 1 {
+                            // Open authority picker if multiple authorities (app-global)
+                            if state.authorities.len() > 1 {
                                 commands.push(TuiCommand::Dispatch(
                                     DispatchCommand::OpenAuthorityPicker,
                                 ));
@@ -439,8 +439,8 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             if state.settings.section == SettingsSection::Recovery {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::StartRecovery));
             } else if state.settings.section == SettingsSection::Authority {
-                // Switch authority - open picker if multiple authorities available
-                if state.settings.authorities.len() > 1 {
+                // Switch authority - open picker if multiple authorities available (app-global)
+                if state.authorities.len() > 1 {
                     commands.push(TuiCommand::Dispatch(DispatchCommand::OpenAuthorityPicker));
                 }
             }

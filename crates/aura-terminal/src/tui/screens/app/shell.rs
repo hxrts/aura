@@ -2249,8 +2249,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         (cb.settings.on_import_device_enrollment_on_mobile)(code);
                                     }
                                     DispatchCommand::OpenAuthorityPicker => {
-                                        // Build list of authorities from state
-                                        let authorities = new_state.settings.authorities.clone();
+                                        // Build list of authorities from app-global state
+                                        let authorities = new_state.authorities.clone();
                                         if authorities.len() <= 1 {
                                             new_state.toast_info("Only one authority available");
                                         } else {
@@ -2270,13 +2270,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::SwitchAuthority { authority_id } => {
-                                        // Find the authority index and update state
-                                        if let Some(idx) = new_state.settings.authorities
+                                        // Find the authority index and update app-global state
+                                        if let Some(idx) = new_state.authorities
                                             .iter()
                                             .position(|a| a.id == authority_id)
                                         {
-                                            new_state.settings.current_authority_index = idx;
-                                            if let Some(auth) = new_state.settings.authorities.get(idx) {
+                                            new_state.current_authority_index = idx;
+                                            if let Some(auth) = new_state.authorities.get(idx) {
                                                 new_state.toast_success(format!(
                                                     "Switched to authority: {}",
                                                     auth.display_name
