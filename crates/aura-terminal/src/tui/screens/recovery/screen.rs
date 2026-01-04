@@ -454,7 +454,7 @@ fn convert_recovery_status(
     state: &aura_app::ui::types::RecoveryState,
     guardians: &[aura_app::ui::types::Guardian],
 ) -> RecoveryStatus {
-    match &state.active_recovery {
+    match state.active_recovery() {
         Some(process) => {
             // Build approvals list
             let approvals: Vec<GuardianApproval> = guardians
@@ -475,7 +475,7 @@ fn convert_recovery_status(
         None => RecoveryStatus {
             state: RecoveryState::None,
             approvals_received: 0,
-            threshold: state.threshold,
+            threshold: state.threshold(),
             approvals: vec![],
         },
     }
@@ -522,24 +522,23 @@ pub fn RecoveryScreen(
         async move {
             // Helper closure to convert RecoveryState to TUI types
             let convert_state = |recovery_state: &aura_app::ui::types::RecoveryState| {
-                let guardians: Vec<Guardian> = recovery_state
-                    .guardians
-                    .iter()
-                    .map(convert_guardian)
-                    .collect();
+                let guardians_vec: Vec<aura_app::ui::types::Guardian> =
+                    recovery_state.all_guardians().cloned().collect();
+                let tui_guardians: Vec<Guardian> =
+                    guardians_vec.iter().map(convert_guardian).collect();
 
-                let status = convert_recovery_status(recovery_state, &recovery_state.guardians);
+                let status = convert_recovery_status(recovery_state, &guardians_vec);
 
                 let pending: Vec<PendingRequest> = recovery_state
-                    .pending_requests
+                    .pending_requests()
                     .iter()
                     .map(PendingRequest::from)
                     .collect();
 
                 (
-                    guardians,
-                    recovery_state.threshold,
-                    recovery_state.guardian_count,
+                    tui_guardians,
+                    recovery_state.threshold(),
+                    recovery_state.guardian_count() as u32,
                     status,
                     pending,
                 )

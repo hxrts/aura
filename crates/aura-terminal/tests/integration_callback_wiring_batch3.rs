@@ -307,14 +307,13 @@ async fn test_recovery_flow_start() {
 
     if let Ok(recovery) = &initial_recovery {
         let status = recovery
-            .active_recovery
-            .as_ref()
+            .active_recovery()
             .map(|r| format!("{status:?}", status = r.status))
             .unwrap_or_else(|| "Idle".to_string());
         println!("  Initial status: {status}");
-        let guardian_count = recovery.guardians.len();
+        let guardian_count = recovery.guardian_count();
         println!("  Initial guardians: {guardian_count}");
-        println!("  Threshold: {threshold}", threshold = recovery.threshold);
+        println!("  Threshold: {threshold}", threshold = recovery.threshold());
     }
     drop(core);
 
@@ -343,14 +342,13 @@ async fn test_recovery_flow_start() {
 
     if let Ok(recovery) = &new_recovery {
         let status = recovery
-            .active_recovery
-            .as_ref()
+            .active_recovery()
             .map(|r| format!("{status:?}", status = r.status))
             .unwrap_or_else(|| "Idle".to_string());
         println!("  New status: {status}");
 
         // Check if recovery was initiated
-        if recovery.active_recovery.is_some() {
+        if recovery.active_recovery().is_some() {
             println!("  Recovery flow initiated successfully");
         }
     }
@@ -394,16 +392,14 @@ async fn test_recovery_cancel() {
     let core = app_core.read().await;
     if let Ok(recovery) = core.read(&*RECOVERY_SIGNAL).await {
         let status = recovery
-            .active_recovery
-            .as_ref()
+            .active_recovery()
             .map(|r| format!("{status:?}", status = r.status))
             .unwrap_or_else(|| "Idle".to_string());
         println!("  Recovery status: {status}");
         // After cancel, should be Idle (no active recovery) or Completed
-        let is_idle_or_completed = recovery.active_recovery.is_none()
+        let is_idle_or_completed = recovery.active_recovery().is_none()
             || recovery
-                .active_recovery
-                .as_ref()
+                .active_recovery()
                 .map(|r| matches!(r.status, RecoveryProcessStatus::Completed))
                 .unwrap_or(false);
         assert!(
@@ -429,7 +425,7 @@ async fn test_guardian_approval_submission() {
     println!("Phase 1: Get initial recovery state");
     let core = app_core.read().await;
     if let Ok(recovery) = core.read(&*RECOVERY_SIGNAL).await {
-        if let Some(active) = &recovery.active_recovery {
+        if let Some(active) = recovery.active_recovery() {
             println!("  Status: {status:?}", status = active.status);
             let approval_count = active.approvals.len();
             println!("  Approvals: {approval_count}");
@@ -697,11 +693,11 @@ async fn test_update_contact_nickname() {
     println!("\nPhase 3: Verify contacts state");
     let core = app_core.read().await;
     if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-        let contact_count = contacts_state.contacts.len();
+        let contact_count = contacts_state.contact_count();
         println!("  Total contacts: {contact_count}");
 
         // Look for the updated contact
-        for contact in &contacts_state.contacts {
+        for contact in contacts_state.all_contacts() {
             if contact.id.to_string() == contact_id || contact.nickname == "My Friend" {
                 println!(
                     "    Found contact: {contact_id} (nickname: {nickname})",
@@ -1335,13 +1331,13 @@ async fn test_complete_contact_to_guardian_flow() {
 
     // Check contacts state
     if let Ok(contacts_state) = core.read(&*CONTACTS_SIGNAL).await {
-        let contact_count = contacts_state.contacts.len();
+        let contact_count = contacts_state.contact_count();
         println!("  Total contacts: {contact_count}");
     }
 
     // Check recovery/guardian state
     if let Ok(recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
-        let guardian_count = recovery_state.guardians.len();
+        let guardian_count = recovery_state.guardian_count();
         println!("  Total guardians: {guardian_count}");
     }
 

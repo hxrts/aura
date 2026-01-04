@@ -28,7 +28,7 @@ pub use state::ViewState;
 pub use collection::DomainCollection;
 pub use account::{AccountBackup, AccountConfig, BACKUP_PREFIX, BACKUP_VERSION};
 pub use chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus};
-pub use contacts::{Contact, ContactsState, MySuggestion, ReadReceiptPolicy, SuggestionPolicy};
+pub use contacts::{Contact, ContactError, ContactsState, ContactUpdate, MySuggestion, ReadReceiptPolicy, SuggestionPolicy};
 pub use display::{
     format_network_status, format_network_status_with_severity, format_relative_time,
     format_relative_time_from, format_relative_time_ms, format_timestamp, format_timestamp_full,
@@ -57,7 +57,7 @@ pub use operations::{
 };
 pub use recovery::{
     classify_threshold_security, format_recovery_status, security_level_hint, CeremonyProgress,
-    Guardian, GuardianBinding, GuardianStatus, RecoveryApproval, RecoveryProcess,
+    Guardian, GuardianBinding, GuardianStatus, RecoveryApproval, RecoveryError, RecoveryProcess,
     RecoveryProcessStatus, RecoveryState, SecurityLevel,
 };
 pub use wizards::{

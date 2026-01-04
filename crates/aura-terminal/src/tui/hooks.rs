@@ -500,6 +500,20 @@ impl Default for ContactsSnapshot {
     }
 }
 
+impl ContactsSnapshot {
+    /// Get total number of contacts
+    #[must_use]
+    pub fn contact_count(&self) -> usize {
+        self.contacts.len()
+    }
+
+    /// Check if there are no contacts
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.contacts.is_empty()
+    }
+}
+
 /// Snapshot of neighborhood-related data for rendering
 #[derive(Debug, Clone)]
 pub struct NeighborhoodSnapshot {

@@ -181,7 +181,7 @@ pub async fn wait_for_contacts_extended(
 /// Wait for a specific contact to appear.
 pub async fn wait_for_contact(app_core: &Arc<RwLock<AppCore>>, contact_id: AuthorityId) {
     wait_for_contacts_extended(app_core, |state| {
-        state.contacts.iter().any(|c| c.id == contact_id)
+        state.all_contacts().any(|c| c.id == contact_id)
     })
     .await;
 }
@@ -191,7 +191,7 @@ pub async fn wait_for_contacts_by_ids(app_core: &Arc<RwLock<AppCore>>, expected:
     wait_for_contacts_extended(app_core, |state| {
         expected
             .iter()
-            .all(|id| state.contacts.iter().any(|c| &c.id == id))
+            .all(|id| state.all_contacts().any(|c| &c.id == id))
     })
     .await;
 }

@@ -183,7 +183,7 @@ fn test_guardian_setup_receives_reactive_contacts() {
         .expect("Guardian setup modal should be open");
 
     assert_eq!(
-        modal.contacts.len(),
+        modal.contact_count(),
         2,
         "Modal should have 2 contacts from reactive subscription"
     );
@@ -216,7 +216,7 @@ fn test_guardian_setup_empty_when_no_contacts() {
         .get_guardian_setup_modal()
         .expect("Guardian setup modal should be open");
 
-    assert!(modal.contacts.is_empty(), "Modal should have no contacts");
+    assert!(modal.is_empty(), "Modal should have no contacts");
     assert!(
         modal.selected_indices.is_empty(),
         "No contacts means no selections"
@@ -254,7 +254,7 @@ fn test_contacts_added_after_render_are_visible() {
         .expect("Guardian setup modal should be open");
 
     assert_eq!(
-        modal.contacts.len(),
+        modal.contact_count(),
         1,
         "Modal should see Bob who was added after render"
     );
@@ -359,7 +359,7 @@ fn test_dispatch_uses_current_contacts_not_captured() {
     // - User would see "No contacts available"
     let modal = harness.get_guardian_setup_modal().unwrap();
     assert_eq!(
-        modal.contacts.len(),
+        modal.contact_count(),
         1,
         "BUG: Dispatch handler used stale captured contacts instead of current reactive state"
     );
@@ -402,7 +402,7 @@ proptest! {
 
         if let Some(modal) = harness.get_guardian_setup_modal() {
             prop_assert_eq!(
-                modal.contacts.len(),
+                modal.contact_count(),
                 contacts.len(),
                 "Modal contact count must match SharedContacts"
             );
@@ -448,7 +448,7 @@ proptest! {
 
         if let Some(modal) = harness.get_guardian_setup_modal() {
             prop_assert_eq!(
-                modal.contacts.len(),
+                modal.contact_count(),
                 all_contacts.len(),
                 "Modal must see all contacts including those added after render"
             );

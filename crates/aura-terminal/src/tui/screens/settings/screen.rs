@@ -131,7 +131,7 @@ pub fn SettingsScreen(
         let app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |recovery_state| {
-                reactive_guardian_count.set(recovery_state.guardians.len());
+                reactive_guardian_count.set(recovery_state.guardian_count());
                 reactive_recovery_status.set(RecoveryStatus::from(&recovery_state));
             })
             .await;

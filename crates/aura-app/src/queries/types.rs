@@ -760,11 +760,7 @@ impl Query for ContactsQuery {
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
 
-        Ok(ContactsState {
-            contacts,
-            selected_contact_id: None, // Set by caller
-            search_filter: None,       // Set by caller
-        })
+        Ok(ContactsState::from_iter(contacts))
     }
 }
 
@@ -954,15 +950,12 @@ impl Query for RecoveryQuery {
 
         let mut guardians_by_id: HashMap<AuthorityId, Guardian> = HashMap::new();
         let mut threshold = 0u32;
-        let mut guardian_count = 0u32;
 
         for row in bindings.rows.iter() {
             if threshold == 0 {
                 threshold = get_int(row, "threshold") as u32;
             }
-            if guardian_count == 0 {
-                guardian_count = get_int(row, "guardian_count") as u32;
-            }
+            // Note: guardian_count is now computed from guardians.len()
 
             let guardian_id = get_authority_id(row, "contact_id")?;
             let nickname = get_string(row, "contact_nickname");
@@ -993,19 +986,14 @@ impl Query for RecoveryQuery {
             });
         }
 
-        let guardians: Vec<Guardian> = guardians_by_id.into_values().collect();
-        if guardian_count == 0 && !guardians.is_empty() {
-            guardian_count = guardians.len() as u32;
-        }
-
-        Ok(RecoveryState {
-            guardians,
+        // Use the HashMap directly - RecoveryState now uses HashMap<AuthorityId, Guardian>
+        Ok(RecoveryState::from_parts(
+            guardians_by_id,
             threshold,
-            guardian_count,
-            active_recovery: None,
-            pending_requests: Vec::new(),
-            guardian_bindings: Vec::new(),
-        })
+            None,
+            Vec::new(),
+            Vec::new(),
+        ))
     }
 }
 

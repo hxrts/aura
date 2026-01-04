@@ -41,7 +41,7 @@ async fn wait_for_contacts(app_core: &Arc<RwLock<AppCore>>, expected: &[Authorit
 
         if expected
             .iter()
-            .all(|id| state.contacts.iter().any(|c| c.id == *id))
+            .all(|id| state.all_contacts().any(|c| c.id == *id))
         {
             return;
         }
@@ -50,7 +50,7 @@ async fn wait_for_contacts(app_core: &Arc<RwLock<AppCore>>, expected: &[Authorit
             panic!(
                 "Timed out waiting for contacts; expected={:?}, got={:?}",
                 expected,
-                state.contacts.iter().map(|c| c.id).collect::<Vec<_>>()
+                state.all_contacts().map(|c| c.id).collect::<Vec<_>>()
             );
         }
 

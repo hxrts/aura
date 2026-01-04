@@ -14,7 +14,7 @@ use aura_app::signal_defs::{
 };
 use aura_app::views::{
     chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
-    contacts::{Contact, ContactsState},
+    contacts::{Contact, ContactsState, ContactUpdate},
     home::{BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
     invitations::{
         Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
@@ -316,9 +316,7 @@ impl ReactiveView for ContactsSignalView {
                                 Some(nickname)
                             };
 
-                            if let Some(contact) =
-                                state.contacts.iter_mut().find(|c| c.id == contact_id)
-                            {
+                            if let Some(contact) = state.contact_mut(&contact_id) {
                                 // Preserve any user-set nickname; only fill suggestion if missing.
                                 if contact.suggested_name.is_none() {
                                     contact.suggested_name = suggested_name;
@@ -327,7 +325,7 @@ impl ReactiveView for ContactsSignalView {
                             } else {
                                 // Contact invitations carry an optional nickname, which we treat as
                                 // a suggested name. The user's nickname is a separate local label.
-                                state.contacts.push(Contact {
+                                state.apply_contact(Contact {
                                     id: contact_id,
                                     nickname: String::new(),
                                     suggested_name,
@@ -341,7 +339,7 @@ impl ReactiveView for ContactsSignalView {
                             changed = true;
                         }
                         ContactFact::Removed { contact_id, .. } => {
-                            state.contacts.retain(|c| c.id != contact_id);
+                            let _ = state.remove_contact(&contact_id);
                             changed = true;
                         }
                         ContactFact::Renamed {
@@ -350,10 +348,11 @@ impl ReactiveView for ContactsSignalView {
                             renamed_at,
                             ..
                         } => {
-                            state.set_nickname(contact_id, new_nickname);
-                            if let Some(contact) =
-                                state.contacts.iter_mut().find(|c| c.id == contact_id)
-                            {
+                            let _ = state.update_contact(
+                                &contact_id,
+                                ContactUpdate::SetNickname(new_nickname),
+                            );
+                            if let Some(contact) = state.contact_mut(&contact_id) {
                                 contact.last_interaction = Some(renamed_at.ts_ms);
                             }
                             changed = true;
@@ -361,7 +360,10 @@ impl ReactiveView for ContactsSignalView {
                         ContactFact::ReadReceiptPolicyUpdated {
                             contact_id, policy, ..
                         } => {
-                            state.set_read_receipt_policy(contact_id, policy);
+                            let _ = state.update_contact(
+                                &contact_id,
+                                ContactUpdate::SetReadReceiptPolicy(policy),
+                            );
                             changed = true;
                         }
                     }
@@ -370,7 +372,10 @@ impl ReactiveView for ContactsSignalView {
                     aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id, .. },
                 )) => {
                     // Reflect guardian status into contacts for details screens.
-                    state.set_guardian_status(*guardian_id, true);
+                    let _ = state.update_contact(
+                        guardian_id,
+                        ContactUpdate::SetGuardian(true),
+                    );
                     changed = true;
                 }
                 _ => {}
@@ -416,10 +421,12 @@ impl RecoverySignalView {
     }
 
     fn ensure_guardian(state: &mut RecoveryState, guardian_id: AuthorityId) {
-        if let Some(guardian) = state.guardians.iter_mut().find(|g| g.id == guardian_id) {
-            guardian.status = GuardianStatus::Active;
+        if state.has_guardian(&guardian_id) {
+            // Reactivate existing guardian
+            let _ = state.reactivate_guardian(&guardian_id);
         } else {
-            state.guardians.push(Guardian {
+            // Add new guardian
+            state.apply_guardian(Guardian {
                 id: guardian_id,
                 name: String::new(),
                 status: GuardianStatus::Active,
@@ -429,8 +436,16 @@ impl RecoverySignalView {
         }
     }
 
-    fn update_guardian_count(state: &mut RecoveryState) {
-        state.guardian_count = state.guardians.len() as u32;
+    fn retain_guardians(state: &mut RecoveryState, guardian_ids: &[AuthorityId]) {
+        // Remove guardians not in the list
+        let to_remove: Vec<AuthorityId> = state
+            .all_guardians()
+            .filter(|g| !guardian_ids.contains(&g.id))
+            .map(|g| g.id)
+            .collect();
+        for id in to_remove {
+            state.remove_guardian(&id);
+        }
     }
 }
 
@@ -445,7 +460,7 @@ impl ReactiveView for RecoverySignalView {
                     aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id, .. },
                 )) => {
                     Self::ensure_guardian(&mut state, *guardian_id);
-                    Self::update_guardian_count(&mut state);
+                    // Note: guardian_count is now computed from guardians.len()
                     changed = true;
                 }
                 FactContent::Relational(RelationalFact::Generic {
@@ -474,8 +489,7 @@ impl ReactiveView for RecoverySignalView {
                             for guardian_id in guardian_ids {
                                 Self::ensure_guardian(&mut state, guardian_id);
                             }
-                            state.threshold = threshold as u32;
-                            Self::update_guardian_count(&mut state);
+                            state.set_threshold(threshold as u32);
                             changed = true;
                         }
                         RecoveryFact::GuardianSetupCompleted {
@@ -484,12 +498,11 @@ impl ReactiveView for RecoverySignalView {
                             ..
                         } => {
                             // Replace guardian set with the ceremony-completed list.
-                            state.guardians.retain(|g| guardian_ids.contains(&g.id));
+                            Self::retain_guardians(&mut state, &guardian_ids);
                             for guardian_id in guardian_ids {
                                 Self::ensure_guardian(&mut state, guardian_id);
                             }
-                            state.threshold = threshold as u32;
-                            Self::update_guardian_count(&mut state);
+                            state.set_threshold(threshold as u32);
                             changed = true;
                         }
                         RecoveryFact::MembershipChangeCompleted {
@@ -497,8 +510,12 @@ impl ReactiveView for RecoverySignalView {
                             new_threshold,
                             ..
                         } => {
-                            state.threshold = new_threshold as u32;
-                            state.guardian_count = new_guardian_ids.len() as u32;
+                            state.set_threshold(new_threshold as u32);
+                            // Guardian count is now computed from the guardians HashMap
+                            Self::retain_guardians(&mut state, &new_guardian_ids);
+                            for guardian_id in new_guardian_ids {
+                                Self::ensure_guardian(&mut state, guardian_id);
+                            }
                             changed = true;
                         }
                         _ => {}

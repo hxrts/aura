@@ -306,11 +306,11 @@ async fn test_invitation_flow_creates_contact() {
     let bob_contacts = env.get_agent("bob").read_contacts().await;
     println!(
         "  Alice contacts: {count}",
-        count = alice_contacts.contacts.len()
+        count = alice_contacts.contact_count()
     );
     println!(
         "  Bob contacts: {count}",
-        count = bob_contacts.contacts.len()
+        count = bob_contacts.contact_count()
     );
 
     // Phase 3: Generate invitation code for Alice
@@ -355,7 +355,7 @@ async fn test_invitation_flow_creates_contact() {
     );
     println!(
         "  Bob contacts after import: {count}",
-        count = bob_contacts_after.contacts.len()
+        count = bob_contacts_after.contact_count()
     );
 
     // Phase 6: Check signal tracker
@@ -542,14 +542,14 @@ async fn test_guardian_recovery_flow() {
     // Read recovery state
     println!("\nInitial recovery state:");
     let bob_recovery = env.get_agent("bob").read_recovery().await;
-    println!("  Guardians: {count}", count = bob_recovery.guardians.len());
+    println!("  Guardians: {count}", count = bob_recovery.guardian_count());
     println!(
         "  Threshold: {threshold}",
-        threshold = bob_recovery.threshold
+        threshold = bob_recovery.threshold()
     );
     println!(
         "  Active recovery: {}",
-        bob_recovery.active_recovery.is_some()
+        bob_recovery.active_recovery().is_some()
     );
 
     // Toggle guardian for alice (now with authority!)
@@ -577,7 +577,7 @@ async fn test_guardian_recovery_flow() {
     println!("\nFinal recovery state:");
     println!(
         "  Guardians: {count}",
-        count = bob_recovery_final.guardians.len()
+        count = bob_recovery_final.guardian_count()
     );
 
     // Check signal emissions
@@ -718,9 +718,9 @@ async fn test_social_graph_flow() {
     let bob_contacts = env.get_agent("bob").read_contacts().await;
     println!(
         "  Bob's contacts: {count}",
-        count = bob_contacts.contacts.len()
+        count = bob_contacts.contact_count()
     );
-    for c in &bob_contacts.contacts {
+    for c in bob_contacts.all_contacts() {
         let name = if !c.nickname.is_empty() {
             c.nickname.clone()
         } else if let Some(s) = &c.suggested_name {
@@ -737,7 +737,7 @@ async fn test_social_graph_flow() {
 
     // Phase 3: Update nicknames for contacts
     println!("\nPhase 3: Updating nicknames...");
-    if let Some(alice_contact) = bob_contacts.contacts.iter().find(|c| {
+    if let Some(alice_contact) = bob_contacts.all_contacts().find(|c| {
         (!c.nickname.is_empty() && c.nickname.to_lowercase() == "alice")
             || c.suggested_name
                 .as_ref()
@@ -763,7 +763,7 @@ async fn test_social_graph_flow() {
 
     // Read contacts again to verify nickname update
     let bob_contacts_after_nickname = env.get_agent("bob").read_contacts().await;
-    for c in &bob_contacts_after_nickname.contacts {
+    for c in bob_contacts_after_nickname.all_contacts() {
         let name = if !c.nickname.is_empty() {
             c.nickname.clone()
         } else if let Some(s) = &c.suggested_name {
@@ -802,7 +802,7 @@ async fn test_social_graph_flow() {
 
     // Phase 5: Invite contact to home (SendHomeInvitation)
     println!("\nPhase 5: Inviting contact to home...");
-    if let Some(alice_contact) = bob_contacts.contacts.iter().find(|c| {
+    if let Some(alice_contact) = bob_contacts.all_contacts().find(|c| {
         (!c.nickname.is_empty() && c.nickname.to_lowercase() == "alice")
             || c.suggested_name
                 .as_ref()
@@ -841,7 +841,7 @@ async fn test_social_graph_flow() {
     let bob_contacts_final = env.get_agent("bob").read_contacts().await;
     println!(
         "  Final contacts: {count}",
-        count = bob_contacts_final.contacts.len()
+        count = bob_contacts_final.contact_count()
     );
 
     // Summary of signal emissions
@@ -904,7 +904,7 @@ async fn test_social_graph_contact_home_view() {
     // Read contacts
     let bob_contacts = env.get_agent("bob").read_contacts().await;
     println!("Bob's contacts:");
-    for c in &bob_contacts.contacts {
+    for c in bob_contacts.all_contacts() {
         println!("  - {name} (id: {id})", name = c.nickname, id = c.id);
     }
 
@@ -919,7 +919,7 @@ async fn test_social_graph_contact_home_view() {
 
     // Verify we can read both signals needed for the view
     assert!(
-        !bob_contacts.contacts.is_empty() || true,
+        !bob_contacts.is_empty() || true,
         "Contacts signal readable"
     );
     println!("\n✓ Both CONTACTS_SIGNAL and HOMES_SIGNAL are readable");

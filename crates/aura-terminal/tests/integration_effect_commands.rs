@@ -155,7 +155,7 @@ async fn test_import_invitation_propagates_to_contacts_signal() {
     // Get initial contacts count
     let initial_contacts = {
         let core = app_core.read().await;
-        core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts.len()
+        core.read(&*CONTACTS_SIGNAL).await.unwrap().contact_count()
     };
     println!("Initial contacts: {}", initial_contacts);
 
@@ -174,11 +174,11 @@ async fn test_import_invitation_propagates_to_contacts_signal() {
     let final_contacts = {
         let core = app_core.read().await;
         let state = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        println!("Final contacts: {}", state.contacts.len());
-        for c in &state.contacts {
+        println!("Final contacts: {}", state.contact_count());
+        for c in state.all_contacts() {
             println!("  - {} ({})", c.nickname, c.id);
         }
-        state.contacts.len()
+        state.contact_count()
     };
 
     assert_eq!(
@@ -215,12 +215,12 @@ async fn test_multiple_imports_all_propagate() {
     // Verify all three appear in signal
     let contacts = {
         let core = app_core.read().await;
-        core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts
+        core.read(&*CONTACTS_SIGNAL).await.unwrap()
     };
 
-    assert_eq!(contacts.len(), 3, "Should have 3 contacts after 3 imports");
+    assert_eq!(contacts.contact_count(), 3, "Should have 3 contacts after 3 imports");
 
-    let names: Vec<_> = contacts.iter().map(|c| c.nickname.to_lowercase()).collect();
+    let names: Vec<_> = contacts.all_contacts().map(|c| c.nickname.to_lowercase()).collect();
     assert!(
         names.contains(&"alice".to_string()),
         "Alice should be in contacts"
@@ -260,12 +260,13 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
     let alice_id = {
         let core = app_core.read().await;
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        contacts
-            .contacts
-            .first()
+        let id = contacts
+            .all_contacts()
+            .next()
             .expect("Alice should exist")
             .id
-            .clone()
+            .clone();
+        id
     };
 
     // Get initial channel count
@@ -332,7 +333,7 @@ async fn test_subscriber_receives_updates() {
 
             // Wait for one update
             if let Ok(update) = stream.recv().await {
-                let _ = tx.send(update.contacts.len()).await;
+                let _ = tx.send(update.contact_count()).await;
             }
         })
     };
@@ -381,7 +382,7 @@ async fn test_failed_command_does_not_propagate() {
     // Get initial state
     let initial_contacts = {
         let core = app_core.read().await;
-        core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts.len()
+        core.read(&*CONTACTS_SIGNAL).await.unwrap().contact_count()
     };
 
     // Try to import invalid code
@@ -396,7 +397,7 @@ async fn test_failed_command_does_not_propagate() {
     // Verify signal was NOT updated
     let final_contacts = {
         let core = app_core.read().await;
-        core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts.len()
+        core.read(&*CONTACTS_SIGNAL).await.unwrap().contact_count()
     };
 
     assert_eq!(
@@ -427,13 +428,13 @@ async fn test_duplicate_import_idempotent() {
         .unwrap();
 
     // Verify only one contact exists
-    let contacts = {
+    let contact_count = {
         let core = app_core.read().await;
-        core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts
+        core.read(&*CONTACTS_SIGNAL).await.unwrap().contact_count()
     };
 
     assert_eq!(
-        contacts.len(),
+        contact_count,
         1,
         "Duplicate import should not create duplicate contacts"
     );
@@ -463,7 +464,7 @@ async fn test_update_nickname_propagates_to_contacts_signal() {
     let (alice_id, original_nickname) = {
         let core = app_core.read().await;
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        let alice = contacts.contacts.first().expect("Alice should exist");
+        let alice = contacts.all_contacts().next().expect("Alice should exist");
         (alice.id.clone(), alice.nickname.clone())
     };
     println!("  Original nickname: {}", original_nickname);
@@ -484,9 +485,7 @@ async fn test_update_nickname_propagates_to_contacts_signal() {
         let core = app_core.read().await;
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
         contacts
-            .contacts
-            .iter()
-            .find(|c| c.id == alice_id)
+            .contact(&alice_id)
             .map(|c| c.nickname.clone())
             .unwrap_or_default()
     };
@@ -527,7 +526,7 @@ async fn test_toggle_guardian_propagates_to_signals() {
     let (alice_id, initial_is_guardian) = {
         let core = app_core.read().await;
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        let alice = contacts.contacts.first().expect("Alice should exist");
+        let alice = contacts.all_contacts().next().expect("Alice should exist");
         (alice.id.clone(), alice.is_guardian)
     };
     println!("  Initial guardian status: {}", initial_is_guardian);
@@ -535,7 +534,7 @@ async fn test_toggle_guardian_propagates_to_signals() {
     // Get initial guardian count from RECOVERY_SIGNAL
     let initial_guardian_count = {
         let core = app_core.read().await;
-        core.read(&*RECOVERY_SIGNAL).await.unwrap().guardians.len()
+        core.read(&*RECOVERY_SIGNAL).await.unwrap().guardian_count()
     };
     println!("  Initial guardian count: {}", initial_guardian_count);
 
@@ -554,12 +553,10 @@ async fn test_toggle_guardian_propagates_to_signals() {
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
         let recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap();
         let is_guardian = contacts
-            .contacts
-            .iter()
-            .find(|c| c.id == alice_id)
+            .contact(&alice_id)
             .map(|c| c.is_guardian)
             .unwrap_or(false);
-        (is_guardian, recovery.guardians.len())
+        (is_guardian, recovery.guardian_count())
     };
 
     println!("  Final guardian status: {}", final_is_guardian);
@@ -611,12 +608,13 @@ async fn test_create_channel_propagates_to_chat_signal() {
     let alice_id = {
         let core = app_core.read().await;
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        contacts
-            .contacts
-            .first()
+        let id = contacts
+            .all_contacts()
+            .next()
             .expect("Alice should exist")
             .id
-            .clone()
+            .clone();
+        id
     };
 
     // Get initial channel count
@@ -695,7 +693,7 @@ async fn test_accept_invitation_propagates_to_signals() {
         let core = app_core.read().await;
         let inv = core.read(&*INVITATIONS_SIGNAL).await.unwrap();
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        (inv.pending_count(), contacts.contacts.len())
+        (inv.pending_count(), contacts.contact_count())
     };
     println!("  Initial pending invitations: {}", initial_pending);
     println!("  Initial contacts: {}", initial_contacts);
@@ -714,7 +712,7 @@ async fn test_accept_invitation_propagates_to_signals() {
         let core = app_core.read().await;
         let inv = core.read(&*INVITATIONS_SIGNAL).await.unwrap();
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        (inv.pending_count(), contacts.contacts.len())
+        (inv.pending_count(), contacts.contact_count())
     };
     println!("  Final pending invitations: {}", final_pending);
     println!("  Final contacts: {}", final_contacts);
@@ -759,7 +757,7 @@ async fn test_decline_invitation_propagates_to_signal() {
     // Check initial state
     let initial_contacts = {
         let core = app_core.read().await;
-        core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts.len()
+        core.read(&*CONTACTS_SIGNAL).await.unwrap().contact_count()
     };
     println!("  Initial contacts after import: {}", initial_contacts);
 
@@ -775,7 +773,7 @@ async fn test_decline_invitation_propagates_to_signal() {
     // Check final state
     let final_contacts = {
         let core = app_core.read().await;
-        core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts.len()
+        core.read(&*CONTACTS_SIGNAL).await.unwrap().contact_count()
     };
     println!("  Final contacts: {}", final_contacts);
 
@@ -786,10 +784,10 @@ async fn test_decline_invitation_propagates_to_signal() {
         let bob_exists = {
             let core = app_core.read().await;
             let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-            contacts
-                .contacts
-                .iter()
-                .any(|c| c.nickname.to_lowercase() == "bob")
+            let exists = contacts
+                .all_contacts()
+                .any(|c| c.nickname.to_lowercase() == "bob");
+            exists
         };
         println!("  Bob still in contacts: {}", bob_exists);
     } else {
@@ -821,8 +819,8 @@ async fn test_send_message_propagates_to_chat_signal() {
         core.read(&*CONTACTS_SIGNAL)
             .await
             .unwrap()
-            .contacts
-            .first()
+            .all_contacts()
+            .next()
             .expect("Alice")
             .id
             .clone()
@@ -981,12 +979,13 @@ async fn test_send_home_invitation_propagates_to_signals() {
     let alice_id = {
         let core = app_core.read().await;
         let contacts = core.read(&*CONTACTS_SIGNAL).await.unwrap();
-        contacts
-            .contacts
-            .first()
+        let id = contacts
+            .all_contacts()
+            .next()
             .expect("Alice should exist")
             .id
-            .clone()
+            .clone();
+        id
     };
     println!("  Alice contact ID: {}", alice_id);
 
@@ -1051,15 +1050,15 @@ async fn test_social_graph_full_flow() {
 
     let contacts = {
         let core = app_core.read().await;
-        core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts
+        core.read(&*CONTACTS_SIGNAL).await.unwrap()
     };
-    assert_eq!(contacts.len(), 2, "Should have 2 contacts after imports");
-    println!("  Contacts after import: {}", contacts.len());
+    assert_eq!(contacts.contact_count(), 2, "Should have 2 contacts after imports");
+    println!("  Contacts after import: {}", contacts.contact_count());
 
     // Step 2: Update nicknames
     println!("Step 2: Updating nicknames...");
     let alice_id = contacts
-        .iter()
+        .all_contacts()
         .find(|c| c.nickname.to_lowercase() == "alice")
         .expect("Alice exists")
         .id
@@ -1077,9 +1076,9 @@ async fn test_social_graph_full_flow() {
     if nickname_result.is_ok() {
         let updated_contacts = {
             let core = app_core.read().await;
-            core.read(&*CONTACTS_SIGNAL).await.unwrap().contacts
+            core.read(&*CONTACTS_SIGNAL).await.unwrap()
         };
-        let alice = updated_contacts.iter().find(|c| c.id == alice_id);
+        let alice = updated_contacts.contact(&alice_id);
         if let Some(a) = alice {
             println!("  Alice nickname after update: {}", a.nickname);
             assert_eq!(a.nickname, "Ally", "Nickname should be updated");
@@ -1119,8 +1118,8 @@ async fn test_social_graph_full_flow() {
         core.read(&*CONTACTS_SIGNAL).await.unwrap()
     };
 
-    println!("  Final contacts count: {}", final_contacts.contacts.len());
-    for c in &final_contacts.contacts {
+    println!("  Final contacts count: {}", final_contacts.contact_count());
+    for c in final_contacts.all_contacts() {
         println!("    - {} (id: {})", c.nickname, c.id);
     }
 

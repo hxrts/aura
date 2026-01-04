@@ -57,7 +57,7 @@ pub async fn handle_recovery(
                 Some(_rt) => {
                     // Check if there's an active recovery that's ready to complete
                     match get_recovery_status(app_core).await {
-                        Ok(state) => match state.active_recovery {
+                        Ok(state) => match state.active_recovery() {
                             Some(recovery) => {
                                 if recovery.approvals_received >= recovery.approvals_required {
                                     // Ready to complete - would call RuntimeBridge to finalize
@@ -94,7 +94,7 @@ pub async fn handle_recovery(
             match runtime {
                 Some(_rt) => {
                     match get_recovery_status(app_core).await {
-                        Ok(state) => match state.active_recovery {
+                        Ok(state) => match state.active_recovery() {
                             Some(_recovery) => {
                                 // Would call RuntimeBridge to cancel the ceremony
                                 Some(Ok(OpResponse::Data("Recovery cancelled".to_string())))

@@ -159,12 +159,12 @@ async fn wait_for_contact(app_core: &Arc<RwLock<AppCore>>, contact_id: Authority
                 .expect("Failed to read CONTACTS_SIGNAL")
         };
 
-        if state.contacts.iter().any(|c| c.id == contact_id) {
+        if state.all_contacts().any(|c| c.id == contact_id) {
             return;
         }
 
         if start.elapsed() > Duration::from_secs(2) {
-            let contact_count = state.contacts.len();
+            let contact_count = state.contact_count();
             panic!("Timed out waiting for contact {contact_id} ({contact_count} contacts present)");
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -391,11 +391,11 @@ async fn test_import_invitation_command_with_demo_codes() {
             .expect("Failed to read CONTACTS_SIGNAL")
     };
     assert!(
-        contacts_state.contacts.iter().any(|c| c.id == alice_sender),
+        contacts_state.all_contacts().any(|c| c.id == alice_sender),
         "Alice should appear in contacts after import"
     );
     assert!(
-        contacts_state.contacts.iter().any(|c| c.id == carol_sender),
+        contacts_state.all_contacts().any(|c| c.id == carol_sender),
         "Carol should appear in contacts after import"
     );
 
@@ -492,17 +492,11 @@ async fn test_complete_demo_invitation_flow() {
         .await
         .expect("Read CONTACTS_SIGNAL");
     assert!(
-        contacts_state
-            .contacts
-            .iter()
-            .any(|c| c.id == alice_invitation.sender_id),
+        contacts_state.has_contact(&alice_invitation.sender_id),
         "Alice should appear in contacts"
     );
     assert!(
-        contacts_state
-            .contacts
-            .iter()
-            .any(|c| c.id == carol_invitation.sender_id),
+        contacts_state.has_contact(&carol_invitation.sender_id),
         "Carol should appear in contacts"
     );
 
@@ -535,11 +529,11 @@ async fn test_complete_demo_invitation_flow() {
 
     // Check recovery/guardians state
     if let Ok(recovery_state) = core.read(&*RECOVERY_SIGNAL).await {
-        let guardian_count = recovery_state.guardians.len();
+        let guardian_count = recovery_state.guardian_count();
         println!("  Guardians: {guardian_count}");
         println!(
             "  Threshold: {threshold}",
-            threshold = recovery_state.threshold
+            threshold = recovery_state.threshold()
         );
     }
 

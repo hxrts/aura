@@ -154,7 +154,7 @@ pub fn use_contacts_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
-                    contacts_state.contacts.iter().map(Contact::from).collect();
+                    contacts_state.all_contacts().map(Contact::from).collect();
                 let new_count = contact_list.len();
 
                 if let Ok(mut guard) = contacts.write() {
@@ -441,7 +441,7 @@ pub fn use_pending_requests_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |r| {
                 let pending: Vec<PendingRequest> = r
-                    .pending_requests
+                    .pending_requests()
                     .iter()
                     .map(PendingRequest::from)
                     .collect();
@@ -493,7 +493,7 @@ pub fn use_notifications_subscription(
         let app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |state| {
-                recovery_count.store(state.pending_requests.len(), Ordering::Relaxed);
+                recovery_count.store(state.pending_requests().len(), Ordering::Relaxed);
                 send_total(&update_tx, &invite_count, &recovery_count);
             })
             .await;

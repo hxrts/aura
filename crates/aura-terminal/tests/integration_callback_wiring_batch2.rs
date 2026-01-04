@@ -210,7 +210,7 @@ async fn test_invitation_roundtrip_preserves_data() {
     // The import adds the sender as a contact via add_contact_from_invitation
     // Check contacts signal for the new contact
     let contacts = ctx.snapshot_contacts();
-    let contact_count = contacts.contacts.len();
+    let contact_count = contacts.contact_count();
     println!("  Contact count after import: {contact_count}");
 
     cleanup_test_dir("inv-roundtrip");
@@ -836,7 +836,7 @@ async fn test_all_snapshots_consistent() {
     let chat_channels = chat.channels.len();
     let chat_messages = chat.messages.len();  // ChatSnapshot has messages field directly
     println!("  Chat: {chat_channels} channels, {chat_messages} messages");
-    let contact_count = contacts.contacts.len();
+    let contact_count = contacts.contact_count();
     println!("  Contacts: {contact_count} contacts");
     println!(
         "  Recovery: in_progress={in_progress}",
@@ -864,8 +864,8 @@ async fn test_all_snapshots_consistent() {
         "Channel count should be consistent"
     );
     assert_eq!(
-        contacts.contacts.len(),
-        contacts2.contacts.len(),
+        contacts.contact_count(),
+        contacts2.contact_count(),
         "Contact count should be consistent"
     );
     println!("  Snapshots are consistent across reads");

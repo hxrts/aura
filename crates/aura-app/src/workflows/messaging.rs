@@ -570,9 +570,7 @@ pub async fn start_direct_chat(
 
     // Get contact name from ViewState for the channel name
     let contact_name = contacts
-        .contacts
-        .iter()
-        .find(|c| c.id == authority_id)
+        .contact(&authority_id)
         .map(|c| c.nickname.clone())
         .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]));
 

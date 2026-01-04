@@ -166,8 +166,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contacts: Vec<Contact> = contacts_state
-                    .contacts
-                    .iter()
+                    .all_contacts()
                     .map(|c| Contact::from(c))
                     .collect();
                 reactive_contacts.set(contacts);

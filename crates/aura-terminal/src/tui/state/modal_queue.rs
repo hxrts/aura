@@ -190,6 +190,18 @@ impl ContactSelectModalState {
             .get(self.selected_index)
             .map(|(id, _)| id.as_str())
     }
+
+    /// Get total number of contacts
+    #[must_use]
+    pub fn contact_count(&self) -> usize {
+        self.contacts.len()
+    }
+
+    /// Check if there are no contacts
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.contacts.is_empty()
+    }
 }
 
 /// State for chat member selection modal (wraps a multi-select contact picker plus the draft create-channel state)

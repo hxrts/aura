@@ -335,8 +335,7 @@ pub async fn accept_invitation(
         )
         .await
         .unwrap_or_default()
-        .contacts
-        .len()
+        .contact_count()
     };
 
     #[cfg(feature = "signals")]
@@ -357,7 +356,7 @@ pub async fn accept_invitation(
         for _ in 0..4096 {
             // Prefer consuming emissions if available (fast path).
             if let Some(state) = contacts_stream.try_recv() {
-                if state.contacts.len() > initial_contact_count {
+                if state.contact_count() > initial_contact_count {
                     break;
                 }
             } else {
@@ -369,8 +368,7 @@ pub async fn accept_invitation(
                 )
                 .await
                 .unwrap_or_default()
-                .contacts
-                .len();
+                .contact_count();
 
                 if contacts_len > initial_contact_count {
                     break;

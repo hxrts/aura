@@ -916,18 +916,18 @@ proptest! {
         if let Some(QueuedModal::ContactSelect(state))
         | Some(QueuedModal::GuardianSelect(state)) = modal
         {
-            if state.contacts.is_empty() {
+            if state.is_empty() {
                 prop_assert_eq!(state.selected_index, 0);
             } else {
-                prop_assert!(state.selected_index < state.contacts.len());
+                prop_assert!(state.selected_index < state.contact_count());
             }
         }
 
         if let Some(QueuedModal::ChatMemberSelect(state)) = modal {
-            if state.picker.contacts.is_empty() {
+            if state.picker.is_empty() {
                 prop_assert_eq!(state.picker.selected_index, 0);
             } else {
-                prop_assert!(state.picker.selected_index < state.picker.contacts.len());
+                prop_assert!(state.picker.selected_index < state.picker.contact_count());
             }
         }
     }

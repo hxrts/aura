@@ -603,7 +603,7 @@ fn test_contact_select_state_machine() {
     let mut state = ContactSelectState::new();
 
     assert!(!state.visible);
-    assert!(state.contacts.is_empty());
+    assert!(state.is_empty());
     assert!(!state.can_select());
 
     // Create test contacts
@@ -616,7 +616,7 @@ fn test_contact_select_state_machine() {
     // Show with contacts
     state.show("Select Guardian", contacts);
     assert!(state.visible);
-    assert_eq!(state.contacts.len(), 3);
+    assert_eq!(state.contact_count(), 3);
     assert_eq!(state.selected_index, 0);
     assert!(state.can_select());
 
@@ -640,7 +640,7 @@ fn test_contact_select_state_machine() {
     // Hide
     state.hide();
     assert!(!state.visible);
-    assert!(state.contacts.is_empty());
+    assert!(state.is_empty());
 
     println!("✓ ContactSelectState state machine works correctly");
 }

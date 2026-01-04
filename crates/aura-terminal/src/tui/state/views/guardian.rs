@@ -82,6 +82,18 @@ impl GuardianSetupModalState {
         self.selected_indices.len() as u8
     }
 
+    /// Get total number of available contacts
+    #[must_use]
+    pub fn contact_count(&self) -> usize {
+        self.contacts.len()
+    }
+
+    /// Check if there are no contacts available
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.contacts.is_empty()
+    }
+
     /// Create initialized state with contacts, pre-selecting current guardians
     #[must_use]
     pub fn with_contacts(contacts: Vec<GuardianCandidate>) -> Self {
