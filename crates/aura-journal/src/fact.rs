@@ -152,6 +152,19 @@ impl Journal {
         self.facts.insert(fact);
     }
 
+    /// Clear ack tracking for the specified facts.
+    ///
+    /// This sets `ack_tracked = false` on each fact, indicating that
+    /// ack tracking has been garbage collected for these facts.
+    pub fn clear_ack_tracking(&mut self, fact_ids: &[OrderTime]) {
+        for order in fact_ids {
+            if let Some(mut fact) = self.get_fact_mut(order) {
+                fact.ack_tracked = false;
+                self.update_fact(fact);
+            }
+        }
+    }
+
     /// Get all facts that have ack tracking enabled
     pub fn ack_tracked_facts(&self) -> impl Iterator<Item = &Fact> {
         self.facts.iter().filter(|f| f.ack_tracked)
@@ -329,6 +342,85 @@ impl AckStorage {
             }
         }
     }
+
+    /// Garbage collect ack tracking for facts that meet policy criteria.
+    ///
+    /// This method iterates over facts with ack tracking, consults the provided
+    /// policy evaluator, and removes ack records for facts where tracking is no
+    /// longer needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `journal` - The journal containing the facts
+    /// * `should_drop` - A closure that takes a fact and its consistency,
+    ///   returning true if ack tracking should be dropped for this fact.
+    ///
+    /// # Returns
+    ///
+    /// The number of facts whose ack tracking was garbage collected.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Drop tracking for all finalized facts
+    /// let gc_count = ack_storage.gc_ack_tracking(&journal, |fact, consistency| {
+    ///     consistency.agreement.is_finalized()
+    /// });
+    /// ```
+    pub fn gc_ack_tracking<F>(&mut self, journal: &mut Journal, mut should_drop: F) -> GcResult
+    where
+        F: FnMut(&Fact, &Consistency) -> bool,
+    {
+        let mut facts_to_gc: Vec<OrderTime> = Vec::new();
+
+        // First pass: identify facts to GC
+        for fact in journal.iter_facts() {
+            if !fact.ack_tracked {
+                continue;
+            }
+
+            if let Some(consistency) = self.get_consistency(journal, fact.id()) {
+                if should_drop(fact, &consistency) {
+                    facts_to_gc.push(fact.id().clone());
+                }
+            }
+        }
+
+        let count = facts_to_gc.len();
+
+        // Second pass: remove ack records and update facts
+        for fact_id in &facts_to_gc {
+            self.delete_acks(fact_id);
+        }
+
+        // Update fact metadata in journal
+        journal.clear_ack_tracking(&facts_to_gc);
+
+        GcResult {
+            facts_collected: count,
+            facts_remaining: self.len(),
+        }
+    }
+
+    /// Garbage collect ack tracking using a predicate on consistency only.
+    ///
+    /// Simpler version of `gc_ack_tracking` when you only need to check
+    /// the consistency metadata, not the fact content.
+    pub fn gc_by_consistency<F>(&mut self, journal: &mut Journal, mut predicate: F) -> GcResult
+    where
+        F: FnMut(&Consistency) -> bool,
+    {
+        self.gc_ack_tracking(journal, |_fact, consistency| predicate(consistency))
+    }
+}
+
+/// Result of garbage collection operation
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GcResult {
+    /// Number of facts whose ack tracking was collected
+    pub facts_collected: usize,
+    /// Number of facts still being tracked
+    pub facts_remaining: usize,
 }
 
 /// Core fact structure (timestamp-driven identity)
@@ -1287,5 +1379,138 @@ mod tests {
 
         // Ordering should be based on order field only
         assert!(fact1 < fact2);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Garbage Collection Tests
+    // ─────────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_gc_ack_tracking_basic() {
+        use aura_core::query::ConsensusId;
+
+        let auth_id = AuthorityId::new_from_entropy([20u8; 32]);
+        let namespace = JournalNamespace::Authority(auth_id);
+        let mut journal = Journal::new(namespace);
+        let mut ack_storage = AckStorage::new();
+
+        // Create a fact with ack tracking
+        let fact = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        )
+        .with_ack_tracking()
+        .with_agreement(Agreement::Finalized {
+            consensus_id: ConsensusId([1u8; 32]),
+        });
+
+        journal.add_fact(fact.clone()).unwrap();
+
+        // Record an ack
+        let peer = AuthorityId::new_from_entropy([21u8; 32]);
+        ack_storage
+            .record_ack(
+                &fact.order,
+                peer,
+                PhysicalTime {
+                    ts_ms: 1000,
+                    uncertainty: None,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(ack_storage.len(), 1);
+        assert!(journal.ack_tracked_facts().count() == 1);
+
+        // GC based on finalization - should drop tracking for finalized facts
+        let result = ack_storage.gc_by_consistency(&mut journal, |c| c.agreement.is_finalized());
+
+        assert_eq!(result.facts_collected, 1);
+        assert_eq!(result.facts_remaining, 0);
+        assert!(ack_storage.is_empty());
+        assert_eq!(journal.ack_tracked_facts().count(), 0);
+    }
+
+    #[test]
+    fn test_gc_ack_tracking_partial() {
+        use aura_core::query::ConsensusId;
+
+        let auth_id = AuthorityId::new_from_entropy([22u8; 32]);
+        let namespace = JournalNamespace::Authority(auth_id);
+        let mut journal = Journal::new(namespace);
+        let mut ack_storage = AckStorage::new();
+
+        // Create two facts - one finalized, one provisional
+        let fact1 = Fact::new(
+            OrderTime([1u8; 32]),
+            TimeStamp::OrderClock(OrderTime([1u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 1,
+            }),
+        )
+        .with_ack_tracking()
+        .with_agreement(Agreement::Finalized {
+            consensus_id: ConsensusId([1u8; 32]),
+        });
+
+        let fact2 = Fact::new(
+            OrderTime([2u8; 32]),
+            TimeStamp::OrderClock(OrderTime([2u8; 32])),
+            FactContent::Snapshot(SnapshotFact {
+                state_hash: Hash32::default(),
+                superseded_facts: vec![],
+                sequence: 2,
+            }),
+        )
+        .with_ack_tracking()
+        .with_agreement(Agreement::Provisional);
+
+        journal.add_fact(fact1.clone()).unwrap();
+        journal.add_fact(fact2.clone()).unwrap();
+
+        // Record acks for both
+        let peer = AuthorityId::new_from_entropy([23u8; 32]);
+        ack_storage
+            .record_ack(
+                &fact1.order,
+                peer,
+                PhysicalTime {
+                    ts_ms: 1000,
+                    uncertainty: None,
+                },
+            )
+            .unwrap();
+        ack_storage
+            .record_ack(
+                &fact2.order,
+                peer,
+                PhysicalTime {
+                    ts_ms: 2000,
+                    uncertainty: None,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(ack_storage.len(), 2);
+        assert_eq!(journal.ack_tracked_facts().count(), 2);
+
+        // GC only finalized facts
+        let result = ack_storage.gc_by_consistency(&mut journal, |c| c.agreement.is_finalized());
+
+        assert_eq!(result.facts_collected, 1);
+        assert_eq!(result.facts_remaining, 1);
+        assert_eq!(ack_storage.len(), 1);
+        assert_eq!(journal.ack_tracked_facts().count(), 1);
+
+        // Provisional fact should still have ack tracking
+        let remaining_fact = journal.get_fact(&fact2.order).unwrap();
+        assert!(remaining_fact.ack_tracked);
     }
 }
