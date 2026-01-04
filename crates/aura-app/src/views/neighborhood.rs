@@ -2,6 +2,7 @@
 
 use aura_core::identifiers::ChannelId;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 /// Adjacency type between homes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -59,7 +60,7 @@ pub struct NeighborhoodState {
     /// Current traversal position (if traversing)
     pub position: Option<TraversalPosition>,
     /// Visible neighbors from current position
-    pub neighbors: Vec<NeighborHome>,
+    neighbors: Vec<NeighborHome>,
     /// Maximum traversal depth allowed
     pub max_depth: u32,
     /// Whether currently loading neighbors
@@ -68,11 +69,139 @@ pub struct NeighborhoodState {
     ///
     /// Managed by the network workflow - terminals should not maintain local peer state.
     #[serde(default)]
-    pub connected_peers: std::collections::HashSet<String>,
+    connected_peers: HashSet<String>,
 }
 
 impl NeighborhoodState {
+    // =========================================================================
+    // Factory Constructors
+    // =========================================================================
+
+    /// Create a new NeighborhoodState from parts.
+    ///
+    /// Used by query results and tests.
+    #[must_use]
+    pub fn from_parts(
+        home_home_id: ChannelId,
+        home_name: String,
+        neighbors: impl IntoIterator<Item = NeighborHome>,
+    ) -> Self {
+        Self {
+            home_home_id,
+            home_name,
+            neighbors: neighbors.into_iter().collect(),
+            ..Default::default()
+        }
+    }
+
+    // =========================================================================
+    // Neighbor Accessors
+    // =========================================================================
+
+    /// Get neighbor by ID
+    #[must_use]
+    pub fn neighbor(&self, id: &ChannelId) -> Option<&NeighborHome> {
+        self.neighbors.iter().find(|n| n.id == *id)
+    }
+
+    /// Get all neighbors
+    #[must_use]
+    pub fn all_neighbors(&self) -> impl Iterator<Item = &NeighborHome> {
+        self.neighbors.iter()
+    }
+
+    /// Get neighbor count
+    #[must_use]
+    pub fn neighbor_count(&self) -> usize {
+        self.neighbors.len()
+    }
+
+    /// Check if there are no neighbors
+    #[must_use]
+    pub fn neighbors_is_empty(&self) -> bool {
+        self.neighbors.is_empty()
+    }
+
+    /// Get direct neighbors
+    #[must_use]
+    pub fn direct_neighbors(&self) -> impl Iterator<Item = &NeighborHome> {
+        self.neighbors
+            .iter()
+            .filter(|n| n.adjacency == AdjacencyType::Direct)
+    }
+
+    /// Add a neighbor
+    pub fn add_neighbor(&mut self, neighbor: NeighborHome) {
+        // Replace if exists, otherwise add
+        if let Some(existing) = self.neighbors.iter_mut().find(|n| n.id == neighbor.id) {
+            *existing = neighbor;
+        } else {
+            self.neighbors.push(neighbor);
+        }
+    }
+
+    /// Remove a neighbor by ID
+    pub fn remove_neighbor(&mut self, id: &ChannelId) -> Option<NeighborHome> {
+        if let Some(pos) = self.neighbors.iter().position(|n| n.id == *id) {
+            Some(self.neighbors.remove(pos))
+        } else {
+            None
+        }
+    }
+
+    /// Clear all neighbors
+    pub fn clear_neighbors(&mut self) {
+        self.neighbors.clear();
+    }
+
+    /// Set neighbors, replacing all existing
+    pub fn set_neighbors(&mut self, neighbors: impl IntoIterator<Item = NeighborHome>) {
+        self.neighbors = neighbors.into_iter().collect();
+    }
+
+    // =========================================================================
+    // Connected Peers Accessors
+    // =========================================================================
+
+    /// Get all connected peers
+    #[must_use]
+    pub fn connected_peers(&self) -> &HashSet<String> {
+        &self.connected_peers
+    }
+
+    /// Get connected peer count
+    #[must_use]
+    pub fn connected_peer_count(&self) -> usize {
+        self.connected_peers.len()
+    }
+
+    /// Check if a peer is connected
+    #[must_use]
+    pub fn has_connected_peer(&self, peer_id: &str) -> bool {
+        self.connected_peers.contains(peer_id)
+    }
+
+    /// Add a connected peer. Returns true if newly added.
+    pub fn add_connected_peer(&mut self, peer_id: String) -> bool {
+        self.connected_peers.insert(peer_id)
+    }
+
+    /// Remove a connected peer. Returns true if was present.
+    pub fn remove_connected_peer(&mut self, peer_id: &str) -> bool {
+        self.connected_peers.remove(peer_id)
+    }
+
+    /// Clear all connected peers
+    pub fn clear_connected_peers(&mut self) {
+        self.connected_peers.clear();
+    }
+
+    // =========================================================================
+    // Navigation Helpers
+    // =========================================================================
+
     /// Check if we're at the local home
+    #[must_use]
     pub fn is_at_home(&self) -> bool {
         self.position
             .as_ref()
@@ -80,20 +209,8 @@ impl NeighborhoodState {
             .unwrap_or(true)
     }
 
-    /// Get neighbor by ID
-    pub fn neighbor(&self, id: &ChannelId) -> Option<&NeighborHome> {
-        self.neighbors.iter().find(|n| n.id == *id)
-    }
-
-    /// Get direct neighbors
-    pub fn direct_neighbors(&self) -> Vec<&NeighborHome> {
-        self.neighbors
-            .iter()
-            .filter(|n| n.adjacency == AdjacencyType::Direct)
-            .collect()
-    }
-
     /// Check if can go back
+    #[must_use]
     pub fn can_go_back(&self) -> bool {
         self.position.as_ref().map(|p| p.depth > 0).unwrap_or(false)
     }

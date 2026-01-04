@@ -160,7 +160,8 @@ impl SnapshotHelper {
         if let Some(snapshot) = self.try_state_snapshot() {
             let home_id = snapshot.neighborhood.home_home_id.clone();
             let home_name = snapshot.neighborhood.home_name.clone();
-            let position = snapshot.neighborhood.position.unwrap_or_else(|| {
+            let homes: Vec<_> = snapshot.neighborhood.all_neighbors().cloned().collect();
+            let position = snapshot.neighborhood.position.clone().unwrap_or_else(|| {
                 aura_app::ui::types::neighborhood::TraversalPosition {
                     current_home_id: home_id.clone(),
                     current_home_name: home_name.clone(),
@@ -171,7 +172,7 @@ impl SnapshotHelper {
             NeighborhoodSnapshot {
                 neighborhood_id: Some(home_id.to_string()),
                 neighborhood_name: Some(home_name),
-                homes: snapshot.neighborhood.neighbors,
+                homes,
                 position,
             }
         } else {

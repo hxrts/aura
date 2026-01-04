@@ -39,8 +39,8 @@ pub async fn add_peer(
     peer_id: String,
 ) -> Result<usize, AuraError> {
     let count = with_neighborhood_state(app_core, |state| {
-        state.connected_peers.insert(peer_id);
-        state.connected_peers.len()
+        state.add_connected_peer(peer_id);
+        state.connected_peer_count()
     })
     .await?;
 
@@ -62,8 +62,8 @@ pub async fn remove_peer(
     peer_id: &str,
 ) -> Result<usize, AuraError> {
     let count = with_neighborhood_state(app_core, |state| {
-        state.connected_peers.remove(peer_id);
-        state.connected_peers.len()
+        state.remove_connected_peer(peer_id);
+        state.connected_peer_count()
     })
     .await?;
 
@@ -79,7 +79,7 @@ pub async fn remove_peer(
 /// **Signal pattern**: Read-only operation (no emission)
 pub async fn get_connected_peers(app_core: &Arc<RwLock<AppCore>>) -> HashSet<String> {
     let state = read_signal_or_default(app_core, &*crate::signal_defs::NEIGHBORHOOD_SIGNAL).await;
-    state.connected_peers
+    state.connected_peers().clone()
 }
 
 // ============================================================================

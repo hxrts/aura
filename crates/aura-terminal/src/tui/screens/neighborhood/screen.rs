@@ -347,7 +347,7 @@ pub fn NeighborhoodScreen(
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
                 let home_id = &n.home_home_id;
-                let mut homes: Vec<HomeSummary> = Vec::with_capacity(n.neighbors.len() + 1);
+                let mut homes: Vec<HomeSummary> = Vec::with_capacity(n.neighbor_count() + 1);
                 homes.push(HomeSummary {
                     id: n.home_home_id.to_string(),
                     name: Some(n.home_name.clone()),
@@ -357,8 +357,7 @@ pub fn NeighborhoodScreen(
                     can_enter: true,
                 });
                 homes.extend(
-                    n.neighbors
-                        .iter()
+                    n.all_neighbors()
                         .filter(|b| b.id != n.home_home_id)
                         .map(|b| convert_neighbor_home(b, home_id)),
                 );

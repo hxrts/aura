@@ -780,7 +780,7 @@ async fn test_neighborhood_position_tracking() {
 
         println!("  Home: {home_id:?}", home_id = neighborhood.home_home_id);
         println!("  Position: {position:?}", position = neighborhood.position);
-        let neighbor_count = neighborhood.neighbors.len();
+        let neighbor_count = neighborhood.neighbor_count();
         println!("  Neighbors: {neighbor_count} entries");
 
         // Verify some position data exists (exact values depend on impl)

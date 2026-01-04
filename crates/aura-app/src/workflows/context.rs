@@ -226,6 +226,6 @@ mod tests {
         let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
 
         let state = get_neighborhood_state(&app_core).await;
-        assert!(state.neighbors.is_empty());
+        assert!(state.neighbors_is_empty());
     }
 }

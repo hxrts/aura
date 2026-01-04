@@ -401,11 +401,10 @@ pub fn use_neighborhood_homes_subscription(
         let homes = shared_homes.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
-                let mut ids: Vec<String> = Vec::with_capacity(n.neighbors.len() + 1);
+                let mut ids: Vec<String> = Vec::with_capacity(n.neighbor_count() + 1);
                 ids.push(n.home_home_id.to_string());
                 ids.extend(
-                    n.neighbors
-                        .iter()
+                    n.all_neighbors()
                         .filter(|b| b.id != n.home_home_id)
                         .map(|b| b.id.to_string()),
                 );
