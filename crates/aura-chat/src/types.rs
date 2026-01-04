@@ -1,9 +1,26 @@
 //! Chat data types and structures
+//!
+//! # Migration Notice
+//!
+//! The status types in this module are being migrated to the unified consistency
+//! metadata types from `aura_core::domain`:
+//!
+//! - `SyncStatus` → `Propagation` (use `aura_core::domain::Propagation`)
+//! - `DeliveryStatus` → `OptimisticStatus` (use `aura_core::domain::OptimisticStatus`)
+//! - `ConfirmationStatus` → `DeferredStatus` (use `aura_core::domain::DeferredStatus`)
+//!
+//! The old types are deprecated and will be removed in a future version.
 
 use aura_core::identifiers::AuthorityId;
-use aura_core::time::TimeStamp;
+use aura_core::time::{PhysicalTime, TimeStamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+// Re-export new consistency types for migration
+pub use aura_core::domain::{
+    Acknowledgment, Agreement, ApprovalProgress, ApprovalThreshold, Consistency, ConsistencyMap,
+    DeferredStatus, OperationCategory, OptimisticStatus, Propagation, ProposalState,
+};
 
 // ============================================================================
 // Sync Status Types (for optimistic UI)
@@ -13,6 +30,15 @@ use uuid::Uuid;
 ///
 /// This is VIEW state, not journal state. It tracks whether local facts
 /// have been synced to peers without affecting the underlying fact system.
+///
+/// # Deprecation
+///
+/// This type is deprecated. Use [`Propagation`] from `aura_core::domain` instead.
+/// The mapping is:
+/// - `SyncStatus::LocalOnly` → `Propagation::Local`
+/// - `SyncStatus::Syncing` → `Propagation::Syncing`
+/// - `SyncStatus::Synced` → `Propagation::Complete`
+/// - `SyncStatus::SyncFailed` → `Propagation::Failed`
 ///
 /// # Usage
 ///
@@ -25,6 +51,7 @@ use uuid::Uuid;
 /// let syncing = SyncStatus::Syncing { peers_synced: 2, peers_total: 5 };
 /// assert!(syncing.is_partial());
 /// ```
+#[deprecated(since = "0.2.0", note = "Use aura_core::domain::Propagation instead")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SyncStatus {
     /// Fact committed locally only, not yet synced to any peer
@@ -135,11 +162,86 @@ impl SyncStatus {
             error,
         }
     }
+
+    /// Convert to the new Propagation type
+    #[allow(deprecated)]
+    pub fn to_propagation(&self) -> Propagation {
+        Propagation::from(self.clone())
+    }
+}
+
+/// Convert SyncStatus to the unified Propagation type
+#[allow(deprecated)]
+impl From<SyncStatus> for Propagation {
+    fn from(status: SyncStatus) -> Self {
+        match status {
+            SyncStatus::LocalOnly => Propagation::Local,
+            SyncStatus::Syncing {
+                peers_synced,
+                peers_total,
+            } => Propagation::Syncing {
+                peers_reached: peers_synced,
+                peers_known: peers_total,
+            },
+            SyncStatus::Synced => Propagation::Complete,
+            SyncStatus::SyncFailed {
+                retry_at_ms,
+                retry_count,
+                error,
+            } => Propagation::Failed {
+                retry_at: PhysicalTime {
+                    ts_ms: retry_at_ms,
+                    uncertainty: None,
+                },
+                retry_count,
+                error: error.unwrap_or_else(|| "Unknown error".to_string()),
+            },
+        }
+    }
+}
+
+/// Convert Propagation to SyncStatus for backward compatibility
+#[allow(deprecated)]
+impl From<Propagation> for SyncStatus {
+    fn from(prop: Propagation) -> Self {
+        match prop {
+            Propagation::Local => SyncStatus::LocalOnly,
+            Propagation::Syncing {
+                peers_reached,
+                peers_known,
+            } => SyncStatus::Syncing {
+                peers_synced: peers_reached,
+                peers_total: peers_known,
+            },
+            Propagation::Complete => SyncStatus::Synced,
+            Propagation::Failed {
+                retry_at,
+                retry_count,
+                error,
+            } => SyncStatus::SyncFailed {
+                retry_at_ms: retry_at.ts_ms,
+                retry_count,
+                error: Some(error),
+            },
+        }
+    }
 }
 
 /// Message delivery status for tracking message delivery and read receipts
 ///
 /// This extends SyncStatus with message-specific delivery semantics.
+///
+/// # Deprecation
+///
+/// This type is deprecated. Use [`OptimisticStatus`] from `aura_core::domain` instead.
+/// `OptimisticStatus` separates concerns into:
+/// - `agreement`: Finalization level (Provisional/SoftSafe/Finalized)
+/// - `propagation`: Sync status (Local/Syncing/Complete/Failed)
+/// - `acknowledgment`: Per-peer delivery confirmation
+///
+/// Note: The `Read` state represents semantic "user read" receipts, which should
+/// be tracked separately as a `MessageRead` fact, not as part of delivery status.
+#[deprecated(since = "0.2.0", note = "Use aura_core::domain::OptimisticStatus instead")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DeliveryStatus {
     /// Message is being sent
@@ -281,12 +383,73 @@ impl DeliveryStatus {
             DeliveryStatus::Failed { .. } => "✗",
         }
     }
+
+    /// Convert to the new OptimisticStatus type
+    ///
+    /// Note: The `Read` state is converted to `Delivered` since read receipts
+    /// are semantic facts that should be tracked separately.
+    #[allow(deprecated)]
+    pub fn to_optimistic_status(&self) -> OptimisticStatus {
+        OptimisticStatus::from(self.clone())
+    }
+}
+
+/// Convert DeliveryStatus to the unified OptimisticStatus type
+///
+/// Note: This is a lossy conversion - the `Read` state is converted to
+/// a delivered status. Read receipts should be tracked as separate semantic facts.
+#[allow(deprecated)]
+impl From<DeliveryStatus> for OptimisticStatus {
+    fn from(status: DeliveryStatus) -> Self {
+        match status {
+            DeliveryStatus::Sending => OptimisticStatus {
+                agreement: Agreement::Provisional,
+                propagation: Propagation::Local,
+                acknowledgment: None,
+            },
+            DeliveryStatus::Sent { .. } => OptimisticStatus {
+                agreement: Agreement::Provisional,
+                propagation: Propagation::Complete,
+                acknowledgment: None,
+            },
+            DeliveryStatus::Delivered { .. } | DeliveryStatus::Read { .. } => {
+                // Delivered/Read implies acks have been received
+                OptimisticStatus {
+                    agreement: Agreement::Provisional,
+                    propagation: Propagation::Complete,
+                    acknowledgment: Some(Acknowledgment::new()),
+                }
+            }
+            DeliveryStatus::Failed { error, .. } => OptimisticStatus {
+                agreement: Agreement::Provisional,
+                propagation: Propagation::Failed {
+                    retry_at: PhysicalTime {
+                        ts_ms: 0,
+                        uncertainty: None,
+                    },
+                    retry_count: 0,
+                    error,
+                },
+                acknowledgment: None,
+            },
+        }
+    }
 }
 
 /// Confirmation status for multi-party operations
 ///
 /// Tracks distributed confirmation for optimistic operations that require
 /// agreement from multiple parties (e.g., channel creation, permission changes).
+///
+/// # Deprecation
+///
+/// This type is deprecated. Use [`DeferredStatus`] from `aura_core::domain` instead.
+/// The `DeferredStatus` type provides richer tracking including:
+/// - Proposal state (Pending/Approved/Rejected/Expired/Superseded)
+/// - Approval progress with per-approver records
+/// - Threshold-based approval tracking
+/// - Applied agreement level
+#[deprecated(since = "0.2.0", note = "Use aura_core::domain::DeferredStatus instead")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ConfirmationStatus {
     /// Applied locally only, no confirmation ceremony started
@@ -369,6 +532,83 @@ impl ConfirmationStatus {
             ConfirmationStatus::PartiallyConfirmed { .. } => "⚠",
             ConfirmationStatus::Unconfirmed { .. } => "⚠",
             ConfirmationStatus::RolledBack { .. } => "✗",
+        }
+    }
+
+    /// Convert to the new DeferredStatus type
+    #[allow(deprecated)]
+    pub fn to_deferred_status(&self, proposal_id: &str) -> DeferredStatus {
+        let expires_at = PhysicalTime {
+            ts_ms: u64::MAX, // Default to far future
+            uncertainty: None,
+        };
+
+        match self {
+            ConfirmationStatus::LocalOnly => DeferredStatus::new(
+                proposal_id,
+                ApprovalThreshold::Any,
+                expires_at,
+            ),
+            ConfirmationStatus::Confirming {
+                confirmed_count,
+                total_parties,
+                ..
+            } => {
+                let mut status = DeferredStatus::new(
+                    proposal_id,
+                    ApprovalThreshold::Unanimous,
+                    expires_at,
+                );
+                // Note: We can't fully reconstruct approver identities from the old format
+                // This is a lossy conversion
+                let _ = (*confirmed_count, *total_parties); // Suppress unused warnings
+                status
+            }
+            ConfirmationStatus::Confirmed { confirmed_at_ms } => {
+                let mut status = DeferredStatus::new(
+                    proposal_id,
+                    ApprovalThreshold::Any,
+                    expires_at,
+                );
+                status.state = ProposalState::Approved;
+                status.applied_agreement = Some(Agreement::SoftSafe { cert: None });
+                let _ = confirmed_at_ms; // Suppress unused warning
+                status
+            }
+            ConfirmationStatus::PartiallyConfirmed { .. } => {
+                // Partial confirmation maps to pending state
+                DeferredStatus::new(
+                    proposal_id,
+                    ApprovalThreshold::Unanimous,
+                    expires_at,
+                )
+            }
+            ConfirmationStatus::Unconfirmed { reason, .. } => {
+                let mut status = DeferredStatus::new(
+                    proposal_id,
+                    ApprovalThreshold::Any,
+                    expires_at,
+                );
+                // Use a zero-filled authority ID as a placeholder for unknown rejector
+                status.state = ProposalState::Rejected {
+                    reason: reason.clone(),
+                    by: AuthorityId::from_uuid(Uuid::nil()),
+                };
+                status
+            }
+            ConfirmationStatus::RolledBack { reason, .. } => {
+                let mut status = DeferredStatus::new(
+                    proposal_id,
+                    ApprovalThreshold::Any,
+                    expires_at,
+                );
+                // Use a zero-filled authority ID as a placeholder for unknown rejector
+                status.state = ProposalState::Rejected {
+                    reason: reason.clone(),
+                    by: AuthorityId::from_uuid(Uuid::nil()),
+                };
+                status
+            }
         }
     }
 }
