@@ -1059,14 +1059,14 @@ mod tests {
     }
 
     fn fact_from_relational(relational: RelationalFact) -> Fact {
-        Fact {
-            order: OrderTime([0u8; 32]),
-            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+        Fact::new(
+            OrderTime([0u8; 32]),
+            TimeStamp::PhysicalClock(PhysicalTime {
                 ts_ms: 0,
                 uncertainty: None,
             }),
-            content: FactContent::Relational(relational),
-        }
+            FactContent::Relational(relational),
+        )
     }
 
     #[tokio::test]

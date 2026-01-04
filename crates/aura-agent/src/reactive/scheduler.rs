@@ -764,11 +764,7 @@ mod tests {
             uncertainty: None,
         });
 
-        Fact {
-            order,
-            timestamp,
-            content,
-        }
+        Fact::new(order, timestamp, content)
     }
 
     /// Mock view for testing

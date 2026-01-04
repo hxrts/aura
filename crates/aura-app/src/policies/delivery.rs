@@ -307,7 +307,7 @@ mod tests {
         // Finalized - drop
         let c = test_consistency(
             Agreement::Finalized {
-                consensus_id: aura_core::types::ConsensusId(1),
+                consensus_id: aura_core::query::ConsensusId([1u8; 32]),
             },
             None,
         );
@@ -343,7 +343,7 @@ mod tests {
         // Finalized but not acked - don't drop
         let c = test_consistency(
             Agreement::Finalized {
-                consensus_id: aura_core::types::ConsensusId(1),
+                consensus_id: aura_core::query::ConsensusId([1u8; 32]),
             },
             None,
         );
@@ -356,7 +356,7 @@ mod tests {
         // Both finalized AND acked - drop
         let c = test_consistency(
             Agreement::Finalized {
-                consensus_id: aura_core::types::ConsensusId(1),
+                consensus_id: aura_core::query::ConsensusId([1u8; 32]),
             },
             Some(test_ack(&[1])),
         );

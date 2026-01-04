@@ -365,7 +365,7 @@ mod tests {
         let consistency = Consistency {
             category: OperationCategory::Optimistic,
             agreement: Agreement::Finalized {
-                consensus_id: aura_core::types::ConsensusId(1),
+                consensus_id: aura_core::query::ConsensusId([1u8; 32]),
             },
             propagation: Propagation::Complete,
             acknowledgment: None,
@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn test_status_result_is_finalized() {
         let status = OptimisticStatus::new().with_agreement(Agreement::Finalized {
-            consensus_id: aura_core::types::ConsensusId(1),
+            consensus_id: aura_core::query::ConsensusId([1u8; 32]),
         });
 
         let result = StatusResult::Optimistic(status);

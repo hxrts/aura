@@ -392,7 +392,7 @@ mod tests {
             Propagation::Local
         );
 
-        tracker.record_fact_propagated(fact_id, test_authority(1));
+        tracker.record_fact_propagated(fact_id.clone(), test_authority(1));
         assert_eq!(
             tracker.fact_propagation_status(&fact_id),
             Propagation::Syncing {
@@ -401,7 +401,7 @@ mod tests {
             }
         );
 
-        tracker.record_fact_propagated(fact_id, test_authority(2));
+        tracker.record_fact_propagated(fact_id.clone(), test_authority(2));
         assert_eq!(
             tracker.fact_propagation_status(&fact_id),
             Propagation::Complete
@@ -420,8 +420,8 @@ mod tests {
         tracker.record_fact_propagated(fact1, test_authority(1));
 
         // fact2 to both peers
-        tracker.record_fact_propagated(fact2, test_authority(1));
-        tracker.record_fact_propagated(fact2, test_authority(2));
+        tracker.record_fact_propagated(fact2.clone(), test_authority(1));
+        tracker.record_fact_propagated(fact2.clone(), test_authority(2));
 
         let fully_propagated = tracker.fully_propagated_facts();
         assert_eq!(fully_propagated.len(), 1);
