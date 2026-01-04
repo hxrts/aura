@@ -272,7 +272,7 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
     // Get initial channel count
     let initial_channels = {
         let core = app_core.read().await;
-        core.read(&*CHAT_SIGNAL).await.unwrap().channels.len()
+        core.read(&*CHAT_SIGNAL).await.unwrap().channel_count()
     };
     println!("Initial channels: {}", initial_channels);
 
@@ -295,18 +295,18 @@ async fn test_start_direct_chat_propagates_to_chat_signal() {
         core.read(&*CHAT_SIGNAL).await.unwrap()
     };
 
-    println!("Final channels: {}", final_state.channels.len());
-    for ch in &final_state.channels {
+    println!("Final channels: {}", final_state.channel_count());
+    for ch in final_state.all_channels() {
         println!("  - {} ({})", ch.name, ch.id);
     }
 
     assert!(
-        final_state.channels.len() > initial_channels,
+        final_state.channel_count() > initial_channels,
         "CHAT_SIGNAL should have new DM channel after StartDirectChat"
     );
 
     // Verify it's a DM channel (check is_dm flag, not ID format)
-    let dm_channel = final_state.channels.iter().find(|c| c.is_dm);
+    let dm_channel = final_state.all_channels().find(|c| c.is_dm);
     assert!(dm_channel.is_some(), "Should have a DM channel");
 
     cleanup_test_dir("direct-chat");
@@ -620,7 +620,7 @@ async fn test_create_channel_propagates_to_chat_signal() {
     // Get initial channel count
     let initial_channels = {
         let core = app_core.read().await;
-        core.read(&*CHAT_SIGNAL).await.unwrap().channels.len()
+        core.read(&*CHAT_SIGNAL).await.unwrap().channel_count()
     };
     println!("  Initial channels: {}", initial_channels);
 
@@ -642,21 +642,20 @@ async fn test_create_channel_propagates_to_chat_signal() {
         core.read(&*CHAT_SIGNAL).await.unwrap()
     };
 
-    println!("  Final channels: {}", final_state.channels.len());
-    for ch in &final_state.channels {
+    println!("  Final channels: {}", final_state.channel_count());
+    for ch in final_state.all_channels() {
         println!("    - {} ({})", ch.name, ch.id);
     }
 
     // If command succeeded, verify channel was added to signal
     if result.is_ok() {
         assert!(
-            final_state.channels.len() > initial_channels,
+            final_state.channel_count() > initial_channels,
             "CHAT_SIGNAL should have new channel after CreateChannel"
         );
         assert!(
             final_state
-                .channels
-                .iter()
+                .all_channels()
                 .any(|c| c.name == "Test Channel"),
             "CHAT_SIGNAL should contain the created channel"
         );
@@ -837,11 +836,12 @@ async fn test_send_message_propagates_to_chat_signal() {
     let dm_channel_id = {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
-        chat.channels
-            .iter()
+        let id = chat
+            .all_channels()
             .find(|c| c.id.to_string().starts_with("dm:"))
             .map(|c| c.id.to_string())
-            .unwrap_or_else(|| "dm:test".to_string())
+            .unwrap_or_else(|| "dm:test".to_string());
+        id
     };
 
     // Get initial message count

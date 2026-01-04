@@ -482,7 +482,7 @@ async fn test_channel_lifecycle() {
     let initial_channels = core
         .read(&*CHAT_SIGNAL)
         .await
-        .map(|s| s.channels.len())
+        .map(|s| s.channel_count())
         .unwrap_or(0);
     println!("  Initial channels: {initial_channels}");
     drop(core);
@@ -574,9 +574,9 @@ async fn test_channel_lifecycle() {
     println!("\nPhase 8: Verify final channel state");
     let core = app_core.read().await;
     if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
-        let channel_count = chat_state.channels.len();
+        let channel_count = chat_state.channel_count();
         println!("  Final channel count: {channel_count}");
-        for channel in &chat_state.channels {
+        for channel in chat_state.all_channels() {
             println!(
                 "    Channel: {name} ({channel_id})",
                 name = channel.name,
@@ -1315,8 +1315,7 @@ async fn test_complete_contact_to_guardian_flow() {
     // Check chat state
     if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
         let dm_channel = chat_state
-            .channels
-            .iter()
+            .all_channels()
             .find(|c| c.id.to_string().contains(contact_id) || c.is_dm);
         if let Some(channel) = dm_channel {
             println!(

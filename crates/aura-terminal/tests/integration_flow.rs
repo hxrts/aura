@@ -416,7 +416,7 @@ async fn test_chat_flow_sends_message() {
     // Read initial chat state
     println!("\nInitial chat state:");
     let bob_chat = env.get_agent("bob").read_chat().await;
-    println!("  Channels: {count}", count = bob_chat.channels.len());
+    println!("  Channels: {count}", count = bob_chat.channel_count());
     println!("  Messages: {count}", count = bob_chat.message_count());
 
     // Try to start DM (should work - creates channel)
@@ -442,7 +442,7 @@ async fn test_chat_flow_sends_message() {
     let bob_chat_after_dm = env.get_agent("bob").read_chat().await;
     println!(
         "  Channels after DM: {count}",
-        count = bob_chat_after_dm.channels.len()
+        count = bob_chat_after_dm.channel_count()
     );
 
     // Try to send message (requires authority for journaled intent)
@@ -469,7 +469,7 @@ async fn test_chat_flow_sends_message() {
     // Verify final state
     let bob_chat_final = env.get_agent("bob").read_chat().await;
     println!("\nFinal chat state:");
-    println!("  Channels: {count}", count = bob_chat_final.channels.len());
+    println!("  Channels: {count}", count = bob_chat_final.channel_count());
     println!("  Messages: {count}", count = bob_chat_final.message_count());
 
     // Verify signal tracking

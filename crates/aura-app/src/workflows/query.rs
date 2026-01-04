@@ -36,8 +36,7 @@ pub async fn list_participants(
     let channel_entry = match channel_ref {
         ChannelRef::Id(id) => chat.channel(&id),
         ChannelRef::Name(name) => chat
-            .channels
-            .iter()
+            .all_channels()
             .find(|c| c.name.eq_ignore_ascii_case(&name)),
     };
 

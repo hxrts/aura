@@ -387,6 +387,25 @@ impl Default for ChatSnapshot {
     }
 }
 
+impl ChatSnapshot {
+    /// Get the number of channels
+    #[must_use]
+    pub fn channel_count(&self) -> usize {
+        self.channels.len()
+    }
+
+    /// Check if there are no channels
+    #[must_use]
+    pub fn channels_is_empty(&self) -> bool {
+        self.channels.is_empty()
+    }
+
+    /// Iterate over all channels
+    pub fn all_channels(&self) -> impl Iterator<Item = &aura_app::ui::types::chat::Channel> {
+        self.channels.iter()
+    }
+}
+
 /// Snapshot of guardian-related data for rendering
 #[derive(Debug, Clone)]
 pub struct GuardiansSnapshot {

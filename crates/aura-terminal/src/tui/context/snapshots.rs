@@ -53,7 +53,7 @@ impl SnapshotHelper {
     pub fn snapshot_chat(&self) -> ChatSnapshot {
         if let Some(snapshot) = self.try_state_snapshot() {
             ChatSnapshot {
-                channels: snapshot.chat.channels,
+                channels: snapshot.chat.all_channels().cloned().collect(),
                 // Selection and messages are managed at a different level now
                 selected_channel: None,
                 messages: Vec::new(),

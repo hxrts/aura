@@ -275,8 +275,7 @@ pub fn use_messages_subscription(
                 } else {
                     // Fallback: get messages for first channel if available
                     chat_state
-                        .channels
-                        .first()
+                        .first_channel()
                         .map(|c| {
                             chat_state
                                 .messages_for_channel(&c.id)
@@ -318,12 +317,11 @@ pub fn use_channels_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let channel_list: Vec<Channel> =
-                    chat_state.channels.iter().map(Channel::from).collect();
+                    chat_state.all_channels().map(Channel::from).collect();
 
                 // Count total messages across all channels for display purposes
                 let total_messages: usize = chat_state
-                    .channels
-                    .iter()
+                    .all_channels()
                     .map(|c| chat_state.messages_for_channel(&c.id).len())
                     .sum();
 
@@ -335,7 +333,7 @@ pub fn use_channels_subscription(
                     // Selection is managed by the TUI, not the app layer.
                     // Send None for selected_index - the shell will manage selection locally.
                     let _ = tx.try_send(UiUpdate::ChatStateUpdated {
-                        channel_count: chat_state.channels.len(),
+                        channel_count: chat_state.channel_count(),
                         message_count: total_messages,
                         selected_index: None,
                     });

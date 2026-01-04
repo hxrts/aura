@@ -243,7 +243,7 @@ async fn test_start_direct_chat_creates_dm_channel() {
     let initial_count = {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
-        let channel_count = chat.channels.len();
+        let channel_count = chat.channel_count();
         println!("  Initial channel count: {channel_count}");
         channel_count
     };
@@ -263,16 +263,16 @@ async fn test_start_direct_chat_creates_dm_channel() {
     println!("\nPhase 3: Verify DM channel was created");
     let expected_channel_id = dm_channel_id(contact_id);
     let chat = wait_for_chat(&app_core, |chat| {
-        chat.channels.iter().any(|c| c.id == expected_channel_id)
+        chat.all_channels().any(|c| c.id == expected_channel_id)
     })
     .await;
 
     assert!(
-        chat.channels.len() > initial_count,
+        chat.channel_count() > initial_count,
         "Should have more channels after DM start"
     );
 
-    let dm_channel = chat.channels.iter().find(|c| c.id == expected_channel_id);
+    let dm_channel = chat.all_channels().find(|c| c.id == expected_channel_id);
     assert!(dm_channel.is_some(), "DM channel should exist");
     let dm = dm_channel.unwrap();
     assert!(dm.is_dm, "Channel should be marked as DM");
@@ -312,7 +312,7 @@ async fn test_send_direct_message_adds_message() {
     let (initial_channel_count, initial_message_count) = {
         let core = app_core.read().await;
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
-        let channel_count = chat.channels.len();
+        let channel_count = chat.channel_count();
         let message_count = chat.message_count();
         println!("  Initial channel count: {channel_count}");
         println!("  Initial message count: {message_count}");
@@ -339,12 +339,12 @@ async fn test_send_direct_message_adds_message() {
     println!("\nPhase 3: Verify DM channel was created");
     let expected_channel_id = dm_channel_id(target);
     let chat = wait_for_chat(&app_core, |chat| {
-        chat.channels.iter().any(|c| c.id == expected_channel_id)
+        chat.all_channels().any(|c| c.id == expected_channel_id)
             && !chat.messages_for_channel(&expected_channel_id).is_empty()
     })
     .await;
 
-    let dm_channel = chat.channels.iter().find(|c| c.id == expected_channel_id);
+    let dm_channel = chat.all_channels().find(|c| c.id == expected_channel_id);
     assert!(
         dm_channel.is_some(),
         "DM channel should be created: {expected_channel_id}"
@@ -358,7 +358,7 @@ async fn test_send_direct_message_adds_message() {
     println!("  Channel name: {name}", name = channel.name);
 
     assert!(
-        chat.channels.len() > initial_channel_count,
+        chat.channel_count() > initial_channel_count,
         "Should have more channels after DM send"
     );
 
@@ -833,7 +833,7 @@ async fn test_all_snapshots_consistent() {
     let devices = ctx.snapshot_devices();
     let guardians = ctx.snapshot_guardians();
 
-    let chat_channels = chat.channels.len();
+    let chat_channels = chat.channel_count();
     let chat_messages = chat.messages.len();  // ChatSnapshot has messages field directly
     println!("  Chat: {chat_channels} channels, {chat_messages} messages");
     let contact_count = contacts.contact_count();
@@ -859,8 +859,8 @@ async fn test_all_snapshots_consistent() {
     let contacts2 = ctx.snapshot_contacts();
 
     assert_eq!(
-        chat.channels.len(),
-        chat2.channels.len(),
+        chat.channel_count(),
+        chat2.channel_count(),
         "Channel count should be consistent"
     );
     assert_eq!(
@@ -926,7 +926,7 @@ async fn test_complete_dm_flow() {
         let chat = core.read(&*CHAT_SIGNAL).await.unwrap();
 
         // Find DM channel by is_dm flag (not by ID string format)
-        let dm_channel = chat.channels.iter().find(|c| c.is_dm);
+        let dm_channel = chat.all_channels().find(|c| c.is_dm);
         assert!(dm_channel.is_some(), "DM channel should exist");
         let dm_channel = dm_channel.unwrap();
         let dm_channel_id = dm_channel.id;

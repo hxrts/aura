@@ -4,6 +4,8 @@ use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::collection::DomainCollection;
+
 // ============================================================================
 // Message Delivery Status
 // ============================================================================
@@ -194,6 +196,35 @@ pub struct Message {
     pub is_finalized: bool,
 }
 
+/// Custom serde module for backward-compatible channel serialization.
+///
+/// Serializes DomainCollection as Vec for wire format compatibility.
+mod channels_serde {
+    use super::{Channel, ChannelId, DomainCollection};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(
+        channels: &DomainCollection<ChannelId, Channel>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let vec: Vec<&Channel> = channels.all().collect();
+        vec.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<DomainCollection<ChannelId, Channel>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec: Vec<Channel> = Vec::deserialize(deserializer)?;
+        Ok(DomainCollection::from_iter(vec.into_iter().map(|c| (c.id.clone(), c))))
+    }
+}
+
 /// Chat state
 ///
 /// Note: This type does NOT track channel selection. Selection is UI state
@@ -203,8 +234,9 @@ pub struct Message {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ChatState {
-    /// All available channels
-    pub channels: Vec<Channel>,
+    /// All available channels (private, use accessor methods)
+    #[serde(with = "channels_serde")]
+    channels: DomainCollection<ChannelId, Channel>,
     /// Per-channel message storage
     #[serde(default)]
     channel_messages: HashMap<ChannelId, Vec<Message>>,
@@ -219,14 +251,68 @@ pub struct ChatState {
 impl ChatState {
     /// Maximum number of messages retained in-memory for the active channel.
     const MAX_ACTIVE_MESSAGES: usize = 500;
+
+    // ========================================================================
+    // Factory Methods
+    // ========================================================================
+
+    /// Create a ChatState from a list of channels
+    #[must_use]
+    pub fn from_channels(channels: impl IntoIterator<Item = Channel>) -> Self {
+        Self {
+            channels: DomainCollection::from_iter(
+                channels.into_iter().map(|c| (c.id.clone(), c)),
+            ),
+            channel_messages: HashMap::new(),
+            total_unread: 0,
+            loading_more: false,
+            has_more: false,
+        }
+    }
+
+    // ========================================================================
+    // Channel Accessors
+    // ========================================================================
+
     /// Get channel by ID
+    #[must_use]
     pub fn channel(&self, id: &ChannelId) -> Option<&Channel> {
-        self.channels.iter().find(|c| c.id == *id)
+        self.channels.get(id)
     }
 
     /// Get mutable channel by ID
     pub fn channel_mut(&mut self, id: &ChannelId) -> Option<&mut Channel> {
-        self.channels.iter_mut().find(|c| c.id == *id)
+        self.channels.get_mut(id)
+    }
+
+    /// Check if a channel exists
+    #[must_use]
+    pub fn has_channel(&self, id: &ChannelId) -> bool {
+        self.channels.contains(id)
+    }
+
+    /// Get all channels as an iterator
+    #[must_use]
+    pub fn all_channels(&self) -> impl Iterator<Item = &Channel> {
+        self.channels.all()
+    }
+
+    /// Get the number of channels
+    #[must_use]
+    pub fn channel_count(&self) -> usize {
+        self.channels.count()
+    }
+
+    /// Check if there are no channels
+    #[must_use]
+    pub fn channels_is_empty(&self) -> bool {
+        self.channels.is_empty()
+    }
+
+    /// Get the first channel (for default selection)
+    #[must_use]
+    pub fn first_channel(&self) -> Option<&Channel> {
+        self.channels.all().next()
     }
 
     /// Get unread count for a channel
@@ -259,17 +345,14 @@ impl ChatState {
         self.channel_messages.values().map(|v| v.len()).sum()
     }
 
-    /// Add a new channel
+    /// Add or update a channel
     pub fn add_channel(&mut self, channel: Channel) {
-        // Avoid duplicates
-        if self.channel(&channel.id).is_none() {
-            self.channels.push(channel);
-        }
+        self.channels.apply(channel.id.clone(), channel);
     }
 
     /// Remove a channel by ID
     pub fn remove_channel(&mut self, channel_id: &ChannelId) {
-        self.channels.retain(|c| c.id != *channel_id);
+        self.channels.remove(channel_id);
         // Remove messages from per-channel cache
         self.channel_messages.remove(channel_id);
     }

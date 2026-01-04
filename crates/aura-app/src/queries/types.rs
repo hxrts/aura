@@ -1308,13 +1308,8 @@ impl Query for ChatQuery {
             })
             .collect::<Result<Vec<_>, QueryParseError>>()?;
 
-        let mut state = ChatState::default();
-        state.channels = channels;
         // Note: selected_channel_id is now UI state in the frontend
         // Messages are loaded per-channel via messages_for_channel()
-        state.total_unread = 0; // Calculated from channels
-        state.loading_more = false;
-        state.has_more = false;
-        Ok(state)
+        Ok(ChatState::from_channels(channels))
     }
 }

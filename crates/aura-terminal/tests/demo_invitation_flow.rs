@@ -180,7 +180,7 @@ async fn wait_for_channel_members(
     loop {
         let core = app_core.read().await;
         if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
-            if let Some(channel) = chat_state.channels.iter().find(|c| c.name == channel_name) {
+            if let Some(channel) = chat_state.all_channels().find(|c| c.name == channel_name) {
                 if channel.member_count >= expected_members {
                     return;
                 }
@@ -203,7 +203,7 @@ async fn wait_for_message(
     loop {
         let core = app_core.read().await;
         if let Ok(chat_state) = core.read(&*CHAT_SIGNAL).await {
-            if let Some(channel) = chat_state.channels.iter().find(|c| c.name == channel_name) {
+            if let Some(channel) = chat_state.all_channels().find(|c| c.name == channel_name) {
                 let channel_messages = chat_state.messages_for_channel(&channel.id);
                 if channel_messages
                     .iter()
@@ -503,8 +503,7 @@ async fn test_complete_demo_invitation_flow() {
     // Chat channel + message should show up in CHAT_SIGNAL.
     let chat_state = core.read(&*CHAT_SIGNAL).await.expect("Read CHAT_SIGNAL");
     let guardians = chat_state
-        .channels
-        .iter()
+        .all_channels()
         .find(|c| c.name == "Guardians")
         .expect("Guardians channel should exist");
     assert_eq!(
