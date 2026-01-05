@@ -5,7 +5,7 @@ import Aura.Domain.Journal.Operations
 import Aura.Domain.FlowBudget
 import Aura.Domain.TimeSystem
 import Aura.Domain.Consensus.Types
-import Aura.Consensus.Evidence
+import Aura.Proofs.Consensus.Evidence
 
 /-!
 # Aura Verification Runner
@@ -68,7 +68,7 @@ open Aura.Domain.Journal (Fact Journal merge merge_safe reduce)
 open Aura.Domain.FlowBudget (Budget charge)
 open Aura.Domain.TimeSystem (Policy Ordering)
 open Aura.Domain.Consensus.Types
-open Aura.Consensus.Evidence (mergeEvidence)
+open Aura.Proofs.Consensus.Evidence (mergeEvidence)
 
 /-!
 ## Version
