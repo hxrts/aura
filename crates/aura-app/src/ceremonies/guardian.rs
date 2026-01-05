@@ -74,10 +74,7 @@ impl GuardianCandidates {
     ///
     /// Returns an error if there aren't enough contacts to satisfy
     /// the n value of the threshold.
-    pub fn validate_for_threshold(
-        &self,
-        threshold_n: u8,
-    ) -> Result<&Self, GuardianSetupError> {
+    pub fn validate_for_threshold(&self, threshold_n: u8) -> Result<&Self, GuardianSetupError> {
         let required = threshold_n as usize;
         let available = self.contacts.len();
         if available < required {

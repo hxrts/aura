@@ -15,8 +15,8 @@ use aura_core::effects::ExecutionMode;
 use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_terminal::demo::{spawn_amp_echo_listener, DemoSimulator};
-use aura_terminal::tui::context::InitializedAppCore;
 use aura_terminal::ids;
+use aura_terminal::tui::context::InitializedAppCore;
 use support::signals::wait_for_chat_extended;
 
 mod support;
@@ -54,8 +54,11 @@ async fn demo_amp_channel_echoes_peer_message() {
         },
         ..Default::default()
     };
-    let effect_ctx =
-        EffectContext::new(bob_authority, bob_context, ExecutionMode::Simulation { seed });
+    let effect_ctx = EffectContext::new(
+        bob_authority,
+        bob_context,
+        ExecutionMode::Simulation { seed },
+    );
     let agent = AgentBuilder::new()
         .with_config(agent_config)
         .with_authority(bob_authority)
@@ -89,16 +92,9 @@ async fn demo_amp_channel_echoes_peer_message() {
         simulator.alice_authority().to_string(),
         simulator.carol_authority().to_string(),
     ];
-    let _channel_id = messaging::create_channel(
-        &app_core,
-        "guardians",
-        None,
-        &members,
-        0,
-        1,
-    )
-    .await
-    .expect("create channel");
+    let _channel_id = messaging::create_channel(&app_core, "guardians", None, &members, 0, 1)
+        .await
+        .expect("create channel");
 
     // Allow demo peers to accept invitations and join before sending.
     tokio::time::sleep(Duration::from_millis(400)).await;

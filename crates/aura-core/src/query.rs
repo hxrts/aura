@@ -375,12 +375,18 @@ impl QueryStats {
 
     /// Check if any matched fact is finalized
     pub fn any_finalized(&self) -> bool {
-        self.consistency.iter().any(|(_, c)| c.agreement.is_finalized())
+        self.consistency
+            .iter()
+            .any(|(_, c)| c.agreement.is_finalized())
     }
 
     /// Check if all matched facts are finalized
     pub fn all_finalized(&self) -> bool {
-        !self.consistency.is_empty() && self.consistency.iter().all(|(_, c)| c.agreement.is_finalized())
+        !self.consistency.is_empty()
+            && self
+                .consistency
+                .iter()
+                .all(|(_, c)| c.agreement.is_finalized())
     }
 }
 

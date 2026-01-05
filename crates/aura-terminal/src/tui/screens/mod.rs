@@ -34,9 +34,7 @@ pub use app::{run_app_with_context, IoApp};
 pub use chat::{run_chat_screen, ChatFocus, ChatScreen};
 pub use contacts::{run_contacts_screen, ContactsScreen};
 pub use neighborhood::home_create_modal::HomeCreateModal;
-pub use neighborhood::{
-    run_neighborhood_screen, NeighborhoodScreen, NeighborhoodScreenProps,
-};
+pub use neighborhood::{run_neighborhood_screen, NeighborhoodScreen, NeighborhoodScreenProps};
 pub use notifications::{run_notifications_screen, NotificationsScreen};
 pub use router::{NavAction, Router, Screen};
 pub use settings::{run_settings_screen, SettingsScreen};

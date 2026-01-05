@@ -24,10 +24,8 @@ async fn replay_amp_channel_lifecycle_trace() {
 
     let trace = ITFLoader::load_from_file(&trace_path).expect("failed to load AMP trace");
 
-    let base_dir = std::env::temp_dir().join(format!(
-        "aura-amp-channel-itf-{}",
-        std::process::id()
-    ));
+    let base_dir =
+        std::env::temp_dir().join(format!("aura-amp-channel-itf-{}", std::process::id()));
     let harness = AmpChannelHarness::new(2025, base_dir)
         .await
         .expect("failed to build AMP harness");

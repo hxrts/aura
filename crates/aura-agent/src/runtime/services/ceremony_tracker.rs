@@ -184,9 +184,7 @@ impl TrackedCeremony {
         // Convert internal state to StatusCeremonyState enum
         let state = if self.is_committed {
             StatusCeremonyState::Committed {
-                consensus_id: self
-                    .committed_consensus_id
-                    .unwrap_or(zero_consensus_id),
+                consensus_id: self.committed_consensus_id.unwrap_or(zero_consensus_id),
                 committed_at: self.committed_at.clone().unwrap_or(zero_time.clone()),
             }
         } else if self.is_superseded {
@@ -242,9 +240,7 @@ impl TrackedCeremony {
         // Get committed agreement if applicable
         let committed_agreement = if self.is_committed {
             Some(aura_core::domain::Agreement::Finalized {
-                consensus_id: self
-                    .committed_consensus_id
-                    .unwrap_or(zero_consensus_id),
+                consensus_id: self.committed_consensus_id.unwrap_or(zero_consensus_id),
             })
         } else {
             None
@@ -410,7 +406,10 @@ impl CeremonyTracker {
     ///
     /// # Returns
     /// The ceremony status for UI display
-    pub async fn get_status(&self, ceremony_id: &CeremonyId) -> Result<CeremonyStatus, IntentError> {
+    pub async fn get_status(
+        &self,
+        ceremony_id: &CeremonyId,
+    ) -> Result<CeremonyStatus, IntentError> {
         self.get(ceremony_id).await.map(|c| c.to_status())
     }
 

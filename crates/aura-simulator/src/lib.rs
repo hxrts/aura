@@ -159,8 +159,8 @@ pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};
 
 // Re-export liveness checking types
 pub use liveness::{
-    BoundedLivenessChecker, BoundedLivenessProperty, LivenessCheckResult,
-    SynchronyAssumption, check_consensus_terminates_within, consensus_liveness_checker,
+    check_consensus_terminates_within, consensus_liveness_checker, BoundedLivenessChecker,
+    BoundedLivenessProperty, LivenessCheckResult, SynchronyAssumption,
 };
 
 // Re-export Duration for convenience

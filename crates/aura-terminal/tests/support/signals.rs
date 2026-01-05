@@ -141,7 +141,10 @@ pub async fn wait_for_message(
     app_core: &Arc<RwLock<AppCore>>,
     predicate: impl Fn(&aura_app::views::Message) -> bool,
 ) -> ChatState {
-    wait_for_chat(app_core, |state| state.all_messages().iter().any(|m| predicate(m))).await
+    wait_for_chat(app_core, |state| {
+        state.all_messages().iter().any(|m| predicate(m))
+    })
+    .await
 }
 
 // ============================================================================

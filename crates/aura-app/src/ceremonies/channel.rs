@@ -155,12 +155,9 @@ mod tests {
 
     #[test]
     fn test_group() {
-        let p = ChannelParticipants::new(vec![
-            make_authority(),
-            make_authority(),
-            make_authority(),
-        ])
-        .unwrap();
+        let p =
+            ChannelParticipants::new(vec![make_authority(), make_authority(), make_authority()])
+                .unwrap();
         assert!(!p.is_pairwise());
         assert!(p.is_group());
     }

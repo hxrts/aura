@@ -96,10 +96,7 @@ impl SyncWireMessage {
     pub fn op_with_ack(op: AttestedOp, ack_requested: bool) -> Self {
         Self {
             schema_version: SYNC_WIRE_SCHEMA_VERSION,
-            payload: SyncWirePayload::OpWithAck(OpWithAckRequest {
-                op,
-                ack_requested,
-            }),
+            payload: SyncWirePayload::OpWithAck(OpWithAckRequest { op, ack_requested }),
         }
     }
 

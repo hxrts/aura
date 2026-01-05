@@ -493,14 +493,18 @@ async fn test_complete_demo_invitation_flow() {
         .expect("Read CONTACTS_SIGNAL");
     assert!(
         contacts_state
-            .all_contacts().cloned().collect::<Vec<_>>()
+            .all_contacts()
+            .cloned()
+            .collect::<Vec<_>>()
             .iter()
             .any(|c| c.id == alice_invitation.sender_id),
         "Alice should appear in contacts"
     );
     assert!(
         contacts_state
-            .all_contacts().cloned().collect::<Vec<_>>()
+            .all_contacts()
+            .cloned()
+            .collect::<Vec<_>>()
             .iter()
             .any(|c| c.id == carol_invitation.sender_id),
         "Carol should appear in contacts"

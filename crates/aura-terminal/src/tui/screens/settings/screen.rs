@@ -183,7 +183,10 @@ pub fn SettingsScreen(
                         Theme::SECONDARY,
                     ),
                     (String::new(), Theme::TEXT),
-                    (format!("Available Guardians: {guardian_count}"), Theme::TEXT),
+                    (
+                        format!("Available Guardians: {guardian_count}"),
+                        Theme::TEXT,
+                    ),
                     (String::new(), Theme::TEXT),
                     (
                         "Guardians help recover your account if you".into(),

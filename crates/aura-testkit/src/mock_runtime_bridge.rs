@@ -186,9 +186,7 @@ impl MockRuntimeBridge {
                 true
             }
             ContactFact::ReadReceiptPolicyUpdated {
-                contact_id,
-                policy,
-                ..
+                contact_id, policy, ..
             } => {
                 let mut contacts = self.contacts.write().await;
                 if let Some(contact) = contacts.iter_mut().find(|c| c.id == contact_id) {

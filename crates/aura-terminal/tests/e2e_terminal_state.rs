@@ -3387,7 +3387,11 @@ async fn test_snapshot_data_accuracy() {
     let contacts_snapshot = ctx.snapshot_contacts();
 
     // Verify has_pending_suggestion logic - computed by comparing suggested_name to nickname
-    for contact in &contacts_snapshot.all_contacts().cloned().collect::<Vec<_>>() {
+    for contact in &contacts_snapshot
+        .all_contacts()
+        .cloned()
+        .collect::<Vec<_>>()
+    {
         // has_pending_suggestion is true when suggested_name differs from nickname
         let has_pending_suggestion = contact
             .suggested_name

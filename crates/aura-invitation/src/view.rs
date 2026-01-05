@@ -404,12 +404,22 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
-        let InvitationDelta::InvitationAdded { invitation_id, direction, invitation_type, message, .. } = delta else {
+        let InvitationDelta::InvitationAdded {
+            invitation_id,
+            direction,
+            invitation_type,
+            message,
+            ..
+        } = delta
+        else {
             panic!("Expected InvitationAdded delta");
         };
         assert_eq!(invitation_id.as_str(), "inv-123");
         assert_eq!(direction, "outbound");
-        assert_matches!(invitation_type, crate::InvitationType::Contact { nickname: None });
+        assert_matches!(
+            invitation_type,
+            crate::InvitationType::Contact { nickname: None }
+        );
         assert_eq!(message, &Some("Please be my guardian".to_string()));
     }
 
@@ -436,7 +446,12 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
-        let InvitationDelta::InvitationAdded { invitation_id, direction, .. } = delta else {
+        let InvitationDelta::InvitationAdded {
+            invitation_id,
+            direction,
+            ..
+        } = delta
+        else {
             panic!("Expected InvitationAdded delta");
         };
         assert_eq!(invitation_id.as_str(), "inv-124");
@@ -458,7 +473,13 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<InvitationDelta>(&deltas[0]).unwrap();
-        let InvitationDelta::InvitationStatusChanged { invitation_id, old_status, new_status, .. } = delta else {
+        let InvitationDelta::InvitationStatusChanged {
+            invitation_id,
+            old_status,
+            new_status,
+            ..
+        } = delta
+        else {
             panic!("Expected InvitationStatusChanged delta");
         };
         assert_eq!(invitation_id.as_str(), "inv-456");
@@ -517,7 +538,12 @@ mod tests {
 
         let compacted = compact_deltas(deltas);
         assert_eq!(compacted.len(), 1);
-        let InvitationDelta::InvitationStatusChanged { new_status, changed_at, .. } = &compacted[0] else {
+        let InvitationDelta::InvitationStatusChanged {
+            new_status,
+            changed_at,
+            ..
+        } = &compacted[0]
+        else {
             panic!("Expected InvitationStatusChanged after compaction");
         };
         assert_eq!(new_status, "cancelled");

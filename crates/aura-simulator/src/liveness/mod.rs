@@ -227,7 +227,8 @@ impl BoundedLivenessChecker {
         // Quint: temporalFastPathBound
         self.add_property(BoundedLivenessProperty {
             name: "fast_path_bound".to_string(),
-            description: "Fast path completes within 2δ when responsive conditions hold".to_string(),
+            description: "Fast path completes within 2δ when responsive conditions hold"
+                .to_string(),
             precondition: "fastPathActive and gstReached and allWitnessesOnlineHonest".to_string(),
             goal: "committed or fallbackActive".to_string(),
             step_bound: match &self.synchrony {
@@ -243,7 +244,8 @@ impl BoundedLivenessChecker {
         // Quint: allInstancesTerminated
         self.add_property(BoundedLivenessProperty {
             name: "consensus_terminates".to_string(),
-            description: "All consensus instances terminate under synchrony with honest quorum".to_string(),
+            description: "All consensus instances terminate under synchrony with honest quorum"
+                .to_string(),
             precondition: "gstReached and hasQuorumOnline".to_string(),
             goal: "allInstancesTerminated".to_string(),
             step_bound: match &self.synchrony {
@@ -259,7 +261,8 @@ impl BoundedLivenessChecker {
         // Quint: invariantProgressUnderSynchrony
         self.add_property(BoundedLivenessProperty {
             name: "progress_under_synchrony".to_string(),
-            description: "Active instances make progress when GST reached and quorum online".to_string(),
+            description: "Active instances make progress when GST reached and quorum online"
+                .to_string(),
             precondition: "gstReached and isActiveWithQuorum".to_string(),
             goal: "proposals.size() > 0 or terminated".to_string(),
             step_bound: match &self.synchrony {
@@ -303,11 +306,15 @@ impl BoundedLivenessChecker {
             let name = &property.name;
 
             // Evaluate precondition and goal first (immutable borrow of self)
-            let precondition_holds = self.evaluate_expression(&property.precondition, state, gst_reached);
+            let precondition_holds =
+                self.evaluate_expression(&property.precondition, state, gst_reached);
             let goal_holds = self.evaluate_expression(&property.goal, state, gst_reached);
 
             // Now get mutable borrow for tracking update
-            let tracking = self.tracking.get_mut(name).expect("property tracking exists");
+            let tracking = self
+                .tracking
+                .get_mut(name)
+                .expect("property tracking exists");
 
             // Update tracking
             if precondition_holds && tracking.precondition_step.is_none() {
@@ -360,7 +367,10 @@ impl BoundedLivenessChecker {
         let mut results = Vec::new();
 
         for property in &self.properties {
-            let tracking = self.tracking.get(&property.name).expect("property tracking exists");
+            let tracking = self
+                .tracking
+                .get(&property.name)
+                .expect("property tracking exists");
 
             let satisfied = if tracking.precondition_step.is_none() {
                 // Precondition never triggered - property vacuously true
@@ -455,13 +465,17 @@ impl BoundedLivenessChecker {
         // Handle "and" expressions
         if expr.contains(" and ") {
             let parts: Vec<&str> = expr.split(" and ").collect();
-            return parts.iter().all(|p| self.evaluate_expression(p, state, gst_reached));
+            return parts
+                .iter()
+                .all(|p| self.evaluate_expression(p, state, gst_reached));
         }
 
         // Handle "or" expressions
         if expr.contains(" or ") {
             let parts: Vec<&str> = expr.split(" or ").collect();
-            return parts.iter().any(|p| self.evaluate_expression(p, state, gst_reached));
+            return parts
+                .iter()
+                .any(|p| self.evaluate_expression(p, state, gst_reached));
         }
 
         // Handle gstReached
@@ -491,13 +505,19 @@ impl BoundedLivenessChecker {
 
         // Check if this is a known function/keyword
         let known_funcs = [
-            "allInstancesTerminated", "terminated", "hasQuorumOnline",
-            "isActiveWithQuorum", "allWitnessesOnlineHonest", "isActive",
-            "fastPathActive", "fallbackActive", "hasEnabledAction", "committed"
+            "allInstancesTerminated",
+            "terminated",
+            "hasQuorumOnline",
+            "isActiveWithQuorum",
+            "allWitnessesOnlineHonest",
+            "isActive",
+            "fastPathActive",
+            "fallbackActive",
+            "hasEnabledAction",
+            "committed",
         ];
 
         if known_funcs.contains(&func_name) {
-
             match func_name {
                 "allInstancesTerminated" | "terminated" => {
                     // Check if all instances have phase == Committed or Failed
@@ -506,8 +526,10 @@ impl BoundedLivenessChecker {
                             return map.values().all(|inst| {
                                 if let Some(phase) = inst.get("phase") {
                                     let phase_str = phase.as_str().unwrap_or("");
-                                    phase_str == "Committed" || phase_str == "ConsensusCommitted"
-                                        || phase_str == "Failed" || phase_str == "ConsensusFailed"
+                                    phase_str == "Committed"
+                                        || phase_str == "ConsensusCommitted"
+                                        || phase_str == "Failed"
+                                        || phase_str == "ConsensusFailed"
                                 } else {
                                     false
                                 }
@@ -518,11 +540,15 @@ impl BoundedLivenessChecker {
                 }
                 "hasQuorumOnline" | "isActiveWithQuorum" => {
                     // Simplified: check if quorum count in state
-                    state.get("hasQuorum").and_then(|v| v.as_bool()).unwrap_or(true)
+                    state
+                        .get("hasQuorum")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true)
                 }
-                "allWitnessesOnlineHonest" => {
-                    state.get("allOnline").and_then(|v| v.as_bool()).unwrap_or(true)
-                }
+                "allWitnessesOnlineHonest" => state
+                    .get("allOnline")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true),
                 "isActive" | "fastPathActive" | "fallbackActive" => {
                     if let Some(phase) = state.get("phase") {
                         let phase_str = phase.as_str().unwrap_or("");
@@ -539,7 +565,11 @@ impl BoundedLivenessChecker {
                 }
                 "hasEnabledAction" => {
                     // Assume there's always an enabled action unless explicitly marked
-                    state.get("deadlocked").and_then(|v| v.as_bool()).map(|d| !d).unwrap_or(true)
+                    state
+                        .get("deadlocked")
+                        .and_then(|v| v.as_bool())
+                        .map(|d| !d)
+                        .unwrap_or(true)
                 }
                 "committed" => {
                     if let Some(phase) = state.get("phase") {
@@ -645,9 +675,8 @@ mod tests {
         let checker = BoundedLivenessChecker::new();
         assert!(checker.properties().is_empty());
 
-        let checker = BoundedLivenessChecker::with_synchrony(
-            SynchronyAssumption::Synchronous { delta: 5 }
-        );
+        let checker =
+            BoundedLivenessChecker::with_synchrony(SynchronyAssumption::Synchronous { delta: 5 });
         assert!(checker.properties().is_empty());
     }
 
@@ -668,9 +697,11 @@ mod tests {
 
     #[test]
     fn test_add_consensus_properties() {
-        let mut checker = BoundedLivenessChecker::with_synchrony(
-            SynchronyAssumption::PartialSynchrony { gst: 5, delta: 3 }
-        );
+        let mut checker =
+            BoundedLivenessChecker::with_synchrony(SynchronyAssumption::PartialSynchrony {
+                gst: 5,
+                delta: 3,
+            });
         checker.add_consensus_properties();
 
         assert!(checker.get_property("fast_path_bound").is_some());
@@ -681,9 +712,8 @@ mod tests {
 
     #[test]
     fn test_check_step_goal_achieved() {
-        let mut checker = BoundedLivenessChecker::with_synchrony(
-            SynchronyAssumption::Synchronous { delta: 3 }
-        );
+        let mut checker =
+            BoundedLivenessChecker::with_synchrony(SynchronyAssumption::Synchronous { delta: 3 });
         checker.add_property(BoundedLivenessProperty {
             name: "test".to_string(),
             precondition: "true".to_string(),
@@ -711,9 +741,8 @@ mod tests {
 
     #[test]
     fn test_check_step_bound_exceeded() {
-        let mut checker = BoundedLivenessChecker::with_synchrony(
-            SynchronyAssumption::Synchronous { delta: 3 }
-        );
+        let mut checker =
+            BoundedLivenessChecker::with_synchrony(SynchronyAssumption::Synchronous { delta: 3 });
         checker.add_property(BoundedLivenessProperty {
             name: "test".to_string(),
             precondition: "true".to_string(),
@@ -738,9 +767,11 @@ mod tests {
 
     #[test]
     fn test_gst_based_precondition() {
-        let mut checker = BoundedLivenessChecker::with_synchrony(
-            SynchronyAssumption::PartialSynchrony { gst: 5, delta: 3 }
-        );
+        let mut checker =
+            BoundedLivenessChecker::with_synchrony(SynchronyAssumption::PartialSynchrony {
+                gst: 5,
+                delta: 3,
+            });
         checker.add_property(BoundedLivenessProperty {
             name: "test".to_string(),
             precondition: "gstReached".to_string(),
@@ -766,9 +797,11 @@ mod tests {
     #[test]
     fn test_vacuous_satisfaction() {
         // Test with partial synchrony where GST is never reached
-        let mut checker = BoundedLivenessChecker::with_synchrony(
-            SynchronyAssumption::PartialSynchrony { gst: 100, delta: 3 }
-        );
+        let mut checker =
+            BoundedLivenessChecker::with_synchrony(SynchronyAssumption::PartialSynchrony {
+                gst: 100,
+                delta: 3,
+            });
         checker.add_property(BoundedLivenessProperty {
             name: "test".to_string(),
             precondition: "gstReached".to_string(), // GST at step 100, so never triggered
@@ -783,7 +816,11 @@ mod tests {
 
         let results = checker.finalize();
         eprintln!("Result: {:?}", results[0]);
-        assert!(results[0].satisfied, "expected satisfied, got: {:?}", results[0]);
+        assert!(
+            results[0].satisfied,
+            "expected satisfied, got: {:?}",
+            results[0]
+        );
         assert!(
             results[0].details.contains("Vacuously") || results[0].details.contains("vacuously"),
             "expected vacuously in details, got: {:?}",

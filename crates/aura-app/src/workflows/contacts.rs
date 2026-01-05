@@ -158,14 +158,9 @@ pub async fn emit_read_receipts(
         }
 
         // Create MessageRead fact
-        let fact = ChatFact::message_read_ms(
-            context_id,
-            channel_id,
-            message_id,
-            reader_id,
-            timestamp_ms,
-        )
-        .to_generic();
+        let fact =
+            ChatFact::message_read_ms(context_id, channel_id, message_id, reader_id, timestamp_ms)
+                .to_generic();
 
         facts.push(fact);
         count += 1;

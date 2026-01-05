@@ -248,10 +248,7 @@ pub async fn refresh_connection_status_from_contacts(
             let core = app_core.read().await;
             core.sync_status().await.unwrap_or_default()
         };
-        if online_contacts == 0
-            && !contacts_state.is_empty()
-            && sync_status.connected_peers > 0
-        {
+        if online_contacts == 0 && !contacts_state.is_empty() && sync_status.connected_peers > 0 {
             let fallback_online =
                 std::cmp::min(contacts_state.contact_count(), sync_status.connected_peers);
             for (idx, contact) in contacts_state.all_contacts_mut().enumerate() {

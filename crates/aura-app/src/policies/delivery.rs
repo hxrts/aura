@@ -58,11 +58,7 @@ pub trait DeliveryPolicy: Send + Sync {
     /// When this returns true, the journal will:
     /// 1. Delete ack records for this fact
     /// 2. Set `ack_tracked = false` on the fact
-    fn should_drop_tracking(
-        &self,
-        consistency: &Consistency,
-        expected: &[AuthorityId],
-    ) -> bool;
+    fn should_drop_tracking(&self, consistency: &Consistency, expected: &[AuthorityId]) -> bool;
 
     /// Get a human-readable name for this policy
     fn name(&self) -> &'static str;
@@ -156,7 +152,8 @@ impl DeliveryPolicy for DropWhenFinalizedAndFullyAcked {
 
     fn should_drop_tracking(&self, c: &Consistency, expected: &[AuthorityId]) -> bool {
         let is_finalized = c.agreement.is_finalized();
-        let is_fully_acked = DropWhenFullyAcked::is_fully_acked(c.acknowledgment.as_ref(), expected);
+        let is_fully_acked =
+            DropWhenFullyAcked::is_fully_acked(c.acknowledgment.as_ref(), expected);
         is_finalized && is_fully_acked
     }
 
@@ -178,7 +175,8 @@ impl DeliveryPolicy for DropWhenSafeAndFullyAcked {
 
     fn should_drop_tracking(&self, c: &Consistency, expected: &[AuthorityId]) -> bool {
         let is_safe = c.agreement.is_safe();
-        let is_fully_acked = DropWhenFullyAcked::is_fully_acked(c.acknowledgment.as_ref(), expected);
+        let is_fully_acked =
+            DropWhenFullyAcked::is_fully_acked(c.acknowledgment.as_ref(), expected);
         is_safe && is_fully_acked
     }
 

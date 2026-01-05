@@ -64,8 +64,7 @@ impl PolicyRegistry {
 
     /// Register a policy for a fact type
     pub fn register<P: DeliveryPolicy + 'static>(&mut self, fact_type: &str, policy: P) {
-        self.policies
-            .insert(fact_type.to_string(), boxed(policy));
+        self.policies.insert(fact_type.to_string(), boxed(policy));
     }
 
     /// Register a boxed policy for a fact type
@@ -120,10 +119,7 @@ impl std::fmt::Debug for PolicyRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PolicyRegistry")
             .field("registered_count", &self.policies.len())
-            .field(
-                "fact_types",
-                &self.policies.keys().collect::<Vec<_>>(),
-            )
+            .field("fact_types", &self.policies.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -213,7 +209,7 @@ impl std::fmt::Debug for TypedPolicyRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::policies::{DropWhenFullyAcked, DropWhenFinalizedAndFullyAcked};
+    use crate::policies::{DropWhenFinalizedAndFullyAcked, DropWhenFullyAcked};
 
     // Dummy fact types for testing
     struct MessageSent;

@@ -300,10 +300,7 @@ fn test_final_guardian_state() {
 fn test_full_demo_flow_trace() {
     let spec_path = std::path::Path::new("../../verification/quint/cli_recovery_demo.qnt");
     if !spec_path.exists() {
-        eprintln!(
-            "Skipping: Quint spec not found at {}",
-            spec_path.display()
-        );
+        eprintln!("Skipping: Quint spec not found at {}", spec_path.display());
         return;
     }
 

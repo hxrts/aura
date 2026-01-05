@@ -96,8 +96,8 @@ pub async fn start_recovery(
         guardians,
         threshold_k.value() as u32,
         Some(recovery_process),
-        Vec::new(),             // pending_requests
-        Vec::new(),             // guardian_bindings
+        Vec::new(), // pending_requests
+        Vec::new(), // guardian_bindings
     );
 
     // Update ViewState - signal forwarding auto-propagates to RECOVERY_SIGNAL
@@ -347,9 +347,6 @@ mod tests {
         // Verify state was set
         let retrieved = get_recovery_status(&app_core).await.unwrap();
         assert!(retrieved.active_recovery().is_some());
-        assert_eq!(
-            retrieved.active_recovery().unwrap().id,
-            "ceremony-123"
-        );
+        assert_eq!(retrieved.active_recovery().unwrap().id, "ceremony-123");
     }
 }

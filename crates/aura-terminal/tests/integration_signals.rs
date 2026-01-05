@@ -133,20 +133,23 @@ async fn test_chat_signal_state_updates() {
 
     // Create updated state with a message
     let mut updated_state = initial.clone();
-    updated_state.apply_message(test_channel_id, Message {
-        id: "msg-1".to_string(),
-        channel_id: test_channel_id,
-        sender_id: AuthorityId::new_from_entropy([0xAA; 32]),
-        sender_name: "Alice".to_string(),
-        content: "Hello, world!".to_string(),
-        timestamp: 1234567890,
-        is_own: false,
-        is_read: false,
-        reply_to: None,
-        delivery_status: MessageDeliveryStatus::default(),
-        epoch_hint: None,
-        is_finalized: false,
-    });
+    updated_state.apply_message(
+        test_channel_id,
+        Message {
+            id: "msg-1".to_string(),
+            channel_id: test_channel_id,
+            sender_id: AuthorityId::new_from_entropy([0xAA; 32]),
+            sender_name: "Alice".to_string(),
+            content: "Hello, world!".to_string(),
+            timestamp: 1234567890,
+            is_own: false,
+            is_read: false,
+            reply_to: None,
+            delivery_status: MessageDeliveryStatus::default(),
+            epoch_hint: None,
+            is_finalized: false,
+        },
+    );
 
     // Emit updated state
     core.emit(&*CHAT_SIGNAL, updated_state).await.unwrap();
@@ -266,20 +269,23 @@ async fn test_chat_message_accumulation() {
     // Add multiple messages to same channel
     for i in 0..5 {
         let mut state = core.read(&*CHAT_SIGNAL).await.unwrap();
-        state.apply_message(test_channel_id, Message {
-            id: format!("msg-{i}"),
-            channel_id: test_channel_id,
-            sender_id: AuthorityId::new_from_entropy([0x20 + (i % 3) as u8; 32]),
-            sender_name: format!("User{}", i % 3),
-            content: format!("Message number {i}"),
-            timestamp: 1234567890 + i as u64,
-            is_own: i % 2 == 0,
-            is_read: true,
-            reply_to: None,
-            delivery_status: MessageDeliveryStatus::default(),
-            epoch_hint: None,
-            is_finalized: false,
-        });
+        state.apply_message(
+            test_channel_id,
+            Message {
+                id: format!("msg-{i}"),
+                channel_id: test_channel_id,
+                sender_id: AuthorityId::new_from_entropy([0x20 + (i % 3) as u8; 32]),
+                sender_name: format!("User{}", i % 3),
+                content: format!("Message number {i}"),
+                timestamp: 1234567890 + i as u64,
+                is_own: i % 2 == 0,
+                is_read: true,
+                reply_to: None,
+                delivery_status: MessageDeliveryStatus::default(),
+                epoch_hint: None,
+                is_finalized: false,
+            },
+        );
         core.emit(&*CHAT_SIGNAL, state).await.unwrap();
     }
 

@@ -469,8 +469,14 @@ async fn test_chat_flow_sends_message() {
     // Verify final state
     let bob_chat_final = env.get_agent("bob").read_chat().await;
     println!("\nFinal chat state:");
-    println!("  Channels: {count}", count = bob_chat_final.channel_count());
-    println!("  Messages: {count}", count = bob_chat_final.message_count());
+    println!(
+        "  Channels: {count}",
+        count = bob_chat_final.channel_count()
+    );
+    println!(
+        "  Messages: {count}",
+        count = bob_chat_final.message_count()
+    );
 
     // Verify signal tracking
     println!("\nSignal emissions:");
@@ -542,7 +548,10 @@ async fn test_guardian_recovery_flow() {
     // Read recovery state
     println!("\nInitial recovery state:");
     let bob_recovery = env.get_agent("bob").read_recovery().await;
-    println!("  Guardians: {count}", count = bob_recovery.guardian_count());
+    println!(
+        "  Guardians: {count}",
+        count = bob_recovery.guardian_count()
+    );
     println!(
         "  Threshold: {threshold}",
         threshold = bob_recovery.threshold()
@@ -763,7 +772,11 @@ async fn test_social_graph_flow() {
 
     // Read contacts again to verify nickname update
     let bob_contacts_after_nickname = env.get_agent("bob").read_contacts().await;
-    for c in &bob_contacts_after_nickname.all_contacts().cloned().collect::<Vec<_>>() {
+    for c in &bob_contacts_after_nickname
+        .all_contacts()
+        .cloned()
+        .collect::<Vec<_>>()
+    {
         let name = if !c.nickname.is_empty() {
             c.nickname.clone()
         } else if let Some(s) = &c.suggested_name {
@@ -918,10 +931,7 @@ async fn test_social_graph_contact_home_view() {
     // This test verifies the signals are available for such a view
 
     // Verify we can read both signals needed for the view
-    assert!(
-        !bob_contacts.is_empty() || true,
-        "Contacts signal readable"
-    );
+    assert!(!bob_contacts.is_empty() || true, "Contacts signal readable");
     println!("\n✓ Both CONTACTS_SIGNAL and HOMES_SIGNAL are readable");
 
     println!("\n=== Social Graph Contact-Home View Test Complete ===\n");

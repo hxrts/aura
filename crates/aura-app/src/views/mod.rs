@@ -25,9 +25,9 @@ pub mod wizards;
 pub use state::ViewState;
 
 // Re-export state types for convenience
-pub use collection::DomainCollection;
 pub use account::{AccountBackup, AccountConfig, BACKUP_PREFIX, BACKUP_VERSION};
 pub use chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus};
+pub use collection::DomainCollection;
 pub use contacts::{Contact, ContactsState, MySuggestion, ReadReceiptPolicy, SuggestionPolicy};
 pub use display::{
     format_network_status, format_network_status_with_severity, format_relative_time,

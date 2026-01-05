@@ -198,7 +198,10 @@ fn test_consistency_map_query_performance() {
     }
 
     let build_time = start.elapsed();
-    println!("Built ConsistencyMap with {} entries in {:?}", NUM_ENTRIES, build_time);
+    println!(
+        "Built ConsistencyMap with {} entries in {:?}",
+        NUM_ENTRIES, build_time
+    );
 
     assert_eq!(map.len(), NUM_ENTRIES);
 
@@ -374,7 +377,10 @@ fn test_gc_performance_under_load() {
 
     // Verify expected ratio
     let gc_ratio = gc_eligible.len() as f64 / NUM_MESSAGES as f64;
-    assert!(gc_ratio > 0.25 && gc_ratio < 0.35, "GC ratio should be ~30%");
+    assert!(
+        gc_ratio > 0.25 && gc_ratio < 0.35,
+        "GC ratio should be ~30%"
+    );
 
     // Phase 3: Simulate batch GC operation
     let start = Instant::now();

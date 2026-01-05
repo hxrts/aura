@@ -68,7 +68,10 @@ fn ceremony_id_display_format() {
     let id = CeremonyId::new(Hash32([0xAB; 32]), Hash32([0xCD; 32]), 0);
     let display = format!("{}", id);
 
-    assert!(display.starts_with("ceremony:"), "Display should start with 'ceremony:'");
+    assert!(
+        display.starts_with("ceremony:"),
+        "Display should start with 'ceremony:'"
+    );
     assert!(display.len() > 10, "Display should include hex suffix");
 }
 
@@ -201,7 +204,11 @@ fn ceremony_status_awaiting_responses() {
 
     assert!(matches!(
         status,
-        CeremonyStatus::AwaitingResponses { accepted: 2, declined: 1, pending: 2 }
+        CeremonyStatus::AwaitingResponses {
+            accepted: 2,
+            declined: 1,
+            pending: 2
+        }
     ));
 }
 
@@ -209,7 +216,10 @@ fn ceremony_status_awaiting_responses() {
 fn ceremony_status_committed() {
     let status = CeremonyStatus::Committed { new_epoch: 42 };
 
-    assert!(matches!(status, CeremonyStatus::Committed { new_epoch: 42 }));
+    assert!(matches!(
+        status,
+        CeremonyStatus::Committed { new_epoch: 42 }
+    ));
 }
 
 #[test]

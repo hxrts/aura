@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use async_lock::RwLock;
-use aura_app::{AppConfig, AppCore};
 use aura_app::ui::workflows::messaging::create_channel;
+use aura_app::{AppConfig, AppCore};
 use aura_terminal::handlers::tui::TuiMode;
 use aura_terminal::tui::callbacks::ChatCallbacks;
 use aura_terminal::tui::context::{InitializedAppCore, IoContext};
@@ -80,7 +80,10 @@ async fn slash_whois_emits_whois_toast() {
     ensure_chat_channel(&ctx).await;
 
     let on_send = callbacks.on_send.clone();
-    on_send("channel:general".to_string(), "/whois test-user".to_string());
+    on_send(
+        "channel:general".to_string(),
+        "/whois test-user".to_string(),
+    );
 
     let toast = next_toast(&mut rx).await;
     assert_eq!(toast.id, "whois");

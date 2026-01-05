@@ -18,7 +18,10 @@ use std::time::Duration;
 fn default_config_has_reasonable_values() {
     let config = TransportCoordinationConfig::default();
 
-    assert!(config.max_connections > 0, "Should allow at least one connection");
+    assert!(
+        config.max_connections > 0,
+        "Should allow at least one connection"
+    );
     assert!(
         config.max_connections <= 1000,
         "Should have reasonable max connections"
@@ -195,7 +198,10 @@ fn transport_error_converts_to_coordination_error() {
     let transport_err = TransportError::ConnectionFailed("peer unreachable".to_string());
     let coord_err: TransportCoordinationError = transport_err.into();
 
-    assert!(matches!(coord_err, TransportCoordinationError::Transport(_)));
+    assert!(matches!(
+        coord_err,
+        TransportCoordinationError::Transport(_)
+    ));
 }
 
 // ============================================================================
@@ -212,8 +218,9 @@ fn coordination_result_ok() {
 
 #[test]
 fn coordination_result_err() {
-    let result: CoordinationResult<u32> =
-        Err(TransportCoordinationError::ProtocolFailed("test".to_string()));
+    let result: CoordinationResult<u32> = Err(TransportCoordinationError::ProtocolFailed(
+        "test".to_string(),
+    ));
 
     assert!(result.is_err());
 }

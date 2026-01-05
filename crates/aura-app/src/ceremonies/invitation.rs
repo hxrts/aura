@@ -34,7 +34,10 @@ impl fmt::Display for InvitationError {
                 write!(f, "Channel not found")
             }
             InvitationError::NoThresholdForGuardian => {
-                write!(f, "Configure guardian threshold before sending guardian invitations")
+                write!(
+                    f,
+                    "Configure guardian threshold before sending guardian invitations"
+                )
             }
             InvitationError::GuardianSetFull { current, max } => {
                 write!(
@@ -209,10 +212,7 @@ mod tests {
     #[test]
     fn test_guardian_invitation_no_threshold() {
         let result = InvitationConfig::guardian(make_authority(), None, 0);
-        assert_eq!(
-            result.unwrap_err(),
-            InvitationError::NoThresholdForGuardian
-        );
+        assert_eq!(result.unwrap_err(), InvitationError::NoThresholdForGuardian);
     }
 
     #[test]

@@ -2,8 +2,8 @@ use super::{AuraEffectSystem, DEFAULT_WINDOW};
 use async_trait::async_trait;
 use aura_core::effects::{
     AmpChannelEffects, AmpChannelError, AmpCiphertext, ChannelCloseParams, ChannelCreateParams,
-    ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
-    RandomCoreEffects, RandomExtendedEffects,
+    ChannelJoinParams, ChannelLeaveParams, ChannelSendParams, RandomCoreEffects,
+    RandomExtendedEffects,
 };
 use aura_core::hash::hash;
 use aura_core::{AuraError, ChannelId, Hash32};

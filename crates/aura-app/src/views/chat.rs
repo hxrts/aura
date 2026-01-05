@@ -453,7 +453,11 @@ impl ChatState {
     }
 
     /// Get mutable reference to a message by ID in a specific channel
-    pub fn message_mut(&mut self, channel_id: &ChannelId, message_id: &str) -> Option<&mut Message> {
+    pub fn message_mut(
+        &mut self,
+        channel_id: &ChannelId,
+        message_id: &str,
+    ) -> Option<&mut Message> {
         self.channel_messages
             .get_mut(channel_id)
             .and_then(|msgs| msgs.iter_mut().find(|m| m.id == message_id))
@@ -703,19 +707,35 @@ mod tests {
         // Check message finalization states
         let messages = state.channel_messages.get(&channel_id).unwrap();
         assert!(
-            messages.iter().find(|m| m.id == "msg1").unwrap().is_finalized,
+            messages
+                .iter()
+                .find(|m| m.id == "msg1")
+                .unwrap()
+                .is_finalized,
             "msg1 should be finalized"
         );
         assert!(
-            messages.iter().find(|m| m.id == "msg2").unwrap().is_finalized,
+            messages
+                .iter()
+                .find(|m| m.id == "msg2")
+                .unwrap()
+                .is_finalized,
             "msg2 should be finalized"
         );
         assert!(
-            !messages.iter().find(|m| m.id == "msg3").unwrap().is_finalized,
+            !messages
+                .iter()
+                .find(|m| m.id == "msg3")
+                .unwrap()
+                .is_finalized,
             "msg3 should NOT be finalized (epoch 3 > 2)"
         );
         assert!(
-            !messages.iter().find(|m| m.id == "msg4").unwrap().is_finalized,
+            !messages
+                .iter()
+                .find(|m| m.id == "msg4")
+                .unwrap()
+                .is_finalized,
             "msg4 should NOT be finalized (no epoch hint)"
         );
     }
@@ -760,7 +780,10 @@ mod tests {
 
         // Second finalization of same messages should return 0
         let count2 = state.mark_finalized_up_to_epoch(&channel_id, 5);
-        assert_eq!(count2, 0, "Already-finalized messages should not be counted again");
+        assert_eq!(
+            count2, 0,
+            "Already-finalized messages should not be counted again"
+        );
     }
 
     #[test]

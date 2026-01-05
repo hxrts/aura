@@ -194,15 +194,16 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 }
             }
 
-            let location =
-                SecureStorageLocation::amp_bootstrap_key(&context, &channel, &existing.bootstrap_id);
+            let location = SecureStorageLocation::amp_bootstrap_key(
+                &context,
+                &channel,
+                &existing.bootstrap_id,
+            );
             let key = effects
                 .secure_retrieve(&location, &[SecureStorageCapability::Read])
                 .await
                 .map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to load AMP bootstrap key: {e}"
-                    ))
+                    IntentError::internal_error(format!("Failed to load AMP bootstrap key: {e}"))
                 })?;
             if key.len() != 32 {
                 return Err(IntentError::internal_error(format!(
@@ -256,9 +257,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ))
             .await
             .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to commit AMP bootstrap fact: {e}"
-                ))
+                IntentError::internal_error(format!("Failed to commit AMP bootstrap fact: {e}"))
             })?;
 
         Ok(ChannelBootstrapPackage {

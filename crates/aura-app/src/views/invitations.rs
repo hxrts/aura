@@ -216,7 +216,10 @@ impl InvitationsState {
     /// Mark an invitation as accepted.
     ///
     /// Returns the accepted invitation on success, or an error if not found.
-    pub fn accept_invitation(&mut self, invitation_id: &str) -> Result<Invitation, InvitationError> {
+    pub fn accept_invitation(
+        &mut self,
+        invitation_id: &str,
+    ) -> Result<Invitation, InvitationError> {
         // Check in pending first
         if let Some(idx) = self.pending.iter().position(|inv| inv.id == invitation_id) {
             let mut inv = self.pending.remove(idx);
@@ -239,7 +242,10 @@ impl InvitationsState {
     /// Mark an invitation as rejected.
     ///
     /// Returns the rejected invitation on success, or an error if not found.
-    pub fn reject_invitation(&mut self, invitation_id: &str) -> Result<Invitation, InvitationError> {
+    pub fn reject_invitation(
+        &mut self,
+        invitation_id: &str,
+    ) -> Result<Invitation, InvitationError> {
         // Check in pending first
         if let Some(idx) = self.pending.iter().position(|inv| inv.id == invitation_id) {
             let mut inv = self.pending.remove(idx);
@@ -263,10 +269,15 @@ impl InvitationsState {
     ///
     /// Returns the revoked invitation on success, or an error if not found
     /// or if attempting to revoke a received invitation.
-    pub fn revoke_invitation(&mut self, invitation_id: &str) -> Result<Invitation, InvitationError> {
+    pub fn revoke_invitation(
+        &mut self,
+        invitation_id: &str,
+    ) -> Result<Invitation, InvitationError> {
         // Check if it's in pending (cannot revoke received)
         if self.pending.iter().any(|inv| inv.id == invitation_id) {
-            return Err(InvitationError::CannotRevokeReceived(invitation_id.to_string()));
+            return Err(InvitationError::CannotRevokeReceived(
+                invitation_id.to_string(),
+            ));
         }
         // Check in sent
         if let Some(idx) = self.sent.iter().position(|inv| inv.id == invitation_id) {
@@ -282,7 +293,10 @@ impl InvitationsState {
     /// Mark an invitation as expired.
     ///
     /// Returns the expired invitation on success, or an error if not found.
-    pub fn expire_invitation(&mut self, invitation_id: &str) -> Result<Invitation, InvitationError> {
+    pub fn expire_invitation(
+        &mut self,
+        invitation_id: &str,
+    ) -> Result<Invitation, InvitationError> {
         // Check in pending first
         if let Some(idx) = self.pending.iter().position(|inv| inv.id == invitation_id) {
             let mut inv = self.pending.remove(idx);
@@ -374,7 +388,10 @@ mod tests {
         state.add_invitation(make_invitation("inv1", InvitationDirection::Received));
 
         let result = state.revoke_invitation("inv1");
-        assert!(matches!(result, Err(InvitationError::CannotRevokeReceived(_))));
+        assert!(matches!(
+            result,
+            Err(InvitationError::CannotRevokeReceived(_))
+        ));
     }
 
     #[test]

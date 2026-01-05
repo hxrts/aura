@@ -182,8 +182,8 @@ pub async fn prepare_send<E: AmpJournalEffects>(
 ) -> Result<(ChannelEpochState, RatchetDerivation)> {
     let state = get_channel_state(effects, context, channel).await?;
     let ratchet_state = ratchet_from_epoch_state(&state);
-    let deriv =
-        derive_for_send(context, channel, &ratchet_state, state.current_gen).map_err(map_amp_error)?;
+    let deriv = derive_for_send(context, channel, &ratchet_state, state.current_gen)
+        .map_err(map_amp_error)?;
     Ok((state, deriv))
 }
 

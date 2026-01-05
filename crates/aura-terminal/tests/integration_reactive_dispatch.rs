@@ -190,7 +190,9 @@ fn test_guardian_setup_receives_reactive_contacts() {
     assert_eq!(contacts[1].name, "Carol");
 
     // Alice should be pre-selected (is_guardian = true)
-    let selected = modal.selected_indices().expect("Should have selected indices");
+    let selected = modal
+        .selected_indices()
+        .expect("Should have selected indices");
     assert!(
         selected.contains(&0),
         "Alice (index 0) should be pre-selected as guardian"
@@ -259,7 +261,10 @@ fn test_contacts_added_after_render_are_visible() {
         "Modal should see Bob who was added after render"
     );
     assert_eq!(
-        modal.contacts().map(|c| c[0].name.clone()).unwrap_or_default(),
+        modal
+            .contacts()
+            .map(|c| c[0].name.clone())
+            .unwrap_or_default(),
         "Bob"
     );
 }
@@ -304,9 +309,9 @@ fn test_guardian_ceremony_in_progress_escape_cancels() {
     state = new_state;
 
     // Enqueue an in-progress guardian ceremony modal
-    let modal = aura_terminal::tui::state_machine::GuardianSetupModalState::in_ceremony(
-        Some("ceremony-123".to_string()),
-    );
+    let modal = aura_terminal::tui::state_machine::GuardianSetupModalState::in_ceremony(Some(
+        "ceremony-123".to_string(),
+    ));
     state
         .modal_queue
         .enqueue(aura_terminal::tui::state_machine::QueuedModal::GuardianSetup(modal));

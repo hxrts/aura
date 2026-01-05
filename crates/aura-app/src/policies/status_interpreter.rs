@@ -257,11 +257,7 @@ impl StatusInterpreter {
     ///
     /// This is a convenience method that dispatches to the appropriate
     /// status getter based on the operation category.
-    pub fn get_status_for_fact(
-        &self,
-        fact: &Fact,
-        ctx: &dyn StatusContext,
-    ) -> StatusResult {
+    pub fn get_status_for_fact(&self, fact: &Fact, ctx: &dyn StatusContext) -> StatusResult {
         let category = ctx.get_category(fact);
 
         match category {

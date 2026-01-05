@@ -29,8 +29,8 @@ use aura_core::{
 };
 use aura_journal::fact::FactOptions;
 use aura_journal::DomainFact;
-use std::sync::Arc;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
+use std::sync::Arc;
 
 /// Messaging backend policy (runtime-backed vs UI-local).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,7 +76,6 @@ pub async fn current_home_channel_id(app_core: &Arc<RwLock<AppCore>>) -> Result<
 
     Ok(format!("home:{home_id}"))
 }
-
 
 async fn context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
@@ -246,7 +245,6 @@ pub async fn create_channel(
             .commit_relational_facts(&[fact])
             .await
             .map_err(|e| AuraError::agent(format!("Failed to persist channel: {e}")))?;
-
     } else if !name.trim().is_empty() {
         channel_id = channel_id_from_input(name);
     }
@@ -615,7 +613,6 @@ pub async fn start_direct_chat(
 pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> Result<ChatState, AuraError> {
     Ok(chat_snapshot(app_core).await)
 }
-
 
 /// Send an action/emote message to a channel
 ///

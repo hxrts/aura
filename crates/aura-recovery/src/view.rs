@@ -898,7 +898,10 @@ mod tests {
 
         assert_eq!(deltas.len(), 1);
         let delta = downcast_delta::<RecoveryDelta>(&deltas[0]).unwrap();
-        let RecoveryDelta::MembershipProposalCreated { change_description, .. } = delta else {
+        let RecoveryDelta::MembershipProposalCreated {
+            change_description, ..
+        } = delta
+        else {
             panic!("Expected MembershipProposalCreated delta");
         };
         assert!(change_description.contains("threshold"));

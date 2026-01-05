@@ -130,7 +130,9 @@ impl PropagationCallback for LoggingPropagationCallback {
             } => {
                 tracing::debug!("Synced {} facts with peer {:?}", facts_synced, peer_id);
             }
-            PropagationEvent::FactPropagated { fact_id, peer_id, .. } => {
+            PropagationEvent::FactPropagated {
+                fact_id, peer_id, ..
+            } => {
                 tracing::trace!("Fact {:?} propagated to peer {:?}", fact_id, peer_id);
             }
             PropagationEvent::PropagationComplete { fact_ids, .. } => {
@@ -216,10 +218,7 @@ impl PropagationTracker {
 
     /// Record that a specific fact was propagated to a peer
     pub fn record_fact_propagated(&mut self, fact_id: OrderTime, peer_id: AuthorityId) {
-        self.fact_peers
-            .entry(fact_id)
-            .or_default()
-            .insert(peer_id);
+        self.fact_peers.entry(fact_id).or_default().insert(peer_id);
     }
 
     /// Record a peer sync failure

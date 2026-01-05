@@ -203,9 +203,7 @@ impl std::fmt::Display for Propagation {
             }
             Self::Complete => write!(f, "Complete"),
             Self::Failed {
-                retry_count,
-                error,
-                ..
+                retry_count, error, ..
             } => {
                 write!(f, "Failed(retry={retry_count}, {error})")
             }

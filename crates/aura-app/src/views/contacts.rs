@@ -68,7 +68,10 @@ mod contact_map_serde {
     use super::{AuthorityId, Contact, HashMap};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S>(map: &HashMap<AuthorityId, Contact>, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(
+        map: &HashMap<AuthorityId, Contact>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {

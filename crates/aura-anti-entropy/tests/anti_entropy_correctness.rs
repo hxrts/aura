@@ -224,11 +224,8 @@ fn digest_set_operations() {
     assert!(union.contains(&cid3));
 
     // Intersection operation
-    let intersection: BTreeSet<Hash32> = digest1
-        .cids
-        .intersection(&digest2.cids)
-        .copied()
-        .collect();
+    let intersection: BTreeSet<Hash32> =
+        digest1.cids.intersection(&digest2.cids).copied().collect();
     assert_eq!(intersection.len(), 1);
     assert!(intersection.contains(&cid2));
 

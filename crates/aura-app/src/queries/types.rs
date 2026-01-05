@@ -992,9 +992,9 @@ impl Query for RecoveryQuery {
         Ok(RecoveryState::from_parts(
             guardians,
             threshold,
-            None,              // active_recovery
-            Vec::new(),        // pending_requests
-            Vec::new(),        // guardian_bindings
+            None,       // active_recovery
+            Vec::new(), // pending_requests
+            Vec::new(), // guardian_bindings
         ))
     }
 }

@@ -663,7 +663,6 @@ impl AppCore {
     ) -> impl futures_signals::signal::Signal<Item = crate::views::NeighborhoodState> {
         self.views.neighborhood_signal()
     }
-
 }
 
 // =============================================================================

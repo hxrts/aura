@@ -340,9 +340,12 @@ impl ApprovalProgress {
     pub fn is_rejection_certain(&self, total_approvers: u32) -> bool {
         let rejections = self.rejection_count() as u32;
         let remaining = total_approvers.saturating_sub(self.received.len() as u32);
-        let max_possible_approvals = (total_approvers - rejections).min(remaining + self.approval_count() as u32);
+        let max_possible_approvals =
+            (total_approvers - rejections).min(remaining + self.approval_count() as u32);
 
-        !self.required.is_met(max_possible_approvals, total_approvers)
+        !self
+            .required
+            .is_met(max_possible_approvals, total_approvers)
     }
 
     /// Get all approvers who approved
@@ -506,7 +509,9 @@ impl CeremonyStatus {
     pub fn is_in_progress(&self) -> bool {
         matches!(
             self.state,
-            CeremonyState::Preparing | CeremonyState::PendingEpoch { .. } | CeremonyState::Committing
+            CeremonyState::Preparing
+                | CeremonyState::PendingEpoch { .. }
+                | CeremonyState::Committing
         )
     }
 
@@ -554,7 +559,11 @@ impl CeremonyStatus {
         at: PhysicalTime,
     ) {
         // Update if already exists, otherwise add new
-        if let Some(existing) = self.responses.iter_mut().find(|r| r.participant == participant) {
+        if let Some(existing) = self
+            .responses
+            .iter_mut()
+            .find(|r| r.participant == participant)
+        {
             existing.response = response;
             existing.responded_at = at;
         } else {
@@ -773,11 +782,19 @@ mod tests {
             total: 3,
         });
 
-        progress.record(test_authority(1), ApprovalDecision::Approve, test_time(1000));
+        progress.record(
+            test_authority(1),
+            ApprovalDecision::Approve,
+            test_time(1000),
+        );
         assert_eq!(progress.approval_count(), 1);
         assert!(!progress.is_threshold_met(3));
 
-        progress.record(test_authority(2), ApprovalDecision::Approve, test_time(2000));
+        progress.record(
+            test_authority(2),
+            ApprovalDecision::Approve,
+            test_time(2000),
+        );
         assert_eq!(progress.approval_count(), 2);
         assert!(progress.is_threshold_met(3));
     }
@@ -845,8 +862,14 @@ mod tests {
 
     #[test]
     fn test_supersession_reason_display() {
-        assert_eq!(SupersessionReason::PrestateStale.to_string(), "prestate stale");
-        assert_eq!(SupersessionReason::NewerRequest.to_string(), "newer request");
+        assert_eq!(
+            SupersessionReason::PrestateStale.to_string(),
+            "prestate stale"
+        );
+        assert_eq!(
+            SupersessionReason::NewerRequest.to_string(),
+            "newer request"
+        );
         assert_eq!(SupersessionReason::ExplicitCancel.to_string(), "cancelled");
     }
 }

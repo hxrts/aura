@@ -8,15 +8,15 @@ use aura_agent::core::{default_context_id_for_authority, AgentBuilder, AgentConf
 use aura_agent::handlers::{InvitationServiceApi, InvitationType};
 use aura_agent::{AuraAgent, EffectContext, SharedTransport};
 use aura_amp::{amp_recv, get_channel_state, AmpJournalEffects};
+use aura_core::effects::amp::ChannelBootstrapPackage;
+use aura_core::effects::random::RandomCoreEffects;
 use aura_core::effects::transport::TransportError;
+use aura_core::effects::{
+    time::PhysicalTimeEffects, SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+};
 use aura_core::effects::{
     ActionEffect, ActionResult, AmpChannelEffects, ChannelCreateParams, ChannelJoinParams,
     ChannelLeaveParams, ChannelSendParams, ExecutionMode, TransportEffects,
-};
-use aura_core::effects::random::RandomCoreEffects;
-use aura_core::effects::amp::ChannelBootstrapPackage;
-use aura_core::effects::{
-    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, time::PhysicalTimeEffects,
 };
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
@@ -99,9 +99,10 @@ impl AmpChannelHarness {
 
     fn agent_for(&self, name: &str) -> Result<Arc<AuraAgent>> {
         let key = normalize_name(name);
-        self.agents.get(&key).cloned().ok_or_else(|| {
-            AuraError::invalid(format!("unknown agent name: {name}"))
-        })
+        self.agents
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| AuraError::invalid(format!("unknown agent name: {name}")))
     }
 
     fn authority_for(&self, name: &str) -> Result<AuthorityId> {
@@ -109,9 +110,10 @@ impl AmpChannelHarness {
             return Ok(id);
         }
         let key = normalize_name(name);
-        self.authorities.get(&key).copied().ok_or_else(|| {
-            AuraError::invalid(format!("unknown authority name: {name}"))
-        })
+        self.authorities
+            .get(&key)
+            .copied()
+            .ok_or_else(|| AuraError::invalid(format!("unknown authority name: {name}")))
     }
 
     async fn ensure_channel_exists(
@@ -119,7 +121,10 @@ impl AmpChannelHarness {
         effects: &Arc<aura_agent::AuraEffectSystem>,
         channel: ChannelId,
     ) -> Result<()> {
-        if get_channel_state(effects.as_ref(), self.context_id, channel).await.is_ok() {
+        if get_channel_state(effects.as_ref(), self.context_id, channel)
+            .await
+            .is_ok()
+        {
             return Ok(());
         }
 
@@ -248,9 +253,7 @@ impl AmpChannelHarness {
         if let InvitationType::Channel { home_id, .. } = &invitation.invitation_type {
             let invite_channel = channel_id_from_input(home_id);
             if invite_channel != channel {
-                return Err(AuraError::invalid(
-                    "invitation channel mismatch for accept",
-                ));
+                return Err(AuraError::invalid("invitation channel mismatch for accept"));
             }
         }
 
@@ -262,11 +265,9 @@ impl AmpChannelHarness {
             return Ok(());
         }
 
-        Err(AuraError::invalid(
-            result
-                .error
-                .unwrap_or_else(|| "invitation acceptance failed".to_string()),
-        ))
+        Err(AuraError::invalid(result.error.unwrap_or_else(|| {
+            "invitation acceptance failed".to_string()
+        })))
     }
 
     async fn receive_amp_message(
@@ -293,9 +294,8 @@ impl AmpChannelHarness {
                             continue;
                         }
 
-                        let payload = String::from_utf8(msg.payload).map_err(|e| {
-                            AuraError::invalid(format!("invalid AMP payload: {e}"))
-                        })?;
+                        let payload = String::from_utf8(msg.payload)
+                            .map_err(|e| AuraError::invalid(format!("invalid AMP payload: {e}")))?;
                         if payload != expected_payload {
                             return Err(AuraError::invalid(format!(
                                 "AMP payload mismatch: expected '{expected_payload}', got '{payload}'"
@@ -322,12 +322,9 @@ impl AmpChannelHarness {
         new_epoch: u64,
         participants: &[Arc<AuraAgent>],
     ) -> Result<()> {
-        let bump_id = Hash32::from_bytes(
-            format!("amp-bump:{channel}:{new_epoch}").as_bytes(),
-        );
-        let consensus_id = Hash32::from_bytes(
-            format!("amp-consensus:{channel}:{new_epoch}").as_bytes(),
-        );
+        let bump_id = Hash32::from_bytes(format!("amp-bump:{channel}:{new_epoch}").as_bytes());
+        let consensus_id =
+            Hash32::from_bytes(format!("amp-consensus:{channel}:{new_epoch}").as_bytes());
 
         let bump = CommittedChannelEpochBump {
             context: self.context_id,
@@ -378,8 +375,8 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                     let cid = param_string(params, &["cid", "channel"]);
                     let harness = harness.clone();
                     Box::pin(async move {
-                        let creator = creator
-                            .ok_or_else(|| AuraError::invalid("missing creator/actor"))?;
+                        let creator =
+                            creator.ok_or_else(|| AuraError::invalid("missing creator/actor"))?;
                         let cid = cid.ok_or_else(|| AuraError::invalid("missing channel id"))?;
 
                         let agent = harness.agent_for(&creator)?;
@@ -395,7 +392,9 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                                 topic: None,
                             })
                             .await
-                            .map_err(|e| AuraError::invalid(format!("create channel failed: {e}")))?;
+                            .map_err(|e| {
+                                AuraError::invalid(format!("create channel failed: {e}"))
+                            })?;
 
                         effects
                             .join_channel(ChannelJoinParams {
@@ -439,8 +438,8 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                     Box::pin(async move {
                         let sender =
                             sender.ok_or_else(|| AuraError::invalid("missing sender/actor"))?;
-                        let receiver =
-                            receiver.ok_or_else(|| AuraError::invalid("missing receiver/member"))?;
+                        let receiver = receiver
+                            .ok_or_else(|| AuraError::invalid("missing receiver/member"))?;
                         let cid = cid.ok_or_else(|| AuraError::invalid("missing channel id"))?;
 
                         let agent = harness.agent_for(&sender)?;
@@ -688,8 +687,7 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                     let cid = param_string(params, &["cid", "channel"]);
                     let harness = harness.clone();
                     Box::pin(async move {
-                        let leaver =
-                            leaver.ok_or_else(|| AuraError::invalid("missing leaver"))?;
+                        let leaver = leaver.ok_or_else(|| AuraError::invalid("missing leaver"))?;
                         let cid = cid.ok_or_else(|| AuraError::invalid("missing channel id"))?;
 
                         let leaver_agent = harness.agent_for(&leaver)?;
@@ -704,7 +702,9 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                                 participant: leaver_id,
                             })
                             .await
-                            .map_err(|e| AuraError::invalid(format!("leave channel failed: {e}")))?;
+                            .map_err(|e| {
+                                AuraError::invalid(format!("leave channel failed: {e}"))
+                            })?;
 
                         let bob = harness.agent_for("bob")?;
                         let alice = harness.agent_for("alice")?;
@@ -740,9 +740,10 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
             .build(),
     );
 
-    registry.register(NoOpHandler::new("assertInvariant").with_description(
-        "No-op assertion marker emitted by Quint AMP harness",
-    ));
+    registry.register(
+        NoOpHandler::new("assertInvariant")
+            .with_description("No-op assertion marker emitted by Quint AMP harness"),
+    );
 
     registry
 }
@@ -791,9 +792,8 @@ async fn build_agent(
     base_path: PathBuf,
     shared_transport: SharedTransport,
 ) -> Result<Arc<AuraAgent>> {
-    std::fs::create_dir_all(&base_path).map_err(|e| {
-        AuraError::internal(format!("create agent storage directory failed: {e}"))
-    })?;
+    std::fs::create_dir_all(&base_path)
+        .map_err(|e| AuraError::internal(format!("create agent storage directory failed: {e}")))?;
 
     let mut config = AgentConfig {
         device_id: device_from_label(label),

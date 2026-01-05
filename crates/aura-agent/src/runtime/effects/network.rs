@@ -26,12 +26,16 @@ impl NetworkCoreEffects for AuraEffectSystem {
             });
         };
 
-        let wire = deserialize_amp_message(&message).map_err(|e| NetworkError::SerializationFailed {
-            error: e.to_string(),
-        })?;
+        let wire =
+            deserialize_amp_message(&message).map_err(|e| NetworkError::SerializationFailed {
+                error: e.to_string(),
+            })?;
 
         let mut metadata = HashMap::new();
-        metadata.insert("content-type".to_string(), super::AMP_CONTENT_TYPE.to_string());
+        metadata.insert(
+            "content-type".to_string(),
+            super::AMP_CONTENT_TYPE.to_string(),
+        );
 
         let source = self.authority_id;
         let context = wire.header.context;

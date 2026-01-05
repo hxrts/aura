@@ -395,10 +395,7 @@ mod tests {
 
         let mut pairs: Vec<_> = coll.into_iter().collect();
         pairs.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(
-            pairs,
-            vec![("a".to_string(), 1), ("b".to_string(), 2)]
-        );
+        assert_eq!(pairs, vec![("a".to_string(), 1), ("b".to_string(), 2)]);
     }
 
     #[test]

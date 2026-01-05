@@ -193,8 +193,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 let channels: Vec<Channel> = chat_state
                     .all_channels()
                     .map(|c| {
-                        Channel::new(c.id.to_string(), &c.name)
-                            .with_unread(c.unread_count as usize)
+                        Channel::new(c.id.to_string(), &c.name).with_unread(c.unread_count as usize)
                     })
                     .collect();
 

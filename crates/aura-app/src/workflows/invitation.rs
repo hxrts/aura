@@ -144,9 +144,9 @@ use crate::workflows::signals::read_signal;
 use crate::workflows::signals::read_signal_or_default;
 use crate::{views::invitations::InvitationsState, AppCore};
 use async_lock::RwLock;
+use aura_core::effects::amp::ChannelBootstrapPackage;
 #[cfg(feature = "signals")]
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::identifiers::AuthorityId;
 use aura_core::AuraError;
 use std::sync::Arc;

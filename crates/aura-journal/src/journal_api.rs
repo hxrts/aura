@@ -215,11 +215,8 @@ impl Journal {
         let timestamp = TimeStamp::OrderClock(order.clone());
 
         // Construct the fact with the relational content
-        let fact = crate::fact::Fact::new(
-            order,
-            timestamp,
-            FactContent::Relational(relational_fact),
-        );
+        let fact =
+            crate::fact::Fact::new(order, timestamp, FactContent::Relational(relational_fact));
 
         self.fact_journal.add_fact(fact.clone())?;
         Ok(fact)

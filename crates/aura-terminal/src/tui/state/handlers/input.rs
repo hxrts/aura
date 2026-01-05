@@ -32,7 +32,8 @@ pub fn handle_mouse_event(
                     if state.chat.focus == ChatFocus::Messages {
                         let max_scroll = state.chat.message_count.saturating_sub(18);
                         if state.chat.message_scroll < max_scroll {
-                            state.chat.message_scroll = state.chat.message_scroll.saturating_add(3).min(max_scroll);
+                            state.chat.message_scroll =
+                                state.chat.message_scroll.saturating_add(3).min(max_scroll);
                         }
                     }
                 }
@@ -50,7 +51,11 @@ pub fn handle_mouse_event(
                     {
                         let max_scroll = state.neighborhood.message_count.saturating_sub(18);
                         if state.neighborhood.message_scroll < max_scroll {
-                            state.neighborhood.message_scroll = state.neighborhood.message_scroll.saturating_add(3).min(max_scroll);
+                            state.neighborhood.message_scroll = state
+                                .neighborhood
+                                .message_scroll
+                                .saturating_add(3)
+                                .min(max_scroll);
                         }
                     }
                 }

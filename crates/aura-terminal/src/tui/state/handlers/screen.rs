@@ -270,7 +270,11 @@ pub fn handle_neighborhood_key(
                     // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
                     let max_scroll = state.neighborhood.message_count.saturating_sub(18);
                     if state.neighborhood.message_scroll < max_scroll {
-                        state.neighborhood.message_scroll = state.neighborhood.message_scroll.saturating_add(1).min(max_scroll);
+                        state.neighborhood.message_scroll = state
+                            .neighborhood
+                            .message_scroll
+                            .saturating_add(1)
+                            .min(max_scroll);
                     }
                 }
                 DetailFocus::Input => {}
@@ -294,7 +298,8 @@ pub fn handle_neighborhood_key(
                     // Scroll down = decrease offset (show newer messages, toward bottom)
                     // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
                     if state.neighborhood.message_scroll > 0 {
-                        state.neighborhood.message_scroll = state.neighborhood.message_scroll.saturating_sub(1);
+                        state.neighborhood.message_scroll =
+                            state.neighborhood.message_scroll.saturating_sub(1);
                     }
                 }
                 DetailFocus::Input => {}

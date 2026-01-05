@@ -54,14 +54,14 @@ pub mod maintenance;
 pub mod sync;
 
 // Re-export key service types
+pub use ack_routing::{
+    AckRouter, AckSignal, AckSignalCallback, FnAckSignalCallback, LoggingAckSignalCallback,
+    NoOpAckSignalCallback,
+};
 pub use aura_maintenance::{
     AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEpoch,
     MaintenanceFact, MaintenanceFactKey, SnapshotCompleted, SnapshotProposed, UpgradeActivated,
     UpgradeProposalMetadata, MAINTENANCE_FACT_TYPE_ID,
-};
-pub use ack_routing::{
-    AckRouter, AckSignal, AckSignalCallback, FnAckSignalCallback, LoggingAckSignalCallback,
-    NoOpAckSignalCallback,
 };
 pub use maintenance::{MaintenanceService, MaintenanceServiceConfig, UpgradeProposal};
 pub use sync::{SyncService, SyncServiceBuilder, SyncServiceConfig, SyncServiceHealth};

@@ -325,9 +325,7 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
                         .collect()
                 })
                 .unwrap_or_default(),
-            s.selected_indices()
-                .map(|v| v.to_vec())
-                .unwrap_or_default(),
+            s.selected_indices().map(|v| v.to_vec()).unwrap_or_default(),
             s.focused_index(),
             s.threshold_k(),
             s.threshold_n(),
@@ -600,9 +598,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
                         .collect()
                 })
                 .unwrap_or_default(),
-            s.selected_indices()
-                .map(|v| v.to_vec())
-                .unwrap_or_default(),
+            s.selected_indices().map(|v| v.to_vec()).unwrap_or_default(),
             s.focused_index(),
             s.threshold_k(),
             s.threshold_n(),

@@ -161,7 +161,10 @@ impl Nonce {
     /// # Arguments
     /// * `nonces` - The FROST signing nonces to wrap
     /// * `id` - A 32-byte random ID for tracking, should be generated via RandomEffects
-    pub fn from_frost(nonces: frost::round1::SigningNonces, id: [u8; 32]) -> Result<Self, AuraError> {
+    pub fn from_frost(
+        nonces: frost::round1::SigningNonces,
+        id: [u8; 32],
+    ) -> Result<Self, AuraError> {
         // Serialize nonces for secure persistence or in-memory caching
         let value = nonces
             .serialize()
@@ -212,9 +215,9 @@ impl NonceCommitment {
         commitments: frost::round1::SigningCommitments,
     ) -> Result<Self, AuraError> {
         let id_bytes = identifier.serialize();
-        let commitment = commitments
-            .serialize()
-            .map_err(|e| AuraError::crypto(format!("Failed to serialize FROST commitments: {e}")))?;
+        let commitment = commitments.serialize().map_err(|e| {
+            AuraError::crypto(format!("Failed to serialize FROST commitments: {e}"))
+        })?;
         let commitment_bytes: &[u8] = commitment.as_ref();
         if commitment_bytes.len() != MAX_COMMITMENT_BYTES {
             return Err(AuraError::crypto(format!(
@@ -817,7 +820,9 @@ impl TryFrom<PublicKeyPackage> for frost_ed25519::keys::PublicKeyPackage {
         let mut group_key_bytes = [0u8; 32];
         group_key_bytes.copy_from_slice(&aura_pkg.group_public_key);
         let group_verifying_key = frost_ed25519::VerifyingKey::deserialize(group_key_bytes)
-            .map_err(|e| AuraError::crypto(format!("Failed to deserialize group verifying key: {e}")))?;
+            .map_err(|e| {
+                AuraError::crypto(format!("Failed to deserialize group verifying key: {e}"))
+            })?;
 
         // Parse individual signer verifying shares
         let mut signer_verifying_keys = std::collections::BTreeMap::new();
@@ -838,7 +843,9 @@ impl TryFrom<PublicKeyPackage> for frost_ed25519::keys::PublicKeyPackage {
             key_array.copy_from_slice(key_bytes);
             let verifying_share = frost_ed25519::keys::VerifyingShare::deserialize(key_array)
                 .map_err(|e| {
-                    AuraError::crypto(format!("Failed to deserialize signer {signer_id} verifying share: {e}"))
+                    AuraError::crypto(format!(
+                        "Failed to deserialize signer {signer_id} verifying share: {e}"
+                    ))
                 })?;
 
             signer_verifying_keys.insert(frost_id, verifying_share);

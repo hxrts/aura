@@ -377,9 +377,8 @@ impl<'a> EnrollmentHandler<'a> {
                 .map(|id| id + 1)
                 .unwrap_or(0);
 
-            let leaf =
-                LeafNode::new_device(LeafId(next_leaf_id), device_id, public_key_bytes)
-                    .map_err(|e| format!("Failed to build device leaf: {e}"))?;
+            let leaf = LeafNode::new_device(LeafId(next_leaf_id), device_id, public_key_bytes)
+                .map_err(|e| format!("Failed to build device leaf: {e}"))?;
 
             let op_kind = self
                 .effects

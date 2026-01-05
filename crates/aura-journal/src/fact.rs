@@ -21,7 +21,6 @@ use aura_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-
 /// Journal namespace for scoping facts
 ///
 /// Facts are scoped to either an authority's namespace or a relational
@@ -173,9 +172,7 @@ impl Journal {
 
     /// Get all facts that are not yet finalized
     pub fn provisional_facts(&self) -> impl Iterator<Item = &Fact> {
-        self.facts
-            .iter()
-            .filter(|f| f.agreement.is_provisional())
+        self.facts.iter().filter(|f| f.agreement.is_provisional())
     }
 
     /// Get all facts that are finalized
@@ -1185,8 +1182,9 @@ impl ProtocolFactKey {
             ProtocolFactKey::AmpChannelBootstrap {
                 channel,
                 bootstrap_id,
-            } => aura_core::util::serialization::to_vec(&(channel, bootstrap_id))
-                .unwrap_or_default(),
+            } => {
+                aura_core::util::serialization::to_vec(&(channel, bootstrap_id)).unwrap_or_default()
+            }
             ProtocolFactKey::LeakageEvent {
                 source,
                 destination,
@@ -1535,5 +1533,4 @@ mod tests {
         let remaining_fact = journal.get_fact(&fact2.order).unwrap();
         assert!(remaining_fact.ack_tracked);
     }
-
 }

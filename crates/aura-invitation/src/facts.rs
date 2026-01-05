@@ -476,7 +476,12 @@ mod tests {
 
         let generic = fact.to_generic();
 
-        let aura_journal::RelationalFact::Generic { binding_type, binding_data, .. } = generic else {
+        let aura_journal::RelationalFact::Generic {
+            binding_type,
+            binding_data,
+            ..
+        } = generic
+        else {
             panic!("Expected Generic variant");
         };
         assert_eq!(binding_type, INVITATION_FACT_TYPE_ID);

@@ -83,10 +83,7 @@ pub fn create_default_policy_registry() -> PolicyRegistry {
     registry.register(fact_types::INVITATION_ACCEPTED, DropWhenFinalized);
 
     // Guardian bindings are critical - need both
-    registry.register(
-        fact_types::GUARDIAN_BINDING,
-        DropWhenFinalizedAndFullyAcked,
-    );
+    registry.register(fact_types::GUARDIAN_BINDING, DropWhenFinalizedAndFullyAcked);
 
     registry
 }

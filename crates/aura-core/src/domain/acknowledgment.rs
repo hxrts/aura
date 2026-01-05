@@ -160,10 +160,7 @@ impl Acknowledgment {
 
     /// Get peers who have NOT acknowledged from an expected set
     pub fn missing_acks<'a>(&'a self, expected: &'a [AuthorityId]) -> Vec<&'a AuthorityId> {
-        expected
-            .iter()
-            .filter(|p| !self.contains(p))
-            .collect()
+        expected.iter().filter(|p| !self.contains(p)).collect()
     }
 
     /// Merge another acknowledgment set into this one

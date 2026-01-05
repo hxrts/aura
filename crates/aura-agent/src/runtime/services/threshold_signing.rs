@@ -35,12 +35,12 @@ use aura_core::threshold::{
     AgreementMode, ApprovalContext, ParticipantIdentity, SignableOperation, SigningContext,
     ThresholdConfig, ThresholdSignature, ThresholdState,
 };
+use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::{
     effects::{PhysicalTimeEffects, ThresholdSigningEffects},
     threshold::{ConvergenceCert, ReversionFact},
     AuraError, ContextId, Epoch, Hash32,
 };
-use aura_core::tree::{AttestedOp, TreeOp};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -399,10 +399,10 @@ impl ThresholdSigningService {
             SigningMode::SingleSigner => {
                 let package = SingleSignerPublicKeyPackage::from_bytes(&state.public_key_package)
                     .map_err(|e| {
-                        AuraError::internal(format!(
-                            "Failed to decode single-signer public key package: {e}"
-                        ))
-                    })?;
+                    AuraError::internal(format!(
+                        "Failed to decode single-signer public key package: {e}"
+                    ))
+                })?;
                 package
                     .verifying_key()
                     .try_into()
@@ -466,8 +466,8 @@ impl ThresholdSigningService {
                 .await
             {
                 Ok(key_package) => {
-                    let share = tree_signing::share_from_key_package_bytes(&key_package)
-                        .map_err(|e| {
+                    let share =
+                        tree_signing::share_from_key_package_bytes(&key_package).map_err(|e| {
                             AuraError::internal(format!(
                                 "Failed to decode key package for {}: {e}",
                                 participant.display_name()

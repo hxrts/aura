@@ -286,10 +286,7 @@ impl Consistency {
 
     /// Get ack count
     pub fn ack_count(&self) -> usize {
-        self.acknowledgment
-            .as_ref()
-            .map(|a| a.count())
-            .unwrap_or(0)
+        self.acknowledgment.as_ref().map(|a| a.count()).unwrap_or(0)
     }
 }
 
@@ -341,9 +338,7 @@ impl ConsistencyMap {
 
     /// Check if an item is safe (A2+)
     pub fn is_safe(&self, id: &str) -> bool {
-        self.get(id)
-            .map(|c| c.agreement.is_safe())
-            .unwrap_or(false)
+        self.get(id).map(|c| c.agreement.is_safe()).unwrap_or(false)
     }
 
     /// Get the ack records for an item
@@ -471,8 +466,7 @@ mod tests {
         let peer1 = test_authority(1);
         let peer2 = test_authority(2);
 
-        let ack = Acknowledgment::new()
-            .add_ack(peer1, test_time(1000));
+        let ack = Acknowledgment::new().add_ack(peer1, test_time(1000));
 
         let c = Consistency::optimistic().with_acknowledgment(ack);
 

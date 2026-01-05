@@ -27,11 +27,12 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::{DomainFact, ProtocolRelationalFact};
 use aura_protocol::amp::amp_recv;
-use tokio::sync::Mutex;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use super::scheduler::ReactiveView;
 
+use crate::runtime::AuraEffectSystem;
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_invitation::{
     InvitationFact, InvitationType as DomainInvitationType, INVITATION_FACT_TYPE_ID,
@@ -46,7 +47,6 @@ use aura_social::moderation::{
     HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
     HOME_UNMUTE_FACT_TYPE_ID,
 };
-use crate::runtime::AuraEffectSystem;
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
     let _ = reactive
@@ -736,199 +736,203 @@ impl ReactiveView for ChatSignalView {
                     };
 
                     match chat_fact {
-                ChatFact::ChannelCreated {
-                    channel_id,
-                    context_id,
-                    name,
-                    topic,
-                    is_dm,
-                    created_at,
-                    ..
-                } => {
-                    let channel = Channel {
-                        id: channel_id,
-                        context_id: Some(context_id),
-                        name,
-                        topic,
-                        channel_type: if is_dm {
-                            ChannelType::DirectMessage
-                        } else {
-                            ChannelType::Home
-                        },
-                        unread_count: 0,
-                        is_dm,
-                        member_ids: Vec::new(),
-                        member_count: 0,
-                        last_message: None,
-                        last_message_time: None,
-                        last_activity: created_at.ts_ms,
-                        last_finalized_epoch: 0,
-                    };
-                    state.add_channel(channel);
-                    changed = true;
-                }
-                ChatFact::ChannelClosed { channel_id, .. } => {
-                    state.remove_channel(&channel_id);
-                    changed = true;
-                }
-                ChatFact::ChannelUpdated {
-                    channel_id,
-                    name,
-                    topic,
-                    updated_at,
-                    ..
-                } => {
-                    if let Some(channel) = state.channel_mut(&channel_id) {
-                        if let Some(name) = name {
-                            channel.name = name;
-                        }
-                        if topic.is_some() {
-                            channel.topic = topic;
-                        }
-                        channel.last_activity = updated_at.ts_ms;
-                    }
-                    changed = true;
-                }
-                ChatFact::MessageSentSealed {
-                    context_id,
-                    channel_id,
-                    message_id,
-                    sender_id,
-                    sender_name,
-                    payload,
-                    sent_at,
-                    reply_to,
-                    epoch_hint,
-                } => {
-                    let sealed_len = payload.len();
-                    let payload_bytes = payload.clone();
-                    let context = context_id;
-                    drop(state);
-                    let content = match amp_recv(self.effects.as_ref(), context, payload_bytes).await
-                    {
-                        Ok(msg) => String::from_utf8(msg.payload)
-                            .unwrap_or_else(|_| format!("[sealed: {} bytes]", sealed_len)),
-                        Err(err) => {
-                            tracing::debug!(
-                                channel_id = %channel_id,
-                                message_id = %message_id,
-                                error = %err,
-                                "AMP decrypt failed; rendering sealed payload"
-                            );
-                            format!("[sealed: {} bytes]", sealed_len)
-                        }
-                    };
-                    state = self.state.lock().await;
-                    let is_own = sender_id == self.own_authority;
-
-                    // Derive delivery status from fact's consistency metadata
-                    let delivery_status = if is_own {
-                        // For messages we sent, derive status from agreement level
-                        // Finalized (A3) messages have consensus confirmation = Delivered
-                        // Ack-tracked messages will transition based on acknowledgments
-                        if fact.is_finalized() {
-                            MessageDeliveryStatus::Delivered
-                        } else {
-                            MessageDeliveryStatus::Sent
-                        }
-                    } else {
-                        // Messages we received are already delivered to us
-                        MessageDeliveryStatus::Delivered
-                    };
-
-                    let message = Message {
-                        id: message_id,
-                        channel_id,
-                        sender_id,
-                        sender_name,
-                        content,
-                        timestamp: sent_at.ts_ms,
-                        reply_to,
-                        is_own,
-                        is_read: is_own,
-                        delivery_status,
-                        epoch_hint,
-                        is_finalized: fact.is_finalized(),
-                    };
-                    state.apply_message(channel_id, message);
-                    changed = true;
-                }
-                ChatFact::MessageRead {
-                    channel_id,
-                    message_id,
-                    reader_id,
-                    read_at,
-                    ..
-                } => {
-                    // Two cases:
-                    // 1. Reader is us - mark message as read in our local state
-                    // 2. Reader is someone else - update our message's delivery_status to Read
-                    if reader_id == self.own_authority {
-                        // We read someone else's message
-                        if state.mark_message_read(&channel_id, &message_id) {
-                            state.decrement_unread(&channel_id);
+                        ChatFact::ChannelCreated {
+                            channel_id,
+                            context_id,
+                            name,
+                            topic,
+                            is_dm,
+                            created_at,
+                            ..
+                        } => {
+                            let channel = Channel {
+                                id: channel_id,
+                                context_id: Some(context_id),
+                                name,
+                                topic,
+                                channel_type: if is_dm {
+                                    ChannelType::DirectMessage
+                                } else {
+                                    ChannelType::Home
+                                },
+                                unread_count: 0,
+                                is_dm,
+                                member_ids: Vec::new(),
+                                member_count: 0,
+                                last_message: None,
+                                last_message_time: None,
+                                last_activity: created_at.ts_ms,
+                                last_finalized_epoch: 0,
+                            };
+                            state.add_channel(channel);
                             changed = true;
                         }
-                        tracing::debug!(
-                            channel_id = %channel_id,
+                        ChatFact::ChannelClosed { channel_id, .. } => {
+                            state.remove_channel(&channel_id);
+                            changed = true;
+                        }
+                        ChatFact::ChannelUpdated {
+                            channel_id,
+                            name,
+                            topic,
+                            updated_at,
+                            ..
+                        } => {
+                            if let Some(channel) = state.channel_mut(&channel_id) {
+                                if let Some(name) = name {
+                                    channel.name = name;
+                                }
+                                if topic.is_some() {
+                                    channel.topic = topic;
+                                }
+                                channel.last_activity = updated_at.ts_ms;
+                            }
+                            changed = true;
+                        }
+                        ChatFact::MessageSentSealed {
+                            context_id,
+                            channel_id,
                             message_id,
-                            read_at = read_at.ts_ms,
-                            "Message marked as read by us"
-                        );
-                    } else {
-                        // Someone else read our message - update delivery status
-                        if state.mark_read_by_recipient(&message_id) {
+                            sender_id,
+                            sender_name,
+                            payload,
+                            sent_at,
+                            reply_to,
+                            epoch_hint,
+                        } => {
+                            let sealed_len = payload.len();
+                            let payload_bytes = payload.clone();
+                            let context = context_id;
+                            drop(state);
+                            let content =
+                                match amp_recv(self.effects.as_ref(), context, payload_bytes).await
+                                {
+                                    Ok(msg) => {
+                                        String::from_utf8(msg.payload).unwrap_or_else(|_| {
+                                            format!("[sealed: {} bytes]", sealed_len)
+                                        })
+                                    }
+                                    Err(err) => {
+                                        tracing::debug!(
+                                            channel_id = %channel_id,
+                                            message_id = %message_id,
+                                            error = %err,
+                                            "AMP decrypt failed; rendering sealed payload"
+                                        );
+                                        format!("[sealed: {} bytes]", sealed_len)
+                                    }
+                                };
+                            state = self.state.lock().await;
+                            let is_own = sender_id == self.own_authority;
+
+                            // Derive delivery status from fact's consistency metadata
+                            let delivery_status = if is_own {
+                                // For messages we sent, derive status from agreement level
+                                // Finalized (A3) messages have consensus confirmation = Delivered
+                                // Ack-tracked messages will transition based on acknowledgments
+                                if fact.is_finalized() {
+                                    MessageDeliveryStatus::Delivered
+                                } else {
+                                    MessageDeliveryStatus::Sent
+                                }
+                            } else {
+                                // Messages we received are already delivered to us
+                                MessageDeliveryStatus::Delivered
+                            };
+
+                            let message = Message {
+                                id: message_id,
+                                channel_id,
+                                sender_id,
+                                sender_name,
+                                content,
+                                timestamp: sent_at.ts_ms,
+                                reply_to,
+                                is_own,
+                                is_read: is_own,
+                                delivery_status,
+                                epoch_hint,
+                                is_finalized: fact.is_finalized(),
+                            };
+                            state.apply_message(channel_id, message);
+                            changed = true;
+                        }
+                        ChatFact::MessageRead {
+                            channel_id,
+                            message_id,
+                            reader_id,
+                            read_at,
+                            ..
+                        } => {
+                            // Two cases:
+                            // 1. Reader is us - mark message as read in our local state
+                            // 2. Reader is someone else - update our message's delivery_status to Read
+                            if reader_id == self.own_authority {
+                                // We read someone else's message
+                                if state.mark_message_read(&channel_id, &message_id) {
+                                    state.decrement_unread(&channel_id);
+                                    changed = true;
+                                }
+                                tracing::debug!(
+                                    channel_id = %channel_id,
+                                    message_id,
+                                    read_at = read_at.ts_ms,
+                                    "Message marked as read by us"
+                                );
+                            } else {
+                                // Someone else read our message - update delivery status
+                                if state.mark_read_by_recipient(&message_id) {
+                                    tracing::debug!(
+                                        channel_id = %channel_id,
+                                        message_id,
+                                        reader_id = %reader_id,
+                                        read_at = read_at.ts_ms,
+                                        "Message delivery status updated to Read"
+                                    );
+                                    changed = true;
+                                }
+                            }
+                        }
+                        ChatFact::MessageEdited {
+                            channel_id,
+                            message_id,
+                            editor_id,
+                            new_payload,
+                            edited_at,
+                            ..
+                        } => {
+                            // Update the message content in local state
+                            let new_content = String::from_utf8_lossy(&new_payload).to_string();
+                            if let Some(msg) = state.message_mut(&channel_id, &message_id) {
+                                msg.content = new_content;
+                            }
                             tracing::debug!(
                                 channel_id = %channel_id,
                                 message_id,
-                                reader_id = %reader_id,
-                                read_at = read_at.ts_ms,
-                                "Message delivery status updated to Read"
+                                editor_id = %editor_id,
+                                edited_at = edited_at.ts_ms,
+                                "Message edited"
                             );
                             changed = true;
                         }
-                    }
-                }
-                ChatFact::MessageEdited {
-                    channel_id,
-                    message_id,
-                    editor_id,
-                    new_payload,
-                    edited_at,
-                    ..
-                } => {
-                    // Update the message content in local state
-                    let new_content = String::from_utf8_lossy(&new_payload).to_string();
-                    if let Some(msg) = state.message_mut(&channel_id, &message_id) {
-                        msg.content = new_content;
-                    }
-                    tracing::debug!(
-                        channel_id = %channel_id,
-                        message_id,
-                        editor_id = %editor_id,
-                        edited_at = edited_at.ts_ms,
-                        "Message edited"
-                    );
-                    changed = true;
-                }
-                ChatFact::MessageDeleted {
-                    channel_id,
-                    message_id,
-                    deleter_id,
-                    deleted_at,
-                    ..
-                } => {
-                    // Remove the message from local state
-                    state.remove_message(&channel_id, &message_id);
-                    tracing::debug!(
-                        channel_id = %channel_id,
-                        message_id,
-                        deleter_id = %deleter_id,
-                        deleted_at = deleted_at.ts_ms,
-                        "Message deleted"
-                    );
-                    changed = true;
-                }
+                        ChatFact::MessageDeleted {
+                            channel_id,
+                            message_id,
+                            deleter_id,
+                            deleted_at,
+                            ..
+                        } => {
+                            // Remove the message from local state
+                            state.remove_message(&channel_id, &message_id);
+                            tracing::debug!(
+                                channel_id = %channel_id,
+                                message_id,
+                                deleter_id = %deleter_id,
+                                deleted_at = deleted_at.ts_ms,
+                                "Message deleted"
+                            );
+                            changed = true;
+                        }
                     }
                 }
 

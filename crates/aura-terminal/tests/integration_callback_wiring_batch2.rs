@@ -834,7 +834,7 @@ async fn test_all_snapshots_consistent() {
     let guardians = ctx.snapshot_guardians();
 
     let chat_channels = chat.channel_count();
-    let chat_messages = chat.messages.len();  // ChatSnapshot has messages field directly
+    let chat_messages = chat.messages.len(); // ChatSnapshot has messages field directly
     println!("  Chat: {chat_channels} channels, {chat_messages} messages");
     let contact_count = contacts.contact_count();
     println!("  Contacts: {contact_count} contacts");

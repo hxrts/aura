@@ -127,10 +127,7 @@ async fn test_home_signals_initialization() {
                 current_home_id = state.current_home_id()
             );
             // Should start with no homes
-            assert!(
-                state.is_empty(),
-                "Initial homes state should be empty"
-            );
+            assert!(state.is_empty(), "Initial homes state should be empty");
         }
         Err(e) => {
             println!("  HOMES_SIGNAL read error (expected for uninitialized): {e:?}");

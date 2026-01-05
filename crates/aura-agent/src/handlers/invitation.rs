@@ -60,8 +60,7 @@ struct ChannelBootstrapInvite {
 }
 
 fn channel_id_from_home_id(home_id: &str) -> ChannelId {
-    ChannelId::from_str(home_id)
-        .unwrap_or_else(|_| ChannelId::from_bytes(hash(home_id.as_bytes())))
+    ChannelId::from_str(home_id).unwrap_or_else(|_| ChannelId::from_bytes(hash(home_id.as_bytes())))
 }
 
 /// Invitation handler
@@ -436,11 +435,8 @@ impl InvitationHandler {
                 )
                 .await
                 .map_err(|e| {
-                    crate::core::AgentError::effects(format!(
-                        "store AMP bootstrap key: {e}"
-                    ))
+                    crate::core::AgentError::effects(format!("store AMP bootstrap key: {e}"))
                 })?;
-
         }
 
         // Device enrollment: install share + notify initiator device runtime.
@@ -879,9 +875,7 @@ impl InvitationHandler {
 
         let now_ms = effects.current_timestamp().await.unwrap_or(0);
         let context_id = match &shareable.invitation_type {
-            InvitationType::Channel { .. } => {
-                default_context_id_for_authority(shareable.sender_id)
-            }
+            InvitationType::Channel { .. } => default_context_id_for_authority(shareable.sender_id),
             _ => self.context.effect_context.context_id(),
         };
 

@@ -482,7 +482,9 @@ impl GuardianSetupModalState {
     #[must_use]
     pub fn ceremony_id(&self) -> Option<&String> {
         match &self.phase {
-            GuardianSetupPhase::CeremonyInProgress { ceremony, .. } => ceremony.ceremony_id.as_ref(),
+            GuardianSetupPhase::CeremonyInProgress { ceremony, .. } => {
+                ceremony.ceremony_id.as_ref()
+            }
             _ => None,
         }
     }
@@ -631,11 +633,9 @@ impl GuardianSetupModalState {
     #[must_use]
     pub fn any_declined(&self) -> bool {
         match &self.phase {
-            GuardianSetupPhase::CeremonyInProgress { responses, .. } => {
-                responses
-                    .iter()
-                    .any(|(_, _, r)| *r == GuardianCeremonyResponse::Declined)
-            }
+            GuardianSetupPhase::CeremonyInProgress { responses, .. } => responses
+                .iter()
+                .any(|(_, _, r)| *r == GuardianCeremonyResponse::Declined),
             _ => false,
         }
     }

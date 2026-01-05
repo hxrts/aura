@@ -30,8 +30,8 @@ pub mod simulator;
 
 pub use hints::DemoHints;
 pub use signal_coordinator::DemoSignalCoordinator;
-pub use simulator::DemoSimulator;
 pub use simulator::spawn_amp_echo_listener;
+pub use simulator::DemoSimulator;
 
 use crate::error::{TerminalError, TerminalResult};
 use aura_core::time::{PhysicalTime, TimeStamp};
@@ -417,8 +417,7 @@ impl SimulatedAgent {
                                 );
 
                                 // Defer guardian binding until after lock is released
-                                guardian_bindings_to_add
-                                    .push((envelope.source, envelope.context));
+                                guardian_bindings_to_add.push((envelope.source, envelope.context));
 
                                 // Send acceptance response back through transport
                                 let mut response_metadata = std::collections::HashMap::new();
