@@ -41,7 +41,7 @@ pub(super) async fn get_lan_peers(bridge: &AgentRuntimeBridge) -> Vec<LanPeerInf
             .into_iter()
             .map(|peer| LanPeerInfo {
                 authority_id: peer.authority_id,
-                address: peer.source_addr.to_string(),
+                address: peer.source_addr.clone(),
                 discovered_at_ms: peer.discovered_at_ms,
                 display_name: peer.descriptor.display_name.clone(),
             })

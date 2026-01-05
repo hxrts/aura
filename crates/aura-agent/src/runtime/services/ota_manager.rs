@@ -5,9 +5,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Update status for the agent.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum UpdateStatus {
     /// No update available.
+    #[default]
     UpToDate,
     /// Update available but not yet downloaded.
     Available {
@@ -26,12 +27,6 @@ pub enum UpdateStatus {
     Installing { version: String },
     /// Update failed.
     Failed { reason: String },
-}
-
-impl Default for UpdateStatus {
-    fn default() -> Self {
-        Self::UpToDate
-    }
 }
 
 #[derive(Debug, Default)]
