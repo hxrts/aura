@@ -96,12 +96,13 @@ impl ConvergenceCert {
 /// A fact can be `Finality::Local` but `Agreement::Finalized` (consensus completed
 /// but not yet replicated), or `Finality::Replicated` but `Agreement::Provisional`
 /// (replicated optimistically before consensus).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Agreement {
     /// A1: Provisional - usable immediately, may be superseded.
     ///
     /// Used for optimistic operations that apply immediately but haven't
     /// been confirmed by consensus. These may be rolled back if superseded.
+    #[default]
     Provisional,
 
     /// A2: Soft-Safe - bounded divergence with convergence certificate.
@@ -121,12 +122,6 @@ pub enum Agreement {
         /// The consensus instance that confirmed this fact
         consensus_id: ConsensusId,
     },
-}
-
-impl Default for Agreement {
-    fn default() -> Self {
-        Self::Provisional
-    }
 }
 
 impl Agreement {

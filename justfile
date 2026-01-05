@@ -586,6 +586,7 @@ check-arch-concurrency:
     scripts/check-arch.sh --concurrency || true
 
 # Run CI checks locally (dry-run of GitHub CI workflow)
+# Mirrors the GitHub CI workflow as closely as possible
 ci-dry-run:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -594,15 +595,32 @@ ci-dry-run:
     GREEN='\033[0;32m'
     RED='\033[0;31m'
     YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
     NC='\033[0m' # No Color
 
     exit_code=0
 
-    # Clean build artifacts for fresh compilation
-    cargo clean 2>/dev/null
+    # Expected CI Rust version (update when GitHub CI updates)
+    # GitHub CI uses actions-rust-lang/setup-rust-toolchain@v1 which installs latest stable
+    CI_RUST_VERSION="1.92"
+
+    echo "CI Dry Run"
+    echo "=========="
+
+    # 0. Environment Check
+    LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    printf "[0/9] Rust version... "
+    if [[ "$LOCAL_RUST" == "$CI_RUST_VERSION" ]]; then
+        echo -e "${GREEN}$LOCAL_RUST${NC} (matches CI)"
+    elif [[ "$LOCAL_RUST" < "$CI_RUST_VERSION" ]]; then
+        echo -e "${YELLOW}$LOCAL_RUST${NC} (CI uses $CI_RUST_VERSION - newer lints may fail in CI)"
+    else
+        echo -e "${BLUE}$LOCAL_RUST${NC} (newer than CI $CI_RUST_VERSION)"
+    fi
+    echo ""
 
     # 1. Format Check
-    printf "[1/8] Format... "
+    printf "[1/9] Format... "
     if cargo fmt --all -- --check 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
@@ -612,7 +630,7 @@ ci-dry-run:
     fi
 
     # 2. Clippy with Effects Enforcement
-    printf "[2/8] Clippy... "
+    printf "[2/9] Clippy... "
     if cargo clippy --workspace --all-targets -q -- \
         -D warnings \
         -D clippy::disallowed_methods \
@@ -623,18 +641,19 @@ ci-dry-run:
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${RED}FAIL${NC}"
+        # Show more useful error output
         cargo clippy --workspace --all-targets -- \
             -D warnings \
             -D clippy::disallowed_methods \
             -D clippy::disallowed_types \
             -D clippy::unwrap_used \
             -D clippy::expect_used \
-            -D clippy::duplicated_attributes 2>&1 | grep -E "^(error|warning\[)" | head -30
+            -D clippy::duplicated_attributes 2>&1 | grep -E "^error(\[|:)" | head -30
         exit_code=1
     fi
 
     # 3. Test Suite
-    printf "[3/8] Tests... "
+    printf "[3/9] Tests... "
     if cargo test --workspace -q 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
@@ -644,7 +663,7 @@ ci-dry-run:
     fi
 
     # 4. Check for Effects System Violations
-    printf "[4/8] Effects violations... "
+    printf "[4/9] Effects violations... "
     violations_found=0
 
     # Check time usage (exclude allowed layers)
@@ -711,7 +730,7 @@ ci-dry-run:
     fi
 
     # 5. Documentation Links Check
-    printf "[5/8] Doc links... "
+    printf "[5/9] Doc links... "
     command -v markdown-link-check &>/dev/null || npm install -g markdown-link-check >/dev/null 2>&1
 
     doc_errors=0
@@ -733,7 +752,7 @@ ci-dry-run:
     fi
 
     # 6. Build Check
-    printf "[6/8] Build... "
+    printf "[6/9] Build... "
     if cargo build --workspace -q 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
@@ -742,8 +761,38 @@ ci-dry-run:
         exit_code=1
     fi
 
-    # 7. Unused Dependencies Check
-    printf "[7/8] Unused deps... "
+    # 7. Architecture Check (local-only, catches layer violations)
+    printf "[7/9] Architecture... "
+    if ./scripts/check-arch.sh --quick 2>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${YELLOW}WARN${NC} (run 'just check-arch' for details)"
+    fi
+
+    # 8. Quint Typecheck (quick sanity check, matches CI quint-model-checking)
+    printf "[8/9] Quint specs... "
+    if command -v quint &>/dev/null; then
+        quint_errors=0
+        for spec in verification/quint/*.qnt; do
+            [ -f "$spec" ] || continue
+            if ! quint typecheck "$spec" >/dev/null 2>&1; then
+                quint_errors=1
+                break
+            fi
+        done
+        if [ $quint_errors -eq 0 ]; then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${RED}FAIL${NC}"
+            echo "  Run 'just quint-typecheck-all' for details"
+            exit_code=1
+        fi
+    else
+        echo -e "${YELLOW}SKIP${NC} (quint not installed)"
+    fi
+
+    # 9. Unused Dependencies Check
+    printf "[9/9] Unused deps... "
     if nix develop .#nightly --command cargo udeps --all-targets 2>&1 | grep -q "unused dependencies:"; then
         echo -e "${YELLOW}WARN${NC}"
         nix develop .#nightly --command cargo udeps --all-targets 2>&1 | grep "unused dependencies:" | head -5
@@ -751,7 +800,7 @@ ci-dry-run:
         echo -e "${GREEN}OK${NC}"
     fi
 
-    # 8. Summary
+    # Summary
     echo ""
     if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}All CI checks passed${NC}"

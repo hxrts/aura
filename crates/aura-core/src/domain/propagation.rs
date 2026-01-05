@@ -29,12 +29,13 @@ use serde::{Deserialize, Serialize};
 /// | Granularity | Aggregate (count) | Per-peer with timestamp |
 /// | Opt-in | Always available | Fact must request acks |
 /// | Use case | "Is sync complete?" | "Did Alice receive this?" |
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Propagation {
     /// Only on this device.
     ///
     /// The fact has been written locally but has not yet been synced
     /// to any peers. This is the initial state for all new facts.
+    #[default]
     Local,
 
     /// Sync in progress.
@@ -66,12 +67,6 @@ pub enum Propagation {
         /// Description of the failure
         error: String,
     },
-}
-
-impl Default for Propagation {
-    fn default() -> Self {
-        Self::Local
-    }
 }
 
 impl Propagation {
