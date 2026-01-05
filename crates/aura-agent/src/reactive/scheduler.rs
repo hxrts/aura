@@ -433,19 +433,14 @@ impl ReactiveScheduler {
 
     fn inspect_generic_facts(&self, facts: &[Fact]) {
         for fact in facts {
-            if let FactContent::Relational(RelationalFact::Generic {
-                context_id,
-                binding_type,
-                binding_data,
-            }) = &fact.content
+            if let FactContent::Relational(RelationalFact::Generic { context_id, envelope }) =
+                &fact.content
             {
-                let binding =
-                    self.fact_registry
-                        .reduce_generic(*context_id, binding_type, binding_data);
+                let binding = self.fact_registry.reduce_envelope(*context_id, envelope);
                 let binding_type_desc = format!("{:?}", binding.binding_type);
                 let context_display = context_id.to_string();
                 tracing::trace!(
-                    fact_type = binding_type,
+                    fact_type = envelope.type_id.as_str(),
                     binding = binding_type_desc,
                     ctx = context_display,
                     "reduced generic fact"
@@ -808,8 +803,12 @@ mod tests {
             1,
             FactContent::Relational(RelationalFact::Generic {
                 context_id: test_context_id(),
-                binding_type: "test_fact".to_string(),
-                binding_data: vec![1, 2, 3],
+                envelope: aura_core::types::facts::FactEnvelope {
+                    type_id: aura_core::types::facts::FactTypeId::from("test_fact"),
+                    schema_version: 1,
+                    encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                    payload: vec![1, 2, 3],
+                },
             }),
         )];
         fact_tx.send(FactSource::Journal(facts)).await.unwrap();
@@ -866,29 +865,19 @@ mod tests {
 
         // Test with facts that should produce deltas
         let facts = vec![
-            make_test_fact(
-                1,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: CHAT_FACT_TYPE_ID.to_string(),
-                    binding_data: channel_fact.to_bytes(),
-                }),
-            ),
-            make_test_fact(
-                2,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: CHAT_FACT_TYPE_ID.to_string(),
-                    binding_data: message_fact.to_bytes(),
-                }),
-            ),
+            make_test_fact(1, FactContent::Relational(channel_fact.to_generic())),
+            make_test_fact(2, FactContent::Relational(message_fact.to_generic())),
             // A non-chat fact that should be ignored
             make_test_fact(
                 3,
                 FactContent::Relational(RelationalFact::Generic {
                     context_id: test_context_id(),
-                    binding_type: "other_action".to_string(),
-                    binding_data: vec![7, 8, 9],
+                    envelope: aura_core::types::facts::FactEnvelope {
+                        type_id: aura_core::types::facts::FactTypeId::from("other_action"),
+                        schema_version: 1,
+                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                        payload: vec![7, 8, 9],
+                    },
                 }),
             ),
         ];
@@ -924,11 +913,7 @@ mod tests {
         let mut more_facts = facts.clone();
         more_facts.push(make_test_fact(
             4,
-            FactContent::Relational(RelationalFact::Generic {
-                context_id: test_context_id(),
-                binding_type: CHAT_FACT_TYPE_ID.to_string(),
-                binding_data: another_message.to_bytes(),
-            }),
+            FactContent::Relational(another_message.to_generic()),
         ));
 
         let more_deltas = reduction.reduce(&more_facts, test_authority);
@@ -961,8 +946,14 @@ mod tests {
                     i,
                     FactContent::Relational(RelationalFact::Generic {
                         context_id: test_context_id(),
-                        binding_type: format!("test_fact_{}", i),
-                        binding_data: vec![i as u8],
+                        envelope: aura_core::types::facts::FactEnvelope {
+                            type_id: aura_core::types::facts::FactTypeId::from(
+                                format!("test_fact_{}", i).as_str(),
+                            ),
+                            schema_version: 1,
+                            encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                            payload: vec![i as u8],
+                        },
                     }),
                 )]))
                 .await
@@ -999,8 +990,12 @@ mod tests {
                 2,
                 FactContent::Relational(RelationalFact::Generic {
                     context_id: test_context_id(),
-                    binding_type: "threshold_updated".to_string(),
-                    binding_data: vec![2, 3],
+                    envelope: aura_core::types::facts::FactEnvelope {
+                        type_id: aura_core::types::facts::FactTypeId::from("threshold_updated"),
+                        schema_version: 1,
+                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                        payload: vec![2, 3],
+                    },
                 }),
             ),
         ];
@@ -1098,22 +1093,8 @@ mod tests {
         );
 
         let facts = vec![
-            make_test_fact(
-                1,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: INVITATION_FACT_TYPE_ID.to_string(),
-                    binding_data: sent_fact.to_bytes(),
-                }),
-            ),
-            make_test_fact(
-                2,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: INVITATION_FACT_TYPE_ID.to_string(),
-                    binding_data: accepted_fact.to_bytes(),
-                }),
-            ),
+            make_test_fact(1, FactContent::Relational(sent_fact.to_generic())),
+            make_test_fact(2, FactContent::Relational(accepted_fact.to_generic())),
         ];
 
         // Use a test authority for invitation direction determination
@@ -1160,30 +1141,9 @@ mod tests {
         );
 
         let facts = vec![
-            make_test_fact(
-                1,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: SOCIAL_FACT_TYPE_ID.to_string(),
-                    binding_data: home_created.to_bytes(),
-                }),
-            ),
-            make_test_fact(
-                2,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: SOCIAL_FACT_TYPE_ID.to_string(),
-                    binding_data: resident_joined.to_bytes(),
-                }),
-            ),
-            make_test_fact(
-                3,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: SOCIAL_FACT_TYPE_ID.to_string(),
-                    binding_data: storage_updated.to_bytes(),
-                }),
-            ),
+            make_test_fact(1, FactContent::Relational(home_created.to_generic())),
+            make_test_fact(2, FactContent::Relational(resident_joined.to_generic())),
+            make_test_fact(3, FactContent::Relational(storage_updated.to_generic())),
         ];
 
         let deltas = reduction.reduce(&facts, None);

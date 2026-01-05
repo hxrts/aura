@@ -64,11 +64,7 @@ mod tests {
             expires_at: Some(pt(31000)),
         };
 
-        let binding = registry.reduce_generic(
-            home_mute.context_id,
-            HOME_MUTE_FACT_TYPE_ID,
-            &home_mute.to_bytes(),
-        );
+        let binding = registry.reduce_envelope(home_mute.context_id, &home_mute.to_envelope());
 
         assert_eq!(
             binding.binding_type,
@@ -84,11 +80,7 @@ mod tests {
             unmuted_at: pt(2000),
         };
 
-        let binding = registry.reduce_generic(
-            home_unmute.context_id,
-            HOME_UNMUTE_FACT_TYPE_ID,
-            &home_unmute.to_bytes(),
-        );
+        let binding = registry.reduce_envelope(home_unmute.context_id, &home_unmute.to_envelope());
 
         assert_eq!(
             binding.binding_type,

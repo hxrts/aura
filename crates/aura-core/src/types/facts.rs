@@ -14,7 +14,7 @@ pub const MAX_FACT_PAYLOAD_BYTES: usize = 65_536;
 ///
 /// Replaces raw `&'static str` type IDs with a validated newtype.
 /// Type IDs follow the format `domain/version` (e.g., "wot/v1", "verify/v1").
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct FactTypeId(Cow<'static, str>);
 
@@ -92,7 +92,7 @@ pub enum FactError {
 }
 
 /// Encoding used inside a fact envelope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum FactEncoding {
     /// DAG-CBOR encoding (canonical, deterministic).
     DagCbor,
@@ -101,7 +101,7 @@ pub enum FactEncoding {
 }
 
 /// Canonical envelope for domain fact payloads.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FactEnvelope {
     /// Domain fact type identifier (e.g., "chat", "invitation").

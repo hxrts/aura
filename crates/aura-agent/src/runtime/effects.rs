@@ -526,10 +526,15 @@ impl AuraEffectSystem {
         binding_type: &str,
         binding_data: Vec<u8>,
     ) -> Result<TypedFact, AuraError> {
+        let envelope = aura_core::types::facts::FactEnvelope {
+            type_id: aura_core::types::facts::FactTypeId::from(binding_type),
+            schema_version: 1,
+            encoding: aura_core::types::facts::FactEncoding::DagCbor,
+            payload: binding_data,
+        };
         let rel = RelationalFact::Generic {
             context_id,
-            binding_type: binding_type.to_string(),
-            binding_data,
+            envelope,
         };
         let mut committed = self.commit_relational_facts(vec![rel]).await?;
         Ok(committed

@@ -272,17 +272,16 @@ impl FactReducer for ContactFactReducer {
         CONTACT_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != CONTACT_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = ContactFact::from_bytes(binding_data)?;
+        let fact = ContactFact::from_envelope(envelope)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
@@ -347,21 +346,16 @@ impl FactReducer for GuardianBindingDetailsFactReducer {
         GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = aura_journal::decode_domain_fact::<GuardianBindingDetailsFact>(
-            GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID,
-            1,
-            binding_data,
-        )?;
+        let fact = GuardianBindingDetailsFact::from_envelope(envelope)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
@@ -369,7 +363,7 @@ impl FactReducer for GuardianBindingDetailsFactReducer {
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic("guardian-binding-details".to_string()),
             context_id,
-            data: hash::hash(binding_data).to_vec(),
+            data: hash::hash(&envelope.payload).to_vec(),
         })
     }
 }
@@ -402,7 +396,7 @@ impl RecoveryGrantDetailsFact {
     }
 
     pub fn grant_hash(&self) -> Hash32 {
-        Hash32::from_bytes(&hash::hash(&self.to_bytes()))
+        Hash32::from_bytes(&hash::hash(&self.to_envelope().payload))
     }
 
     pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
@@ -417,21 +411,16 @@ impl FactReducer for RecoveryGrantDetailsFactReducer {
         RECOVERY_GRANT_DETAILS_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != RECOVERY_GRANT_DETAILS_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != RECOVERY_GRANT_DETAILS_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = aura_journal::decode_domain_fact::<RecoveryGrantDetailsFact>(
-            RECOVERY_GRANT_DETAILS_FACT_TYPE_ID,
-            1,
-            binding_data,
-        )?;
+        let fact = RecoveryGrantDetailsFact::from_envelope(envelope)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
@@ -439,7 +428,7 @@ impl FactReducer for RecoveryGrantDetailsFactReducer {
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic("recovery-grant-details".to_string()),
             context_id,
-            data: hash::hash(binding_data).to_vec(),
+            data: hash::hash(&envelope.payload).to_vec(),
         })
     }
 }
@@ -484,14 +473,9 @@ mod tests {
 
         let generic = fact.to_generic();
 
-        if let aura_journal::RelationalFact::Generic {
-            binding_type,
-            binding_data,
-            ..
-        } = generic
-        {
-            assert_eq!(binding_type, CONTACT_FACT_TYPE_ID);
-            let restored = ContactFact::from_bytes(&binding_data);
+        if let aura_journal::RelationalFact::Generic { envelope, .. } = generic {
+            assert_eq!(envelope.type_id.as_str(), CONTACT_FACT_TYPE_ID);
+            let restored = ContactFact::from_envelope(&envelope);
             assert!(restored.is_some());
         } else {
             panic!("Expected Generic variant");
@@ -510,9 +494,9 @@ mod tests {
             1234567890,
         );
 
-        let bytes = fact.to_bytes();
-        let binding1 = reducer.reduce(context_id, CONTACT_FACT_TYPE_ID, &bytes);
-        let binding2 = reducer.reduce(context_id, CONTACT_FACT_TYPE_ID, &bytes);
+        let envelope = fact.to_envelope();
+        let binding1 = reducer.reduce_envelope(context_id, &envelope);
+        let binding2 = reducer.reduce_envelope(context_id, &envelope);
         assert!(binding1.is_some());
         assert!(binding2.is_some());
         let binding1 = binding1.unwrap();
@@ -535,8 +519,8 @@ mod tests {
             0,
         );
 
-        let bytes = fact.to_bytes();
-        let binding = reducer.reduce(test_context_id(), CONTACT_FACT_TYPE_ID, &bytes);
+        let envelope = fact.to_envelope();
+        let binding = reducer.reduce_envelope(test_context_id(), &envelope);
 
         assert!(binding.is_some());
         let binding = binding.unwrap();

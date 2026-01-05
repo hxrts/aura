@@ -121,8 +121,7 @@ pub use types::GuardianMetadata;
 
 // Extensibility infrastructure re-exports
 pub use extensibility::{
-    decode_domain_fact, encode_domain_fact, parse_generic_fact, DomainFact, FactReducer,
-    FactRegistry,
+    decode_domain_fact, encode_domain_fact, parse_envelope, DomainFact, FactReducer, FactRegistry,
 };
 
 // Device naming fact re-exports

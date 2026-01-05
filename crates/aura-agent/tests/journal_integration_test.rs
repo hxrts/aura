@@ -107,8 +107,12 @@ fn make_generic_fact(binding_type: &str, index: u64) -> Fact {
         make_timestamp(1000 + index),
         FactContent::Relational(RelationalFact::Generic {
             context_id: ContextId::new_from_entropy([0u8; 32]),
-            binding_type: binding_type.to_string(),
-            binding_data: vec![index as u8],
+            envelope: aura_core::types::facts::FactEnvelope {
+                type_id: aura_core::types::facts::FactTypeId::from(binding_type),
+                schema_version: 1,
+                encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                payload: vec![index as u8],
+            },
         }),
     )
 }
@@ -404,10 +408,9 @@ async fn test_generic_facts_preserved() {
     assert_eq!(received.len(), 1);
 
     // Verify fact content is preserved
-    if let FactContent::Relational(RelationalFact::Generic { binding_type, .. }) =
-        &received[0].content
+    if let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &received[0].content
     {
-        assert_eq!(binding_type, "test_binding_type");
+        assert_eq!(envelope.type_id.as_str(), "test_binding_type");
     } else {
         panic!("Expected Generic fact");
     }

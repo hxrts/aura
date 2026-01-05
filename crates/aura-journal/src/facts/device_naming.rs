@@ -36,6 +36,7 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::time::PhysicalTime;
+use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
 use serde::{Deserialize, Serialize};
 
 use crate::extensibility::{DomainFact, FactReducer};
@@ -136,31 +137,38 @@ impl DomainFact for DeviceNamingFact {
         DEVICE_NAMING_FACT_TYPE_ID
     }
 
+    fn schema_version(&self) -> u16 {
+        DEVICE_NAMING_SCHEMA_VERSION
+    }
+
     fn context_id(&self) -> ContextId {
         match self {
             Self::SuggestionUpdated { context_id, .. } => *context_id,
         }
     }
 
-    #[allow(clippy::expect_used)] // Encoding this type is infallible
-    fn to_bytes(&self) -> Vec<u8> {
-        crate::encode_domain_fact(
-            DEVICE_NAMING_FACT_TYPE_ID,
-            DEVICE_NAMING_SCHEMA_VERSION,
-            self,
-        )
-        .expect("DomainFact encoding failed")
+    fn to_envelope(&self) -> FactEnvelope {
+        let payload = aura_core::util::serialization::to_vec(self)
+            .expect("DeviceNamingFact serialization should not fail");
+        FactEnvelope {
+            type_id: FactTypeId::from(self.type_id()),
+            schema_version: self.schema_version(),
+            encoding: FactEncoding::DagCbor,
+            payload,
+        }
     }
 
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
+    fn from_envelope(envelope: &FactEnvelope) -> Option<Self>
     where
         Self: Sized,
     {
-        crate::decode_domain_fact(
-            DEVICE_NAMING_FACT_TYPE_ID,
-            DEVICE_NAMING_SCHEMA_VERSION,
-            bytes,
-        )
+        if envelope.type_id.as_str() != DEVICE_NAMING_FACT_TYPE_ID {
+            return None;
+        }
+        if envelope.schema_version != DEVICE_NAMING_SCHEMA_VERSION {
+            return None;
+        }
+        aura_core::util::serialization::from_slice(&envelope.payload).ok()
     }
 }
 
@@ -291,17 +299,16 @@ impl FactReducer for DeviceNamingFactReducer {
         DEVICE_NAMING_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != DEVICE_NAMING_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != DEVICE_NAMING_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = DeviceNamingFact::from_bytes(binding_data)?;
+        let fact = DeviceNamingFact::from_envelope(envelope)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
@@ -346,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fact_serialization_roundtrip() {
+    fn test_fact_envelope_roundtrip() {
         let fact = DeviceNamingFact::suggestion_updated_ms(
             test_authority_id(1),
             test_device_id(10),
@@ -354,8 +361,8 @@ mod tests {
             1234567890,
         );
 
-        let bytes = fact.to_bytes();
-        let restored = DeviceNamingFact::from_bytes(&bytes);
+        let envelope = fact.to_envelope();
+        let restored = DeviceNamingFact::from_envelope(&envelope);
         assert!(restored.is_some());
         assert_eq!(restored.unwrap(), fact);
     }
@@ -371,14 +378,9 @@ mod tests {
 
         let generic = fact.to_generic();
 
-        if let crate::fact::RelationalFact::Generic {
-            binding_type,
-            binding_data,
-            ..
-        } = generic
-        {
-            assert_eq!(binding_type, DEVICE_NAMING_FACT_TYPE_ID);
-            let restored = DeviceNamingFact::from_bytes(&binding_data);
+        if let crate::fact::RelationalFact::Generic { envelope, .. } = generic {
+            assert_eq!(envelope.type_id.as_str(), DEVICE_NAMING_FACT_TYPE_ID);
+            let restored = DeviceNamingFact::from_envelope(&envelope);
             assert!(restored.is_some());
         } else {
             panic!("Expected Generic variant");
@@ -429,8 +431,8 @@ mod tests {
         );
 
         let context_id = derive_device_naming_context(authority);
-        let bytes = fact.to_bytes();
-        let binding = reducer.reduce(context_id, DEVICE_NAMING_FACT_TYPE_ID, &bytes);
+        let envelope = fact.to_envelope();
+        let binding = reducer.reduce_envelope(context_id, &envelope);
 
         assert!(binding.is_some());
         let binding = binding.unwrap();
@@ -452,8 +454,8 @@ mod tests {
 
         // Use a different authority's context
         let wrong_context = derive_device_naming_context(test_authority_id(99));
-        let bytes = fact.to_bytes();
-        let binding = reducer.reduce(wrong_context, DEVICE_NAMING_FACT_TYPE_ID, &bytes);
+        let envelope = fact.to_envelope();
+        let binding = reducer.reduce_envelope(wrong_context, &envelope);
 
         assert!(binding.is_none());
     }
@@ -470,10 +472,10 @@ mod tests {
         );
 
         let context_id = derive_device_naming_context(authority);
-        let bytes = fact.to_bytes();
+        let envelope = fact.to_envelope();
 
-        let binding1 = reducer.reduce(context_id, DEVICE_NAMING_FACT_TYPE_ID, &bytes);
-        let binding2 = reducer.reduce(context_id, DEVICE_NAMING_FACT_TYPE_ID, &bytes);
+        let binding1 = reducer.reduce_envelope(context_id, &envelope);
+        let binding2 = reducer.reduce_envelope(context_id, &envelope);
 
         assert!(binding1.is_some());
         assert!(binding2.is_some());

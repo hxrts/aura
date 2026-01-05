@@ -486,17 +486,16 @@ impl FactReducer for RendezvousFactReducer {
         RENDEZVOUS_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != RENDEZVOUS_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != RENDEZVOUS_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = RendezvousFact::from_bytes(binding_data)?;
+        let fact = RendezvousFact::from_envelope(envelope)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
@@ -662,9 +661,9 @@ mod tests {
         };
 
         let fact = RendezvousFact::Descriptor(descriptor);
-        let bytes = fact.to_bytes();
+        let envelope = fact.to_envelope();
 
-        let binding = reducer.reduce(test_context(), RENDEZVOUS_FACT_TYPE_ID, &bytes);
+        let binding = reducer.reduce_envelope(test_context(), &envelope);
         assert!(binding.is_some());
     }
 
@@ -684,9 +683,8 @@ mod tests {
         };
 
         let fact = RendezvousFact::Descriptor(descriptor);
-        let bytes = fact.to_bytes();
         let other_context = ContextId::new_from_entropy([9u8; 32]);
-        let binding = reducer.reduce(other_context, RENDEZVOUS_FACT_TYPE_ID, &bytes);
+        let binding = reducer.reduce_envelope(other_context, &fact.to_envelope());
         assert!(binding.is_none());
     }
 
@@ -718,9 +716,9 @@ mod tests {
         };
 
         let fact = RendezvousFact::Descriptor(descriptor);
-        let bytes = fact.to_bytes();
-        let binding1 = reducer.reduce(context_id, RENDEZVOUS_FACT_TYPE_ID, &bytes);
-        let binding2 = reducer.reduce(context_id, RENDEZVOUS_FACT_TYPE_ID, &bytes);
+        let envelope = fact.to_envelope();
+        let binding1 = reducer.reduce_envelope(context_id, &envelope);
+        let binding2 = reducer.reduce_envelope(context_id, &envelope);
         assert!(binding1.is_some());
         assert!(binding2.is_some());
         let binding1 = binding1.unwrap();

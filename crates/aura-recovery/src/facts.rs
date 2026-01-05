@@ -831,17 +831,16 @@ impl FactReducer for RecoveryFactReducer {
         RECOVERY_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != RECOVERY_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != RECOVERY_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = RecoveryFact::from_bytes(binding_data)?;
+        let fact = RecoveryFact::from_envelope(envelope)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
@@ -986,16 +985,11 @@ mod tests {
 
         let generic = fact.to_generic();
 
-        let aura_journal::RelationalFact::Generic {
-            binding_type,
-            binding_data,
-            ..
-        } = generic
-        else {
+        let aura_journal::RelationalFact::Generic { envelope, .. } = generic else {
             panic!("Expected Generic variant");
         };
-        assert_eq!(binding_type, RECOVERY_FACT_TYPE_ID);
-        let restored = RecoveryFact::from_bytes(&binding_data);
+        assert_eq!(envelope.type_id.as_str(), RECOVERY_FACT_TYPE_ID);
+        let restored = RecoveryFact::from_envelope(&envelope);
         assert!(restored.is_some());
     }
 
@@ -1011,8 +1005,8 @@ mod tests {
             accepted_at: pt(1234567890),
         };
 
-        let bytes = fact.to_bytes();
-        let binding = reducer.reduce(test_context_id(), RECOVERY_FACT_TYPE_ID, &bytes);
+        let envelope = fact.to_envelope();
+        let binding = reducer.reduce_envelope(test_context_id(), &envelope);
 
         assert!(binding.is_some());
         let binding = binding.unwrap();
@@ -1034,7 +1028,7 @@ mod tests {
         };
 
         let other_context = ContextId::new_from_entropy([7u8; 32]);
-        let binding = reducer.reduce(other_context, RECOVERY_FACT_TYPE_ID, &fact.to_bytes());
+        let binding = reducer.reduce_envelope(other_context, &fact.to_envelope());
         assert!(binding.is_none());
     }
 
@@ -1065,9 +1059,9 @@ mod tests {
             accepted_at: pt(1234567890),
         };
 
-        let bytes = fact.to_bytes();
-        let binding1 = reducer.reduce(context_id, RECOVERY_FACT_TYPE_ID, &bytes);
-        let binding2 = reducer.reduce(context_id, RECOVERY_FACT_TYPE_ID, &bytes);
+        let envelope = fact.to_envelope();
+        let binding1 = reducer.reduce_envelope(context_id, &envelope);
+        let binding2 = reducer.reduce_envelope(context_id, &envelope);
         assert!(binding1.is_some());
         assert!(binding2.is_some());
         let binding1 = binding1.unwrap();

@@ -4,7 +4,7 @@
 //! that hides CRDT implementation details.
 
 use crate::algebra::{AccountState, OpLog};
-use crate::fact::{Fact, FactContent, Journal as FactJournal, JournalNamespace};
+use crate::fact::{Fact, FactContent, FactEncoding, FactEnvelope, FactTypeId, Journal as FactJournal, JournalNamespace};
 
 use aura_core::effects::time::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
 use aura_core::hash::hash;
@@ -170,13 +170,18 @@ impl Journal {
             // If not order clock, synthesize an order token for deterministic insertion
             _ => OrderTime(aura_core::hash::hash(format!("{:?}", &ts).as_bytes())),
         };
+        let envelope = FactEnvelope {
+            type_id: FactTypeId::from("journal_fact"),
+            schema_version: 1,
+            encoding: FactEncoding::DagCbor,
+            payload: journal_fact.content.clone().into_bytes(),
+        };
         let fact = Fact::new(
             order,
             ts,
             FactContent::Relational(crate::fact::RelationalFact::Generic {
                 context_id: derive_context_for_fact(&journal_fact),
-                binding_type: journal_fact.content.clone(),
-                binding_data: journal_fact.content.clone().into_bytes(),
+                envelope,
             }),
         );
 
@@ -193,12 +198,17 @@ impl Journal {
     /// # Example
     ///
     /// ```ignore
-    /// use aura_journal::fact_journal::RelationalFact;
+    /// use aura_journal::fact::{RelationalFact, FactEnvelope, FactTypeId, FactEncoding};
     ///
+    /// let envelope = FactEnvelope {
+    ///     type_id: FactTypeId::from("dkd_derivation"),
+    ///     schema_version: 1,
+    ///     encoding: FactEncoding::DagCbor,
+    ///     payload: serde_json::to_vec(&metadata).unwrap(),
+    /// };
     /// let fact = RelationalFact::Generic {
     ///     context_id: ContextId::from(uuid::Uuid::from_bytes([0u8; 16])),
-    ///     binding_type: "dkd_derivation".to_string(),
-    ///     binding_data: serde_json::to_vec(&metadata).unwrap(),
+    ///     envelope,
     /// };
     ///
     /// journal.add_relational_fact(fact, &random).await?;
@@ -323,8 +333,8 @@ impl Journal {
                         crate::fact::RelationalFact::Protocol(
                             crate::protocol_facts::ProtocolRelationalFact::AmpChannelBootstrap(..),
                         ) => "AmpChannelBootstrap".to_string(),
-                        crate::fact::RelationalFact::Generic { binding_type, .. } => {
-                            format!("Generic:{binding_type}")
+                        crate::fact::RelationalFact::Generic { envelope, .. } => {
+                            format!("Generic:{}", envelope.type_id.as_str())
                         }
                     },
                     FactContent::Snapshot(_) => "Snapshot".to_string(),
@@ -335,10 +345,10 @@ impl Journal {
                         format!("{:?} -> {:?}", op.tree_op, op.new_commitment)
                     }
                     FactContent::Relational(rel) => match rel {
-                        crate::fact::RelationalFact::Generic { binding_data, .. } => {
-                            // Try to decode as JSON for readability
-                            String::from_utf8(binding_data.clone())
-                                .unwrap_or_else(|_| format!("{} bytes", binding_data.len()))
+                        crate::fact::RelationalFact::Generic { envelope, .. } => {
+                            // Try to decode payload as UTF-8 for readability
+                            String::from_utf8(envelope.payload.clone())
+                                .unwrap_or_else(|_| format!("{} bytes", envelope.payload.len()))
                         }
                         _ => format!("{rel:?}"),
                     },
@@ -381,14 +391,12 @@ impl Journal {
                 // Only extract Generic relational facts that were added via add_fact
                 match &fact.content {
                     FactContent::Relational(crate::fact::RelationalFact::Generic {
-                        binding_type,
-                        binding_data,
+                        envelope,
                         ..
                     }) => {
-                        // The binding_type contains the original JournalFact.content
-                        // Try binding_data first (UTF-8 encoded), fall back to binding_type
-                        let content = String::from_utf8(binding_data.clone())
-                            .unwrap_or_else(|_| binding_type.clone());
+                        // Try payload as UTF-8, fall back to type_id
+                        let content = String::from_utf8(envelope.payload.clone())
+                            .unwrap_or_else(|_| envelope.type_id.as_str().to_string());
 
                         Some(JournalFact {
                             content,

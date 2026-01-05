@@ -386,17 +386,16 @@ impl FactReducer for MaintenanceFactReducer {
         MAINTENANCE_FACT_TYPE_ID.as_str()
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != MAINTENANCE_FACT_TYPE_ID.as_str() {
+        if envelope.type_id.as_str() != MAINTENANCE_FACT_TYPE_ID.as_str() {
             return None;
         }
 
-        let fact = MaintenanceFact::from_bytes(binding_data)?;
+        let fact = MaintenanceFact::from_envelope(envelope)?;
         let key = fact.binding_key();
 
         Some(RelationalBinding {

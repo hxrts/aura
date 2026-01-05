@@ -28,14 +28,15 @@ impl ViewReduction<RecoveryDelta> for RecoveryReduction {
         facts
             .iter()
             .flat_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) if binding_type == RECOVERY_FACT_TYPE_ID => {
+                FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                    if envelope.type_id.as_str() == RECOVERY_FACT_TYPE_ID =>
+                {
                     // Use the domain reducer and downcast back to RecoveryDelta
-                    let view_deltas =
-                        reducer.reduce_fact(binding_type, binding_data, own_authority);
+                    let view_deltas = reducer.reduce_fact(
+                        envelope.type_id.as_str(),
+                        &envelope.payload,
+                        own_authority,
+                    );
                     downcast_recovery_deltas(view_deltas)
                 }
                 _ => Vec::new(),

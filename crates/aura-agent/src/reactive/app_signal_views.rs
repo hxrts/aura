@@ -93,25 +93,21 @@ impl ReactiveView for InvitationsSignalView {
         let mut changed = false;
 
         for fact in facts {
-            let FactContent::Relational(RelationalFact::Generic {
-                binding_type,
-                binding_data,
-                ..
-            }) = &fact.content
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
             else {
                 continue;
             };
 
-            if binding_type != INVITATION_FACT_TYPE_ID {
+            if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
                 continue;
             }
 
-            let Some(inv) = InvitationFact::from_bytes(binding_data) else {
+            let Some(inv) = InvitationFact::from_envelope(envelope) else {
                 emit_internal_error(
                     &self.reactive,
                     format!(
-                        "Failed to decode InvitationFact bytes (len={})",
-                        binding_data.len()
+                        "Failed to decode InvitationFact envelope (payload len={})",
+                        envelope.payload.len()
                     ),
                 )
                 .await;
@@ -284,17 +280,15 @@ impl ReactiveView for ContactsSignalView {
 
         for fact in facts {
             match &fact.content {
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) if binding_type == CONTACT_FACT_TYPE_ID => {
-                    let Some(contact_fact) = ContactFact::from_bytes(binding_data) else {
+                FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                    if envelope.type_id.as_str() == CONTACT_FACT_TYPE_ID =>
+                {
+                    let Some(contact_fact) = ContactFact::from_envelope(envelope) else {
                         emit_internal_error(
                             &self.reactive,
                             format!(
-                                "Failed to decode ContactFact bytes (len={})",
-                                binding_data.len()
+                                "Failed to decode ContactFact envelope (payload len={})",
+                                envelope.payload.len()
                             ),
                         )
                         .await;
@@ -438,17 +432,15 @@ impl ReactiveView for RecoverySignalView {
                     Self::ensure_guardian(&mut state, *guardian_id);
                     changed = true;
                 }
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) if binding_type == RECOVERY_FACT_TYPE_ID => {
-                    let Some(recovery_fact) = RecoveryFact::from_bytes(binding_data) else {
+                FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                    if envelope.type_id.as_str() == RECOVERY_FACT_TYPE_ID =>
+                {
+                    let Some(recovery_fact) = RecoveryFact::from_envelope(envelope) else {
                         emit_internal_error(
                             &self.reactive,
                             format!(
-                                "Failed to decode RecoveryFact bytes (len={})",
-                                binding_data.len()
+                                "Failed to decode RecoveryFact envelope (payload len={})",
+                                envelope.payload.len()
                             ),
                         )
                         .await;
@@ -558,11 +550,8 @@ impl ReactiveView for HomeSignalView {
         let mut changed = false;
 
         for fact in facts {
-            let FactContent::Relational(RelationalFact::Generic {
-                context_id,
-                binding_type,
-                binding_data,
-            }) = &fact.content
+            let FactContent::Relational(RelationalFact::Generic { context_id, envelope }) =
+                &fact.content
             else {
                 continue;
             };
@@ -571,9 +560,9 @@ impl ReactiveView for HomeSignalView {
                 continue;
             };
 
-            match binding_type.as_str() {
+            match envelope.type_id.as_str() {
                 HOME_BAN_FACT_TYPE_ID => {
-                    if let Some(ban) = HomeBanFact::from_bytes(binding_data) {
+                    if let Some(ban) = HomeBanFact::from_envelope(envelope) {
                         let record = BanRecord {
                             authority_id: ban.banned_authority,
                             reason: ban.reason,
@@ -586,14 +575,14 @@ impl ReactiveView for HomeSignalView {
                     }
                 }
                 HOME_UNBAN_FACT_TYPE_ID => {
-                    if let Some(unban) = HomeUnbanFact::from_bytes(binding_data) {
+                    if let Some(unban) = HomeUnbanFact::from_envelope(envelope) {
                         if home_state.remove_ban(&unban.unbanned_authority).is_some() {
                             changed = true;
                         }
                     }
                 }
                 HOME_MUTE_FACT_TYPE_ID => {
-                    if let Some(mute) = HomeMuteFact::from_bytes(binding_data) {
+                    if let Some(mute) = HomeMuteFact::from_envelope(envelope) {
                         let record = MuteRecord {
                             authority_id: mute.muted_authority,
                             duration_secs: mute.duration_secs,
@@ -606,14 +595,14 @@ impl ReactiveView for HomeSignalView {
                     }
                 }
                 HOME_UNMUTE_FACT_TYPE_ID => {
-                    if let Some(unmute) = HomeUnmuteFact::from_bytes(binding_data) {
+                    if let Some(unmute) = HomeUnmuteFact::from_envelope(envelope) {
                         if home_state.remove_mute(&unmute.unmuted_authority).is_some() {
                             changed = true;
                         }
                     }
                 }
                 HOME_KICK_FACT_TYPE_ID => {
-                    if let Some(kick) = HomeKickFact::from_bytes(binding_data) {
+                    if let Some(kick) = HomeKickFact::from_envelope(envelope) {
                         let record = KickRecord {
                             authority_id: kick.kicked_authority,
                             channel: kick.channel_id,
@@ -627,7 +616,7 @@ impl ReactiveView for HomeSignalView {
                     }
                 }
                 HOME_PIN_FACT_TYPE_ID => {
-                    if let Some(pin) = HomePinFact::from_bytes(binding_data) {
+                    if let Some(pin) = HomePinFact::from_envelope(envelope) {
                         home_state.pin_message_with_meta(PinnedMessageMeta {
                             message_id: pin.message_id,
                             pinned_by: pin.actor_authority,
@@ -637,7 +626,7 @@ impl ReactiveView for HomeSignalView {
                     }
                 }
                 HOME_UNPIN_FACT_TYPE_ID => {
-                    if let Some(unpin) = HomeUnpinFact::from_bytes(binding_data) {
+                    if let Some(unpin) = HomeUnpinFact::from_envelope(envelope) {
                         if home_state.unpin_message(&unpin.message_id) {
                             changed = true;
                         }
@@ -718,17 +707,15 @@ impl ReactiveView for ChatSignalView {
                 }
 
                 // Handle generic chat facts
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) if binding_type == CHAT_FACT_TYPE_ID => {
-                    let Some(chat_fact) = ChatFact::from_bytes(binding_data) else {
+                FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                    if envelope.type_id.as_str() == CHAT_FACT_TYPE_ID =>
+                {
+                    let Some(chat_fact) = ChatFact::from_envelope(envelope) else {
                         emit_internal_error(
                             &self.reactive,
                             format!(
-                                "Failed to decode ChatFact bytes (len={})",
-                                binding_data.len()
+                                "Failed to decode ChatFact envelope (payload len={})",
+                                envelope.payload.len()
                             ),
                         )
                         .await;

@@ -163,14 +163,20 @@ where
             status: MembershipStatus::Joined,
         };
 
-        let binding_data = serde_json::to_vec(&membership_data)
+        let payload = serde_json::to_vec(&membership_data)
             .map_err(|e| AmpChannelError::Internal(format!("Serialization error: {e}")))?;
+
+        let envelope = aura_core::types::facts::FactEnvelope {
+            type_id: aura_core::types::facts::FactTypeId::from("channel_membership"),
+            schema_version: 1,
+            encoding: aura_core::types::facts::FactEncoding::Json,
+            payload,
+        };
 
         self.effects
             .insert_relational_fact(RelationalFact::Generic {
                 context_id: params.context,
-                binding_type: "channel_membership".to_string(),
-                binding_data,
+                envelope,
             })
             .await
             .map_err(map_err)?;
@@ -197,14 +203,20 @@ where
             status: MembershipStatus::Left,
         };
 
-        let binding_data = serde_json::to_vec(&membership_data)
+        let payload = serde_json::to_vec(&membership_data)
             .map_err(|e| AmpChannelError::Internal(format!("Serialization error: {e}")))?;
+
+        let envelope = aura_core::types::facts::FactEnvelope {
+            type_id: aura_core::types::facts::FactTypeId::from("channel_membership"),
+            schema_version: 1,
+            encoding: aura_core::types::facts::FactEncoding::Json,
+            payload,
+        };
 
         self.effects
             .insert_relational_fact(RelationalFact::Generic {
                 context_id: params.context,
-                binding_type: "channel_membership".to_string(),
-                binding_data,
+                envelope,
             })
             .await
             .map_err(map_err)?;

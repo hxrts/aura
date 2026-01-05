@@ -619,20 +619,16 @@ impl InvitationHandler {
         };
 
         for fact in facts.iter().rev() {
-            let FactContent::Relational(RelationalFact::Generic {
-                binding_type,
-                binding_data,
-                ..
-            }) = &fact.content
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
             else {
                 continue;
             };
 
-            if binding_type != INVITATION_FACT_TYPE_ID {
+            if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
                 continue;
             }
 
-            let Some(inv_fact) = InvitationFact::from_bytes(binding_data) else {
+            let Some(inv_fact) = InvitationFact::from_envelope(envelope) else {
                 continue;
             };
 
@@ -789,20 +785,16 @@ impl InvitationHandler {
         };
 
         for fact in facts.iter().rev() {
-            let FactContent::Relational(RelationalFact::Generic {
-                binding_type,
-                binding_data,
-                ..
-            }) = &fact.content
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
             else {
                 continue;
             };
 
-            if binding_type != INVITATION_FACT_TYPE_ID {
+            if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
                 continue;
             }
 
-            let Some(inv_fact) = InvitationFact::from_bytes(binding_data) else {
+            let Some(inv_fact) = InvitationFact::from_envelope(envelope) else {
                 continue;
             };
 
@@ -1664,21 +1656,17 @@ mod tests {
         let mut found = None::<ContactFact>;
         let mut seen_binding_types: Vec<String> = Vec::new();
         for fact in committed {
-            let FactContent::Relational(RelationalFact::Generic {
-                binding_type,
-                binding_data,
-                ..
-            }) = fact.content
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
             else {
                 continue;
             };
 
-            seen_binding_types.push(binding_type.clone());
-            if binding_type != CONTACT_FACT_TYPE_ID {
+            seen_binding_types.push(envelope.type_id.as_str().to_string());
+            if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
                 continue;
             }
 
-            found = ContactFact::from_bytes(&binding_data);
+            found = ContactFact::from_envelope(&envelope);
         }
 
         if found.is_none() {
@@ -1743,20 +1731,16 @@ mod tests {
 
         let mut found = None::<ContactFact>;
         for fact in committed {
-            let FactContent::Relational(RelationalFact::Generic {
-                binding_type,
-                binding_data,
-                ..
-            }) = fact.content
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
             else {
                 continue;
             };
 
-            if binding_type != CONTACT_FACT_TYPE_ID {
+            if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
                 continue;
             }
 
-            found = ContactFact::from_bytes(&binding_data);
+            found = ContactFact::from_envelope(&envelope);
         }
 
         let fact = found.expect("expected a committed ContactFact");

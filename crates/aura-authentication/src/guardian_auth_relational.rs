@@ -309,9 +309,13 @@ impl GuardianAuthHandler {
         };
 
         if let Ok(binding_bytes) = serde_json::to_vec(&record) {
-            let _ = self
-                .context
-                .add_generic_fact("recovery_request", binding_bytes);
+            let envelope = aura_core::types::facts::FactEnvelope {
+                type_id: aura_core::types::facts::FactTypeId::from("recovery_request"),
+                schema_version: 1,
+                encoding: aura_core::types::facts::FactEncoding::Json,
+                payload: binding_bytes,
+            };
+            let _ = self.context.add_generic_fact_envelope(envelope);
         }
 
         Ok(verified)
@@ -339,9 +343,9 @@ impl GuardianAuthHandler {
                 // Determine the latest recovery request for this guardian
                 let latest_request = self
                     .context
-                    .generic_fact_bytes("recovery_request")
+                    .generic_fact_envelopes("recovery_request")
                     .iter()
-                    .filter_map(|bytes| serde_json::from_slice::<RecoveryRequestRecord>(bytes).ok())
+                    .filter_map(|env| serde_json::from_slice::<RecoveryRequestRecord>(&env.payload).ok())
                     .filter(|record| record.guardian_id == guardian_id)
                     .max_by_key(|record| record.requested_at);
 
@@ -408,10 +412,10 @@ impl GuardianAuthHandler {
         account_id: AuthorityId,
     ) -> bool {
         self.context
-            .generic_fact_bytes("guardian_notification")
+            .generic_fact_envelopes("guardian_notification")
             .iter()
-            .any(|bytes| {
-                serde_json::from_slice::<GuardianNotificationRecord>(bytes)
+            .any(|env| {
+                serde_json::from_slice::<GuardianNotificationRecord>(&env.payload)
                     .map(|record| {
                         record.guardian_id == guardian_id && record.account_id == account_id
                     })

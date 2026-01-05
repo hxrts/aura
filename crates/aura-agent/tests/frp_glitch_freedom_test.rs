@@ -305,8 +305,12 @@ async fn test_scheduler_topological_update_order() {
         }),
         FactContent::Relational(RelationalFact::Generic {
             context_id: ContextId::new_from_entropy([0u8; 32]),
-            binding_type: "test".to_string(),
-            binding_data: vec![1],
+            envelope: aura_core::types::facts::FactEnvelope {
+                type_id: aura_core::types::facts::FactTypeId::from("test"),
+                schema_version: 1,
+                encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                payload: vec![1],
+            },
         }),
     );
 

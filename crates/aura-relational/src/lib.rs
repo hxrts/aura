@@ -193,15 +193,16 @@ impl RelationalContext {
     }
 
     /// Append an arbitrary Generic relational fact scoped to this context.
-    pub fn add_generic_fact(
+    ///
+    /// Note: Prefer using `add_domain_fact` for typed facts. This method is for
+    /// cases where you have a pre-constructed envelope.
+    pub fn add_generic_fact_envelope(
         &self,
-        binding_type: impl Into<String>,
-        binding_data: Vec<u8>,
+        envelope: aura_core::types::facts::FactEnvelope,
     ) -> Result<()> {
         self.add_fact(RelationalFact::Generic {
             context_id: self.context_id,
-            binding_type: binding_type.into(),
-            binding_data,
+            envelope,
         })
     }
 
@@ -282,12 +283,11 @@ impl RelationalContext {
         self.get_facts()
             .into_iter()
             .filter_map(|fact| match fact {
-                RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                } if binding_type == crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID => {
-                    crate::facts::GuardianBindingDetailsFact::from_bytes(&binding_data)
+                RelationalFact::Generic { envelope, .. }
+                    if envelope.type_id.as_str()
+                        == crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID =>
+                {
+                    crate::facts::GuardianBindingDetailsFact::from_envelope(&envelope)
                         .map(|f| f.binding)
                 }
                 _ => None,
@@ -300,12 +300,11 @@ impl RelationalContext {
         self.get_facts()
             .into_iter()
             .filter_map(|fact| match fact {
-                RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                } if binding_type == crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID => {
-                    crate::facts::GuardianBindingDetailsFact::from_bytes(&binding_data)
+                RelationalFact::Generic { envelope, .. }
+                    if envelope.type_id.as_str()
+                        == crate::facts::GUARDIAN_BINDING_DETAILS_FACT_TYPE_ID =>
+                {
+                    crate::facts::GuardianBindingDetailsFact::from_envelope(&envelope)
                 }
                 _ => None,
             })
@@ -318,12 +317,11 @@ impl RelationalContext {
         self.get_facts()
             .into_iter()
             .filter_map(|fact| match fact {
-                RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                } if binding_type == crate::facts::RECOVERY_GRANT_DETAILS_FACT_TYPE_ID => {
-                    crate::facts::RecoveryGrantDetailsFact::from_bytes(&binding_data)
+                RelationalFact::Generic { envelope, .. }
+                    if envelope.type_id.as_str()
+                        == crate::facts::RECOVERY_GRANT_DETAILS_FACT_TYPE_ID =>
+                {
+                    crate::facts::RecoveryGrantDetailsFact::from_envelope(&envelope)
                         .map(|f| f.grant)
                 }
                 _ => None,
@@ -392,11 +390,14 @@ impl RelationalContext {
             .collect()
     }
 
-    /// Return the raw bytes for all `RelationalFact::Generic` entries with a given `binding_type`.
+    /// Return the envelopes for all `RelationalFact::Generic` entries with a given type_id.
     ///
     /// This helper avoids leaking `aura-journal`'s fact enum into higher-layer crates that only
     /// need to parse their own domain payloads.
-    pub fn generic_fact_bytes(&self, binding_type: &str) -> Vec<Vec<u8>> {
+    pub fn generic_fact_envelopes(
+        &self,
+        type_id: &str,
+    ) -> Vec<aura_core::types::facts::FactEnvelope> {
         let Ok(journal) = self.journal.read() else {
             return Vec::new();
         };
@@ -405,11 +406,11 @@ impl RelationalContext {
             .facts
             .iter()
             .filter_map(|f| match &f.content {
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type: bt,
-                    binding_data,
-                    ..
-                }) if bt == binding_type => Some(binding_data.clone()),
+                FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                    if envelope.type_id.as_str() == type_id =>
+                {
+                    Some(envelope.clone())
+                }
                 _ => None,
             })
             .collect()

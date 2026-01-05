@@ -159,9 +159,8 @@ pub(crate) fn fact_context(fact: &RelationalFact) -> Result<ContextId> {
         RelationalFact::Protocol(ProtocolRelationalFact::AmpChannelBootstrap(b)) => Ok(b.context),
         RelationalFact::Generic {
             context_id,
-            binding_type,
-            ..
-        } if binding_type.starts_with("amp-") => Ok(*context_id),
+            envelope,
+        } if envelope.type_id.as_str().starts_with("amp-") => Ok(*context_id),
         _ => Err(AuraError::invalid("fact not AMP-context scoped")),
     }
 }

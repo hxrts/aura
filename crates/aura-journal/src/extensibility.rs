@@ -52,6 +52,13 @@ pub use aura_core::types::facts::{
 ///
 /// Domain crates implement this trait for their fact enums to enable
 /// extensible fact handling without modifying `aura-journal`.
+///
+/// # Typed Storage (No Stringly-Typed Vec<u8>)
+///
+/// Facts are stored using `FactEnvelope` which provides:
+/// - **Type safety**: `envelope.type_id` is always valid
+/// - **No double serialization**: Only `envelope.payload` is raw bytes
+/// - **Validation at construction**: Size and type checks in envelope
 pub trait DomainFact: Debug + Clone + Send + Sync + 'static {
     /// Returns the type identifier for this fact domain
     ///
@@ -59,29 +66,61 @@ pub trait DomainFact: Debug + Clone + Send + Sync + 'static {
     /// Used to distinguish fact types when stored as `RelationalFact::Generic`.
     fn type_id(&self) -> &'static str;
 
+    /// Returns the schema version for this fact type
+    ///
+    /// Increment when making breaking changes to the fact structure.
+    /// Default is 1 for backwards compatibility.
+    fn schema_version(&self) -> u16 {
+        1
+    }
+
     /// Returns the context ID this fact belongs to
     ///
     /// Facts are scoped to relational contexts for isolation.
     fn context_id(&self) -> ContextId;
 
-    /// Serialize the fact to bytes for storage
+    /// Create a typed `FactEnvelope` for this fact.
     ///
-    /// Typically uses serde_json or bincode.
-    fn to_bytes(&self) -> Vec<u8>;
+    /// This is the primary serialization method. The envelope contains:
+    /// - `type_id`: From `self.type_id()`
+    /// - `schema_version`: From `self.schema_version()`
+    /// - `encoding`: DAG-CBOR (default)
+    /// - `payload`: The serialized fact data
+    fn to_envelope(&self) -> FactEnvelope;
 
-    /// Deserialize a fact from bytes
+    /// Deserialize a fact from a `FactEnvelope`.
     ///
-    /// Returns None if deserialization fails.
-    fn from_bytes(bytes: &[u8]) -> Option<Self>
+    /// Returns None if:
+    /// - The type_id doesn't match
+    /// - Deserialization fails
+    fn from_envelope(envelope: &FactEnvelope) -> Option<Self>
     where
         Self: Sized;
+
+    /// Serialize to raw bytes (convenience wrapper for `to_envelope().payload`).
+    ///
+    /// This is the payload portion of the envelope, suitable for hashing or
+    /// embedding in other structures.
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_envelope().payload
+    }
+
+    /// Deserialize from raw bytes (convenience wrapper for direct deserialization).
+    ///
+    /// Note: This bypasses type_id and schema_version validation. Prefer
+    /// `from_envelope` when you have a full envelope with metadata.
+    fn from_bytes(bytes: &[u8]) -> Option<Self>
+    where
+        Self: Sized + serde::de::DeserializeOwned,
+    {
+        aura_core::util::serialization::from_slice(bytes).ok()
+    }
 
     /// Convert to a Generic relational fact for storage
     fn to_generic(&self) -> crate::fact::RelationalFact {
         crate::fact::RelationalFact::Generic {
             context_id: self.context_id(),
-            binding_type: self.type_id().to_string(),
-            binding_data: self.to_bytes(),
+            envelope: self.to_envelope(),
         }
     }
 }
@@ -94,21 +133,19 @@ pub trait FactReducer: Send + Sync {
     /// Returns the type ID this reducer handles
     fn handles_type(&self) -> &'static str;
 
-    /// Reduce a domain fact (serialized as bytes) to a relational binding
+    /// Reduce a domain fact from its envelope to a relational binding
     ///
     /// # Arguments
     /// * `context_id` - The context this fact belongs to
-    /// * `binding_type` - The binding type string from the Generic fact
-    /// * `binding_data` - The serialized fact data
+    /// * `envelope` - The typed fact envelope
     ///
     /// # Returns
     /// A `RelationalBinding` if reduction succeeds, or None if this reducer
-    /// doesn't handle this binding type.
-    fn reduce(
+    /// doesn't handle this fact type.
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> Option<RelationalBinding>;
 }
 
@@ -157,25 +194,25 @@ impl FactRegistry {
 
     /// Reduce a Generic relational fact using the registered reducer
     ///
-    /// If no reducer is registered for the binding_type, returns a
+    /// If no reducer is registered for the envelope's type_id, returns a
     /// default Generic binding.
-    pub fn reduce_generic(
+    pub fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> RelationalBinding {
-        if let Some(reducer) = self.reducers.get(binding_type) {
-            if let Some(binding) = reducer.reduce(context_id, binding_type, binding_data) {
+        let type_id = envelope.type_id.as_str();
+        if let Some(reducer) = self.reducers.get(type_id) {
+            if let Some(binding) = reducer.reduce_envelope(context_id, envelope) {
                 return binding;
             }
         }
 
-        // Fallback: return a generic binding
+        // Fallback: return a generic binding with the envelope's payload
         RelationalBinding {
-            binding_type: RelationalBindingType::Generic(binding_type.to_string()),
+            binding_type: RelationalBindingType::Generic(type_id.to_string()),
             context_id,
-            data: binding_data.to_vec(),
+            data: envelope.payload.clone(),
         }
     }
 
@@ -196,28 +233,23 @@ impl Debug for FactRegistry {
     }
 }
 
-/// Helper to create a domain fact from a Generic relational fact
+/// Helper to create a domain fact from a `FactEnvelope`
 ///
 /// # Type Parameters
 /// * `F` - The domain fact type to deserialize to
 ///
 /// # Arguments
-/// * `binding_type` - The binding type from the Generic fact
-/// * `binding_data` - The serialized fact data
+/// * `envelope` - The typed fact envelope
 /// * `expected_type` - The expected type_id string
 ///
 /// # Returns
 /// The deserialized domain fact, or None if the type doesn't match
 /// or deserialization fails.
-pub fn parse_generic_fact<F: DomainFact>(
-    binding_type: &str,
-    binding_data: &[u8],
-    expected_type: &str,
-) -> Option<F> {
-    if binding_type != expected_type {
+pub fn parse_envelope<F: DomainFact>(envelope: &FactEnvelope, expected_type: &str) -> Option<F> {
+    if envelope.type_id.as_str() != expected_type {
         return None;
     }
-    F::from_bytes(binding_data)
+    F::from_envelope(envelope)
 }
 
 /// Validate a list of fact type IDs for duplicates.
@@ -241,7 +273,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     // Test domain fact type
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     enum TestFact {
         Created { id: String },
         Updated { id: String, value: u32 },
@@ -256,12 +288,22 @@ mod tests {
             ContextId::new_from_entropy([42u8; 32])
         }
 
-        fn to_bytes(&self) -> Vec<u8> {
-            serde_json::to_vec(self).unwrap()
+        fn to_envelope(&self) -> FactEnvelope {
+            let payload =
+                aura_core::util::serialization::to_vec(self).expect("TestFact serialization");
+            FactEnvelope {
+                type_id: aura_core::types::facts::FactTypeId::from(self.type_id()),
+                schema_version: self.schema_version(),
+                encoding: FactEncoding::DagCbor,
+                payload,
+            }
         }
 
-        fn from_bytes(bytes: &[u8]) -> Option<Self> {
-            serde_json::from_slice(bytes).ok()
+        fn from_envelope(envelope: &FactEnvelope) -> Option<Self> {
+            if envelope.type_id.as_str() != "test" {
+                return None;
+            }
+            aura_core::util::serialization::from_slice(&envelope.payload).ok()
         }
     }
 
@@ -273,17 +315,16 @@ mod tests {
             "test"
         }
 
-        fn reduce(
+        fn reduce_envelope(
             &self,
             context_id: ContextId,
-            binding_type: &str,
-            binding_data: &[u8],
+            envelope: &FactEnvelope,
         ) -> Option<RelationalBinding> {
-            if binding_type != "test" {
+            if envelope.type_id.as_str() != "test" {
                 return None;
             }
 
-            let fact: TestFact = serde_json::from_slice(binding_data).ok()?;
+            let fact: TestFact = TestFact::from_envelope(envelope)?;
             let id = match &fact {
                 TestFact::Created { id } => id.clone(),
                 TestFact::Updated { id, .. } => id.clone(),
@@ -298,13 +339,13 @@ mod tests {
     }
 
     #[test]
-    fn test_domain_fact_serialization() {
+    fn test_domain_fact_envelope_roundtrip() {
         let fact = TestFact::Created {
             id: "abc".to_string(),
         };
-        let bytes = fact.to_bytes();
-        let restored = TestFact::from_bytes(&bytes);
-        assert!(restored.is_some());
+        let envelope = fact.to_envelope();
+        let restored = TestFact::from_envelope(&envelope);
+        assert_eq!(restored, Some(fact));
     }
 
     #[test]
@@ -314,14 +355,9 @@ mod tests {
         };
         let generic = fact.to_generic();
 
-        if let crate::fact::RelationalFact::Generic {
-            binding_type,
-            binding_data,
-            ..
-        } = generic
-        {
-            assert_eq!(binding_type, "test");
-            let restored = TestFact::from_bytes(&binding_data);
+        if let crate::fact::RelationalFact::Generic { envelope, .. } = generic {
+            assert_eq!(envelope.type_id.as_str(), "test");
+            let restored = TestFact::from_envelope(&envelope);
             assert!(restored.is_some());
         } else {
             panic!("Expected Generic variant");
@@ -338,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_reduce() {
+    fn test_registry_reduce_envelope() {
         let mut registry = FactRegistry::new();
         registry.register::<TestFact>("test", Box::new(TestFactReducer));
 
@@ -346,24 +382,27 @@ mod tests {
             id: "xyz".to_string(),
         };
         let context_id = fact.context_id();
-        let bytes = fact.to_bytes();
+        let envelope = fact.to_envelope();
 
-        let binding = registry.reduce_generic(context_id, "test", &bytes);
+        let binding = registry.reduce_envelope(context_id, &envelope);
         assert_eq!(binding.data, b"xyz".to_vec());
     }
 
     #[test]
-    fn test_parse_generic_fact() {
+    fn test_parse_envelope() {
         let fact = TestFact::Updated {
             id: "foo".to_string(),
             value: 42,
         };
-        let bytes = fact.to_bytes();
+        let envelope = fact.to_envelope();
 
-        let restored: Option<TestFact> = parse_generic_fact("test", &bytes, "test");
+        let restored: Option<TestFact> = parse_envelope(&envelope, "test");
         assert!(restored.is_some());
 
-        let wrong_type: Option<TestFact> = parse_generic_fact("wrong", &bytes, "test");
+        // Wrong type should fail
+        let mut wrong_envelope = envelope.clone();
+        wrong_envelope.type_id = aura_core::types::facts::FactTypeId::from("wrong");
+        let wrong_type: Option<TestFact> = parse_envelope(&wrong_envelope, "test");
         assert!(wrong_type.is_none());
     }
 }

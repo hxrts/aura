@@ -46,12 +46,12 @@ impl ViewReduction<GuardianDelta> for GuardianReduction {
                     added_at: 0,
                     share_index: None,
                 }),
-                FactContent::Relational(RelationalFact::Generic { binding_type, .. }) => {
-                    if binding_type == "guardian_removed" {
+                FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
+                    if envelope.type_id.as_str() == "guardian_removed" {
                         Some(GuardianDelta::GuardianRemoved {
                             authority_id: "unknown".to_string(),
                         })
-                    } else if binding_type == "threshold_updated" {
+                    } else if envelope.type_id.as_str() == "threshold_updated" {
                         Some(GuardianDelta::ThresholdUpdated {
                             threshold: 2,
                             total: 3,
@@ -106,8 +106,12 @@ mod tests {
                 2,
                 FactContent::Relational(RelationalFact::Generic {
                     context_id: test_context_id(),
-                    binding_type: "threshold_updated".to_string(),
-                    binding_data: vec![2, 3],
+                    envelope: aura_core::types::facts::FactEnvelope {
+                        type_id: aura_core::types::facts::FactTypeId::from("threshold_updated"),
+                        schema_version: 1,
+                        encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                        payload: vec![2, 3],
+                    },
                 }),
             ),
         ];

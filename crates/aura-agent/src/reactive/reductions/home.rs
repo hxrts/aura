@@ -43,18 +43,14 @@ impl ViewReduction<HomeDelta> for HomeReduction {
         facts
             .iter()
             .filter_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) => {
+                FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
                     // Only process social facts
-                    if binding_type != SOCIAL_FACT_TYPE_ID {
+                    if envelope.type_id.as_str() != SOCIAL_FACT_TYPE_ID {
                         return None;
                     }
 
-                    // Deserialize the SocialFact from binding_data
-                    let social_fact = SocialFact::from_bytes(binding_data)?;
+                    // Deserialize the SocialFact from envelope
+                    let social_fact = SocialFact::from_envelope(envelope)?;
 
                     match social_fact {
                         SocialFact::HomeCreated {
@@ -158,22 +154,8 @@ mod tests {
         );
 
         let facts = vec![
-            make_test_fact(
-                1,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: SOCIAL_FACT_TYPE_ID.to_string(),
-                    binding_data: home_created.to_bytes(),
-                }),
-            ),
-            make_test_fact(
-                2,
-                FactContent::Relational(RelationalFact::Generic {
-                    context_id: test_context_id(),
-                    binding_type: SOCIAL_FACT_TYPE_ID.to_string(),
-                    binding_data: resident_joined.to_bytes(),
-                }),
-            ),
+            make_test_fact(1, FactContent::Relational(home_created.to_generic())),
+            make_test_fact(2, FactContent::Relational(resident_joined.to_generic())),
         ];
 
         let deltas = reduction.reduce(&facts, None);

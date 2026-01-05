@@ -183,8 +183,12 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
     let ctx = ContextId::new_from_entropy([14u8; 32]);
     let bad = RelationalFact::Generic {
         context_id: ctx,
-        binding_type: CONTACT_FACT_TYPE_ID.to_string(),
-        binding_data: vec![0xff, 0x00, 0x01],
+        envelope: aura_core::types::facts::FactEnvelope {
+            type_id: aura_core::types::facts::FactTypeId::from(CONTACT_FACT_TYPE_ID),
+            schema_version: 1,
+            encoding: aura_core::types::facts::FactEncoding::DagCbor,
+            payload: vec![0xff, 0x00, 0x01],
+        },
     };
 
     let mut updates = pipeline.subscribe();

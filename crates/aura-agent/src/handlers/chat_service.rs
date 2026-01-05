@@ -247,19 +247,18 @@ impl ChatServiceApi {
             let aura_journal::fact::FactContent::Relational(
                 aura_journal::fact::RelationalFact::Generic {
                     context_id: ctx,
-                    binding_type,
-                    binding_data,
+                    envelope,
                 },
             ) = fact.content
             else {
                 continue;
             };
 
-            if ctx != context_id || binding_type != CHAT_FACT_TYPE_ID {
+            if ctx != context_id || envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
                 continue;
             }
 
-            let Some(chat_fact) = aura_chat::ChatFact::from_bytes(&binding_data) else {
+            let Some(chat_fact) = aura_chat::ChatFact::from_envelope(&envelope) else {
                 continue;
             };
 
@@ -573,17 +572,16 @@ impl ChatServiceApi {
             let aura_journal::fact::FactContent::Relational(
                 aura_journal::fact::RelationalFact::Generic {
                     context_id,
-                    binding_type,
-                    binding_data,
+                    envelope,
                 },
             ) = fact.content
             else {
                 continue;
             };
-            if binding_type != CHAT_FACT_TYPE_ID {
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
                 continue;
             }
-            let Some(chat_fact) = aura_chat::ChatFact::from_bytes(&binding_data) else {
+            let Some(chat_fact) = aura_chat::ChatFact::from_envelope(&envelope) else {
                 continue;
             };
             let aura_chat::ChatFact::ChannelCreated {

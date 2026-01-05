@@ -4,7 +4,7 @@
 
 use super::facts::{
     HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID,
-    HOME_KICK_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
+    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
 };
 use super::types::{BanStatus, KickRecord, MuteStatus};
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -35,10 +35,9 @@ pub fn query_current_bans(
         match &fact.content {
             FactContent::Relational(RelationalFact::Generic {
                 context_id: fact_context,
-                binding_type,
-                binding_data,
-            }) if fact_context == context_id && binding_type == HOME_BAN_FACT_TYPE_ID => {
-                if let Some(home_ban) = HomeBanFact::from_bytes(binding_data) {
+                envelope,
+            }) if fact_context == context_id && envelope.type_id.as_str() == HOME_BAN_FACT_TYPE_ID => {
+                if let Some(home_ban) = HomeBanFact::from_envelope(envelope) {
                     let banned_at_ms = home_ban.banned_at_ms();
                     let expires_at_ms = home_ban.expires_at_ms();
                     let ban = BanStatus {
@@ -54,10 +53,9 @@ pub fn query_current_bans(
             }
             FactContent::Relational(RelationalFact::Generic {
                 context_id: fact_context,
-                binding_type,
-                binding_data,
-            }) if fact_context == context_id && binding_type == HOME_UNBAN_FACT_TYPE_ID => {
-                if let Some(home_unban) = HomeUnbanFact::from_bytes(binding_data) {
+                envelope,
+            }) if fact_context == context_id && envelope.type_id.as_str() == HOME_UNBAN_FACT_TYPE_ID => {
+                if let Some(home_unban) = HomeUnbanFact::from_envelope(envelope) {
                     // Remove ban if unban happened after the ban
                     if let Some(ban) = bans.get(&home_unban.unbanned_authority) {
                         if home_unban.unbanned_at_ms() >= ban.banned_at_ms {
@@ -100,10 +98,9 @@ pub fn query_current_mutes(
         match &fact.content {
             FactContent::Relational(RelationalFact::Generic {
                 context_id: fact_context,
-                binding_type,
-                binding_data,
-            }) if fact_context == context_id && binding_type == "moderation:home-mute" => {
-                if let Some(home_mute) = HomeMuteFact::from_bytes(binding_data) {
+                envelope,
+            }) if fact_context == context_id && envelope.type_id.as_str() == HOME_MUTE_FACT_TYPE_ID => {
+                if let Some(home_mute) = HomeMuteFact::from_envelope(envelope) {
                     let mute = MuteStatus {
                         muted_authority: home_mute.muted_authority,
                         actor_authority: home_mute.actor_authority,
@@ -117,10 +114,9 @@ pub fn query_current_mutes(
             }
             FactContent::Relational(RelationalFact::Generic {
                 context_id: fact_context,
-                binding_type,
-                binding_data,
-            }) if fact_context == context_id && binding_type == "moderation:home-unmute" => {
-                if let Some(home_unmute) = HomeUnmuteFact::from_bytes(binding_data) {
+                envelope,
+            }) if fact_context == context_id && envelope.type_id.as_str() == HOME_UNMUTE_FACT_TYPE_ID => {
+                if let Some(home_unmute) = HomeUnmuteFact::from_envelope(envelope) {
                     let unmuted_authority = home_unmute.unmuted_authority;
                     let unmuted_at_ms = home_unmute.unmuted_at_ms();
                     // Remove mute if unmute happened after the mute
@@ -158,12 +154,11 @@ pub fn query_kick_history(facts: &[Fact], context_id: &ContextId) -> Vec<KickRec
     for fact in facts {
         if let FactContent::Relational(RelationalFact::Generic {
             context_id: fact_context,
-            binding_type,
-            binding_data,
+            envelope,
         }) = &fact.content
         {
-            if fact_context == context_id && binding_type == HOME_KICK_FACT_TYPE_ID {
-                if let Some(home_kick) = HomeKickFact::from_bytes(binding_data) {
+            if fact_context == context_id && envelope.type_id.as_str() == HOME_KICK_FACT_TYPE_ID {
+                if let Some(home_kick) = HomeKickFact::from_envelope(envelope) {
                     let kicked_at_ms = home_kick.kicked_at_ms();
                     kicks.push(KickRecord {
                         kicked_authority: home_kick.kicked_authority,

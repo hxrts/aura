@@ -623,12 +623,13 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                         // via DomainFact::to_generic()
                         RelationalFact::Generic {
                             context_id: ctx,
-                            binding_type,
-                            binding_data,
+                            envelope,
                         } => RelationalBinding {
-                            binding_type: RelationalBindingType::Generic(binding_type.clone()),
+                            binding_type: RelationalBindingType::Generic(
+                                envelope.type_id.as_str().to_string(),
+                            ),
                             context_id: *ctx,
-                            data: binding_data.clone(),
+                            data: envelope.payload.clone(),
                         },
                     };
                     bindings.push(binding);

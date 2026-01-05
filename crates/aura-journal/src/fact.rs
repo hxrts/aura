@@ -11,6 +11,7 @@
 
 use crate::protocol_facts::ProtocolRelationalFact;
 pub use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
+pub use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
 use aura_core::{
     domain::{Acknowledgment, Agreement, Consistency, OperationCategory, Propagation},
     identifiers::{AuthorityId, ChannelId, ContextId},
@@ -1004,10 +1005,11 @@ pub enum RelationalFact {
     Generic {
         /// Context in which this binding exists
         context_id: ContextId,
-        /// Type of binding (domain-specific, e.g., "chat", "invitation", "contact")
-        binding_type: String,
-        /// Serialized binding data (deserialize with `DomainFact::from_bytes`)
-        binding_data: Vec<u8>,
+        /// Typed fact envelope (contains type_id, schema_version, encoding, payload)
+        ///
+        /// This replaces the stringly-typed `binding_type: String, binding_data: Vec<u8>`
+        /// pattern to eliminate double serialization and enable type-safe access.
+        envelope: FactEnvelope,
     },
 }
 

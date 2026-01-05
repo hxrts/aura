@@ -19,11 +19,19 @@ pub fn encode_relational_generic<T: Serialize>(
     kind: &str,
     payload: &T,
 ) -> Result<FactValue, AuraError> {
+    let payload_bytes = serde_json::to_vec(payload)
+        .map_err(|e| AuraError::agent(format!("Failed to serialize fact payload: {e}")))?;
+
+    let envelope = aura_core::types::facts::FactEnvelope {
+        type_id: aura_core::types::facts::FactTypeId::from(kind),
+        schema_version: 1,
+        encoding: aura_core::types::facts::FactEncoding::Json,
+        payload: payload_bytes,
+    };
+
     let content = FactContent::Relational(RelationalFact::Generic {
         context_id,
-        binding_type: kind.to_string(),
-        binding_data: serde_json::to_vec(payload)
-            .map_err(|e| AuraError::agent(format!("Failed to serialize fact payload: {e}")))?,
+        envelope,
     });
 
     encode_fact_content(content)

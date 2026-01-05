@@ -77,7 +77,7 @@ impl GuardianRequestFact {
         };
         GuardianRequestFactKey {
             sub_type,
-            data: hash::hash(&self.to_bytes()).to_vec(),
+            data: hash::hash(&self.to_envelope().payload).to_vec(),
         }
     }
 }
@@ -90,17 +90,16 @@ impl FactReducer for GuardianRequestFactReducer {
         GUARDIAN_REQUEST_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != GUARDIAN_REQUEST_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != GUARDIAN_REQUEST_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = GuardianRequestFact::from_bytes(binding_data)?;
+        let fact = GuardianRequestFact::from_envelope(envelope)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }
@@ -115,15 +114,14 @@ impl FactReducer for GuardianRequestFactReducer {
     }
 }
 
-/// Best-effort decode helper when iterating Generic facts.
+/// Best-effort decode helper when iterating Generic facts from an envelope.
 pub fn parse_guardian_request(
-    binding_type: &str,
-    binding_data: &[u8],
+    envelope: &aura_core::types::facts::FactEnvelope,
 ) -> Option<GuardianRequestFact> {
-    if binding_type != GUARDIAN_REQUEST_FACT_TYPE_ID {
+    if envelope.type_id.as_str() != GUARDIAN_REQUEST_FACT_TYPE_ID {
         return None;
     }
-    GuardianRequestFact::from_bytes(binding_data)
+    GuardianRequestFact::from_envelope(envelope)
 }
 
 #[cfg(test)]
@@ -159,10 +157,10 @@ mod tests {
         let reducer = GuardianRequestFactReducer;
         let context_id = test_context_id();
         let fact = GuardianRequestFact::requested(context_id, test_payload());
-        let bytes = fact.to_bytes();
+        let envelope = fact.to_envelope();
 
-        let binding1 = reducer.reduce(context_id, GUARDIAN_REQUEST_FACT_TYPE_ID, &bytes);
-        let binding2 = reducer.reduce(context_id, GUARDIAN_REQUEST_FACT_TYPE_ID, &bytes);
+        let binding1 = reducer.reduce_envelope(context_id, &envelope);
+        let binding2 = reducer.reduce_envelope(context_id, &envelope);
         assert!(binding1.is_some());
         assert!(binding2.is_some());
         let binding1 = binding1.unwrap();

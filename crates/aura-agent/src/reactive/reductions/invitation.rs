@@ -28,14 +28,15 @@ impl ViewReduction<InvitationDelta> for InvitationReduction {
         facts
             .iter()
             .flat_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::Generic {
-                    binding_type,
-                    binding_data,
-                    ..
-                }) if binding_type == INVITATION_FACT_TYPE_ID => {
+                FactContent::Relational(RelationalFact::Generic { envelope, .. })
+                    if envelope.type_id.as_str() == INVITATION_FACT_TYPE_ID =>
+                {
                     // Use the domain reducer and downcast back to InvitationDelta
-                    let view_deltas =
-                        reducer.reduce_fact(binding_type, binding_data, own_authority);
+                    let view_deltas = reducer.reduce_fact(
+                        envelope.type_id.as_str(),
+                        &envelope.payload,
+                        own_authority,
+                    );
                     downcast_invitation_deltas(view_deltas)
                 }
                 _ => Vec::new(),
@@ -85,11 +86,7 @@ mod tests {
 
         let facts = vec![make_test_fact(
             1,
-            FactContent::Relational(RelationalFact::Generic {
-                context_id: test_context_id(),
-                binding_type: INVITATION_FACT_TYPE_ID.to_string(),
-                binding_data: sent_fact.to_bytes(),
-            }),
+            FactContent::Relational(sent_fact.to_generic()),
         )];
 
         let test_authority = Some(AuthorityId::new_from_entropy([99u8; 32]));

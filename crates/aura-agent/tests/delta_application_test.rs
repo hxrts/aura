@@ -118,12 +118,14 @@ impl ViewReduction<TestDelta> for MessageReduction {
         facts
             .iter()
             .filter_map(|fact| {
-                if let FactContent::Relational(RelationalFact::Generic { binding_type, .. }) =
+                if let FactContent::Relational(RelationalFact::Generic { envelope, .. }) =
                     &fact.content
                 {
-                    binding_type
+                    envelope
+                        .type_id
+                        .as_str()
                         .strip_prefix("message:")
-                        .map(|message| TestDelta::AppendMessage(message.to_string()))
+                        .map(|message: &str| TestDelta::AppendMessage(message.to_string()))
                 } else {
                     None
                 }
@@ -172,8 +174,14 @@ fn make_message_fact(message: &str, index: u64) -> Fact {
         make_timestamp(1000 + index),
         FactContent::Relational(RelationalFact::Generic {
             context_id: ContextId::new_from_entropy([0u8; 32]),
-            binding_type: format!("message:{}", message),
-            binding_data: vec![],
+            envelope: aura_core::types::facts::FactEnvelope {
+                type_id: aura_core::types::facts::FactTypeId::from(
+                    format!("message:{}", message).as_str(),
+                ),
+                schema_version: 1,
+                encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                payload: vec![],
+            },
         }),
     )
 }
@@ -184,8 +192,12 @@ fn make_generic_fact(binding_type: &str, index: u64) -> Fact {
         make_timestamp(1000 + index),
         FactContent::Relational(RelationalFact::Generic {
             context_id: ContextId::new_from_entropy([0u8; 32]),
-            binding_type: binding_type.to_string(),
-            binding_data: vec![],
+            envelope: aura_core::types::facts::FactEnvelope {
+                type_id: aura_core::types::facts::FactTypeId::from(binding_type),
+                schema_version: 1,
+                encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                payload: vec![],
+            },
         }),
     )
 }

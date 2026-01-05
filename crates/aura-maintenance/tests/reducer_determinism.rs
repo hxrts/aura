@@ -10,7 +10,6 @@ use aura_journal::{DomainFact, FactReducer};
 use aura_maintenance::{
     CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceFact, MaintenanceFactDelta,
     MaintenanceFactReducer, SnapshotProposed, UpgradeActivated, UpgradeProposalMetadata,
-    MAINTENANCE_FACT_TYPE_ID,
 };
 use uuid::Uuid;
 
@@ -79,12 +78,12 @@ fn reducer_binding_is_idempotent() {
         metadata,
     ));
 
-    let bytes = fact.to_bytes();
+    let envelope = fact.to_envelope();
     let first = reducer
-        .reduce(context_id, MAINTENANCE_FACT_TYPE_ID.as_str(), &bytes)
+        .reduce_envelope(context_id, &envelope)
         .expect("binding");
     let second = reducer
-        .reduce(context_id, MAINTENANCE_FACT_TYPE_ID.as_str(), &bytes)
+        .reduce_envelope(context_id, &envelope)
         .expect("binding");
 
     assert_eq!(first.binding_type, second.binding_type);

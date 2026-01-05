@@ -941,17 +941,16 @@ impl FactReducer for SocialFactReducer {
         SOCIAL_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != SOCIAL_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != SOCIAL_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = SocialFact::from_bytes(binding_data)?;
+        let fact = SocialFact::from_envelope(envelope)?;
 
         if !fact.validate_for_reduction(context_id) {
             return None;
@@ -1067,8 +1066,7 @@ mod tests {
             "Test Home".to_string(),
         );
 
-        let binding = match reducer.reduce(test_context_id(), SOCIAL_FACT_TYPE_ID, &fact.to_bytes())
-        {
+        let binding = match reducer.reduce_envelope(test_context_id(), &fact.to_envelope()) {
             Some(binding) => binding,
             None => panic!("should reduce"),
         };
@@ -1094,9 +1092,9 @@ mod tests {
             "Test Home".to_string(),
         );
 
-        let bytes = fact.to_bytes();
-        let binding1 = reducer.reduce(context_id, SOCIAL_FACT_TYPE_ID, &bytes);
-        let binding2 = reducer.reduce(context_id, SOCIAL_FACT_TYPE_ID, &bytes);
+        let envelope = fact.to_envelope();
+        let binding1 = reducer.reduce_envelope(context_id, &envelope);
+        let binding2 = reducer.reduce_envelope(context_id, &envelope);
         assert!(binding1.is_some());
         assert!(binding2.is_some());
         let binding1 = binding1.unwrap();

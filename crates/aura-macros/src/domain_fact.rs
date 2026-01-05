@@ -150,20 +150,36 @@ pub fn derive_domain_fact_impl(input: proc_macro::TokenStream) -> proc_macro::To
                 #type_id
             }
 
+            fn schema_version(&self) -> u16 {
+                #schema_version
+            }
+
             fn context_id(&self) -> aura_core::identifiers::ContextId {
                 #context_impl
             }
 
-            fn to_bytes(&self) -> Vec<u8> {
-                aura_journal::encode_domain_fact(#type_id, #schema_version, self)
-                    .expect("DomainFact encoding failed")
+            fn to_envelope(&self) -> aura_core::types::facts::FactEnvelope {
+                let payload = aura_core::util::serialization::to_vec(self)
+                    .expect("DomainFact serialization should not fail");
+                aura_core::types::facts::FactEnvelope {
+                    type_id: aura_core::types::facts::FactTypeId::from(#type_id),
+                    schema_version: #schema_version,
+                    encoding: aura_core::types::facts::FactEncoding::DagCbor,
+                    payload,
+                }
             }
 
-            fn from_bytes(bytes: &[u8]) -> Option<Self>
+            fn from_envelope(envelope: &aura_core::types::facts::FactEnvelope) -> Option<Self>
             where
                 Self: Sized,
             {
-                aura_journal::decode_domain_fact(#type_id, #schema_version, bytes)
+                if envelope.type_id.as_str() != #type_id {
+                    return None;
+                }
+                if envelope.schema_version != #schema_version {
+                    return None;
+                }
+                aura_core::util::serialization::from_slice(&envelope.payload).ok()
             }
         }
     };

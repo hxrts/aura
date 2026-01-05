@@ -19,6 +19,8 @@ pub mod recovery;
 
 // Re-export all public types for convenience
 pub use consensus::{ConsensusProof, ConsensusStatus};
-pub use fact::{GenericBinding, RelationalFact};
+pub use fact::{
+    GenericBinding, GenericBindingError, RelationalFact, MAX_RELATIONAL_BINDING_DATA_BYTES,
+};
 pub use guardian::{GuardianBinding, GuardianBindingBuilder, GuardianParameters};
 pub use recovery::{RecoveryGrant, RecoveryOp, RecoverySeverity};

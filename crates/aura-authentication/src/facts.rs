@@ -505,17 +505,16 @@ impl FactReducer for AuthFactReducer {
         AUTH_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &aura_core::types::facts::FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != AUTH_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != AUTH_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = AuthFact::from_bytes(binding_data)?;
+        let fact = AuthFact::from_envelope(envelope)?;
         if !fact.validate_for_reduction(context_id) {
             return None;
         }

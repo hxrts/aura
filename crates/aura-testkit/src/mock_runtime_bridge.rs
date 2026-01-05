@@ -130,10 +130,13 @@ impl MockRuntimeBridge {
         let _ = self.reactive_handler.emit(&*CONTACTS_SIGNAL, state).await;
     }
 
-    /// Process a ContactFact from binding data and update internal contacts list
+    /// Process a ContactFact from envelope and update internal contacts list
     /// Returns true if contacts were changed
-    async fn process_contact_fact_data(&self, _binding_type: &str, binding_data: &[u8]) -> bool {
-        let Some(fact) = ContactFact::from_bytes(binding_data) else {
+    async fn process_contact_fact_envelope(
+        &self,
+        envelope: &aura_core::types::facts::FactEnvelope,
+    ) -> bool {
+        let Some(fact) = ContactFact::from_envelope(envelope) else {
             return false;
         };
 
@@ -264,19 +267,11 @@ impl RuntimeBridge for MockRuntimeBridge {
         // Process Generic facts to detect ContactFacts and update signals
         let mut contact_changed = false;
         for fact in facts {
-            // ContactFacts are stored as RelationalFact::Generic with binding_type containing "contact"
-            if let RelationalFact::Generic {
-                binding_type,
-                binding_data,
-                ..
-            } = fact
-            {
-                if binding_type.contains("contact") {
+            // ContactFacts are stored as RelationalFact::Generic with type_id containing "contact"
+            if let RelationalFact::Generic { envelope, .. } = fact {
+                if envelope.type_id.as_str().contains("contact") {
                     // Parse the contact fact and update state
-                    if self
-                        .process_contact_fact_data(binding_type, binding_data)
-                        .await
-                    {
+                    if self.process_contact_fact_envelope(envelope).await {
                         contact_changed = true;
                     }
                 }

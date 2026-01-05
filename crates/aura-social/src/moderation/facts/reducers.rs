@@ -3,6 +3,7 @@
 use super::constants::*;
 use super::fact_types::*;
 use aura_core::identifiers::ContextId;
+use aura_core::types::facts::FactEnvelope;
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer, FactRegistry,
@@ -15,21 +16,20 @@ impl FactReducer for HomeMuteFactReducer {
         HOME_MUTE_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != HOME_MUTE_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != HOME_MUTE_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = HomeMuteFact::from_bytes(binding_data)?;
+        let _fact = HomeMuteFact::from_envelope(envelope)?;
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(HOME_MUTE_FACT_TYPE_ID.to_string()),
             context_id,
-            data: fact.to_bytes(),
+            data: envelope.payload.clone(),
         })
     }
 }
@@ -41,21 +41,20 @@ impl FactReducer for HomeUnmuteFactReducer {
         HOME_UNMUTE_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != HOME_UNMUTE_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != HOME_UNMUTE_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = HomeUnmuteFact::from_bytes(binding_data)?;
+        let _fact = HomeUnmuteFact::from_envelope(envelope)?;
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(HOME_UNMUTE_FACT_TYPE_ID.to_string()),
             context_id,
-            data: fact.to_bytes(),
+            data: envelope.payload.clone(),
         })
     }
 }
@@ -67,21 +66,20 @@ impl FactReducer for HomeBanFactReducer {
         HOME_BAN_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != HOME_BAN_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != HOME_BAN_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = HomeBanFact::from_bytes(binding_data)?;
+        let _fact = HomeBanFact::from_envelope(envelope)?;
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(HOME_BAN_FACT_TYPE_ID.to_string()),
             context_id,
-            data: fact.to_bytes(),
+            data: envelope.payload.clone(),
         })
     }
 }
@@ -93,21 +91,20 @@ impl FactReducer for HomeUnbanFactReducer {
         HOME_UNBAN_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != HOME_UNBAN_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != HOME_UNBAN_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = HomeUnbanFact::from_bytes(binding_data)?;
+        let _fact = HomeUnbanFact::from_envelope(envelope)?;
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(HOME_UNBAN_FACT_TYPE_ID.to_string()),
             context_id,
-            data: fact.to_bytes(),
+            data: envelope.payload.clone(),
         })
     }
 }
@@ -119,21 +116,20 @@ impl FactReducer for HomeKickFactReducer {
         HOME_KICK_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != HOME_KICK_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != HOME_KICK_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = HomeKickFact::from_bytes(binding_data)?;
+        let _fact = HomeKickFact::from_envelope(envelope)?;
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(HOME_KICK_FACT_TYPE_ID.to_string()),
             context_id,
-            data: fact.to_bytes(),
+            data: envelope.payload.clone(),
         })
     }
 }
@@ -145,21 +141,20 @@ impl FactReducer for HomePinFactReducer {
         HOME_PIN_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != HOME_PIN_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != HOME_PIN_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = HomePinFact::from_bytes(binding_data)?;
+        let _fact = HomePinFact::from_envelope(envelope)?;
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(HOME_PIN_FACT_TYPE_ID.to_string()),
             context_id,
-            data: fact.to_bytes(),
+            data: envelope.payload.clone(),
         })
     }
 }
@@ -171,21 +166,20 @@ impl FactReducer for HomeUnpinFactReducer {
         HOME_UNPIN_FACT_TYPE_ID
     }
 
-    fn reduce(
+    fn reduce_envelope(
         &self,
         context_id: ContextId,
-        binding_type: &str,
-        binding_data: &[u8],
+        envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if binding_type != HOME_UNPIN_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != HOME_UNPIN_FACT_TYPE_ID {
             return None;
         }
 
-        let fact = HomeUnpinFact::from_bytes(binding_data)?;
+        let _fact = HomeUnpinFact::from_envelope(envelope)?;
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(HOME_UNPIN_FACT_TYPE_ID.to_string()),
             context_id,
-            data: fact.to_bytes(),
+            data: envelope.payload.clone(),
         })
     }
 }
