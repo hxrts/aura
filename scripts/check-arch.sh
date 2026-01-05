@@ -1184,7 +1184,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_STYLE" = true ]; then
       for offset in 1 2 3; do
         prev_line=$((linenum - offset))
         if [ "$prev_line" -gt 0 ]; then
-          if sed -n "${prev_line}p" "$file" 2>/dev/null | grep -q "#\[must_use\]"; then
+          if sed -n "${prev_line}p" "$file" 2>/dev/null | grep -qE "#\[must_use(\]| *=)"; then
             has_must_use=true
             break
           fi
