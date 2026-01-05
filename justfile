@@ -117,7 +117,7 @@ serve: serve-book
 
 # Build all crates
 build:
-    cargo build --workspace --verbose
+    cargo build --workspace -q
 
 # Build Aura terminal in development mode (release profile with dev features)
 # Creates ./bin/aura wrapper for easy access
@@ -140,11 +140,11 @@ build-terminal-release:
 
 # Build in release mode
 build-release:
-    cargo build --workspace --release --verbose
+    cargo build --workspace --release -q
 
 # Run all tests
 test:
-    cargo test --workspace --verbose
+    cargo test --workspace -q
 
 # Run all tests with output
 test-verbose:
@@ -152,7 +152,7 @@ test-verbose:
 
 # Run tests for a specific crate
 test-crate crate:
-    cargo test -p {{crate}} --verbose
+    cargo test -p {{crate}} -q
 
 # Run tests for a specific crate avoiding architectural violations
 test-crate-isolated crate:
@@ -163,7 +163,7 @@ test-crate-isolated crate:
 
 # Check code without building
 check:
-    cargo check --workspace --verbose
+    cargo check --workspace -q
 
 # Run the exact same lint command that Zed editor runs (rust-analyzer checkOnSave)
 # This is exactly what Zed runs automatically on file save via rust-analyzer
@@ -172,11 +172,11 @@ check-zed:
 
 # Run clippy linter with effects system enforcement
 clippy:
-    cargo clippy --workspace --all-targets --verbose -- -D warnings
+    cargo clippy --workspace --all-targets -q -- -D warnings
 
 # Strict clippy check enforcing effects system usage
 clippy-strict:
-    cargo clippy --workspace --all-targets --verbose -- -D warnings -D clippy::disallowed_methods -D clippy::disallowed_types
+    cargo clippy --workspace --all-targets -q -- -D warnings -D clippy::disallowed_methods -D clippy::disallowed_types
 
 # Ensure Layer 4 crates do not reintroduce crate-level allow attributes
 check-layer4-lints:
@@ -590,10 +590,6 @@ ci-dry-run:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    echo "Running CI Dry-Run (Local GitHub Workflow Simulation)"
-    echo "======================================================"
-    echo ""
-
     # Colors for output
     GREEN='\033[0;32m'
     RED='\033[0;31m'
@@ -602,251 +598,165 @@ ci-dry-run:
 
     exit_code=0
 
-    # Clean ALL build artifacts to ensure fresh compilation (matches GitHub CI behavior)
-    echo "Cleaning build cache to ensure fresh compilation..."
-    cargo clean
-    echo ""
+    # Clean build artifacts for fresh compilation
+    cargo clean 2>/dev/null
 
     # 1. Format Check
-    echo "[1/8] Running Format Check..."
-    if cargo fmt --all -- --check; then
-        echo -e "${GREEN}[OK]${NC} Format check passed"
+    printf "[1/8] Format... "
+    if cargo fmt --all -- --check 2>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}[FAIL]${NC} Format check failed"
+        echo -e "${RED}FAIL${NC}"
+        cargo fmt --all -- --check 2>&1 | head -20
         exit_code=1
     fi
-    echo ""
 
     # 2. Clippy with Effects Enforcement
-    echo "[2/8] Running Clippy with Effects Enforcement..."
-    if cargo clippy --workspace --all-targets --verbose -- \
+    printf "[2/8] Clippy... "
+    if cargo clippy --workspace --all-targets -q -- \
         -D warnings \
         -D clippy::disallowed_methods \
         -D clippy::disallowed_types \
         -D clippy::unwrap_used \
         -D clippy::expect_used \
-        -D clippy::duplicated_attributes; then
-        echo -e "${GREEN}[OK]${NC} Clippy check passed"
+        -D clippy::duplicated_attributes 2>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}[FAIL]${NC} Clippy check failed"
+        echo -e "${RED}FAIL${NC}"
+        cargo clippy --workspace --all-targets -- \
+            -D warnings \
+            -D clippy::disallowed_methods \
+            -D clippy::disallowed_types \
+            -D clippy::unwrap_used \
+            -D clippy::expect_used \
+            -D clippy::duplicated_attributes 2>&1 | grep -E "^(error|warning\[)" | head -30
         exit_code=1
     fi
-    echo ""
 
     # 3. Test Suite
-    echo "[3/8] Running Test Suite..."
-    if cargo test --workspace --verbose; then
-        echo -e "${GREEN}[OK]${NC} Test suite passed"
+    printf "[3/8] Tests... "
+    if cargo test --workspace -q 2>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}[FAIL]${NC} Test suite failed"
+        echo -e "${RED}FAIL${NC}"
+        cargo test --workspace 2>&1 | grep -E "^(FAILED|error\[|thread .* panicked)" | head -20
         exit_code=1
     fi
-    echo ""
 
-    # 4. Check for Effects System Violations (Layer-Aware)
-    echo "[4/8] Checking for Effects System Violations..."
+    # 4. Check for Effects System Violations
+    printf "[4/8] Effects violations... "
     violations_found=0
 
-    # Layer architecture:
-    # - Layer 3 (aura-effects): Production handlers - MUST use SystemTime::now(), thread_rng()
-    # - Layer 6 (aura-agent, aura-simulator): Runtime composition - allowed for instrumentation
-    # - Layer 7 (aura-terminal): User interface - allowed for TUI/CLI interaction
-    # - Layer 8 (aura-testkit, tests/): Testing infrastructure - allowed
-    # - All other layers: MUST use effect traits
-
-    # Check for direct time usage (exclude Layer 3, 6, 7, 8, integration tests, demo code, CLI scenarios, and test modules)
-    # Note: May include false positives from code in comments or test modules
+    # Check time usage (exclude allowed layers)
     time_violations=$(rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number \
-        --glob '!**/aura-effects/**' \
-        --glob '!**/aura-agent/**' \
-        --glob '!**/aura-simulator/**' \
-        --glob '!**/aura-terminal/**' \
-        --glob '!**/aura-testkit/**' \
-        --glob '!**/tests/**' \
-        --glob '!**/integration/**' \
-        --glob '!**/demo/**' \
-        --glob '!**/examples/**' 2>/dev/null | \
-        grep -v '^\s*//\|^\s\+//\|:\s*//' | \
-        grep -v "#\[tokio::test\]" | \
-        grep -v "#\[test\]" || true)
+        --glob '!**/aura-effects/**' --glob '!**/aura-agent/**' --glob '!**/aura-simulator/**' \
+        --glob '!**/aura-terminal/**' --glob '!**/aura-testkit/**' --glob '!**/tests/**' \
+        --glob '!**/integration/**' --glob '!**/demo/**' --glob '!**/examples/**' 2>/dev/null | \
+        grep -v '^\s*//\|:\s*//' | grep -v "#\[test\]" || true)
 
-    # Filter out lines from files with #[cfg(test)] modules
     if [ -n "$time_violations" ]; then
-        filtered_time=""
+        # Filter test modules
+        filtered=""
         while IFS= read -r line; do
             [ -z "$line" ] && continue
             file_path="${line%%:*}"
             if [ -f "$file_path" ] && grep -q "#\[cfg(test)\]" "$file_path" 2>/dev/null; then
                 match_line_num=$(echo "$line" | cut -d: -f2)
                 cfg_test_line=$(grep -n "#\[cfg(test)\]" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
-                if [ -n "$match_line_num" ] && [ -n "$cfg_test_line" ] && [ "$match_line_num" -gt "$cfg_test_line" ]; then
-                    continue
-                fi
+                [ -n "$match_line_num" ] && [ -n "$cfg_test_line" ] && [ "$match_line_num" -gt "$cfg_test_line" ] && continue
             fi
-            filtered_time="${filtered_time}${line}"$'\n'
+            filtered="${filtered}${line}"$'\n'
         done <<< "$time_violations"
-        time_violations="$filtered_time"
+        [ -n "$filtered" ] && [ "$filtered" != $'\n' ] && violations_found=1 && echo "$filtered"
     fi
 
-    if [ -n "$time_violations" ] && [ "$time_violations" != $'\n' ]; then
-        echo "$time_violations"
-        echo -e "${RED}[ERROR]${NC} Found direct time usage in application code! Use PhysicalTimeEffects::now() instead."
+    # Check randomness usage
+    if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ -q \
+        --glob '!**/aura-effects/**' --glob '!**/aura-agent/**' --glob '!**/aura-simulator/**' \
+        --glob '!**/aura-terminal/**' --glob '!**/aura-testkit/**' --glob '!**/tests/**' \
+        --glob '!**/integration/**' --glob '!**/demo/**' 2>/dev/null; then
         violations_found=1
     fi
 
-    # Check for direct randomness usage (exclude Layer 3, 6, 7, 8, integration tests, and demo code)
-    if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number \
-        --glob '!**/aura-effects/**' \
-        --glob '!**/aura-agent/**' \
-        --glob '!**/aura-simulator/**' \
-        --glob '!**/aura-terminal/**' \
-        --glob '!**/aura-testkit/**' \
-        --glob '!**/tests/**' \
-        --glob '!**/integration/**' \
-        --glob '!**/demo/**' \
-        --glob '!**/examples/**' 2>/dev/null; then
-        echo -e "${RED}[ERROR]${NC} Found direct randomness usage in application code! Use RandomEffects methods instead."
-        violations_found=1
-    fi
-
-    # Check for direct UUID usage (exclude Layer 3, 6, 7, 8, integration tests, demo code, ID constructors, property tests, and test modules)
+    # Check UUID usage
     uuid_violations=$(rg --type rust "Uuid::new_v4\(\)" crates/ --line-number \
-        --glob '!**/aura-effects/**' \
-        --glob '!**/aura-agent/**' \
-        --glob '!**/aura-simulator/**' \
-        --glob '!**/aura-testkit/**' \
-        --glob '!**/aura-quint/**' \
-        --glob '!**/aura-terminal/**' \
-        --glob '!**/tests/**' \
-        --glob '!**/integration/**' \
-        --glob '!**/demo/**' \
-        --glob '!**/tui/**' \
-        --glob '!**/examples/**' \
-        --glob '!**/aura-core/src/types/identifiers.rs' \
-        --glob '!**/aura-core/src/effects/quint.rs' \
-        --glob '!**/aura-composition/src/registry.rs' \
-        --glob '!**/aura-sync/src/services/maintenance.rs' \
+        --glob '!**/aura-effects/**' --glob '!**/aura-agent/**' --glob '!**/aura-simulator/**' \
+        --glob '!**/aura-testkit/**' --glob '!**/aura-quint/**' --glob '!**/aura-terminal/**' \
+        --glob '!**/tests/**' --glob '!**/demo/**' --glob '!**/tui/**' --glob '!**/examples/**' \
+        --glob '!**/aura-core/src/types/identifiers.rs' --glob '!**/aura-core/src/effects/quint.rs' \
+        --glob '!**/aura-composition/src/registry.rs' --glob '!**/aura-sync/src/services/maintenance.rs' \
         --glob '!**/aura-sync/src/infrastructure/peers.rs' 2>/dev/null | \
-        grep -v '^\s*//\|^\s\+//\|:\s*//' | \
-        grep -v "#\[tokio::test\]" | \
-        grep -v "#\[test\]" || true)
+        grep -v '^\s*//\|:\s*//' | grep -v "#\[test\]" || true)
 
-    # Filter out lines from files with #[cfg(test)] modules
     if [ -n "$uuid_violations" ]; then
-        filtered_uuid=""
+        filtered=""
         while IFS= read -r line; do
             [ -z "$line" ] && continue
             file_path="${line%%:*}"
             if [ -f "$file_path" ] && grep -q "#\[cfg(test)\]" "$file_path" 2>/dev/null; then
                 match_line_num=$(echo "$line" | cut -d: -f2)
                 cfg_test_line=$(grep -n "#\[cfg(test)\]" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
-                if [ -n "$match_line_num" ] && [ -n "$cfg_test_line" ] && [ "$match_line_num" -gt "$cfg_test_line" ]; then
-                    continue
-                fi
+                [ -n "$match_line_num" ] && [ -n "$cfg_test_line" ] && [ "$match_line_num" -gt "$cfg_test_line" ] && continue
             fi
-            filtered_uuid="${filtered_uuid}${line}"$'\n'
+            filtered="${filtered}${line}"$'\n'
         done <<< "$uuid_violations"
-        uuid_violations="$filtered_uuid"
-    fi
-
-    if [ -n "$uuid_violations" ] && [ "$uuid_violations" != $'\n' ]; then
-        echo "$uuid_violations"
-        echo -e "${RED}[ERROR]${NC} Found direct UUID usage in application code! Use RandomEffects::random_uuid() instead."
-        violations_found=1
+        [ -n "$filtered" ] && [ "$filtered" != $'\n' ] && violations_found=1 && echo "$filtered"
     fi
 
     if [ $violations_found -eq 0 ]; then
-        echo -e "${GREEN}[OK]${NC} No effects system violations found"
+        echo -e "${GREEN}OK${NC}"
     else
-        echo ""
-        echo -e "${YELLOW}Note:${NC} Layer 1 ID constructors (aura-core/identifiers.rs), Layer 3 (aura-effects), Layer 6 (aura-agent, aura-simulator), Layer 7 (aura-terminal), Layer 8 (aura-testkit, tests/), property tests (aura-quint), demo/TUI code, operation ID generation (aura-composition/registry.rs), and sync service IDs (aura-sync/services, aura-sync/infrastructure) are exempt."
+        echo -e "${RED}FAIL${NC}"
         exit_code=1
     fi
-    echo ""
 
     # 5. Documentation Links Check
-    echo "[5/8] Checking Documentation Links..."
-    # Install markdown-link-check if not available
-    if ! command -v markdown-link-check &> /dev/null; then
-        echo "Installing markdown-link-check..."
-        npm install -g markdown-link-check > /dev/null 2>&1
-    fi
+    printf "[5/8] Doc links... "
+    command -v markdown-link-check &>/dev/null || npm install -g markdown-link-check >/dev/null 2>&1
 
     doc_errors=0
-    doc_output=$(mktemp)
-
-    # Find all markdown files recursively (matching GitHub CI behavior)
-    # Exclude node_modules, target, and .git directories
+    broken_files=""
     while IFS= read -r file; do
-        if [ -f "$file" ]; then
-            if ! markdown-link-check "$file" --config .github/config/markdown-link-check.json 2>&1 | tee -a "$doc_output" | grep -q "ERROR:"; then
-                :
-            else
-                echo -e "${RED}Broken links found in $file${NC}"
-                doc_errors=1
-            fi
+        if [ -f "$file" ] && ! markdown-link-check "$file" --config .github/config/markdown-link-check.json -q 2>/dev/null; then
+            doc_errors=1
+            broken_files="$broken_files $file"
         fi
-    done < <(find . -name "*.md" -type f \
-        ! -path "*/node_modules/*" \
-        ! -path "*/target/*" \
-        ! -path "*/.git/*" \
-        ! -path "*/.aura-test/*" \
-        ! -path "*/ext/quint/*" \
-        ! -path "*/work/*" \
-        ! -path "*/.claude/skills/*")
+    done < <(find . -name "*.md" -type f ! -path "*/node_modules/*" ! -path "*/target/*" ! -path "*/.git/*" \
+        ! -path "*/.aura-test/*" ! -path "*/ext/quint/*" ! -path "*/work/*" ! -path "*/.claude/skills/*")
 
     if [ $doc_errors -eq 0 ]; then
-        echo -e "${GREEN}[OK]${NC} Documentation links check passed"
+        echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}[FAIL]${NC} Documentation links check failed"
-        echo "See errors above for details"
+        echo -e "${RED}FAIL${NC}"
+        echo "  Broken links in:$broken_files"
         exit_code=1
     fi
-    rm -f "$doc_output"
-    echo ""
 
     # 6. Build Check
-    echo "[6/8] Running Build Check..."
-    if cargo build --workspace --verbose; then
-        echo -e "${GREEN}[OK]${NC} Build check passed"
+    printf "[6/8] Build... "
+    if cargo build --workspace -q 2>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}[FAIL]${NC} Build check failed"
+        echo -e "${RED}FAIL${NC}"
+        cargo build --workspace 2>&1 | grep -E "^error" | head -10
         exit_code=1
     fi
-    echo ""
 
     # 7. Unused Dependencies Check
-    echo "[7/8] Checking for Unused Dependencies (cargo-udeps)..."
-    echo "Using nightly Rust toolchain for cargo-udeps..."
-
-    # Run cargo-udeps using the nightly shell from flake.nix
-    if nix develop .#nightly --command cargo udeps --all-targets 2>&1 | tee /tmp/udeps-output.txt | grep -q "unused dependencies:"; then
-        # Found unused dependencies - show them
-        echo -e "${YELLOW}[WARNING]${NC} Found unused dependencies:"
-        grep -A 100 "unused dependencies:" /tmp/udeps-output.txt | head -50
-        echo ""
-        echo -e "${YELLOW}Note:${NC} cargo-udeps may report false positives for:"
-        echo "  - Dependencies used in macro-generated code"
-        echo "  - Dependencies used only in doc-tests"
-        echo "  - Re-exported dependencies in public APIs"
-        echo ""
-        echo "Review the output above and verify these are actual unused dependencies."
-        echo "This is a WARNING, not a failure - CI will continue."
+    printf "[7/8] Unused deps... "
+    if nix develop .#nightly --command cargo udeps --all-targets 2>&1 | grep -q "unused dependencies:"; then
+        echo -e "${YELLOW}WARN${NC}"
+        nix develop .#nightly --command cargo udeps --all-targets 2>&1 | grep "unused dependencies:" | head -5
     else
-        echo -e "${GREEN}[OK]${NC} No unused dependencies found (or only known false positives)"
+        echo -e "${GREEN}OK${NC}"
     fi
-    rm -f /tmp/udeps-output.txt
-    echo ""
 
     # 8. Summary
-    echo "[8/8] Summary"
-    echo "======================================================"
+    echo ""
     if [ $exit_code -eq 0 ]; then
-        echo -e "${GREEN}All CI checks passed!${NC}"
-        echo "Ready to submit PR - matches GitHub CI requirements"
+        echo -e "${GREEN}All CI checks passed${NC}"
     else
-        echo -e "${RED}Some CI checks failed!${NC}"
-        echo "Please fix the issues above before submitting PR"
+        echo -e "${RED}CI checks failed${NC}"
         exit $exit_code
     fi
 

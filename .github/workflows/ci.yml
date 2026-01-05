@@ -21,7 +21,7 @@ jobs:
         with:
           components: rustfmt
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: cargo fmt --all -- --check 2>&1 || { echo "::error::Formatting check failed"; exit 1; }
 
   clippy-effects-enforcement:
     name: Clippy - Effects System Enforcement
@@ -49,7 +49,15 @@ jobs:
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
       - name: Run clippy with effects enforcement
         run: |
-          cargo clippy --workspace --all-targets --verbose -- \
+          cargo clippy --workspace --all-targets -- \
+            -D warnings \
+            -D clippy::disallowed_methods \
+            -D clippy::disallowed_types \
+            -D clippy::unwrap_used \
+            -D clippy::expect_used \
+            -D clippy::duplicated_attributes 2>&1 | grep -E "^(error|warning|\s+-->|Compiling)" || true
+          # Re-run to get proper exit code
+          cargo clippy --workspace --all-targets -q -- \
             -D warnings \
             -D clippy::disallowed_methods \
             -D clippy::disallowed_types \
@@ -82,7 +90,7 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
       - name: Run tests
-        run: cargo test --workspace --verbose
+        run: cargo test --workspace -q 2>&1 | grep -vE "^running [0-9]+ test|^test result:|^   Compiling" || cargo test --workspace -q
 
   check-effects-violations:
     name: Check for Effects System Violations
@@ -93,7 +101,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Check for direct time usage
         run: |
-          echo "Checking for direct time usage violations..."
 
           # Get files with violations
           files_with_violations=$(rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ \
@@ -127,28 +134,22 @@ jobs:
 
           if [ -n "$violations" ]; then
             echo "$violations"
-            echo "[ERROR] Found direct time usage! Use effects.now() instead."
+            echo "::error::Found direct time usage! Use effects.now() instead."
             exit 1
-          else
-            echo "[OK] No direct time usage violations found"
           fi
       - name: Check for direct randomness usage
         run: |
-          echo "Checking for direct randomness usage violations..."
           if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number \
               --glob '!**/aura-agent/**' \
               --glob '!**/aura-effects/**' \
               --glob '!**/aura-simulator/**' \
               --glob '!**/aura-testkit/**' \
               --glob '!**/tests/**'; then
-            echo "[ERROR] Found direct randomness usage! Use effects.random_bytes() or effects.rng() instead."
+            echo "::error::Found direct randomness usage! Use effects.random_bytes() or effects.rng() instead."
             exit 1
-          else
-            echo "[OK] No direct randomness usage violations found"
           fi
       - name: Check for direct UUID usage
         run: |
-          echo "Checking for direct UUID usage violations..."
 
           # Get files with violations
           files_with_violations=$(rg --type rust "Uuid::new_v4\(\)" crates/ \
@@ -186,10 +187,8 @@ jobs:
 
           if [ -n "$violations" ]; then
             echo "$violations"
-            echo "[ERROR] Found direct UUID usage! Use effects.gen_uuid() instead."
+            echo "::error::Found direct UUID usage! Use effects.gen_uuid() instead."
             exit 1
-          else
-            echo "[OK] No direct UUID usage violations found"
           fi
 
   check-documentation-links:
@@ -228,7 +227,7 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
       - name: Build workspace
-        run: cargo build --workspace --verbose
+        run: cargo build --workspace -q
 
   unused-dependencies:
     name: Check Unused Dependencies
@@ -253,11 +252,7 @@ jobs:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
       - name: Check for unused dependencies
-        run: |
-          echo "Checking for unused dependencies..."
-          echo "Note: This job is advisory only and won't fail CI"
-          echo ""
-          cargo +nightly udeps --all-targets 2>&1 || true
+        run: cargo +nightly udeps --all-targets 2>&1 | grep -E "^(unused|warning:)" || echo "No unused dependencies found"
 
   lint-test:
     name: Verify Lint Enforcement Works
