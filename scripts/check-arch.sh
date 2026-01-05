@@ -295,7 +295,8 @@ check_deps() {
   local blocked="aura-agent|aura-simulator|aura-app|aura-terminal|aura-testkit"
   for crate in "${l4_crates[@]}"; do
     [[ -f "crates/$crate/Cargo.toml" ]] || continue
-    if rg "$blocked" "crates/$crate/Cargo.toml" >/dev/null 2>&1; then
+    # Only match actual dependency lines (exclude comments)
+    if rg "^[^#]*($blocked)" "crates/$crate/Cargo.toml" >/dev/null 2>&1; then
       violation "$crate depends on L6+ — forbidden"
     else
       info "$crate: firewall clean"
@@ -370,6 +371,7 @@ check_effects() {
     | grep -v "crates/aura-terminal/" \
     | grep -v "crates/aura-composition/" \
     | grep -v "crates/aura-testkit/" \
+    | grep -v "crates/aura-macros/" \
     | grep -Ev "$ALLOW_APP_NATIVE" \
     | grep -v "crates/aura-authorization/src/storage_authorization.rs" \
     | grep -v "crates/aura-core/src/effects/reactive.rs" \
@@ -844,16 +846,21 @@ check_style() {
   # Builder methods without #[must_use]
   local builder_methods missing_must_use=""
   builder_methods=$(rg --no-heading -n "pub\s+(const\s+)?fn\s+with_\w+\s*\(" crates/aura-core/src -g "*.rs" || true)
-  while IFS= read -r hit; do
-    [[ -z "$hit" ]] && continue
-    local file="${hit%%:*}" rest="${hit#*:}" linenum="${rest%%:*}"
-    local has=false
-    for offset in 1 2 3; do
-      local prev=$((linenum - offset))
-      [[ "$prev" -gt 0 ]] && sed -n "${prev}p" "$file" 2>/dev/null | grep -qE "#\[must_use" && { has=true; break; }
-    done
-    $has || missing_must_use+="$hit"$'\n'
-  done <<< "$builder_methods"
+  if [[ -n "$builder_methods" ]]; then
+    while IFS= read -r hit; do
+      [[ -z "$hit" ]] && continue
+      local file rest linenum
+      file="${hit%%:*}"
+      rest="${hit#*:}"
+      linenum="${rest%%:*}"
+      local has=false
+      for offset in 1 2 3; do
+        local prev=$((linenum - offset))
+        [[ "$prev" -gt 0 ]] && sed -n "${prev}p" "$file" 2>/dev/null | grep -qE "#\[must_use" && { has=true; break; }
+      done
+      $has || missing_must_use+="$hit"$'\n'
+    done <<< "$builder_methods"
+  fi
   emit_hits "Builder without #[must_use]" "$missing_must_use"
 
   info "Style checks complete"

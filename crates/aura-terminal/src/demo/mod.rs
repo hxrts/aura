@@ -247,10 +247,10 @@ pub struct AgentState {
     pub monitoring: bool,
 
     /// Number of recovery approvals given
-    pub recovery_approvals: usize,
+    pub recovery_approvals: u32,
 
     /// Number of messages sent
-    pub messages_sent: usize,
+    pub messages_sent: u32,
 
     /// Last action timestamp
     pub last_action_time: Option<PhysicalTime>,
@@ -852,9 +852,9 @@ pub struct AgentStatistics {
     /// Guardian bindings - accounts this agent is guardian for
     pub guardian_bindings: Vec<GuardianBinding>,
     /// Number of recovery approvals
-    pub recovery_approvals: usize,
+    pub recovery_approvals: u32,
     /// Number of messages sent
-    pub messages_sent: usize,
+    pub messages_sent: u32,
     /// Current demo phase
     pub current_phase: Option<DemoPhase>,
     /// Uptime duration

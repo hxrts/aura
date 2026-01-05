@@ -619,11 +619,11 @@ quint-generate-traces:
 
 # Check Quint-Rust type correspondence
 quint-check-types verbose="":
-    ./scripts/check-quint-rust-types.sh {{verbose}}
+    ./scripts/verify.sh quint-types {{verbose}}
 
 # Generate verification coverage report
 verification-coverage format="--md":
-    ./scripts/verification-coverage.sh {{format}}
+    ./scripts/verify.sh coverage {{format}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TUI ITF Traces
@@ -631,11 +631,11 @@ verification-coverage format="--md":
 
 # Regenerate deterministic ITF trace for TUI replay tests
 tui-itf-trace out="verification/quint/traces/tui_trace.itf.json" seed="424242" max_steps="50":
-    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} nix develop --command scripts/gen-tui-itf-trace.sh {{out}}
+    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} nix develop --command ./scripts/tui-itf-trace.sh generate {{out}}
 
 # Check that the checked-in ITF trace matches regeneration
 tui-itf-trace-check seed="424242" max_steps="50":
-    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} nix develop --command scripts/check-tui-itf-trace.sh
+    TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} nix develop --command ./scripts/tui-itf-trace.sh check
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Lean Formal Verification
@@ -755,7 +755,7 @@ kani-setup:
 
 # Run full Kani verification suite
 kani-suite:
-    @./scripts/run-kani-suite.sh
+    @./scripts/verify.sh kani
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Combined Verification

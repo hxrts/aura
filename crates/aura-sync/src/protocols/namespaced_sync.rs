@@ -87,9 +87,9 @@ pub struct SyncResponse {
 #[derive(Debug, Clone, Default)]
 pub struct SyncStats {
     /// Facts sent
-    pub facts_sent: usize,
+    pub facts_sent: u64,
     /// Facts received
-    pub facts_received: usize,
+    pub facts_received: u64,
     /// Sync duration in ms
     pub duration_ms: u64,
 }
