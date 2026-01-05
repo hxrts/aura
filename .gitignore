@@ -28,7 +28,7 @@ console/styles/*.rs
 *.swo
 *~
 .DS_Store
-.claude/
+.claude
 GEMINI.md
 
 # Aura data directories (mode-specific)
@@ -61,7 +61,7 @@ logs/
 *.temp
 
 # Working
-work/
+work
 ext/
 mermaid.min.js
 mermaid-init.js
