@@ -863,6 +863,41 @@ check_style() {
   fi
   emit_hits "Builder without #[must_use]" "$missing_must_use"
 
+  # Lonely mod.rs files (directory with only mod.rs should be a single file)
+  local lonely_mods=""
+  while IFS= read -r modrs; do
+    [[ -z "$modrs" ]] && continue
+    local dir
+    dir=$(dirname "$modrs")
+    # Count .rs files in directory (excluding mod.rs itself)
+    local sibling_count
+    sibling_count=$(find "$dir" -maxdepth 1 -name "*.rs" ! -name "mod.rs" 2>/dev/null | wc -l | tr -d ' ')
+    # Count subdirectories that are modules (have mod.rs or are named like modules)
+    local subdir_count
+    subdir_count=$(find "$dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$sibling_count" -eq 0 && "$subdir_count" -eq 0 ]]; then
+      lonely_mods+="$modrs"$'\n'
+    fi
+  done < <(find crates -name "mod.rs" -type f 2>/dev/null)
+  emit_hits "Lonely mod.rs (convert to single file)" "$lonely_mods"
+
+  # Empty directories (should be deleted or have .gitkeep)
+  local empty_dirs=""
+  while IFS= read -r dir; do
+    [[ -z "$dir" ]] && continue
+    # Skip if it's a git directory or target
+    [[ "$dir" == *".git"* || "$dir" == *"target"* ]] && continue
+    # Check if directory is truly empty (no files, no subdirs)
+    local file_count
+    file_count=$(find "$dir" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
+    local subdir_count
+    subdir_count=$(find "$dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$file_count" -eq 0 && "$subdir_count" -eq 0 ]]; then
+      empty_dirs+="$dir"$'\n'
+    fi
+  done < <(find crates -type d 2>/dev/null)
+  emit_hits "Empty directory (delete or add .gitkeep)" "$empty_dirs"
+
   info "Style checks complete"
 }
 

@@ -1117,6 +1117,7 @@ impl SimulatedBridge {
                             last_message: None,
                             last_message_time: None,
                             last_activity: PhysicalTimeHandler::new().physical_time_now_ms(),
+                            last_finalized_epoch: 0,
                         };
                         let _ = self
                             .tui_event_tx

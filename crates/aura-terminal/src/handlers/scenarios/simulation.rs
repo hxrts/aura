@@ -245,7 +245,7 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
         initiator_id: crate::ids::authority_id("scenario:guardian-setup:initiator"),
         account_id: crate::ids::authority_id("scenario:guardian-setup:account"),
         context: recovery_context,
-        threshold: 2,
+        threshold: 2u16,
         guardians,
     };
 

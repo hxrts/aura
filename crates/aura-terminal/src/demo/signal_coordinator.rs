@@ -167,7 +167,7 @@ impl DemoSignalCoordinator {
         let mut last_state = self.last_recovery_state.lock().await;
 
         // Check if a new recovery session started
-        if let Some(ref active) = recovery_state.active_recovery {
+        if let Some(active) = recovery_state.active_recovery() {
             let session_id = &active.id;
 
             // Only forward if this is a new session
@@ -243,6 +243,7 @@ impl DemoSignalCoordinator {
                     reply_to: None,
                     is_read: false,
                     delivery_status: Default::default(),
+                    epoch_hint: None,
                     is_finalized: false,
                 };
 
@@ -264,11 +265,11 @@ impl DemoSignalCoordinator {
                 // Production would use RecoveryGrant facts through consensus.
                 let mut recovery = core.read(&*RECOVERY_SIGNAL).await.unwrap_or_default();
 
-                if let Some(ref mut active) = recovery.active_recovery {
+                if let Some(active) = recovery.active_recovery_mut() {
                     if active.id == session_id && !active.approved_by.contains(&authority_id) {
                         recovery.add_guardian_approval(authority_id.clone());
 
-                        if let Some(ref active) = recovery.active_recovery {
+                        if let Some(active) = recovery.active_recovery() {
                             tracing::info!(
                                 "Demo: Guardian {} approved recovery ({}/{})",
                                 authority_id,
@@ -322,15 +323,14 @@ impl DemoSignalCoordinator {
                                 core.read(&*RECOVERY_SIGNAL).await.unwrap_or_default();
                             let now = self.runtime_now_ms().await;
 
-                            if !recovery.guardians.iter().any(|g| g.id == authority_id) {
-                                recovery.guardians.push(Guardian {
+                            if !recovery.has_guardian(&authority_id) {
+                                recovery.upsert_guardian(Guardian {
                                     id: authority_id.clone(),
                                     name: guardian_name,
                                     status: GuardianStatus::Active,
                                     added_at: now,
                                     last_seen: Some(now),
                                 });
-                                recovery.guardian_count = recovery.guardians.len() as u32;
 
                                 if let Err(e) = core.emit(&*RECOVERY_SIGNAL, recovery).await {
                                     tracing::warn!("Demo: Failed to emit RECOVERY_SIGNAL: {}", e);
