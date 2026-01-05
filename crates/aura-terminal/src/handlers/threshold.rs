@@ -349,7 +349,7 @@ async fn execute_dkd_protocol(
 
     output.blank();
     output.println("DKD protocol completed successfully!");
-    output.kv("Session", result.session_id.0.to_string());
+    output.kv("Session", result.session_id.0.clone());
     output.kv("Participants", result.participant_count.to_string());
     output.kv("Derived key length", result.derived_key.len().to_string());
     output.kv("Epoch", result.epoch.to_string());
@@ -409,7 +409,7 @@ pub async fn handle_dkd_test(
 
     output.blank();
     output.println("DKD test completed successfully!");
-    output.kv("Session", result.session_id.0.to_string());
+    output.kv("Session", result.session_id.0.clone());
     output.kv("Participants", result.participant_count.to_string());
     output.kv("Key length", result.derived_key.len().to_string());
 

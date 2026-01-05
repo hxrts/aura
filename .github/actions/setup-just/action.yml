@@ -1,8 +1,0 @@
-name: Setup Just
-description: Install the just command runner
-
-runs:
-  using: composite
-  steps:
-    - name: Install just
-      uses: extractions/setup-just@v2

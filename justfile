@@ -153,15 +153,18 @@ ci-book: summary
 ci-format:
     cargo fmt --all -- --check
 
-# Clippy with effects enforcement
+# Clippy with effects enforcement (matches CI environment)
+# Note: CARGO_INCREMENTAL=0 forces fresh lint checking
+# Note: Nix clippy may not catch all implicit_clone cases; GitHub CI uses newer clippy
 ci-clippy:
-    cargo clippy --workspace --all-targets -- \
+    CARGO_INCREMENTAL=0 RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- \
         -D warnings \
         -D clippy::disallowed_methods \
         -D clippy::disallowed_types \
         -D clippy::unwrap_used \
         -D clippy::expect_used \
-        -D clippy::duplicated_attributes
+        -D clippy::duplicated_attributes \
+        -D clippy::implicit_clone
 
 # Build check
 ci-build:

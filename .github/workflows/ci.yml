@@ -9,6 +9,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Suppress Nix welcome message in CI
+  AURA_SUPPRESS_NIX_WELCOME: 1
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -23,7 +25,6 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: book
-      - uses: ./.github/actions/setup-just
       - name: Build documentation
         run: nix develop --command just ci-book
 
@@ -32,49 +33,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-      - uses: ./.github/actions/setup-just
-      - run: just ci-format
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: format
+      - run: nix develop --command just ci-format
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-nix
         with:
-          components: clippy
-      - uses: ./.github/actions/setup-just
-      - run: just ci-clippy
+          cache-name: clippy
+      - run: nix develop --command just ci-clippy
 
   build:
     name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-      - uses: ./.github/actions/setup-just
-      - run: just ci-build
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: build
+      - run: nix develop --command just ci-build
 
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-      - uses: ./.github/actions/setup-just
-      - uses: ./.github/actions/setup-quint
-      - run: just ci-test
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: test
+      - run: nix develop --command just ci-test
 
   effects:
     name: Effects Violations
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install ripgrep
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
-      - uses: ./.github/actions/setup-just
-      - run: just ci-effects
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: effects
+      - run: nix develop --command just ci-effects
 
   doc-links:
     name: Doc Links
@@ -98,9 +100,10 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-nix
         with:
-          toolchain: nightly
-      - name: Install cargo-udeps
-        run: cargo install cargo-udeps --locked
-      - run: cargo +nightly udeps --all-targets 2>&1 | grep -E "^(unused|warning:)" || echo "No unused dependencies found"
+          cache-name: unused-deps
+      - name: Check unused dependencies
+        run: |
+          nix develop .#nightly --command bash -c \
+            'cargo +nightly udeps --all-targets 2>&1 | grep -E "^(unused|warning:)" || echo "No unused dependencies found"'

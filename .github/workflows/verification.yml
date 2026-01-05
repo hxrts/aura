@@ -18,6 +18,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  AURA_SUPPRESS_NIX_WELCOME: 1
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
@@ -29,9 +30,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-quint
-      - uses: ./.github/actions/setup-just
-      - run: just ci-quint-typecheck
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: quint-typecheck
+      - run: nix develop --command just ci-quint-typecheck
 
   quint-verify:
     name: Quint Verify
@@ -39,9 +41,10 @@ jobs:
     needs: quint-typecheck
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-quint
-      - uses: ./.github/actions/setup-just
-      - run: just ci-quint-verify
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: quint-verify
+      - run: nix develop --command just ci-quint-verify
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Lean Formal Verification
@@ -55,7 +58,6 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: lean
-      - uses: ./.github/actions/setup-just
       - name: Build Lean proofs
         run: nix develop --command just ci-lean-build
       - name: Check for incomplete proofs
@@ -75,19 +77,14 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: kani
-      - uses: ./.github/actions/setup-rust
-        with:
-          toolchain: nightly
-          components: rust-src
-      - uses: ./.github/actions/setup-just
       - name: Install CBMC
         run: sudo apt-get update && sudo apt-get install -y cbmc
       - name: Install Kani
         run: |
-          cargo install --locked kani-verifier
-          cargo kani setup
+          nix develop .#nightly --command bash -c \
+            'cargo install --locked kani-verifier && cargo kani setup'
       - name: Run Kani proofs
-        run: just ci-kani
+        run: nix develop .#nightly --command just ci-kani
       - name: Upload Kani results
         if: always()
         uses: actions/upload-artifact@v4

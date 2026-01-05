@@ -1508,7 +1508,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         if let Ok(guard) = shared_channels_for_dispatch.read() {
                                             if let Some(channel) = guard.get(idx) {
                                                 (cb.chat.on_send)(
-                                                    channel.id.to_string(),
+                                                    channel.id.clone(),
                                                     content,
                                                 );
                                             } else {

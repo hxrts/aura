@@ -1,5 +1,5 @@
 {
-  description = "Aura - Threshold Identity and Storage Platform";
+  description = "Aura";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -41,6 +41,7 @@
           extensions = [
             "rust-src"
             "rust-analyzer"
+            "clippy"
           ];
           targets = [ "wasm32-unknown-unknown" ];
         };
