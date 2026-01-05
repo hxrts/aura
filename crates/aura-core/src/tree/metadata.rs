@@ -14,18 +14,18 @@
 
 #![forbid(unsafe_code)]
 
-use crate::{tree::types::LeafMetadata, AuraError};
+use crate::{tree::types::LeafMetadata, util::serialization, AuraError};
 use serde::{Deserialize, Serialize};
 
 /// Maximum bytes for device nickname suggestion in metadata.
-pub const NICKNAME_SUGGESTION_BYTES_MAX: usize = 64;
+pub const MAX_NICKNAME_SUGGESTION_BYTES: usize = 64;
 
 /// Maximum bytes for platform hint in metadata.
-pub const PLATFORM_BYTES_MAX: usize = 16;
+pub const MAX_PLATFORM_BYTES: usize = 16;
 
 /// Structured metadata for device leaf nodes.
 ///
-/// Serialized into `LeafMetadata` bytes using compact bincode encoding.
+/// Serialized into `LeafMetadata` bytes using DAG-CBOR encoding.
 /// Total encoded size must fit within `MAX_LEAF_META_BYTES` (256).
 ///
 /// This stores the **initial** nickname_suggestion at enrollment time.
@@ -39,7 +39,7 @@ pub struct DeviceLeafMetadata {
     /// Initial nickname suggestion (what the device wants to be called).
     ///
     /// Set during enrollment from the invitation payload.
-    /// Limited to `NICKNAME_SUGGESTION_BYTES_MAX` (64) bytes.
+    /// Limited to [`MAX_NICKNAME_SUGGESTION_BYTES`] (64) bytes.
     /// `None` means no suggestion was provided.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nickname_suggestion: Option<String>,
@@ -47,7 +47,7 @@ pub struct DeviceLeafMetadata {
     /// Platform hint (e.g., "ios", "android", "macos", "windows", "linux", "browser").
     ///
     /// Informational only, not validated against a fixed set.
-    /// Limited to `PLATFORM_BYTES_MAX` (16) bytes.
+    /// Limited to [`MAX_PLATFORM_BYTES`] (16) bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
 
@@ -117,16 +117,16 @@ impl DeviceLeafMetadata {
     /// # Errors
     ///
     /// Returns `AuraError::Invalid` if:
-    /// - `nickname_suggestion` exceeds `NICKNAME_SUGGESTION_BYTES_MAX`
-    /// - `platform` exceeds `PLATFORM_BYTES_MAX`
+    /// - `nickname_suggestion` exceeds [`MAX_NICKNAME_SUGGESTION_BYTES`]
+    /// - `platform` exceeds [`MAX_PLATFORM_BYTES`]
     /// - Encoded size exceeds `MAX_LEAF_META_BYTES`
     pub fn encode(&self) -> Result<LeafMetadata, AuraError> {
         // Validate nickname length
         if let Some(ref name) = self.nickname_suggestion {
-            if name.len() > NICKNAME_SUGGESTION_BYTES_MAX {
+            if name.len() > MAX_NICKNAME_SUGGESTION_BYTES {
                 return Err(AuraError::invalid(format!(
                     "nickname_suggestion exceeds {} bytes (got {})",
-                    NICKNAME_SUGGESTION_BYTES_MAX,
+                    MAX_NICKNAME_SUGGESTION_BYTES,
                     name.len()
                 )));
             }
@@ -134,16 +134,16 @@ impl DeviceLeafMetadata {
 
         // Validate platform length
         if let Some(ref platform) = self.platform {
-            if platform.len() > PLATFORM_BYTES_MAX {
+            if platform.len() > MAX_PLATFORM_BYTES {
                 return Err(AuraError::invalid(format!(
                     "platform exceeds {} bytes (got {})",
-                    PLATFORM_BYTES_MAX,
+                    MAX_PLATFORM_BYTES,
                     platform.len()
                 )));
             }
         }
 
-        let bytes = bincode::serialize(self)
+        let bytes = serialization::to_vec(self)
             .map_err(|e| AuraError::serialization(format!("DeviceLeafMetadata encode: {e}")))?;
 
         let meta = LeafMetadata::try_new(bytes)?;
@@ -170,7 +170,7 @@ impl DeviceLeafMetadata {
             return Ok(Self::default());
         }
 
-        let result: Self = bincode::deserialize(meta.as_bytes())
+        let result: Self = serialization::from_slice(meta.as_bytes())
             .map_err(|e| AuraError::serialization(format!("DeviceLeafMetadata decode: {e}")))?;
 
         // Paired assertion: verify constraints hold after decode
@@ -178,14 +178,14 @@ impl DeviceLeafMetadata {
             result
                 .nickname_suggestion
                 .as_ref()
-                .map_or(true, |s| s.len() <= NICKNAME_SUGGESTION_BYTES_MAX),
+                .map_or(true, |s| s.len() <= MAX_NICKNAME_SUGGESTION_BYTES),
             "decoded nickname_suggestion exceeds limit"
         );
         debug_assert!(
             result
                 .platform
                 .as_ref()
-                .map_or(true, |s| s.len() <= PLATFORM_BYTES_MAX),
+                .map_or(true, |s| s.len() <= MAX_PLATFORM_BYTES),
             "decoded platform exceeds limit"
         );
 
@@ -227,14 +227,14 @@ mod tests {
 
     #[test]
     fn test_rejects_oversized_nickname() {
-        let long_name = "x".repeat(NICKNAME_SUGGESTION_BYTES_MAX + 1);
+        let long_name = "x".repeat(MAX_NICKNAME_SUGGESTION_BYTES + 1);
         let meta = DeviceLeafMetadata::with_nickname_suggestion(long_name);
         assert!(meta.encode().is_err());
     }
 
     #[test]
     fn test_rejects_oversized_platform() {
-        let long_platform = "x".repeat(PLATFORM_BYTES_MAX + 1);
+        let long_platform = "x".repeat(MAX_PLATFORM_BYTES + 1);
         let meta = DeviceLeafMetadata::new().with_platform(long_platform);
         assert!(meta.encode().is_err());
     }
@@ -256,8 +256,8 @@ mod tests {
     #[test]
     fn test_max_size_fits_within_leaf_metadata() {
         // Create metadata with maximum allowed content
-        let max_name = "x".repeat(NICKNAME_SUGGESTION_BYTES_MAX);
-        let max_platform = "y".repeat(PLATFORM_BYTES_MAX);
+        let max_name = "x".repeat(MAX_NICKNAME_SUGGESTION_BYTES);
+        let max_platform = "y".repeat(MAX_PLATFORM_BYTES);
 
         let meta = DeviceLeafMetadata::with_nickname_suggestion(max_name)
             .with_platform(max_platform)

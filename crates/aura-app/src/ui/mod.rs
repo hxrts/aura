@@ -124,9 +124,11 @@ pub mod types {
     };
     // Account validation
     pub use crate::views::{
-        account, chat, contacts, display, home, invitations, neighborhood, notifications,
+        account, chat, contacts, display, home, invitations, naming, neighborhood, notifications,
         operations, recovery, wizards,
     };
+    // Naming pattern
+    pub use crate::views::naming::EffectiveName;
     pub use crate::views::{
         classify_threshold_security, format_recovery_status, security_level_hint, AccountBackup,
         AccountConfig, AdjacencyType, BanRecord, CeremonyProgress, Channel, ChannelType, ChatState,
@@ -174,6 +176,9 @@ pub mod types {
 
     // AMP types for channel state inspection
     pub use aura_journal::ChannelEpochState;
+
+    // Recovery types for scenario simulation
+    pub use aura_recovery::types::RecoveryRequest;
 }
 
 pub mod authorization {

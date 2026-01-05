@@ -2,7 +2,7 @@
 //!
 //! Panel showing LAN-discovered peers that can be invited as contacts.
 
-use aura_app::views::naming::EffectiveName;
+use aura_app::ui::types::EffectiveName;
 use iocraft::prelude::*;
 use std::sync::Arc;
 

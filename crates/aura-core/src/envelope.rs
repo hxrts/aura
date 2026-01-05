@@ -4,15 +4,11 @@
 //!
 //! - Version field enables forward compatibility
 //! - `encode()` / `decode()` are symmetric (round-trip safe)
-//! - Invite code format: `aura:v{version}:{base64(bincode(envelope))}`
+//! - Invite code format: `aura:v{version}:{base64(dag-cbor(envelope))}`
 //!
 //! # Wire Format
 //!
-//! Bincode encoding with the following layout:
-//! - version: u8
-//! - kind: u8 (discriminant)
-//! - payload_len: varint
-//! - payload: [u8; payload_len]
+//! DAG-CBOR encoding (canonical, deterministic CBOR).
 //!
 //! # Safety
 //!
@@ -23,13 +19,15 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 
+use crate::util::serialization;
+
 /// Protocol version for envelope format.
 pub const ENVELOPE_VERSION_CURRENT: u8 = 1;
 
 /// Maximum payload size in bytes.
 ///
 /// Prevents unbounded allocations during decode.
-pub const PAYLOAD_BYTES_MAX: usize = 64 * 1024; // 64 KiB
+pub const MAX_PAYLOAD_BYTES: usize = 64 * 1024; // 64 KiB
 
 /// Unified envelope for shareable Aura payloads.
 ///
@@ -50,7 +48,7 @@ pub struct AuraEnvelope {
 
     /// Payload bytes (format depends on kind).
     ///
-    /// Limited to `PAYLOAD_BYTES_MAX` bytes.
+    /// Limited to [`MAX_PAYLOAD_BYTES`] bytes.
     #[serde(with = "serde_bytes")]
     pub payload: Vec<u8>,
 }
@@ -75,8 +73,8 @@ impl AuraEnvelope {
     #[must_use]
     pub fn new(kind: AuraPayloadKind, payload: Vec<u8>) -> Self {
         debug_assert!(
-            payload.len() <= PAYLOAD_BYTES_MAX,
-            "payload exceeds {PAYLOAD_BYTES_MAX} bytes"
+            payload.len() <= MAX_PAYLOAD_BYTES,
+            "payload exceeds {MAX_PAYLOAD_BYTES} bytes"
         );
         Self {
             version: ENVELOPE_VERSION_CURRENT,
@@ -105,12 +103,13 @@ impl AuraEnvelope {
 
     /// Encode to bytes for transport.
     ///
-    /// Uses bincode for compact encoding. Infallible for valid envelopes.
-    #[must_use]
-    #[allow(clippy::expect_used)] // Serialization of this type is infallible
-    pub fn encode(&self) -> Vec<u8> {
-        // bincode serialization should not fail for these types
-        bincode::serialize(self).expect("AuraEnvelope serialization is infallible")
+    /// Uses DAG-CBOR for canonical, deterministic encoding.
+    ///
+    /// # Errors
+    ///
+    /// Returns error string if serialization fails.
+    pub fn encode(&self) -> Result<Vec<u8>, String> {
+        serialization::to_vec(self).map_err(|e| format!("envelope encode: {e}"))
     }
 
     /// Decode from bytes.
@@ -119,15 +118,15 @@ impl AuraEnvelope {
     ///
     /// Returns error string if:
     /// - Bytes are malformed
-    /// - Payload exceeds `PAYLOAD_BYTES_MAX`
+    /// - Payload exceeds [`MAX_PAYLOAD_BYTES`]
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
         let envelope: Self =
-            bincode::deserialize(bytes).map_err(|e| format!("envelope decode: {e}"))?;
+            serialization::from_slice(bytes).map_err(|e| format!("envelope decode: {e}"))?;
 
-        if envelope.payload.len() > PAYLOAD_BYTES_MAX {
+        if envelope.payload.len() > MAX_PAYLOAD_BYTES {
             return Err(format!(
                 "payload exceeds {} bytes (got {})",
-                PAYLOAD_BYTES_MAX,
+                MAX_PAYLOAD_BYTES,
                 envelope.payload.len()
             ));
         }
@@ -138,10 +137,13 @@ impl AuraEnvelope {
     /// Encode to human-shareable invite code string.
     ///
     /// Format: `aura:v{version}:{base64}`
-    #[must_use]
-    pub fn to_invite_code(&self) -> String {
-        let bytes = self.encode();
-        format!("aura:v{}:{}", self.version, BASE64.encode(&bytes))
+    ///
+    /// # Errors
+    ///
+    /// Returns error string if encoding fails.
+    pub fn to_invite_code(&self) -> Result<String, String> {
+        let bytes = self.encode()?;
+        Ok(format!("aura:v{}:{}", self.version, BASE64.encode(&bytes)))
     }
 
     /// Decode from invite code string.
@@ -208,7 +210,7 @@ mod tests {
     #[test]
     fn test_envelope_round_trip() {
         let original = AuraEnvelope::new(AuraPayloadKind::Invite, vec![1, 2, 3, 4]);
-        let encoded = original.encode();
+        let encoded = original.encode().expect("encode");
         let decoded = AuraEnvelope::decode(&encoded).expect("decode");
         assert_eq!(original, decoded);
     }
@@ -216,7 +218,7 @@ mod tests {
     #[test]
     fn test_invite_code_round_trip() {
         let original = AuraEnvelope::new(AuraPayloadKind::Discovery, b"test payload".to_vec());
-        let code = original.to_invite_code();
+        let code = original.to_invite_code().expect("to_invite_code");
         assert!(code.starts_with("aura:v1:"));
 
         let decoded = AuraEnvelope::from_invite_code(&code).expect("decode");
@@ -226,7 +228,7 @@ mod tests {
     #[test]
     fn test_invite_code_with_whitespace() {
         let original = AuraEnvelope::invite(b"test".to_vec());
-        let code = original.to_invite_code();
+        let code = original.to_invite_code().expect("to_invite_code");
 
         // Should handle leading/trailing whitespace
         let with_whitespace = format!("  {code}  \n");
@@ -236,12 +238,12 @@ mod tests {
 
     #[test]
     fn test_rejects_oversized_payload() {
-        let huge = vec![0u8; PAYLOAD_BYTES_MAX + 1];
+        let huge = vec![0u8; MAX_PAYLOAD_BYTES + 1];
         // Direct construction bypasses limit (debug_assert only)
         // But decode should reject it
         let mut envelope = AuraEnvelope::new(AuraPayloadKind::Invite, vec![]);
         envelope.payload = huge;
-        let bytes = envelope.encode();
+        let bytes = envelope.encode().expect("encode");
         assert!(AuraEnvelope::decode(&bytes).is_err());
     }
 

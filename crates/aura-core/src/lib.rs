@@ -284,8 +284,8 @@ pub use relational::*;
 pub use tree::{
     commit_branch, commit_leaf, compute_root_commitment, policy_hash, AttestedOp, BranchNode,
     DeviceLeafMetadata, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, NodeKind, Policy,
-    PolicyError, TreeCommitment, TreeOp, TreeOpKind, NICKNAME_SUGGESTION_BYTES_MAX,
-    PLATFORM_BYTES_MAX,
+    PolicyError, TreeCommitment, TreeOp, TreeOpKind, MAX_NICKNAME_SUGGESTION_BYTES,
+    MAX_PLATFORM_BYTES,
 };
 #[doc = "stable: Epoch counters and participant identifiers"]
 pub use types::epochs::*;
@@ -308,7 +308,7 @@ pub use threshold::{
 
 // Envelope types for shareable payloads
 #[doc = "stable: Unified envelope format for invitations, discovery, and rendezvous descriptors"]
-pub use envelope::{AuraEnvelope, AuraPayloadKind, ENVELOPE_VERSION_CURRENT, PAYLOAD_BYTES_MAX};
+pub use envelope::{AuraEnvelope, AuraPayloadKind, ENVELOPE_VERSION_CURRENT, MAX_PAYLOAD_BYTES};
 
 /// Standard result type for core operations
 pub type Result<T> = std::result::Result<T, AuraError>;

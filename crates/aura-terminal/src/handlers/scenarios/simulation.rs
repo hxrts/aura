@@ -8,7 +8,7 @@ use aura_agent::handlers::{
 };
 use aura_agent::AgentConfig;
 use aura_core::effects::PhysicalTimeEffects;
-use aura_recovery::types::RecoveryRequest;
+use aura_app::ui::types::RecoveryRequest;
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 use std::collections::HashMap;
 use std::sync::Arc;

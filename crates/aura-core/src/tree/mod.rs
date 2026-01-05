@@ -34,7 +34,7 @@ pub mod types;
 pub mod verification;
 
 pub use commitment::*;
-pub use metadata::{DeviceLeafMetadata, NICKNAME_SUGGESTION_BYTES_MAX, PLATFORM_BYTES_MAX};
+pub use metadata::{DeviceLeafMetadata, MAX_NICKNAME_SUGGESTION_BYTES, MAX_PLATFORM_BYTES};
 pub use policy::{Policy, PolicyError};
 pub use snapshot::*;
 pub use types::*;
