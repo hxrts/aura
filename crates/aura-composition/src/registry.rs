@@ -660,7 +660,7 @@ pub struct RegistryCapabilities {
     /// All registered effect types with their capabilities
     pub registered_effects: Vec<EffectCapability>,
     /// Total number of operations across all effects
-    pub total_operations: usize,
+    pub total_operations: usize, // usize ok: internal summary struct, not serialized
     /// Execution modes of registered handlers
     pub execution_modes: Vec<ExecutionMode>,
 }
@@ -671,7 +671,7 @@ pub struct EffectCapability {
     /// The effect type
     pub effect_type: EffectType,
     /// Number of supported operations
-    pub operation_count: usize,
+    pub operation_count: usize, // usize ok: internal capability struct, not serialized
     /// List of supported operation names
     pub operations: Vec<String>,
 }

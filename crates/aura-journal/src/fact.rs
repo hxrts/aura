@@ -419,9 +419,9 @@ impl AckStorage {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GcResult {
     /// Number of facts whose ack tracking was collected
-    pub facts_collected: usize,
+    pub facts_collected: usize, // usize ok: internal GC metric, not serialized
     /// Number of facts still being tracked
-    pub facts_remaining: usize,
+    pub facts_remaining: usize, // usize ok: internal GC metric, not serialized
 }
 
 /// Core fact structure (timestamp-driven identity)

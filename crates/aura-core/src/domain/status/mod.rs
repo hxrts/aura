@@ -73,6 +73,7 @@ impl OptimisticStatus {
     }
 
     /// Create with ack tracking enabled
+    #[must_use]
     pub fn with_ack_tracking() -> Self {
         Self {
             acknowledgment: Some(Acknowledgment::new()),

@@ -955,8 +955,10 @@ impl QueryEffects for QueryHandler {
         let result = self.query(query).await?;
 
         // Build consistency map from facts
-        // TODO: In a full implementation, this would look up actual consistency metadata
-        // from the journal for each matched fact. For now, return empty map.
+        // Consistency metadata (agreement level, propagation status) is tracked separately
+        // in the journal's fact metadata system. Query-time consistency lookup requires
+        // integration with IndexedJournalEffects to retrieve per-fact metadata.
+        // See docs/113_database.md §6 for the consistency tracking architecture.
         let consistency = ConsistencyMap::new();
 
         Ok((result, consistency))

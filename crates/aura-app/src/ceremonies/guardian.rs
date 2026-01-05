@@ -113,10 +113,14 @@ impl GuardianCandidates {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU8, Ordering};
     use uuid::Uuid;
 
+    static COUNTER: AtomicU8 = AtomicU8::new(1);
+
     fn make_authority() -> AuthorityId {
-        AuthorityId::from_uuid(Uuid::new_v4())
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        AuthorityId::from_uuid(Uuid::from_bytes([n; 16]))
     }
 
     #[test]

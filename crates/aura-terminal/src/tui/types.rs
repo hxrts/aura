@@ -1202,11 +1202,11 @@ impl ReadReceiptPolicy {
 }
 
 /// Convert from app ReadReceiptPolicy
-impl From<aura_app::views::contacts::ReadReceiptPolicy> for ReadReceiptPolicy {
-    fn from(policy: aura_app::views::contacts::ReadReceiptPolicy) -> Self {
+impl From<aura_app::ui::types::contacts::ReadReceiptPolicy> for ReadReceiptPolicy {
+    fn from(policy: aura_app::ui::types::contacts::ReadReceiptPolicy) -> Self {
         match policy {
-            aura_app::views::contacts::ReadReceiptPolicy::Disabled => Self::Disabled,
-            aura_app::views::contacts::ReadReceiptPolicy::Enabled => Self::Enabled,
+            aura_app::ui::types::contacts::ReadReceiptPolicy::Disabled => Self::Disabled,
+            aura_app::ui::types::contacts::ReadReceiptPolicy::Enabled => Self::Enabled,
         }
     }
 }

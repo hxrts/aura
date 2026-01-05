@@ -4,18 +4,24 @@
 
 use super::*;
 use aura_core::identifiers::{AuthorityId, ChannelId, DeviceId};
+use std::sync::atomic::{AtomicU8, Ordering};
 use uuid::Uuid;
 
 // =============================================================================
 // Test Helpers
 // =============================================================================
 
+static AUTHORITY_COUNTER: AtomicU8 = AtomicU8::new(1);
+static DEVICE_COUNTER: AtomicU8 = AtomicU8::new(1);
+
 fn make_authority() -> AuthorityId {
-    AuthorityId::from_uuid(Uuid::new_v4())
+    let n = AUTHORITY_COUNTER.fetch_add(1, Ordering::Relaxed);
+    AuthorityId::from_uuid(Uuid::from_bytes([n; 16]))
 }
 
 fn make_device() -> DeviceId {
-    DeviceId::from_uuid(Uuid::new_v4())
+    let n = DEVICE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    DeviceId::from_uuid(Uuid::from_bytes([n; 16]))
 }
 
 fn make_channel_id() -> ChannelId {

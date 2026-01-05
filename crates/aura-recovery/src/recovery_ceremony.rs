@@ -1136,7 +1136,7 @@ mod tests {
     /// Strategy to generate a valid ceremony state with configurable parameters
     #[allow(dead_code)] // Reserved for future proptest expansion
     fn ceremony_state_strategy(
-        num_guardians: usize,
+        num_guardians: usize, // usize ok: function parameter for proptest vec length, not serialized
         threshold: u16,
     ) -> impl Strategy<Value = RecoveryCeremonyState> {
         prop::collection::vec(any::<[u8; 32]>(), num_guardians).prop_map(move |seeds| {
