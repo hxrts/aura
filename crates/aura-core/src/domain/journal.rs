@@ -355,6 +355,7 @@ impl Fact {
     }
 
     /// Create a fact with a single key-value pair
+    #[must_use = "this returns the constructed Fact and does not modify state"]
     pub fn with_value(key: impl Into<FactKey>, value: FactValue) -> Result<Self, AuraError> {
         let mut fact = Self::new();
         fact.insert(key, value)?;
