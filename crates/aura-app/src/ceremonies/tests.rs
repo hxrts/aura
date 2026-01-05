@@ -65,7 +65,7 @@ fn test_guardian_candidates_max_threshold() {
 #[test]
 fn test_guardian_candidates_into_contacts() {
     let contacts = vec![make_authority(), make_authority()];
-    let candidates = GuardianCandidates::from_contacts(contacts.clone()).unwrap();
+    let candidates = GuardianCandidates::from_contacts(contacts).unwrap();
     let recovered = candidates.into_contacts();
     assert_eq!(recovered.len(), 2);
 }

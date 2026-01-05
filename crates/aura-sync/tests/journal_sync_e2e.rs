@@ -290,7 +290,6 @@ fn journal_sync_peer_state_pruning() {
     assert!(pruned >= 5, "Expected at least 5 pruned, got {pruned}");
     assert!(
         protocol.statistics().total_peers <= max_peers as u64,
-        "Should have at most {} peers",
-        max_peers
+        "Should have at most {max_peers} peers"
     );
 }

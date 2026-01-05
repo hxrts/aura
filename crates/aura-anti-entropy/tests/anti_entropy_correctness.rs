@@ -3,6 +3,8 @@
 //! Tests for the digest-based reconciliation protocol.
 //! Validates digest computation determinism and configuration.
 
+#![allow(clippy::expect_used, clippy::clone_on_copy)]
+
 use aura_anti_entropy::{AntiEntropyConfig, BloomDigest, SyncError};
 use aura_core::{identifiers::DeviceId, Hash32, ProtocolErrorCode};
 use std::collections::BTreeSet;
@@ -121,7 +123,7 @@ fn sync_error_codes_are_unique() {
 #[test]
 fn sync_error_display_is_meaningful() {
     let err = SyncError::VerificationFailed("invalid signature".to_string());
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
 
     assert!(msg.contains("verification"));
     assert!(msg.contains("invalid signature"));
@@ -131,7 +133,7 @@ fn sync_error_display_is_meaningful() {
 fn peer_unreachable_error_message() {
     let device = DeviceId::new_from_entropy([1u8; 32]);
     let err = SyncError::PeerUnreachable(device);
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
 
     assert!(msg.to_lowercase().contains("reachable") || msg.to_lowercase().contains("peer"));
 }
@@ -139,7 +141,7 @@ fn peer_unreachable_error_message() {
 #[test]
 fn back_pressure_error_message() {
     let err = SyncError::BackPressure;
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
 
     assert!(msg.to_lowercase().contains("back pressure") || msg.to_lowercase().contains("pending"));
 }

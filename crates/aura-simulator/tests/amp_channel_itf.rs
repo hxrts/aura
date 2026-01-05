@@ -1,5 +1,5 @@
 //! Replay AMP channel lifecycle traces against real simulation agents.
-#![allow(clippy::expect_used)]
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
 
 use std::path::Path;
 

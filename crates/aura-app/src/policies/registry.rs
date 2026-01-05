@@ -279,7 +279,7 @@ mod tests {
         registry.register("Foo", DropWhenFinalized);
         registry.register("Bar", DropWhenFullyAcked);
 
-        let debug = format!("{:?}", registry);
+        let debug = format!("{registry:?}");
         assert!(debug.contains("PolicyRegistry"));
         assert!(debug.contains("2")); // registered_count
     }

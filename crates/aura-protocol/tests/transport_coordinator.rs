@@ -2,6 +2,13 @@
 //!
 //! Tests for multi-party connection management and retry logic.
 
+#![allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::redundant_clone,
+    clippy::unnecessary_literal_unwrap
+)]
+
 use aura_effects::transport::{NonZeroDuration, TransportConfig};
 use aura_protocol::handlers::transport_coordinator::{
     CoordinationResult, RetryingTransportManager, TransportCoordinationConfig,
@@ -85,7 +92,7 @@ fn error_codes_are_unique() {
 #[test]
 fn protocol_failed_error_message() {
     let err = TransportCoordinationError::ProtocolFailed("handshake timeout".to_string());
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
 
     assert!(msg.contains("Protocol execution failed"));
     assert!(msg.contains("handshake timeout"));
@@ -94,7 +101,7 @@ fn protocol_failed_error_message() {
 #[test]
 fn capability_check_failed_error_message() {
     let err = TransportCoordinationError::CapabilityCheckFailed("missing encryption".to_string());
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
 
     assert!(msg.contains("Capability check failed"));
     assert!(msg.contains("missing encryption"));
@@ -103,7 +110,7 @@ fn capability_check_failed_error_message() {
 #[test]
 fn flow_budget_exceeded_error_message() {
     let err = TransportCoordinationError::FlowBudgetExceeded("daily limit reached".to_string());
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
 
     assert!(msg.contains("Flow budget exceeded"));
     assert!(msg.contains("daily limit reached"));
@@ -112,7 +119,7 @@ fn flow_budget_exceeded_error_message() {
 #[test]
 fn effect_error_message() {
     let err = TransportCoordinationError::Effect("storage unavailable".to_string());
-    let msg = format!("{}", err);
+    let msg = format!("{err}");
 
     assert!(msg.contains("Effect error"));
     assert!(msg.contains("storage unavailable"));
@@ -232,7 +239,7 @@ fn coordination_result_err() {
 #[test]
 fn config_debug_format() {
     let config = TransportCoordinationConfig::default();
-    let debug = format!("{:?}", config);
+    let debug = format!("{config:?}");
 
     assert!(debug.contains("TransportCoordinationConfig"));
     assert!(debug.contains("max_connections"));
@@ -241,7 +248,7 @@ fn config_debug_format() {
 #[test]
 fn error_debug_format() {
     let err = TransportCoordinationError::ProtocolFailed("test failure".to_string());
-    let debug = format!("{:?}", err);
+    let debug = format!("{err:?}");
 
     assert!(debug.contains("ProtocolFailed"));
     assert!(debug.contains("test failure"));

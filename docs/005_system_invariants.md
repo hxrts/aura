@@ -19,8 +19,8 @@ No observable network behavior may occur without successful authorization and fl
 - Journal facts must be atomically coupled
 - No bypass paths to `TransportEffects::send()`
 
-### 2. **CRDT Convergence** 
-**Location**: [`crates/aura-journal/src/reduce/INVARIANTS.md`](../crates/aura-journal/src/reduce/INVARIANTS.md)
+### 2. **CRDT Convergence**
+**Location**: `crates/aura-journal/` (invariants documented in module code)
 
 Identical sets of facts must always produce identical reduced state, ensuring eventual consistency across all nodes.
 
@@ -42,7 +42,7 @@ Information must not flow across relational context boundaries without explicit 
 - No cross-context state reduction
 
 ### 4. **Secure Channel Lifecycle**
-**Location**: [`crates/aura-transport/src/channel/INVARIANTS.md`](../crates/aura-transport/src/channel/INVARIANTS.md)
+**Location**: `crates/aura-transport/` (invariants documented in module code)
 
 Secure channels are strictly bound to epochs and follow a defined state machine. Messages on stale channels must be rejected.
 

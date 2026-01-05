@@ -294,5 +294,4 @@ import Aura.Consensus.Proofs
 
 - [Lean README](./lean/README.md) - Detailed Lean module documentation
 - [Quint README](./quint/README.md) - Detailed Quint specification documentation
-- [Verification Coverage](../docs/998_verification_coverage.md) - Current coverage metrics
-- [Verification Guide](../docs/807_verification_guide.md) - Verification development guide
+- [Verification Coverage](../docs/998_verification_coverage.md) - Verification coverage tracking

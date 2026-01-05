@@ -3,6 +3,8 @@
 //! Tests for the authority-based recovery protocol using relational contexts.
 //! Validates recovery operations, guardian approvals, and protocol outcomes.
 
+#![allow(clippy::expect_used, clippy::redundant_clone, clippy::useless_vec)]
+
 use aura_core::{identifiers::AuthorityId, Hash32, TrustLevel};
 use aura_recovery::{
     guardian_ceremony::{CeremonyId, CeremonyResponse, CeremonyStatus, GuardianRotationOp},
@@ -66,7 +68,7 @@ fn ceremony_id_varies_with_nonce() {
 #[test]
 fn ceremony_id_display_format() {
     let id = CeremonyId::new(Hash32([0xAB; 32]), Hash32([0xCD; 32]), 0);
-    let display = format!("{}", id);
+    let display = format!("{id}");
 
     assert!(
         display.starts_with("ceremony:"),
@@ -382,7 +384,7 @@ fn ceremony_id_collision_resistance() {
 
     for nonce in 0..1000u64 {
         let id = CeremonyId::new(Hash32([0u8; 32]), Hash32([1u8; 32]), nonce);
-        assert!(ids.insert(id), "Collision detected at nonce {}", nonce);
+        assert!(ids.insert(id), "Collision detected at nonce {nonce}");
     }
 }
 

@@ -316,7 +316,7 @@ See `docs/998_verification_coverage.md` for the current coverage status.
 ## Resources
 
 - [Quint Documentation](https://quint-lang.org/docs)
-- [Verification Guide](../../docs/807_verification_guide.md)
+- [Verification Coverage](../../docs/998_verification_coverage.md)
 - [Simulation Guide](../../docs/806_simulation_guide.md)
 - [Generative Testing Guide](../../docs/809_generative_testing_guide.md)
 - [System Architecture](../../docs/001_system_architecture.md)

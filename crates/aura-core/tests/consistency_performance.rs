@@ -6,7 +6,7 @@
 //!
 //! Run with: cargo test -p aura-core --test consistency_performance -- --ignored
 
-#![allow(clippy::expect_used, missing_docs)]
+#![allow(clippy::expect_used, clippy::disallowed_methods, missing_docs)]
 
 use aura_core::{
     domain::{
@@ -79,8 +79,7 @@ fn test_ack_storage_at_scale() {
 
     let creation_time = start.elapsed();
     println!(
-        "Created {} acknowledgments with {} peers each in {:?}",
-        NUM_MESSAGES, NUM_PEERS, creation_time
+        "Created {NUM_MESSAGES} acknowledgments with {NUM_PEERS} peers each in {creation_time:?}"
     );
 
     // Verify structure
@@ -99,7 +98,7 @@ fn test_ack_storage_at_scale() {
     }
 
     let lookup_time = start.elapsed();
-    println!("Looked up peer 50 in all messages in {:?}", lookup_time);
+    println!("Looked up peer 50 in all messages in {lookup_time:?}");
     assert_eq!(found_count, NUM_MESSAGES);
 
     // Phase 3: Test all_acked performance
@@ -114,10 +113,7 @@ fn test_ack_storage_at_scale() {
     }
 
     let all_acked_time = start.elapsed();
-    println!(
-        "Checked all_acked for {} messages in {:?}",
-        NUM_MESSAGES, all_acked_time
-    );
+    println!("Checked all_acked for {NUM_MESSAGES} messages in {all_acked_time:?}");
     assert_eq!(all_acked_count, NUM_MESSAGES);
 
     // Phase 4: Test merge performance (CRDT join)
@@ -130,7 +126,7 @@ fn test_ack_storage_at_scale() {
     }
 
     let merge_time = start.elapsed();
-    println!("Merged acknowledgments 1000 times in {:?}", merge_time);
+    println!("Merged acknowledgments 1000 times in {merge_time:?}");
 
     // Report summary
     println!("\n=== Summary ===");
@@ -175,7 +171,7 @@ fn test_consistency_map_query_performance() {
     let mut map = ConsistencyMap::new();
 
     for i in 0..NUM_ENTRIES {
-        let id = format!("item-{:05}", i);
+        let id = format!("item-{i:05}");
 
         // Vary the consistency state
         let consistency = if i % 3 == 0 {
@@ -198,10 +194,7 @@ fn test_consistency_map_query_performance() {
     }
 
     let build_time = start.elapsed();
-    println!(
-        "Built ConsistencyMap with {} entries in {:?}",
-        NUM_ENTRIES, build_time
-    );
+    println!("Built ConsistencyMap with {NUM_ENTRIES} entries in {build_time:?}");
 
     assert_eq!(map.len(), NUM_ENTRIES);
 
@@ -212,7 +205,7 @@ fn test_consistency_map_query_performance() {
 
     for i in 0..NUM_LOOKUPS {
         let idx = (i * 7919) % NUM_ENTRIES; // Pseudo-random access pattern
-        let id = format!("item-{:05}", idx);
+        let id = format!("item-{idx:05}");
 
         if map.is_finalized(&id) {
             finalized_count += 1;
@@ -222,13 +215,10 @@ fn test_consistency_map_query_performance() {
         }
     }
 
+    let total_lookups = NUM_LOOKUPS * 2;
     let lookup_time = start.elapsed();
-    println!(
-        "Performed {} lookups (is_finalized + is_safe) in {:?}",
-        NUM_LOOKUPS * 2,
-        lookup_time
-    );
-    println!("Found {} finalized, {} safe", finalized_count, safe_count);
+    println!("Performed {total_lookups} lookups (is_finalized + is_safe) in {lookup_time:?}");
+    println!("Found {finalized_count} finalized, {safe_count} safe");
 
     // Phase 3: Iterate all entries
     let start = Instant::now();
@@ -239,22 +229,19 @@ fn test_consistency_map_query_performance() {
     }
 
     let iter_time = start.elapsed();
-    println!(
-        "Iterated all {} entries in {:?}, total acks: {}",
-        NUM_ENTRIES, iter_time, total_ack_count
-    );
+    println!("Iterated all {NUM_ENTRIES} entries in {iter_time:?}, total acks: {total_ack_count}");
 
     // Phase 4: Test merge performance
     let start = Instant::now();
     let mut map2 = ConsistencyMap::new();
     for i in NUM_ENTRIES..NUM_ENTRIES + 1000 {
-        let id = format!("item-{:05}", i);
+        let id = format!("item-{i:05}");
         map2.insert(id, Consistency::optimistic());
     }
 
     map.merge(map2);
     let merge_time = start.elapsed();
-    println!("Merged 1000 entries in {:?}", merge_time);
+    println!("Merged 1000 entries in {merge_time:?}");
     assert_eq!(map.len(), NUM_ENTRIES + 1000);
 
     // Report summary
@@ -301,7 +288,7 @@ fn test_gc_performance_under_load() {
     let mut entries: Vec<(String, Consistency)> = Vec::with_capacity(NUM_MESSAGES);
 
     for i in 0..NUM_MESSAGES {
-        let id = format!("msg-{:05}", i);
+        let id = format!("msg-{i:05}");
 
         // Create different scenarios:
         // - 30% finalized and fully acked (can GC)
@@ -309,7 +296,7 @@ fn test_gc_performance_under_load() {
         // - 20% not finalized but fully acked (cannot GC)
         // - 20% neither finalized nor fully acked (cannot GC)
         let consistency = match i % 10 {
-            0 | 1 | 2 => {
+            0..=2 => {
                 // Finalized and fully acked
                 let ack = create_acknowledgment_for_peers(NUM_PEERS);
                 Consistency::optimistic()
@@ -317,7 +304,7 @@ fn test_gc_performance_under_load() {
                     .with_propagation(Propagation::complete())
                     .with_acknowledgment(ack)
             }
-            3 | 4 | 5 => {
+            3..=5 => {
                 // Finalized but missing some acks
                 let ack = create_acknowledgment_for_peers(NUM_PEERS / 2);
                 Consistency::optimistic()
@@ -325,7 +312,7 @@ fn test_gc_performance_under_load() {
                     .with_propagation(Propagation::complete())
                     .with_acknowledgment(ack)
             }
-            6 | 7 => {
+            6..=7 => {
                 // Not finalized but fully acked
                 let ack = create_acknowledgment_for_peers(NUM_PEERS);
                 Consistency::optimistic()
@@ -346,7 +333,7 @@ fn test_gc_performance_under_load() {
     }
 
     let setup_time = start.elapsed();
-    println!("Created {} entries in {:?}", NUM_MESSAGES, setup_time);
+    println!("Created {NUM_MESSAGES} entries in {setup_time:?}");
 
     // Phase 2: Simulate GC eligibility check (DropWhenFinalizedAndFullyAcked policy)
     let start = Instant::now();
@@ -366,10 +353,7 @@ fn test_gc_performance_under_load() {
     }
 
     let gc_check_time = start.elapsed();
-    println!(
-        "GC eligibility check for {} messages in {:?}",
-        NUM_MESSAGES, gc_check_time
-    );
+    println!("GC eligibility check for {NUM_MESSAGES} messages in {gc_check_time:?}");
     println!(
         "Found {} eligible for GC (expected ~30%)",
         gc_eligible.len()
@@ -404,10 +388,7 @@ fn test_gc_performance_under_load() {
     }
 
     let gc_execute_time = start.elapsed();
-    println!(
-        "Executed GC batch (removed {}) in {:?}",
-        gc_count, gc_execute_time
-    );
+    println!("Executed GC batch (removed {gc_count}) in {gc_execute_time:?}");
     assert_eq!(remaining.len(), NUM_MESSAGES - gc_count);
 
     // Phase 4: Test missing_acks performance (for partial delivery tracking)
