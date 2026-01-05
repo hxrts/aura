@@ -1,10 +1,5 @@
 # Aura
 
-[![CI](https://github.com/your-org/aura/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/aura/actions/workflows/ci.yml)
-[![Quint Model Checking](https://github.com/your-org/aura/actions/workflows/ci.yml/badge.svg?job=quint-model-checking)](https://github.com/your-org/aura/actions/workflows/ci.yml)
-[![Lean Proofs](https://github.com/your-org/aura/actions/workflows/ci.yml/badge.svg?job=lean-proofs)](https://github.com/your-org/aura/actions/workflows/ci.yml)
-[![Consensus Conformance](https://github.com/your-org/aura/actions/workflows/ci.yml/badge.svg?job=consensus-conformance)](https://github.com/your-org/aura/actions/workflows/ci.yml)
-
 Aura is a private peer-to-peer social network designed around a few novel concepts:
 
 Identity is relational • Identity emerges bottom-up between parties that share context. Aura has no transparent state and no global singleton, rather each context is encrypted and governed by its own threshold authority. Aura's relational model enables social recovery and complete account rehydration without transient decryption in scenarios where users have lost all devices.
