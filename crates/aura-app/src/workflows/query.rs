@@ -43,7 +43,7 @@ pub async fn list_participants(
     if let Some(channel_entry) = channel_entry {
         for member_id in &channel_entry.member_ids {
             if let Some(contact) = contacts.contact(member_id) {
-                participants.push(get_display_name(contact));
+                participants.push(effective_name(contact));
             } else {
                 participants.push(member_id.to_string());
             }
@@ -56,7 +56,7 @@ pub async fn list_participants(
         let contact_id_str = channel.strip_prefix("dm:").unwrap_or("");
         if let Ok(contact_id) = parse_authority_id(contact_id_str) {
             if let Some(contact) = contacts.contact(&contact_id) {
-                participants.push(get_display_name(contact));
+                participants.push(effective_name(contact));
             } else {
                 participants.push(contact_id_str.to_string());
             }
@@ -95,7 +95,7 @@ pub async fn get_user_info(
     let matching: Vec<_> = contacts
         .all_contacts()
         .filter(|c| {
-            get_display_name(c)
+            effective_name(c)
                 .to_lowercase()
                 .contains(&target.to_lowercase())
         })
@@ -106,7 +106,7 @@ pub async fn get_user_info(
     } else if matching.is_empty() {
         Err(AuraError::not_found(format!("User '{target}' not found")))
     } else {
-        let names: Vec<_> = matching.iter().map(|c| get_display_name(c)).collect();
+        let names: Vec<_> = matching.iter().map(|c| effective_name(c)).collect();
         Err(AuraError::invalid(format!(
             "Multiple matches for '{}': {}",
             target,
@@ -125,13 +125,13 @@ pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
     snapshot.contacts.all_contacts().cloned().collect()
 }
 
-/// Helper function to get display name from contact
+/// Helper function to get effective name from contact
 ///
-/// Priority: nickname > suggested_name > truncated ID
-fn get_display_name(contact: &Contact) -> String {
+/// Priority: nickname > nickname_suggestion > truncated ID
+fn effective_name(contact: &Contact) -> String {
     if !contact.nickname.is_empty() {
         contact.nickname.clone()
-    } else if let Some(ref suggested) = contact.suggested_name {
+    } else if let Some(ref suggested) = contact.nickname_suggestion {
         suggested.clone()
     } else {
         let id_str = contact.id.to_string();

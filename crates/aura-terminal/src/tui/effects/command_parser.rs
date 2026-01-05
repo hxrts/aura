@@ -39,8 +39,8 @@ pub enum EffectCommand {
     RefreshAccount,
     /// Create new account (threshold configuration is done later in Settings)
     CreateAccount {
-        /// Display name
-        display_name: String,
+        /// What the user wants to be called
+        nickname_suggestion: String,
     },
 
     // === Settings Commands ===

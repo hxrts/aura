@@ -26,8 +26,8 @@ pub struct ContactCache {
     pub authority_id: AuthorityId,
     /// Nickname assigned by the user
     pub nickname: Option<String>,
-    /// Display name from the contact
-    pub display_name: Option<String>,
+    /// What the contact wants to be called
+    pub nickname_suggestion: Option<String>,
     /// Last seen timestamp (unix millis)
     pub last_seen: Option<u64>,
     /// Cached avatar hash for display
@@ -41,18 +41,18 @@ impl ContactCache {
         Self {
             authority_id,
             nickname: None,
-            display_name: None,
+            nickname_suggestion: None,
             last_seen: None,
             avatar_hash: None,
         }
     }
 
-    /// Get the best display name for this contact
+    /// Get the effective name for this contact (nickname > suggestion > ID)
     #[must_use]
-    pub fn display(&self) -> String {
+    pub fn effective_name(&self) -> String {
         self.nickname
             .clone()
-            .or_else(|| self.display_name.clone())
+            .or_else(|| self.nickname_suggestion.clone())
             .unwrap_or_else(|| {
                 let id = self.authority_id.to_string();
                 format!("{}...", &id[..8.min(id.len())])

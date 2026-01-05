@@ -103,7 +103,7 @@ mod tests {
             created_by: creator_id,
             members: vec![ChatMember {
                 authority_id: creator_id,
-                display_name: "Creator".to_string(),
+                nickname_suggestion: "Creator".to_string(),
                 joined_at: now,
                 role: ChatRole::Admin,
             }],

@@ -792,7 +792,7 @@ mod tests {
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         let outcome = GuardOutcome {
@@ -891,7 +891,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         handler.cache_peer_descriptor(descriptor.clone()).await;
@@ -921,7 +921,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
         handler.cache_peer_descriptor(descriptor).await;
 

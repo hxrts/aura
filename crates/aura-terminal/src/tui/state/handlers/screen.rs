@@ -14,8 +14,8 @@ use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::QueuedModal;
 use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
-    AddDeviceModalState, ChatFocus, DetailFocus, DisplayNameModalState, ImportInvitationModalState,
-    NeighborhoodMode,
+    AddDeviceModalState, ChatFocus, DetailFocus, ImportInvitationModalState,
+    NeighborhoodMode, NicknameSuggestionModalState,
 };
 use super::super::TuiState;
 
@@ -369,18 +369,18 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
         }
         KeyCode::Char('e') => {
             if state.settings.section == SettingsSection::Profile {
-                // Open display name edit modal via queue
-                state.modal_queue.enqueue(QueuedModal::SettingsDisplayName(
-                    DisplayNameModalState::default(),
+                // Open nickname suggestion edit modal via queue
+                state.modal_queue.enqueue(QueuedModal::SettingsNicknameSuggestion(
+                    NicknameSuggestionModalState::default(),
                 ));
             }
         }
         KeyCode::Enter => {
             match state.settings.section {
                 SettingsSection::Profile => {
-                    // Open display name edit modal via queue
-                    state.modal_queue.enqueue(QueuedModal::SettingsDisplayName(
-                        DisplayNameModalState::default(),
+                    // Open nickname suggestion edit modal via queue
+                    state.modal_queue.enqueue(QueuedModal::SettingsNicknameSuggestion(
+                        NicknameSuggestionModalState::default(),
                     ));
                 }
                 SettingsSection::Threshold => {

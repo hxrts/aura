@@ -324,7 +324,7 @@ mod settings_screen {
 
         let props = extract_settings_view_props(&harness.state);
         assert!(
-            props.display_name_modal_visible,
+            props.nickname_suggestion_modal_visible,
             "Nickname modal state must reach props"
         );
     }

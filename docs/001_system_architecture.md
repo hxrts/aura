@@ -40,7 +40,7 @@ pub struct ContextId(Uuid);
 
 ### 1.4 Contextual identity properties
 
-Identity is scoped to contexts. A device can participate in many contexts without linking them. Profile data and display names live in the context journal.
+Identity is scoped to contexts. A device can participate in many contexts without linking them. Profile data and nickname suggestions live in the context journal.
 
 ## 2. Guard Chain and Flow Budget System
 

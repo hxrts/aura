@@ -29,7 +29,7 @@ use crate::tui::types::{Contact, InvitationType};
 pub struct GlobalModalProps {
     // Account setup modal
     pub account_setup_visible: bool,
-    pub account_setup_display_name: String,
+    pub account_setup_nickname_suggestion: String,
     pub account_setup_creating: bool,
     pub account_setup_show_spinner: bool,
     pub account_setup_success: bool,
@@ -76,7 +76,7 @@ pub fn render_account_setup_modal(global: &GlobalModalProps) -> Option<AnyElemen
                 ModalFrame {
                     AccountSetupModal(
                         visible: true,
-                        display_name: global.account_setup_display_name.clone(),
+                        nickname_suggestion: global.account_setup_nickname_suggestion.clone(),
                         focused: true,
                         creating: global.account_setup_creating,
                         show_spinner: global.account_setup_show_spinner,
@@ -181,9 +181,9 @@ pub fn render_help_modal(global: &GlobalModalProps) -> Option<AnyElement<'static
 
 pub fn render_nickname_modal(contacts: &ContactsViewProps) -> Option<AnyElement<'static>> {
     if contacts.nickname_modal_visible {
-        // Show hint with suggested name if available
+        // Show hint with nickname suggestion if available
         let hint = contacts
-            .nickname_modal_suggested_name
+            .nickname_modal_nickname_suggestion
             .as_ref()
             .map(|s| format!("Suggestion: {s}"))
             .unwrap_or_default();
@@ -437,17 +437,17 @@ pub fn render_channel_info_modal(chat: &ChatViewProps) -> Option<AnyElement<'sta
 // Settings Screen Modal Render Functions
 // =============================================================================
 
-pub fn render_display_name_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
-    if settings.display_name_modal_visible {
+pub fn render_nickname_suggestion_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
+    if settings.nickname_suggestion_modal_visible {
         Some(
             element! {
                 ModalFrame {
                     TextInputModal(
                         visible: true,
                         focused: true,
-                        title: "Edit Display Name".to_string(),
-                        value: settings.display_name_modal_value.clone(),
-                        placeholder: "Enter your display name...".to_string(),
+                        title: "Edit Nickname".to_string(),
+                        value: settings.nickname_suggestion_modal_value.clone(),
+                        placeholder: "Enter what you want to be called...".to_string(),
                         hint: String::new(),
                         error: String::new(),
                         submitting: false,

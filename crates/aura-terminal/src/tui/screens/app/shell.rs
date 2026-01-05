@@ -14,7 +14,7 @@ use super::modal_overlays::{
     render_account_setup_modal, render_add_device_modal, render_channel_info_modal,
     render_chat_create_modal, render_confirm_modal, render_contact_modal,
     render_contacts_code_modal, render_contacts_create_modal, render_contacts_import_modal,
-    render_device_enrollment_modal, render_device_import_modal, render_display_name_modal,
+    render_device_enrollment_modal, render_device_import_modal, render_nickname_suggestion_modal,
     render_guardian_modal, render_guardian_setup_modal, render_help_modal,
     render_home_create_modal, render_mfa_setup_modal, render_nickname_modal,
     render_remove_device_modal, render_topic_modal, GlobalModalProps,
@@ -80,7 +80,7 @@ pub struct IoAppProps {
     pub invitations: Vec<Invitation>,
     pub guardians: Vec<Guardian>,
     pub devices: Vec<Device>,
-    pub display_name: String,
+    pub nickname_suggestion: String,
     pub threshold_k: u8,
     pub threshold_n: u8,
     pub mfa_policy: MfaPolicy,
@@ -288,9 +288,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let update_rx_holder = props.update_rx.clone();
     let update_tx_holder = props.update_tx.clone();
 
-    // Display name state - State<T> automatically triggers re-renders on .set()
-    let display_name_state = hooks.use_state({
-        let initial = props.display_name.clone();
+    // Nickname suggestion state - State<T> automatically triggers re-renders on .set()
+    let nickname_suggestion_state = hooks.use_state({
+        let initial = props.nickname_suggestion.clone();
         move || initial
     });
 
@@ -499,7 +499,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let tasks_for_updates = tasks.clone();
     if let Some(rx_holder) = update_rx_holder {
         hooks.use_future({
-            let mut display_name_state = display_name_state.clone();
+            let mut nickname_suggestion_state = nickname_suggestion_state.clone();
             let app_core = app_ctx.app_core.clone();
             // Toast queue migration: mutate TuiState via TuiStateHandle (always bumps render version)
             let mut tui = tui.clone();
@@ -541,8 +541,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         // Settings updates
                         // =========================================================================
-                        UiUpdate::DisplayNameChanged(name) => {
-                            display_name_state.set(name);
+                        UiUpdate::NicknameSuggestionChanged(name) => {
+                            nickname_suggestion_state.set(name);
                         }
                         UiUpdate::MfaPolicyChanged(_policy) => {
                             // Settings screen renders from SETTINGS_SIGNAL; no local state update.
@@ -935,7 +935,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             if !contact.nickname.is_empty() {
                                                 return contact.nickname.clone();
                                             }
-                                            if let Some(name) = &contact.suggested_name {
+                                            if let Some(name) = &contact.nickname_suggestion {
                                                 return name.clone();
                                             }
                                         }
@@ -1289,9 +1289,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let on_update_mfa = callbacks
         .as_ref()
         .map(|cb| cb.settings.on_update_mfa.clone());
-    let on_update_display_name = callbacks
+    let on_update_nickname_suggestion = callbacks
         .as_ref()
-        .map(|cb| cb.settings.on_update_display_name.clone());
+        .map(|cb| cb.settings.on_update_nickname_suggestion.clone());
     let on_update_threshold = callbacks
         .as_ref()
         .map(|cb| cb.settings.on_update_threshold.clone());
@@ -1325,7 +1325,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         match modal {
             QueuedModal::AccountSetup(state) => {
                 global_modals.account_setup_visible = true;
-                global_modals.account_setup_display_name = state.display_name.clone();
+                global_modals.account_setup_nickname_suggestion = state.nickname_suggestion.clone();
                 global_modals.account_setup_creating = state.creating;
                 global_modals.account_setup_show_spinner = state.should_show_spinner();
                 global_modals.account_setup_success = state.success;
@@ -1660,11 +1660,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let idx = new_state.contacts.selected_index;
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
                                             if let Some(contact) = guard.get(idx) {
-                                                // nickname is already populated with suggested_name if empty (see Contact::from)
+                                                // nickname is already populated with nickname_suggestion if empty (see Contact::from)
                                                 let modal_state = crate::tui::state_machine::NicknameModalState::for_contact(
                                                     &contact.id,
                                                     &contact.nickname,
-                                                ).with_suggestion(contact.suggested_name.clone());
+                                                ).with_suggestion(contact.nickname_suggestion.clone());
                                                 new_state
                                                     .modal_queue
                                                     .enqueue(crate::tui::state_machine::QueuedModal::ContactsNickname(
@@ -1684,7 +1684,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 let receiver_name = if !contact.nickname.is_empty()
                                                 {
                                                     contact.nickname.clone()
-                                                } else if let Some(s) = &contact.suggested_name {
+                                                } else if let Some(s) = &contact.nickname_suggestion {
                                                     s.clone()
                                                 } else {
                                                     let short = contact
@@ -1837,7 +1837,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
 
                                         // Populate candidates from current contacts
-                                        // Note: nickname is already populated with suggested_name if empty (see Contact::from)
+                                        // Note: nickname is already populated with nickname_suggestion if empty (see Contact::from)
                                         let candidates: Vec<crate::tui::state_machine::GuardianCandidate> = current_contacts
                                             .iter()
                                             .map(|c| crate::tui::state_machine::GuardianCandidate {
@@ -1903,12 +1903,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         // Create modal state for MFA setup (pre-selects all, sets threshold)
                                         let modal_state =
                                             crate::tui::state_machine::GuardianSetupModalState::for_mfa_setup(candidates, threshold_k);
-
-                                        if !new_state.settings.demo_mobile_device_id.is_empty() {
-                                            new_state.toast_info(
-                                                "Demo: press Ctrl+M to select the Mobile device for MFA.",
-                                            );
-                                        }
 
                                         new_state.modal_queue.enqueue(
                                             crate::tui::state_machine::QueuedModal::MfaSetup(modal_state),
@@ -2232,8 +2226,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
 
                                     // === Settings Screen Commands ===
-                                    DispatchCommand::UpdateDisplayName { display_name } => {
-                                        (cb.settings.on_update_display_name)(display_name);
+                                    DispatchCommand::UpdateNicknameSuggestion { nickname_suggestion } => {
+                                        (cb.settings.on_update_nickname_suggestion)(nickname_suggestion);
                                     }
                                     DispatchCommand::UpdateMfaPolicy { policy } => {
                                         (cb.settings.on_update_mfa)(policy);
@@ -2256,7 +2250,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             // Convert authorities to contact-like format for picker
                                             let contacts: Vec<(String, String)> = authorities
                                                 .iter()
-                                                .map(|a| (a.id.clone(), format!("{} ({})", a.display_name, a.short_id)))
+                                                .map(|a| (a.id.clone(), format!("{} ({})", a.nickname_suggestion, a.short_id)))
                                                 .collect();
 
                                             let modal_state = crate::tui::state_machine::ContactSelectModalState::single(
@@ -2278,7 +2272,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             if let Some(auth) = new_state.authorities.get(idx) {
                                                 new_state.toast_success(format!(
                                                     "Switched to authority: {}",
-                                                    auth.display_name
+                                                    auth.nickname_suggestion
                                                 ));
                                             }
                                         } else {
@@ -2436,7 +2430,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             SettingsScreen(
                                 view: settings_props.clone(),
                                 on_update_mfa: on_update_mfa.clone(),
-                                on_update_display_name: on_update_display_name.clone(),
+                                on_update_nickname_suggestion: on_update_nickname_suggestion.clone(),
                                 on_update_threshold: on_update_threshold.clone(),
                                 on_add_device: on_add_device.clone(),
                                 on_remove_device: on_remove_device.clone(),
@@ -2488,7 +2482,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // === SETTINGS SCREEN MODALS ===
             // Rendered via modal_overlays module for maintainability
             // Note: Threshold changes now use OpenGuardianSetup (see contacts screen modals)
-            #(render_display_name_modal(&settings_props))
+            #(render_nickname_suggestion_modal(&settings_props))
             #(render_add_device_modal(&settings_props))
             #(render_device_import_modal(&settings_props))
             #(render_device_enrollment_modal(&settings_props))
@@ -2569,12 +2563,12 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
 
     // Settings data - reactively updated via SETTINGS_SIGNAL
     let devices = Vec::new();
-    let display_name = {
+    let nickname_suggestion = {
         let core = ctx_arc.app_core_raw().read().await;
         core.read(&*SETTINGS_SIGNAL)
             .await
             .unwrap_or_default()
-            .display_name
+            .nickname_suggestion
     };
     let threshold_k = 0;
     let threshold_n = 0;
@@ -2609,7 +2603,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         guardians: guardians,
                         // Settings screen data
                         devices: devices,
-                        display_name: display_name,
+                        nickname_suggestion: nickname_suggestion,
                         threshold_k: threshold_k,
                         threshold_n: threshold_n,
                         mfa_policy: MfaPolicy::SensitiveOnly,
@@ -2654,7 +2648,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         guardians: guardians,
                         // Settings screen data
                         devices: devices,
-                        display_name: display_name,
+                        nickname_suggestion: nickname_suggestion,
                         threshold_k: threshold_k,
                         threshold_n: threshold_n,
                         mfa_policy: MfaPolicy::SensitiveOnly,

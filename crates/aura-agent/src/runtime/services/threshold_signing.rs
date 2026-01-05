@@ -470,7 +470,7 @@ impl ThresholdSigningService {
                         tree_signing::share_from_key_package_bytes(&key_package).map_err(|e| {
                             AuraError::internal(format!(
                                 "Failed to decode key package for {}: {e}",
-                                participant.display_name()
+                                participant.debug_label()
                             ))
                         })?;
                     signers.push(SignerMaterial {
@@ -478,7 +478,7 @@ impl ThresholdSigningService {
                         key_package,
                     });
                 }
-                Err(_) => missing.push(participant.display_name()),
+                Err(_) => missing.push(participant.debug_label()),
             }
         }
 
@@ -912,14 +912,14 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                 .map_err(|e| {
                     AuraError::internal(format!(
                         "Failed to store key package for participant {}: {}",
-                        participant.display_name(),
+                        participant.debug_label(),
                         e
                     ))
                 })?;
 
             tracing::debug!(
                 ?authority,
-                participant = %participant.display_name(),
+                participant = %participant.debug_label(),
                 signer_index,
                 new_epoch,
                 "Stored participant key package"
@@ -1306,7 +1306,7 @@ impl ThresholdSigningEffects for ThresholdSigningService {
                     tracing::debug!(
                         ?authority,
                         failed_epoch,
-                        participant = %participant.display_name(),
+                        participant = %participant.debug_label(),
                         error = %e,
                         "Failed to delete participant share (may not exist)"
                     );

@@ -207,7 +207,7 @@ async fn persist_account_config(
     time: &impl PhysicalTimeEffects,
     authority_id: AuthorityId,
     context_id: ContextId,
-    display_name: Option<String>,
+    nickname_suggestion: Option<String>,
 ) -> Result<(), AuraError> {
     let created_at = time
         .physical_time()
@@ -218,7 +218,7 @@ async fn persist_account_config(
     let config = AccountConfig {
         authority_id: hex::encode(authority_id.to_bytes()),
         context_id: hex::encode(context_id.to_bytes()),
-        display_name,
+        nickname_suggestion,
         created_at,
     };
 
@@ -242,7 +242,7 @@ async fn persist_account_config(
 pub async fn create_account(
     base_path: &Path,
     device_id_str: &str,
-    display_name: &str,
+    nickname_suggestion: &str,
 ) -> Result<(AuthorityId, ContextId), AuraError> {
     let storage = open_bootstrap_storage(base_path);
     let time = PhysicalTimeHandler::new();
@@ -257,7 +257,7 @@ pub async fn create_account(
         &time,
         authority_id,
         context_id,
-        Some(display_name.to_string()),
+        Some(nickname_suggestion.to_string()),
     )
     .await?;
 

@@ -58,12 +58,12 @@ impl AccountFilesHelper {
 
     pub async fn create_account(
         &self,
-        display_name: &str,
+        nickname_suggestion: &str,
     ) -> Result<(AuthorityId, ContextId), String> {
         match crate::handlers::tui::create_account(
             &self.base_path,
             &self.device_id_str,
-            display_name,
+            nickname_suggestion,
         )
         .await
         {

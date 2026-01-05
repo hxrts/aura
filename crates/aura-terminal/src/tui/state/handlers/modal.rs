@@ -22,8 +22,8 @@ use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
     AccountSetupModalState, AddDeviceModalState, ConfirmRemoveModalState, CreateChannelModalState,
     CreateInvitationField, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
-    DisplayNameModalState, GuardianSetupModalState, GuardianSetupStep, ImportInvitationModalState,
-    NicknameModalState, TopicModalState,
+    GuardianSetupModalState, GuardianSetupStep, ImportInvitationModalState,
+    NicknameModalState, NicknameSuggestionModalState, TopicModalState,
 };
 use super::super::TuiState;
 
@@ -115,8 +115,8 @@ pub fn handle_queued_modal_key(
             handle_mfa_setup_key_queue(state, commands, key, modal_state);
         }
         // Settings screen modals
-        QueuedModal::SettingsDisplayName(modal_state) => {
-            handle_settings_display_name_key_queue(state, commands, key, modal_state);
+        QueuedModal::SettingsNicknameSuggestion(modal_state) => {
+            handle_settings_nickname_suggestion_key_queue(state, commands, key, modal_state);
         }
         QueuedModal::SettingsAddDevice(modal_state) => {
             handle_settings_add_device_key_queue(state, commands, key, modal_state);
@@ -228,20 +228,20 @@ fn handle_account_setup_key_queue(
         KeyCode::Char(c) => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::AccountSetup(ref mut s) = modal {
-                    s.display_name.push(c);
+                    s.nickname_suggestion.push(c);
                 }
             });
         }
         KeyCode::Backspace => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::AccountSetup(ref mut s) = modal {
-                    s.display_name.pop();
+                    s.nickname_suggestion.pop();
                 }
             });
         }
         KeyCode::Enter => {
             if current_state.can_submit() {
-                let name = current_state.display_name;
+                let name = current_state.nickname_suggestion;
                 state.modal_queue.update_active(|modal| {
                     if let QueuedModal::AccountSetup(ref mut s) = modal {
                         s.start_creating();
@@ -1217,12 +1217,12 @@ fn handle_mfa_setup_key_queue(
     }
 }
 
-/// Handle settings display name modal keys (queue-based)
-fn handle_settings_display_name_key_queue(
+/// Handle settings nickname suggestion modal keys (queue-based)
+fn handle_settings_nickname_suggestion_key_queue(
     state: &mut TuiState,
     commands: &mut Vec<TuiCommand>,
     key: KeyEvent,
-    modal_state: DisplayNameModalState,
+    modal_state: NicknameSuggestionModalState,
 ) {
     match key.code {
         KeyCode::Esc => {
@@ -1230,22 +1230,22 @@ fn handle_settings_display_name_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateDisplayName {
-                    display_name: modal_state.value,
+                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateNicknameSuggestion {
+                    nickname_suggestion: modal_state.value,
                 }));
                 state.modal_queue.dismiss();
             }
         }
         KeyCode::Char(c) => {
             state.modal_queue.update_active(|modal| {
-                if let QueuedModal::SettingsDisplayName(ref mut s) = modal {
+                if let QueuedModal::SettingsNicknameSuggestion(ref mut s) = modal {
                     s.value.push(c);
                 }
             });
         }
         KeyCode::Backspace => {
             state.modal_queue.update_active(|modal| {
-                if let QueuedModal::SettingsDisplayName(ref mut s) = modal {
+                if let QueuedModal::SettingsNicknameSuggestion(ref mut s) = modal {
                     s.value.pop();
                 }
             });

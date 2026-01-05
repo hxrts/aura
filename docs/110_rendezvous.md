@@ -97,8 +97,8 @@ pub struct RendezvousDescriptor {
     pub valid_until: u64,
     /// Nonce for uniqueness
     pub nonce: [u8; 32],
-    /// Human-readable display name (optional, for UI purposes)
-    pub display_name: Option<String>,
+    /// What the peer wants to be called (optional, for UI purposes)
+    pub nickname_suggestion: Option<String>,
 }
 ```
 

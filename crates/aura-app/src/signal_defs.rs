@@ -301,8 +301,8 @@ pub struct DeviceInfo {
 /// Account settings and profile state
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SettingsState {
-    /// Display name/nickname
-    pub display_name: String,
+    /// Nickname suggestion (what the user wants to be called)
+    pub nickname_suggestion: String,
     /// Threshold k (minimum signers required)
     pub threshold_k: u8,
     /// Threshold n (total guardians)

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use aura_app::ui::signals::{RECOVERY_SIGNAL, SETTINGS_SIGNAL};
 
 use crate::tui::callbacks::{
-    AddDeviceCallback, RemoveDeviceCallback, UpdateDisplayNameCallback, UpdateThresholdCallback,
+    AddDeviceCallback, RemoveDeviceCallback, UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
 };
 use crate::tui::components::SimpleSelectableItem;
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -50,7 +50,7 @@ pub type MfaCallback = Arc<dyn Fn(MfaPolicy) + Send + Sync>;
 ///
 /// ## Reactive Data Model
 ///
-/// Domain data (display_name, devices, guardians, etc.) is NOT passed as props.
+/// Domain data (nickname_suggestion, devices, guardians, etc.) is NOT passed as props.
 /// Instead, the component subscribes to signals directly via AppCoreContext.
 /// This ensures a single source of truth and prevents stale data bugs.
 #[derive(Default, Props)]
@@ -62,7 +62,7 @@ pub struct SettingsScreenProps {
 
     // === Callbacks ===
     pub on_update_mfa: Option<MfaCallback>,
-    pub on_update_display_name: Option<UpdateDisplayNameCallback>,
+    pub on_update_nickname_suggestion: Option<UpdateNicknameSuggestionCallback>,
     pub on_update_threshold: Option<UpdateThresholdCallback>,
     pub on_add_device: Option<AddDeviceCallback>,
     pub on_remove_device: Option<RemoveDeviceCallback>,
@@ -92,7 +92,7 @@ pub fn SettingsScreen(
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
     // Initialize reactive state with defaults - will be populated by signal subscriptions
-    let reactive_display_name = hooks.use_state(String::new);
+    let reactive_nickname_suggestion = hooks.use_state(String::new);
     let reactive_devices = hooks.use_state(Vec::new);
     let reactive_threshold = hooks.use_state(|| (0u8, 0u8));
     let reactive_guardian_count = hooks.use_state(|| 0usize);
@@ -100,13 +100,13 @@ pub fn SettingsScreen(
 
     // Subscribe to settings signal for domain data
     hooks.use_future({
-        let mut reactive_display_name = reactive_display_name.clone();
+        let mut reactive_nickname_suggestion = reactive_nickname_suggestion.clone();
         let mut reactive_devices = reactive_devices.clone();
         let mut reactive_threshold = reactive_threshold.clone();
         let app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                reactive_display_name.set(settings_state.display_name);
+                reactive_nickname_suggestion.set(settings_state.nickname_suggestion);
                 let devices: Vec<Device> = settings_state
                     .devices
                     .iter()
@@ -139,7 +139,7 @@ pub fn SettingsScreen(
     });
 
     // Use reactive state for rendering
-    let display_name = reactive_display_name.read().clone();
+    let nickname_suggestion = reactive_nickname_suggestion.read().clone();
     let devices = reactive_devices.read().clone();
     let (threshold_k, threshold_n) = *reactive_threshold.read();
     let guardian_count = *reactive_guardian_count.read();
@@ -157,16 +157,16 @@ pub fn SettingsScreen(
     // Build detail content
     let detail_lines: Vec<(String, Color)> = match current_section {
         SettingsSection::Profile => {
-            let name = if display_name.is_empty() {
+            let name = if nickname_suggestion.is_empty() {
                 "(not set)".into()
             } else {
-                display_name
+                nickname_suggestion
             };
             vec![
-                (format!("Display Name: {name}"), Theme::TEXT),
+                (format!("Nickname: {name}"), Theme::TEXT),
                 (String::new(), Theme::TEXT),
                 (
-                    "Your display name is shared with contacts".into(),
+                    "Your nickname is shared with contacts".into(),
                     Theme::TEXT_MUTED,
                 ),
                 ("and shown in your contact card.".into(), Theme::TEXT_MUTED),
@@ -304,7 +304,7 @@ pub fn SettingsScreen(
                     // Show current authority info
                     if let Some(auth) = current_auth {
                         lines.push((
-                            format!("Authority: {}", auth.display_name),
+                            format!("Authority: {}", auth.nickname_suggestion),
                             Theme::SECONDARY,
                         ));
                         lines.push((format!("ID: {}", auth.short_id), Theme::TEXT_MUTED));

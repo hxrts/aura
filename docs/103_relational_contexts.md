@@ -167,7 +167,7 @@ Other relational contexts follow similar patterns. Each context defines its own 
 
 A relational context does not reveal its participants. The `ContextId` is opaque. Only participating authorities know the relationship. No external party can infer connections between authorities based on context identifiers.
 
-Profile information shared inside a context stays local to that context. Display names and contact attributes do not leave the context journal. Each context forms a separate identity boundary. Authorities can maintain many unrelated relationships without cross linking.
+Profile information shared inside a context stays local to that context. Nickname suggestions and contact attributes do not leave the context journal. Each context forms a separate identity boundary. Authorities can maintain many unrelated relationships without cross linking.
 
 ## 9. Implementation Patterns
 

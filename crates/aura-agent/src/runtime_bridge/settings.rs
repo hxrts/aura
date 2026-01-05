@@ -12,7 +12,7 @@ pub(super) struct StoredAccountConfig {
     #[serde(default)]
     pub(super) context_id: Option<String>,
     #[serde(default)]
-    pub(super) display_name: Option<String>,
+    pub(super) nickname_suggestion: Option<String>,
     #[serde(default)]
     pub(super) mfa_policy: Option<String>,
     #[serde(default)]

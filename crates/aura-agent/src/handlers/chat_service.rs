@@ -347,7 +347,7 @@ impl ChatServiceApi {
         let mut members = Vec::new();
         members.push(ChatMember {
             authority_id: creator_id,
-            display_name: creator_id.to_string(),
+            nickname_suggestion: creator_id.to_string(),
             joined_at: created_at.clone(),
             role: ChatRole::Admin,
         });
@@ -357,7 +357,7 @@ impl ChatServiceApi {
             }
             members.push(ChatMember {
                 authority_id: member,
-                display_name: member.to_string(),
+                nickname_suggestion: member.to_string(),
                 joined_at: created_at.clone(),
                 role: ChatRole::Member,
             });
@@ -545,7 +545,7 @@ impl ChatServiceApi {
             created_by: creator_id,
             members: vec![ChatMember {
                 authority_id: creator_id,
-                display_name: creator_id.to_string(),
+                nickname_suggestion: creator_id.to_string(),
                 joined_at: created_at_ts,
                 role: ChatRole::Admin,
             }],
@@ -617,7 +617,7 @@ impl ChatServiceApi {
                     created_by: creator_id,
                     members: vec![ChatMember {
                         authority_id: creator_id,
-                        display_name: creator_id.to_string(),
+                        nickname_suggestion: creator_id.to_string(),
                         joined_at: created_at_ts,
                         role: ChatRole::Admin,
                     }],

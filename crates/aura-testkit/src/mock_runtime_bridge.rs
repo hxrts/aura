@@ -64,8 +64,8 @@ pub struct MockRuntimeBridge {
     invitations: Arc<RwLock<HashMap<String, InvitationInfo>>>,
     /// Contacts (simulated from accepted invitations)
     contacts: Arc<RwLock<Vec<Contact>>>,
-    /// Mock display name
-    display_name: Arc<RwLock<String>>,
+    /// Mock nickname suggestion
+    nickname_suggestion: Arc<RwLock<String>>,
     /// Mock MFA policy
     mfa_policy: Arc<RwLock<String>>,
     /// Counter for generating unique IDs
@@ -102,7 +102,7 @@ impl MockRuntimeBridge {
             facts: Arc::new(RwLock::new(Vec::new())),
             invitations: Arc::new(RwLock::new(HashMap::new())),
             contacts: Arc::new(RwLock::new(Vec::new())),
-            display_name: Arc::new(RwLock::new("MockUser".to_string())),
+            nickname_suggestion: Arc::new(RwLock::new("MockUser".to_string())),
             mfa_policy: Arc::new(RwLock::new("Disabled".to_string())),
             id_counter: AtomicU64::new(1),
             current_time_ms: AtomicU64::new(1700000000000), // Fixed starting time
@@ -148,7 +148,7 @@ impl MockRuntimeBridge {
                     contacts.push(Contact {
                         id: contact_id,
                         nickname: new_nickname,
-                        suggested_name: None,
+                        nickname_suggestion: None,
                         is_guardian: false,
                         is_resident: false,
                         last_interaction: Some(self.now_ms()),
@@ -176,7 +176,7 @@ impl MockRuntimeBridge {
                 contacts.push(Contact {
                     id: contact_id,
                     nickname,
-                    suggested_name: None,
+                    nickname_suggestion: None,
                     is_guardian: false,
                     is_resident: false,
                     last_interaction: Some(self.now_ms()),
@@ -859,7 +859,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             let new_contact = Contact {
                 id: invitation.sender_id,
                 nickname,
-                suggested_name: invitation.message.clone(),
+                nickname_suggestion: invitation.message.clone(),
                 is_guardian,
                 is_resident: false,
                 last_interaction: Some(self.now_ms()),
@@ -1016,12 +1016,12 @@ impl RuntimeBridge for MockRuntimeBridge {
     // =========================================================================
 
     async fn get_settings(&self) -> SettingsBridgeState {
-        let display_name = self.display_name.read().await.clone();
+        let nickname_suggestion = self.nickname_suggestion.read().await.clone();
         let mfa_policy = self.mfa_policy.read().await.clone();
         let devices = self.devices.read().await;
 
         SettingsBridgeState {
-            display_name,
+            nickname_suggestion,
             mfa_policy,
             threshold_k: 2,
             threshold_n: 3,
@@ -1034,8 +1034,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         self.devices.read().await.clone()
     }
 
-    async fn set_display_name(&self, name: &str) -> Result<(), IntentError> {
-        *self.display_name.write().await = name.to_string();
+    async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError> {
+        *self.nickname_suggestion.write().await = name.to_string();
         Ok(())
     }
 

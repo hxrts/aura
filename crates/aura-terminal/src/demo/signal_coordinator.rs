@@ -267,7 +267,7 @@ impl DemoSignalCoordinator {
 
                 if let Some(active) = recovery.active_recovery_mut() {
                     if active.id == session_id && !active.approved_by.contains(&authority_id) {
-                        recovery.add_guardian_approval(authority_id.clone());
+                        recovery.add_guardian_approval(authority_id.clone()).ok();
 
                         if let Some(active) = recovery.active_recovery() {
                             tracing::info!(

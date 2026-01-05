@@ -732,7 +732,7 @@ async fn test_social_graph_flow() {
     for c in &bob_contacts.all_contacts().cloned().collect::<Vec<_>>() {
         let name = if !c.nickname.is_empty() {
             c.nickname.clone()
-        } else if let Some(s) = &c.suggested_name {
+        } else if let Some(s) = &c.nickname_suggestion {
             s.clone()
         } else {
             c.id.to_string()
@@ -748,7 +748,7 @@ async fn test_social_graph_flow() {
     println!("\nPhase 3: Updating nicknames...");
     if let Some(alice_contact) = bob_contacts.all_contacts().find(|c| {
         (!c.nickname.is_empty() && c.nickname.to_lowercase() == "alice")
-            || c.suggested_name
+            || c.nickname_suggestion
                 .as_ref()
                 .is_some_and(|s| s.to_lowercase() == "alice")
     }) {
@@ -779,7 +779,7 @@ async fn test_social_graph_flow() {
     {
         let name = if !c.nickname.is_empty() {
             c.nickname.clone()
-        } else if let Some(s) = &c.suggested_name {
+        } else if let Some(s) = &c.nickname_suggestion {
             s.clone()
         } else {
             c.id.to_string()
@@ -817,7 +817,7 @@ async fn test_social_graph_flow() {
     println!("\nPhase 5: Inviting contact to home...");
     if let Some(alice_contact) = bob_contacts.all_contacts().find(|c| {
         (!c.nickname.is_empty() && c.nickname.to_lowercase() == "alice")
-            || c.suggested_name
+            || c.nickname_suggestion
                 .as_ref()
                 .is_some_and(|s| s.to_lowercase() == "alice")
     }) {

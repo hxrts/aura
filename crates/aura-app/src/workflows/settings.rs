@@ -24,7 +24,7 @@ async fn refresh_settings_signal_from_runtime(
         }
     };
     let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
-    state.display_name = settings.display_name;
+    state.nickname_suggestion = settings.nickname_suggestion;
     state.mfa_policy = settings.mfa_policy;
     state.threshold_k = settings.threshold_k as u8;
     state.threshold_n = settings.threshold_n as u8;
@@ -77,9 +77,9 @@ pub async fn update_mfa_policy(
     Ok(())
 }
 
-/// Update nickname/display name
+/// Update nickname suggestion (what the user wants to be called)
 ///
-/// **What it does**: Updates display name and emits SETTINGS_SIGNAL
+/// **What it does**: Updates nickname suggestion and emits SETTINGS_SIGNAL
 /// **Returns**: Unit result
 /// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn update_nickname(
@@ -89,9 +89,9 @@ pub async fn update_nickname(
     let runtime = require_runtime(app_core).await?;
 
     runtime
-        .set_display_name(&name)
+        .set_nickname_suggestion(&name)
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to update display name: {e}")))?;
+        .map_err(|e| AuraError::agent(format!("Failed to update nickname: {e}")))?;
 
     refresh_settings_from_runtime(app_core).await?;
     Ok(())

@@ -38,18 +38,18 @@ pub struct SettingsViewState {
     // not here, since authority switching is app-global context.
 }
 
-/// State for display name edit modal (settings screen)
+/// State for nickname suggestion edit modal (settings screen)
 ///
 /// Note: Visibility is controlled by ModalQueue, not a `visible` field.
 #[derive(Clone, Debug, Default)]
-pub struct DisplayNameModalState {
-    /// Display name input buffer
+pub struct NicknameSuggestionModalState {
+    /// Nickname suggestion input buffer
     pub value: String,
     /// Error message if any
     pub error: Option<String>,
 }
 
-impl DisplayNameModalState {
+impl NicknameSuggestionModalState {
     /// Create initialized state with current name
     pub fn with_name(current_name: &str) -> Self {
         Self {
@@ -195,20 +195,20 @@ impl ConfirmRemoveModalState {
 // Form Data Types with Validation
 // ============================================================================
 
-/// Form data for display name editing (portable, validatable)
+/// Form data for nickname suggestion editing (portable, validatable)
 #[derive(Clone, Debug, Default)]
-pub struct DisplayNameFormData {
-    /// Display name value (required)
+pub struct NicknameSuggestionFormData {
+    /// Nickname suggestion value (required)
     pub value: String,
 }
 
-impl Validatable for DisplayNameFormData {
+impl Validatable for NicknameSuggestionFormData {
     fn validate(&self) -> Vec<ValidationError> {
         let mut errors = vec![];
         if self.value.trim().is_empty() {
-            errors.push(ValidationError::required("display_name"));
+            errors.push(ValidationError::required("nickname_suggestion"));
         } else if self.value.len() > 100 {
-            errors.push(ValidationError::too_long("display_name", 100));
+            errors.push(ValidationError::too_long("nickname_suggestion", 100));
         }
         errors
     }

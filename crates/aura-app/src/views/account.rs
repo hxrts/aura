@@ -21,9 +21,9 @@ pub struct AccountConfig {
     pub authority_id: String,
     /// The primary context ID for this account (hex-encoded)
     pub context_id: String,
-    /// User display name for this device
+    /// Nickname suggestion (what the user wants to be called)
     #[serde(default)]
-    pub display_name: Option<String>,
+    pub nickname_suggestion: Option<String>,
     /// Account creation timestamp (ms since epoch)
     pub created_at: u64,
 }
@@ -33,13 +33,13 @@ impl AccountConfig {
     pub fn new(
         authority_id: String,
         context_id: String,
-        display_name: Option<String>,
+        nickname_suggestion: Option<String>,
         created_at: u64,
     ) -> Self {
         Self {
             authority_id,
             context_id,
-            display_name,
+            nickname_suggestion,
             created_at,
         }
     }
@@ -176,7 +176,7 @@ mod tests {
     fn test_account_config_new() {
         let config = create_test_config();
         assert_eq!(config.authority_id, "0123456789abcdef0123456789abcdef");
-        assert_eq!(config.display_name, Some("Test User".to_string()));
+        assert_eq!(config.nickname_suggestion, Some("Test User".to_string()));
     }
 
     #[test]

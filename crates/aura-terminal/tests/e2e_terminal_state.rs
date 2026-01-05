@@ -84,7 +84,7 @@ async fn test_account_creation_callback_flow() {
     );
 
     // STEP 4: Simulate what the callback does - this is the core of the test
-    // The callback in app.rs does: ctx.create_account(&display_name)
+    // The callback in app.rs does: ctx.create_account(&nickname_suggestion)
     let create_result = ctx.create_account("Bob").await;
 
     // STEP 5: Verify the result
@@ -571,20 +571,20 @@ fn test_account_setup_state_machine() {
 
     // Initial state
     assert!(!state.visible);
-    assert!(state.display_name.is_empty());
+    assert!(state.nickname_suggestion.is_empty());
     assert!(state.error.is_none());
 
     // Show modal
     state.show();
     assert!(state.visible);
 
-    // Set display name
-    state.set_display_name("Bob".to_string());
-    assert_eq!(state.display_name, "Bob");
+    // Set nickname suggestion
+    state.set_nickname_suggestion("Bob".to_string());
+    assert_eq!(state.nickname_suggestion, "Bob");
     assert!(state.can_submit());
 
     // Empty name cannot submit
-    state.set_display_name("".to_string());
+    state.set_nickname_suggestion("".to_string());
     assert!(!state.can_submit());
 
     // Hide modal
@@ -684,9 +684,9 @@ fn test_screen_enum() {
 fn test_effect_commands() {
     // CreateAccount
     let cmd = EffectCommand::CreateAccount {
-        display_name: "Bob".to_string(),
+        nickname_suggestion: "Bob".to_string(),
     };
-    assert_matches!(cmd, EffectCommand::CreateAccount { display_name } if display_name == "Bob");
+    assert_matches!(cmd, EffectCommand::CreateAccount { nickname_suggestion } if nickname_suggestion == "Bob");
 
     // SendMessage
     let cmd = EffectCommand::SendMessage {
@@ -3348,7 +3348,7 @@ async fn test_snapshot_data_accuracy() {
         Contact {
             id: contact1_id.clone(),
             nickname: "Alice".to_string(),
-            suggested_name: Some("Alice Smith".to_string()), // Different from nickname
+            nickname_suggestion: Some("Alice Smith".to_string()), // Different from nickname
             is_guardian: false,
             is_resident: false,
             last_interaction: Some(1702000000000),
@@ -3358,7 +3358,7 @@ async fn test_snapshot_data_accuracy() {
         Contact {
             id: contact2_id.clone(),
             nickname: "Bob".to_string(),
-            suggested_name: Some("Bob".to_string()), // Same as nickname
+            nickname_suggestion: Some("Bob".to_string()), // Same as nickname
             is_guardian: false,
             is_resident: false,
             last_interaction: Some(1702000000000),
@@ -3368,7 +3368,7 @@ async fn test_snapshot_data_accuracy() {
         Contact {
             id: contact3_id.clone(),
             nickname: "Carol".to_string(),
-            suggested_name: None, // No suggestion
+            nickname_suggestion: None, // No suggestion
             is_guardian: false,
             is_resident: false,
             last_interaction: None,
@@ -3386,24 +3386,24 @@ async fn test_snapshot_data_accuracy() {
     // Get contacts snapshot
     let contacts_snapshot = ctx.snapshot_contacts();
 
-    // Verify has_pending_suggestion logic - computed by comparing suggested_name to nickname
+    // Verify has_pending_suggestion logic - computed by comparing nickname_suggestion to nickname
     for contact in &contacts_snapshot
         .all_contacts()
         .cloned()
         .collect::<Vec<_>>()
     {
-        // has_pending_suggestion is true when suggested_name differs from nickname
+        // has_pending_suggestion is true when nickname_suggestion differs from nickname
         let has_pending_suggestion = contact
-            .suggested_name
+            .nickname_suggestion
             .as_ref()
             .is_some_and(|suggested| !suggested.is_empty() && *suggested != contact.nickname);
 
         let expected = if contact.id == contact1_id {
-            true // suggested_name differs from nickname
+            true // nickname_suggestion differs from nickname
         } else if contact.id == contact2_id {
-            false // suggested_name equals nickname
+            false // nickname_suggestion equals nickname
         } else if contact.id == contact3_id {
-            false // no suggested_name
+            false // no nickname_suggestion
         } else {
             false
         };

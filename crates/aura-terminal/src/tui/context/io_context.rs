@@ -552,8 +552,8 @@ impl IoContext {
     // Account file operations (isolated, async)
     // =========================================================================
 
-    pub async fn create_account(&self, display_name: &str) -> Result<(), String> {
-        let (authority_id, _context_id) = self.account_files.create_account(display_name).await?;
+    pub async fn create_account(&self, nickname_suggestion: &str) -> Result<(), String> {
+        let (authority_id, _context_id) = self.account_files.create_account(nickname_suggestion).await?;
 
         {
             let mut core = self.app_core_raw().write().await;
@@ -930,15 +930,15 @@ impl IoContext {
     // Settings helpers (via SETTINGS_SIGNAL)
     // =========================================================================
 
-    pub async fn get_display_name(&self) -> String {
+    pub async fn get_nickname_suggestion(&self) -> String {
         let core = self.app_core.raw().read().await;
         core.read(&*SETTINGS_SIGNAL)
             .await
             .unwrap_or_default()
-            .display_name
+            .nickname_suggestion
     }
 
-    // Note: set_display_name and set_mfa_policy were removed because they bypassed
+    // Note: set_nickname_suggestion and set_mfa_policy were removed because they bypassed
     // the proper command dispatch pattern. Use EffectCommand::UpdateNickname and
     // EffectCommand::UpdateMfaPolicy instead, which go through the proper workflow
     // and persist to storage.

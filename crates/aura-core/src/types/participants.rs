@@ -156,8 +156,8 @@ impl ParticipantIdentity {
         Self::GroupMember { group, member }
     }
 
-    /// Get a display name for this participant
-    pub fn display_name(&self) -> String {
+    /// Get a debug label for this participant (not a user-facing nickname)
+    pub fn debug_label(&self) -> String {
         match self {
             Self::Device(id) => format!("Device:{id}"),
             Self::Guardian(id) => format!("Guardian:{id}"),

@@ -4,15 +4,15 @@ use aura_app::ui::prelude::*;
 
 // Re-export portable validation for callers that only import this module
 pub use aura_app::ui::types::{
-    is_valid_display_name, validate_display_name, DisplayNameError, MAX_DISPLAY_NAME_LENGTH,
-    MIN_DISPLAY_NAME_LENGTH,
+    is_valid_nickname_suggestion, validate_nickname_suggestion, NicknameSuggestionError, MAX_NICKNAME_SUGGESTION_LENGTH,
+    MIN_NICKNAME_SUGGESTION_LENGTH,
 };
 
 /// State for account setup modal
 #[derive(Clone, Debug, Default)]
 pub struct AccountSetupModalState {
-    /// Current display name input
-    pub display_name: String,
+    /// Current nickname suggestion input
+    pub nickname_suggestion: String,
     /// Whether account creation is in progress
     pub creating: bool,
     /// Whether account was created successfully
@@ -26,7 +26,7 @@ impl AccountSetupModalState {
     /// Uses portable validation from aura-app.
     #[must_use]
     pub fn can_submit(&self) -> bool {
-        can_submit_account_setup(&self.display_name, self.creating, self.success)
+        can_submit_account_setup(&self.nickname_suggestion, self.creating, self.success)
     }
 
     /// Start the creating state.

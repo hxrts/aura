@@ -235,11 +235,11 @@ mod tests {
             .unwrap();
 
         let mut contact = ContactCache::new(contact_authority);
-        contact.display_name = Some("Alice".to_string());
+        contact.nickname_suggestion = Some("Alice".to_string());
         store.update_contact(contact);
         assert!(store.is_dirty());
 
         let cached = store.get_contact(&contact_authority).unwrap();
-        assert_eq!(cached.display_name.as_deref(), Some("Alice"));
+        assert_eq!(cached.nickname_suggestion.as_deref(), Some("Alice"));
     }
 }

@@ -20,7 +20,7 @@ use std::sync::Arc;
 /// Update (or clear) a contact's nickname.
 ///
 /// Nicknames are **user-assigned local labels**. Passing an empty nickname clears the label,
-/// allowing the contact's `suggested_name` to be used for display again.
+/// allowing the contact's `nickname_suggestion` to be used for display again.
 pub async fn update_contact_nickname(
     app_core: &Arc<RwLock<AppCore>>,
     contact_id: &str,

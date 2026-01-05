@@ -82,7 +82,7 @@ pub struct ContextId(Uuid);
 
 A `ContextId` identifies a relational context. It does not encode membership. It does not reveal which authorities participate. The context stores only the relational facts required by the participants.
 
-Identity inside a context may include display names or other profile attributes. These values are private to that context and no external party can observe them. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for context isolation mechanisms. Nicknames and local mappings allow a device to associate multiple authorities with a single local contact.
+Identity inside a context may include nickname suggestions or other profile attributes. These values are private to that context and no external party can observe them. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for context isolation mechanisms. Nicknames (local mappings) allow a device to associate multiple authorities with a single local contact.
 
 ## 5. Authority Relationships
 

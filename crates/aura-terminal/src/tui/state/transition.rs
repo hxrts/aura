@@ -172,7 +172,7 @@ mod tests {
         let (state, _) = transition(&state, events::char('i'));
         let (state, _) = transition(&state, events::char('c'));
         let (state, _) = transition(&state, events::char('e'));
-        assert_eq!(state.account_setup_state().unwrap().display_name, "Alice");
+        assert_eq!(state.account_setup_state().unwrap().nickname_suggestion, "Alice");
 
         // Submit should dispatch CreateAccount and set creating flag
         let (state, commands) = transition(&state, events::enter());
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn test_account_setup_async_feedback() {
         let mut state = TuiState::with_account_setup();
-        state.account_setup_state_mut().unwrap().display_name = "Alice".to_string();
+        state.account_setup_state_mut().unwrap().nickname_suggestion = "Alice".to_string();
         state.account_setup_state_mut().unwrap().creating = true;
 
         // Verify initial state
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn test_account_setup_error_recovery() {
         let mut state = TuiState::with_account_setup();
-        state.account_setup_state_mut().unwrap().display_name = "Alice".to_string();
+        state.account_setup_state_mut().unwrap().nickname_suggestion = "Alice".to_string();
         state.account_setup_state_mut().unwrap().creating = true;
 
         // Simulate error callback
@@ -220,7 +220,7 @@ mod tests {
         let (state, _) = transition(&state, events::enter());
         assert!(state.account_setup_state().unwrap().error.is_none());
         assert!(!state.account_setup_state().unwrap().success);
-        assert_eq!(state.account_setup_state().unwrap().display_name, "Alice"); // Name preserved
+        assert_eq!(state.account_setup_state().unwrap().nickname_suggestion, "Alice"); // Name preserved
     }
 
     #[test]
@@ -235,11 +235,11 @@ mod tests {
     #[test]
     fn test_account_setup_backspace() {
         let mut state = TuiState::with_account_setup();
-        state.account_setup_state_mut().unwrap().display_name = "Alice".to_string();
+        state.account_setup_state_mut().unwrap().nickname_suggestion = "Alice".to_string();
 
         // Backspace should remove character
         let (state, _) = transition(&state, events::backspace());
-        assert_eq!(state.account_setup_state().unwrap().display_name, "Alic");
+        assert_eq!(state.account_setup_state().unwrap().nickname_suggestion, "Alic");
     }
 
     #[test]

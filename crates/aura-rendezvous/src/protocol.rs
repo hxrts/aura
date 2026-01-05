@@ -368,7 +368,7 @@ mod tests {
             valid_from: 1000,
             valid_until: 2000,
             nonce: [3u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         let offer = DescriptorOffer { descriptor };

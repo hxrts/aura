@@ -89,13 +89,13 @@ pub(crate) async fn load_consensus_key_material(
             .map_err(|e| {
                 AuraError::internal(format!(
                     "Failed to load key package for {}: {e}",
-                    participant.display_name()
+                    participant.debug_label()
                 ))
             })?;
         let share = share_from_key_package_bytes(&bytes).map_err(|e| {
             AuraError::internal(format!(
                 "Failed to parse key package for {}: {e}",
-                participant.display_name()
+                participant.debug_label()
             ))
         })?;
         key_packages.insert(authority, share);

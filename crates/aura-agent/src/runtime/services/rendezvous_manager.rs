@@ -963,7 +963,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         manager.cache_descriptor(descriptor.clone()).await.unwrap();

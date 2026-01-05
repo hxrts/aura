@@ -44,8 +44,8 @@ async fn setup_test_env() -> TestEnv {
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
     let device_id_str = "test-device-a".to_string();
-    let display_name = "DemoUser-A".to_string();
-    let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &display_name)
+    let nickname_suggestion = "DemoUser-A".to_string();
+    let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &nickname_suggestion)
         .await
         .expect("Failed to create account");
 

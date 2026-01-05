@@ -64,8 +64,8 @@ impl std::fmt::Display for ChatMessageId {
 pub struct ChatMember {
     /// Authority ID of the member
     pub authority_id: AuthorityId,
-    /// Display name for the member
-    pub display_name: String,
+    /// What the member wants to be called (their nickname suggestion)
+    pub nickname_suggestion: String,
     /// When the member joined the group (using unified time system)
     pub joined_at: TimeStamp,
     /// Role in the group (admin, member, etc.)

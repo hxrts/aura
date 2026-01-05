@@ -62,7 +62,7 @@ pub type RecoveryCallback = NoArgCallback;
 pub type ApprovalCallback = IdCallback;
 
 // --- Settings Screen ---
-pub type UpdateDisplayNameCallback = IdCallback;
+pub type UpdateNicknameSuggestionCallback = IdCallback;
 pub type AddDeviceCallback = IdCallback;
 pub type RemoveDeviceCallback = IdCallback;
 pub type UpdateThresholdCallback = ThresholdCallback;

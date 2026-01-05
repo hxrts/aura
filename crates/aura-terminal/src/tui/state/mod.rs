@@ -225,10 +225,10 @@ impl TuiState {
     /// Signal that account creation succeeded (queue-based)
     /// Dismisses modal and shows a success toast instead of a success screen
     pub fn account_created_queued(&mut self) {
-        // Get the display name before dismissing
-        let display_name =
+        // Get the nickname suggestion before dismissing
+        let nickname_suggestion =
             if let Some(QueuedModal::AccountSetup(ref state)) = self.modal_queue.current() {
-                state.display_name.clone()
+                state.nickname_suggestion.clone()
             } else {
                 String::new()
             };
@@ -237,10 +237,10 @@ impl TuiState {
         self.modal_queue.dismiss();
 
         // Show a success toast
-        let message = if display_name.is_empty() {
+        let message = if nickname_suggestion.is_empty() {
             "Account created successfully".to_string()
         } else {
-            format!("Welcome, {display_name}!")
+            format!("Welcome, {nickname_suggestion}!")
         };
         self.next_toast_id += 1;
         self.toast_queue
@@ -263,7 +263,7 @@ impl TuiState {
             Some(QueuedModal::ChatTopic(_)) => true,
             Some(QueuedModal::ContactsNickname(_)) => true,
             Some(QueuedModal::ContactsImport(_)) => true,
-            Some(QueuedModal::SettingsDisplayName(_)) => true,
+            Some(QueuedModal::SettingsNicknameSuggestion(_)) => true,
             Some(QueuedModal::SettingsAddDevice(_)) => true,
             _ => false,
         }

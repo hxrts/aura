@@ -318,17 +318,17 @@ impl ReactiveView for ContactsSignalView {
 
                             if let Some(contact) = state.contact_mut(&contact_id) {
                                 // Preserve any user-set nickname; only fill suggestion if missing.
-                                if contact.suggested_name.is_none() {
-                                    contact.suggested_name = suggested_name;
+                                if contact.nickname_suggestion.is_none() {
+                                    contact.nickname_suggestion = suggested_name;
                                 }
                                 contact.last_interaction = Some(added_at.ts_ms);
                             } else {
                                 // Contact invitations carry an optional nickname, which we treat as
-                                // a suggested name. The user's nickname is a separate local label.
+                                // a nickname_suggestion. The user's nickname is a separate local label.
                                 state.apply_contact(Contact {
                                     id: contact_id,
                                     nickname: String::new(),
-                                    suggested_name,
+                                    nickname_suggestion: suggested_name,
                                     is_guardian: false,
                                     is_resident: false,
                                     last_interaction: Some(added_at.ts_ms),

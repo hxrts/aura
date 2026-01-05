@@ -678,7 +678,7 @@ impl Query for ContactsQuery {
             vec![
                 DatalogValue::var("id"),
                 DatalogValue::var("nickname"),
-                DatalogValue::var("suggested_name"),
+                DatalogValue::var("nickname_suggestion"),
                 DatalogValue::var("is_guardian"),
                 DatalogValue::var("is_resident"),
                 DatalogValue::var("last_interaction"),
@@ -714,7 +714,7 @@ impl Query for ContactsQuery {
                 vec![
                     DatalogValue::var("id"),
                     DatalogValue::var("nickname"),
-                    DatalogValue::var("suggested_name"),
+                    DatalogValue::var("nickname_suggestion"),
                     DatalogValue::var("is_guardian"),
                     DatalogValue::var("is_resident"),
                     DatalogValue::var("last_interaction"),
@@ -752,7 +752,7 @@ impl Query for ContactsQuery {
                 Ok(Contact {
                     id: get_authority_id(&row, "id")?,
                     nickname: get_string(&row, "nickname"),
-                    suggested_name: get_optional_string(&row, "suggested_name"),
+                    nickname_suggestion: get_optional_string(&row, "nickname_suggestion"),
                     is_guardian: get_bool(&row, "is_guardian"),
                     is_resident: get_bool(&row, "is_resident"),
                     last_interaction,

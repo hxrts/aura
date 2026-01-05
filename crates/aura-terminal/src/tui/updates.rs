@@ -23,7 +23,7 @@
 //! // In callback:
 //! let tx = update_tx.clone();
 //! tokio::spawn(async move {
-//!     let _ = tx.try_send(UiUpdate::DisplayNameChanged(name));
+//!     let _ = tx.try_send(UiUpdate::NicknameSuggestionChanged(name));
 //! });
 //!
 //! // In component:
@@ -31,8 +31,8 @@
 //!     async move {
 //!         while let Some(update) = rx.recv().await {
 //!             match update {
-//!                 UiUpdate::DisplayNameChanged(name) => {
-//!                     display_name.set(name); // Triggers re-render
+//!                 UiUpdate::NicknameSuggestionChanged(name) => {
+//!                     nickname_suggestion.set(name); // Triggers re-render
 //!                 }
 //!                 // ...
 //!             }
@@ -67,8 +67,8 @@ pub enum UiUpdate {
     // =========================================================================
     // Settings Updates
     // =========================================================================
-    /// Display name was successfully updated
-    DisplayNameChanged(String),
+    /// Nickname suggestion was successfully updated
+    NicknameSuggestionChanged(String),
 
     /// MFA policy was successfully updated
     MfaPolicyChanged(MfaPolicy),
@@ -405,13 +405,13 @@ mod tests {
     fn test_ui_update_channel() {
         let (tx, mut rx) = ui_update_channel();
 
-        tx.try_send(UiUpdate::DisplayNameChanged("Alice".to_string()))
+        tx.try_send(UiUpdate::NicknameSuggestionChanged("Alice".to_string()))
             .unwrap();
         tx.try_send(UiUpdate::MfaPolicyChanged(MfaPolicy::AlwaysRequired))
             .unwrap();
 
         let update1 = rx.try_recv().unwrap();
-        assert!(matches!(update1, UiUpdate::DisplayNameChanged(name) if name == "Alice"));
+        assert!(matches!(update1, UiUpdate::NicknameSuggestionChanged(name) if name == "Alice"));
 
         let update2 = rx.try_recv().unwrap();
         assert!(matches!(

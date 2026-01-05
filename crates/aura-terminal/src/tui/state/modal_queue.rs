@@ -9,8 +9,8 @@ use crate::tui::screens::Screen;
 use super::views::{
     AccountSetupModalState, AddDeviceModalState, ChannelInfoModalState, ConfirmRemoveModalState,
     CreateChannelModalState, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
-    DisplayNameModalState, GuardianSetupModalState, HomeCreateModalState,
-    ImportInvitationModalState, InvitationCodeModalState, NicknameModalState, TopicModalState,
+    GuardianSetupModalState, HomeCreateModalState, ImportInvitationModalState,
+    InvitationCodeModalState, NicknameModalState, NicknameSuggestionModalState, TopicModalState,
 };
 
 // Re-export portable modal queue constants and types from aura-app
@@ -96,8 +96,8 @@ pub enum QueuedModal {
     // ========================================================================
     // Settings Screen Modals
     // ========================================================================
-    /// Edit display name
-    SettingsDisplayName(DisplayNameModalState),
+    /// Edit nickname suggestion (what you want to be called)
+    SettingsNicknameSuggestion(NicknameSuggestionModalState),
 
     /// Add device
     SettingsAddDevice(AddDeviceModalState),

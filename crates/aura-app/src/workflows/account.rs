@@ -127,91 +127,91 @@ pub fn validate_threshold_compatibility(configs: &[(&str, u32)]) -> Result<(), A
 }
 
 // ============================================================================
-// Display Name Validation
+// Nickname Suggestion Validation
 // ============================================================================
 
-/// Maximum allowed length for a display name.
-pub const MAX_DISPLAY_NAME_LENGTH: usize = 64;
+/// Maximum allowed length for a nickname suggestion.
+pub const MAX_NICKNAME_SUGGESTION_LENGTH: usize = 64;
 
-/// Minimum allowed length for a display name.
-pub const MIN_DISPLAY_NAME_LENGTH: usize = 1;
+/// Minimum allowed length for a nickname suggestion.
+pub const MIN_NICKNAME_SUGGESTION_LENGTH: usize = 1;
 
-/// Display name validation error types.
+/// Nickname suggestion validation error types.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DisplayNameError {
-    /// Display name is empty or whitespace-only
+pub enum NicknameSuggestionError {
+    /// Nickname suggestion is empty or whitespace-only
     Empty,
-    /// Display name exceeds maximum length
+    /// Nickname suggestion exceeds maximum length
     TooLong {
         /// Actual length
         length: usize,
         /// Maximum allowed
         max: usize,
     },
-    /// Display name contains invalid characters
+    /// Nickname suggestion contains invalid characters
     InvalidChars {
         /// Description of the issue
         reason: String,
     },
 }
 
-impl std::fmt::Display for DisplayNameError {
+impl std::fmt::Display for NicknameSuggestionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Empty => write!(f, "Display name cannot be empty"),
+            Self::Empty => write!(f, "Nickname suggestion cannot be empty"),
             Self::TooLong { length, max } => {
-                write!(f, "Display name too long: {length} characters (max {max})")
+                write!(f, "Nickname suggestion too long: {length} characters (max {max})")
             }
             Self::InvalidChars { reason } => {
-                write!(f, "Display name contains invalid characters: {reason}")
+                write!(f, "Nickname suggestion contains invalid characters: {reason}")
             }
         }
     }
 }
 
-impl std::error::Error for DisplayNameError {}
+impl std::error::Error for NicknameSuggestionError {}
 
-/// Validate a display name for account setup.
+/// Validate a nickname suggestion for account setup.
 ///
 /// # Arguments
-/// * `name` - The display name to validate
+/// * `name` - The nickname suggestion to validate
 ///
 /// # Returns
-/// * `Ok(String)` - The trimmed, validated display name
-/// * `Err(DisplayNameError)` - If validation fails
+/// * `Ok(String)` - The trimmed, validated nickname suggestion
+/// * `Err(NicknameSuggestionError)` - If validation fails
 ///
 /// # Validation Rules
 /// - Must not be empty or whitespace-only
-/// - Must not exceed `MAX_DISPLAY_NAME_LENGTH` characters
+/// - Must not exceed `MAX_NICKNAME_SUGGESTION_LENGTH` characters
 /// - Must not contain control characters
 ///
 /// # Examples
 /// ```rust
-/// use aura_app::ui::workflows::account::validate_display_name;
+/// use aura_app::ui::workflows::account::validate_nickname_suggestion;
 ///
-/// assert!(validate_display_name("Alice").is_ok());
-/// assert!(validate_display_name("").is_err());
-/// assert!(validate_display_name("   ").is_err());
+/// assert!(validate_nickname_suggestion("Alice").is_ok());
+/// assert!(validate_nickname_suggestion("").is_err());
+/// assert!(validate_nickname_suggestion("   ").is_err());
 /// ```
-pub fn validate_display_name(name: &str) -> Result<String, DisplayNameError> {
+pub fn validate_nickname_suggestion(name: &str) -> Result<String, NicknameSuggestionError> {
     let trimmed = name.trim();
 
     // Check for empty
     if trimmed.is_empty() {
-        return Err(DisplayNameError::Empty);
+        return Err(NicknameSuggestionError::Empty);
     }
 
     // Check length
-    if trimmed.len() > MAX_DISPLAY_NAME_LENGTH {
-        return Err(DisplayNameError::TooLong {
+    if trimmed.len() > MAX_NICKNAME_SUGGESTION_LENGTH {
+        return Err(NicknameSuggestionError::TooLong {
             length: trimmed.len(),
-            max: MAX_DISPLAY_NAME_LENGTH,
+            max: MAX_NICKNAME_SUGGESTION_LENGTH,
         });
     }
 
     // Check for control characters (excluding normal whitespace)
     if trimmed.chars().any(|c| c.is_control()) {
-        return Err(DisplayNameError::InvalidChars {
+        return Err(NicknameSuggestionError::InvalidChars {
             reason: "control characters not allowed".to_string(),
         });
     }
@@ -219,36 +219,36 @@ pub fn validate_display_name(name: &str) -> Result<String, DisplayNameError> {
     Ok(trimmed.to_string())
 }
 
-/// Check if a display name is valid without returning the trimmed value.
+/// Check if a nickname suggestion is valid without returning the trimmed value.
 ///
 /// Convenience function for form validation that just needs a boolean.
 ///
 /// # Examples
 /// ```rust
-/// use aura_app::ui::workflows::account::is_valid_display_name;
+/// use aura_app::ui::workflows::account::is_valid_nickname_suggestion;
 ///
-/// assert!(is_valid_display_name("Alice"));
-/// assert!(!is_valid_display_name(""));
+/// assert!(is_valid_nickname_suggestion("Alice"));
+/// assert!(!is_valid_nickname_suggestion(""));
 /// ```
 #[must_use]
-pub fn is_valid_display_name(name: &str) -> bool {
-    validate_display_name(name).is_ok()
+pub fn is_valid_nickname_suggestion(name: &str) -> bool {
+    validate_nickname_suggestion(name).is_ok()
 }
 
-/// Check if a form can be submitted based on display name.
+/// Check if a form can be submitted based on nickname suggestion.
 ///
 /// This mirrors the TUI's `can_submit()` logic for portable use.
 ///
 /// # Arguments
-/// * `display_name` - The current display name input
+/// * `nickname_suggestion` - The current nickname suggestion input
 /// * `is_creating` - Whether creation is already in progress
 /// * `is_success` - Whether creation already succeeded
 ///
 /// # Returns
 /// `true` if the form can be submitted
 #[must_use]
-pub fn can_submit_account_setup(display_name: &str, is_creating: bool, is_success: bool) -> bool {
-    is_valid_display_name(display_name) && !is_creating && !is_success
+pub fn can_submit_account_setup(nickname_suggestion: &str, is_creating: bool, is_success: bool) -> bool {
+    is_valid_nickname_suggestion(nickname_suggestion) && !is_creating && !is_success
 }
 
 // =============================================================================
@@ -445,58 +445,58 @@ mod tests {
     }
 
     // =========================================================================
-    // Display Name Validation Tests
+    // Nickname Suggestion Validation Tests
     // =========================================================================
 
     #[test]
-    fn test_validate_display_name_valid() {
-        assert_eq!(validate_display_name("Alice").unwrap(), "Alice");
-        assert_eq!(validate_display_name("Bob Smith").unwrap(), "Bob Smith");
-        assert_eq!(validate_display_name("  Trimmed  ").unwrap(), "Trimmed");
+    fn test_validate_nickname_suggestion_valid() {
+        assert_eq!(validate_nickname_suggestion("Alice").unwrap(), "Alice");
+        assert_eq!(validate_nickname_suggestion("Bob Smith").unwrap(), "Bob Smith");
+        assert_eq!(validate_nickname_suggestion("  Trimmed  ").unwrap(), "Trimmed");
     }
 
     #[test]
-    fn test_validate_display_name_empty() {
-        assert_eq!(validate_display_name(""), Err(DisplayNameError::Empty));
-        assert_eq!(validate_display_name("   "), Err(DisplayNameError::Empty));
-        assert_eq!(validate_display_name("\t\n"), Err(DisplayNameError::Empty));
+    fn test_validate_nickname_suggestion_empty() {
+        assert_eq!(validate_nickname_suggestion(""), Err(NicknameSuggestionError::Empty));
+        assert_eq!(validate_nickname_suggestion("   "), Err(NicknameSuggestionError::Empty));
+        assert_eq!(validate_nickname_suggestion("\t\n"), Err(NicknameSuggestionError::Empty));
     }
 
     #[test]
-    fn test_validate_display_name_too_long() {
-        let long_name = "a".repeat(MAX_DISPLAY_NAME_LENGTH + 1);
-        match validate_display_name(&long_name) {
-            Err(DisplayNameError::TooLong { length, max }) => {
-                assert_eq!(length, MAX_DISPLAY_NAME_LENGTH + 1);
-                assert_eq!(max, MAX_DISPLAY_NAME_LENGTH);
+    fn test_validate_nickname_suggestion_too_long() {
+        let long_name = "a".repeat(MAX_NICKNAME_SUGGESTION_LENGTH + 1);
+        match validate_nickname_suggestion(&long_name) {
+            Err(NicknameSuggestionError::TooLong { length, max }) => {
+                assert_eq!(length, MAX_NICKNAME_SUGGESTION_LENGTH + 1);
+                assert_eq!(max, MAX_NICKNAME_SUGGESTION_LENGTH);
             }
             other => panic!("Expected TooLong error, got {other:?}"),
         }
     }
 
     #[test]
-    fn test_validate_display_name_max_length_ok() {
-        let max_name = "a".repeat(MAX_DISPLAY_NAME_LENGTH);
-        assert!(validate_display_name(&max_name).is_ok());
+    fn test_validate_nickname_suggestion_max_length_ok() {
+        let max_name = "a".repeat(MAX_NICKNAME_SUGGESTION_LENGTH);
+        assert!(validate_nickname_suggestion(&max_name).is_ok());
     }
 
     #[test]
-    fn test_validate_display_name_control_chars() {
+    fn test_validate_nickname_suggestion_control_chars() {
         assert!(matches!(
-            validate_display_name("Alice\x00Bob"),
-            Err(DisplayNameError::InvalidChars { .. })
+            validate_nickname_suggestion("Alice\x00Bob"),
+            Err(NicknameSuggestionError::InvalidChars { .. })
         ));
         assert!(matches!(
-            validate_display_name("Name\x07Bell"),
-            Err(DisplayNameError::InvalidChars { .. })
+            validate_nickname_suggestion("Name\x07Bell"),
+            Err(NicknameSuggestionError::InvalidChars { .. })
         ));
     }
 
     #[test]
-    fn test_is_valid_display_name() {
-        assert!(is_valid_display_name("Alice"));
-        assert!(!is_valid_display_name(""));
-        assert!(!is_valid_display_name("   "));
+    fn test_is_valid_nickname_suggestion() {
+        assert!(is_valid_nickname_suggestion("Alice"));
+        assert!(!is_valid_nickname_suggestion(""));
+        assert!(!is_valid_nickname_suggestion("   "));
     }
 
     #[test]
@@ -518,25 +518,25 @@ mod tests {
     }
 
     #[test]
-    fn test_display_name_error_display() {
+    fn test_nickname_suggestion_error_display() {
         assert_eq!(
-            DisplayNameError::Empty.to_string(),
-            "Display name cannot be empty"
+            NicknameSuggestionError::Empty.to_string(),
+            "Nickname suggestion cannot be empty"
         );
         assert_eq!(
-            DisplayNameError::TooLong {
+            NicknameSuggestionError::TooLong {
                 length: 100,
                 max: 64
             }
             .to_string(),
-            "Display name too long: 100 characters (max 64)"
+            "Nickname suggestion too long: 100 characters (max 64)"
         );
         assert_eq!(
-            DisplayNameError::InvalidChars {
+            NicknameSuggestionError::InvalidChars {
                 reason: "control characters not allowed".to_string()
             }
             .to_string(),
-            "Display name contains invalid characters: control characters not allowed"
+            "Nickname suggestion contains invalid characters: control characters not allowed"
         );
     }
 }

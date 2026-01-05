@@ -13,8 +13,8 @@ use crate::tui::theme::{Borders, Spacing, Theme};
 pub struct AccountSetupModalProps {
     /// Whether the modal is visible
     pub visible: bool,
-    /// Current display name input
-    pub display_name: String,
+    /// Current nickname suggestion input
+    pub nickname_suggestion: String,
     /// Whether the input is focused
     pub focused: bool,
     /// Whether account creation is in progress
@@ -37,7 +37,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
         .into_any();
     }
 
-    let display_name = props.display_name.clone();
+    let nickname_suggestion = props.nickname_suggestion.clone();
     let creating = props.creating;
     let success = props.success;
     let has_error = !props.error.is_empty();
@@ -72,7 +72,7 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
                         Some(element! {
                             View(margin_top: Spacing::SM) {
                                 Text(
-                                    content: format!("Welcome, {}!", display_name),
+                                    content: format!("Welcome, {}!", nickname_suggestion),
                                     color: Theme::TEXT_MUTED,
                                 )
                             }
@@ -98,11 +98,11 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
     // The spinner is debounced - only shows after 300ms to avoid flicker for fast operations.
 
     // Show input form (default state, or creating state with inline spinner)
-    let can_submit = !display_name.is_empty() && !creating;
+    let can_submit = !nickname_suggestion.is_empty() && !creating;
 
     // Input field props
     let input_props = LabeledInputProps::new("Display Name *", "Enter your name...")
-        .with_value(display_name)
+        .with_value(nickname_suggestion)
         .with_focused(props.focused);
 
     element! {
@@ -226,8 +226,8 @@ pub fn AccountSetupModal(props: &AccountSetupModalProps) -> impl Into<AnyElement
 pub struct AccountSetupState {
     /// Whether the modal is visible
     pub visible: bool,
-    /// Current display name input
-    pub display_name: String,
+    /// Current nickname suggestion input
+    pub nickname_suggestion: String,
     /// Whether account creation is in progress
     pub creating: bool,
     /// Whether account was created successfully
@@ -245,7 +245,7 @@ impl AccountSetupState {
     /// Show the modal
     pub fn show(&mut self) {
         self.visible = true;
-        self.display_name.clear();
+        self.nickname_suggestion.clear();
         self.creating = false;
         self.success = false;
         self.error = None;
@@ -256,26 +256,26 @@ impl AccountSetupState {
         self.visible = false;
     }
 
-    /// Set the display name
-    pub fn set_display_name(&mut self, name: impl Into<String>) {
-        self.display_name = name.into();
+    /// Set the nickname suggestion
+    pub fn set_nickname_suggestion(&mut self, name: impl Into<String>) {
+        self.nickname_suggestion = name.into();
         self.error = None; // Clear error on input
     }
 
     /// Append a character
     pub fn push_char(&mut self, c: char) {
-        self.display_name.push(c);
+        self.nickname_suggestion.push(c);
         self.error = None;
     }
 
     /// Remove last character
     pub fn backspace(&mut self) {
-        self.display_name.pop();
+        self.nickname_suggestion.pop();
     }
 
     /// Check if submission is valid
     pub fn can_submit(&self) -> bool {
-        !self.display_name.is_empty() && !self.creating && !self.success
+        !self.nickname_suggestion.is_empty() && !self.creating && !self.success
     }
 
     /// Start creating account
@@ -324,11 +324,11 @@ impl AccountSetupState {
     }
 
     /// Get display name if valid
-    pub fn get_display_name(&self) -> Option<&str> {
-        if self.display_name.is_empty() {
+    pub fn get_nickname_suggestion(&self) -> Option<&str> {
+        if self.nickname_suggestion.is_empty() {
             None
         } else {
-            Some(&self.display_name)
+            Some(&self.nickname_suggestion)
         }
     }
 }
@@ -352,11 +352,11 @@ mod tests {
         state.push_char('i');
         state.push_char('c');
         state.push_char('e');
-        assert_eq!(state.display_name, "Alice");
+        assert_eq!(state.nickname_suggestion, "Alice");
         assert!(state.can_submit());
 
         state.backspace();
-        assert_eq!(state.display_name, "Alic");
+        assert_eq!(state.nickname_suggestion, "Alic");
 
         state.start_creating();
         assert!(state.creating);
@@ -371,7 +371,7 @@ mod tests {
     fn test_error_handling() {
         let mut state = AccountSetupState::new();
         state.show();
-        state.set_display_name("Test");
+        state.set_nickname_suggestion("Test");
         state.start_creating();
         state.set_error("Network error");
 

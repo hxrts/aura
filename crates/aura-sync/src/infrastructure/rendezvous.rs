@@ -228,7 +228,7 @@ mod tests {
             valid_from,
             valid_until,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         }
     }
 

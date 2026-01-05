@@ -144,9 +144,9 @@ pub struct RendezvousDescriptor {
     pub valid_until: u64,
     /// Nonce for uniqueness
     pub nonce: [u8; 32],
-    /// Human-readable display name (optional, for UI purposes)
+    /// What this peer wants to be called (optional, for UI purposes)
     #[serde(default)]
-    pub display_name: Option<String>,
+    pub nickname_suggestion: Option<String>,
 }
 
 impl RendezvousDescriptor {
@@ -534,7 +534,7 @@ mod tests {
             valid_from: 1000,
             valid_until: 2000,
             nonce: [42u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         let fact = RendezvousFact::Descriptor(descriptor);
@@ -561,7 +561,7 @@ mod tests {
             valid_from: 1000,
             valid_until: 2000,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         assert!(!descriptor.is_valid(500)); // Before valid_from
@@ -581,7 +581,7 @@ mod tests {
             valid_from: 0,
             valid_until: 1000,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         // Refresh threshold is at 900 (10% before expiry)
@@ -658,7 +658,7 @@ mod tests {
             valid_from: 0,
             valid_until: 1000,
             nonce: [7u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         let fact = RendezvousFact::Descriptor(descriptor);
@@ -680,7 +680,7 @@ mod tests {
             valid_from: 0,
             valid_until: 1000,
             nonce: [7u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         let fact = RendezvousFact::Descriptor(descriptor);
@@ -714,7 +714,7 @@ mod tests {
             valid_from: 0,
             valid_until: 1000,
             nonce: [7u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         let fact = RendezvousFact::Descriptor(descriptor);
@@ -743,7 +743,7 @@ mod tests {
             valid_from: 0,
             valid_until: 1000,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         });
 
         let bindings = descriptor_fact.authority_bindings();

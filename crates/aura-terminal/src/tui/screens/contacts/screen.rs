@@ -73,7 +73,7 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
 
     let name = if !c.nickname.is_empty() {
         c.nickname.clone()
-    } else if let Some(suggested) = &c.suggested_name {
+    } else if let Some(suggested) = &c.nickname_suggestion {
         suggested.clone()
     } else {
         let id = c.id.clone();

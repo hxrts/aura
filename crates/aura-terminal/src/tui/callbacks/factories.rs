@@ -134,7 +134,7 @@ impl ChatCallbacks {
                                             let id = contact.id.to_string();
                                             let name = if !contact.nickname.is_empty() {
                                                 contact.nickname
-                                            } else if let Some(s) = &contact.suggested_name {
+                                            } else if let Some(s) = &contact.nickname_suggestion {
                                                 s.clone()
                                             } else {
                                                 id.chars().take(8).collect::<String>() + "..."
@@ -717,7 +717,7 @@ impl RecoveryCallbacks {
 #[derive(Clone)]
 pub struct SettingsCallbacks {
     pub on_update_mfa: Arc<dyn Fn(MfaPolicy) + Send + Sync>,
-    pub on_update_display_name: UpdateDisplayNameCallback,
+    pub on_update_nickname_suggestion: UpdateNicknameSuggestionCallback,
     pub on_update_threshold: UpdateThresholdCallback,
     pub on_add_device: AddDeviceCallback,
     pub on_remove_device: RemoveDeviceCallback,
@@ -729,7 +729,7 @@ impl SettingsCallbacks {
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_update_mfa: Self::make_update_mfa(ctx.clone(), tx.clone()),
-            on_update_display_name: Self::make_update_display_name(ctx.clone(), tx.clone()),
+            on_update_nickname_suggestion: Self::make_update_nickname_suggestion(ctx.clone(), tx.clone()),
             on_update_threshold: Self::make_update_threshold(ctx.clone(), tx.clone()),
             on_add_device: Self::make_add_device(ctx.clone(), tx.clone()),
             on_remove_device: Self::make_remove_device(ctx.clone(), tx.clone()),
@@ -760,10 +760,10 @@ impl SettingsCallbacks {
         })
     }
 
-    fn make_update_display_name(
+    fn make_update_nickname_suggestion(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
-    ) -> UpdateDisplayNameCallback {
+    ) -> UpdateNicknameSuggestionCallback {
         Arc::new(move |name: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
@@ -772,7 +772,7 @@ impl SettingsCallbacks {
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::DisplayNameChanged(name_clone));
+                        let _ = tx.try_send(UiUpdate::NicknameSuggestionChanged(name_clone));
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
@@ -1080,7 +1080,7 @@ impl HomeCallbacks {
                                             let id = contact.id.to_string();
                                             let name = if !contact.nickname.is_empty() {
                                                 contact.nickname
-                                            } else if let Some(s) = &contact.suggested_name {
+                                            } else if let Some(s) = &contact.nickname_suggestion {
                                                 s.clone()
                                             } else {
                                                 id.chars().take(8).collect::<String>() + "..."
@@ -1254,26 +1254,26 @@ impl AppCallbacks {
     }
 
     fn make_create_account(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateAccountCallback {
-        Arc::new(move |display_name: String| {
+        Arc::new(move |nickname_suggestion: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
                 // Create the account file via async storage effects.
-                match ctx.create_account(&display_name).await {
+                match ctx.create_account(&nickname_suggestion).await {
                     Ok(()) => {
-                        // Then persist the display name to settings storage and emit SETTINGS_SIGNAL.
+                        // Then persist the nickname suggestion to settings storage and emit SETTINGS_SIGNAL.
                         // This is best-effort and does not hold up account creation.
                         let _ = ctx
                             .dispatch(EffectCommand::UpdateNickname {
-                                name: display_name.clone(),
+                                name: nickname_suggestion.clone(),
                             })
                             .await;
 
-                        let _ = tx.try_send(UiUpdate::DisplayNameChanged(display_name.clone()));
+                        let _ = tx.try_send(UiUpdate::NicknameSuggestionChanged(nickname_suggestion.clone()));
 
                         // Then dispatch the intent to create a journal fact.
                         let cmd = EffectCommand::CreateAccount {
-                            display_name: display_name.clone(),
+                            nickname_suggestion: nickname_suggestion.clone(),
                         };
 
                         match ctx.dispatch(cmd).await {

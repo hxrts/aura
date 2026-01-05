@@ -184,7 +184,7 @@ async fn test_settings_nickname_actually_changes() {
 
     // Phase 1: Get initial nickname (may be empty initially)
     println!("Phase 1: Get initial nickname");
-    let initial_name = ctx.get_display_name().await;
+    let initial_name = ctx.get_nickname_suggestion().await;
     println!("  Initial display name: '{initial_name}'");
     // Note: Initial name may be empty - that's OK, we're testing that UpdateNickname works
 
@@ -201,12 +201,12 @@ async fn test_settings_nickname_actually_changes() {
 
     // Phase 3: Verify IoContext returns new nickname
     println!("\nPhase 3: Verify IoContext returns new nickname");
-    let updated_name = ctx.get_display_name().await;
+    let updated_name = ctx.get_nickname_suggestion().await;
     assert_eq!(
         updated_name, new_nickname,
         "Display name should be updated to new value. Got '{updated_name}', expected '{new_nickname}'"
     );
-    println!("  IoContext.get_display_name() returns: '{updated_name}'");
+    println!("  IoContext.get_nickname_suggestion() returns: '{updated_name}'");
 
     // Phase 4: Update again to verify repeated updates work
     println!("\nPhase 4: Verify repeated updates work");
@@ -217,7 +217,7 @@ async fn test_settings_nickname_actually_changes() {
     .await
     .expect("Second update should succeed");
 
-    let final_name = ctx.get_display_name().await;
+    let final_name = ctx.get_nickname_suggestion().await;
     assert_eq!(
         final_name, another_name,
         "Display name should update again. Got '{final_name}', expected '{another_name}'"
@@ -481,7 +481,7 @@ async fn test_contacts_signal_contact_tracking() {
         contacts.apply_contact(ViewContact {
             id: contact_alice_id.clone(),
             nickname: "Alice (Friend)".to_string(),
-            suggested_name: Some("Alice".to_string()),
+            nickname_suggestion: Some("Alice".to_string()),
             is_guardian: false,
             is_resident: false,
             last_interaction: None,
@@ -513,7 +513,7 @@ async fn test_contacts_signal_contact_tracking() {
             .expect("Alice should exist in contacts");
 
         assert_eq!(
-            alice.suggested_name,
+            alice.nickname_suggestion,
             Some("Alice".to_string()),
             "Suggested name should match"
         );
@@ -521,8 +521,8 @@ async fn test_contacts_signal_contact_tracking() {
         assert!(!alice.is_guardian, "Should not be guardian initially");
 
         println!(
-            "  Contact found: {suggested_name:?}",
-            suggested_name = alice.suggested_name
+            "  Contact found: {nickname_suggestion:?}",
+            nickname_suggestion = alice.nickname_suggestion
         );
         println!("  Nickname: {nickname}", nickname = alice.nickname);
         println!(
@@ -935,7 +935,7 @@ async fn test_dispatch_and_wait_completes() {
 
     // Phase 2: Verify change is immediately visible
     println!("\nPhase 2: Verify change is immediately visible");
-    let name = ctx.get_display_name().await;
+    let name = ctx.get_nickname_suggestion().await;
     assert_eq!(
         name, "WaitedNickname",
         "Name should be updated immediately after dispatch_and_wait"
@@ -1034,7 +1034,7 @@ async fn test_complete_settings_flow_persists() {
 
     // Phase 2: Verify all settings via IoContext
     println!("\nPhase 2: Verify via IoContext");
-    let name = ctx.get_display_name().await;
+    let name = ctx.get_nickname_suggestion().await;
     let mfa = ctx.get_mfa_policy().await;
 
     assert_eq!(name, "CompleteTestUser", "Name should match");
@@ -1094,7 +1094,7 @@ async fn test_snapshot_methods_return_current_state() {
     .expect("Update should succeed");
 
     // Get display name to verify update worked
-    let updated_name = ctx.get_display_name().await;
+    let updated_name = ctx.get_nickname_suggestion().await;
     assert_eq!(
         updated_name, "SnapshotTestName",
         "Display name should reflect update"

@@ -186,7 +186,7 @@ pub struct ContactsViewProps {
     pub nickname_modal_visible: bool,
     pub nickname_modal_contact_id: String,
     pub nickname_modal_value: String,
-    pub nickname_modal_suggested_name: Option<String>,
+    pub nickname_modal_nickname_suggestion: Option<String>,
     // Import invitation modal (accept invitation code)
     pub import_modal_visible: bool,
     pub import_modal_code: String,
@@ -245,7 +245,7 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
                 true,
                 s.contact_id.clone(),
                 s.value.clone(),
-                s.suggested_name.clone(),
+                s.nickname_suggestion.clone(),
             ),
             _ => (false, String::new(), String::new(), None),
         };
@@ -357,7 +357,7 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
         nickname_modal_visible: nickname_visible,
         nickname_modal_contact_id: nickname_contact_id,
         nickname_modal_value: nickname_value,
-        nickname_modal_suggested_name: nickname_suggested,
+        nickname_modal_nickname_suggestion: nickname_suggested,
         // Import modal (from queue)
         import_modal_visible: import_visible,
         import_modal_code: import_code,
@@ -438,9 +438,9 @@ pub struct SettingsViewProps {
     pub authority_picker_modal_visible: bool,
     pub authority_picker_modal_contacts: Vec<(String, String)>,
     pub authority_picker_modal_selected_index: usize,
-    // Display name modal (user's own display name)
-    pub display_name_modal_visible: bool,
-    pub display_name_modal_value: String,
+    // Nickname suggestion modal (what you want to be called)
+    pub nickname_suggestion_modal_visible: bool,
+    pub nickname_suggestion_modal_value: String,
     // Add device modal
     pub add_device_modal_visible: bool,
     pub add_device_modal_name: String,
@@ -483,8 +483,9 @@ pub struct SettingsViewProps {
 /// Extract SettingsScreen view props from TuiState
 pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     // Extract modal state from queue (all modals now use queue system)
-    let (display_name_visible, display_name_value) = match state.modal_queue.current() {
-        Some(QueuedModal::SettingsDisplayName(s)) => (true, s.value.clone()),
+    let (nickname_suggestion_visible, nickname_suggestion_value) = match state.modal_queue.current()
+    {
+        Some(QueuedModal::SettingsNicknameSuggestion(s)) => (true, s.value.clone()),
         _ => (false, String::new()),
     };
 
@@ -636,9 +637,9 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         authority_picker_modal_visible: authority_picker_visible,
         authority_picker_modal_contacts: authority_picker_contacts,
         authority_picker_modal_selected_index: authority_picker_selected,
-        // Display name modal (from queue)
-        display_name_modal_visible: display_name_visible,
-        display_name_modal_value: display_name_value,
+        // Nickname suggestion modal (from queue)
+        nickname_suggestion_modal_visible: nickname_suggestion_visible,
+        nickname_suggestion_modal_value: nickname_suggestion_value,
         // Add device modal (from queue)
         add_device_modal_visible: add_device_visible,
         add_device_modal_name: add_device_name,
@@ -878,26 +879,26 @@ mod tests {
 
     #[test]
     fn test_settings_view_props_extraction() {
-        use crate::tui::state_machine::DisplayNameModalState;
+        use crate::tui::state_machine::NicknameSuggestionModalState;
 
         let mut state = TuiState::new();
         state.settings.section = SettingsSection::Devices;
         state.settings.selected_index = 1;
         state.settings.mfa_policy = MfaPolicy::AlwaysRequired;
         // Use queue for modal visibility (only one modal at a time)
-        let display_name_modal = DisplayNameModalState::with_name("new-nick");
+        let nickname_suggestion_modal = NicknameSuggestionModalState::with_name("new-nick");
         state
             .modal_queue
-            .enqueue(QueuedModal::SettingsDisplayName(display_name_modal));
+            .enqueue(QueuedModal::SettingsNicknameSuggestion(nickname_suggestion_modal));
 
         let props = extract_settings_view_props(&state);
 
         assert_eq!(props.section, SettingsSection::Devices);
         assert_eq!(props.selected_index, 1);
         assert_eq!(props.mfa_policy, MfaPolicy::AlwaysRequired);
-        assert!(props.display_name_modal_visible);
-        assert_eq!(props.display_name_modal_value, "new-nick");
-        // add_device_modal is not active because display_name_modal is (only one modal at a time)
+        assert!(props.nickname_suggestion_modal_visible);
+        assert_eq!(props.nickname_suggestion_modal_value, "new-nick");
+        // add_device_modal is not active because nickname_suggestion_modal is (only one modal at a time)
         assert!(!props.add_device_modal_visible);
     }
 

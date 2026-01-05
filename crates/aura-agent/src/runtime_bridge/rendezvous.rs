@@ -43,7 +43,7 @@ pub(super) async fn get_lan_peers(bridge: &AgentRuntimeBridge) -> Vec<LanPeerInf
                 authority_id: peer.authority_id,
                 address: peer.source_addr.clone(),
                 discovered_at_ms: peer.discovered_at_ms,
-                display_name: peer.descriptor.display_name.clone(),
+                nickname_suggestion: peer.descriptor.nickname_suggestion.clone(),
             })
             .collect()
     } else {

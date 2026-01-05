@@ -629,8 +629,8 @@ mod settings_screen {
         tui.clear_commands();
         tui.send_enter();
 
-        // Settings profile edit updates display name, not contact nickname
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::UpdateDisplayName { display_name } if display_name == "NewNickname")));
+        // Settings profile edit updates nickname suggestion, not contact nickname
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::UpdateNicknameSuggestion { nickname_suggestion } if nickname_suggestion == "NewNickname")));
     }
 
     #[test]

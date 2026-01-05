@@ -105,7 +105,7 @@ pub struct FullTestEnv {
 pub struct FullTestEnvConfig {
     pub name: String,
     pub seed: u64,
-    pub display_name: Option<String>,
+    pub nickname_suggestion: Option<String>,
 }
 
 impl Default for FullTestEnvConfig {
@@ -113,7 +113,7 @@ impl Default for FullTestEnvConfig {
         Self {
             name: "default".to_string(),
             seed: 2024,
-            display_name: None,
+            nickname_suggestion: None,
         }
     }
 }
@@ -133,14 +133,14 @@ impl FullTestEnv {
         let FullTestEnvConfig {
             name,
             seed,
-            display_name,
+            nickname_suggestion,
         } = config;
         let test_dir = unique_test_dir(&format!("aura-full-test-{name}"));
 
         let device_id_str = format!("test-device-{name}");
-        let display_name = display_name.unwrap_or_else(|| format!("TestUser-{name}"));
+        let nickname_suggestion = nickname_suggestion.unwrap_or_else(|| format!("TestUser-{name}"));
 
-        let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &display_name)
+        let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &nickname_suggestion)
             .await
             .expect("Failed to create account");
 

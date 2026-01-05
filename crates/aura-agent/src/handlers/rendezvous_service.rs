@@ -268,7 +268,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
 
         service.cache_peer_descriptor(descriptor.clone()).await;
@@ -298,7 +298,7 @@ mod tests {
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
-            display_name: None,
+            nickname_suggestion: None,
         };
         service.cache_peer_descriptor(descriptor).await;
 

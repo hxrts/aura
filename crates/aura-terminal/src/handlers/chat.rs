@@ -151,7 +151,7 @@ pub async fn handle_chat(
                 for member in &group.members {
                     ConsoleEffects::log_info(
                         ctx.effects(),
-                        &format!("  - {} ({:?})", member.display_name, member.role),
+                        &format!("  - {} ({:?})", member.nickname_suggestion, member.role),
                     )
                     .await?;
                 }

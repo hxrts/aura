@@ -57,7 +57,7 @@ fn test_descriptor(authority: AuthorityId, context: ContextId) -> RendezvousDesc
         valid_from: 0,
         valid_until: 10_000,
         nonce: [0u8; 32],
-        display_name: None,
+        nickname_suggestion: None,
     }
 }
 
@@ -502,7 +502,7 @@ fn test_transport_hint_serialization() {
         valid_from: 0,
         valid_until: 10_000,
         nonce: [0u8; 32],
-        display_name: None,
+        nickname_suggestion: None,
     };
 
     let fact = RendezvousFact::Descriptor(descriptor.clone());
@@ -532,7 +532,7 @@ fn test_relay_transport_hint() {
         valid_from: 0,
         valid_until: 10_000,
         nonce: [0u8; 32],
-        display_name: None,
+        nickname_suggestion: None,
     };
 
     // Should have relay hint

@@ -145,8 +145,8 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
                 return;
             }
 
-            // Settings display name modal
-            QueuedModal::SettingsDisplayName(modal_state) => {
+            // Settings nickname suggestion modal
+            QueuedModal::SettingsNicknameSuggestion(modal_state) => {
                 modal_state.value.push_str(text);
                 return;
             }

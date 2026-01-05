@@ -118,7 +118,7 @@ fn test_command_authorization_levels() {
     // that users need to run before they have an account
     assert_eq!(
         EffectCommand::CreateAccount {
-            display_name: "test".to_string()
+            nickname_suggestion: "test".to_string()
         }
         .authorization_level(),
         CommandAuthorizationLevel::Basic

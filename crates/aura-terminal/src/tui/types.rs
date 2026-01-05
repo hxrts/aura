@@ -703,13 +703,13 @@ impl AuthoritySubSection {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AuthorityInfo {
     pub id: String,
-    pub display_name: String,
+    pub nickname_suggestion: String,
     pub short_id: String,
     pub is_current: bool,
 }
 
 impl AuthorityInfo {
-    pub fn new(id: impl Into<String>, display_name: impl Into<String>) -> Self {
+    pub fn new(id: impl Into<String>, nickname_suggestion: impl Into<String>) -> Self {
         let id_str = id.into();
         let short_id = if id_str.len() > 8 {
             id_str[..8].to_string()
@@ -718,7 +718,7 @@ impl AuthorityInfo {
         };
         Self {
             id: id_str,
-            display_name: display_name.into(),
+            nickname_suggestion: nickname_suggestion.into(),
             short_id,
             is_current: false,
         }
@@ -1216,7 +1216,7 @@ impl From<aura_app::ui::types::contacts::ReadReceiptPolicy> for ReadReceiptPolic
 pub struct Contact {
     pub id: String,
     pub nickname: String,
-    pub suggested_name: Option<String>,
+    pub nickname_suggestion: Option<String>,
     pub status: ContactStatus,
     pub is_guardian: bool,
     /// Read receipt policy for this contact (privacy-first default: disabled)
@@ -1243,7 +1243,7 @@ impl Contact {
     }
 
     pub fn with_suggestion(mut self, name: impl Into<String>) -> Self {
-        self.suggested_name = Some(name.into());
+        self.nickname_suggestion = Some(name.into());
         self
     }
 }
@@ -1409,10 +1409,10 @@ impl HomeSummary {
 
 impl From<&AppContact> for Contact {
     fn from(c: &AppContact) -> Self {
-        // Use suggested_name as default nickname if nickname is empty
+        // Use nickname_suggestion as default nickname if nickname is empty
         let nickname = if !c.nickname.is_empty() {
             c.nickname.clone()
-        } else if let Some(suggested) = &c.suggested_name {
+        } else if let Some(suggested) = &c.nickname_suggestion {
             suggested.clone()
         } else {
             String::new()
@@ -1421,7 +1421,7 @@ impl From<&AppContact> for Contact {
         Self {
             id: c.id.to_string(),
             nickname,
-            suggested_name: c.suggested_name.clone(),
+            nickname_suggestion: c.nickname_suggestion.clone(),
             status: if c.is_online {
                 ContactStatus::Active
             } else {
@@ -1720,7 +1720,7 @@ pub fn format_contact_name(authority_id: &str, contacts: &[Contact]) -> String {
         if !contact.nickname.is_empty() {
             return contact.nickname.clone();
         }
-        if let Some(name) = contact.suggested_name.as_ref() {
+        if let Some(name) = contact.nickname_suggestion.as_ref() {
             if !name.is_empty() {
                 return name.clone();
             }

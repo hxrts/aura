@@ -36,9 +36,9 @@ pub async fn handle_query(
                 Ok(contact) => {
                     // Format contact info for terminal display
                     let id_str = contact.id.to_string();
-                    let display_name = if !contact.nickname.is_empty() {
+                    let effective_name = if !contact.nickname.is_empty() {
                         contact.nickname.clone()
-                    } else if let Some(ref suggested) = contact.suggested_name {
+                    } else if let Some(ref suggested) = contact.nickname_suggestion {
                         suggested.clone()
                     } else {
                         id_str.chars().take(8).collect::<String>() + "..."
@@ -46,7 +46,7 @@ pub async fn handle_query(
 
                     let info = format!(
                         "User: {}\nID: {}\nOnline: {}\nGuardian: {}\nResident: {}",
-                        display_name,
+                        effective_name,
                         id_str,
                         if contact.is_online { "Yes" } else { "No" },
                         if contact.is_guardian { "Yes" } else { "No" },

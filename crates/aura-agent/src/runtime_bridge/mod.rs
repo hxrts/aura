@@ -2483,10 +2483,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
 
         // Settings service not yet implemented - return available data
-        // When implemented, would provide: display_name, mfa_policy from profile facts
-        let (display_name, mfa_policy) = match self.try_load_account_config().await {
+        // When implemented, would provide: nickname_suggestion, mfa_policy from profile facts
+        let (nickname_suggestion, mfa_policy) = match self.try_load_account_config().await {
             Ok(Some((_key, config))) => (
-                config.display_name.unwrap_or_default(),
+                config.nickname_suggestion.unwrap_or_default(),
                 config.mfa_policy.unwrap_or_else(|| "disabled".to_string()),
             ),
             Ok(None) => (String::new(), "disabled".to_string()),
@@ -2497,7 +2497,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         };
 
         SettingsBridgeState {
-            display_name,
+            nickname_suggestion,
             mfa_policy,
             threshold_k,
             threshold_n,
@@ -2565,9 +2565,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         devices
     }
 
-    async fn set_display_name(&self, name: &str) -> Result<(), IntentError> {
+    async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError> {
         let (key, mut config) = self.load_account_config().await?;
-        config.display_name = Some(name.to_string());
+        config.nickname_suggestion = Some(name.to_string());
         self.store_account_config(&key, &config).await
     }
 

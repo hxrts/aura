@@ -31,8 +31,8 @@ pub struct NicknameModalState {
     pub contact_id: String,
     /// Current nickname value
     pub value: String,
-    /// Suggested name (shown as hint when editing)
-    pub suggested_name: Option<String>,
+    /// Nickname suggestion (shown as hint when editing)
+    pub nickname_suggestion: Option<String>,
     /// Error message if any
     pub error: Option<String>,
 }
@@ -44,15 +44,15 @@ impl NicknameModalState {
         Self {
             contact_id: contact_id.to_string(),
             value: current_name.to_string(),
-            suggested_name: None,
+            nickname_suggestion: None,
             error: None,
         }
     }
 
-    /// Set the suggested name (shown as hint in the modal)
+    /// Set the nickname suggestion (shown as hint in the modal)
     #[must_use]
     pub fn with_suggestion(mut self, suggested: Option<String>) -> Self {
-        self.suggested_name = suggested;
+        self.nickname_suggestion = suggested;
         self
     }
 
@@ -60,7 +60,7 @@ impl NicknameModalState {
     pub fn reset(&mut self) {
         self.contact_id.clear();
         self.value.clear();
-        self.suggested_name = None;
+        self.nickname_suggestion = None;
         self.error = None;
     }
 

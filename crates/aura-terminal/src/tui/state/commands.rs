@@ -141,8 +141,8 @@ pub enum DispatchCommand {
     ApproveRecovery,
 
     // Settings screen
-    UpdateDisplayName {
-        display_name: String,
+    UpdateNicknameSuggestion {
+        nickname_suggestion: String,
     },
     UpdateMfaPolicy {
         policy: MfaPolicy,

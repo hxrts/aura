@@ -53,8 +53,8 @@ impl PeerInvitationStatus {
 pub struct DiscoveredPeerInfo {
     /// Authority ID (hex string)
     pub authority_id: String,
-    /// Display name if available
-    pub display_name: Option<String>,
+    /// Nickname suggestion if available
+    pub nickname_suggestion: Option<String>,
     /// IP address and port
     pub address: String,
     /// Discovery method (LAN, relay, etc.)
@@ -72,15 +72,15 @@ impl DiscoveredPeerInfo {
             authority_id: authority_id.into(),
             address: address.into(),
             discovery_method: "LAN".to_string(),
-            display_name: None,
+            nickname_suggestion: None,
             age_secs: 0,
             invitation_status: PeerInvitationStatus::None,
         }
     }
 
-    /// Set the display name
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.display_name = Some(name.into());
+    /// Set the nickname suggestion
+    pub fn with_nickname_suggestion(mut self, name: impl Into<String>) -> Self {
+        self.nickname_suggestion = Some(name.into());
         self
     }
 
@@ -111,10 +111,10 @@ impl DiscoveredPeerInfo {
         self
     }
 
-    /// Get display label (name or truncated authority ID)
+    /// Get display label (nickname or truncated authority ID)
     #[must_use]
     pub fn display_label(&self) -> String {
-        if let Some(name) = &self.display_name {
+        if let Some(name) = &self.nickname_suggestion {
             name.clone()
         } else {
             // Show first 8 and last 4 chars of authority ID
@@ -347,7 +347,7 @@ mod tests {
     #[test]
     fn test_discovered_peer_info() {
         let peer = DiscoveredPeerInfo::new("abc123def456", "192.168.1.100:8080")
-            .with_name("Alice")
+            .with_nickname_suggestion("Alice")
             .with_method("LAN")
             .with_age(120);
 

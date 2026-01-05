@@ -28,8 +28,8 @@ pub enum SuggestionPolicy {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct MySuggestion {
-    /// Display name to share
-    pub display_name: Option<String>,
+    /// Nickname suggestion to share (what you want to be called)
+    pub nickname_suggestion: Option<String>,
     /// Status message to share
     pub status: Option<String>,
 }
@@ -44,10 +44,10 @@ pub struct MySuggestion {
 pub struct Contact {
     /// Contact identifier (authority ID)
     pub id: AuthorityId,
-    /// Nickname (user-assigned name)
+    /// Nickname (user-assigned name for this contact)
     pub nickname: String,
-    /// Suggested name (from contact or system)
-    pub suggested_name: Option<String>,
+    /// Nickname suggestion (what the contact wants to be called)
+    pub nickname_suggestion: Option<String>,
     /// Whether this contact is a guardian
     pub is_guardian: bool,
     /// Whether this contact is a home resident
@@ -167,7 +167,7 @@ impl ContactsState {
 
     /// Filter contacts by a search term.
     ///
-    /// Matches against nickname and suggested_name (case-insensitive).
+    /// Matches against nickname and nickname_suggestion (case-insensitive).
     /// Returns all contacts if filter is empty.
     pub fn filter_by(&self, filter: &str) -> Vec<&Contact> {
         if filter.is_empty() {
@@ -178,7 +178,7 @@ impl ContactsState {
             .values()
             .filter(|c| {
                 c.nickname.to_lowercase().contains(&filter_lower)
-                    || c.suggested_name
+                    || c.nickname_suggestion
                         .as_ref()
                         .map(|n| n.to_lowercase().contains(&filter_lower))
                         .unwrap_or(false)
@@ -196,15 +196,15 @@ impl ContactsState {
         self.contacts.values().filter(|c| c.is_resident)
     }
 
-    /// Get display name for a contact.
+    /// Get effective name for a contact.
     ///
-    /// Returns nickname if set, otherwise suggested_name, otherwise the ID as fallback.
-    pub fn get_display_name(&self, id: &AuthorityId) -> String {
+    /// Returns nickname if set, otherwise nickname_suggestion, otherwise the ID as fallback.
+    pub fn effective_name(&self, id: &AuthorityId) -> String {
         if let Some(contact) = self.contact(id) {
             if !contact.nickname.is_empty() {
                 return contact.nickname.clone();
             }
-            if let Some(name) = &contact.suggested_name {
+            if let Some(name) = &contact.nickname_suggestion {
                 return name.clone();
             }
         }
@@ -264,7 +264,7 @@ impl ContactsState {
                 Contact {
                     id: target,
                     nickname,
-                    suggested_name: None,
+                    nickname_suggestion: None,
                     is_guardian: false,
                     is_resident: false,
                     last_interaction: None,

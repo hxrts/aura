@@ -185,8 +185,8 @@ pub struct LanPeerInfo {
     pub address: String,
     /// When this peer was discovered (ms since epoch)
     pub discovered_at_ms: u64,
-    /// Display name if available from the descriptor
-    pub display_name: Option<String>,
+    /// Nickname suggestion if available from the descriptor
+    pub nickname_suggestion: Option<String>,
 }
 
 // =============================================================================
@@ -266,8 +266,8 @@ pub struct InvitationInfo {
 /// are derived views obtained from signals, not from here.
 #[derive(Debug, Clone, Default)]
 pub struct SettingsBridgeState {
-    /// User's display name
-    pub display_name: String,
+    /// User's nickname suggestion (what they want to be called)
+    pub nickname_suggestion: String,
     /// MFA policy setting
     pub mfa_policy: String,
     /// Threshold signing configuration (k of n)
@@ -789,8 +789,8 @@ pub trait RuntimeBridge: Send + Sync {
     /// List devices for the current account (best effort).
     async fn list_devices(&self) -> Vec<BridgeDeviceInfo>;
 
-    /// Update display name
-    async fn set_display_name(&self, name: &str) -> Result<(), IntentError>;
+    /// Update nickname suggestion (what the user wants to be called)
+    async fn set_nickname_suggestion(&self, name: &str) -> Result<(), IntentError>;
 
     /// Update MFA policy
     async fn set_mfa_policy(&self, policy: &str) -> Result<(), IntentError>;
@@ -1306,7 +1306,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
         Vec::new()
     }
 
-    async fn set_display_name(&self, _name: &str) -> Result<(), IntentError> {
+    async fn set_nickname_suggestion(&self, _name: &str) -> Result<(), IntentError> {
         Err(IntentError::no_agent(
             "Settings update not available in offline mode",
         ))
