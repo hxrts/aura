@@ -52,20 +52,15 @@ impl fmt::Display for InvitationError {
 impl std::error::Error for InvitationError {}
 
 /// Role for channel invitations
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ChannelRole {
     /// Full participant with send/receive
+    #[default]
     Participant,
     /// Read-only observer
     Observer,
     /// Administrator with moderation rights
     Admin,
-}
-
-impl Default for ChannelRole {
-    fn default() -> Self {
-        Self::Participant
-    }
 }
 
 /// A validated invitation configuration
