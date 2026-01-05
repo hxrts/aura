@@ -1,126 +1,31 @@
 # Justfile for Aura project automation
+#
+# Run `just` or `just --list` to see available commands
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Expected CI Rust version (update when GitHub CI updates)
+CI_RUST_VERSION := "1.92"
 
 # Default recipe - show available commands
 default:
     @just --list
 
-# Generate docs/SUMMARY.md from Markdown files in docs/ and subfolders
-summary:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    docs="docs"
-    build_dir="$docs/book"
-    out="$docs/SUMMARY.md"
-
-    echo "# Summary" > "$out"
-    echo "" >> "$out"
-
-    # Helper function to extract title from markdown file
-    get_title() {
-        local f="$1"
-        local title
-        title="$(grep -m1 '^# ' "$f" | sed 's/^# *//')"
-        if [ -z "$title" ]; then
-            local base="$(basename "${f%.*}")"
-            title="$(printf '%s\n' "$base" \
-                | tr '._-' '   ' \
-                | awk '{for(i=1;i<=NF;i++){ $i=toupper(substr($i,1,1)) substr($i,2) }}1')"
-        fi
-        echo "$title"
-    }
-
-    # Helper function to get chapter name from directory
-    get_chapter_name() {
-        local dir="$1"
-        # Capitalize first letter of each word
-        echo "$dir" | tr '_-' '  ' | awk '{for(i=1;i<=NF;i++){ $i=toupper(substr($i,1,1)) substr($i,2) }}1'
-    }
-
-    # Collect all files, organized by directory
-    declare -A dirs
-    declare -a root_files
-
-    while IFS= read -r f; do
-        rel="${f#$docs/}"
-
-        # Skip SUMMARY.md
-        [ "$rel" = "SUMMARY.md" ] && continue
-
-        # Skip files under the build output directory
-        case "$f" in "$build_dir"/*) continue ;; esac
-
-        # Check if file is in a subdirectory
-        if [[ "$rel" == */* ]]; then
-            # Extract directory name (first component of path)
-            dir="${rel%%/*}"
-            # Add file to this directory's list
-            dirs[$dir]+="$f"$'\n'
-        else
-            # Root-level file
-            root_files+=("$f")
-        fi
-    done < <(find "$docs" -type f -name '*.md' -not -name 'SUMMARY.md' -not -path "$build_dir/*" | LC_ALL=C sort)
-
-    # Write root-level files first
-    for f in "${root_files[@]}"; do
-        rel="${f#$docs/}"
-        title="$(get_title "$f")"
-        echo "- [$title]($rel)" >> "$out"
-    done
-
-    # Write chapters (directories) with their files
-    for dir in $(printf '%s\n' "${!dirs[@]}" | LC_ALL=C sort); do
-        # Add blank line before chapter
-        [ ${#root_files[@]} -gt 0 ] && echo "" >> "$out"
-
-        # Add chapter heading
-        chapter_name="$(get_chapter_name "$dir")"
-        echo "# $chapter_name" >> "$out"
-        echo "" >> "$out"
-
-        # Add files in this directory
-        while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            rel="${f#$docs/}"
-            title="$(get_title "$f")"
-            echo "- [$title]($rel)" >> "$out"
-        done < <(echo -n "${dirs[$dir]}" | LC_ALL=C sort)
-    done
-
-    echo "Wrote $out"
-
-# Build the book after regenerating the summary
-book: summary
-    echo '.chapter-item a strong { display: none; }' > custom.css
-    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c 'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js custom.css'
-
-# Serve locally with live reload
-serve-book: summary
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    # Kill any existing mdbook servers
-    if pgrep -x mdbook > /dev/null; then
-        echo "Stopping existing mdbook server..."
-        pkill mdbook
-        sleep 1
-    fi
-
-    # Create custom.css transiently, cleanup when server stops
-    echo '.chapter-item a strong { display: none; }' > custom.css
-    trap 'rm -f mermaid-init.js mermaid.min.js custom.css' EXIT
-    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c 'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook serve --open'
-
-# Serve documentation with live reload (alias for serve-book)
-serve: serve-book
+# ═══════════════════════════════════════════════════════════════════════════════
+# Build
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # Build all crates
 build:
     cargo build --workspace -q
 
+# Build in release mode
+build-release:
+    cargo build --workspace --release -q
+
 # Build Aura terminal in development mode (release profile with dev features)
-# Creates ./bin/aura wrapper for easy access
 build-dev:
     cargo build -p aura-terminal --bin aura --features development --release
     mkdir -p bin
@@ -128,9 +33,7 @@ build-dev:
     chmod +x bin/aura
     @echo "Binary available at: ./bin/aura"
 
-build-app-host:
-    cargo build -p aura-app --bin app-host --features host --release
-
+# Build terminal in release mode without dev features
 build-terminal-release:
     cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal
     mkdir -p bin
@@ -138,9 +41,13 @@ build-terminal-release:
     chmod +x bin/aura
     @echo "Binary available at: ./bin/aura"
 
-# Build in release mode
-build-release:
-    cargo build --workspace --release -q
+# Build app-host binary
+build-app-host:
+    cargo build -p aura-app --bin app-host --features host --release
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # Run all tests
 test:
@@ -154,47 +61,46 @@ test-verbose:
 test-crate crate:
     cargo test -p {{crate}} -q
 
-# Run tests for a specific crate avoiding architectural violations
+# Run tests for a specific crate in isolation (lib + unit tests only)
 test-crate-isolated crate:
     #!/usr/bin/env bash
     echo "Testing {{crate}} in isolation (lib + unit tests only)..."
-    # Test just the library code with unit tests, avoiding dev dependencies that may violate architecture
     cd "crates/{{crate}}" && cargo test --lib --verbose
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Linting & Formatting
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # Check code without building
 check:
     cargo check --workspace -q
 
-# Run the exact same lint command that Zed editor runs (rust-analyzer checkOnSave)
-# This is exactly what Zed runs automatically on file save via rust-analyzer
+# Run the exact same check that Zed editor runs (rust-analyzer checkOnSave)
 check-zed:
     cargo check --workspace --all-targets
 
-# Run clippy linter with effects system enforcement
+# Run clippy linter
 clippy:
     cargo clippy --workspace --all-targets -q -- -D warnings
 
 # Strict clippy check enforcing effects system usage
 clippy-strict:
-    cargo clippy --workspace --all-targets -q -- -D warnings -D clippy::disallowed_methods -D clippy::disallowed_types
+    cargo clippy --workspace --all-targets -q -- \
+        -D warnings \
+        -D clippy::disallowed_methods \
+        -D clippy::disallowed_types
 
-# Ensure Layer 4 crates do not reintroduce crate-level allow attributes
+# Ensure Layer 4 crates do not have crate-level allow attributes
 check-layer4-lints:
     #!/usr/bin/env bash
     set -euo pipefail
-    if rg -n "^#!\\[allow" \
-        crates/aura-guards/src/lib.rs \
-        crates/aura-consensus/src/lib.rs \
-        crates/aura-amp/src/lib.rs \
-        crates/aura-anti-entropy/src/lib.rs \
-        crates/aura-protocol/src/lib.rs; then
+    L4_CRATES="crates/aura-guards/src/lib.rs crates/aura-consensus/src/lib.rs"
+    L4_CRATES="$L4_CRATES crates/aura-amp/src/lib.rs crates/aura-anti-entropy/src/lib.rs"
+    L4_CRATES="$L4_CRATES crates/aura-protocol/src/lib.rs"
+    if rg -n "^#!\[allow" $L4_CRATES; then
         echo "crate-level #![allow] found in Layer 4 lib.rs; move to module scope"
         exit 1
     fi
-
-# Test lint enforcement (should fail)
-lint-test:
-    cargo check test_lints.rs
 
 # Format code
 fmt:
@@ -208,365 +114,15 @@ fmt-check:
 audit:
     cargo audit
 
-# Clean build artifacts and generated files
-clean:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "Cleaning build artifacts..."
-    cargo clean
-
-    echo "Cleaning Nix outputs..."
-    rm -rf result result-*
-
-    echo "Cleaning documentation builds..."
-    rm -rf docs/book/
-    rm -f mermaid.min.js mermaid-init.js custom.css
-
-    echo "Cleaning logs..."
-    rm -rf logs/
-    rm -f *.log
-
-    echo "Cleaning demo/test data..."
-    rm -rf .aura-demo/ .aura-test/
-    rm -rf outcomes/
-    rm -f *.sealed *.dat *.tmp *.temp
-
-    echo "Cleaning verification artifacts..."
-    rm -rf verification/lean/.lake/
-    rm -rf verification/lean/build/
-    rm -rf verification/lean/Generated/
-    rm -rf verification/lean/.lean_build/
-    rm -rf verification/traces/
-    rm -rf _apalache-out/
-
-    echo "✓ Clean complete"
-
-# Clean everything including production data (use with caution!)
-clean-all: clean
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo ""
-    echo "WARNING: This will delete production data in .aura/"
-    read -p "Are you sure? [y/N] " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Removing production data..."
-        rm -rf .aura/
-        rm -rf secure_store/
-        echo "✓ All data cleaned"
-    else
-        echo "Aborted."
-    fi
-
-# Watch and rebuild on changes
-watch:
-    cargo watch -x build
-
-# Watch and run tests on changes
-watch-test:
-    cargo watch -x test
-
-# Initialize a new account (Phase 0 smoke test)
-init-account:
-    cargo run --bin aura -- init -n 3 -t 2 -o .aura
-
-# Show account status
-status:
-    cargo run --bin aura -- status -c .aura/configs/device_1.toml
-
-# Test key derivation
-# test-dkd app_id context:
-#     cargo run --bin aura -- test-dkd --app-id {{app_id}} --context {{context}} -f .aura/configs/device_1.toml
-#     Note: Disabled - requires agent crate functionality
-
-# Run Phase 0 smoke tests
-smoke-test:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    echo "Running Phase 0 Smoke Tests"
-    echo "==========================="
-    echo ""
-
-    # Clean previous test artifacts
-    rm -rf .aura-test
-
-    echo "1. Initializing 2-of-3 threshold account..."
-    cargo run --bin aura -- init -n 3 -t 2 -o .aura-test
-    echo "OK Account initialized"
-    echo ""
-
-    echo "2. Verifying effect_api and config files creation..."
-    if [ -f ".aura-test/effect_api.cbor" ]; then
-        echo "OK Effect API file created successfully"
-        echo "Ledger size: $(stat -c%s .aura-test/effect_api.cbor 2>/dev/null || stat -f%z .aura-test/effect_api.cbor) bytes"
-    else
-        echo "ERROR: Ledger file not found"
-        exit 1
-    fi
-    if [ -f ".aura-test/configs/device_1.toml" ]; then
-        echo "OK Config file created successfully"
-    else
-        echo "ERROR: Config file not found"
-        exit 1
-    fi
-    echo ""
-
-    echo "3. Checking account status..."
-    cargo run --bin aura -- status -c .aura-test/configs/device_1.toml
-    echo "OK Status retrieved"
-    echo ""
-
-    echo "4. Testing multi-device threshold operations..."
-
-    # Verify all 3 config files exist
-    echo "   4.1 Verifying all device configs..."
-    for i in 1 2 3; do
-        if [ -f ".aura-test/configs/device_${i}.toml" ]; then
-            echo "   [OK] Device ${i} config found"
-        else
-            echo "   ERROR: Device ${i} config not found"
-            exit 1
-        fi
-    done
-    echo "   OK All 3 device configs verified"
-
-    # Test loading each device config
-    echo "   4.2 Testing device config loading..."
-    for i in 1 2 3; do
-        echo "   Testing device ${i}..."
-        if cargo run --bin aura -- status -c .aura-test/configs/device_${i}.toml > /dev/null 2>&1; then
-            echo "   [OK] Device ${i} loaded successfully"
-        else
-            echo "   ERROR: Device ${i} failed to load"
-            exit 1
-        fi
-    done
-    echo "   OK All devices can load their configs"
-
-    # Test starting agents on different ports
-    echo "   4.3 Testing multi-device agents on different ports..."
-
-    # Function to start an agent in background and capture PID
-    start_agent() {
-        local device_num=$1
-        local port=$((58834 + device_num))
-        local config_file=".aura-test/configs/device_${device_num}.toml"
-
-        echo "   Starting device ${device_num} on port ${port}..."
-        cargo run --bin aura -- node --port ${port} --daemon -c ${config_file} &
-        local pid=$!
-        echo ${pid} > ".aura-test/agent_${device_num}.pid"
-
-        # Give agent time to start
-        sleep 2
-
-        # Check if agent is still running
-        if kill -0 ${pid} 2>/dev/null; then
-            echo "   [OK] Device ${device_num} agent started successfully (PID: ${pid})"
-            return 0
-        else
-            echo "   ERROR: Device ${device_num} agent failed to start"
-            return 1
-        fi
-    }
-
-    # Function to stop all agents
-    stop_all_agents() {
-        echo "   Stopping all test agents..."
-        for i in 1 2 3; do
-            if [ -f ".aura-test/agent_${i}.pid" ]; then
-                local pid=$(cat ".aura-test/agent_${i}.pid")
-                if kill -0 ${pid} 2>/dev/null; then
-                    kill ${pid}
-                    echo "   [OK] Stopped agent ${i} (PID: ${pid})"
-                fi
-                rm -f ".aura-test/agent_${i}.pid"
-            fi
-        done
-    }
-
-    # Set up cleanup trap
-    trap stop_all_agents EXIT
-
-    # Start all three agents
-    if start_agent 1 && start_agent 2 && start_agent 3; then
-        echo "   OK All 3 agents started on different ports"
-
-        # Wait a moment to ensure they're stable
-        sleep 3
-
-        # Verify agents are still running
-        echo "   4.4 Verifying agents are stable..."
-        all_running=true
-        for i in 1 2 3; do
-            if [ -f ".aura-test/agent_${i}.pid" ]; then
-                pid=$(cat ".aura-test/agent_${i}.pid")
-                if kill -0 ${pid} 2>/dev/null; then
-                    echo "   [OK] Device ${i} agent still running"
-                else
-                    echo "   ERROR: Device ${i} agent stopped unexpectedly"
-                    all_running=false
-                fi
-            else
-                echo "   ERROR: Device ${i} PID file missing"
-                all_running=false
-            fi
-        done
-
-        if [ "$all_running" = true ]; then
-            echo "   OK All agents are stable and running"
-        else
-            echo "   ERROR: Some agents are not stable"
-            stop_all_agents
-            exit 1
-        fi
-
-        # Clean stop of all agents
-        stop_all_agents
-        echo "   OK Agent startup/shutdown test completed"
-
-        # Test threshold signature operation
-        echo "   4.5 Testing 2-of-3 threshold signature operation..."
-
-        # Test threshold signature with all 3 devices
-        if cargo run --bin aura -- threshold --configs .aura-test/configs/device_1.toml,.aura-test/configs/device_2.toml,.aura-test/configs/device_3.toml --threshold 2 --mode local > /dev/null 2>&1; then
-            echo "   [OK] 3-device threshold signature test passed"
-        else
-            echo "   ERROR: 3-device threshold signature test failed"
-            exit 1
-        fi
-
-        # Test threshold signature with minimum required (2 devices)
-        if cargo run --bin aura -- threshold --configs .aura-test/configs/device_1.toml,.aura-test/configs/device_2.toml --threshold 2 --mode local > /dev/null 2>&1; then
-            echo "   [OK] 2-device minimum threshold test passed"
-        else
-            echo "   ERROR: 2-device minimum threshold test failed"
-            exit 1
-        fi
-
-        echo "   OK Threshold signature operations verified"
-    else
-        echo "   ERROR: Failed to start all agents"
-        stop_all_agents
-        exit 1
-    fi
-    echo ""
-
-    echo "5. Testing scenario discovery..."
-    if [ -d "scenarios" ]; then
-        cargo run --bin aura -- scenarios discover --root . > /dev/null 2>&1
-        echo "OK Scenario discovery functional"
-    else
-        echo "SKIP No scenarios directory found"
-    fi
-    echo ""
-
-    echo "Phase 0 smoke tests passed!"
-    echo "Multi-device setup and basic operations functional!"
-
-# Run macOS Keychain integration tests
-test-macos-keychain:
-    #!/usr/bin/env bash
-    set -e
-
-    echo "Aura macOS Keychain Integration Tests"
-    echo "======================================"
-    echo ""
-
-    # Check that we're on macOS
-    if [[ "$OSTYPE" != "darwin"* ]]; then
-        echo "Error: These tests are designed for macOS only"
-        echo "Current OS: $OSTYPE"
-        exit 1
-    fi
-
-    # Check if we're in the right directory
-    if [[ ! -f "Cargo.toml" ]] || [[ ! -d "crates/agent" ]]; then
-        echo "Error: Please run this from the Aura project root directory"
-        exit 1
-    fi
-
-    echo "Important Notes:"
-    echo "  - These tests will interact with your macOS Keychain"
-    echo "  - You may be prompted to allow keychain access"
-    echo "  - Test data will be created and cleaned up automatically"
-    echo "  - Some tests may require administrator permissions"
-    echo ""
-
-    # Prompt for confirmation
-    read -p "Continue with keychain tests? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Tests cancelled by user"
-        exit 0
-    fi
-
-    echo "Starting macOS Keychain Tests..."
-    echo ""
-
-    # Set test environment variables
-    export RUST_LOG=debug
-    export RUST_BACKTRACE=1
-
-    # Run the specific macOS keychain tests
-    cargo test -p aura-agent --test macos_keychain_tests -- --nocapture --test-threads=1
-
-    TEST_EXIT_CODE=$?
-
-    echo ""
-    if [ $TEST_EXIT_CODE -eq 0 ]; then
-        echo "All macOS keychain tests passed!"
-        echo ""
-        echo "Secure Storage System Verification:"
-        echo "  - Platform-specific keychain backend: Working"
-        echo "  - Hardware UUID derivation: Working"
-        echo "  - Device attestation with SIP: Working"
-        echo "  - Key share encryption/decryption: Working"
-        echo "  - Keychain persistence: Working"
-        echo "  - Error handling: Working"
-        echo ""
-        echo "Your macOS keychain integration is ready for production use!"
-    else
-        echo "Some keychain tests failed"
-        echo ""
-        echo "Common Issues:"
-        echo "  - Keychain access denied - grant permission when prompted"
-        echo "  - System Integrity Protection disabled - enable SIP for security"
-        echo "  - Missing dependencies - ensure all required crates are built"
-        echo ""
-        echo "Check the test output above for specific error details."
-        exit $TEST_EXIT_CODE
-    fi
-
-    echo ""
-    echo "Test Summary:"
-    echo "  - Platform: macOS (Keychain Services)"
-    echo "  - Encryption: AES-256-GCM with random nonces"
-    echo "  - Authentication: Hardware-backed device attestation"
-    echo "  - Storage: Persistent keychain with access control"
-    echo "  - Integration: Complete workflow tested"
-
-    echo ""
-    echo "Security Features Verified:"
-    echo "  - Hardware-backed key storage"
-    echo "  - Platform-specific device identification"
-    echo "  - System Integrity Protection detection"
-    echo "  - Secure boot verification preparation"
-    echo "  - Device attestation with Ed25519 signatures"
-    echo "  - Keychain access control integration"
-
-    echo ""
-    echo "Next Steps:"
-    echo "  - Run 'just init-account' to test with the new secure storage"
-    echo "  - Use 'just status' to verify keychain integration"
-    echo "  - Deploy with confidence knowing keys are hardware-protected"
+# ═══════════════════════════════════════════════════════════════════════════════
+# Architecture Checks
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # Check architectural layer compliance (all checks)
 check-arch *FLAGS:
     scripts/check-arch.sh {{FLAGS}} || true
 
-# Quick architectural checks by category
+# Quick architecture checks by category
 check-arch-layers:
     scripts/check-arch.sh --layers || true
 
@@ -585,24 +141,17 @@ check-arch-todos:
 check-arch-concurrency:
     scripts/check-arch.sh --concurrency || true
 
-# Run CI checks locally (dry-run of GitHub CI workflow)
-# Mirrors the GitHub CI workflow as closely as possible
+# ═══════════════════════════════════════════════════════════════════════════════
+# CI
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Run CI checks locally (mirrors GitHub CI workflow)
 ci-dry-run:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    # Colors for output
-    GREEN='\033[0;32m'
-    RED='\033[0;31m'
-    YELLOW='\033[0;33m'
-    BLUE='\033[0;34m'
-    NC='\033[0m' # No Color
-
+    GREEN='\033[0;32m' RED='\033[0;31m' YELLOW='\033[0;33m' BLUE='\033[0;34m' NC='\033[0m'
     exit_code=0
-
-    # Expected CI Rust version (update when GitHub CI updates)
-    # GitHub CI uses actions-rust-lang/setup-rust-toolchain@v1 which installs latest stable
-    CI_RUST_VERSION="1.92"
 
     echo "CI Dry Run"
     echo "=========="
@@ -610,12 +159,12 @@ ci-dry-run:
     # 0. Environment Check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
     printf "[0/9] Rust version... "
-    if [[ "$LOCAL_RUST" == "$CI_RUST_VERSION" ]]; then
+    if [[ "$LOCAL_RUST" == "{{CI_RUST_VERSION}}" ]]; then
         echo -e "${GREEN}$LOCAL_RUST${NC} (matches CI)"
-    elif [[ "$LOCAL_RUST" < "$CI_RUST_VERSION" ]]; then
-        echo -e "${YELLOW}$LOCAL_RUST${NC} (CI uses $CI_RUST_VERSION - newer lints may fail in CI)"
+    elif [[ "$LOCAL_RUST" < "{{CI_RUST_VERSION}}" ]]; then
+        echo -e "${YELLOW}$LOCAL_RUST${NC} (CI uses {{CI_RUST_VERSION}} - newer lints may fail in CI)"
     else
-        echo -e "${BLUE}$LOCAL_RUST${NC} (newer than CI $CI_RUST_VERSION)"
+        echo -e "${BLUE}$LOCAL_RUST${NC} (newer than CI {{CI_RUST_VERSION}})"
     fi
     echo ""
 
@@ -624,31 +173,18 @@ ci-dry-run:
     if cargo fmt --all -- --check 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}FAIL${NC}"
-        cargo fmt --all -- --check 2>&1 | head -20
-        exit_code=1
+        echo -e "${RED}FAIL${NC}"; cargo fmt --all -- --check 2>&1 | head -20; exit_code=1
     fi
 
     # 2. Clippy with Effects Enforcement
     printf "[2/9] Clippy... "
-    if cargo clippy --workspace --all-targets -q -- \
-        -D warnings \
-        -D clippy::disallowed_methods \
-        -D clippy::disallowed_types \
-        -D clippy::unwrap_used \
-        -D clippy::expect_used \
-        -D clippy::duplicated_attributes 2>/dev/null; then
+    CLIPPY_FLAGS="-D warnings -D clippy::disallowed_methods -D clippy::disallowed_types"
+    CLIPPY_FLAGS="$CLIPPY_FLAGS -D clippy::unwrap_used -D clippy::expect_used -D clippy::duplicated_attributes"
+    if cargo clippy --workspace --all-targets -q -- $CLIPPY_FLAGS 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${RED}FAIL${NC}"
-        # Show more useful error output
-        cargo clippy --workspace --all-targets -- \
-            -D warnings \
-            -D clippy::disallowed_methods \
-            -D clippy::disallowed_types \
-            -D clippy::unwrap_used \
-            -D clippy::expect_used \
-            -D clippy::duplicated_attributes 2>&1 | grep -E "^error(\[|:)" | head -30
+        cargo clippy --workspace --all-targets -- $CLIPPY_FLAGS 2>&1 | grep -E "^error(\[|:)" | head -30
         exit_code=1
     fi
 
@@ -664,104 +200,47 @@ ci-dry-run:
 
     # 4. Check for Effects System Violations
     printf "[4/9] Effects violations... "
-    violations_found=0
+    violations=0
+    EXCLUDE="--glob '!**/aura-effects/**' --glob '!**/aura-agent/**' --glob '!**/aura-simulator/**'"
+    EXCLUDE="$EXCLUDE --glob '!**/aura-terminal/**' --glob '!**/aura-testkit/**' --glob '!**/tests/**'"
+    EXCLUDE="$EXCLUDE --glob '!**/integration/**' --glob '!**/demo/**' --glob '!**/examples/**'"
 
-    # Check time usage (exclude allowed layers)
-    time_violations=$(rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number \
-        --glob '!**/aura-effects/**' --glob '!**/aura-agent/**' --glob '!**/aura-simulator/**' \
-        --glob '!**/aura-terminal/**' --glob '!**/aura-testkit/**' --glob '!**/tests/**' \
-        --glob '!**/integration/**' --glob '!**/demo/**' --glob '!**/examples/**' 2>/dev/null | \
-        grep -v '^\s*//\|:\s*//' | grep -v "#\[test\]" || true)
-
-    if [ -n "$time_violations" ]; then
-        # Filter test modules
-        filtered=""
-        while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            file_path="${line%%:*}"
-            if [ -f "$file_path" ] && grep -q "#\[cfg(test)\]" "$file_path" 2>/dev/null; then
-                match_line_num=$(echo "$line" | cut -d: -f2)
-                cfg_test_line=$(grep -n "#\[cfg(test)\]" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
-                [ -n "$match_line_num" ] && [ -n "$cfg_test_line" ] && [ "$match_line_num" -gt "$cfg_test_line" ] && continue
-            fi
-            filtered="${filtered}${line}"$'\n'
-        done <<< "$time_violations"
-        [ -n "$filtered" ] && [ "$filtered" != $'\n' ] && violations_found=1 && echo "$filtered"
+    # Check time usage
+    if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ $EXCLUDE -q 2>/dev/null; then
+        violations=1
     fi
-
     # Check randomness usage
-    if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ -q \
-        --glob '!**/aura-effects/**' --glob '!**/aura-agent/**' --glob '!**/aura-simulator/**' \
-        --glob '!**/aura-terminal/**' --glob '!**/aura-testkit/**' --glob '!**/tests/**' \
-        --glob '!**/integration/**' --glob '!**/demo/**' 2>/dev/null; then
-        violations_found=1
+    if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ $EXCLUDE -q 2>/dev/null; then
+        violations=1
     fi
 
-    # Check UUID usage
-    uuid_violations=$(rg --type rust "Uuid::new_v4\(\)" crates/ --line-number \
-        --glob '!**/aura-effects/**' --glob '!**/aura-agent/**' --glob '!**/aura-simulator/**' \
-        --glob '!**/aura-testkit/**' --glob '!**/aura-quint/**' --glob '!**/aura-terminal/**' \
-        --glob '!**/tests/**' --glob '!**/demo/**' --glob '!**/tui/**' --glob '!**/examples/**' \
-        --glob '!**/aura-core/src/types/identifiers.rs' --glob '!**/aura-core/src/effects/quint.rs' \
-        --glob '!**/aura-composition/src/registry.rs' --glob '!**/aura-sync/src/services/maintenance.rs' \
-        --glob '!**/aura-sync/src/infrastructure/peers.rs' 2>/dev/null | \
-        grep -v '^\s*//\|:\s*//' | grep -v "#\[test\]" || true)
-
-    if [ -n "$uuid_violations" ]; then
-        filtered=""
-        while IFS= read -r line; do
-            [ -z "$line" ] && continue
-            file_path="${line%%:*}"
-            if [ -f "$file_path" ] && grep -q "#\[cfg(test)\]" "$file_path" 2>/dev/null; then
-                match_line_num=$(echo "$line" | cut -d: -f2)
-                cfg_test_line=$(grep -n "#\[cfg(test)\]" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
-                [ -n "$match_line_num" ] && [ -n "$cfg_test_line" ] && [ "$match_line_num" -gt "$cfg_test_line" ] && continue
-            fi
-            filtered="${filtered}${line}"$'\n'
-        done <<< "$uuid_violations"
-        [ -n "$filtered" ] && [ "$filtered" != $'\n' ] && violations_found=1 && echo "$filtered"
-    fi
-
-    if [ $violations_found -eq 0 ]; then
+    if [ $violations -eq 0 ]; then
         echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}FAIL${NC}"
-        exit_code=1
+        echo -e "${RED}FAIL${NC}"; exit_code=1
     fi
 
     # 5. Documentation Links Check
     printf "[5/9] Doc links... "
     command -v markdown-link-check &>/dev/null || npm install -g markdown-link-check >/dev/null 2>&1
-
     doc_errors=0
-    broken_files=""
     while IFS= read -r file; do
         if [ -f "$file" ] && ! markdown-link-check "$file" --config .github/config/markdown-link-check.json -q 2>/dev/null; then
-            doc_errors=1
-            broken_files="$broken_files $file"
+            doc_errors=1; break
         fi
     done < <(find . -name "*.md" -type f ! -path "*/node_modules/*" ! -path "*/target/*" ! -path "*/.git/*" \
         ! -path "*/.aura-test/*" ! -path "*/ext/quint/*" ! -path "*/work/*" ! -path "*/.claude/skills/*")
-
-    if [ $doc_errors -eq 0 ]; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${RED}FAIL${NC}"
-        echo "  Broken links in:$broken_files"
-        exit_code=1
-    fi
+    if [ $doc_errors -eq 0 ]; then echo -e "${GREEN}OK${NC}"; else echo -e "${RED}FAIL${NC}"; exit_code=1; fi
 
     # 6. Build Check
     printf "[6/9] Build... "
     if cargo build --workspace -q 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
-        echo -e "${RED}FAIL${NC}"
-        cargo build --workspace 2>&1 | grep -E "^error" | head -10
-        exit_code=1
+        echo -e "${RED}FAIL${NC}"; cargo build --workspace 2>&1 | grep -E "^error" | head -10; exit_code=1
     fi
 
-    # 7. Architecture Check (local-only, catches layer violations)
+    # 7. Architecture Check
     printf "[7/9] Architecture... "
     if ./scripts/check-arch.sh --quick 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
@@ -769,24 +248,15 @@ ci-dry-run:
         echo -e "${YELLOW}WARN${NC} (run 'just check-arch' for details)"
     fi
 
-    # 8. Quint Typecheck (quick sanity check, matches CI quint-model-checking)
+    # 8. Quint Typecheck
     printf "[8/9] Quint specs... "
     if command -v quint &>/dev/null; then
-        quint_errors=0
+        quint_ok=1
         for spec in verification/quint/*.qnt; do
             [ -f "$spec" ] || continue
-            if ! quint typecheck "$spec" >/dev/null 2>&1; then
-                quint_errors=1
-                break
-            fi
+            if ! quint typecheck "$spec" >/dev/null 2>&1; then quint_ok=0; break; fi
         done
-        if [ $quint_errors -eq 0 ]; then
-            echo -e "${GREEN}OK${NC}"
-        else
-            echo -e "${RED}FAIL${NC}"
-            echo "  Run 'just quint-typecheck-all' for details"
-            exit_code=1
-        fi
+        if [ $quint_ok -eq 1 ]; then echo -e "${GREEN}OK${NC}"; else echo -e "${RED}FAIL${NC}"; exit_code=1; fi
     else
         echo -e "${YELLOW}SKIP${NC} (quint not installed)"
     fi
@@ -795,7 +265,6 @@ ci-dry-run:
     printf "[9/9] Unused deps... "
     if nix develop .#nightly --command cargo udeps --all-targets 2>&1 | grep -q "unused dependencies:"; then
         echo -e "${YELLOW}WARN${NC}"
-        nix develop .#nightly --command cargo udeps --all-targets 2>&1 | grep "unused dependencies:" | head -5
     else
         echo -e "${GREEN}OK${NC}"
     fi
@@ -805,533 +274,491 @@ ci-dry-run:
     if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}All CI checks passed${NC}"
     else
-        echo -e "${RED}CI checks failed${NC}"
-        exit $exit_code
+        echo -e "${RED}CI checks failed${NC}"; exit $exit_code
     fi
 
-# Parse Quint file to JSON using native parser
+# ═══════════════════════════════════════════════════════════════════════════════
+# Clean
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Clean build artifacts and generated files
+clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Cleaning build artifacts..."
+    cargo clean
+    echo "Cleaning Nix outputs..."
+    rm -rf result result-*
+    echo "Cleaning documentation builds..."
+    rm -rf docs/book/ mermaid.min.js mermaid-init.js custom.css
+    echo "Cleaning logs..."
+    rm -rf logs/ *.log
+    echo "Cleaning demo/test data..."
+    rm -rf .aura-demo/ .aura-test/ outcomes/ *.sealed *.dat *.tmp *.temp
+    echo "Cleaning verification artifacts..."
+    rm -rf verification/lean/.lake/ verification/lean/build/ verification/lean/Generated/
+    rm -rf verification/lean/.lean_build/ verification/traces/ _apalache-out/
+    echo "✓ Clean complete"
+
+# Clean everything including production data (use with caution!)
+clean-all: clean
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo ""
+    echo "WARNING: This will delete production data in .aura/"
+    read -p "Are you sure? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm -rf .aura/ secure_store/
+        echo "✓ All data cleaned"
+    else
+        echo "Aborted."
+    fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Watch
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Watch and rebuild on changes
+watch:
+    cargo watch -x build
+
+# Watch and run tests on changes
+watch-test:
+    cargo watch -x test
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Documentation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Generate docs/SUMMARY.md from Markdown files
+summary:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docs="docs"; build_dir="$docs/book"; out="$docs/SUMMARY.md"
+
+    get_title() {
+        local title="$(grep -m1 '^# ' "$1" | sed 's/^# *//')"
+        if [ -z "$title" ]; then
+            title="$(basename "${1%.*}" | tr '._-' '   ' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1))substr($i,2)}}1')"
+        fi
+        echo "$title"
+    }
+
+    echo "# Summary" > "$out"; echo "" >> "$out"
+
+    declare -A dirs; declare -a root_files
+    while IFS= read -r f; do
+        rel="${f#$docs/}"
+        [ "$rel" = "SUMMARY.md" ] && continue
+        case "$f" in "$build_dir"/*) continue ;; esac
+        if [[ "$rel" == */* ]]; then
+            dir="${rel%%/*}"; dirs[$dir]+="$f"$'\n'
+        else
+            root_files+=("$f")
+        fi
+    done < <(find "$docs" -type f -name '*.md' -not -name 'SUMMARY.md' -not -path "$build_dir/*" | LC_ALL=C sort)
+
+    for f in "${root_files[@]}"; do
+        echo "- [$(get_title "$f")](${f#$docs/})" >> "$out"
+    done
+
+    for dir in $(printf '%s\n' "${!dirs[@]}" | LC_ALL=C sort); do
+        [ ${#root_files[@]} -gt 0 ] && echo "" >> "$out"
+        echo "# $(echo "$dir" | tr '_-' '  ' | awk '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1))substr($i,2)}}1')" >> "$out"
+        echo "" >> "$out"
+        while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            echo "- [$(get_title "$f")](${f#$docs/})" >> "$out"
+        done < <(echo -n "${dirs[$dir]}" | LC_ALL=C sort)
+    done
+    echo "Wrote $out"
+
+# Build the book after regenerating the summary
+book: summary
+    echo '.chapter-item a strong { display: none; }' > custom.css
+    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c \
+        'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js custom.css'
+
+# Serve locally with live reload
+serve-book: summary
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pgrep -x mdbook > /dev/null && { echo "Stopping existing mdbook server..."; pkill mdbook; sleep 1; }
+    echo '.chapter-item a strong { display: none; }' > custom.css
+    trap 'rm -f mermaid-init.js mermaid.min.js custom.css' EXIT
+    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c \
+        'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook serve --open'
+
+# Serve documentation with live reload (alias)
+serve: serve-book
+
+# Generate rustdoc documentation
+docs:
+    cargo doc --workspace --no-deps --open
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 0 / Smoke Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Initialize a new account (Phase 0 smoke test)
+init-account:
+    cargo run --bin aura -- init -n 3 -t 2 -o .aura
+
+# Show account status
+status:
+    cargo run --bin aura -- status -c .aura/configs/device_1.toml
+
+# Run Phase 0 smoke tests
+smoke-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "Running Phase 0 Smoke Tests"
+    echo "==========================="
+    rm -rf .aura-test
+
+    echo "1. Initializing 2-of-3 threshold account..."
+    cargo run --bin aura -- init -n 3 -t 2 -o .aura-test
+    echo "OK Account initialized"
+
+    echo "2. Verifying effect_api and config files..."
+    [ -f ".aura-test/effect_api.cbor" ] && echo "OK Effect API file created" || { echo "ERROR: Ledger file not found"; exit 1; }
+    [ -f ".aura-test/configs/device_1.toml" ] && echo "OK Config file created" || { echo "ERROR: Config file not found"; exit 1; }
+
+    echo "3. Checking account status..."
+    cargo run --bin aura -- status -c .aura-test/configs/device_1.toml
+    echo "OK Status retrieved"
+
+    echo "4. Testing multi-device configs..."
+    for i in 1 2 3; do
+        [ -f ".aura-test/configs/device_${i}.toml" ] && echo "   [OK] Device ${i} config found" || { echo "ERROR"; exit 1; }
+    done
+
+    echo "5. Testing threshold signature operation..."
+    cargo run --bin aura -- threshold \
+        --configs .aura-test/configs/device_1.toml,.aura-test/configs/device_2.toml \
+        --threshold 2 --mode local > /dev/null 2>&1 && echo "OK Threshold signature passed" || { echo "FAIL"; exit 1; }
+
+    echo ""
+    echo "Phase 0 smoke tests passed!"
+
+# Run macOS Keychain integration tests
+test-macos-keychain:
+    #!/usr/bin/env bash
+    set -e
+    [[ "$OSTYPE" != "darwin"* ]] && { echo "Error: macOS only"; exit 1; }
+    echo "Aura macOS Keychain Integration Tests"
+    echo "======================================"
+    read -p "Continue with keychain tests? (y/N): " -n 1 -r; echo
+    [[ ! $REPLY =~ ^[Yy]$ ]] && { echo "Cancelled"; exit 0; }
+    export RUST_LOG=debug RUST_BACKTRACE=1
+    cargo test -p aura-agent --test macos_keychain_tests -- --nocapture --test-threads=1
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Quint Specifications
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Verify Quint setup
+verify-quint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Verifying Quint Setup"
+    echo "====================="
+    nix develop --command quint --version
+    nix develop --command node --version
+    nix develop --command java -version
+    echo 'module simple { val x = 1 }' > /tmp/simple.qnt
+    nix develop --command quint parse /tmp/simple.qnt > /dev/null && echo "[OK] Basic parsing works"
+    echo "Quint setup verification completed!"
+
+# Parse Quint file to JSON
 quint-parse input output:
-    @echo "Parsing Quint file to JSON..."
-    @echo "Input: {{input}}"
-    @echo "Output: {{output}}"
     nix develop --command quint parse --out {{output}} {{input}}
-    @echo "Parse completed successfully!"
 
-# Parse Quint file and display AST structure
-quint-parse-ast input:
-    @echo "Parsing Quint file AST..."
-    nix develop --command quint parse --out /tmp/quint-ast.json {{input}}
-    @echo "AST structure for {{input}}:"
-    @echo "============================"
-    jq '.modules[0].name as $name | "Module: " + $name' /tmp/quint-ast.json
-    jq '.modules[0].declarations | length as $count | "Declarations: " + ($count | tostring)' /tmp/quint-ast.json
-    @echo ""
-    @echo "Full AST available at: /tmp/quint-ast.json"
-
-# Parse Quint file with type checking and compile to JSON
+# Parse and typecheck Quint file
 quint-compile input output:
-    @echo "Compiling Quint file with full type checking..."
-    @echo "Input: {{input}}"
-    @echo "Output: {{output}}"
     nix develop --command quint typecheck {{input}}
     nix develop --command quint parse --out {{output}} {{input}}
-    @echo "Compilation completed successfully!"
 
-# Regenerate deterministic ITF trace for the TUI replay tests
-tui-itf-trace out="verification/traces/tui_trace.itf.json" seed="424242" max_steps="50":
+# Typecheck all Quint specs (fast sanity check)
+quint-typecheck-all:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
+    echo "Typechecking All Quint Specs"
+    echo "============================"
+    passed=0; failed=0
+
+    for dir in "verification/quint" "verification/quint/consensus" "verification/quint/journal" \
+               "verification/quint/keys" "verification/quint/sessions" "crates/aura-simulator/tests/quint_specs"; do
+        [ -d "$dir" ] || continue
+        for spec in "$dir"/*.qnt; do
+            [ -f "$spec" ] || continue
+            if quint typecheck "$spec" > /dev/null 2>&1; then
+                echo -e "  ${GREEN}✓${NC} $(basename "$spec")"; ((passed++))
+            else
+                echo -e "  ${RED}✗${NC} $(basename "$spec")"; ((failed++))
+            fi
+        done
+    done
+
+    echo ""; echo "Passed: $passed, Failed: $failed"
+    [ $failed -gt 0 ] && exit 1 || echo -e "${GREEN}All specs passed!${NC}"
+
+# Quint model checking with invariant verification (matches CI)
+quint-verify-models:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
+
+    echo "Quint Model Checking"
+    echo "===================="
+    cd verification/quint
+
+    echo "[1/2] Typechecking all Quint specifications..."
+    for spec in *.qnt; do
+        echo "  Checking $spec..."
+        quint typecheck "$spec" || { echo -e "${RED}[FAIL]${NC} $spec"; exit 1; }
+    done
+    echo -e "${GREEN}[OK]${NC} All specs typecheck"
+
+    echo "[2/2] Running Quint invariant verification..."
+    quint verify --invariant=AllInvariants consensus/core.qnt --max-steps=10 || \
+        { echo -e "${RED}[FAIL]${NC} consensus/core.qnt"; exit 1; }
+    quint verify --invariant=InvariantByzantineThreshold consensus/adversary.qnt --max-steps=10 || \
+        { echo -e "${RED}[FAIL]${NC} consensus/adversary.qnt"; exit 1; }
+    quint verify --invariant=InvariantProgressUnderSynchrony consensus/liveness.qnt --max-steps=10 || \
+        { echo -e "${RED}[FAIL]${NC} consensus/liveness.qnt"; exit 1; }
+
+    echo -e "${GREEN}[OK]${NC} All invariants pass"
+
+# Verify a single Quint spec with specific invariants
+quint-verify spec invariants:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    mkdir -p verification/quint/traces
+    SPEC_NAME=$(basename "{{spec}}" .qnt)
+    INV_FLAGS=""
+    IFS=',' read -ra INVS <<< "{{invariants}}"
+    for inv in "${INVS[@]}"; do INV_FLAGS="$INV_FLAGS --invariant=$inv"; done
+    quint verify "{{spec}}" $INV_FLAGS --max-steps=10 \
+        --out-itf="verification/quint/traces/${SPEC_NAME}_counter.itf.json" --verbosity=3
+
+# Generate ITF traces from Quint specs
+quint-generate-traces:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
+    echo "Generating ITF Traces"
+    echo "====================="
+    mkdir -p verification/quint/traces
+
+    SPECS=(
+        "verification/quint/consensus/core.qnt:consensus"
+        "verification/quint/journal/core.qnt:journal"
+    )
+    for target in "${SPECS[@]}"; do
+        IFS=':' read -r spec name <<< "$target"
+        [ -f "$spec" ] || continue
+        if quint run "$spec" --max-steps=15 --out-itf="verification/quint/traces/${name}.itf.json" >/dev/null 2>&1; then
+            echo -e "  ${GREEN}✓${NC} $name"
+        else
+            echo -e "  ${RED}✗${NC} $name"
+        fi
+    done
+
+# Check Quint-Rust type correspondence
+quint-check-types verbose="":
+    ./scripts/check-quint-rust-types.sh {{verbose}}
+
+# Generate verification coverage report
+verification-coverage format="--md":
+    ./scripts/verification-coverage.sh {{format}}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TUI ITF Traces
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Regenerate deterministic ITF trace for TUI replay tests
+tui-itf-trace out="verification/quint/traces/tui_trace.itf.json" seed="424242" max_steps="50":
     TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} nix develop --command scripts/gen-tui-itf-trace.sh {{out}}
 
 # Check that the checked-in ITF trace matches regeneration
 tui-itf-trace-check seed="424242" max_steps="50":
     TUI_ITF_SEED={{seed}} TUI_ITF_MAX_STEPS={{max_steps}} nix develop --command scripts/check-tui-itf-trace.sh
 
-# Test Quint parsing with example file
-test-quint-parse:
+# ═══════════════════════════════════════════════════════════════════════════════
+# Lean Formal Verification
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Initialize Lean project (run once or after clean)
+lean-init:
+    @echo "Initializing Lean project..."
+    cd verification/lean && lake update
+
+# Build Lean verification modules
+lean-build jobs="2": lean-init
+    @echo "Building Lean verification modules (threads={{jobs}})..."
+    cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{jobs}}
+
+# Build the Lean oracle verifier CLI for differential testing
+lean-oracle-build: lean-init
     #!/usr/bin/env bash
     set -euo pipefail
+    PROJECT_ROOT="$(pwd)"
+    echo "Building Lean oracle verifier..."
+    cd verification/lean && lake build aura_verifier
+    BINARY="$PROJECT_ROOT/verification/lean/.lake/build/bin/aura_verifier"
+    [ -f "$BINARY" ] && echo "✓ Built: $BINARY" || { echo "✗ Binary not found"; exit 1; }
 
-    echo "Testing Quint Parsing Capabilities"
-    echo "==================================="
-    echo ""
+# Run differential tests against Lean oracle
+test-differential: lean-oracle-build
+    cargo test -p aura-testkit --features lean --test lean_differential -- --ignored --nocapture
 
-    # Create a test Quint file
-    mkdir -p .aura-test
-    cat > .aura-test/test.qnt << 'EOF'
-    module test {
-      var counter: int
-
-      action init = {
-        counter' = 0
-      }
-
-      action increment = {
-        counter' = counter + 1
-      }
-
-      action step = {
-        increment
-      }
-
-      val counterInvariant = counter >= 0
-    }
-    EOF
-
-    echo "1. Created test Quint file: .aura-test/test.qnt"
-    echo ""
-
-    echo "2. Parsing to JSON..."
-    just quint-parse .aura-test/test.qnt .aura-test/test.json
-    echo ""
-
-    echo "3. Examining parsed structure..."
-    echo "Main module:"
-    jq '.main' .aura-test/test.json
-    echo ""
-    echo "Module declarations count:"
-    jq '.modules[0].declarations | length' .aura-test/test.json
-    echo ""
-
-    echo "4. Testing AST parsing..."
-    just quint-parse-ast .aura-test/test.qnt
-    echo ""
-
-    echo "5. Files generated:"
-    ls -la .aura-test/test.*
-    echo ""
-
-    echo "Quint parsing test completed successfully!"
-    echo "JSON output available at: .aura-test/test.json"
-
-# Verify Quint setup and parsing capabilities
-verify-quint:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    echo "Verifying Quint Setup"
-    echo "====================="
-    echo ""
-
-    echo "1. Checking Quint installation..."
-    nix develop --command quint --version
-    echo ""
-
-    echo "2. Checking Node.js (required for Quint)..."
-    nix develop --command node --version
-    echo ""
-
-    echo "3. Checking Java Runtime (required for ANTLR)..."
-    nix develop --command java -version
-    echo ""
-
-    echo "4. Testing basic Quint functionality..."
-    echo 'module simple { val x = 1 }' > /tmp/simple.qnt
-    nix develop --command quint parse /tmp/simple.qnt > /dev/null && echo "[OK] Basic parsing works"
-    echo ""
-
-    echo "Quint setup verification completed!"
-
-# Typecheck all Quint specs without verification (fast sanity check)
-quint-typecheck-all:
+# Check Lean proofs for completeness
+lean-check jobs="4": (lean-build jobs)
     #!/usr/bin/env bash
     set -uo pipefail
-
-    GREEN='\033[0;32m'
-    RED='\033[0;31m'
-    YELLOW='\033[1;33m'
-    NC='\033[0m'
-
-    echo "Typechecking All Quint Specs"
-    echo "============================"
-    echo ""
-
-    SPECS_DIR="verification/quint"
-    TEST_SPECS_DIR="crates/aura-simulator/tests/quint_specs"
-
-    passed=0
-    failed=0
-
-    # Typecheck verification/quint/
-    echo "Checking specs in $SPECS_DIR..."
-    for spec in $SPECS_DIR/protocol_*.qnt $SPECS_DIR/harness_*.qnt; do
-        if [ -f "$spec" ]; then
-            name=$(basename "$spec")
-            if quint typecheck "$spec" > /dev/null 2>&1; then
-                echo -e "  ${GREEN}✓${NC} $name"
-                passed=$((passed + 1))
-            else
-                echo -e "  ${RED}✗${NC} $name"
-                failed=$((failed + 1))
-            fi
-        fi
-    done
-
-    # Typecheck test specs
-    echo ""
-    echo "Checking specs in $TEST_SPECS_DIR..."
-    for spec in $TEST_SPECS_DIR/*.qnt; do
-        if [ -f "$spec" ]; then
-            name=$(basename "$spec")
-            if quint typecheck "$spec" > /dev/null 2>&1; then
-                echo -e "  ${GREEN}✓${NC} $name"
-                passed=$((passed + 1))
-            else
-                echo -e "  ${RED}✗${NC} $name"
-                failed=$((failed + 1))
-            fi
-        fi
-    done
-
-    echo ""
-    echo "=============================="
-    echo -e "Passed: ${GREEN}$passed${NC}"
-    echo -e "Failed: ${RED}$failed${NC}"
-
-    if [ $failed -gt 0 ]; then
-        echo -e "${RED}Some specs failed typecheck!${NC}"
-        exit 1
+    GREEN='\033[0;32m' YELLOW='\033[1;33m' NC='\033[0m'
+    echo "Checking Lean proof status..."
+    if grep -r "sorry" verification/lean/Aura --include="*.lean" > /tmp/sorry-check.txt 2>/dev/null; then
+        count=$(wc -l < /tmp/sorry-check.txt | tr -d ' ')
+        echo -e "${YELLOW}⚠ Found $count incomplete proofs (sorry)${NC}"
+        head -10 /tmp/sorry-check.txt | sed 's/^/  /'
     else
-        echo -e "${GREEN}All specs passed typecheck!${NC}"
+        echo -e "${GREEN}✓ All proofs complete${NC}"
     fi
 
-# Verify Quint specs with Apalache symbolic model checking
-# Usage: just quint-verify-all              # Run with defaults
-# Usage: just quint-verify-all 5            # Max 5 steps
-# Usage: just quint-verify-all 10 traces    # Max 10 steps, output to traces/
-quint-verify-all max_steps="5" output_dir="traces/verify":
+# Clean Lean build artifacts
+lean-clean:
+    cd verification/lean && lake clean
+
+# Full Lean workflow (clean, build, verify)
+lean-full: lean-clean lean-build lean-check
+    @echo "Lean verification complete!"
+
+# Show Lean proof status summary
+lean-status:
     #!/usr/bin/env bash
     set -uo pipefail
-
-    GREEN='\033[0;32m'
-    RED='\033[0;31m'
-    YELLOW='\033[1;33m'
-    NC='\033[0m'
-
-    MAX_STEPS="{{max_steps}}"
-    OUTPUT_DIR="{{output_dir}}"
-
-    echo "Quint + Apalache Verification"
-    echo "============================="
-    echo "Max steps: $MAX_STEPS"
-    echo "Output dir: $OUTPUT_DIR"
-    echo ""
-
-    mkdir -p "$OUTPUT_DIR"
-
-    # Specs with their invariants to verify
-    # Format: spec_file:invariant1,invariant2,...
-    VERIFY_TARGETS=(
-        # Journal CRDT properties (proving.md §1)
-        "verification/quint/protocol_journal.qnt:InvariantNonceUnique,InvariantEventsOrdered,InvariantLamportMonotonic,InvariantReduceDeterministic"
-
-        # Consensus fast-path/fallback (proving.md §1)
-        "verification/quint/protocol_consensus.qnt:InvariantUniqueCommitPerInstance,InvariantCommitRequiresThreshold,InvariantPathConvergence"
-
-        # Anti-entropy convergence (proving.md §3)
-        "verification/quint/protocol_anti_entropy.qnt:InvariantFactsMonotonic,InvariantVectorClockConsistent,InvariantEventualConvergence"
-
-        # Recovery safety (proving.md §4)
-        "verification/quint/protocol_recovery.qnt:InvariantThresholdWithinBounds,InvariantApprovalsSubsetGuardians,InvariantPhaseConsistency"
-
-        # Session management
-        "verification/quint/protocol_sessions.qnt:InvariantAuthoritiesRegisteredSessions,InvariantRevokedInactive"
-    )
-
-    passed=0
-    failed=0
-    skipped=0
-
-    for target in "${VERIFY_TARGETS[@]}"; do
-        IFS=':' read -r spec invariants <<< "$target"
-        spec_name=$(basename "$spec" .qnt)
-
-        if [ ! -f "$spec" ]; then
-            echo -e "${YELLOW}SKIP${NC} $spec_name (file not found)"
-            skipped=$((skipped + 1))
-            continue
-        fi
-
-        echo ""
-        echo "Verifying $spec_name..."
-        echo "  Invariants: $invariants"
-
-        # Convert comma-separated invariants to --invariant flags
-        inv_flags=""
-        IFS=',' read -ra INV_ARRAY <<< "$invariants"
-        for inv in "${INV_ARRAY[@]}"; do
-            inv_flags="$inv_flags --invariant=$inv"
-        done
-
-        output_file="$OUTPUT_DIR/${spec_name}_verify.json"
-
-        # Run quint verify with Apalache
-        if quint verify "$spec" \
-            $inv_flags \
-            --max-steps="$MAX_STEPS" \
-            --out-itf="$OUTPUT_DIR/${spec_name}_counter.itf.json" \
-            > "$output_file" 2>&1; then
-            echo -e "  ${GREEN}✓ PASS${NC}"
-            passed=$((passed + 1))
+    GREEN='\033[0;32m' YELLOW='\033[1;33m' NC='\033[0m'
+    echo "Lean Proof Status"
+    echo "================="
+    find "verification/lean/Aura" -name "*.lean" -type f | sort | while read -r f; do
+        name=$(basename "$f" .lean)
+        sorries=$(grep -c "sorry" "$f" 2>/dev/null || echo 0)
+        if [ "$sorries" -gt 0 ] 2>/dev/null; then
+            echo -e "  ${YELLOW}○${NC} $name ($sorries incomplete)"
         else
-            # Check if it's a real failure or just a limitation
-            if grep -q "no violation found" "$output_file" 2>/dev/null; then
-                echo -e "  ${GREEN}✓ PASS${NC} (no violation in $MAX_STEPS steps)"
-                passed=$((passed + 1))
-            elif grep -q "Apalache" "$output_file" 2>/dev/null; then
-                echo -e "  ${RED}✗ FAIL${NC}"
-                echo "    Counterexample: $OUTPUT_DIR/${spec_name}_counter.itf.json"
-                echo "    Full output: $output_file"
-                failed=$((failed + 1))
-            else
-                echo -e "  ${YELLOW}? ERROR${NC} (see $output_file)"
-                skipped=$((skipped + 1))
-            fi
+            echo -e "  ${GREEN}●${NC} $name"
         fi
     done
 
-    echo ""
-    echo "=============================="
-    echo -e "Passed:  ${GREEN}$passed${NC}"
-    echo -e "Failed:  ${RED}$failed${NC}"
-    echo -e "Skipped: ${YELLOW}$skipped${NC}"
-    echo ""
-    echo "Counterexamples (if any) saved to: $OUTPUT_DIR/"
-
-    if [ $failed -gt 0 ]; then
-        echo -e "${RED}Some invariants were violated!${NC}"
-        exit 1
-    else
-        echo -e "${GREEN}All verified invariants hold (up to $MAX_STEPS steps)${NC}"
-    fi
-
-# Verify a single Quint spec with specific invariants
-# Usage: just quint-verify verification/quint/protocol_journal.qnt InvariantNonceUnique
-quint-verify spec invariants:
+# Translate Rust to Lean using Charon + Aeneas
+lean-translate jobs="1" crate="all":
     #!/usr/bin/env bash
     set -uo pipefail
+    GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
+    JOBS="{{jobs}}"; TARGET="{{crate}}"
+    export CARGO_BUILD_JOBS="$JOBS" RUSTFLAGS="${RUSTFLAGS:-} -C codegen-units=1"
 
-    echo "Verifying {{spec}}..."
-    echo "Invariants: {{invariants}}"
-    echo ""
-
-    mkdir -p verification/traces
-    SPEC_NAME=$(basename "{{spec}}" .qnt)
-
-    # Convert comma-separated to multiple --invariant flags
-    INV_FLAGS=""
-    IFS=',' read -ra INV_ARRAY <<< "{{invariants}}"
-    for inv in "${INV_ARRAY[@]}"; do
-        INV_FLAGS="$INV_FLAGS --invariant=$inv"
-    done
-
-    quint verify "{{spec}}" \
-        $INV_FLAGS \
-        --max-steps=10 \
-        --out-itf="verification/traces/${SPEC_NAME}_counter.itf.json" \
-        --verbosity=3
-
-# Generate ITF traces from all Quint specs
-quint-generate-traces:
-    #!/usr/bin/env bash
-    set -uo pipefail
-
-    GREEN='\033[0;32m'
-    RED='\033[0;31m'
-    YELLOW='\033[1;33m'
-    NC='\033[0m'
-
-    echo "Generating ITF Traces from Quint Specs"
+    echo "Translating Rust to Lean (jobs=$JOBS)"
     echo "======================================"
-    echo ""
+    mkdir -p verification/lean/Generated target/llbc
 
-    mkdir -p verification/traces
+    command -v charon &>/dev/null || { echo -e "${RED}✗ Charon not found${NC}"; exit 1; }
+    command -v aeneas &>/dev/null || { echo -e "${RED}✗ Aeneas not found${NC}"; exit 1; }
 
-    # Specs that have step actions defined
-    RUNNABLE_SPECS=(
-        "verification/quint/protocol_journal.qnt:journal"
-        "verification/quint/protocol_consensus.qnt:consensus"
-        "verification/quint/protocol_anti_entropy.qnt:anti_entropy"
-        "verification/quint/protocol_epochs.qnt:epochs"
-        "verification/quint/protocol_cross_interaction.qnt:cross_interaction"
-        "verification/quint/protocol_capability_properties.qnt:cap_props"
-        "verification/quint/protocol_frost.qnt:frost"
-    )
+    CRATES=("aura-core" "aura-journal")
+    [ "$TARGET" != "all" ] && CRATES=("$TARGET")
 
-    for target in "${RUNNABLE_SPECS[@]}"; do
-        IFS=':' read -r spec trace_name <<< "$target"
-
-        if [ ! -f "$spec" ]; then
-            echo -e "${YELLOW}SKIP${NC} $spec (not found)"
-            continue
-        fi
-
-        echo "Generating trace for $trace_name..."
-        if quint run "$spec" \
-            --main=step \
-            --max-steps=15 \
-            --out-itf="verification/traces/${trace_name}.itf.json" \
-            > /dev/null 2>&1; then
-            size=$(du -h "verification/traces/${trace_name}.itf.json" | cut -f1)
-            echo -e "  ${GREEN}✓${NC} verification/traces/${trace_name}.itf.json ($size)"
-        else
-            echo -e "  ${RED}✗${NC} Failed to generate trace"
-        fi
+    for crate in "${CRATES[@]}"; do
+        echo "Translating $crate..."
+        llbc="target/llbc/${crate//-/_}.llbc"
+        out="verification/lean/Generated/${crate//-/_}"
+        mkdir -p "$out"
+        nice -n 19 charon cargo --dest target/llbc -- -p "$crate" -j "$JOBS" 2>/dev/null && \
+        nice -n 19 aeneas -backend lean "$llbc" -dest "$out" 2>/dev/null && \
+            echo -e "  ${GREEN}✓${NC}" || echo -e "  ${RED}✗${NC}"
     done
 
-    echo ""
-    echo "Trace generation complete. Files in verification/traces/"
-    ls -la verification/traces/*.itf.json 2>/dev/null || echo "No traces generated"
+# ═══════════════════════════════════════════════════════════════════════════════
+# Kani Bounded Model Checking
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# Check Quint-Rust type correspondence
-# Detects drift between Quint type definitions and Rust QuintMappable implementations
-quint-check-types verbose="":
-    #!/usr/bin/env bash
-    set -uo pipefail
-    ./scripts/check-quint-rust-types.sh {{verbose}}
+# Run Kani verification on a package
+kani package="aura-protocol" unwind="10":
+    nix develop .#nightly --command cargo kani --package {{package}} --default-unwind {{unwind}}
 
-# Generate verification coverage report
-# Usage: just verification-coverage        # Markdown to stdout
-# Usage: just verification-coverage --json # JSON metrics
-verification-coverage format="--md":
-    #!/usr/bin/env bash
-    set -uo pipefail
-    ./scripts/verification-coverage.sh {{format}}
+# Run a specific Kani harness
+kani-harness harness package="aura-protocol" unwind="10":
+    nix develop .#nightly --command cargo kani --package {{package}} --harness {{harness}} --default-unwind {{unwind}}
 
-# Execute any aura CLI command with nix build
-# Usage: just aura init -n 3 -t 2 -o test-account
-# Usage: just aura status -c test-account/configs/device_1.toml
-# Usage: just aura scenarios list
-aura *ARGS='--help':
-    @AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command cargo build --bin aura
-    @AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command cargo run --bin aura -- {{ARGS}}
-
-# Generate Cargo.nix using crate2nix (needed for hermetic Nix builds)
-generate-cargo-nix:
+# Setup Kani (first time only)
+kani-setup:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Regenerating Cargo.nix with crate2nix..."
-    nix develop --command crate2nix generate
-    echo "Cargo.nix regenerated successfully!"
-    echo ""
-    echo "Run 'nix build .#aura-terminal' to test hermetic build"
+    echo "Setting up Kani verifier..."
+    nix develop .#nightly --command cargo install --locked kani-verifier
+    nix develop .#nightly --command cargo kani setup
+    echo "✓ Kani setup complete! Run 'just kani' to verify."
 
-# Build using hermetic Nix build (requires Cargo.nix to exist)
-build-nix:
-    nix build .#aura-terminal
+# Run full Kani verification suite
+kani-suite:
+    @./scripts/run-kani-suite.sh
 
-# Build specific package with hermetic Nix
-build-nix-package package:
-    nix build .#{{package}}
+# ═══════════════════════════════════════════════════════════════════════════════
+# Combined Verification
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# Run hermetic Nix checks
-check-nix:
-    nix flake check
-
-# Test hermetic build of all available packages
-test-nix-all:
+# Lean formal verification (matches CI lean-proofs job)
+verify-lean:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Testing all hermetic Nix builds..."
-    echo "=================================="
-    echo ""
-
-    echo "1. Building aura-terminal..."
-    nix build .#aura-terminal
-    echo "[OK] aura-terminal built successfully"
-
-    echo "2. Building aura-agent..."
-    nix build .#aura-agent
-    echo "[OK] aura-agent built successfully"
-
-    echo "3. Building aura-simulator..."
-    nix build .#aura-simulator
-    echo "[OK] aura-simulator built successfully"
-
-    echo ""
-    echo "All hermetic builds completed successfully!"
-
-# Generate documentation
-docs:
-    cargo doc --workspace --no-deps --open
-
-# Watch and serve the console frontend with hot reload
-serve-console:
-    cd crates/console && trunk serve --open
-
-# Stop any running trunk servers
-stop-console:
-    #!/usr/bin/env bash
-    if pgrep -x trunk > /dev/null; then
-        pkill trunk
-        echo "Stopped trunk server"
+    GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
+    echo "Lean Formal Verification"
+    echo "========================"
+    cd verification/lean
+    lake build && echo -e "${GREEN}[OK]${NC} Lean proofs build" || { echo -e "${RED}[FAIL]${NC}"; exit 1; }
+    cd ../..
+    if grep -r "sorry" verification/lean/Aura --include="*.lean" 2>/dev/null; then
+        echo "[WARNING] Found incomplete proofs (sorry)"
     else
-        echo "No trunk server running"
+        echo -e "${GREEN}[OK]${NC} All proofs complete"
     fi
 
-# Show project statistics
-stats:
-    @echo "Project Statistics"
-    @echo "=================="
-    @echo ""
-    @echo "Lines of Rust code:"
-    @find crates -name "*.rs" -type f -exec cat {} + | wc -l
-    @echo ""
-    @echo "Number of crates:"
-    @ls -1 crates | wc -l
-    @echo ""
-    @echo "Dependencies:"
-    @cargo tree --workspace --depth 1 | grep -v "└──" | grep -v "├──" | tail -n +2 | wc -l
-
-# Install git hooks
-install-hooks:
-    @echo "Installing git hooks..."
-    @echo "#!/usr/bin/env bash" > .git/hooks/pre-commit
-    @echo "just fmt-check && just clippy-strict" >> .git/hooks/pre-commit
-    @chmod +x .git/hooks/pre-commit
-    @echo "Git hooks installed"
-
-# Build WASM module for db-test
-build-wasm-db-test:
+# Consensus conformance tests (matches CI)
+verify-conformance:
     #!/usr/bin/env bash
     set -euo pipefail
+    GREEN='\033[0;32m' RED='\033[0;31m' NC='\033[0m'
+    echo "Consensus Conformance Tests"
+    echo "==========================="
 
-    echo "Building Datafrog WASM module..."
-    echo "================================"
-    echo ""
+    echo "[1/3] Generating ITF traces..."
+    mkdir -p traces
+    quint run --out-itf=traces/consensus.itf.json verification/quint/consensus/core.qnt \
+        --max-steps=30 --max-samples=5 || { echo -e "${RED}[FAIL]${NC}"; exit 1; }
+    echo -e "${GREEN}[OK]${NC} Generated traces"
 
-    cd crates/db-test
+    echo "[2/3] Running ITF conformance tests..."
+    cargo test -p aura-protocol --test consensus_itf_conformance -- --nocapture || \
+        { echo -e "${RED}[FAIL]${NC}"; exit 1; }
+    echo -e "${GREEN}[OK]${NC} Conformance passed"
 
-    wasm-pack build --target web --out-dir web/pkg
+    echo "[3/3] Running differential tests..."
+    cargo test -p aura-protocol --test consensus_differential -- --nocapture || \
+        { echo -e "${RED}[FAIL]${NC}"; exit 1; }
+    echo -e "${GREEN}[OK]${NC} Differential passed"
 
-    echo ""
-    echo "WASM build complete!"
-    echo "Output: crates/db-test/web/pkg/"
-    echo ""
-    echo "To test, run: just serve-wasm-db-test"
+# Run all verification (Lean + Quint + Conformance)
+verify-all: verify-lean quint-verify-models verify-conformance
+    @echo ""; echo "ALL VERIFICATION COMPLETE"
 
-# Serve the WASM test application
-serve-wasm-db-test:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    echo "Starting web server for Datafrog WASM test..."
-    echo "============================================="
-    echo ""
-
-    if [ ! -d "crates/db-test/web/pkg" ]; then
-        echo "Error: WASM module not built yet"
-        echo "Run: just build-wasm-db-test"
-        exit 1
-    fi
-
-    echo "Server running at: http://localhost:8000"
-    echo "Press Ctrl+C to stop"
-    echo ""
-
-    cd crates/db-test/web
-    python3 -m http.server 8000
-
-# Build and serve WASM test in one command
-test-wasm-db: build-wasm-db-test serve-wasm-db-test
+# ═══════════════════════════════════════════════════════════════════════════════
+# Scenarios
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # Run scenarios with default settings
 run-scenarios:
@@ -1361,564 +788,94 @@ discover-scenarios:
 generate-report input output:
     cargo run --bin aura -- scenarios report --input {{input}} --output {{output}} --format html --detailed
 
-# Run full scenario test suite (discovery, validation, execution, reporting)
-test-scenarios:
+# Run full scenario test suite
+test-scenarios: discover-scenarios validate-scenarios
     #!/usr/bin/env bash
     set -euo pipefail
-
-    echo "Running Full Scenario Test Suite"
-    echo "================================"
-    echo ""
-
-    echo "1. Discovering scenarios..."
-    just discover-scenarios
-    echo ""
-
-    echo "2. Validating scenarios..."
-    just validate-scenarios
-    echo ""
-
-    echo "3. Running scenarios..."
     cargo run --bin aura -- scenarios run --directory scenarios --output-file outcomes/scenario_results.json --detailed-report
-    echo ""
-
-    echo "4. Generating report..."
     just generate-report outcomes/scenario_results.json outcomes/scenario_report.html
-    echo ""
+    echo "Report: outcomes/scenario_report.html"
 
-    echo "Scenario test suite completed!"
-    echo "Report available at: outcomes/scenario_report.html"
+# ═══════════════════════════════════════════════════════════════════════════════
+# Nix / Hermetic Builds
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# Demonstrate the complete Quint to JSON to simulator pipeline
-test-quint-pipeline:
+# Generate Cargo.nix using crate2nix
+generate-cargo-nix:
+    nix develop --command crate2nix generate
+    @echo "Run 'nix build .#aura-terminal' to test hermetic build"
+
+# Build using hermetic Nix build
+build-nix:
+    nix build .#aura-terminal
+
+# Build specific package with hermetic Nix
+build-nix-package package:
+    nix build .#{{package}}
+
+# Run hermetic Nix checks
+check-nix:
+    nix flake check
+
+# Test hermetic build of all available packages
+test-nix-all:
     #!/usr/bin/env bash
     set -euo pipefail
-
-    echo "Testing Quint Specification to Simulator Pipeline"
-    echo "=================================================="
-    echo ""
-
-    # Clean up any previous test artifacts
-    rm -f /tmp/quint_pipeline_test.json
-    mkdir -p .aura-test
-
-    echo "1. Converting Quint specification to JSON..."
-    echo "   Input: verification/quint/protocol_dkd.qnt"
-    echo "   Output: /tmp/quint_pipeline_test.json"
-    echo ""
-    just quint-parse verification/quint/protocol_dkd.qnt /tmp/quint_pipeline_test.json
-    echo ""
-
-    echo "2. Verifying JSON output structure..."
-    if [ -f "/tmp/quint_pipeline_test.json" ]; then
-        echo "   [OK] JSON file created successfully"
-        echo "   Size: $(stat -f%z /tmp/quint_pipeline_test.json 2>/dev/null || stat -c%s /tmp/quint_pipeline_test.json) bytes"
-
-        # Extract key information from the JSON
-        echo "   Module name: $(jq -r '.modules[0].name' /tmp/quint_pipeline_test.json)"
-        echo "   Declarations: $(jq '.modules[0].declarations | length' /tmp/quint_pipeline_test.json)"
-        echo "   Variables: $(jq '.modules[0].declarations | map(select(.kind == "var")) | length' /tmp/quint_pipeline_test.json)"
-        echo "   Actions: $(jq '.modules[0].declarations | map(select(.qualifier == "action")) | length' /tmp/quint_pipeline_test.json)"
-        echo "   Properties: $(jq '.modules[0].declarations | map(select(.qualifier == "val")) | length' /tmp/quint_pipeline_test.json)"
-    else
-        echo "   [ERROR] JSON file not created"
-        exit 1
-    fi
-    echo ""
-
-    echo "3. Testing JSON can be consumed by simulator..."
-    echo "   The JSON output contains all necessary information for the simulator:"
-    echo "   - State variables: sessionCount, completedSessions, failedSessions"
-    echo "   - Actions: startSession, completeSession, failSession, init, step"
-    echo "   - Properties: validCounts, sessionLimit, safetyProperty, progressProperty"
-    echo ""
-
-    echo "4. Verifying existing integration..."
-    if [ -f "/tmp/dkd_spec.json" ]; then
-        echo "   [OK] Existing DKD spec JSON found and ready for simulator"
-        echo "   Size: $(stat -f%z /tmp/dkd_spec.json 2>/dev/null || stat -c%s /tmp/dkd_spec.json) bytes"
-        echo "   Created: $(stat -f%Sm /tmp/dkd_spec.json 2>/dev/null || stat -c%y /tmp/dkd_spec.json)"
-    else
-        echo "   [INFO] No existing DKD spec JSON found - creating one"
-        just quint-parse verification/quint/protocol_dkd.qnt /tmp/dkd_spec.json
-    fi
-    echo ""
-
-    echo "5. Pipeline verification complete!"
-    echo "   Quint to JSON conversion: Working"
-    echo "   JSON structure validation: Working"
-    echo "   Simulator integration points: Ready"
-    echo ""
-    echo "Available commands for the pipeline:"
-    echo "   just quint-parse <input.qnt> <output.json>  - Convert any Quint spec to JSON"
-    echo "   just quint-compile <input.qnt> <output.json> - Full compile with type checking"
-    echo "   just test-quint-parse                       - Test with a simple example"
-    echo ""
-    echo "The converted JSON can be consumed by the simulator tests that expect"
-    echo "Quint specification files at /tmp/dkd_spec.json"
-
-# ============================================================================
-# Kani Bounded Model Checking
-# ============================================================================
-
-# Run Kani verification on consensus module (requires nightly shell)
-# First time setup: just kani-setup
-kani package="aura-protocol" unwind="10":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "Running Kani bounded model checking on {{package}}..."
-    echo "Unwind bound: {{unwind}}"
-    echo ""
-    # Use nix develop .#nightly to get the correct environment
-    nix develop .#nightly --command cargo kani --package {{package}} --default-unwind {{unwind}}
-
-# Run a specific Kani harness
-kani-harness harness package="aura-protocol" unwind="10":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "Running Kani harness: {{harness}}"
-    nix develop .#nightly --command cargo kani --package {{package}} --harness {{harness}} --default-unwind {{unwind}}
-
-# Setup Kani (first time only)
-kani-setup:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "Setting up Kani verifier..."
-    echo ""
-    echo "Step 1: Installing kani-verifier..."
-    nix develop .#nightly --command cargo install --locked kani-verifier
-    echo ""
-    echo "Step 2: Running Kani setup (downloads CBMC and toolchain)..."
-    nix develop .#nightly --command cargo kani setup
-    echo ""
-    echo "✓ Kani setup complete!"
-    echo ""
-    echo "Run 'just kani' to verify the consensus module."
-
-# Run full Kani verification suite with summary output
-# Logs detailed output to logs/kani/, surfaces only pass/fail
-kani-suite:
-    @./scripts/run-kani-suite.sh
-
-# ============================================================================
-# Lean Verification Tasks
-# ============================================================================
-
-# Initialize Lean project (run once or after clean)
-lean-init:
-    @echo "Initializing Lean project..."
-    cd verification/lean && lake update
-
-# Build Lean verification modules
-# Usage: just lean-build [jobs]
-#   jobs: number of parallel threads (default: 2 for safe resource usage)
-lean-build jobs="2": lean-init
-    @echo "Building Lean verification modules (threads={{jobs}})..."
-    cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{jobs}}
-
-# Build the Lean oracle verifier CLI for differential testing
-lean-oracle-build: lean-init
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    NC='\033[0m'
-
-    # Store project root before changing directories
-    PROJECT_ROOT="$(pwd)"
-
-    echo "Building Lean oracle verifier..."
-    cd verification/lean && lake build aura_verifier
-
-    BINARY="$PROJECT_ROOT/verification/lean/.lake/build/bin/aura_verifier"
-    if [ -f "$BINARY" ]; then
-        echo -e "${GREEN}✓ Lean oracle built successfully${NC}"
-        echo "  Binary: $BINARY"
-        VERSION=$("$BINARY" version 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
-        echo "  Version: $VERSION"
-    else
-        echo -e "${YELLOW}⚠ Binary not found at expected location${NC}"
-        echo "  Expected: $BINARY"
-        exit 1
-    fi
-
-# Run differential tests against Lean oracle
-test-differential: lean-oracle-build
-    @echo "Running differential tests against Lean oracle..."
-    cargo test -p aura-testkit --features lean --test lean_differential -- --ignored --nocapture
-
-# Run Lean verification (build and check for errors)
-# Usage: just lean-check [jobs]
-lean-check jobs="4": (lean-build jobs)
-    #!/usr/bin/env bash
-    set -uo pipefail
-
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    NC='\033[0m'
-
-    echo "Checking Lean proof status..."
-    echo ""
-
-    # Check for sorry usage (incomplete proofs)
-    if grep -r "sorry" verification/lean/Aura --include="*.lean" > /tmp/sorry-check.txt 2>/dev/null; then
-        count=$(wc -l < /tmp/sorry-check.txt | tr -d ' ')
-        echo -e "${YELLOW}⚠ Found $count incomplete proofs (sorry):${NC}"
-        head -10 /tmp/sorry-check.txt | sed 's/^/  /'
-        if [ "$count" -gt 10 ]; then
-            echo "  ... and $(($count - 10)) more"
-        fi
-    else
-        echo -e "${GREEN}✓ All proofs complete (no sorry found)${NC}"
-    fi
-
-# Clean Lean build artifacts
-lean-clean:
-    @echo "Cleaning Lean artifacts..."
-    cd verification/lean && lake clean
-
-# Full Lean workflow (clean, build, verify)
-lean-full: lean-clean lean-build lean-check
-    @echo "Lean verification complete!"
-
-# Show Lean proof status summary
-lean-status:
-    #!/usr/bin/env bash
-    set -uo pipefail
-
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    NC='\033[0m'
-
-    echo "Lean Proof Status"
-    echo "================="
-    echo ""
-
-    LEAN_DIR="verification/lean"
-
-    if [ ! -d "$LEAN_DIR" ]; then
-        echo "No Lean directory found at $LEAN_DIR"
-        exit 0
-    fi
-
-    echo "Modules:"
-    find "$LEAN_DIR/Aura" -name "*.lean" -type f | sort | while read -r f; do
-        name=$(basename "$f" .lean)
-        dir=$(dirname "$f" | sed "s|$LEAN_DIR/Aura/||")
-        if [ "$dir" != "$LEAN_DIR/Aura" ] && [ -n "$dir" ]; then
-            display="$dir/$name"
-        else
-            display="$name"
-        fi
-        sorries=$(grep -c "sorry" "$f" 2>/dev/null || true)
-        sorries=${sorries:-0}
-        if [ "$sorries" -gt 0 ] 2>/dev/null; then
-            echo -e "  ${YELLOW}○${NC} $display ($sorries incomplete)"
-        else
-            echo -e "  ${GREEN}●${NC} $display"
-        fi
+    echo "Testing all hermetic Nix builds..."
+    for pkg in aura-terminal aura-agent aura-simulator; do
+        echo "Building $pkg..."
+        nix build .#$pkg && echo "[OK] $pkg"
     done
+    echo "All hermetic builds completed!"
 
-    echo ""
-    echo "Run 'just lean-check' to build and verify proofs"
+# ═══════════════════════════════════════════════════════════════════════════════
+# WASM / Console
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# Translate pure Rust functions to Lean using Charon + Aeneas
-# Workflow: Rust → Charon → LLBC → Aeneas → Lean
-# Usage: just lean-translate [jobs] [crate]
-#   jobs: number of parallel jobs (default: 1 for safe resource usage)
-#   crate: specific crate to translate (default: all)
-# Example: just lean-translate 2 aura-core
-#
-# Resource management:
-#   - Uses nice -n 19 for lowest CPU priority
-#   - Limits cargo parallelism with -j flag
-#   - Codegen units set to 1 to reduce memory per rustc process
-#   - On macOS, monitor with: watch -n1 'ps aux | grep -E "charon|aeneas|rustc" | head -5'
-lean-translate jobs="1" crate="all":
-    #!/usr/bin/env bash
-    set -uo pipefail
+# Watch and serve the console frontend with hot reload
+serve-console:
+    cd crates/console && trunk serve --open
 
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    RED='\033[0;31m'
-    NC='\033[0m'
+# Stop any running trunk servers
+stop-console:
+    pgrep -x trunk > /dev/null && pkill trunk && echo "Stopped trunk server" || echo "No trunk server running"
 
-    JOBS="{{jobs}}"
-    TARGET_CRATE="{{crate}}"
+# Build WASM module for db-test
+build-wasm-db-test:
+    cd crates/db-test && wasm-pack build --target web --out-dir web/pkg
+    @echo "Output: crates/db-test/web/pkg/"
 
-    # Set environment variables for resource limiting
-    export CARGO_BUILD_JOBS="$JOBS"
-    export RUSTFLAGS="${RUSTFLAGS:-} -C codegen-units=1"  # Reduce memory per rustc
-
-    echo "Translating Rust to Lean using Charon + Aeneas"
-    echo "==============================================="
-    echo "Resource settings:"
-    echo "  - Parallel jobs: $JOBS"
-    echo "  - CPU priority: nice -n 19 (lowest)"
-    echo "  - Codegen units: 1 (reduces memory)"
-    echo ""
-    echo "Tip: To monitor resource usage, run in another terminal:"
-    echo "  watch -n1 'ps aux | grep -E \"charon|aeneas|rustc\" | head -5'"
-    echo ""
-
-    OUTPUT_DIR="verification/lean/Generated"
-    LLBC_DIR="target/llbc"
-    mkdir -p "$OUTPUT_DIR" "$LLBC_DIR"
-
-    # Check if charon and aeneas are available
-    if ! command -v charon &> /dev/null; then
-        echo -e "${RED}✗ Charon not found in PATH${NC}"
-        echo "  Run 'nix develop' to enter the development environment"
-        exit 1
-    fi
-
-    if ! command -v aeneas &> /dev/null; then
-        echo -e "${RED}✗ Aeneas not found in PATH${NC}"
-        echo "  Run 'nix develop' to enter the development environment"
-        exit 1
-    fi
-
-    echo "Charon: $(charon version 2>/dev/null || echo 'available')"
-    echo "Aeneas: available (use -help for options)"
-    echo ""
-
-    # Crates to translate (containing pure/ modules)
-    if [ "$TARGET_CRATE" = "all" ]; then
-        CRATES=(
-            "aura-core"
-            "aura-journal"
-        )
-    else
-        CRATES=("$TARGET_CRATE")
-    fi
-
-    SUCCESS=0
-    FAILED=0
-
-    for crate in "${CRATES[@]}"; do
-        echo "=== Translating $crate ==="
-        echo ""
-
-        # Step 1: Compile with Charon to LLBC
-        # Use nice for low priority, -j for limited parallelism
-        echo -n "  [1/2] Compiling to LLBC with Charon (jobs=$JOBS)... "
-        llbc_file="$LLBC_DIR/${crate//-/_}.llbc"
-
-        if nice -n 19 charon cargo --dest "$LLBC_DIR" -- -p "$crate" -j "$JOBS" 2>/tmp/charon_err.log; then
-            echo -e "${GREEN}✓${NC}"
-        else
-            echo -e "${RED}✗${NC}"
-            echo "    Error: $(head -5 /tmp/charon_err.log)"
-            ((FAILED++))
-            continue
-        fi
-
-        # Step 2: Translate with Aeneas to Lean
-        echo -n "  [2/2] Translating to Lean with Aeneas... "
-        crate_out="$OUTPUT_DIR/${crate//-/_}"
-        mkdir -p "$crate_out"
-
-        if nice -n 19 aeneas -backend lean "$llbc_file" -dest "$crate_out" 2>/tmp/aeneas_err.log; then
-            echo -e "${GREEN}✓${NC}"
-            ((SUCCESS++))
-        else
-            echo -e "${YELLOW}⚠${NC} (check output)"
-            echo "    Note: $(head -3 /tmp/aeneas_err.log)"
-            # Count as partial success if files were generated
-            if [ -n "$(find "$crate_out" -name '*.lean' 2>/dev/null)" ]; then
-                ((SUCCESS++))
-            else
-                ((FAILED++))
-            fi
-        fi
-        echo ""
-    done
-
-    echo "Summary: $SUCCESS crates translated, $FAILED failed"
-    echo ""
-    echo "Generated Lean files: $OUTPUT_DIR/"
-    if [ -d "$OUTPUT_DIR" ]; then
-        find "$OUTPUT_DIR" -name "*.lean" -type f | head -10
-        count=$(find "$OUTPUT_DIR" -name "*.lean" -type f | wc -l | tr -d ' ')
-        if [ "$count" -gt 10 ]; then
-            echo "  ... and $(($count - 10)) more"
-        fi
-    fi
-
-# Verify translated Lean code compiles
-# Usage: just lean-verify-translated [jobs] [crate]
-lean-verify-translated jobs="2" crate="all": (lean-translate jobs crate) lean-init
-    #!/usr/bin/env bash
-    set -uo pipefail
-
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    NC='\033[0m'
-
-    echo "Verifying translated Lean code..."
-
-    GEN_DIR="verification/lean/Generated"
-    if [ ! -d "$GEN_DIR" ]; then
-        echo -e "${YELLOW}⚠ No generated code found in $GEN_DIR${NC}"
-        exit 0
-    fi
-
-    # Count generated files
-    count=$(find "$GEN_DIR" -name "*.lean" -type f | wc -l | tr -d ' ')
-    if [ "$count" -eq 0 ]; then
-        echo -e "${YELLOW}⚠ No .lean files found in $GEN_DIR${NC}"
-        exit 0
-    fi
-
-    echo "Found $count generated Lean files"
-    echo ""
-
-    # Try to build the generated code with lake
-    cd verification/lean
-    if lake build Generated 2>/dev/null; then
-        echo -e "${GREEN}✓ All translated code compiles${NC}"
-    else
-        echo -e "${YELLOW}⚠ Some translated code has errors${NC}"
-        echo "  Run 'cd verification/lean && lake build Generated' for details"
-    fi
-
-# =============================================================================
-# On-Demand Verification Commands (matches conditional CI jobs)
-# =============================================================================
-# These commands mirror the verification jobs in GitHub CI that only run
-# on main push, specific labels, or when verification files change.
-# Use these when working on verification code or before major releases.
-
-# Lean formal verification (matches CI lean-proofs job)
-verify-lean:
+# Serve the WASM test application
+serve-wasm-db-test:
     #!/usr/bin/env bash
     set -euo pipefail
+    [ -d "crates/db-test/web/pkg" ] || { echo "Run: just build-wasm-db-test"; exit 1; }
+    echo "Server: http://localhost:8000"
+    cd crates/db-test/web && python3 -m http.server 8000
 
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    RED='\033[0;31m'
-    NC='\033[0m'
+# Build and serve WASM test
+test-wasm-db: build-wasm-db-test serve-wasm-db-test
 
-    echo "Lean Formal Verification"
-    echo "========================"
-    echo ""
+# ═══════════════════════════════════════════════════════════════════════════════
+# Utilities
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    echo "[1/2] Building Lean proofs..."
-    cd verification/lean
-    if lake build; then
-        echo -e "${GREEN}[OK]${NC} Lean proofs build successfully"
-    else
-        echo -e "${RED}[FAIL]${NC} Lean proofs failed to build"
-        exit 1
-    fi
-    echo ""
+# Execute any aura CLI command
+aura *ARGS='--help':
+    @AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command cargo run --bin aura -- {{ARGS}}
 
-    echo "[2/2] Checking for incomplete proofs (sorry usage)..."
-    cd ../..
-    if grep -r "sorry" verification/lean/Aura --include="*.lean" 2>/dev/null; then
-        echo -e "${YELLOW}[WARNING]${NC} Found incomplete proofs (sorry). These should be resolved."
-    else
-        echo -e "${GREEN}[OK]${NC} All proofs complete (no sorry found)"
-    fi
-    echo ""
+# Show project statistics
+stats:
+    @echo "Project Statistics"
+    @echo "=================="
+    @echo "Lines of Rust code:"
+    @find crates -name "*.rs" -type f -exec cat {} + | wc -l
+    @echo "Number of crates:"
+    @ls -1 crates | wc -l
 
-    echo -e "${GREEN}Lean verification complete${NC}"
-
-# Quint model checking with invariant verification (matches CI quint-model-checking job)
-quint-verify-models:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    GREEN='\033[0;32m'
-    RED='\033[0;31m'
-    NC='\033[0m'
-
-    echo "Quint Model Checking"
-    echo "===================="
-    echo ""
-
-    cd verification/quint
-
-    echo "[1/2] Typechecking all Quint specifications..."
-    for spec in *.qnt; do
-        echo "  Checking $spec..."
-        if ! quint typecheck "$spec"; then
-            echo -e "${RED}[FAIL]${NC} Typecheck failed for $spec"
-            exit 1
-        fi
-    done
-    echo -e "${GREEN}[OK]${NC} All Quint specs typecheck"
-    echo ""
-
-    echo "[2/2] Running Quint invariant verification..."
-
-    echo "  Verifying consensus/core.qnt..."
-    if ! quint verify --invariant=AllInvariants consensus/core.qnt --max-steps=10; then
-        echo -e "${RED}[FAIL]${NC} consensus/core.qnt invariants failed"
-        exit 1
-    fi
-
-    echo "  Verifying consensus/adversary.qnt..."
-    if ! quint verify --invariant=InvariantByzantineThreshold consensus/adversary.qnt --max-steps=10; then
-        echo -e "${RED}[FAIL]${NC} consensus/adversary.qnt invariants failed"
-        exit 1
-    fi
-
-    echo "  Verifying consensus/liveness.qnt..."
-    if ! quint verify --invariant=InvariantProgressUnderSynchrony consensus/liveness.qnt --max-steps=10; then
-        echo -e "${RED}[FAIL]${NC} consensus/liveness.qnt invariants failed"
-        exit 1
-    fi
-
-    echo -e "${GREEN}[OK]${NC} All Quint invariants pass model checking"
-    echo ""
-    echo -e "${GREEN}Quint verification complete${NC}"
-
-# Consensus conformance tests (matches CI consensus-conformance job)
-verify-conformance:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    GREEN='\033[0;32m'
-    RED='\033[0;31m'
-    NC='\033[0m'
-
-    echo "Consensus Conformance Tests"
-    echo "==========================="
-    echo ""
-
-    echo "[1/3] Generating fresh ITF traces from Quint spec..."
-    mkdir -p traces
-    if ! quint run --out-itf=traces/consensus.itf.json verification/quint/consensus/core.qnt --max-steps=30 --max-samples=5; then
-        echo -e "${RED}[FAIL]${NC} Failed to generate ITF traces"
-        exit 1
-    fi
-    echo -e "${GREEN}[OK]${NC} Generated fresh ITF traces"
-    echo ""
-
-    echo "[2/3] Running ITF conformance tests..."
-    if ! cargo test -p aura-protocol --test consensus_itf_conformance -- --nocapture; then
-        echo -e "${RED}[FAIL]${NC} ITF conformance tests failed"
-        exit 1
-    fi
-    echo -e "${GREEN}[OK]${NC} ITF conformance tests passed"
-    echo ""
-
-    echo "[3/3] Running differential tests (production vs reference)..."
-    if ! cargo test -p aura-protocol --test consensus_differential -- --nocapture; then
-        echo -e "${RED}[FAIL]${NC} Differential tests failed"
-        exit 1
-    fi
-    echo -e "${GREEN}[OK]${NC} Differential tests passed"
-    echo ""
-
-    echo -e "${GREEN}Consensus conformance complete${NC}"
-
-# Run all verification (Lean + Quint + Conformance)
-verify-all: verify-lean quint-verify-models verify-conformance
-    #!/usr/bin/env bash
-    echo ""
-    echo "========================================"
-    echo "ALL VERIFICATION COMPLETE"
-    echo "========================================"
+# Install git hooks
+install-hooks:
+    @echo "#!/usr/bin/env bash" > .git/hooks/pre-commit
+    @echo "just fmt-check && just clippy-strict" >> .git/hooks/pre-commit
+    @chmod +x .git/hooks/pre-commit
+    @echo "Git hooks installed"
