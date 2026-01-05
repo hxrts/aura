@@ -26,10 +26,6 @@ quint run verification/quint/demo_flow.qnt \
 
 The test `verification_demo_itf` in `crates/aura-terminal/tests/verification_demo_itf.rs` runs Quint simulations and writes traces here for conformance testing against Rust implementations.
 
-### Trace Generation Script
-
-The script `scripts/generate-itf-traces.sh` generates traces for all Quint specifications.
-
 ## File naming conventions
 
 - `{spec_name}.itf.json` - Single trace from a specification

@@ -17,9 +17,10 @@
 //!
 //! ## Running Tests
 //!
-//! Generate traces first:
+//! Generate traces first using quint:
 //! ```bash
-//! ./scripts/generate-itf-traces.sh 50  # Generate 200+ traces
+//! quint run verification/quint/consensus/core.qnt \
+//!   --out-itf traces/consensus/trace.itf.json --max-steps 20
 //! ```
 //!
 //! Then run tests:
@@ -967,7 +968,7 @@ fn test_exhaustive_trace_conformance() {
 
     if traces.is_empty() {
         eprintln!("No traces found in {trace_dir:?}");
-        eprintln!("Generate traces with: ./scripts/generate-itf-traces.sh");
+        eprintln!("Generate traces with: quint run verification/quint/consensus/core.qnt --out-itf traces/consensus/trace.itf.json --max-steps 20");
         return;
     }
 
@@ -1060,7 +1061,7 @@ fn test_trace_coverage_minimum() {
             MIN_TRACES,
             TARGET_TRACES
         );
-        eprintln!("Generate more traces with: ./scripts/generate-itf-traces.sh");
+        eprintln!("Generate more traces with: quint run verification/quint/consensus/core.qnt --out-itf traces/consensus/trace.itf.json --max-steps 20");
         // Don't fail, just warn
     } else if traces.len() < TARGET_TRACES {
         println!(

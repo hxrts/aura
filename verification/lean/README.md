@@ -224,8 +224,9 @@ See the doc comments in individual proof modules for Rust correspondence notes.
 The Rust pure core can be tested against Quint ITF traces:
 
 ```bash
-# Generate traces
-./scripts/generate-itf-traces.sh 50
+# Generate traces with quint
+quint run verification/quint/consensus/core.qnt \
+  --out-itf traces/consensus/trace.itf.json --max-steps 20
 
 # Run conformance tests
 cargo test -p aura-testkit --test consensus_itf_conformance

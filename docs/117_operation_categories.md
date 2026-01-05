@@ -16,7 +16,7 @@ Agreement modes are orthogonal to categories. Operations can use provisional or 
 
 ## Domain Fact Contract (Applies to Category A/B Facts)
 
-Optimistic and deferred operations emit domain facts. To keep those facts deterministic and versioned across replicas, follow the domain fact contract in `docs/102_journal.md` and validate with `scripts/check-domain-fact-contract.sh`.
+Optimistic and deferred operations emit domain facts. To keep those facts deterministic and versioned across replicas, follow the domain fact contract in `docs/102_journal.md`.
 
 ### The Key Architectural Insight
 

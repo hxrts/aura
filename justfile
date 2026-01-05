@@ -29,16 +29,14 @@ build-release:
 build-dev:
     cargo build -p aura-terminal --bin aura --features development --release
     mkdir -p bin
-    cp scripts/aura-wrapper.sh bin/aura
-    chmod +x bin/aura
+    cp target/release/aura bin/aura
     @echo "Binary available at: ./bin/aura"
 
 # Build terminal in release mode without dev features
 build-terminal-release:
     cargo build -p aura-terminal --bin aura --release --no-default-features --features terminal
     mkdir -p bin
-    cp scripts/aura-wrapper.sh bin/aura
-    chmod +x bin/aura
+    cp target/release/aura bin/aura
     @echo "Binary available at: ./bin/aura"
 
 # Build app-host binary

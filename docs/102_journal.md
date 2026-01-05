@@ -89,8 +89,6 @@ Domain facts are the extensibility mechanism for Layer 2 crates. Every domain fa
 - **Context derivation**: declare `context` / `context_fn` for `DomainFact` or implement a stable `context_id()` derivation.
 - **Reducer registration**: provide a `FactReducer` and register it in the central registry (`crates/aura-agent/src/fact_registry.rs`).
 
-Lint: run `scripts/check-domain-fact-contract.sh` to validate these requirements.
-
 ## 3. Semilattice Structure
 
 Journals use a join semilattice. The semilattice uses set union as the join operator with partial order defined by subset inclusion. The journal never removes facts during merge. Every merge operation increases or preserves the fact set.
