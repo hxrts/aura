@@ -20,7 +20,17 @@ Neighborhoods are collections of homes connected via adjacency and traversal pol
 
 An authority (`AuthorityId`) is the cryptographic identity that holds capabilities and participates in consensus. A nickname is a local mapping from an authority to a human-understandable name. Each device maintains its own nickname mappings. There is no global username registry.
 
-A contact suggestion is metadata an authority optionally shares when connecting with someone. Users configure a default suggestion sent to all new connections. Users can share different suggestions with different people or opt out entirely.
+A nickname suggestion (`nickname_suggestion`) is metadata an authority optionally shares when connecting with someone. Users configure a default suggestion sent to all new connections. Users can share different suggestions with different people or opt out entirely.
+
+### 1.4 Unified Naming Pattern
+
+The codebase uses a consistent naming pattern across entities (contacts, devices, discovered peers). The `EffectiveName` trait in `aura-app/src/views/naming.rs` defines the resolution order:
+
+1. **Local nickname** (user-assigned override) if non-empty
+2. **Shared nickname_suggestion** (what entity wants to be called) if non-empty
+3. **Fallback identifier** (truncated authority/device ID)
+
+This pattern ensures consistent display names across all UI surfaces while respecting both local preferences and shared suggestions.
 
 ## 2. Message Types
 
