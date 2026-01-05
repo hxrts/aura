@@ -66,7 +66,24 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cache-name: test
-      - run: nix develop --command just ci-test
+      - name: Create swap space
+        run: |
+          # Create 4GB swap for memory-heavy compilation
+          sudo fallocate -l 4G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "Swap enabled:"
+          free -h
+      - name: Run tests
+        run: nix develop --command just ci-test
+        env:
+          # Reduce parallelism to lower peak disk usage from concurrent artifacts
+          CARGO_BUILD_JOBS: 4
+          # Disable debug info to reduce disk usage (~50% reduction in target size)
+          CARGO_PROFILE_DEV_DEBUG: 0
+          # Disable incremental compilation to reduce disk usage
+          CARGO_INCREMENTAL: 0
 
   effects:
     name: Effects Violations
