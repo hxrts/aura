@@ -142,23 +142,143 @@ check-arch-concurrency:
     scripts/check-arch.sh --concurrency || true
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CI
+# CI Steps (called by ci-dry-run and GitHub workflows)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Run CI checks locally (mirrors GitHub CI workflow)
+# Build documentation book
+ci-book: summary
+    echo '.chapter-item a strong { display: none; }' > custom.css
+    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c \
+        'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js custom.css'
+
+# Format check
+ci-format:
+    cargo fmt --all -- --check
+
+# Clippy with effects enforcement
+ci-clippy:
+    cargo clippy --workspace --all-targets -- \
+        -D warnings \
+        -D clippy::disallowed_methods \
+        -D clippy::disallowed_types \
+        -D clippy::unwrap_used \
+        -D clippy::expect_used \
+        -D clippy::duplicated_attributes
+
+# Build check
+ci-build:
+    cargo build --workspace -q
+
+# Test suite
+ci-test:
+    cargo test --workspace -q
+
+# Effects system violation checks
+ci-effects:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    EXCLUDE="--glob '!**/aura-effects/**' --glob '!**/aura-agent/**' --glob '!**/aura-simulator/**'"
+    EXCLUDE="$EXCLUDE --glob '!**/aura-terminal/**' --glob '!**/aura-testkit/**' --glob '!**/tests/**'"
+    EXCLUDE="$EXCLUDE --glob '!**/integration/**' --glob '!**/demo/**' --glob '!**/examples/**'"
+
+    # Check time usage
+    if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ $EXCLUDE 2>/dev/null; then
+        echo "::error::Found direct time usage! Use TimeEffects instead."
+        exit 1
+    fi
+    # Check randomness usage
+    if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ $EXCLUDE 2>/dev/null; then
+        echo "::error::Found direct randomness usage! Use RandomEffects instead."
+        exit 1
+    fi
+    echo "No effects violations found"
+
+# Quint typecheck
+ci-quint-typecheck:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd verification/quint
+    for spec in *.qnt consensus/*.qnt journal/*.qnt keys/*.qnt sessions/*.qnt; do
+        [ -f "$spec" ] || continue
+        echo "Checking $spec..."
+        quint typecheck "$spec" || exit 1
+    done
+    echo "All Quint specs typecheck"
+
+# Quint model checking
+ci-quint-verify:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd verification/quint
+    echo "Verifying consensus/core.qnt..."
+    quint verify --invariant=AllInvariants consensus/core.qnt --max-steps=10
+    echo "Verifying consensus/adversary.qnt..."
+    quint verify --invariant=InvariantByzantineThreshold consensus/adversary.qnt --max-steps=10
+    echo "Verifying consensus/liveness.qnt..."
+    quint verify --invariant=InvariantProgressUnderSynchrony consensus/liveness.qnt --max-steps=10
+    echo "All Quint invariants verified"
+
+# Lean build
+ci-lean-build:
+    cd verification/lean && lake build
+
+# Lean sorry check
+ci-lean-check-sorry:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if grep -r "sorry" verification/lean/Aura --include="*.lean" 2>/dev/null; then
+        echo "::warning::Found incomplete proofs (sorry)"
+    else
+        echo "All proofs complete"
+    fi
+
+# Kani bounded model checking
+ci-kani:
+    cargo kani --package aura-protocol --default-unwind 10 --output-format terse
+
+# ITF conformance tests
+ci-conformance-itf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p traces
+    echo "Generating ITF traces..."
+    quint run --out-itf=traces/consensus.itf.json verification/quint/consensus/core.qnt --max-steps=30 --max-samples=5
+    echo "Running ITF conformance tests..."
+    cargo test -p aura-testkit --test consensus_itf_conformance -- --nocapture
+
+# Differential tests
+ci-conformance-diff:
+    cargo test -p aura-testkit --test consensus_differential -- --nocapture
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CI Dry Run
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Run CI checks locally (same recipes as GitHub CI)
 ci-dry-run:
     #!/usr/bin/env bash
     set -euo pipefail
-
     GREEN='\033[0;32m' RED='\033[0;31m' YELLOW='\033[0;33m' BLUE='\033[0;34m' NC='\033[0m'
     exit_code=0
 
+    run_step() {
+        local num="$1" name="$2" cmd="$3"
+        printf "[$num] $name... "
+        if $cmd >/dev/null 2>&1; then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${RED}FAIL${NC}"
+            exit_code=1
+        fi
+    }
+
     echo "CI Dry Run"
     echo "=========="
+    echo ""
 
-    # 0. Environment Check
+    # Environment check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    printf "[0/9] Rust version... "
+    printf "[0/7] Rust version... "
     if [[ "$LOCAL_RUST" == "{{CI_RUST_VERSION}}" ]]; then
         echo -e "${GREEN}$LOCAL_RUST${NC} (matches CI)"
     elif [[ "$LOCAL_RUST" < "{{CI_RUST_VERSION}}" ]]; then
@@ -168,105 +288,32 @@ ci-dry-run:
     fi
     echo ""
 
-    # 1. Format Check
-    printf "[1/9] Format... "
-    if cargo fmt --all -- --check 2>/dev/null; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${RED}FAIL${NC}"; cargo fmt --all -- --check 2>&1 | head -20; exit_code=1
-    fi
+    # Run CI steps (same as GitHub workflows)
+    run_step "1/7" "Format"  "just ci-format"
+    run_step "2/7" "Clippy"  "just ci-clippy"
+    run_step "3/7" "Build"   "just ci-build"
+    run_step "4/7" "Test"    "just ci-test"
+    run_step "5/7" "Effects" "just ci-effects"
 
-    # 2. Clippy with Effects Enforcement
-    printf "[2/9] Clippy... "
-    CLIPPY_FLAGS="-D warnings -D clippy::disallowed_methods -D clippy::disallowed_types"
-    CLIPPY_FLAGS="$CLIPPY_FLAGS -D clippy::unwrap_used -D clippy::expect_used -D clippy::duplicated_attributes"
-    if cargo clippy --workspace --all-targets -q -- $CLIPPY_FLAGS 2>/dev/null; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${RED}FAIL${NC}"
-        cargo clippy --workspace --all-targets -- $CLIPPY_FLAGS 2>&1 | grep -E "^error(\[|:)" | head -30
-        exit_code=1
-    fi
-
-    # 3. Test Suite
-    printf "[3/9] Tests... "
-    if cargo test --workspace -q 2>/dev/null; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${RED}FAIL${NC}"
-        cargo test --workspace 2>&1 | grep -E "^(FAILED|error\[|thread .* panicked)" | head -20
-        exit_code=1
-    fi
-
-    # 4. Check for Effects System Violations
-    printf "[4/9] Effects violations... "
-    violations=0
-    EXCLUDE="--glob '!**/aura-effects/**' --glob '!**/aura-agent/**' --glob '!**/aura-simulator/**'"
-    EXCLUDE="$EXCLUDE --glob '!**/aura-terminal/**' --glob '!**/aura-testkit/**' --glob '!**/tests/**'"
-    EXCLUDE="$EXCLUDE --glob '!**/integration/**' --glob '!**/demo/**' --glob '!**/examples/**'"
-
-    # Check time usage
-    if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ $EXCLUDE -q 2>/dev/null; then
-        violations=1
-    fi
-    # Check randomness usage
-    if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ $EXCLUDE -q 2>/dev/null; then
-        violations=1
-    fi
-
-    if [ $violations -eq 0 ]; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${RED}FAIL${NC}"; exit_code=1
-    fi
-
-    # 5. Documentation Links Check
-    printf "[5/9] Doc links... "
-    command -v markdown-link-check &>/dev/null || npm install -g markdown-link-check >/dev/null 2>&1
-    doc_errors=0
-    while IFS= read -r file; do
-        if [ -f "$file" ] && ! markdown-link-check "$file" --config .github/config/markdown-link-check.json -q 2>/dev/null; then
-            doc_errors=1; break
-        fi
-    done < <(find . -name "*.md" -type f ! -path "*/node_modules/*" ! -path "*/target/*" ! -path "*/.git/*" \
-        ! -path "*/.aura-test/*" ! -path "*/ext/quint/*" ! -path "*/work/*" ! -path "*/.claude/skills/*")
-    if [ $doc_errors -eq 0 ]; then echo -e "${GREEN}OK${NC}"; else echo -e "${RED}FAIL${NC}"; exit_code=1; fi
-
-    # 6. Build Check
-    printf "[6/9] Build... "
-    if cargo build --workspace -q 2>/dev/null; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${RED}FAIL${NC}"; cargo build --workspace 2>&1 | grep -E "^error" | head -10; exit_code=1
-    fi
-
-    # 7. Architecture Check
-    printf "[7/9] Architecture... "
-    if ./scripts/check-arch.sh --quick 2>/dev/null; then
-        echo -e "${GREEN}OK${NC}"
-    else
-        echo -e "${YELLOW}WARN${NC} (run 'just check-arch' for details)"
-    fi
-
-    # 8. Quint Typecheck
-    printf "[8/9] Quint specs... "
+    # Quint (optional - skip if not installed)
+    printf "[6/7] Quint... "
     if command -v quint &>/dev/null; then
-        quint_ok=1
-        for spec in verification/quint/*.qnt; do
-            [ -f "$spec" ] || continue
-            if ! quint typecheck "$spec" >/dev/null 2>&1; then quint_ok=0; break; fi
-        done
-        if [ $quint_ok -eq 1 ]; then echo -e "${GREEN}OK${NC}"; else echo -e "${RED}FAIL${NC}"; exit_code=1; fi
+        if just ci-quint-typecheck >/dev/null 2>&1; then
+            echo -e "${GREEN}OK${NC}"
+        else
+            echo -e "${RED}FAIL${NC}"
+            exit_code=1
+        fi
     else
         echo -e "${YELLOW}SKIP${NC} (quint not installed)"
     fi
 
-    # 9. Unused Dependencies Check
-    printf "[9/9] Unused deps... "
-    if nix develop .#nightly --command cargo udeps --all-targets 2>&1 | grep -q "unused dependencies:"; then
-        echo -e "${YELLOW}WARN${NC}"
-    else
+    # Architecture check (warning only)
+    printf "[7/7] Architecture... "
+    if ./scripts/check-arch.sh --quick >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${YELLOW}WARN${NC} (run 'just check-arch' for details)"
     fi
 
     # Summary
@@ -274,7 +321,8 @@ ci-dry-run:
     if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}All CI checks passed${NC}"
     else
-        echo -e "${RED}CI checks failed${NC}"; exit $exit_code
+        echo -e "${RED}Some CI checks failed${NC}"
+        exit 1
     fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

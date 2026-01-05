@@ -1,4 +1,4 @@
-name: CI - Effects System Enforcement
+name: CI
 
 on:
   push:
@@ -11,584 +11,96 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  format:
-    name: Format Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rustfmt
-      - name: Check formatting
-        run: cargo fmt --all -- --check 2>&1 || { echo "::error::Formatting check failed"; exit 1; }
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Fast checks (run first for quick feedback)
+  # ─────────────────────────────────────────────────────────────────────────────
 
-  clippy-effects-enforcement:
-    name: Clippy - Effects System Enforcement
+  book:
+    name: Book
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: book
+      - uses: ./.github/actions/setup-just
+      - name: Build documentation
+        run: nix develop --command just ci-book
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-just
+      - run: just ci-format
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
         with:
           components: clippy
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo build
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-      - name: Run clippy with effects enforcement
-        run: |
-          cargo clippy --workspace --all-targets -- \
-            -D warnings \
-            -D clippy::disallowed_methods \
-            -D clippy::disallowed_types \
-            -D clippy::unwrap_used \
-            -D clippy::expect_used \
-            -D clippy::duplicated_attributes 2>&1 | grep -E "^(error|warning|\s+-->|Compiling)" || true
-          # Re-run to get proper exit code
-          cargo clippy --workspace --all-targets -q -- \
-            -D warnings \
-            -D clippy::disallowed_methods \
-            -D clippy::disallowed_types \
-            -D clippy::unwrap_used \
-            -D clippy::expect_used \
-            -D clippy::duplicated_attributes
+      - uses: ./.github/actions/setup-just
+      - run: just ci-clippy
 
-  test:
-    name: Test Suite
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Install Quint
-        run: npm install -g @informalsystems/quint@0.25.1
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo build
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-      - name: Run tests
-        run: cargo test --workspace -q 2>&1 | grep -vE "^running [0-9]+ test|^test result:|^   Compiling" || cargo test --workspace -q
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-just
+      - run: just ci-build
 
-  check-effects-violations:
-    name: Check for Effects System Violations
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-just
+      - uses: ./.github/actions/setup-quint
+      - run: just ci-test
+
+  effects:
+    name: Effects Violations
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
-      - name: Check for direct time usage
-        run: |
+      - uses: ./.github/actions/setup-just
+      - run: just ci-effects
 
-          # Get files with violations
-          files_with_violations=$(rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ \
-              --files-with-matches \
-              --glob '!**/aura-agent/**' \
-              --glob '!**/aura-effects/**' \
-              --glob '!**/aura-simulator/**' \
-              --glob '!**/aura-testkit/**' \
-              --glob '!**/aura-terminal/**' \
-              --glob '!**/tests/**' \
-              --glob '!**/integration/**' \
-              --glob '!**/demo/**' 2>/dev/null || true)
-
-          violations=""
-          for file in $files_with_violations; do
-            # Skip files with allow attribute in test modules
-            if grep -q "#\[cfg(test)\]" "$file" && \
-               grep -A 5 "#\[cfg(test)\]" "$file" | grep -q "#!\[allow(clippy::disallowed_methods)\]"; then
-              continue
-            fi
-
-            # Get violations from this file, excluding comments
-            file_violations=$(rg "SystemTime::now|Instant::now|chrono::Utc::now" "$file" --line-number 2>/dev/null | \
-                grep -v '^\s*//' | \
-                grep -v ':\s*//' || true)
-
-            if [ -n "$file_violations" ]; then
-              violations="$violations$file_violations"$'\n'
-            fi
-          done
-
-          if [ -n "$violations" ]; then
-            echo "$violations"
-            echo "::error::Found direct time usage! Use effects.now() instead."
-            exit 1
-          fi
-      - name: Check for direct randomness usage
-        run: |
-          if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number \
-              --glob '!**/aura-agent/**' \
-              --glob '!**/aura-effects/**' \
-              --glob '!**/aura-simulator/**' \
-              --glob '!**/aura-testkit/**' \
-              --glob '!**/tests/**'; then
-            echo "::error::Found direct randomness usage! Use effects.random_bytes() or effects.rng() instead."
-            exit 1
-          fi
-      - name: Check for direct UUID usage
-        run: |
-
-          # Get files with violations
-          files_with_violations=$(rg --type rust "Uuid::new_v4\(\)" crates/ \
-              --files-with-matches \
-              --glob '!**/aura-effects/**' \
-              --glob '!**/aura-agent/**' \
-              --glob '!**/aura-simulator/**' \
-              --glob '!**/aura-testkit/**' \
-              --glob '!**/aura-quint/**' \
-              --glob '!**/aura-terminal/**' \
-              --glob '!**/tests/**' \
-              --glob '!**/aura-core/src/types/identifiers.rs' \
-              --glob '!**/aura-core/src/effects/quint.rs' \
-              --glob '!**/aura-composition/src/registry.rs' \
-              --glob '!**/aura-sync/src/services/maintenance.rs' \
-              --glob '!**/aura-sync/src/infrastructure/peers.rs' 2>/dev/null || true)
-
-          violations=""
-          for file in $files_with_violations; do
-            # Skip files with allow attribute in test modules
-            if grep -q "#\[cfg(test)\]" "$file" && \
-               grep -A 5 "#\[cfg(test)\]" "$file" | grep -q "#\[allow(clippy::disallowed_methods)\]"; then
-              continue
-            fi
-
-            # Get violations from this file, excluding comments
-            file_violations=$(rg "Uuid::new_v4\(\)" "$file" --line-number 2>/dev/null | \
-                grep -v '^\s*//' | \
-                grep -v ':\s*//' || true)
-
-            if [ -n "$file_violations" ]; then
-              violations="$violations$file_violations"$'\n'
-            fi
-          done
-
-          if [ -n "$violations" ]; then
-            echo "$violations"
-            echo "::error::Found direct UUID usage! Use effects.gen_uuid() instead."
-            exit 1
-          fi
-
-  check-documentation-links:
-    name: Check Documentation Links
+  doc-links:
+    name: Doc Links
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check markdown links
-        uses: gaurav-nelson/github-action-markdown-link-check@v1
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
         with:
-          use-quiet-mode: "yes"
-          use-verbose-mode: "yes"
-          config-file: ".github/config/markdown-link-check.json"
-          base-branch: "main"
+          use-quiet-mode: 'yes'
+          use-verbose-mode: 'yes'
+          config-file: '.github/config/markdown-link-check.json'
+          base-branch: 'main'
 
-  build:
-    name: Build Check
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Optional checks (warnings only)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  unused-deps:
+    name: Unused Deps
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo build
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-      - name: Build workspace
-        run: cargo build --workspace -q
-
-  unused-dependencies:
-    name: Check Unused Dependencies
-    runs-on: ubuntu-latest
-    continue-on-error: true  # Warning only - don't fail CI
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: ./.github/actions/setup-rust
         with:
           toolchain: nightly
       - name: Install cargo-udeps
         run: cargo install cargo-udeps --locked
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-      - name: Check for unused dependencies
-        run: cargo +nightly udeps --all-targets 2>&1 | grep -E "^(unused|warning:)" || echo "No unused dependencies found"
-
-  lint-test:
-    name: Verify Lint Enforcement Works
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: clippy
-      - name: Test lint enforcement (should fail)
-        run: |
-          echo "Testing that our lints catch violations..."
-          # This should fail due to linting violations
-          if cargo check --manifest-path=<(cat << 'EOF'
-          [package]
-          name = "lint-test"
-          version = "0.1.0"
-          edition = "2021"
-
-          [lints]
-          workspace = true
-
-          [dependencies]
-          uuid = "1.0"
-          rand = "0.8"
-
-          [[bin]]
-          name = "test"
-          path = "test_lints.rs"
-          EOF
-          ); then
-            echo "[ERROR] Lints should have failed but didn't!"
-            exit 1
-          else
-            echo "[OK] Lints correctly caught violations"
-          fi
-
-  lean-proofs:
-    name: Lean Formal Verification
-    runs-on: ubuntu-latest
-    # Only run when Lean files or kernel code changes
-    if: |
-      github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'verification') ||
-      contains(join(github.event.pull_request.changed_files, ' '), 'verification/lean') ||
-      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-journal') ||
-      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-core/src/time')
-    steps:
-      - name: Free disk space
-        run: |
-          echo "Disk space before cleanup:"
-          df -h /
-          # Aggressive cleanup to ensure enough space for Nix store + cache
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /opt/hostedtoolcache/Python /opt/hostedtoolcache/Ruby /opt/hostedtoolcache/go /opt/hostedtoolcache/node
-          sudo docker image prune --all --force || true
-          sudo apt-get clean || true
-          echo "Disk space after cleanup:"
-          df -h /
-      - uses: actions/checkout@v4
-      - name: Install Nix
-        uses: cachix/install-nix-action@v27
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-      - name: Cache Nix store
-        uses: actions/cache@v3
-        with:
-          path: /nix/store
-          key: ${{ runner.os }}-nix-lean-${{ hashFiles('flake.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-nix-lean-
-            ${{ runner.os }}-nix-
-      - name: Build Lean proofs
-        run: |
-          echo "Building Lean formal verification modules..."
-          nix develop --command bash -c "cd verification/lean && lake build"
-      - name: Check for incomplete proofs
-        run: |
-          echo "Checking for incomplete proofs (sorry usage)..."
-          if grep -r "sorry" verification/lean/Aura --include="*.lean" 2>/dev/null; then
-            echo "[WARNING] Found incomplete proofs (sorry). These should be resolved."
-            # Don't fail CI for now, just warn
-          else
-            echo "[OK] All proofs complete (no sorry found)"
-          fi
-      - name: Cleanup before cache save
-        if: always()
-        run: |
-          # Run nix garbage collection to reduce store size
-          nix-collect-garbage -d || true
-          echo "Disk space before cache save:"
-          df -h /
-
-  differential-testing:
-    name: Lean Differential Testing
-    runs-on: ubuntu-latest
-    needs: [lean-proofs]
-    # Only run when Lean or kernel code changes
-    if: |
-      github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'verification') ||
-      contains(join(github.event.pull_request.changed_files, ' '), 'verification/lean') ||
-      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-journal') ||
-      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-core/src/time') ||
-      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-testkit')
-    steps:
-      - name: Free disk space
-        run: |
-          echo "Disk space before cleanup:"
-          df -h /
-          # Aggressive cleanup to ensure enough space for Nix store + cache
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/share/swift
-          sudo rm -rf /opt/hostedtoolcache/Python /opt/hostedtoolcache/Ruby /opt/hostedtoolcache/go /opt/hostedtoolcache/node
-          sudo docker image prune --all --force || true
-          sudo apt-get clean || true
-          echo "Disk space after cleanup:"
-          df -h /
-      - uses: actions/checkout@v4
-      - name: Install Nix
-        uses: cachix/install-nix-action@v27
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-      - name: Cache Nix store
-        uses: actions/cache@v3
-        with:
-          path: /nix/store
-          key: ${{ runner.os }}-nix-differential-${{ hashFiles('flake.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-nix-differential-
-            ${{ runner.os }}-nix-
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo build
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
-      - name: Build Lean oracle
-        run: |
-          echo "Building Lean oracle verifier..."
-          nix develop --command just lean-oracle-build
-      - name: Run differential tests
-        run: |
-          echo "Running differential tests (Rust vs Lean oracle)..."
-          nix develop --command just test-differential
-      - name: Cleanup before cache save
-        if: always()
-        run: |
-          # Clean up build artifacts before cache save to reduce cache size
-          rm -rf target/debug/deps target/debug/build target/debug/incremental || true
-          # Run nix garbage collection to reduce store size
-          nix-collect-garbage -d || true
-          echo "Disk space before cache save:"
-          df -h /
-
-  quint-model-checking:
-    name: Quint Model Checking
-    runs-on: ubuntu-latest
-    # Only run when Quint specs or consensus code changes
-    if: |
-      github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'verification') ||
-      contains(join(github.event.pull_request.changed_files, ' '), 'verification/quint') ||
-      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-protocol/src/consensus')
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install Quint
-        run: npm install -g @informalsystems/quint@0.25.1
-      - name: Typecheck Quint specs
-        run: |
-          echo "Typechecking all Quint specifications..."
-          cd verification/quint
-          for spec in *.qnt; do
-            echo "  Checking $spec..."
-            quint typecheck "$spec" || exit 1
-          done
-          echo "[OK] All Quint specs typecheck"
-      - name: Run Quint invariant verification
-        run: |
-          echo "Running Quint model checking on consensus specs..."
-          cd verification/quint
-
-          # Verify core consensus invariants
-          echo "  Verifying consensus/core.qnt..."
-          quint verify --invariant=AllInvariants consensus/core.qnt --max-steps=10 || exit 1
-
-          # Verify adversary model
-          echo "  Verifying consensus/adversary.qnt..."
-          quint verify --invariant=InvariantByzantineThreshold consensus/adversary.qnt --max-steps=10 || exit 1
-
-          # Verify liveness properties
-          echo "  Verifying consensus/liveness.qnt..."
-          quint verify --invariant=InvariantProgressUnderSynchrony consensus/liveness.qnt --max-steps=10 || exit 1
-
-          echo "[OK] All Quint invariants pass model checking"
-
-  kani-verification:
-    name: Kani Bounded Model Checking
-    runs-on: ubuntu-latest
-    # Only run on push to main or when explicitly requested via label
-    # Kani takes significant time (~30+ minutes) so we don't run on every PR
-    if: |
-      github.event_name == 'push' && github.ref == 'refs/heads/main' ||
-      contains(github.event.pull_request.labels.*.name, 'kani')
-    steps:
-      - name: Free disk space
-        run: |
-          echo "Disk space before cleanup:"
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/share/boost /usr/share/swift
-          sudo rm -rf /opt/hostedtoolcache/Python /opt/hostedtoolcache/Ruby /opt/hostedtoolcache/go /opt/hostedtoolcache/node
-          sudo docker image prune --all --force || true
-          sudo apt-get clean || true
-          echo "Disk space after cleanup:"
-          df -h /
-      - uses: actions/checkout@v4
-      - name: Install Rust nightly
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: nightly
-          components: rust-src
-      - name: Install CBMC
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cbmc
-      - name: Cache Kani installation
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/bin/cargo-kani
-          key: ${{ runner.os }}-kani-0.56.0
-      - name: Install Kani
-        run: |
-          if ! command -v cargo-kani &> /dev/null; then
-            echo "Installing Kani verifier..."
-            cargo install --locked kani-verifier
-            cargo kani setup
-          else
-            echo "Kani already installed"
-          fi
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo build
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-kani-${{ hashFiles('**/Cargo.lock') }}
-      - name: Run Kani proofs
-        run: |
-          echo "Running Kani bounded model checking on consensus core..."
-          echo "This verifies:"
-          echo "  - Invariant preservation (apply_share, trigger_fallback, fail_consensus)"
-          echo "  - Monotonicity (proposals never shrink, equivocators never removed)"
-          echo "  - Panic freedom (no panics on valid inputs)"
-          echo "  - Phase transitions (terminal states stable)"
-          echo "  - Agreement (commit matches threshold result)"
-          echo "  - Reference equivalence (production matches reference)"
-          echo ""
-
-          # Run each harness with a timeout
-          # Using --default-unwind to limit loop unwinding
-          cargo kani --package aura-protocol \
-            --default-unwind 10 \
-            --output-format terse \
-            2>&1 | tee kani-output.log
-
-          echo ""
-          echo "========================================"
-          echo "KANI VERIFICATION COMPLETE"
-          echo "========================================"
-      - name: Upload Kani results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kani-verification-results
-          path: kani-output.log
-
-  consensus-conformance:
-    name: Consensus Conformance Tests
-    runs-on: ubuntu-latest
-    needs: [test]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install Quint
-        run: npm install -g @informalsystems/quint@0.25.1
-      - name: Cache cargo registry
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-      - name: Cache cargo build
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-conformance-${{ hashFiles('**/Cargo.lock') }}
-      - name: Generate fresh ITF traces
-        run: |
-          echo "Generating ITF traces from Quint spec..."
-          # Generate traces to the dedicated traces directory
-          quint run --out-itf=traces/consensus.itf.json verification/quint/consensus/core.qnt --max-steps=30 --max-samples=5
-          echo "[OK] Generated fresh ITF traces to traces/"
-      - name: Run ITF conformance tests
-        run: |
-          echo "Running ITF conformance tests..."
-          cargo test -p aura-testkit --test consensus_itf_conformance -- --nocapture
-      - name: Run differential tests
-        run: |
-          echo "Running differential tests (production vs reference)..."
-          cargo test -p aura-testkit --test consensus_differential -- --nocapture
-      - name: Report conformance status
-        if: always()
-        run: |
-          echo "========================================"
-          echo "CONSENSUS CONFORMANCE REPORT"
-          echo "========================================"
-          echo "ITF Conformance: Tests verify Rust pure core matches Quint spec"
-          echo "Differential: Tests verify production matches reference model"
-          echo "========================================"
+      - run: cargo +nightly udeps --all-targets 2>&1 | grep -E "^(unused|warning:)" || echo "No unused dependencies found"

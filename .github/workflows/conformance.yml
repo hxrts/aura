@@ -1,0 +1,53 @@
+name: Conformance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'verification/**'
+      - 'crates/aura-protocol/src/consensus/**'
+      - 'crates/aura-testkit/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'verification/**'
+      - 'crates/aura-protocol/src/consensus/**'
+      - 'crates/aura-testkit/**'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # ITF Conformance Testing
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  itf-conformance:
+    name: ITF Conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-quint
+      - uses: ./.github/actions/setup-just
+      - name: Run ITF conformance tests
+        run: just ci-conformance-itf
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Differential Testing (Rust vs Lean Oracle)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  differential:
+    name: Differential
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: differential
+      - uses: ./.github/actions/setup-rust
+      - uses: ./.github/actions/setup-just
+      - name: Build Lean oracle
+        run: nix develop --command just lean-oracle-build
+      - name: Run differential tests
+        run: nix develop --command just ci-conformance-diff

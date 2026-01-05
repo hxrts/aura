@@ -1,0 +1,14 @@
+name: Setup Quint
+description: Install Node.js and Quint specification language
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Quint
+      shell: bash
+      run: npm install -g @informalsystems/quint@0.25.1
