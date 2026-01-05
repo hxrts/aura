@@ -231,7 +231,7 @@ impl std::fmt::Display for TransportAddress {
 }
 
 /// Transport protocol classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TransportProtocol {
     /// TCP transport.
     Tcp,
@@ -240,13 +240,8 @@ pub enum TransportProtocol {
     /// In-memory transport for testing.
     Memory,
     /// Unknown or unspecified transport.
+    #[default]
     Unknown,
-}
-
-impl Default for TransportProtocol {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 /// Connection role metadata for bidirectional transports.

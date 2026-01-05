@@ -449,15 +449,15 @@ jobs:
 
           # Verify core consensus invariants
           echo "  Verifying consensus/core.qnt..."
-          quint verify --invariant=AllInvariants consensus/core.qnt --max-samples=1000 || exit 1
+          quint verify --invariant=AllInvariants consensus/core.qnt --max-steps=10 || exit 1
 
           # Verify adversary model
           echo "  Verifying consensus/adversary.qnt..."
-          quint verify --invariant=InvariantByzantineThreshold consensus/adversary.qnt --max-samples=500 || exit 1
+          quint verify --invariant=InvariantByzantineThreshold consensus/adversary.qnt --max-steps=10 || exit 1
 
           # Verify liveness properties
           echo "  Verifying consensus/liveness.qnt..."
-          quint verify --invariant=InvariantProgressUnderSynchrony consensus/liveness.qnt --max-samples=500 || exit 1
+          quint verify --invariant=InvariantProgressUnderSynchrony consensus/liveness.qnt --max-steps=10 || exit 1
 
           echo "[OK] All Quint invariants pass model checking"
 
@@ -540,7 +540,7 @@ jobs:
           echo "========================================"
       - name: Upload Kani results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: kani-verification-results
           path: kani-output.log

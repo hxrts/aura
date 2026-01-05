@@ -1853,21 +1853,21 @@ quint-verify-models:
 
     echo "[2/2] Running Quint invariant verification..."
 
-    echo "  Verifying protocol_consensus.qnt..."
-    if ! quint verify --invariant=AllInvariants protocol_consensus.qnt --max-samples=1000; then
-        echo -e "${RED}[FAIL]${NC} protocol_consensus.qnt invariants failed"
+    echo "  Verifying consensus/core.qnt..."
+    if ! quint verify --invariant=AllInvariants consensus/core.qnt --max-steps=10; then
+        echo -e "${RED}[FAIL]${NC} consensus/core.qnt invariants failed"
         exit 1
     fi
 
-    echo "  Verifying protocol_consensus_adversary.qnt..."
-    if ! quint verify --invariant=InvariantByzantineThreshold protocol_consensus_adversary.qnt --max-samples=500; then
-        echo -e "${RED}[FAIL]${NC} protocol_consensus_adversary.qnt invariants failed"
+    echo "  Verifying consensus/adversary.qnt..."
+    if ! quint verify --invariant=InvariantByzantineThreshold consensus/adversary.qnt --max-steps=10; then
+        echo -e "${RED}[FAIL]${NC} consensus/adversary.qnt invariants failed"
         exit 1
     fi
 
-    echo "  Verifying protocol_consensus_liveness.qnt..."
-    if ! quint verify --invariant=InvariantProgressUnderSynchrony protocol_consensus_liveness.qnt --max-samples=500; then
-        echo -e "${RED}[FAIL]${NC} protocol_consensus_liveness.qnt invariants failed"
+    echo "  Verifying consensus/liveness.qnt..."
+    if ! quint verify --invariant=InvariantProgressUnderSynchrony consensus/liveness.qnt --max-steps=10; then
+        echo -e "${RED}[FAIL]${NC} consensus/liveness.qnt invariants failed"
         exit 1
     fi
 
@@ -1890,7 +1890,7 @@ verify-conformance:
 
     echo "[1/3] Generating fresh ITF traces from Quint spec..."
     mkdir -p traces
-    if ! quint run --out-itf=traces/consensus.itf.json verification/quint/protocol_consensus.qnt --max-steps=30 --max-samples=5; then
+    if ! quint run --out-itf=traces/consensus.itf.json verification/quint/consensus/core.qnt --max-steps=30 --max-samples=5; then
         echo -e "${RED}[FAIL]${NC} Failed to generate ITF traces"
         exit 1
     fi
