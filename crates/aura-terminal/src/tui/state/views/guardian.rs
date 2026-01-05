@@ -508,13 +508,13 @@ impl GuardianSetupModalState {
     /// Check if ceremony is complete
     #[must_use]
     pub fn ceremony_is_complete(&self) -> bool {
-        self.ceremony().map_or(false, |c| c.is_complete)
+        self.ceremony().is_some_and(|c| c.is_complete)
     }
 
     /// Check if ceremony has failed
     #[must_use]
     pub fn ceremony_has_failed(&self) -> bool {
-        self.ceremony().map_or(false, |c| c.has_failed)
+        self.ceremony().is_some_and(|c| c.has_failed)
     }
 
     /// Get ceremony error message
@@ -535,7 +535,7 @@ impl GuardianSetupModalState {
     /// Get reversion risk
     #[must_use]
     pub fn ceremony_reversion_risk(&self) -> bool {
-        self.ceremony().map_or(false, |c| c.reversion_risk)
+        self.ceremony().is_some_and(|c| c.reversion_risk)
     }
 
     /// Set ceremony ID (only in CeremonyInProgress)

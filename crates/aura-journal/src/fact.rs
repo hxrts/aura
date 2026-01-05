@@ -206,8 +206,7 @@ impl Journal {
             Ok(())
         } else {
             Err(aura_core::AuraError::not_found(format!(
-                "Fact with order {:?} not found",
-                order
+                "Fact with order {order:?} not found"
             )))
         }
     }
@@ -224,8 +223,7 @@ impl Journal {
             Ok(())
         } else {
             Err(aura_core::AuraError::not_found(format!(
-                "Fact with order {:?} not found",
-                order
+                "Fact with order {order:?} not found"
             )))
         }
     }

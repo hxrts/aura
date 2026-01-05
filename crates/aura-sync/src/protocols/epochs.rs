@@ -164,8 +164,7 @@ impl EpochRotationCoordinator {
         _context_id: ContextId,
         now: &PhysicalTime,
     ) -> Result<String, AuraError> {
-        let participants_len =
-            u32::try_from(participants.len()).expect("participant count exceeds u32::MAX");
+        let participants_len = participants.len() as u32;
         if participants_len < self.epoch_config.rotation_threshold {
             return Err(sync_protocol_error(
                 "epochs",
@@ -227,8 +226,7 @@ impl EpochRotationCoordinator {
             .insert(confirmation.participant_id, confirmation);
 
         // Check if we have enough confirmations
-        let confirmations_len = u32::try_from(rotation.confirmations.len())
-            .expect("confirmation count exceeds u32::MAX");
+        let confirmations_len = rotation.confirmations.len() as u32;
         let ready_for_commit = confirmations_len >= self.epoch_config.rotation_threshold;
 
         if ready_for_commit {

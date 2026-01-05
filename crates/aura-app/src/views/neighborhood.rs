@@ -105,7 +105,6 @@ impl NeighborhoodState {
     }
 
     /// Get all neighbors
-    #[must_use]
     pub fn all_neighbors(&self) -> impl Iterator<Item = &NeighborHome> {
         self.neighbors.iter()
     }
@@ -123,7 +122,6 @@ impl NeighborhoodState {
     }
 
     /// Get direct neighbors
-    #[must_use]
     pub fn direct_neighbors(&self) -> impl Iterator<Item = &NeighborHome> {
         self.neighbors
             .iter()

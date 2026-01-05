@@ -155,7 +155,7 @@ impl StatusInterpreter {
         Some(
             OptimisticStatus::new()
                 .with_agreement(consistency.agreement.clone())
-                .with_propagation(consistency.propagation.clone()),
+                .with_propagation(consistency.propagation),
         )
     }
 
@@ -208,7 +208,7 @@ impl StatusInterpreter {
                 aura_core::domain::status::ApprovalDecision::Reject
             };
             status.approvals.record(
-                approver.clone(),
+                *approver,
                 decision,
                 PhysicalTime {
                     ts_ms: 0,
@@ -244,7 +244,7 @@ impl StatusInterpreter {
         // Add responses
         for (participant, response, responded_at) in &details.responses {
             status.responses.push(ParticipantResponse {
-                participant: participant.clone(),
+                participant: *participant,
                 response: response.clone(),
                 responded_at: responded_at.clone(),
             });

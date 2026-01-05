@@ -426,7 +426,7 @@ impl ApprovalThreshold {
                 if total_approvers == 0 {
                     return false;
                 }
-                let required = (total_approvers as u64 * *percent as u64 + 99) / 100;
+                let required = (total_approvers as u64 * *percent as u64).div_ceil(100);
                 approvals as u64 >= required
             }
         }

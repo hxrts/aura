@@ -380,7 +380,7 @@ impl QueryStats {
 
     /// Check if all matched facts are finalized
     pub fn all_finalized(&self) -> bool {
-        self.consistency.len() > 0 && self.consistency.iter().all(|(_, c)| c.agreement.is_finalized())
+        !self.consistency.is_empty() && self.consistency.iter().all(|(_, c)| c.agreement.is_finalized())
     }
 }
 

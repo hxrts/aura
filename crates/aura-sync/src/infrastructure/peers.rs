@@ -702,21 +702,18 @@ impl PeerManager {
             .filter(|p| p.metadata.has_sync_capability)
             .count();
 
+        let active_sessions: usize = self
+            .peers
+            .values()
+            .map(|p| p.metadata.active_sessions)
+            .sum();
+
         PeerManagerStatistics {
-            total_tracked: u32::try_from(self.peers.len()).expect("peer count exceeds u32::MAX"),
-            connected_peers: u32::try_from(connected)
-                .expect("connected peer count exceeds u32::MAX"),
-            available_peers: u32::try_from(available)
-                .expect("available peer count exceeds u32::MAX"),
-            peers_with_sync_capability: u32::try_from(with_capability)
-                .expect("sync-capable peer count exceeds u32::MAX"),
-            total_active_sessions: u32::try_from(
-                self.peers
-                    .values()
-                    .map(|p| p.metadata.active_sessions)
-                    .sum::<usize>(),
-            )
-            .expect("active session count exceeds u32::MAX"),
+            total_tracked: self.peers.len() as u32,
+            connected_peers: connected as u32,
+            available_peers: available as u32,
+            peers_with_sync_capability: with_capability as u32,
+            total_active_sessions: active_sessions as u32,
         }
     }
 

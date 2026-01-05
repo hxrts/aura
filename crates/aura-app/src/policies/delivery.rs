@@ -203,12 +203,15 @@ pub fn boxed<P: DeliveryPolicy + 'static>(policy: P) -> BoxedPolicy {
 // Channel-Aware Policies
 // =============================================================================
 
+/// Type alias for channel ID extractor functions
+pub type ChannelIdExtractor = Box<dyn Fn(&Fact) -> Option<String> + Send + Sync>;
+
 /// Policy that delivers to all channel members.
 ///
 /// This wraps another policy and provides channel member lookup.
 pub struct ChannelMembersPolicy<P: DeliveryPolicy> {
     inner: P,
-    channel_id_extractor: Box<dyn Fn(&Fact) -> Option<String> + Send + Sync>,
+    channel_id_extractor: ChannelIdExtractor,
 }
 
 impl<P: DeliveryPolicy> ChannelMembersPolicy<P> {

@@ -63,14 +63,14 @@ impl ValidationError {
     #[must_use]
     pub fn required(field: impl Into<String>) -> Self {
         let f = field.into();
-        Self::new(f.clone(), format!("{} is required", f))
+        Self::new(f.clone(), format!("{f} is required"))
     }
 
     /// Create a validation error for a field that's too long
     #[must_use]
     pub fn too_long(field: impl Into<String>, max: usize) -> Self {
         let f = field.into();
-        Self::new(f.clone(), format!("{} must be at most {} characters", f, max))
+        Self::new(f.clone(), format!("{f} must be at most {max} characters"))
     }
 }
 

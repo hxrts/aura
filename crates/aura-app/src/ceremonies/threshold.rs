@@ -98,8 +98,8 @@ impl ThresholdConfig {
     }
 
     /// Create a 1-of-1 configuration (single guardian)
+    #[allow(clippy::unwrap_used)] // SAFETY: 1 is always non-zero
     pub fn single() -> Self {
-        // SAFETY: 1 is always non-zero
         Self {
             k: NonZeroU8::new(1).unwrap(),
             n: NonZeroU8::new(1).unwrap(),
@@ -107,12 +107,13 @@ impl ThresholdConfig {
     }
 
     /// Create a majority threshold (ceil((n+1)/2) of n)
+    #[allow(clippy::unwrap_used)] // SAFETY: k >= 1 when n >= 1
     pub fn majority(n: u8) -> Result<Self, ThresholdError> {
         let n_nz = NonZeroU8::new(n).ok_or(ThresholdError::NIsZero)?;
         // Ceiling of (n+1)/2 for majority
         let k = (n / 2) + 1;
         Ok(Self {
-            k: NonZeroU8::new(k).unwrap(), // k >= 1 when n >= 1
+            k: NonZeroU8::new(k).unwrap(),
             n: n_nz,
         })
     }

@@ -20,6 +20,8 @@ use aura_core::{
     },
 };
 
+use crate::views::MessageDeliveryStatus;
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -372,7 +374,7 @@ impl Query for MessagesQuery {
                     reply_to: get_optional_string(&row, "reply_to"),
                     is_own: false, // Determined at render time
                     is_read: get_bool(&row, "is_read"),
-                    delivery_status: Default::default(),
+                    delivery_status: MessageDeliveryStatus::default(),
                     epoch_hint: None, // Not available from Datalog query
                     is_finalized: false,
                 })

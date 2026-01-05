@@ -369,7 +369,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // =========================================================================
     // Threshold values from settings - used for recovery eligibility checks
     let shared_threshold = use_threshold_subscription(&mut hooks, &app_ctx);
-    let shared_threshold_for_dispatch = shared_threshold.clone();
+    let shared_threshold_for_dispatch = shared_threshold;
 
     // =========================================================================
     // ERROR_SIGNAL subscription: central domain error surfacing
@@ -505,7 +505,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let mut tui = tui.clone();
             let shared_contacts_for_updates = shared_contacts.clone();
             // Shared selection state for messages subscription synchronization
-            let tui_selected_for_updates = tui_selected.clone();
+            let tui_selected_for_updates = tui_selected;
             async move {
                 // Helper macro-like function to add a toast to the queue
                 // (Inline to avoid borrow checker issues with closures)
@@ -1451,8 +1451,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_messages_for_dispatch = shared_messages;
         // Used to map device selection for MFA wizard
         let shared_devices_for_dispatch = shared_devices;
-        // Used for recovery eligibility checks
-        let shared_threshold_for_dispatch = shared_threshold_for_dispatch;
+        // Used for recovery eligibility checks (from threshold subscription)
         move |event| {
             // Convert iocraft event to aura-core event and run through state machine
             if let Some(core_event) = convert_iocraft_event(event) {
@@ -1600,7 +1599,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         // Validate: need at least 1 contact (+ self = 2 participants)
                                         if current_contacts.is_empty() {
                                             new_state.toast_error(
-                                                &ChannelError::InsufficientParticipants {
+                                                ChannelError::InsufficientParticipants {
                                                     required: MIN_CHANNEL_PARTICIPANTS,
                                                     available: 1, // Just self
                                                 }
@@ -1783,7 +1782,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         // Check if threshold is configured
                                         if threshold_k == 0 {
                                             new_state.toast_error(
-                                                &RecoveryError::NoThresholdConfigured.to_string(),
+                                                RecoveryError::NoThresholdConfigured.to_string(),
                                             );
                                             continue;
                                         }
@@ -1796,7 +1795,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
                                         if guardian_count < threshold_k as usize {
                                             new_state.toast_error(
-                                                &RecoveryError::InsufficientGuardians {
+                                                RecoveryError::InsufficientGuardians {
                                                     required: threshold_k,
                                                     available: guardian_count,
                                                 }
@@ -1832,7 +1831,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         // Validate using type-safe ceremony error
                                         if current_contacts.is_empty() {
                                             new_state.toast_error(
-                                                &GuardianSetupError::NoContacts.to_string(),
+                                                GuardianSetupError::NoContacts.to_string(),
                                             );
                                             continue;
                                         }
@@ -1872,7 +1871,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         // Validate using type-safe ceremony error
                                         if current_devices.len() < MIN_MFA_DEVICES {
                                             new_state.toast_error(
-                                                &MfaSetupError::InsufficientDevices {
+                                                MfaSetupError::InsufficientDevices {
                                                     required: MIN_MFA_DEVICES,
                                                     available: current_devices.len(),
                                                 }

@@ -681,7 +681,7 @@ pub fn amp_channel_registry(harness: Arc<AmpChannelHarness>) -> ActionRegistry {
                 "required": []
             }))
             .execute_fn({
-                let harness = harness.clone();
+                let harness = harness;
                 move |params, _, state| {
                     let result_state = state.clone();
                     let leaver = param_string(params, &["leaver", "actor", "member"]);
@@ -795,8 +795,10 @@ async fn build_agent(
         AuraError::internal(format!("create agent storage directory failed: {e}"))
     })?;
 
-    let mut config = AgentConfig::default();
-    config.device_id = device_from_label(label);
+    let mut config = AgentConfig {
+        device_id: device_from_label(label),
+        ..Default::default()
+    };
     config.storage.base_path = base_path;
 
     let context = default_context_id_for_authority(authority);

@@ -186,7 +186,6 @@ impl TrackedCeremony {
             StatusCeremonyState::Committed {
                 consensus_id: self
                     .committed_consensus_id
-                    .clone()
                     .unwrap_or(zero_consensus_id),
                 committed_at: self.committed_at.clone().unwrap_or(zero_time.clone()),
             }
@@ -225,7 +224,7 @@ impl TrackedCeremony {
             .iter()
             .filter_map(|p| match p {
                 ParticipantIdentity::Guardian(auth_id) => Some(ParticipantResponse {
-                    participant: auth_id.clone(),
+                    participant: *auth_id,
                     response: CeremonyResponse::Accept,
                     responded_at: zero_time.clone(), // We don't track individual response times
                 }),
@@ -245,7 +244,6 @@ impl TrackedCeremony {
             Some(aura_core::domain::Agreement::Finalized {
                 consensus_id: self
                     .committed_consensus_id
-                    .clone()
                     .unwrap_or(zero_consensus_id),
             })
         } else {

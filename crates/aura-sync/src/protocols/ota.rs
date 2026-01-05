@@ -231,8 +231,7 @@ impl OTAProtocol {
             .filter(|s| matches!(s, ReadinessStatus::Ready))
             .count();
 
-        let ready_count_u32 =
-            u32::try_from(ready_count).expect("ready device count exceeds u32::MAX");
+        let ready_count_u32 = ready_count as u32;
         ready_count_u32 >= self.config.readiness_threshold
     }
 

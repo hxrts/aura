@@ -314,7 +314,7 @@ impl BoundedLivenessChecker {
                 tracking.precondition_step = Some(step_index);
                 tracking.precondition_active = true;
                 if self.verbose {
-                    println!("[Liveness] {} precondition triggered at step {}", name, step_index);
+                    println!("[Liveness] {name} precondition triggered at step {step_index}");
                 }
             }
 
@@ -440,6 +440,7 @@ impl BoundedLivenessChecker {
     ///
     /// This is a simplified evaluator for common patterns. Full evaluation
     /// would require the Quint interpreter.
+    #[allow(clippy::only_used_in_recursion)] // &self needed for method call in recursive closures
     fn evaluate_expression(&self, expr: &str, state: &Value, gst_reached: bool) -> bool {
         let expr = expr.trim();
 
@@ -599,7 +600,7 @@ pub fn check_consensus_terminates_within(
 
     checker.add_property(BoundedLivenessProperty {
         name: "consensus_terminates_within".to_string(),
-        description: format!("Consensus terminates within {} steps after GST", bound),
+        description: format!("Consensus terminates within {bound} steps after GST"),
         precondition: "gstReached".to_string(),
         goal: "allInstancesTerminated".to_string(),
         step_bound: bound,

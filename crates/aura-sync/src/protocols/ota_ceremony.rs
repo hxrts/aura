@@ -219,7 +219,7 @@ impl OTACeremonyState {
     /// Count ready devices.
     pub fn ready_count(&self) -> u32 {
         let ready_count = self.commitments.values().filter(|c| c.ready).count();
-        u32::try_from(ready_count).expect("ready device count exceeds u32::MAX")
+        ready_count as u32
     }
 
     /// Check if threshold is met.

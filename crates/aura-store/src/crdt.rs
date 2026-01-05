@@ -162,11 +162,11 @@ impl JoinSemilattice for StorageOpLog {
         let mut merged: BTreeMap<(AuthorityId, u64), StorageOperation> = BTreeMap::new();
 
         for op in &self.operations {
-            merged.insert((op.authority.clone(), op.counter), op.clone());
+            merged.insert((op.authority, op.counter), op.clone());
         }
 
         for op in &other.operations {
-            let key = (op.authority.clone(), op.counter);
+            let key = (op.authority, op.counter);
             // Only insert if not present (first-write-wins for same key)
             merged.entry(key).or_insert_with(|| op.clone());
         }

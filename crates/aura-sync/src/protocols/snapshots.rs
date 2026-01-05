@@ -290,8 +290,7 @@ impl SnapshotProtocol {
         }
 
         // Verify threshold
-        let approvals_len =
-            u32::try_from(approvals.len()).expect("approval count exceeds u32::MAX");
+        let approvals_len = approvals.len() as u32;
         if approvals_len < self.config.approval_threshold {
             return Err(sync_protocol_error(
                 "sync",

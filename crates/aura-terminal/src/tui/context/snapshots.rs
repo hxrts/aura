@@ -164,7 +164,7 @@ impl SnapshotHelper {
             let home_name = snapshot.neighborhood.home_name.clone();
             // Collect neighbors first before moving position
             let homes: Vec<_> = snapshot.neighborhood.all_neighbors().cloned().collect();
-            let position = snapshot.neighborhood.position.clone().unwrap_or_else(|| {
+            let position = snapshot.neighborhood.position.unwrap_or_else(|| {
                 aura_app::ui::types::neighborhood::TraversalPosition {
                     current_home_id: home_id.clone(),
                     current_home_name: home_name.clone(),

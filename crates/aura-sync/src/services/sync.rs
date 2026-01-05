@@ -366,8 +366,8 @@ impl SyncService {
         SyncServiceHealth {
             status,
             active_sessions: session_stats.active_sessions as u32,
-            tracked_peers: peer_stats.total_tracked as u32,
-            available_peers: peer_stats.available_peers as u32,
+            tracked_peers: peer_stats.total_tracked,
+            available_peers: peer_stats.available_peers,
             last_sync,
             uptime,
         }

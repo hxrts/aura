@@ -146,7 +146,7 @@ pub async fn send_direct_message(
                 channel_type: ChannelType::DirectMessage,
                 unread_count: 0,
                 is_dm: true,
-                member_ids: target_id.clone().into_iter().collect(),
+                member_ids: target_id.into_iter().collect(),
                 member_count: target_id.map_or(1, |_| 2), // Self + target (if known)
                 last_message: None,
                 last_message_time: None,
