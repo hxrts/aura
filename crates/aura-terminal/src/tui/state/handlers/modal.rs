@@ -22,8 +22,8 @@ use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
     AccountSetupModalState, AddDeviceModalState, ConfirmRemoveModalState, CreateChannelModalState,
     CreateInvitationField, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
-    GuardianSetupModalState, GuardianSetupStep, ImportInvitationModalState,
-    NicknameModalState, NicknameSuggestionModalState, TopicModalState,
+    GuardianSetupModalState, GuardianSetupStep, ImportInvitationModalState, NicknameModalState,
+    NicknameSuggestionModalState, TopicModalState,
 };
 use super::super::TuiState;
 
@@ -1230,9 +1230,11 @@ fn handle_settings_nickname_suggestion_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::UpdateNicknameSuggestion {
-                    nickname_suggestion: modal_state.value,
-                }));
+                commands.push(TuiCommand::Dispatch(
+                    DispatchCommand::UpdateNicknameSuggestion {
+                        nickname_suggestion: modal_state.value,
+                    },
+                ));
                 state.modal_queue.dismiss();
             }
         }

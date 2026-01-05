@@ -25,17 +25,17 @@ pub async fn handle_settings(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Option<OpResult> {
     match command {
-        EffectCommand::AddDevice { device_name } => {
-            match start_device_enrollment_ceremony(app_core, device_name.clone()).await {
-                Ok(start) => Some(Ok(OpResponse::DeviceEnrollmentStarted {
-                    ceremony_id: start.ceremony_id,
-                    enrollment_code: start.enrollment_code,
-                    pending_epoch: start.pending_epoch,
-                    device_id: start.device_id.to_string(),
-                })),
-                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
-            }
-        }
+        EffectCommand::AddDevice {
+            nickname_suggestion,
+        } => match start_device_enrollment_ceremony(app_core, nickname_suggestion.clone()).await {
+            Ok(start) => Some(Ok(OpResponse::DeviceEnrollmentStarted {
+                ceremony_id: start.ceremony_id,
+                enrollment_code: start.enrollment_code,
+                pending_epoch: start.pending_epoch,
+                device_id: start.device_id.to_string(),
+            })),
+            Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
+        },
 
         EffectCommand::RemoveDevice { device_id } => {
             match start_device_removal_ceremony(app_core, device_id.clone()).await {

@@ -230,7 +230,7 @@ pub async fn handle_invitations(
 
                     // Format invitation type for display
                     let invitation_type = match &invitation.invitation_type {
-                        InvitationBridgeType::Channel { home_id } => {
+                        InvitationBridgeType::Channel { home_id, .. } => {
                             format!("channel:{home_id}")
                         }
                         InvitationBridgeType::Guardian { .. } => "guardian".to_string(),
@@ -242,11 +242,11 @@ pub async fn handle_invitations(
                             }
                         }
                         InvitationBridgeType::DeviceEnrollment {
-                            device_name,
+                            nickname_suggestion,
                             device_id,
                             ..
                         } => {
-                            if let Some(name) = device_name {
+                            if let Some(name) = nickname_suggestion {
                                 format!("device:{name}")
                             } else {
                                 format!("device:{device_id}")

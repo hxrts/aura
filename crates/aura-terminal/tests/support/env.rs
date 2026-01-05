@@ -140,9 +140,10 @@ impl FullTestEnv {
         let device_id_str = format!("test-device-{name}");
         let nickname_suggestion = nickname_suggestion.unwrap_or_else(|| format!("TestUser-{name}"));
 
-        let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &nickname_suggestion)
-            .await
-            .expect("Failed to create account");
+        let (authority_id, context_id) =
+            create_account(&test_dir, &device_id_str, &nickname_suggestion)
+                .await
+                .expect("Failed to create account");
 
         let agent_config = AgentConfig {
             device_id: ids::device_id(&device_id_str),

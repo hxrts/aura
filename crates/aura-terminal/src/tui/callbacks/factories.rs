@@ -729,7 +729,10 @@ impl SettingsCallbacks {
     pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
         Self {
             on_update_mfa: Self::make_update_mfa(ctx.clone(), tx.clone()),
-            on_update_nickname_suggestion: Self::make_update_nickname_suggestion(ctx.clone(), tx.clone()),
+            on_update_nickname_suggestion: Self::make_update_nickname_suggestion(
+                ctx.clone(),
+                tx.clone(),
+            ),
             on_update_threshold: Self::make_update_threshold(ctx.clone(), tx.clone()),
             on_add_device: Self::make_add_device(ctx.clone(), tx.clone()),
             on_remove_device: Self::make_remove_device(ctx.clone(), tx.clone()),
@@ -807,11 +810,11 @@ impl SettingsCallbacks {
     }
 
     fn make_add_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> AddDeviceCallback {
-        Arc::new(move |device_name: String| {
+        Arc::new(move |nickname_suggestion: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
-                let start = match ctx.start_device_enrollment(&device_name).await {
+                let start = match ctx.start_device_enrollment(&nickname_suggestion).await {
                     Ok(start) => start,
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by operational layer.
@@ -821,7 +824,7 @@ impl SettingsCallbacks {
 
                 let _ = tx.try_send(UiUpdate::DeviceEnrollmentStarted {
                     ceremony_id: start.ceremony_id.clone(),
-                    device_name: device_name.clone(),
+                    nickname_suggestion: nickname_suggestion.clone(),
                     enrollment_code: start.enrollment_code.clone(),
                     pending_epoch: start.pending_epoch,
                     device_id: start.device_id.clone(),
@@ -1269,7 +1272,9 @@ impl AppCallbacks {
                             })
                             .await;
 
-                        let _ = tx.try_send(UiUpdate::NicknameSuggestionChanged(nickname_suggestion.clone()));
+                        let _ = tx.try_send(UiUpdate::NicknameSuggestionChanged(
+                            nickname_suggestion.clone(),
+                        ));
 
                         // Then dispatch the intent to create a journal fact.
                         let cmd = EffectCommand::CreateAccount {

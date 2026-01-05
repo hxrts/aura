@@ -134,6 +134,11 @@ pub struct TrackedCeremony {
     /// Device being enrolled (DeviceEnrollment ceremonies only).
     pub enrollment_device_id: Option<DeviceId>,
 
+    /// Nickname suggestion for the enrolling device (DeviceEnrollment ceremonies only).
+    ///
+    /// Stored here to be embedded in `DeviceLeafMetadata` when enrollment completes.
+    pub enrollment_nickname_suggestion: Option<String>,
+
     /// When the ceremony was initiated
     pub started_at: Instant,
 
@@ -296,6 +301,7 @@ impl CeremonyTracker {
         participants: Vec<ParticipantIdentity>,
         new_epoch: u64,
         enrollment_device_id: Option<DeviceId>,
+        enrollment_nickname_suggestion: Option<String>,
     ) -> Result<(), IntentError> {
         self.register_with_prestate(
             ceremony_id,
@@ -305,6 +311,7 @@ impl CeremonyTracker {
             participants,
             new_epoch,
             enrollment_device_id,
+            enrollment_nickname_suggestion,
             None, // No prestate hash for backward compatibility
         )
         .await
@@ -321,6 +328,7 @@ impl CeremonyTracker {
         participants: Vec<ParticipantIdentity>,
         new_epoch: u64,
         enrollment_device_id: Option<DeviceId>,
+        enrollment_nickname_suggestion: Option<String>,
         prestate_hash: Option<Hash32>,
     ) -> Result<(), IntentError> {
         let participants_set: HashSet<_> = participants.into_iter().collect();
@@ -342,6 +350,7 @@ impl CeremonyTracker {
             accepted_participants: HashSet::new(),
             new_epoch,
             enrollment_device_id,
+            enrollment_nickname_suggestion,
             started_at: Instant::now(),
             has_failed: false,
             is_committed: false,
@@ -872,6 +881,7 @@ mod tests {
                 ],
                 100,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -904,6 +914,7 @@ mod tests {
                     ParticipantIdentity::guardian(c),
                 ],
                 100,
+                None,
                 None,
             )
             .await
@@ -955,6 +966,7 @@ mod tests {
                 ],
                 100,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -998,6 +1010,7 @@ mod tests {
                     ParticipantIdentity::guardian(b),
                 ],
                 100,
+                None,
                 None,
             )
             .await
@@ -1045,6 +1058,7 @@ mod tests {
                 ],
                 100,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1085,6 +1099,7 @@ mod tests {
                 ],
                 100,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1114,6 +1129,7 @@ mod tests {
                 vec![ParticipantIdentity::device(device)],
                 42,
                 Some(device),
+                Some("My Test Device".to_string()),
             )
             .await
             .unwrap();
@@ -1151,6 +1167,7 @@ mod tests {
                     ParticipantIdentity::device(device_b),
                 ],
                 77,
+                None,
                 None,
             )
             .await
@@ -1192,6 +1209,7 @@ mod tests {
                 ],
                 88,
                 Some(device_b),
+                None,
             )
             .await
             .unwrap();
@@ -1253,6 +1271,7 @@ mod tests {
                     accepted_participants: accepted,
                     new_epoch: 100,
                     enrollment_device_id: None,
+                    enrollment_nickname_suggestion: None,
                     started_at: Instant::now(),
                     has_failed: false,
                     is_committed: false,
@@ -1293,6 +1312,7 @@ mod tests {
                         accepted_participants: HashSet::new(),
                         new_epoch: 100,
                         enrollment_device_id: None,
+                        enrollment_nickname_suggestion: None,
                         started_at: Instant::now(),
                         has_failed: false,
                         is_committed: false,
@@ -1346,6 +1366,7 @@ mod tests {
                         accepted_participants: accepted.clone(),
                         new_epoch: 100,
                         enrollment_device_id: None,
+                        enrollment_nickname_suggestion: None,
                         started_at: Instant::now(),
                         has_failed: false,
                         is_committed: false,
@@ -1394,6 +1415,7 @@ mod tests {
                         accepted_participants: HashSet::new(),
                         new_epoch: 100,
                         enrollment_device_id: None,
+                        enrollment_nickname_suggestion: None,
                         started_at: Instant::now(),
                         has_failed: false,
                         is_committed: false,
@@ -1453,6 +1475,7 @@ mod tests {
                         accepted_participants: accepted,
                         new_epoch: 100,
                         enrollment_device_id: None,
+                        enrollment_nickname_suggestion: None,
                         started_at: Instant::now(),
                         has_failed: false,
                         is_committed: true, // Mark as committed
@@ -1508,6 +1531,7 @@ mod tests {
                         accepted_participants: accepted,
                         new_epoch: 100,
                         enrollment_device_id: None,
+                        enrollment_nickname_suggestion: None,
                         started_at: Instant::now(),
                         has_failed,
                         is_committed,
@@ -1565,6 +1589,7 @@ mod tests {
                         accepted_participants: accepted,
                         new_epoch: 100,
                         enrollment_device_id: None,
+                        enrollment_nickname_suggestion: None,
                         started_at: Instant::now(),
                         has_failed: is_superseded, // Superseded ceremonies are marked failed
                         is_committed,

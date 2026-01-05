@@ -21,7 +21,8 @@ use std::sync::Arc;
 use aura_app::ui::signals::{RECOVERY_SIGNAL, SETTINGS_SIGNAL};
 
 use crate::tui::callbacks::{
-    AddDeviceCallback, RemoveDeviceCallback, UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
+    AddDeviceCallback, RemoveDeviceCallback, UpdateNicknameSuggestionCallback,
+    UpdateThresholdCallback,
 };
 use crate::tui::components::SimpleSelectableItem;
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};

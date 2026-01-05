@@ -16,6 +16,7 @@ pub mod contacts;
 pub mod display;
 pub mod home;
 pub mod invitations;
+pub mod naming;
 pub mod neighborhood;
 pub mod notifications;
 pub mod operations;
@@ -64,3 +65,6 @@ pub use wizards::{
     format_wizard_progress, wizard_progress_percent, AccountSetupStep, CreateChannelStep,
     RecoverySetupStep,
 };
+
+// Naming trait for unified name resolution
+pub use naming::{truncate_id_for_display, EffectiveName};

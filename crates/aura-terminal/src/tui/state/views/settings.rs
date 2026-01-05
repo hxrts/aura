@@ -104,8 +104,8 @@ impl AddDeviceModalState {
 pub struct DeviceEnrollmentCeremonyModalState {
     /// Ceremony UI state (id/progress/pending epoch)
     pub ceremony: KeyRotationCeremonyUiState,
-    /// Device name being enrolled (for display)
-    pub device_name: String,
+    /// Nickname suggestion for the device being enrolled (what it wants to be called)
+    pub nickname_suggestion: String,
     /// Enrollment code to import on the new device
     pub enrollment_code: String,
     /// Whether code was copied to clipboard
@@ -113,13 +113,17 @@ pub struct DeviceEnrollmentCeremonyModalState {
 }
 
 impl DeviceEnrollmentCeremonyModalState {
-    pub fn started(ceremony_id: String, device_name: String, enrollment_code: String) -> Self {
+    pub fn started(
+        ceremony_id: String,
+        nickname_suggestion: String,
+        enrollment_code: String,
+    ) -> Self {
         Self {
             ceremony: KeyRotationCeremonyUiState {
                 ceremony_id: Some(ceremony_id),
                 ..KeyRotationCeremonyUiState::default()
             },
-            device_name,
+            nickname_suggestion,
             enrollment_code,
             copied: false,
         }
@@ -163,18 +167,18 @@ impl DeviceEnrollmentCeremonyModalState {
 pub struct ConfirmRemoveModalState {
     /// Device ID to remove
     pub device_id: String,
-    /// Device name (for display)
-    pub device_name: String,
+    /// Device display name (effective name for UI)
+    pub display_name: String,
     /// Whether confirm button is focused (vs cancel)
     pub confirm_focused: bool,
 }
 
 impl ConfirmRemoveModalState {
     /// Create initialized state for device removal confirmation
-    pub fn for_device(device_id: &str, device_name: &str) -> Self {
+    pub fn for_device(device_id: &str, display_name: &str) -> Self {
         Self {
             device_id: device_id.to_string(),
-            device_name: device_name.to_string(),
+            display_name: display_name.to_string(),
             confirm_focused: false,
         }
     }
@@ -182,7 +186,7 @@ impl ConfirmRemoveModalState {
     /// Reset state (called when dismissed)
     pub fn reset(&mut self) {
         self.device_id.clear();
-        self.device_name.clear();
+        self.display_name.clear();
         self.confirm_focused = false;
     }
 

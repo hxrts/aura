@@ -62,7 +62,11 @@ impl InvitationServiceApi {
             .create_invitation(
                 &self.effects,
                 receiver_id,
-                InvitationType::Channel { home_id, bootstrap },
+                InvitationType::Channel {
+                    home_id,
+                    nickname_suggestion: None,
+                    bootstrap,
+                },
                 message,
                 expires_in_ms,
             )
@@ -135,7 +139,7 @@ impl InvitationServiceApi {
         subject_authority: AuthorityId,
         initiator_device_id: DeviceId,
         device_id: DeviceId,
-        device_name: Option<String>,
+        nickname_suggestion: Option<String>,
         ceremony_id: CeremonyId,
         pending_epoch: u64,
         key_package: Vec<u8>,
@@ -151,7 +155,7 @@ impl InvitationServiceApi {
                     subject_authority,
                     initiator_device_id,
                     device_id,
-                    device_name,
+                    nickname_suggestion,
                     ceremony_id,
                     pending_epoch,
                     key_package,

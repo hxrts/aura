@@ -553,7 +553,10 @@ impl IoContext {
     // =========================================================================
 
     pub async fn create_account(&self, nickname_suggestion: &str) -> Result<(), String> {
-        let (authority_id, _context_id) = self.account_files.create_account(nickname_suggestion).await?;
+        let (authority_id, _context_id) = self
+            .account_files
+            .create_account(nickname_suggestion)
+            .await?;
 
         {
             let mut core = self.app_core_raw().write().await;
@@ -714,12 +717,12 @@ impl IoContext {
 
     pub async fn start_device_enrollment(
         &self,
-        device_name: &str,
+        nickname_suggestion: &str,
     ) -> Result<DeviceEnrollmentStartInfo, String> {
         match self
             .operational
             .execute(&EffectCommand::AddDevice {
-                device_name: device_name.to_string(),
+                nickname_suggestion: nickname_suggestion.to_string(),
             })
             .await
         {

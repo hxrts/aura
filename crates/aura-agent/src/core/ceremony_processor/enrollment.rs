@@ -13,6 +13,8 @@ use aura_core::effects::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
 };
 use aura_core::identifiers::CeremonyId;
+use aura_core::tree::metadata::DeviceLeafMetadata;
+use aura_core::tree::LeafRole;
 use aura_core::{AttestedOp, AuthorityId, DeviceId, LeafId, LeafNode, NodeIndex, TreeOp};
 use aura_protocol::effects::TreeEffects;
 
@@ -377,8 +379,26 @@ impl<'a> EnrollmentHandler<'a> {
                 .map(|id| id + 1)
                 .unwrap_or(0);
 
-            let leaf = LeafNode::new_device(LeafId(next_leaf_id), device_id, public_key_bytes)
-                .map_err(|e| format!("Failed to build device leaf: {e}"))?;
+            // Build DeviceLeafMetadata with nickname_suggestion from ceremony state
+            let device_metadata =
+                if let Some(ref suggestion) = ceremony_state.enrollment_nickname_suggestion {
+                    DeviceLeafMetadata::with_nickname_suggestion(suggestion)
+                } else {
+                    DeviceLeafMetadata::new()
+                };
+
+            let leaf_metadata = device_metadata
+                .encode()
+                .map_err(|e| format!("Failed to encode device metadata: {e}"))?;
+
+            let leaf = LeafNode::new(
+                LeafId(next_leaf_id),
+                device_id,
+                LeafRole::Device,
+                public_key_bytes,
+                leaf_metadata,
+            )
+            .map_err(|e| format!("Failed to build device leaf: {e}"))?;
 
             let op_kind = self
                 .effects

@@ -24,6 +24,8 @@
 //! - `check_attested_op`: Full verification plus TreeState consistency check
 
 pub mod commitment;
+/// Structured metadata for device and guardian leaf nodes
+pub mod metadata;
 pub mod policy;
 /// Snapshot and cut-based pruning of operation history
 pub mod snapshot;
@@ -32,6 +34,7 @@ pub mod types;
 pub mod verification;
 
 pub use commitment::*;
+pub use metadata::{DeviceLeafMetadata, NICKNAME_SUGGESTION_BYTES_MAX, PLATFORM_BYTES_MAX};
 pub use policy::{Policy, PolicyError};
 pub use snapshot::*;
 pub use types::*;

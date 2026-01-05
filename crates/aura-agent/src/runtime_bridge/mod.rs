@@ -1091,6 +1091,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 participants,
                 new_epoch.value(),
                 None,
+                None,
             )
             .await
             .map_err(|e| {
@@ -1333,6 +1334,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 participants,
                 pending_epoch.value(),
                 None,
+                None,
             )
             .await
             .map_err(|e| {
@@ -1426,7 +1428,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
     async fn initiate_device_enrollment_ceremony(
         &self,
-        device_name: String,
+        nickname_suggestion: String,
     ) -> Result<aura_app::runtime_bridge::DeviceEnrollmentStart, IntentError> {
         use aura_core::effects::{
             SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
@@ -1643,6 +1645,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let acceptance_threshold = threshold_k.min(acceptance_n);
 
         let tracker = self.agent.ceremony_tracker().await;
+        let nickname_for_tracker = if nickname_suggestion.is_empty() {
+            None
+        } else {
+            Some(nickname_suggestion.clone())
+        };
         tracker
             .register(
                 ceremony_id.clone(),
@@ -1652,6 +1659,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 acceptors,
                 pending_epoch.value(),
                 Some(new_device_id),
+                nickname_for_tracker,
             )
             .await
             .map_err(|e| {
@@ -1745,7 +1753,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 authority_id,
                 current_device_id,
                 new_device_id,
-                Some(device_name),
+                Some(nickname_suggestion),
                 ceremony_id.clone(),
                 pending_epoch.value(),
                 invited_key_package,
@@ -1992,6 +2000,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 participants.clone(),
                 pending_epoch.value(),
                 Some(target_device_id),
+                None,
             )
             .await
             .map_err(|e| {
@@ -2507,6 +2516,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
     }
 
     async fn list_devices(&self) -> Vec<BridgeDeviceInfo> {
+        use aura_app::views::naming::EffectiveName;
+        use aura_core::tree::metadata::DeviceLeafMetadata;
+
         let effects = self.agent.runtime().effects();
         let current_device = self.agent.context().device_id();
 
@@ -2516,13 +2528,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 tracing::warn!("Failed to read commitment tree state for devices: {e}");
                 // Return at least the current device on error
                 let id = current_device;
-                let short = id.to_string();
-                let short = short.chars().take(8).collect::<String>();
-                return vec![BridgeDeviceInfo {
+                let device = BridgeDeviceInfo {
                     id,
-                    name: format!("Device {short} (local)"),
+                    name: String::new(), // Will be computed from effective_name()
+                    nickname: None,
+                    nickname_suggestion: None,
                     is_current: true,
                     last_seen: None,
+                };
+                return vec![BridgeDeviceInfo {
+                    name: device.effective_name(),
+                    ..device
                 }];
             }
         };
@@ -2533,13 +2549,28 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .filter(|leaf| leaf.role == LeafRole::Device)
             .map(|leaf| {
                 let id = leaf.device_id;
-                let short = id.to_string();
-                let short = short.chars().take(8).collect::<String>();
-                BridgeDeviceInfo {
+
+                // Try to decode nickname_suggestion from leaf metadata
+                let nickname_suggestion = DeviceLeafMetadata::decode(&leaf.meta)
+                    .ok()
+                    .and_then(|meta| meta.nickname_suggestion);
+
+                // Local nickname override (not yet wired to persistent storage)
+                let nickname: Option<String> = None;
+
+                let device = BridgeDeviceInfo {
                     id,
-                    name: format!("Device {short}"),
+                    name: String::new(), // Will be computed from effective_name()
+                    nickname,
+                    nickname_suggestion,
                     is_current: leaf.device_id == current_device,
                     last_seen: None,
+                };
+
+                // Compute name using EffectiveName trait
+                BridgeDeviceInfo {
+                    name: device.effective_name(),
+                    ..device
                 }
             })
             .collect();
@@ -2549,15 +2580,19 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let current_in_tree = devices.iter().any(|d| d.is_current);
         if !current_in_tree {
             let id = current_device;
-            let short = id.to_string();
-            let short = short.chars().take(8).collect::<String>();
+            let device = BridgeDeviceInfo {
+                id,
+                name: String::new(),
+                nickname: None,
+                nickname_suggestion: None,
+                is_current: true,
+                last_seen: None,
+            };
             devices.insert(
                 0,
                 BridgeDeviceInfo {
-                    id,
-                    name: format!("Device {short} (local)"),
-                    is_current: true,
-                    last_seen: None,
+                    name: device.effective_name(),
+                    ..device
                 },
             );
         }

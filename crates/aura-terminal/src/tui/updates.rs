@@ -93,7 +93,7 @@ pub enum UiUpdate {
     /// Device enrollment ("add device") ceremony started.
     DeviceEnrollmentStarted {
         ceremony_id: String,
-        device_name: String,
+        nickname_suggestion: String,
         enrollment_code: String,
         pending_epoch: Epoch,
         device_id: String,

@@ -11,7 +11,7 @@ use aura_core::threshold::AgreementMode;
 #[derive(Default, Props)]
 pub struct DeviceEnrollmentModalProps {
     pub visible: bool,
-    pub device_name: String,
+    pub nickname_suggestion: String,
     pub enrollment_code: String,
     pub accepted_count: u16,
     pub total_count: u16,
@@ -67,7 +67,7 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
     element! {
         CodeDisplayModal(
             visible: props.visible,
-            title: format!("{step_title}: {}", props.device_name),
+            title: format!("{step_title}: {}", props.nickname_suggestion),
             status: status,
             status_text: status_text,
             progress_text: progress_text,

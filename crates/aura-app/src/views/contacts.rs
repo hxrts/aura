@@ -4,6 +4,8 @@ use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::naming::{truncate_id_for_display, EffectiveName};
+
 // Re-export ReadReceiptPolicy from aura-relational for convenience
 pub use aura_relational::ReadReceiptPolicy;
 
@@ -58,6 +60,26 @@ pub struct Contact {
     pub is_online: bool,
     /// Read receipt policy for this contact (privacy-first: disabled by default)
     pub read_receipt_policy: ReadReceiptPolicy,
+}
+
+impl EffectiveName for Contact {
+    fn nickname(&self) -> Option<&str> {
+        if self.nickname.is_empty() {
+            None
+        } else {
+            Some(&self.nickname)
+        }
+    }
+
+    fn nickname_suggestion(&self) -> Option<&str> {
+        self.nickname_suggestion
+            .as_deref()
+            .filter(|s| !s.is_empty())
+    }
+
+    fn fallback_id(&self) -> String {
+        truncate_id_for_display(&self.id.to_string())
+    }
 }
 
 // =============================================================================
@@ -198,17 +220,14 @@ impl ContactsState {
 
     /// Get effective name for a contact.
     ///
+    /// Delegates to the `EffectiveName` trait implementation on `Contact`.
     /// Returns nickname if set, otherwise nickname_suggestion, otherwise the ID as fallback.
     pub fn effective_name(&self, id: &AuthorityId) -> String {
         if let Some(contact) = self.contact(id) {
-            if !contact.nickname.is_empty() {
-                return contact.nickname.clone();
-            }
-            if let Some(name) = &contact.nickname_suggestion {
-                return name.clone();
-            }
+            contact.effective_name()
+        } else {
+            truncate_id_for_display(&id.to_string())
         }
-        id.to_string()
     }
 
     /// Get read receipt policy for a contact.

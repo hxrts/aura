@@ -60,6 +60,8 @@
 
 /// Domain-specific logic types (consensus, journal, content addressing)
 pub mod domain;
+/// Unified envelope format for shareable Aura payloads (invites, discovery, rendezvous)
+pub mod envelope;
 /// Core domain types (identifiers, authority, scope, flow, epochs, sessions, relationships)
 pub mod types;
 /// Utility modules (serialization, conversions, context derivation, test utilities)
@@ -281,8 +283,9 @@ pub use relational::*;
 #[doc = "stable: Tree types are foundational Layer 1 abstractions required by effect traits and FROST primitives"]
 pub use tree::{
     commit_branch, commit_leaf, compute_root_commitment, policy_hash, AttestedOp, BranchNode,
-    Epoch, LeafId, LeafNode, LeafRole, NodeIndex, NodeKind, Policy, PolicyError, TreeCommitment,
-    TreeOp, TreeOpKind,
+    DeviceLeafMetadata, Epoch, LeafId, LeafNode, LeafRole, NodeIndex, NodeKind, Policy,
+    PolicyError, TreeCommitment, TreeOp, TreeOpKind, NICKNAME_SUGGESTION_BYTES_MAX,
+    PLATFORM_BYTES_MAX,
 };
 #[doc = "stable: Epoch counters and participant identifiers"]
 pub use types::epochs::*;
@@ -302,6 +305,10 @@ pub use threshold::{
     ApprovalContext, NetworkAddress, NetworkAddressError, ParticipantEndpoint, ParticipantIdentity,
     SignableOperation, SignerIndexError, SigningContext, SigningParticipant, ThresholdSignature,
 };
+
+// Envelope types for shareable payloads
+#[doc = "stable: Unified envelope format for invitations, discovery, and rendezvous descriptors"]
+pub use envelope::{AuraEnvelope, AuraPayloadKind, ENVELOPE_VERSION_CURRENT, PAYLOAD_BYTES_MAX};
 
 /// Standard result type for core operations
 pub type Result<T> = std::result::Result<T, AuraError>;

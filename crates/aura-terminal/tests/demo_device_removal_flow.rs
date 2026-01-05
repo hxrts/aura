@@ -45,9 +45,10 @@ async fn setup_test_env() -> TestEnv {
 
     let device_id_str = "test-device-a".to_string();
     let nickname_suggestion = "DemoUser-A".to_string();
-    let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &nickname_suggestion)
-        .await
-        .expect("Failed to create account");
+    let (authority_id, context_id) =
+        create_account(&test_dir, &device_id_str, &nickname_suggestion)
+            .await
+            .expect("Failed to create account");
 
     let shared_transport = SharedTransport::new();
     let seed = 2030u64;

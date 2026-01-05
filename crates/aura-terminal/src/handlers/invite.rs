@@ -175,11 +175,11 @@ fn format_invitation_type(shareable: &ShareableInvitation) -> String {
         aura_agent::handlers::InvitationType::DeviceEnrollment {
             subject_authority,
             device_id,
-            device_name,
+            nickname_suggestion,
             pending_epoch,
             ..
         } => {
-            let label = device_name
+            let label = nickname_suggestion
                 .as_deref()
                 .map(|s| format!(" (name: {s})"))
                 .unwrap_or_default();
@@ -275,6 +275,7 @@ mod tests {
     fn test_format_invitation_type_channel() {
         let shareable = test_shareable(InvitationType::Channel {
             home_id: "home-123".to_string(),
+            nickname_suggestion: None,
             bootstrap: None,
         });
         let result = format_invitation_type(&shareable);

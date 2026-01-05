@@ -53,8 +53,8 @@ pub enum EffectCommand {
     },
     /// Add a device to the account
     AddDevice {
-        /// Device name/identifier
-        device_name: String,
+        /// Nickname suggestion (what the device wants to be called)
+        nickname_suggestion: String,
     },
     /// Remove a device from the account
     RemoveDevice {

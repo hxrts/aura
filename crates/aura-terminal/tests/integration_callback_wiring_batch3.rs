@@ -1128,7 +1128,7 @@ async fn test_device_management() {
     println!("Phase 1: Add device");
     let result = ctx
         .dispatch(EffectCommand::AddDevice {
-            device_name: "My Laptop".to_string(),
+            nickname_suggestion: "My Laptop".to_string(),
         })
         .await;
 

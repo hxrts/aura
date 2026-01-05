@@ -450,7 +450,7 @@ pub struct SettingsViewProps {
     // Device enrollment ceremony modal
     pub device_enrollment_modal_visible: bool,
     pub device_enrollment_modal_ceremony_id: String,
-    pub device_enrollment_modal_device_name: String,
+    pub device_enrollment_modal_nickname_suggestion: String,
     pub device_enrollment_modal_code: String,
     pub device_enrollment_modal_accepted_count: u16,
     pub device_enrollment_modal_total_count: u16,
@@ -464,7 +464,7 @@ pub struct SettingsViewProps {
     // Confirm remove modal
     pub confirm_remove_modal_visible: bool,
     pub confirm_remove_modal_device_id: String,
-    pub confirm_remove_modal_device_name: String,
+    pub confirm_remove_modal_display_name: String,
     pub confirm_remove_modal_confirm_focused: bool,
     // MFA setup modal (wizard-based)
     pub mfa_setup_modal_visible: bool,
@@ -509,7 +509,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     let (
         enrollment_visible,
         enrollment_ceremony_id,
-        enrollment_device_name,
+        enrollment_nickname_suggestion,
         enrollment_code,
         enrollment_accepted,
         enrollment_total,
@@ -527,7 +527,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
                 warn!("Device enrollment modal missing ceremony id");
                 String::new()
             }),
-            s.device_name.clone(),
+            s.nickname_suggestion.clone(),
             s.enrollment_code.clone(),
             s.ceremony.accepted_count,
             s.ceremony.total_count,
@@ -559,13 +559,13 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
     let (
         confirm_remove_visible,
         confirm_remove_device_id,
-        confirm_remove_device_name,
+        confirm_remove_display_name,
         confirm_remove_focused,
     ) = match state.modal_queue.current() {
         Some(QueuedModal::SettingsRemoveDevice(s)) => (
             true,
             s.device_id.clone(),
-            s.device_name.clone(),
+            s.display_name.clone(),
             s.confirm_focused,
         ),
         _ => (false, String::new(), String::new(), false),
@@ -649,7 +649,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         // Device enrollment ceremony modal (from queue)
         device_enrollment_modal_visible: enrollment_visible,
         device_enrollment_modal_ceremony_id: enrollment_ceremony_id,
-        device_enrollment_modal_device_name: enrollment_device_name,
+        device_enrollment_modal_nickname_suggestion: enrollment_nickname_suggestion,
         device_enrollment_modal_code: enrollment_code,
         device_enrollment_modal_accepted_count: enrollment_accepted,
         device_enrollment_modal_total_count: enrollment_total,
@@ -663,7 +663,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         // Confirm remove modal (from queue)
         confirm_remove_modal_visible: confirm_remove_visible,
         confirm_remove_modal_device_id: confirm_remove_device_id,
-        confirm_remove_modal_device_name: confirm_remove_device_name,
+        confirm_remove_modal_display_name: confirm_remove_display_name,
         confirm_remove_modal_confirm_focused: confirm_remove_focused,
         // MFA setup modal (from queue)
         mfa_setup_modal_visible: mfa_visible,
@@ -889,7 +889,9 @@ mod tests {
         let nickname_suggestion_modal = NicknameSuggestionModalState::with_name("new-nick");
         state
             .modal_queue
-            .enqueue(QueuedModal::SettingsNicknameSuggestion(nickname_suggestion_modal));
+            .enqueue(QueuedModal::SettingsNicknameSuggestion(
+                nickname_suggestion_modal,
+            ));
 
         let props = extract_settings_view_props(&state);
 

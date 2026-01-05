@@ -14,9 +14,9 @@ use super::modal_overlays::{
     render_account_setup_modal, render_add_device_modal, render_channel_info_modal,
     render_chat_create_modal, render_confirm_modal, render_contact_modal,
     render_contacts_code_modal, render_contacts_create_modal, render_contacts_import_modal,
-    render_device_enrollment_modal, render_device_import_modal, render_nickname_suggestion_modal,
-    render_guardian_modal, render_guardian_setup_modal, render_help_modal,
-    render_home_create_modal, render_mfa_setup_modal, render_nickname_modal,
+    render_device_enrollment_modal, render_device_import_modal, render_guardian_modal,
+    render_guardian_setup_modal, render_help_modal, render_home_create_modal,
+    render_mfa_setup_modal, render_nickname_modal, render_nickname_suggestion_modal,
     render_remove_device_modal, render_topic_modal, GlobalModalProps,
 };
 
@@ -558,7 +558,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                         UiUpdate::DeviceEnrollmentStarted {
                             ceremony_id,
-                            device_name,
+                            nickname_suggestion,
                             enrollment_code,
                             pending_epoch: _,
                             device_id: _,
@@ -578,7 +578,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         crate::tui::state_machine::QueuedModal::SettingsDeviceEnrollment(
                                             crate::tui::state_machine::DeviceEnrollmentCeremonyModalState::started(
                                                 ceremony_id,
-                                                device_name,
+                                                nickname_suggestion,
                                                 enrollment_code,
                                             ),
                                         ),

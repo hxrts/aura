@@ -691,7 +691,7 @@ impl InvitationHandler {
                 subject_authority,
                 initiator_device_id,
                 device_id,
-                device_name: _,
+                nickname_suggestion: _,
                 ceremony_id,
                 pending_epoch,
                 key_package,
@@ -721,7 +721,7 @@ impl InvitationHandler {
                 subject_authority,
                 initiator_device_id,
                 device_id,
-                device_name: _,
+                nickname_suggestion: _,
                 ceremony_id,
                 pending_epoch,
                 key_package,
@@ -755,6 +755,7 @@ impl InvitationHandler {
         if let Some(inv) = self.invitation_cache.get_invitation(invitation_id).await {
             if let InvitationType::Channel {
                 home_id,
+                nickname_suggestion: _,
                 bootstrap: Some(package),
             } = &inv.invitation_type
             {
@@ -771,6 +772,7 @@ impl InvitationHandler {
         {
             if let InvitationType::Channel {
                 home_id,
+                nickname_suggestion: _,
                 bootstrap: Some(package),
             } = shareable.invitation_type
             {
@@ -826,6 +828,7 @@ impl InvitationHandler {
 
             if let InvitationType::Channel {
                 home_id,
+                nickname_suggestion: _,
                 bootstrap: Some(package),
             } = invitation_type
             {
@@ -1602,6 +1605,7 @@ mod tests {
                 receiver_id,
                 InvitationType::Channel {
                     home_id: "home-123".to_string(),
+                    nickname_suggestion: None,
                     bootstrap: None,
                 },
                 None,
@@ -1962,6 +1966,7 @@ mod tests {
             sender_id,
             invitation_type: InvitationType::Channel {
                 home_id: "home-xyz".to_string(),
+                nickname_suggestion: None,
                 bootstrap: None,
             },
             expires_at: Some(1800000000000),
@@ -1972,7 +1977,11 @@ mod tests {
         let decoded = ShareableInvitation::from_code(&code).unwrap();
 
         match decoded.invitation_type {
-            InvitationType::Channel { home_id, .. } => {
+            InvitationType::Channel {
+                home_id,
+                nickname_suggestion: _,
+                bootstrap: _,
+            } => {
                 assert_eq!(home_id, "home-xyz");
             }
             _ => panic!("wrong invitation type"),

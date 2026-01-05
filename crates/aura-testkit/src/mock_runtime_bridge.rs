@@ -109,6 +109,8 @@ impl MockRuntimeBridge {
             devices: Arc::new(RwLock::new(vec![BridgeDeviceInfo {
                 id: device_id,
                 name: "MockDevice".to_string(),
+                nickname: None,
+                nickname_suggestion: Some("MockDevice".to_string()),
                 is_current: true,
                 last_seen: Some(1700000000000),
             }])),
@@ -587,11 +589,11 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     async fn initiate_device_enrollment_ceremony(
         &self,
-        device_name: String,
+        nickname_suggestion: String,
     ) -> Result<DeviceEnrollmentStart, IntentError> {
         Ok(DeviceEnrollmentStart {
             ceremony_id: self.next_id(),
-            enrollment_code: format!("aura-enroll:mock:{device_name}"),
+            enrollment_code: format!("aura-enroll:mock:{nickname_suggestion}"),
             pending_epoch: Epoch::new(1),
             device_id: DeviceId::new_from_entropy([3u8; 32]),
         })
@@ -686,18 +688,19 @@ impl RuntimeBridge for MockRuntimeBridge {
                             }
                         })
                     },
-                    InvitationBridgeType::Channel { home_id } => {
+                    InvitationBridgeType::Channel { home_id, nickname_suggestion } => {
                         serde_json::json!({
                             "Channel": {
-                                "home_id": home_id
+                                "home_id": home_id,
+                                "nickname_suggestion": nickname_suggestion
                             }
                         })
                     },
-                    InvitationBridgeType::DeviceEnrollment { device_id, device_name, .. } => {
+                    InvitationBridgeType::DeviceEnrollment { device_id, nickname_suggestion, .. } => {
                         serde_json::json!({
                             "DeviceEnrollment": {
                                 "device_id": device_id,
-                                "device_name": device_name
+                                "nickname_suggestion": nickname_suggestion
                             }
                         })
                     },
@@ -808,7 +811,10 @@ impl RuntimeBridge for MockRuntimeBridge {
             invitation_id: invitation_id.clone(),
             sender_id: self.authority_id,
             receiver_id: receiver,
-            invitation_type: InvitationBridgeType::Channel { home_id },
+            invitation_type: InvitationBridgeType::Channel {
+                home_id,
+                nickname_suggestion: None,
+            },
             status: InvitationBridgeStatus::Pending,
             created_at_ms: now,
             expires_at_ms,
@@ -984,7 +990,15 @@ impl RuntimeBridge for MockRuntimeBridge {
                     .and_then(|b| b.as_str())
                     .unwrap_or("home")
                     .to_string();
-                InvitationBridgeType::Channel { home_id }
+                let nickname_suggestion = inv_type
+                    .get("Channel")
+                    .and_then(|c| c.get("nickname_suggestion"))
+                    .and_then(|n| n.as_str())
+                    .map(|s| s.to_string());
+                InvitationBridgeType::Channel {
+                    home_id,
+                    nickname_suggestion,
+                }
             } else {
                 InvitationBridgeType::Contact { nickname: None }
             }

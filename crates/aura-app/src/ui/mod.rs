@@ -138,8 +138,8 @@ pub mod types {
         BACKUP_VERSION,
     };
     pub use crate::workflows::account::{
-        can_submit_account_setup, is_valid_nickname_suggestion, validate_nickname_suggestion, NicknameSuggestionError,
-        MAX_NICKNAME_SUGGESTION_LENGTH, MIN_NICKNAME_SUGGESTION_LENGTH,
+        can_submit_account_setup, is_valid_nickname_suggestion, validate_nickname_suggestion,
+        NicknameSuggestionError, MAX_NICKNAME_SUGGESTION_LENGTH, MIN_NICKNAME_SUGGESTION_LENGTH,
     };
     // Toast and modal lifecycle types
     pub use crate::views::notifications::{

@@ -96,9 +96,10 @@ async fn setup_test_env(name: &str) -> TestEnv {
     let device_id_str = format!("test-device-{name}");
     let nickname_suggestion = format!("DemoUser-{name}");
 
-    let (authority_id, context_id) = create_account(&test_dir, &device_id_str, &nickname_suggestion)
-        .await
-        .expect("Failed to create account");
+    let (authority_id, context_id) =
+        create_account(&test_dir, &device_id_str, &nickname_suggestion)
+            .await
+            .expect("Failed to create account");
 
     let agent_config = AgentConfig {
         device_id: ids::device_id(&device_id_str),

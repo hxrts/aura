@@ -34,6 +34,7 @@
 //! ```
 
 use crate::core::IntentError;
+use crate::views::naming::{truncate_id_for_display, EffectiveName};
 use crate::ReactiveHandler;
 use async_trait::async_trait;
 use aura_core::effects::amp::{
@@ -204,14 +205,17 @@ pub enum InvitationBridgeType {
     Contact { nickname: Option<String> },
     /// Guardian invitation for a subject authority
     Guardian { subject_authority: AuthorityId },
-    /// Channel/home invitation
-    Channel { home_id: String },
+    /// Channel/home invitation with optional nickname suggestion
+    Channel {
+        home_id: String,
+        nickname_suggestion: Option<String>,
+    },
     /// Device enrollment invitation (out-of-band transfer).
     DeviceEnrollment {
         subject_authority: AuthorityId,
         initiator_device_id: DeviceId,
         device_id: DeviceId,
-        device_name: Option<String>,
+        nickname_suggestion: Option<String>,
         ceremony_id: String,
         pending_epoch: Epoch,
     },
@@ -288,12 +292,32 @@ pub struct SettingsBridgeState {
 pub struct BridgeDeviceInfo {
     /// Stable device identifier
     pub id: DeviceId,
-    /// Human-friendly label (best effort)
+    /// Human-friendly label (best effort, computed for display)
     pub name: String,
+    /// Local nickname override (user-assigned name for this device)
+    pub nickname: Option<String>,
+    /// Nickname suggestion (what the device wants to be called, from enrollment)
+    pub nickname_suggestion: Option<String>,
     /// Whether this is the current device
     pub is_current: bool,
     /// Last-seen timestamp (ms since epoch), if known
     pub last_seen: Option<u64>,
+}
+
+impl EffectiveName for BridgeDeviceInfo {
+    fn nickname(&self) -> Option<&str> {
+        self.nickname.as_deref().filter(|s| !s.is_empty())
+    }
+
+    fn nickname_suggestion(&self) -> Option<&str> {
+        self.nickname_suggestion
+            .as_deref()
+            .filter(|s| !s.is_empty())
+    }
+
+    fn fallback_id(&self) -> String {
+        truncate_id_for_display(&self.id.to_string())
+    }
 }
 
 /// Bridge trait for runtime operations
@@ -658,9 +682,12 @@ pub trait RuntimeBridge: Send + Sync {
     /// Initiate a device enrollment ("add device") ceremony.
     ///
     /// Returns a shareable enrollment code for the invited device to import.
+    ///
+    /// # Arguments
+    /// * `nickname_suggestion` - Optional suggested name for the device (what it wants to be called)
     async fn initiate_device_enrollment_ceremony(
         &self,
-        device_name: String,
+        nickname_suggestion: String,
     ) -> Result<DeviceEnrollmentStart, IntentError>;
 
     /// Initiate a device removal ("remove device") ceremony.
@@ -1186,7 +1213,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn initiate_device_enrollment_ceremony(
         &self,
-        _device_name: String,
+        _nickname_suggestion: String,
     ) -> Result<DeviceEnrollmentStart, IntentError> {
         Err(IntentError::no_agent(
             "Device enrollment not available in offline mode",

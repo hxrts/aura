@@ -160,10 +160,16 @@ impl std::fmt::Display for NicknameSuggestionError {
         match self {
             Self::Empty => write!(f, "Nickname suggestion cannot be empty"),
             Self::TooLong { length, max } => {
-                write!(f, "Nickname suggestion too long: {length} characters (max {max})")
+                write!(
+                    f,
+                    "Nickname suggestion too long: {length} characters (max {max})"
+                )
             }
             Self::InvalidChars { reason } => {
-                write!(f, "Nickname suggestion contains invalid characters: {reason}")
+                write!(
+                    f,
+                    "Nickname suggestion contains invalid characters: {reason}"
+                )
             }
         }
     }
@@ -247,7 +253,11 @@ pub fn is_valid_nickname_suggestion(name: &str) -> bool {
 /// # Returns
 /// `true` if the form can be submitted
 #[must_use]
-pub fn can_submit_account_setup(nickname_suggestion: &str, is_creating: bool, is_success: bool) -> bool {
+pub fn can_submit_account_setup(
+    nickname_suggestion: &str,
+    is_creating: bool,
+    is_success: bool,
+) -> bool {
     is_valid_nickname_suggestion(nickname_suggestion) && !is_creating && !is_success
 }
 
@@ -451,15 +461,30 @@ mod tests {
     #[test]
     fn test_validate_nickname_suggestion_valid() {
         assert_eq!(validate_nickname_suggestion("Alice").unwrap(), "Alice");
-        assert_eq!(validate_nickname_suggestion("Bob Smith").unwrap(), "Bob Smith");
-        assert_eq!(validate_nickname_suggestion("  Trimmed  ").unwrap(), "Trimmed");
+        assert_eq!(
+            validate_nickname_suggestion("Bob Smith").unwrap(),
+            "Bob Smith"
+        );
+        assert_eq!(
+            validate_nickname_suggestion("  Trimmed  ").unwrap(),
+            "Trimmed"
+        );
     }
 
     #[test]
     fn test_validate_nickname_suggestion_empty() {
-        assert_eq!(validate_nickname_suggestion(""), Err(NicknameSuggestionError::Empty));
-        assert_eq!(validate_nickname_suggestion("   "), Err(NicknameSuggestionError::Empty));
-        assert_eq!(validate_nickname_suggestion("\t\n"), Err(NicknameSuggestionError::Empty));
+        assert_eq!(
+            validate_nickname_suggestion(""),
+            Err(NicknameSuggestionError::Empty)
+        );
+        assert_eq!(
+            validate_nickname_suggestion("   "),
+            Err(NicknameSuggestionError::Empty)
+        );
+        assert_eq!(
+            validate_nickname_suggestion("\t\n"),
+            Err(NicknameSuggestionError::Empty)
+        );
     }
 
     #[test]

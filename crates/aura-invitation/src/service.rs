@@ -102,6 +102,9 @@ pub enum InvitationType {
     Channel {
         /// Home/channel identifier
         home_id: String,
+        /// Optional nickname suggestion (what the channel/home wants to be called)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        nickname_suggestion: Option<String>,
         /// Optional bootstrap key package for provisional AMP messaging.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bootstrap: Option<ChannelBootstrapPackage>,
@@ -128,8 +131,8 @@ pub enum InvitationType {
         initiator_device_id: DeviceId,
         /// Device id being enrolled
         device_id: DeviceId,
-        /// Optional device label
-        device_name: Option<String>,
+        /// Optional nickname suggestion (what the device wants to be called)
+        nickname_suggestion: Option<String>,
         /// Key-rotation ceremony identifier
         ceremony_id: CeremonyId,
         /// Pending epoch created during prepare
@@ -671,6 +674,7 @@ mod tests {
         assert_eq!(
             InvitationType::Channel {
                 home_id: "b".to_string(),
+                nickname_suggestion: None,
                 bootstrap: None,
             }
             .as_type_string(),

@@ -437,7 +437,9 @@ pub fn render_channel_info_modal(chat: &ChatViewProps) -> Option<AnyElement<'sta
 // Settings Screen Modal Render Functions
 // =============================================================================
 
-pub fn render_nickname_suggestion_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
+pub fn render_nickname_suggestion_modal(
+    settings: &SettingsViewProps,
+) -> Option<AnyElement<'static>> {
     if settings.nickname_suggestion_modal_visible {
         Some(
             element! {
@@ -517,7 +519,7 @@ pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<An
                 ModalFrame {
                     DeviceEnrollmentModal(
                         visible: true,
-                        device_name: settings.device_enrollment_modal_device_name.clone(),
+                        nickname_suggestion: settings.device_enrollment_modal_nickname_suggestion.clone(),
                         enrollment_code: settings.device_enrollment_modal_code.clone(),
                         accepted_count: settings.device_enrollment_modal_accepted_count,
                         total_count: settings.device_enrollment_modal_total_count,
@@ -548,7 +550,7 @@ pub fn render_remove_device_modal(settings: &SettingsViewProps) -> Option<AnyEle
                         title: "Remove Device".to_string(),
                         message: format!(
                             "Are you sure you want to remove \"{}\"?",
-                            settings.confirm_remove_modal_device_name
+                            settings.confirm_remove_modal_display_name
                         ),
                         confirm_text: "Remove".to_string(),
                         cancel_text: "Cancel".to_string(),

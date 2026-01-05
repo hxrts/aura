@@ -4,8 +4,8 @@ use aura_app::ui::prelude::*;
 
 // Re-export portable validation for callers that only import this module
 pub use aura_app::ui::types::{
-    is_valid_nickname_suggestion, validate_nickname_suggestion, NicknameSuggestionError, MAX_NICKNAME_SUGGESTION_LENGTH,
-    MIN_NICKNAME_SUGGESTION_LENGTH,
+    is_valid_nickname_suggestion, validate_nickname_suggestion, NicknameSuggestionError,
+    MAX_NICKNAME_SUGGESTION_LENGTH, MIN_NICKNAME_SUGGESTION_LENGTH,
 };
 
 /// State for account setup modal

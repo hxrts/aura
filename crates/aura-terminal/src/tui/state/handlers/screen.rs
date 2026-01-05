@@ -14,8 +14,8 @@ use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::QueuedModal;
 use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
-    AddDeviceModalState, ChatFocus, DetailFocus, ImportInvitationModalState,
-    NeighborhoodMode, NicknameSuggestionModalState,
+    AddDeviceModalState, ChatFocus, DetailFocus, ImportInvitationModalState, NeighborhoodMode,
+    NicknameSuggestionModalState,
 };
 use super::super::TuiState;
 
@@ -370,18 +370,22 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
         KeyCode::Char('e') => {
             if state.settings.section == SettingsSection::Profile {
                 // Open nickname suggestion edit modal via queue
-                state.modal_queue.enqueue(QueuedModal::SettingsNicknameSuggestion(
-                    NicknameSuggestionModalState::default(),
-                ));
+                state
+                    .modal_queue
+                    .enqueue(QueuedModal::SettingsNicknameSuggestion(
+                        NicknameSuggestionModalState::default(),
+                    ));
             }
         }
         KeyCode::Enter => {
             match state.settings.section {
                 SettingsSection::Profile => {
                     // Open nickname suggestion edit modal via queue
-                    state.modal_queue.enqueue(QueuedModal::SettingsNicknameSuggestion(
-                        NicknameSuggestionModalState::default(),
-                    ));
+                    state
+                        .modal_queue
+                        .enqueue(QueuedModal::SettingsNicknameSuggestion(
+                            NicknameSuggestionModalState::default(),
+                        ));
                 }
                 SettingsSection::Threshold => {
                     // Open guardian setup modal via dispatch (reuse the same wizard as contacts)

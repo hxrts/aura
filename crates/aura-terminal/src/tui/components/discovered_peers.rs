@@ -2,6 +2,7 @@
 //!
 //! Panel showing LAN-discovered peers that can be invited as contacts.
 
+use aura_app::views::naming::EffectiveName;
 use iocraft::prelude::*;
 use std::sync::Arc;
 
@@ -112,21 +113,40 @@ impl DiscoveredPeerInfo {
     }
 
     /// Get display label (nickname or truncated authority ID)
+    ///
+    /// Delegates to `EffectiveName::effective_name()`.
     #[must_use]
     pub fn display_label(&self) -> String {
-        if let Some(name) = &self.nickname_suggestion {
-            name.clone()
-        } else {
-            // Show first 8 and last 4 chars of authority ID
-            let id = &self.authority_id;
-            if id.len() > 16 {
-                format!("{}...{}", &id[..8], &id[id.len() - 4..])
-            } else {
-                id.clone()
-            }
-        }
+        self.effective_name()
+    }
+}
+
+impl EffectiveName for DiscoveredPeerInfo {
+    /// Peers don't have local nickname overrides (per design).
+    fn nickname(&self) -> Option<&str> {
+        // Discovered peers don't support local nickname overrides
+        // Users who want to name them should add them as contacts
+        None
     }
 
+    fn nickname_suggestion(&self) -> Option<&str> {
+        self.nickname_suggestion
+            .as_deref()
+            .filter(|s| !s.is_empty())
+    }
+
+    fn fallback_id(&self) -> String {
+        // Show first 8 and last 4 chars of authority ID
+        let id = &self.authority_id;
+        if id.len() > 16 {
+            format!("{}...{}", &id[..8], &id[id.len() - 4..])
+        } else {
+            id.clone()
+        }
+    }
+}
+
+impl DiscoveredPeerInfo {
     /// Format age for display
     #[must_use]
     pub fn age_display(&self) -> String {

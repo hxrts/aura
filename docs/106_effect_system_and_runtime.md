@@ -872,7 +872,7 @@ AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and a runtime bridg
                                │
                                ↓ (internal, hidden from frontends)
                    ┌───────────────────────┐
-                   │  RuntimeBridge impl  │  ← aura-agent or other runtime
+                   │  RuntimeBridge impl   │  ← aura-agent or other runtime
                    │                       │
                    │  • Effect system      │
                    │  • Service handlers   │

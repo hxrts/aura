@@ -42,12 +42,15 @@ pub async fn start_device_threshold_ceremony(
 }
 
 /// Start a device enrollment ("add device") ceremony.
+///
+/// # Arguments
+/// * `nickname_suggestion` - Suggested name for the device (what it wants to be called)
 pub async fn start_device_enrollment_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
-    device_name: String,
+    nickname_suggestion: String,
 ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, AuraError> {
     let core = app_core.read().await;
-    core.initiate_device_enrollment_ceremony(device_name)
+    core.initiate_device_enrollment_ceremony(nickname_suggestion)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to start device enrollment: {e}")))
 }

@@ -88,6 +88,9 @@ pub mod facts;
 /// View delta and reducer for invitation facts
 pub mod view;
 
+/// Descriptors for invitation-based peer connection
+pub mod descriptor;
+
 /// Operation category map (A/B/C) for protocol gating and review.
 pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("invitation:send", "C"),
@@ -192,6 +195,9 @@ pub use guards::{
 pub use service::{
     Invitation, InvitationConfig, InvitationService, InvitationStatus, InvitationType,
 };
+
+// Re-export descriptor types
+pub use descriptor::{InviteDescriptor, TransportHint, TRANSPORT_HINTS_MAX};
 
 // Re-export core types
 pub use aura_core::{

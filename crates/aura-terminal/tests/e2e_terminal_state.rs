@@ -3194,7 +3194,7 @@ async fn test_device_management() {
     println!("\nPhase 2: Testing AddDevice dispatch");
     let add_result = ctx
         .dispatch(EffectCommand::AddDevice {
-            device_name: "TestPhone".to_string(),
+            nickname_suggestion: "TestPhone".to_string(),
         })
         .await;
     // AddDevice dispatch should succeed (creates a pending fact)
