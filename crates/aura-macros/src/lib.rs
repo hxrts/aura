@@ -31,7 +31,7 @@ mod test_macros;
 /// Full-featured choreography! macro with complete rumpsteak-aura feature inheritance
 ///
 /// This macro inherits ALL standard rumpsteak-aura features including:
-/// - Namespace attributes: `#[namespace = "my_protocol"]`
+/// - Module namespaces: `module my_protocol exposing (ProtocolName)`
 /// - Parameterized roles: `Worker[N]`, `Signer[*]`
 /// - Choice constructs: `choice at Role { ... }`
 /// - Loop constructs: `loop { ... }`
@@ -46,15 +46,14 @@ mod test_macros;
 /// ```ignore
 /// use aura_macros::choreography;
 ///
-/// choreography! {
-///     #[namespace = "threshold_ceremony"]
-///     choreography ThresholdExample {
-///         roles: Coordinator, Signer[N];
+/// choreography!(r#"
+/// module threshold_ceremony exposing (ThresholdExample)
 ///
-///         Coordinator -> Signer[*]: StartRequest;
-///         Signer[*] -> Coordinator: Commitment;
-///     }
-/// }
+/// protocol ThresholdExample =
+///   roles Coordinator, Signer[N]
+///   Coordinator -> Signer[*] : StartRequest
+///   Signer[*] -> Coordinator : Commitment
+/// "#);
 /// ```
 #[proc_macro]
 pub fn choreography(input: TokenStream) -> TokenStream {

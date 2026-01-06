@@ -259,28 +259,7 @@ impl RecoveryProtocol {
 }
 
 // Recovery Protocol Choreography
-choreography! {
-    #[namespace = "recovery_protocol"]
-    protocol RecoveryProtocol {
-        roles: Account, Guardian, Coordinator;
-
-        // Step 1: Account initiates recovery
-        Account[guard_capability = "initiate_recovery", flow_cost = 100]
-        -> Coordinator: InitiateRecovery(RecoveryRequest);
-
-        // Step 2: Coordinator distributes to guardians
-        Coordinator[guard_capability = "coordinate_recovery", flow_cost = 50]
-        -> Guardian: DistributeRecoveryRequest(RecoveryRequest);
-
-        // Step 3: Guardians submit approvals
-        Guardian[guard_capability = "approve_recovery", flow_cost = 50]
-        -> Coordinator: SubmitApproval(GuardianApproval);
-
-        // Step 4: Coordinator aggregates and responds
-        Coordinator[guard_capability = "finalize_recovery", flow_cost = 100]
-        -> Account: RecoveryComplete(RecoveryOutcome);
-    }
-}
+choreography!(include_str!("src/recovery_protocol.choreo"));
 
 /// Recovery protocol handler
 pub struct RecoveryProtocolHandler {

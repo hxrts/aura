@@ -68,6 +68,30 @@
 pub use rumpsteak_aura;
 pub use rumpsteak_aura_choreography;
 
+use async_trait::async_trait;
+
+/// Aura extension for rumpsteak choreographic adapters.
+///
+/// Generated runners call `provide_message` and `select_branch` to source
+/// outbound messages and choice decisions. This trait extends the upstream
+/// adapter with those hooks.
+#[async_trait]
+pub trait ChoreographicAdapterExt:
+    rumpsteak_aura_choreography::ChoreographicAdapter
+{
+    /// Provide the next outbound message for a send.
+    async fn provide_message<M: rumpsteak_aura_choreography::Message>(
+        &mut self,
+        to: Self::Role,
+    ) -> Result<M, Self::Error>;
+
+    /// Select a branch label from the available choices.
+    async fn select_branch<L: rumpsteak_aura_choreography::LabelId>(
+        &mut self,
+        choices: &[L],
+    ) -> Result<L, Self::Error>;
+}
+
 // Note: aura-macros generates code that uses aura-mpst types,
 // but we don't import aura-macros here to avoid circular dependency
 
@@ -128,7 +152,7 @@ pub use ast_extraction::{
 /// Full-featured choreography! macro with ALL rumpsteak-aura features + Aura extensions
 ///
 /// This macro provides access to ALL rumpsteak-aura features plus Aura-specific extensions:
-/// - Namespace attributes: `#[namespace = "my_protocol"]`
+/// - Module namespaces: `module my_protocol exposing (ProtocolName)`
 /// - Parameterized roles: `Worker[N]`, `Signer[*]`
 /// - Choice constructs: `choice at Role { ... }`
 /// - Loop constructs: `loop { ... }`
@@ -142,28 +166,23 @@ pub use ast_extraction::{
 /// ```ignore
 /// use aura_mpst::choreography;
 ///
-/// choreography! {
-///     #[namespace = "threshold_ceremony"]
-///     protocol ThresholdExample {
-///         roles: Coordinator, Signer[3];
+/// choreography!(r#"
+/// module threshold_ceremony exposing (ThresholdExample)
 ///
-///         choice at Coordinator {
-///             start_ceremony: {
-///                 Coordinator[guard_capability = "coordinate_signing",
-///                            flow_cost = 200,
-///                            journal_facts = "ceremony_started"]
-///                 -> Signer[*]: StartRequest;
-///
-///                 Signer[*][guard_capability = "participate_signing",
-///                          flow_cost = 150]
-///                 -> Coordinator: Commitment;
-///             }
-///             abort: {
-///                 Coordinator -> Signer[*]: Abort;
-///             }
-///         }
-///     }
-/// }
+/// protocol ThresholdExample =
+///   roles Coordinator, Signer[3]
+///   case choose Coordinator of
+///     start_ceremony ->
+///       Coordinator[guard_capability = "coordinate_signing",
+///                  flow_cost = 200,
+///                  journal_facts = "ceremony_started"]
+///         -> Signer[*] : StartRequest
+///       Signer[*][guard_capability = "participate_signing",
+///                flow_cost = 150]
+///         -> Coordinator : Commitment
+///     abort ->
+///       Coordinator -> Signer[*] : Abort
+/// "#);
 /// ```
 ///
 /// Note: The choreography! macro is available in the aura-macros crate.

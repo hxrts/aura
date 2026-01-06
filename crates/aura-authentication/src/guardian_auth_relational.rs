@@ -240,28 +240,7 @@ fn verify_consensus_proof(
 }
 
 // Guardian Authentication Choreography via Relational Context
-choreography! {
-    #[namespace = "guardian_auth_relational"]
-    protocol GuardianAuthRelational {
-        roles: Account, Guardian, Coordinator;
-
-        // Step 1: Account requests guardian approval
-        Account[guard_capability = "request_guardian_approval", flow_cost = 50]
-        -> Coordinator: RequestGuardianAuth(GuardianAuthRequest);
-
-        // Step 2: Coordinator forwards to guardian
-        Coordinator[guard_capability = "coordinate_guardians", flow_cost = 30]
-        -> Guardian: ForwardAuthRequest(GuardianAuthRequest);
-
-        // Step 3: Guardian submits proof
-        Guardian[guard_capability = "submit_guardian_proof", flow_cost = 50]
-        -> Coordinator: SubmitGuardianProof(GuardianAuthProof);
-
-        // Step 4: Coordinator verifies and responds
-        Coordinator[guard_capability = "verify_guardian", flow_cost = 30]
-        -> Account: GuardianAuthResult(GuardianAuthResponse);
-    }
-}
+choreography!(include_str!("src/guardian_auth_relational.choreo"));
 
 /// Guardian authentication handler for relational contexts
 pub struct GuardianAuthHandler {

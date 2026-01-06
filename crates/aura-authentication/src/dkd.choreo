@@ -1,0 +1,14 @@
+module dkd_protocol exposing (DkdChoreography)
+
+protocol DkdChoreography =
+  roles Initiator, Participant
+
+  Initiator[guard_capability = "dkd:initiate", flow_cost = 200] -> Participant : InitiateSession(crate::dkd::DkdMessage)
+
+  Participant[guard_capability = "dkd:commit", flow_cost = 150] -> Initiator : SubmitCommitment(crate::dkd::DkdMessage)
+
+  Initiator[guard_capability = "dkd:reveal", flow_cost = 150] -> Participant : RequestReveal(crate::dkd::DkdMessage)
+
+  Participant[guard_capability = "dkd:reveal", flow_cost = 150] -> Initiator : SubmitReveal(crate::dkd::DkdMessage)
+
+  Initiator[guard_capability = "dkd:finalize", flow_cost = 100, journal_facts = "dkd_session_completed"] -> Participant : KeyDerived(crate::dkd::DkdMessage)

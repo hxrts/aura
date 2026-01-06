@@ -2,10 +2,12 @@
 name = "session-choreography"
 version = "0.1.0"
 edition = "2021"
+include = ["src/**", "Cargo.toml"]
 
 [dependencies]
 aura-core = { path = "../../crates/aura-core" }
 aura-macros = { path = "../../crates/aura-macros" }
+aura-mpst = { path = "../../crates/aura-mpst" }
 aura-agent = { path = "../../crates/aura-agent" }
 aura-protocol = { path = "../../crates/aura-protocol" }
 aura-effects = { path = "../../crates/aura-effects" }
@@ -17,6 +19,8 @@ tracing-subscriber = "0.3"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 anyhow = "1.0"
 
+rumpsteak-aura = { workspace = true }
+futures = { workspace = true }
 [[bin]]
 name = "session_patterns"
 path = "src/session_patterns.rs"

@@ -1,37 +1,28 @@
-error: Choreography is missing a namespace attribute. Add #[namespace = "unique_name"] before your choreography! macro. Each choreography in the same file must have a unique namespace.
+error: Choreography is missing a namespace. Add `module <name> exposing (...)` to your .choreo file or use #[namespace = "unique_name"] inside the choreography! macro. Each choreography in the same file must have a unique namespace.
  --> tests/trybuild/missing_namespace.rs:3:1
   |
-3 | / choreography! {
-4 | |     choreography MissingNamespace {
-5 | |         roles: Alice, Bob;
-... |
-9 | | }
-  | |_^
+3 | / choreography!(r#"
+4 | | protocol MissingNamespace =
+5 | |   roles Alice, Bob
+6 | |   Alice -> Bob : Message
+7 | | "#);
+  | |___^
   |
   = note: this error originates in the macro `choreography` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0432]: unresolved import `super`
+error[E0255]: the name `Message` is defined multiple times
  --> tests/trybuild/missing_namespace.rs:3:1
   |
-3 | / choreography! {
-4 | |     choreography MissingNamespace {
-5 | |         roles: Alice, Bob;
-... |
-9 | | }
-  | |_^ no `Ping` in the root
+3 | / choreography!(r#"
+4 | | protocol MissingNamespace =
+5 | |   roles Alice, Bob
+6 | |   Alice -> Bob : Message
+7 | | "#);
+  | |___^ `Message` redefined here
   |
-  = help: consider importing this variant instead:
-          crate::rumpsteak_session_types::Label::Ping
+  = note: `Message` must be defined only once in the type namespace of this module
   = note: this error originates in the macro `choreography` (in Nightly builds, run with -Z macro-backtrace for more info)
-
-error[E0782]: expected a type, found a trait
- --> tests/trybuild/missing_namespace.rs:3:1
+help: you can use `as` to change the binding name of the import
   |
-3 | / choreography! {
-4 | |     choreography MissingNamespace {
-5 | |         roles: Alice, Bob;
-... |
-9 | | }
-  | |_^
-  |
-  = note: this error originates in the macro `choreography` (in Nightly builds, run with -Z macro-backtrace for more info)
+7 | "#) as OtherMessage;
+  |     +++++++++++++++

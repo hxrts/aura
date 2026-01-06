@@ -1,0 +1,16 @@
+module guardian_setup exposing (GuardianSetup)
+
+protocol GuardianSetup =
+  roles SetupInitiator, Guardian1, Guardian2, Guardian3
+
+  SetupInitiator[guard_capability = "initiate_guardian_setup", flow_cost = 300, journal_facts = "guardian_setup_initiated", leakage_budget = [1, 0, 0]] -> Guardian1 : SendInvitation(crate::guardian_setup::GuardianInvitation)
+  SetupInitiator[guard_capability = "initiate_guardian_setup", flow_cost = 300] -> Guardian2 : SendInvitation(crate::guardian_setup::GuardianInvitation)
+  SetupInitiator[guard_capability = "initiate_guardian_setup", flow_cost = 300] -> Guardian3 : SendInvitation(crate::guardian_setup::GuardianInvitation)
+
+  Guardian1[guard_capability = "accept_guardian_invitation,verify_setup_invitation", flow_cost = 200, journal_facts = "guardian_setup_accepted", leakage_budget = [0, 1, 0]] -> SetupInitiator : AcceptInvitation(crate::guardian_setup::GuardianAcceptance)
+  Guardian2[guard_capability = "accept_guardian_invitation,verify_setup_invitation", flow_cost = 200, journal_facts = "guardian_setup_accepted"] -> SetupInitiator : AcceptInvitation(crate::guardian_setup::GuardianAcceptance)
+  Guardian3[guard_capability = "accept_guardian_invitation,verify_setup_invitation", flow_cost = 200, journal_facts = "guardian_setup_accepted"] -> SetupInitiator : AcceptInvitation(crate::guardian_setup::GuardianAcceptance)
+
+  SetupInitiator[guard_capability = "complete_guardian_setup", flow_cost = 150, journal_facts = "guardian_setup_completed", journal_merge = true] -> Guardian1 : CompleteSetup(crate::guardian_setup::SetupCompletion)
+  SetupInitiator[guard_capability = "complete_guardian_setup", flow_cost = 150, journal_merge = true] -> Guardian2 : CompleteSetup(crate::guardian_setup::SetupCompletion)
+  SetupInitiator[guard_capability = "complete_guardian_setup", flow_cost = 150, journal_merge = true] -> Guardian3 : CompleteSetup(crate::guardian_setup::SetupCompletion)

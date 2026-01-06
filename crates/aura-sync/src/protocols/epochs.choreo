@@ -1,0 +1,13 @@
+module epoch_rotation exposing (EpochRotationProtocol)
+
+protocol EpochRotationProtocol =
+  roles Coordinator, Participant1, Participant2
+
+  Coordinator[guard_capability = "propose_epoch_rotation", flow_cost = 120, journal_facts = "epoch_rotation_proposed"] -> Participant1 : EpochRotationProposal(crate::protocols::epochs::EpochRotationProposal)
+  Coordinator[guard_capability = "propose_epoch_rotation", flow_cost = 120] -> Participant2 : EpochRotationProposal(crate::protocols::epochs::EpochRotationProposal)
+
+  Participant1[guard_capability = "confirm_epoch_readiness", flow_cost = 80, journal_facts = "epoch_confirmation_sent"] -> Coordinator : EpochConfirmation(crate::protocols::epochs::EpochConfirmation)
+  Participant2[guard_capability = "confirm_epoch_readiness", flow_cost = 80, journal_facts = "epoch_confirmation_sent"] -> Coordinator : EpochConfirmation(crate::protocols::epochs::EpochConfirmation)
+
+  Coordinator[guard_capability = "commit_epoch_rotation", flow_cost = 100, journal_facts = "epoch_rotation_committed"] -> Participant1 : EpochCommit(crate::protocols::epochs::EpochCommit)
+  Coordinator[guard_capability = "commit_epoch_rotation", flow_cost = 100, journal_facts = "epoch_rotation_committed"] -> Participant2 : EpochCommit(crate::protocols::epochs::EpochCommit)

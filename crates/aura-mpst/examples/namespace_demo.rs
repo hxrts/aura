@@ -6,18 +6,7 @@
 // Example code defines types for demonstration that aren't directly called
 #![allow(dead_code)]
 
-use futures::channel::mpsc::{Receiver, Sender};
-use rumpsteak_aura::*;
-use rumpsteak_aura_choreography::Label;
 use serde::{Deserialize, Serialize};
-
-// Required type definitions for the generated choreography
-type Channel = channel::Bidirectional<Sender<Label>, Receiver<Label>>;
-const CHANNEL_BUFFER: usize = 64;
-#[allow(dead_code)]
-fn channel() -> (Sender<Label>, Receiver<Label>) {
-    futures::channel::mpsc::channel(CHANNEL_BUFFER)
-}
 
 // Message types for the authentication protocol
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,17 +31,16 @@ struct AuthResponse {
 // In a library, this would generate role types. For this example, we demonstrate
 // the protocol structure conceptually without macro expansion.
 //
-// choreography! {
-//     #[namespace = "auth_service"]
-//     choreography AuthenticationProtocol {
-//         roles: Client, AuthServer, Database;
+// choreography!(r#"
+// module auth_service exposing (AuthenticationProtocol)
 //
-//         Client -> AuthServer: LoginRequest;
-//         AuthServer -> Database: UserQuery;
-//         Database -> AuthServer: UserData;
-//         AuthServer -> Client: AuthResponse;
-//     }
-// }
+// protocol AuthenticationProtocol =
+//   roles Client, AuthServer, Database
+//   Client -> AuthServer : LoginRequest
+//   AuthServer -> Database : UserQuery
+//   Database -> AuthServer : UserData
+//   AuthServer -> Client : AuthResponse
+// "#);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Aura Namespace Demonstration ===\n");
@@ -64,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "
    Key Features Demonstrated:
-   [-] Namespace attribute: #[namespace = \"auth_service\"]"
+   [-] Module namespace: module auth_service exposing (AuthenticationProtocol)"
     );
     println!("   [-] Role isolation within namespace");
     println!("   [-] Session type generation for choreography");

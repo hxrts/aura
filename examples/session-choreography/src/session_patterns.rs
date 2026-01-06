@@ -7,67 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Simple session coordination choreography
-choreography! {
-    #[namespace = "session_patterns"]
-    protocol SimpleSessionChoreography {
-        roles: Coordinator, Participants[*];
-
-        // Phase 1: Session Setup
-        Coordinator[guard_capability = "create_session",
-                   flow_cost = 100,
-                   journal_facts = "session_created"]
-        -> Participants[*]: SessionInvitation(SessionInvitation);
-
-        // Phase 2: Participant Response
-        choice Participants[*] {
-            accept: {
-                Participants[*][guard_capability = "join_session",
-                              flow_cost = 50,
-                              journal_facts = "session_joined"]
-                -> Coordinator: SessionAccepted(SessionAccepted);
-            }
-            decline: {
-                Participants[*][guard_capability = "decline_session",
-                              flow_cost = 25,
-                              journal_facts = "session_declined"]
-                -> Coordinator: SessionDeclined(SessionDeclined);
-            }
-        }
-
-        // Phase 3: Session Activation
-        Coordinator[guard_capability = "activate_session",
-                   flow_cost = 75,
-                   journal_facts = "session_activated"]
-        -> Participants[*]: SessionActivated(SessionActivated);
-
-        // Phase 4: Session Operations
-        loop {
-            choice Coordinator {
-                broadcast: {
-                    Coordinator[guard_capability = "broadcast_message",
-                               flow_cost = 25]
-                    -> Participants[*]: BroadcastMessage(BroadcastMessage);
-                }
-                status_check: {
-                    Coordinator[guard_capability = "check_status",
-                               flow_cost = 10]
-                    -> Participants[*]: StatusCheck(StatusCheck);
-
-                    Participants[*][guard_capability = "report_status",
-                                   flow_cost = 15]
-                    -> Coordinator: StatusReport(StatusReport);
-                }
-                end_session: {
-                    Coordinator[guard_capability = "end_session",
-                               flow_cost = 100,
-                               journal_facts = "session_ended"]
-                    -> Participants[*]: SessionEnded(SessionEnded);
-                    break;
-                }
-            }
-        }
-    }
-}
+choreography!(include_str!("src/session_patterns.choreo"));
 
 // Message types
 

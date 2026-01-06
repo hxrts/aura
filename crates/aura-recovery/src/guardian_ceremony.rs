@@ -359,42 +359,7 @@ impl CeremonyFact {
 // ============================================================================
 
 // Guardian Ceremony Choreography - uses session types for linear protocol flow
-choreography! {
-    #[namespace = "guardian_ceremony"]
-    protocol GuardianCeremony {
-        roles: Initiator, Guardian[n];
-
-        // Phase 1: Propose rotation (bound to prestate)
-        Initiator[guard_capability = "initiate_guardian_ceremony",
-                  flow_cost = 500,
-                  journal_facts = "ceremony_initiated",
-                  leakage_budget = [1, 0, 0]]
-        -> Guardian[*]: ProposeRotation(CeremonyProposal);
-
-        // Phase 2: Guardians respond (exactly once per guardian - linear!)
-        Guardian[*][guard_capability = "respond_guardian_ceremony",
-                    flow_cost = 200,
-                    journal_facts = "guardian_responded",
-                    leakage_budget = [0, 1, 0]]
-        -> Initiator: RespondCeremony(CeremonyResponseMsg);
-
-        // Phase 3: Commit or Abort (exclusive choice - exactly one outcome)
-        choice {
-            // All required guardians accepted - commit
-            Initiator[guard_capability = "commit_guardian_ceremony",
-                      flow_cost = 300,
-                      journal_facts = "ceremony_committed",
-                      journal_merge = true]
-            -> Guardian[*]: CommitCeremony(CeremonyCommit);
-        } or {
-            // Some guardian declined or timeout - abort
-            Initiator[guard_capability = "abort_guardian_ceremony",
-                      flow_cost = 100,
-                      journal_facts = "ceremony_aborted"]
-            -> Guardian[*]: AbortCeremony(CeremonyAbort);
-        }
-    }
-}
+choreography!(include_str!("src/guardian_ceremony.choreo"));
 
 /// Ceremony proposal sent to guardians
 #[derive(Debug, Clone, Serialize, Deserialize)]

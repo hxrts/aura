@@ -910,32 +910,7 @@ pub struct DkdMessage {
     pub timestamp: u64,
 }
 
-choreography! {
-    #[namespace = "dkd_protocol"]
-    protocol DkdChoreography {
-        roles: Initiator, Participant;
-
-        // Phase 1: Session initiation
-        Initiator[guard_capability = "dkd:initiate", flow_cost = 200]
-        -> Participant: InitiateSession(DkdMessage);
-
-        // Phase 2: Commitment exchange
-        Participant[guard_capability = "dkd:commit", flow_cost = 150]
-        -> Initiator: SubmitCommitment(DkdMessage);
-
-        // Phase 3: Reveal exchange
-        Initiator[guard_capability = "dkd:reveal", flow_cost = 150]
-        -> Participant: RequestReveal(DkdMessage);
-
-        Participant[guard_capability = "dkd:reveal", flow_cost = 150]
-        -> Initiator: SubmitReveal(DkdMessage);
-
-        // Phase 4: Key derivation notification
-        Initiator[guard_capability = "dkd:finalize", flow_cost = 100,
-                   journal_facts = "dkd_session_completed"]
-        -> Participant: KeyDerived(DkdMessage);
-    }
-}
+choreography!(include_str!("src/dkd.choreo"));
 
 // =============================================================================
 // Convenience Functions

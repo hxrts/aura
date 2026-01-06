@@ -1,0 +1,10 @@
+module invitation exposing (InvitationExchange)
+
+protocol InvitationExchange =
+  roles Sender, Receiver
+
+  Sender[guard_capability = "invitation:send", flow_cost = 1, journal_facts = "InvitationFact::Sent"] -> Receiver : InvitationOffer(crate::InvitationOffer)
+
+  Receiver[guard_capability = "invitation:accept", flow_cost = 1, journal_facts = "InvitationFact::Responded"] -> Sender : InvitationResponse(crate::InvitationResponse)
+
+  Sender[guard_capability = "invitation:send", flow_cost = 1, journal_facts = "InvitationFact::Acknowledged"] -> Receiver : InvitationAck(crate::InvitationAck)

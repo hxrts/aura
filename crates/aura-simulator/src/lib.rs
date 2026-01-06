@@ -137,6 +137,15 @@ pub mod scenarios;
 // Testkit integration bridge
 pub mod testkit_bridge;
 
+// Choreographic protocol simulation transport
+pub mod choreography_transport;
+
+// Protocol observer for event tracing
+pub mod choreography_observer;
+
+// Protocol state machine for stepped simulation
+pub mod protocol_state_machine;
+
 // Re-export core types for external usage
 pub use types::{
     ByzantineStrategy, ChaosStrategy, FaultType, LogLevel, NetworkConfig, PropertyViolationType,
@@ -153,6 +162,17 @@ pub use handlers::{
 
 // Re-export testkit bridge
 pub use testkit_bridge::{MiddlewareConfig as HandlerConfig, TestkitSimulatorBridge};
+
+// Re-export choreography transport
+pub use choreography_transport::{SimulatedMessageBus, SimulatedTransport};
+
+// Re-export choreography observer
+pub use choreography_observer::{ObserverStatistics, ProtocolEvent, SimulatorObserver};
+
+// Re-export protocol state machine
+pub use protocol_state_machine::{
+    ParticipantState, ProtocolScheduler, ProtocolStateMachine, StepResult,
+};
 
 // Re-export scenario types for convenience
 pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};

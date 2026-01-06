@@ -9,6 +9,7 @@ license.workspace = true
 description = "Capability-based agents with clean service layer architecture for identity management"
 keywords = ["identity", "capability", "agent", "threshold", "cryptography"]
 categories = ["cryptography", "authentication"]
+include = ["src/**", "Cargo.toml"]
 
 [dependencies]
 # Workspace crates
@@ -76,6 +77,7 @@ tokio-tungstenite = { workspace = true, optional = true }
 # Note: axum, tower, tower-http, qrcode not in workspace - would need to be added if dev-console feature is needed
 
 # Platform-specific secure storage
+rumpsteak-aura = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 # security-framework = { workspace = true } # removed - unused
 # core-foundation = { workspace = true } # removed - unused

@@ -167,3 +167,43 @@ pub use recovery_ceremony::{
     RecoveryCeremonyEffects, RecoveryCeremonyExecutor, RecoveryCeremonyFact, RecoveryCeremonyId,
     RecoveryCeremonyState, RecoveryCeremonyStatus,
 };
+
+// =============================================================================
+// Generated Runner Re-exports for execute_as Pattern
+// =============================================================================
+
+/// Re-exports for RecoveryProtocol choreography runners
+pub mod recovery_runners {
+    pub use crate::recovery_protocol::rumpsteak_session_types_recovery_protocol::recovery_protocol::RecoveryProtocolRole;
+    pub use crate::recovery_protocol::rumpsteak_session_types_recovery_protocol::recovery_protocol::runners::{
+        execute_as, run_account, run_coordinator, run_guardian,
+        AccountOutput, CoordinatorOutput, GuardianOutput,
+    };
+}
+
+/// Re-exports for GuardianCeremony choreography runners
+pub mod ceremony_runners {
+    pub use crate::guardian_ceremony::rumpsteak_session_types_guardian_ceremony::guardian_ceremony::GuardianCeremonyRole;
+    pub use crate::guardian_ceremony::rumpsteak_session_types_guardian_ceremony::guardian_ceremony::runners::{
+        execute_as, run_guardian, run_initiator,
+        GuardianOutput, InitiatorOutput,
+    };
+}
+
+/// Re-exports for GuardianSetup choreography runners
+pub mod setup_runners {
+    pub use crate::guardian_setup::rumpsteak_session_types_guardian_setup::guardian_setup::GuardianSetupRole;
+    pub use crate::guardian_setup::rumpsteak_session_types_guardian_setup::guardian_setup::runners::{
+        execute_as, run_guardian1, run_guardian2, run_guardian3, run_setupinitiator,
+        Guardian1Output, Guardian2Output, Guardian3Output, SetupInitiatorOutput,
+    };
+}
+
+/// Re-exports for GuardianMembershipChange choreography runners
+pub mod membership_runners {
+    pub use crate::guardian_membership::rumpsteak_session_types_guardian_membership_change::guardian_membership_change::GuardianMembershipChangeRole;
+    pub use crate::guardian_membership::rumpsteak_session_types_guardian_membership_change::guardian_membership_change::runners::{
+        execute_as, run_changeinitiator, run_guardian1, run_guardian2, run_guardian3,
+        ChangeInitiatorOutput, Guardian1Output, Guardian2Output, Guardian3Output,
+    };
+}

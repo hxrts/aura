@@ -1,0 +1,19 @@
+module aura_consensus exposing (AuraConsensus)
+
+protocol AuraConsensus =
+  roles Coordinator, Witness[N]
+
+  @parallel
+  Coordinator[guard_capability = "initiate_consensus", flow_cost = 100] -> Witness[*] : Execute(crate::ConsensusMessage)
+
+  @parallel
+  Witness[*][guard_capability = "witness_nonce", flow_cost = 50] -> Coordinator : NonceCommit(crate::ConsensusMessage)
+
+  @parallel
+  Coordinator[guard_capability = "aggregate_nonces", flow_cost = 75] -> Witness[*] : SignRequest(crate::ConsensusMessage)
+
+  @parallel
+  Witness[*][guard_capability = "witness_sign", flow_cost = 50, leak = "pipelined_commitment"] -> Coordinator : SignShare(crate::ConsensusMessage)
+
+  @parallel
+  Coordinator[guard_capability = "finalize_consensus", flow_cost = 100, journal_facts = "consensus_complete"] -> Witness[*] : ConsensusResult(crate::ConsensusMessage)

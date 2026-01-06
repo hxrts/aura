@@ -10,8 +10,8 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 
 | Status | Count | Protocols |
 |--------|-------|-----------|
-| Wired | 1 | AuraConsensus |
-| Spec-only | 13 | All others |
+| Wired | 0 | — |
+| Spec-only | 14 | All protocols |
 | **Total** | **14** | |
 
 ---
@@ -22,55 +22,55 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| AuraConsensus | `aura-consensus/src/protocol.rs` | **Wired** | — | Has `choreography_runtime.rs` with shared bus test |
+| AuraConsensus | `crates/aura-consensus/src/protocol/choreography.choreo` | Spec-only | CHOREO-CONS-001 | Awaiting `execute_as` wiring |
 
 ### Transport & Channels
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| AmpTransport | `aura-amp/src/choreography.rs` | Spec-only | CHOREO-AMP-001 | Needs MPST runner + adapter wiring |
+| AmpTransport | `crates/aura-amp/src/choreography.choreo` | Spec-only | CHOREO-AMP-001 | Needs MPST runner + adapter wiring |
 
 ### Rendezvous
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| RendezvousExchange | `aura-rendezvous/src/protocol.rs` | Spec-only | CHOREO-RDV-001 | Direct peer discovery |
-| RelayedRendezvous | `aura-rendezvous/src/protocol.rs` | Spec-only | CHOREO-RDV-002 | Relay-assisted connection |
+| RendezvousExchange | `crates/aura-rendezvous/src/protocol.rendezvous_exchange.choreo` | Spec-only | CHOREO-RDV-001 | Direct peer discovery |
+| RelayedRendezvous | `crates/aura-rendezvous/src/protocol.relayed_rendezvous.choreo` | Spec-only | CHOREO-RDV-002 | Relay-assisted connection |
 
 ### Authentication
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| GuardianAuthRelational | `aura-authentication/src/guardian_auth_relational.rs` | Spec-only | CHOREO-AUTH-001 | Needs runtime adapter |
-| DkdChoreography | `aura-authentication/src/dkd.rs` | Spec-only | CHOREO-AUTH-002 | Distributed key derivation |
+| GuardianAuthRelational | `crates/aura-authentication/src/guardian_auth_relational.choreo` | Spec-only | CHOREO-AUTH-001 | Needs runtime adapter |
+| DkdChoreography | `crates/aura-authentication/src/dkd.choreo` | Spec-only | CHOREO-AUTH-002 | Distributed key derivation |
 
 ### Recovery
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| RecoveryProtocol | `aura-recovery/src/recovery_protocol.rs` | Spec-only | CHOREO-REC-001 | Account recovery flow |
-| GuardianMembershipChange | `aura-recovery/src/guardian_membership.rs` | Spec-only | CHOREO-REC-002 | Guardian add/remove |
-| GuardianCeremony | `aura-recovery/src/guardian_ceremony.rs` | Spec-only | CHOREO-REC-003 | Guardian key ceremony |
-| GuardianSetup | `aura-recovery/src/guardian_setup.rs` | Spec-only | CHOREO-REC-004 | Initial guardian setup |
+| RecoveryProtocol | `crates/aura-recovery/src/recovery_protocol.choreo` | Spec-only | CHOREO-REC-001 | Account recovery flow |
+| GuardianMembershipChange | `crates/aura-recovery/src/guardian_membership.choreo` | Spec-only | CHOREO-REC-002 | Guardian add/remove |
+| GuardianCeremony | `crates/aura-recovery/src/guardian_ceremony.choreo` | Spec-only | CHOREO-REC-003 | Guardian key ceremony |
+| GuardianSetup | `crates/aura-recovery/src/guardian_setup.choreo` | Spec-only | CHOREO-REC-004 | Initial guardian setup |
 
 ### Invitation
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| InvitationExchange | `aura-invitation/src/protocol.rs` | Spec-only | CHOREO-INV-001 | Contact invitation |
-| GuardianInvitation | `aura-invitation/src/protocol.rs` | Spec-only | CHOREO-INV-002 | Guardian invitation |
+| InvitationExchange | `crates/aura-invitation/src/protocol.invitation_exchange.choreo` | Spec-only | CHOREO-INV-001 | Contact invitation |
+| GuardianInvitation | `crates/aura-invitation/src/protocol.guardian_invitation.choreo` | Spec-only | CHOREO-INV-002 | Guardian invitation |
 
 ### Sync
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| EpochRotationProtocol | `aura-sync/src/protocols/epochs.rs` | Spec-only | CHOREO-SYNC-001 | Epoch rotation sync |
+| EpochRotationProtocol | `crates/aura-sync/src/protocols/epochs.choreo` | Spec-only | CHOREO-SYNC-001 | Epoch rotation sync |
 
 ### Demo
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| SessionCoordinationChoreography | `aura-agent/src/handlers/sessions/coordination.rs` | Spec-only | CHOREO-AGENT-001 | Demo/test choreography |
+| SessionCoordinationChoreography | `crates/aura-agent/src/handlers/sessions/coordination.choreo` | Spec-only | CHOREO-AGENT-001 | Demo/test choreography |
 
 ---
 
@@ -85,28 +85,54 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 ---
 
 
-## Wiring Plan + Ownership (Pre‑MPST)
+## Wiring Plan + Ownership (MPST `execute_as`)
 
-This section captures the **owner**, **runtime registration point**, and **blocking dependencies** for each choreography. This is the pre‑MPST wiring plan used to sequence integration work.
+This section captures the **owner**, **runtime entry point**, and **blocking dependencies** for each choreography under the v0.8.0 `execute_as` pattern.
 
-| Protocol | Owner (crate) | Runtime registration point | Guard chain integration | Dependencies / Blocks |
-|----------|--------------|----------------------------|-------------------------|-----------------------|
-| RecoveryProtocol | `aura-recovery` | `aura-recovery/src/choreography_runtime.rs` + `aura-agent/src/runtime/choreography_adapter.rs` | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| GuardianCeremony | `aura-recovery` | `aura-recovery/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| GuardianSetup | `aura-recovery` | `aura-recovery/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| InvitationExchange | `aura-invitation` | `aura-invitation/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| GuardianInvitation | `aura-invitation` | `aura-invitation/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| RendezvousExchange | `aura-rendezvous` | `aura-rendezvous/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| RelayedRendezvous | `aura-rendezvous` | `aura-rendezvous/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| AmpTransport | `aura-amp` | `aura-amp/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| GuardianAuthRelational | `aura-authentication` | `aura-authentication/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| DkdChoreography | `aura-authentication` | `aura-authentication/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| EpochRotationProtocol | `aura-sync` | `aura-sync/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
-| SessionCoordinationChoreography | `aura-agent` | `aura-agent/src/handlers/sessions/coordination.rs` | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| Protocol | Owner (crate) | Runtime entry point (execute_as) | Guard chain integration | Dependencies / Blocks |
+|----------|--------------|-----------------------------------|-------------------------|-----------------------|
+| AuraConsensus | `aura-consensus` | `crates/aura-agent/src/runtime_bridge/consensus.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution in rumpsteak‑aura + wiring |
+| RecoveryProtocol | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| GuardianCeremony | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| GuardianSetup | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| GuardianMembershipChange | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| InvitationExchange | `aura-invitation` | `crates/aura-agent/src/handlers/invitation_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| GuardianInvitation | `aura-invitation` | `crates/aura-agent/src/handlers/invitation_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| RendezvousExchange | `aura-rendezvous` | `crates/aura-agent/src/handlers/rendezvous_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| RelayedRendezvous | `aura-rendezvous` | `crates/aura-agent/src/runtime/services/rendezvous_manager.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| AmpTransport | `aura-amp` | `crates/aura-agent/src/runtime_bridge/amp.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| GuardianAuthRelational | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| DkdChoreography | `aura-authentication` | `crates/aura-authentication/src/dkd.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| EpochRotationProtocol | `aura-sync` | `crates/aura-agent/src/runtime/services/sync_manager.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| SessionCoordinationChoreography | `aura-agent` | `crates/aura-agent/src/handlers/sessions/coordination.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+
+## Decision Sourcing (provide_message / select_branch)
+
+This table captures how generated runners obtain outbound messages and branch decisions. These are **initial wiring assumptions** to be verified during integration.
+
+| Protocol | provide_message source | select_branch source |
+|----------|------------------------|----------------------|
+| AuraConsensus | Derived from `ConsensusParams` + local consensus state | N/A (no choices) |
+| RecoveryProtocol | Derived from recovery request + journal state | N/A (no choices) |
+| GuardianCeremony | Ceremony proposal/response/commit or abort from service state | Initiator policy/UI decision (Commit/Abort) |
+| GuardianSetup | Guardian setup request + local key state | N/A (no choices) |
+| GuardianMembershipChange | Membership change request + journal state | N/A (no choices) |
+| InvitationExchange | Invitation payload from params + local facts | N/A (no choices) |
+| GuardianInvitation | Guardian invite payload from params + local facts | N/A (no choices) |
+| RendezvousExchange | Rendezvous descriptors + discovery payload from manager state | N/A (no choices) |
+| RelayedRendezvous | Relayed rendezvous payloads from manager state | N/A (no choices) |
+| AmpTransport | AMP message payloads from channel state | N/A (no choices) |
+| GuardianAuthRelational | Auth challenge/response derived from auth state | N/A (no choices) |
+| DkdChoreography | DKG messages derived from DKG state | N/A (no choices) |
+| EpochRotationProtocol | Epoch rotation messages from sync manager state | N/A (no choices) |
+| SessionCoordinationChoreography | Session request/invite/response from session manager state | Participants: accept/reject from UI/policy; Coordinator: success/failure from validation |
 
 ## Runtime Infrastructure
 
 The runtime provides `ChoreographicEffects` implementation in `aura-agent/src/runtime/effects/choreography.rs`.
+Generated runners are driven via `AuraProtocolAdapter` in
+`crates/aura-agent/src/runtime/choreography_adapter.rs`, which bridges
+`ChoreographicEffects` to the `ChoreographicAdapter` API.
 
 ### ChoreographicEffects Trait
 
@@ -124,12 +150,13 @@ The runtime provides `ChoreographicEffects` implementation in `aura-agent/src/ru
 - Transport effects for message passing
 - Session lifecycle management with metrics
 
-### Wiring a Choreography
+### Wiring a Choreography (v0.8.0)
 
-1. Create `choreography_runtime.rs` module in the crate
-2. Implement `run_coordinator` and `run_witness` (or equivalent role functions)
-3. Use `ChoreographicEffects` for message passing
-4. Add integration tests with shared bus pattern (see `aura-consensus` example)
+1. Store the protocol in a `.choreo` file **next to the Rust module** that loads it.
+2. Use `choreography!(include_str!("..."))` to generate the protocol module and runners.
+3. Build an `AuraProtocolAdapter` (from `crates/aura-agent/src/runtime/choreography_adapter.rs`)
+   and call `Protocol::execute_as(role, &mut adapter, params)` from the runtime bridge/service.
+4. Provide decision sources for `provide_message` and `select_branch` per the table above.
 
 ---
 

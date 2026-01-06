@@ -1,0 +1,8 @@
+module amp_transport exposing (AmpTransport)
+
+protocol AmpTransport =
+  roles Sender, Receiver
+
+  Sender[guard_capability = "cap:amp_send", journal_facts = "amp_send_msg"] -> Receiver : AmpData(crate::AmpMessage)
+
+  Receiver[guard_capability = "cap:amp_recv", journal_facts = "amp_recv_ack"] -> Sender : AmpAck(crate::AmpReceipt)

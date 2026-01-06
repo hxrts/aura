@@ -182,6 +182,31 @@ pub enum ChoreographyError {
         /// Error message
         message: String,
     },
+
+    /// Role family is empty (no instances registered)
+    #[error("Role family '{family}' is empty")]
+    EmptyRoleFamily {
+        /// The name of the empty role family
+        family: String,
+    },
+
+    /// Role family not found (unknown family name)
+    #[error("Role family '{family}' not found")]
+    RoleFamilyNotFound {
+        /// The name of the unknown role family
+        family: String,
+    },
+
+    /// Invalid role family range
+    #[error("Invalid role family range [{start}, {end}) for family '{family}'")]
+    InvalidRoleFamilyRange {
+        /// The role family name
+        family: String,
+        /// Start of the requested range
+        start: u32,
+        /// End of the requested range
+        end: u32,
+    },
 }
 
 impl From<rumpsteak_aura_choreography::ChoreographyError> for ChoreographyError {
@@ -208,6 +233,11 @@ impl aura_core::ProtocolErrorCode for ChoreographyError {
             ChoreographyError::ByzantineBehavior { .. } => "choreography_byzantine",
             ChoreographyError::Transport { .. } => "choreography_transport",
             ChoreographyError::InternalError { .. } => "choreography_internal",
+            ChoreographyError::EmptyRoleFamily { .. } => "choreography_empty_role_family",
+            ChoreographyError::RoleFamilyNotFound { .. } => "choreography_role_family_not_found",
+            ChoreographyError::InvalidRoleFamilyRange { .. } => {
+                "choreography_invalid_role_family_range"
+            }
         }
     }
 }

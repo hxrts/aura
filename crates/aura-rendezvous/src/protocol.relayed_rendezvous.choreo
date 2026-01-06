@@ -1,0 +1,12 @@
+module rendezvous_relay exposing (RelayedRendezvous)
+
+protocol RelayedRendezvous =
+  roles Initiator, Relay, Responder
+
+  Initiator[guard_capability = "rendezvous:relay", flow_cost = 2] -> Relay : RelayRequest(crate::RelayRequest)
+
+  Relay[guard_capability = "relay:forward", flow_cost = 1, leak = "neighbor:1"] -> Responder : RelayForward(crate::RelayForward)
+
+  Responder[guard_capability = "rendezvous:relay", flow_cost = 2] -> Relay : RelayResponse(crate::RelayResponse)
+
+  Relay[guard_capability = "relay:forward", flow_cost = 1, leak = "neighbor:1"] -> Initiator : RelayComplete(crate::RelayComplete)

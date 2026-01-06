@@ -92,3 +92,15 @@ pub use consensus::{
     finalize_amp_bump_with_journal, finalize_amp_bump_with_journal_default,
     run_amp_channel_epoch_bump, run_amp_channel_epoch_bump_default,
 };
+
+// =============================================================================
+// Generated Runner Re-exports for execute_as Pattern
+// =============================================================================
+
+/// Re-exports for AmpTransport choreography runners
+pub mod amp_runners {
+    pub use crate::choreography::rumpsteak_session_types_amp_transport::amp_transport::AmpTransportRole;
+    pub use crate::choreography::rumpsteak_session_types_amp_transport::amp_transport::runners::{
+        execute_as, run_receiver, run_sender, ReceiverOutput, SenderOutput,
+    };
+}

@@ -70,12 +70,6 @@ pub struct EpochRotationProposal {
     pub timestamp: PhysicalTime,
 }
 
-impl EpochRotationProposal {
-    /// Get timestamp in milliseconds for backward compatibility
-    pub fn timestamp_ms(&self) -> u64 {
-        self.timestamp.ts_ms
-    }
-}
 
 /// Epoch confirmation from participant
 ///
@@ -90,12 +84,6 @@ pub struct EpochConfirmation {
     pub confirmation_timestamp: PhysicalTime,
 }
 
-impl EpochConfirmation {
-    /// Get confirmation timestamp in milliseconds for backward compatibility
-    pub fn confirmation_timestamp_ms(&self) -> u64 {
-        self.confirmation_timestamp.ts_ms
-    }
-}
 
 /// Synchronized epoch commit
 ///
@@ -109,12 +97,6 @@ pub struct EpochCommit {
     pub participants: Vec<DeviceId>,
 }
 
-impl EpochCommit {
-    /// Get commit timestamp in milliseconds for backward compatibility
-    pub fn commit_timestamp_ms(&self) -> u64 {
-        self.commit_timestamp.ts_ms
-    }
-}
 
 impl Default for EpochConfig {
     fn default() -> Self {
@@ -290,42 +272,5 @@ impl EpochRotationCoordinator {
 // BISCUIT INTEGRATION: When re-enabling choreography, these guard_capability annotations
 // are compatible with BiscuitGuardEvaluator for token-based authorization.
 /*
-choreography! {
-    #[namespace = "epoch_rotation"]
-    protocol EpochRotationProtocol {
-        roles: Coordinator, Participant1, Participant2;
-
-        // Phase 1: Propose epoch rotation
-        Coordinator[guard_capability = "propose_epoch_rotation",
-                   flow_cost = 120,
-                   journal_facts = "epoch_rotation_proposed"]
-        -> Participant1: EpochRotationProposal(EpochRotationProposal);
-
-        Coordinator[guard_capability = "propose_epoch_rotation",
-                   flow_cost = 120]
-        -> Participant2: EpochRotationProposal(EpochRotationProposal);
-
-        // Phase 2: Participants confirm readiness
-        Participant1[guard_capability = "confirm_epoch_readiness",
-                    flow_cost = 80,
-                    journal_facts = "epoch_confirmation_sent"]
-        -> Coordinator: EpochConfirmation(EpochConfirmation);
-
-        Participant2[guard_capability = "confirm_epoch_readiness",
-                    flow_cost = 80,
-                    journal_facts = "epoch_confirmation_sent"]
-        -> Coordinator: EpochConfirmation(EpochConfirmation);
-
-        // Phase 3: Synchronized commit
-        Coordinator[guard_capability = "commit_epoch_rotation",
-                   flow_cost = 100,
-                   journal_facts = "epoch_rotation_committed"]
-        -> Participant1: EpochCommit(EpochCommit);
-
-        Coordinator[guard_capability = "commit_epoch_rotation",
-                   flow_cost = 100,
-                   journal_facts = "epoch_rotation_committed"]
-        -> Participant2: EpochCommit(EpochCommit);
-    }
-}
+choreography!(include_str!("src/protocols/epochs.choreo"));
 */

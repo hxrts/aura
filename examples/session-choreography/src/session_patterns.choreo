@@ -1,0 +1,32 @@
+module session_patterns exposing (SimpleSessionChoreography)
+
+protocol SimpleSessionChoreography =
+  roles Coordinator, Participants[*]
+
+  @parallel
+  Coordinator[guard_capability = "create_session", flow_cost = 100, journal_facts = "session_created"] -> Participants[*] : SessionInvitation(crate::SessionInvitation)
+
+  case choose Participants[*] of
+    accept ->
+      @parallel
+      Participants[*][guard_capability = "join_session", flow_cost = 50, journal_facts = "session_joined"] -> Coordinator : SessionAccepted(crate::SessionAccepted)
+    decline ->
+      @parallel
+      Participants[*][guard_capability = "decline_session", flow_cost = 25, journal_facts = "session_declined"] -> Coordinator : SessionDeclined(crate::SessionDeclined)
+
+  @parallel
+  Coordinator[guard_capability = "activate_session", flow_cost = 75, journal_facts = "session_activated"] -> Participants[*] : SessionActivated(crate::SessionActivated)
+
+  loop decide by Coordinator
+    case choose Coordinator of
+      broadcast ->
+        @parallel
+        Coordinator[guard_capability = "broadcast_message", flow_cost = 25] -> Participants[*] : BroadcastMessage(crate::BroadcastMessage)
+      status_check ->
+        @parallel
+        Coordinator[guard_capability = "check_status", flow_cost = 10] -> Participants[*] : StatusCheck(crate::StatusCheck)
+        @parallel
+        Participants[*][guard_capability = "report_status", flow_cost = 15] -> Coordinator : StatusReport(crate::StatusReport)
+      end_session ->
+        @parallel
+        Coordinator[guard_capability = "end_session", flow_cost = 100, journal_facts = "session_ended"] -> Participants[*] : SessionEnded(crate::SessionEnded)

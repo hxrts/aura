@@ -74,7 +74,7 @@ pub use shared_transport::SharedTransport;
 #[allow(unused_imports)]
 pub use subsystems::{ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem};
 
-// Runtime system type aliases for backwards compatibility
+/// Public API type aliases for runtime components.
 pub type RuntimeSystem = AuraEffectSystem;
 pub type RuntimeBuilder = EffectSystemBuilder;
 pub use registry::{

@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+include = ["src/**", "Cargo.toml"]
 
 [lints]
 workspace = true
@@ -43,6 +44,8 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
+rumpsteak-aura = { workspace = true }
+futures = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

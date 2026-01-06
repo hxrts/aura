@@ -1,0 +1,12 @@
+module guardian_auth_relational exposing (GuardianAuthRelational)
+
+protocol GuardianAuthRelational =
+  roles Account, Guardian, Coordinator
+
+  Account[guard_capability = "request_guardian_approval", flow_cost = 50] -> Coordinator : RequestGuardianAuth(crate::guardian_auth_relational::GuardianAuthRequest)
+
+  Coordinator[guard_capability = "coordinate_guardians", flow_cost = 30] -> Guardian : ForwardAuthRequest(crate::guardian_auth_relational::GuardianAuthRequest)
+
+  Guardian[guard_capability = "submit_guardian_proof", flow_cost = 50] -> Coordinator : SubmitGuardianProof(crate::guardian_auth_relational::GuardianAuthProof)
+
+  Coordinator[guard_capability = "verify_guardian", flow_cost = 30] -> Account : GuardianAuthResult(crate::guardian_auth_relational::GuardianAuthResponse)

@@ -181,30 +181,7 @@ pub mod exchange {
     // 1. Sender creates and sends invitation offer
     // 2. Receiver accepts or declines the invitation
     // 3. Sender acknowledges the response
-    choreography! {
-        #[namespace = "invitation"]
-        protocol InvitationExchange {
-            roles: Sender, Receiver;
-
-            // Sender offers invitation
-            Sender[guard_capability = "invitation:send",
-                   flow_cost = 1,
-                   journal_facts = "InvitationFact::Sent"]
-            -> Receiver: InvitationOffer(super::InvitationOffer);
-
-            // Receiver responds (accept or decline)
-            Receiver[guard_capability = "invitation:accept",
-                     flow_cost = 1,
-                     journal_facts = "InvitationFact::Responded"]
-            -> Sender: InvitationResponse(super::InvitationResponse);
-
-            // Sender acknowledges response
-            Sender[guard_capability = "invitation:send",
-                   flow_cost = 1,
-                   journal_facts = "InvitationFact::Acknowledged"]
-            -> Receiver: InvitationAck(super::InvitationAck);
-        }
-    }
+    choreography!(include_str!("src/protocol.invitation_exchange.choreo"));
 }
 
 /// Guardian invitation protocol module
@@ -219,30 +196,7 @@ pub mod guardian {
     // 1. Principal requests guardian relationship
     // 2. Guardian accepts or declines with appropriate response
     // 3. Principal confirms the relationship establishment
-    choreography! {
-        #[namespace = "invitation_guardian"]
-        protocol GuardianInvitation {
-            roles: Principal, Guardian;
-
-            // Principal sends guardian request
-            Principal[guard_capability = "invitation:guardian",
-                      flow_cost = 2,
-                      journal_facts = "InvitationFact::GuardianRequested"]
-            -> Guardian: GuardianRequest(super::GuardianRequest);
-
-            // Guardian accepts (or use separate decline path)
-            Guardian[guard_capability = "invitation:guardian:accept",
-                     flow_cost = 2,
-                     journal_facts = "InvitationFact::GuardianAccepted"]
-            -> Principal: GuardianAccept(super::GuardianAccept);
-
-            // Principal confirms relationship
-            Principal[guard_capability = "invitation:guardian",
-                      flow_cost = 1,
-                      journal_facts = "InvitationFact::GuardianConfirmed"]
-            -> Guardian: GuardianConfirm(super::GuardianConfirm);
-        }
-    }
+    choreography!(include_str!("src/protocol.guardian_invitation.choreo"));
 }
 
 // =============================================================================
@@ -279,6 +233,30 @@ pub enum GuardianInvitationState {
     Confirmed { relationship_id: String },
     /// Protocol failed
     Failed { reason: String },
+}
+
+// =============================================================================
+// Protocol Metadata
+// =============================================================================
+
+// =============================================================================
+// Generated Runner Re-exports for execute_as Pattern
+// =============================================================================
+
+/// Re-exports for InvitationExchange choreography runners
+pub mod exchange_runners {
+    pub use super::exchange::rumpsteak_session_types_invitation::invitation::InvitationExchangeRole;
+    pub use super::exchange::rumpsteak_session_types_invitation::invitation::runners::{
+        execute_as, run_receiver, run_sender, ReceiverOutput, SenderOutput,
+    };
+}
+
+/// Re-exports for GuardianInvitation choreography runners
+pub mod guardian_runners {
+    pub use super::guardian::rumpsteak_session_types_invitation_guardian::invitation_guardian::GuardianInvitationRole;
+    pub use super::guardian::rumpsteak_session_types_invitation_guardian::invitation_guardian::runners::{
+        execute_as, run_guardian, run_principal, GuardianOutput, PrincipalOutput,
+    };
 }
 
 // =============================================================================

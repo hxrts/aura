@@ -141,61 +141,7 @@ pub struct SetupCompletion {
 }
 
 // Guardian Setup Choreography - 3 phase protocol
-choreography! {
-    #[namespace = "guardian_setup"]
-    protocol GuardianSetup {
-        roles: SetupInitiator, Guardian1, Guardian2, Guardian3;
-
-        // Phase 1: Send invitations to all guardians
-        SetupInitiator[guard_capability = "initiate_guardian_setup",
-                       flow_cost = 300,
-                       journal_facts = "guardian_setup_initiated",
-                       leakage_budget = [1, 0, 0]]
-        -> Guardian1: SendInvitation(GuardianInvitation);
-
-        SetupInitiator[guard_capability = "initiate_guardian_setup",
-                       flow_cost = 300]
-        -> Guardian2: SendInvitation(GuardianInvitation);
-
-        SetupInitiator[guard_capability = "initiate_guardian_setup",
-                       flow_cost = 300]
-        -> Guardian3: SendInvitation(GuardianInvitation);
-
-        // Phase 2: Guardians respond with acceptance
-        Guardian1[guard_capability = "accept_guardian_invitation,verify_setup_invitation",
-                  flow_cost = 200,
-                  journal_facts = "guardian_setup_accepted",
-                  leakage_budget = [0, 1, 0]]
-        -> SetupInitiator: AcceptInvitation(GuardianAcceptance);
-
-        Guardian2[guard_capability = "accept_guardian_invitation,verify_setup_invitation",
-                  flow_cost = 200,
-                  journal_facts = "guardian_setup_accepted"]
-        -> SetupInitiator: AcceptInvitation(GuardianAcceptance);
-
-        Guardian3[guard_capability = "accept_guardian_invitation,verify_setup_invitation",
-                  flow_cost = 200,
-                  journal_facts = "guardian_setup_accepted"]
-        -> SetupInitiator: AcceptInvitation(GuardianAcceptance);
-
-        // Phase 3: Broadcast completion to all guardians
-        SetupInitiator[guard_capability = "complete_guardian_setup",
-                       flow_cost = 150,
-                       journal_facts = "guardian_setup_completed",
-                       journal_merge = true]
-        -> Guardian1: CompleteSetup(SetupCompletion);
-
-        SetupInitiator[guard_capability = "complete_guardian_setup",
-                       flow_cost = 150,
-                       journal_merge = true]
-        -> Guardian2: CompleteSetup(SetupCompletion);
-
-        SetupInitiator[guard_capability = "complete_guardian_setup",
-                       flow_cost = 150,
-                       journal_merge = true]
-        -> Guardian3: CompleteSetup(SetupCompletion);
-    }
-}
+choreography!(include_str!("src/guardian_setup.choreo"));
 
 /// Guardian setup coordinator.
 ///

@@ -53,7 +53,6 @@ pub mod config;
 pub mod core;
 
 // Core modules
-pub mod choreography_runtime;
 pub mod dkg;
 pub mod frost;
 pub mod messages;

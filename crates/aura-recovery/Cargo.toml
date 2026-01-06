@@ -6,6 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+include = ["src/**", "Cargo.toml"]
 
 [dependencies]
 aura-core = { path = "../aura-core" }
@@ -32,6 +33,7 @@ hex = { workspace = true }
 futures = { workspace = true }
 
 
+rumpsteak-aura = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true }
 aura-testkit = { path = "../aura-testkit" }

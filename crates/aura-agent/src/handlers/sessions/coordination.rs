@@ -27,67 +27,7 @@ use std::sync::Arc;
 // 2. Coordinator validates request and seeks participant agreement
 // 3. Participants approve or reject session participation
 // 4. Coordinator creates session and distributes session handles
-choreography! {
-    #[namespace = "session_coordination"]
-    protocol SessionCoordinationChoreography {
-        roles: Initiator, Participants[*], Coordinator;
-
-        // Phase 1: Session Creation Request
-        Initiator[guard_capability = "request_session",
-                  flow_cost = 100,
-                  journal_facts = "session_requested"]
-        -> Coordinator: SessionRequest(SessionRequest);
-
-        // Phase 2: Participant Invitation
-        Coordinator[guard_capability = "invite_participants",
-                   flow_cost = 50,
-                   journal_facts = "participants_invited"]
-        -> Participants[*]: ParticipantInvitation(ParticipantInvitation);
-
-        // Phase 3: Participant Response
-        choice Participants[*] {
-            accept: {
-                Participants[*][guard_capability = "accept_session",
-                              flow_cost = 75,
-                              journal_facts = "session_accepted"]
-                -> Coordinator: SessionAccepted(SessionAccepted);
-            }
-            reject: {
-                Participants[*][guard_capability = "reject_session",
-                              flow_cost = 50,
-                              journal_facts = "session_rejected"]
-                -> Coordinator: SessionRejected(SessionRejected);
-            }
-        }
-
-        // Phase 4: Session Creation Result
-        choice Coordinator {
-            success: {
-                Coordinator[guard_capability = "create_session",
-                           flow_cost = 200,
-                           journal_facts = "session_created",
-                           journal_merge = true]
-                -> Initiator: SessionCreated(SessionCreated);
-
-                Coordinator[guard_capability = "notify_participants",
-                           flow_cost = 100,
-                           journal_facts = "session_participants_notified"]
-                -> Participants[*]: SessionCreated(SessionCreated);
-            }
-            failure: {
-                Coordinator[guard_capability = "reject_session_creation",
-                           flow_cost = 100,
-                           journal_facts = "session_creation_failed"]
-                -> Initiator: SessionCreationFailed(SessionCreationFailed);
-
-                Coordinator[guard_capability = "notify_participants_failure",
-                           flow_cost = 50,
-                           journal_facts = "session_failure_notified"]
-                -> Participants[*]: SessionCreationFailed(SessionCreationFailed);
-            }
-        }
-    }
-}
+choreography!(include_str!("src/handlers/sessions/coordination.choreo"));
 
 // Message types for session coordination choreography
 

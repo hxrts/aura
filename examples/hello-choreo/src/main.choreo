@@ -1,0 +1,7 @@
+module pingpong exposing (PingPong)
+
+protocol PingPong =
+  roles Alice, Bob
+
+  Alice -> Bob : Ping
+  Bob -> Alice : Pong

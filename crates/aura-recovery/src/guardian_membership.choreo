@@ -1,0 +1,16 @@
+module guardian_membership_change exposing (GuardianMembershipChange)
+
+protocol GuardianMembershipChange =
+  roles ChangeInitiator, Guardian1, Guardian2, Guardian3
+
+  ChangeInitiator[guard_capability = "initiate_membership_change", flow_cost = 350, journal_facts = "membership_change_proposed", leakage_budget = [1, 0, 0]] -> Guardian1 : ProposeChange(crate::guardian_membership::MembershipProposal)
+  ChangeInitiator[guard_capability = "initiate_membership_change", flow_cost = 350] -> Guardian2 : ProposeChange(crate::guardian_membership::MembershipProposal)
+  ChangeInitiator[guard_capability = "initiate_membership_change", flow_cost = 350] -> Guardian3 : ProposeChange(crate::guardian_membership::MembershipProposal)
+
+  Guardian1[guard_capability = "vote_membership_change,verify_membership_proposal", flow_cost = 220, journal_facts = "membership_vote_cast", leakage_budget = [0, 1, 0]] -> ChangeInitiator : CastVote(crate::guardian_membership::GuardianVote)
+  Guardian2[guard_capability = "vote_membership_change,verify_membership_proposal", flow_cost = 220, journal_facts = "membership_vote_cast"] -> ChangeInitiator : CastVote(crate::guardian_membership::GuardianVote)
+  Guardian3[guard_capability = "vote_membership_change,verify_membership_proposal", flow_cost = 220, journal_facts = "membership_vote_cast"] -> ChangeInitiator : CastVote(crate::guardian_membership::GuardianVote)
+
+  ChangeInitiator[guard_capability = "complete_membership_change", flow_cost = 180, journal_facts = "membership_change_completed", journal_merge = true] -> Guardian1 : CompleteChange(crate::guardian_membership::ChangeCompletion)
+  ChangeInitiator[guard_capability = "complete_membership_change", flow_cost = 180, journal_merge = true] -> Guardian2 : CompleteChange(crate::guardian_membership::ChangeCompletion)
+  ChangeInitiator[guard_capability = "complete_membership_change", flow_cost = 180, journal_merge = true] -> Guardian3 : CompleteChange(crate::guardian_membership::ChangeCompletion)

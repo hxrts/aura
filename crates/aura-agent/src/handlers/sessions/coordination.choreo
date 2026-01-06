@@ -1,0 +1,27 @@
+module session_coordination exposing (SessionCoordinationChoreography)
+
+protocol SessionCoordinationChoreography =
+  roles Initiator, Participants[*], Coordinator
+
+  Initiator[guard_capability = "request_session", flow_cost = 100, journal_facts = "session_requested"] -> Coordinator : SessionRequest(crate::handlers::sessions::coordination::SessionRequest)
+
+  @parallel
+  Coordinator[guard_capability = "invite_participants", flow_cost = 50, journal_facts = "participants_invited"] -> Participants[*] : ParticipantInvitation(crate::handlers::sessions::coordination::ParticipantInvitation)
+
+  case choose Participants[*] of
+    Accept ->
+      @parallel
+      Participants[*][guard_capability = "accept_session", flow_cost = 75, journal_facts = "session_accepted"] -> Coordinator : SessionAccepted(crate::handlers::sessions::coordination::SessionAccepted)
+    Reject ->
+      @parallel
+      Participants[*][guard_capability = "reject_session", flow_cost = 50, journal_facts = "session_rejected"] -> Coordinator : SessionRejected(crate::handlers::sessions::coordination::SessionRejected)
+
+  case choose Coordinator of
+    Success ->
+      Coordinator[guard_capability = "create_session", flow_cost = 200, journal_facts = "session_created", journal_merge = true] -> Initiator : SessionCreated(crate::handlers::sessions::coordination::SessionCreated)
+      @parallel
+      Coordinator[guard_capability = "notify_participants", flow_cost = 100, journal_facts = "session_participants_notified"] -> Participants[*] : SessionCreated(crate::handlers::sessions::coordination::SessionCreated)
+    Failure ->
+      Coordinator[guard_capability = "reject_session_creation", flow_cost = 100, journal_facts = "session_creation_failed"] -> Initiator : SessionCreationFailed(crate::handlers::sessions::coordination::SessionCreationFailed)
+      @parallel
+      Coordinator[guard_capability = "notify_participants_failure", flow_cost = 50, journal_facts = "session_failure_notified"] -> Participants[*] : SessionCreationFailed(crate::handlers::sessions::coordination::SessionCreationFailed)

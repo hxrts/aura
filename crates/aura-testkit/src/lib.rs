@@ -123,6 +123,7 @@ pub mod infrastructure;
 pub mod mock_effects;
 pub mod mock_runtime_bridge;
 pub mod mocks;
+pub mod protocol_test; // Fluent protocol test API
 pub mod simulation;
 pub mod stateful_effects;
 pub mod time;
@@ -148,6 +149,12 @@ pub use mocks::*;
 // Re-export simulation components (excluding ambiguous transport)
 pub use simulation::transport as simulation_transport;
 pub use simulation::{choreography::*, network::*};
+
+// Re-export protocol test API types
+pub use protocol_test::{
+    ExecutionMode, ParticipantState, ProtocolEvent, ProtocolTest, ProtocolTestObserver,
+    ProtocolTestResult, ProtocolTestRunner, ProtocolTestStatistics, StepResult, SteppedParticipant,
+};
 
 // Re-export stateful effects (all items)
 pub use stateful_effects::*;

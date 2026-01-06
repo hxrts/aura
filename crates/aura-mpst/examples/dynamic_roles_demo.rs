@@ -7,18 +7,7 @@
 #![allow(dead_code)]
 
 use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
-use futures::channel::mpsc::{Receiver, Sender};
-use rumpsteak_aura::*;
-use rumpsteak_aura_choreography::Label;
 use serde::{Deserialize, Serialize};
-
-// Required type definitions for the generated choreography
-type Channel = channel::Bidirectional<Sender<Label>, Receiver<Label>>;
-const CHANNEL_BUFFER: usize = 64;
-#[allow(dead_code)]
-fn channel() -> (Sender<Label>, Receiver<Label>) {
-    futures::channel::mpsc::channel(CHANNEL_BUFFER)
-}
 
 // Message types for the threshold ceremony
 #[derive(Debug, Clone, Serialize, Deserialize)]

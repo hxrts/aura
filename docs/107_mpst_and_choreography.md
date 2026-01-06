@@ -4,19 +4,22 @@ This document describes the architecture of choreographic protocols in Aura. It 
 
 ## 1. DSL and Projection
 
-Aura defines global protocols using the `choreography!` macro. The macro parses a global specification into an abstract syntax tree. The macro produces code that represents the protocol as a choreographic structure.
+Aura defines global protocols using the `choreography!` macro. The macro parses a global specification into an abstract syntax tree. The macro produces code that represents the protocol as a choreographic structure. The source of truth for protocols is a `.choreo` file stored **next to the Rust module** that loads it.
 
 Projection converts the global protocol into per-role local session types. Each local session type defines the exact sequence of sends and receives for a single role. Projection eliminates deadlocks and ensures that communication structure is correct.
 
 ```rust
-choreography! {
-    #[namespace = "example"]
-    protocol Example {
-        roles: A, B;
-        A -> B: Msg(data: Vec<u8>);
-        B -> A: Ack(code: u32);
-    }
-}
+choreography!(include_str!("example.choreo"));
+```
+
+Example file: `example.choreo`
+```
+module example exposing (Example)
+
+protocol Example =
+  roles A, B
+  A -> B : Msg(data: Vec<u8>)
+  B -> A : Ack(code: u32)
 ```
 
 This snippet defines a global protocol with two roles. Projection produces a local type for `A` and a local type for `B`. Each local type enforces the required ordering at compile time.
@@ -35,32 +38,25 @@ This example shows the projected type for role `A`. The type describes that `A` 
 
 ## 3. Runtime Integration
 
-Aura integrates session types with the effect system through `ChoreoHandler` from the rumpsteak library. A handler executes sends and receives using effect traits. The handler manages serialization and deserialization of messages.
-
-`EffectsChoreographicAdapter` implements `ChoreoHandler` for Aura runtimes. It maps session operations to effect calls using `ChoreographicEffects` and other traits. A handler must be initialized with role mappings and context identifiers.
+Aura executes generated runners through rumpsteak‑aura’s `ChoreographicAdapter` API. The generated protocol exposes `execute_as`, which runs a specific role with a supplied adapter. Aura provides a runtime adapter in `crates/aura-agent/src/runtime/choreography_adapter.rs` that bridges `ChoreographicEffects` to the generated runners.
 
 ```rust
 #[async_trait]
-pub trait ChoreoHandler {
-    type Role;
-    type Endpoint;
+pub trait ChoreographicAdapter: Send {
+    type Error;
+    type Role: RoleId;
 
-    async fn send<M: Serialize + Send + Sync>(
-        &mut self,
-        endpoint: &mut Self::Endpoint,
-        to: Self::Role,
-        msg: &M,
-    ) -> Result<(), ChoreographyError>;
-
-    async fn recv<M: DeserializeOwned + Send>(
-        &mut self,
-        endpoint: &mut Self::Endpoint,
-        from: Self::Role,
-    ) -> Result<M, ChoreographyError>;
+    async fn send<M: Message>(&mut self, to: Self::Role, msg: M) -> Result<(), Self::Error>;
+    async fn recv<M: Message>(&mut self, from: Self::Role) -> Result<M, Self::Error>;
 }
 ```
 
-This trait defines the interface for session type execution. The `Role` type identifies participants and the `Endpoint` type provides connection state. Implementations call the underlying effects and apply guard chains.
+Generated runners also call:
+- `provide_message` for outbound payloads
+- `select_branch` for choice decisions
+
+These are sourced from runtime state (params, journal facts, UI inputs) as documented in
+`docs/119_choreography_runtime_audit.md`.
 
 ## 4. Choreography Annotations and Effect Commands
 

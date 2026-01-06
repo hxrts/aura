@@ -17,19 +17,12 @@ pub struct Ping;
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Pong;
 
-// Use the choreography macro - generates both rumpsteak and Aura modules
-// Note: Each choreography must have a unique namespace within the same file
+// Use the choreography macro - generates both rumpsteak and Aura modules.
+// Note: Each choreography must have a unique module namespace.
 use aura_macros::choreography;
-choreography! {
-    #[namespace = "pingpong"]
-    choreography PingPong {
-        roles: Alice, Bob;
-        Alice -> Bob: Ping;
-        Bob -> Alice: Pong;
-    }
-}
+choreography!(include_str!("src/main.choreo"));
 
-// The macro generates the aura_choreography_pingpong module (namespace-prefixed)
+// The macro generates the aura_choreography_pingpong module (namespace-prefixed).
 
 /// Demonstration of the choreography system using the actual macro
 #[tokio::main]

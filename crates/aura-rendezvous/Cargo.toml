@@ -6,6 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Secret-Branded Broadcasting (SBB) and rendezvous protocols for Aura"
+include = ["src/**", "Cargo.toml"]
 
 [dependencies]
 # Core Aura crates
@@ -38,6 +39,7 @@ async-lock = "3"
 hex = { workspace = true }
 base64 = { workspace = true }
 
+rumpsteak-aura = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true }
 rand = { workspace = true }

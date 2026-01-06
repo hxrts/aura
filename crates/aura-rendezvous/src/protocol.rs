@@ -148,33 +148,7 @@ pub mod exchange {
     // 2. Responder publishes response descriptor
     // 3. Initiator initiates Noise IKpsk2 handshake
     // 4. Responder completes handshake, establishing secure channel
-    choreography! {
-        #[namespace = "rendezvous"]
-        protocol RendezvousExchange {
-            roles: Initiator, Responder;
-
-            // Phase 1: Descriptor exchange (via journal facts, propagate via sync)
-            Initiator[guard_capability = "rendezvous:publish",
-                      flow_cost = 1,
-                      journal_facts = "RendezvousFact::Descriptor"]
-            -> Responder: DescriptorOffer(super::DescriptorOffer);
-
-            Responder[guard_capability = "rendezvous:publish",
-                      flow_cost = 1,
-                      journal_facts = "RendezvousFact::Descriptor"]
-            -> Initiator: DescriptorAnswer(super::DescriptorAnswer);
-
-            // Phase 2: Direct channel establishment (outside journal)
-            Initiator[guard_capability = "rendezvous:connect",
-                      flow_cost = 2]
-            -> Responder: HandshakeInit(super::HandshakeInit);
-
-            Responder[guard_capability = "rendezvous:connect",
-                      flow_cost = 2,
-                      journal_facts = "RendezvousFact::ChannelEstablished"]
-            -> Initiator: HandshakeComplete(super::HandshakeComplete);
-        }
-    }
+    choreography!(include_str!("src/protocol.rendezvous_exchange.choreo"));
 }
 
 /// Relayed rendezvous protocol module
@@ -190,34 +164,7 @@ pub mod relayed {
     // 2. Relay forwards to responder (with metadata leakage tracking)
     // 3. Responder sends response back through relay
     // 4. Relay completes by forwarding response to initiator
-    choreography! {
-        #[namespace = "rendezvous_relay"]
-        protocol RelayedRendezvous {
-            roles: Initiator, Relay, Responder;
-
-            // Initiator requests relay assistance
-            Initiator[guard_capability = "rendezvous:relay",
-                      flow_cost = 2]
-            -> Relay: RelayRequest(super::RelayRequest);
-
-            // Relay forwards to responder (with neighbor leakage)
-            Relay[guard_capability = "relay:forward",
-                  flow_cost = 1,
-                  leak = "neighbor:1"]
-            -> Responder: RelayForward(super::RelayForward);
-
-            // Responder sends response back through relay
-            Responder[guard_capability = "rendezvous:relay",
-                      flow_cost = 2]
-            -> Relay: RelayResponse(super::RelayResponse);
-
-            // Relay completes by forwarding to initiator (with neighbor leakage)
-            Relay[guard_capability = "relay:forward",
-                  flow_cost = 1,
-                  leak = "neighbor:1"]
-            -> Initiator: RelayComplete(super::RelayComplete);
-        }
-    }
+    choreography!(include_str!("src/protocol.relayed_rendezvous.choreo"));
 }
 
 // =============================================================================
@@ -273,6 +220,27 @@ pub const EXCHANGE_PROTOCOL_ID: &str = "rendezvous.exchange.v1";
 
 /// Protocol identifier for relayed exchange
 pub const RELAYED_PROTOCOL_ID: &str = "rendezvous_relay.relayed.v1";
+
+// =============================================================================
+// Generated Runner Re-exports for execute_as Pattern
+// =============================================================================
+
+/// Re-exports for RendezvousExchange choreography runners
+pub mod exchange_runners {
+    pub use super::exchange::rumpsteak_session_types_rendezvous::rendezvous::RendezvousExchangeRole;
+    pub use super::exchange::rumpsteak_session_types_rendezvous::rendezvous::runners::{
+        execute_as, run_initiator, run_responder, InitiatorOutput, ResponderOutput,
+    };
+}
+
+/// Re-exports for RelayedRendezvous choreography runners
+pub mod relayed_runners {
+    pub use super::relayed::rumpsteak_session_types_rendezvous_relay::rendezvous_relay::RelayedRendezvousRole;
+    pub use super::relayed::rumpsteak_session_types_rendezvous_relay::rendezvous_relay::runners::{
+        execute_as, run_initiator, run_relay, run_responder,
+        InitiatorOutput, RelayOutput, ResponderOutput,
+    };
+}
 
 // =============================================================================
 // Tests

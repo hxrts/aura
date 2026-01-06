@@ -1,12 +1,11 @@
 use aura_macros::choreography;
 
-choreography! {
-    #[namespace = "invalid_guard_capability"]
-    choreography InvalidGuardCapability {
-        roles: Alice, Bob;
+choreography!(r#"
+module invalid_guard_capability exposing (InvalidGuardCapability)
 
-        Alice[guard_capability = 42] -> Bob: Message;
-    }
-}
+protocol InvalidGuardCapability =
+  roles Alice, Bob
+  Alice[guard_capability = 42] -> Bob : Message
+"#);
 
 fn main() {}

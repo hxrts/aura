@@ -14,11 +14,10 @@ proc-macro = []
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "2.0", features = ["full", "extra-traits"] }
-rumpsteak-aura-choreography = "0.7.0"
-rumpsteak-aura = "0.7.0"
+rumpsteak-aura-choreography = { workspace = true }
+rumpsteak-aura = { workspace = true }
 futures = "0.3"
 thiserror = "1.0"
-regex = "1.0"
 
 # Async trait support for generated code  
 async-trait = "0.1"
@@ -29,7 +28,7 @@ aura-mpst = { path = "../aura-mpst" }
 [dev-dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-rumpsteak-aura = "0.7.0"
+rumpsteak-aura = { workspace = true }
 futures = "0.3"
 aura-core = { path = "../aura-core" }
 trybuild = "1.0"

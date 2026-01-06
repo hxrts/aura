@@ -6,6 +6,7 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+include = ["src/**", "Cargo.toml"]
 
 [features]
 default = []
@@ -43,6 +44,7 @@ rand = { workspace = true }
 biscuit-auth = { workspace = true }
 hex = "0.4"
 
+rumpsteak-aura = { workspace = true }
 [dev-dependencies]
 # Testing infrastructure (Layer 5 can use testkit)
 aura-testkit = { path = "../aura-testkit" }

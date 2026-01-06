@@ -5,9 +5,7 @@
 //! coupling into choreographic protocols.
 
 use crate::ids::RoleId;
-use rumpsteak_aura_choreography::effects::ExtensionEffect;
 use serde::{Deserialize, Serialize};
-use std::any::{Any, TypeId};
 
 /// Extension for validating capabilities before protocol operations
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -18,32 +16,6 @@ pub struct ValidateCapability {
     pub role: RoleId,
 }
 
-impl ExtensionEffect for ValidateCapability {
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-
-    fn type_name(&self) -> &'static str {
-        "ValidateCapability"
-    }
-
-    fn participating_role_ids(&self) -> Vec<Box<dyn Any>> {
-        // Role-specific extension - only this role participates
-        vec![Box::new(self.role.clone())]
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn clone_box(&self) -> Box<dyn ExtensionEffect> {
-        Box::new(self.clone())
-    }
-}
 
 /// Extension for executing guard chain validations
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -56,31 +28,6 @@ pub struct ExecuteGuardChain {
     pub operation: String,
 }
 
-impl ExtensionEffect for ExecuteGuardChain {
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-
-    fn type_name(&self) -> &'static str {
-        "ExecuteGuardChain"
-    }
-
-    fn participating_role_ids(&self) -> Vec<Box<dyn Any>> {
-        vec![Box::new(self.role.clone())]
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn clone_box(&self) -> Box<dyn ExtensionEffect> {
-        Box::new(self.clone())
-    }
-}
 
 /// Extension for tracking flow costs in protocols
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -93,31 +40,6 @@ pub struct ChargeFlowCost {
     pub role: RoleId,
 }
 
-impl ExtensionEffect for ChargeFlowCost {
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-
-    fn type_name(&self) -> &'static str {
-        "ChargeFlowCost"
-    }
-
-    fn participating_role_ids(&self) -> Vec<Box<dyn Any>> {
-        vec![Box::new(self.role.clone())]
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn clone_box(&self) -> Box<dyn ExtensionEffect> {
-        Box::new(self.clone())
-    }
-}
 
 /// Extension for journal fact recording
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -130,31 +52,6 @@ pub struct JournalFact {
     pub operation: String,
 }
 
-impl ExtensionEffect for JournalFact {
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-
-    fn type_name(&self) -> &'static str {
-        "JournalFact"
-    }
-
-    fn participating_role_ids(&self) -> Vec<Box<dyn Any>> {
-        vec![Box::new(self.role.clone())]
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn clone_box(&self) -> Box<dyn ExtensionEffect> {
-        Box::new(self.clone())
-    }
-}
 
 /// Extension for journal merge operations
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -165,35 +62,6 @@ pub struct JournalMerge {
     pub roles: Vec<RoleId>,
 }
 
-impl ExtensionEffect for JournalMerge {
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-
-    fn type_name(&self) -> &'static str {
-        "JournalMerge"
-    }
-
-    fn participating_role_ids(&self) -> Vec<Box<dyn Any>> {
-        // Multiple roles participate in merge operations
-        self.roles
-            .iter()
-            .map(|r| Box::new(r.clone()) as Box<dyn Any>)
-            .collect()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn clone_box(&self) -> Box<dyn ExtensionEffect> {
-        Box::new(self.clone())
-    }
-}
 
 /// Wrapper enum for concrete extension types
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -221,58 +89,8 @@ pub struct CompositeExtension {
     pub operation: String,
 }
 
-impl ExtensionEffect for CompositeExtension {
-    fn type_id(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-
-    fn type_name(&self) -> &'static str {
-        "CompositeExtension"
-    }
-
-    fn participating_role_ids(&self) -> Vec<Box<dyn Any>> {
-        // Collect all participating roles from contained extensions
-        let mut all_roles = vec![Box::new(self.role.clone()) as Box<dyn Any>];
-
-        for ext in &self.extensions {
-            match ext {
-                ConcreteExtension::ValidateCapability(e) => {
-                    all_roles.extend(e.participating_role_ids());
-                }
-                ConcreteExtension::ExecuteGuardChain(e) => {
-                    all_roles.extend(e.participating_role_ids());
-                }
-                ConcreteExtension::ChargeFlowCost(e) => {
-                    all_roles.extend(e.participating_role_ids());
-                }
-                ConcreteExtension::JournalFact(e) => {
-                    all_roles.extend(e.participating_role_ids());
-                }
-                ConcreteExtension::JournalMerge(e) => {
-                    all_roles.extend(e.participating_role_ids());
-                }
-            }
-        }
-
-        // Deduplicate roles (basic approach)
-        all_roles.sort_by_key(|r| format!("{r:?}"));
-        all_roles.dedup_by_key(|r| format!("{r:?}"));
-
-        all_roles
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn clone_box(&self) -> Box<dyn ExtensionEffect> {
-        Box::new(self.clone())
-    }
-}
+// Note: Aura extensions are currently handled at compile-time in aura-macros.
+// Runtime ExtensionEffect wiring will be reintroduced after MPST integration.
 
 impl CompositeExtension {
     /// Create a new composite extension

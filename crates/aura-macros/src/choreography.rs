@@ -9,89 +9,569 @@
 //! - Aura wrapper module with role types and helper functions
 //! - Integration with the Aura effects system
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Group, TokenStream, TokenTree};
 use quote::quote;
 use rumpsteak_aura_choreography::{
-    ast::Protocol,
-    compiler::{generate_choreography_code_with_namespacing, parse_choreography_str, project},
+    ast::{Choreography, MessageType, Protocol},
+    compiler::{
+        codegen::generate_choreography_code, parse_choreography_str, project,
+    },
     extensions::ExtensionRegistry,
     parse_and_generate_with_extensions,
 };
-use std::collections::BTreeSet;
-use syn::{parse::Parse, Ident, Token};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
+use syn::spanned::Spanned;
+use syn::{
+    parse::Parse,
+    visit_mut::{self, VisitMut},
+    Attribute, Expr, ExprLit, ExprMacro, Ident, Lit, LitStr, Stmt,
+};
 
 // Import Biscuit-related types for the updated annotation system
 use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
 
-/// Parse choreography input to extract roles and protocol name
+/// Parsed choreography input (DSL source + derived metadata)
 #[derive(Debug)]
 struct ChoreographyInput {
-    _protocol_name: Ident,
     roles: Vec<Ident>,
     aura_annotations: Vec<AuraEffect>,
+    namespace: Option<String>,
+    choreography: Choreography,
 }
 
-impl Parse for ChoreographyInput {
+#[derive(Debug)]
+struct ChoreographyMacroInput {
+    attrs: Vec<Attribute>,
+    expr: Expr,
+}
+
+impl Parse for ChoreographyMacroInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let full_input_str = input.fork().to_string();
+        let attrs = input.call(Attribute::parse_outer)?;
+        let expr: Expr = input.parse()?;
+        Ok(Self { attrs, expr })
+    }
+}
 
-        // Skip any attributes (like #[namespace = "..."]) before the choreography keyword
-        while input.peek(Token![#]) {
-            let _: syn::Attribute = input
-                .call(syn::Attribute::parse_outer)?
-                .pop()
-                .ok_or_else(|| syn::Error::new(input.span(), "Expected attribute"))?;
-        }
+fn parse_choreography_source(input: TokenStream) -> Result<ChoreographyInput, syn::Error> {
+    let parsed = syn::parse2::<ChoreographyMacroInput>(input)?;
+    let namespace_attr = extract_namespace_from_attrs(&parsed.attrs)?;
+    let (dsl, span) = read_choreography_source(parsed.expr)?;
 
-        // Parse "choreography ProtocolName" or "protocol ProtocolName"
-        let _keyword: Ident = input.parse()?; // "choreography" or "protocol"
-        let protocol_name: Ident = input.parse()?;
-
-        // Parse roles section
-        let content;
-        syn::braced!(content in input);
-
-        // Look for "roles: Role1, Role2, ...;"
-        let roles_keyword: Ident = content.parse()?;
-        if roles_keyword != "roles" {
-            return Err(syn::Error::new(roles_keyword.span(), "Expected 'roles'"));
-        }
-        content.parse::<Token![:]>()?;
-
-        let mut roles = Vec::new();
-        loop {
-            if content.peek(Token![;]) {
-                content.parse::<Token![;]>()?;
-                break;
+    let parser_dsl = strip_aura_annotations_for_parser(&dsl);
+    let mut choreography = parse_choreography_str(&parser_dsl).map_err(|err| {
+        syn::Error::new(span, format!("Choreography parse error: {err}"))
+    })?;
+    let namespace = match (namespace_attr, choreography.namespace.clone()) {
+        (Some(attr), Some(parsed_ns)) => {
+            if parsed_ns != attr {
+                return Err(syn::Error::new(
+                    span,
+                    format!(
+                        "Namespace mismatch: macro namespace \"{}\" \
+                         does not match module namespace \"{}\"",
+                        attr, parsed_ns
+                    ),
+                ));
             }
-            let role: Ident = content.parse()?;
-            if content.peek(syn::token::Bracket) {
-                let bracketed;
-                syn::bracketed!(bracketed in content);
-                while !bracketed.is_empty() {
-                    let _: proc_macro2::TokenTree = bracketed.parse()?;
+            choreography.namespace = Some(attr.clone());
+            Some(attr)
+        }
+        (Some(attr), None) => {
+            choreography.namespace = Some(attr.clone());
+            Some(attr)
+        }
+        (None, Some(parsed_ns)) => Some(parsed_ns),
+        (None, None) => None,
+    };
+
+    let roles = choreography
+        .roles
+        .iter()
+        .map(|role| role.name().clone())
+        .collect::<Vec<_>>();
+    let aura_annotations = extract_aura_annotations(&dsl)
+        .map_err(|err| syn::Error::new(proc_macro2::Span::call_site(), err.to_string()))?;
+
+    Ok(ChoreographyInput {
+        roles,
+        aura_annotations,
+        namespace,
+        choreography,
+    })
+}
+
+fn strip_aura_annotations_for_parser(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch != '[' {
+            out.push(ch);
+            continue;
+        }
+
+        let mut depth = 1usize;
+        let mut buf = String::new();
+        let mut has_equals = false;
+
+        while let Some(next) = chars.next() {
+            if next == '[' {
+                depth += 1;
+            } else if next == ']' {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
                 }
             }
-            roles.push(role);
-            if content.peek(Token![,]) {
-                content.parse::<Token![,]>()?;
+            if next == '=' {
+                has_equals = true;
+            }
+            buf.push(next);
+        }
+
+        if !has_equals {
+            out.push('[');
+            out.push_str(&buf);
+            out.push(']');
+        }
+    }
+
+    out
+}
+
+fn insert_message(out: &mut BTreeMap<String, MessageType>, message: MessageType) {
+    out.insert(message.name.to_string(), message);
+}
+
+fn insert_choice_label(out: &mut BTreeMap<String, MessageType>, label: &Ident) {
+    let key = label.to_string();
+    out.entry(key).or_insert_with(|| MessageType {
+        name: label.clone(),
+        type_annotation: None,
+        payload: None,
+    });
+}
+
+fn collect_messages(protocol: &Protocol, out: &mut BTreeMap<String, MessageType>) {
+    match protocol {
+        Protocol::Send {
+            message,
+            continuation,
+            ..
+        } => {
+            insert_message(out, message.clone());
+            collect_messages(continuation, out);
+        }
+        Protocol::Broadcast {
+            message,
+            continuation,
+            ..
+        } => {
+            insert_message(out, message.clone());
+            collect_messages(continuation, out);
+        }
+        Protocol::Choice { branches, .. } => {
+            for branch in branches {
+                insert_choice_label(out, &branch.label);
+                collect_messages(&branch.protocol, out);
             }
         }
-
-        // Messages and actions are parsed by rumpsteak; consume remaining tokens
-        // so this wrapper can still extract Aura annotations cleanly.
-        while !content.is_empty() {
-            let _: proc_macro2::TokenTree = content.parse()?;
+        Protocol::Loop { body, .. } => {
+            collect_messages(body, out);
         }
+        Protocol::Parallel { protocols } => {
+            for protocol in protocols {
+                collect_messages(protocol, out);
+            }
+        }
+        Protocol::Rec { body, .. } => {
+            collect_messages(body, out);
+        }
+        Protocol::Extension {
+            continuation, ..
+        } => {
+            collect_messages(continuation, out);
+        }
+        Protocol::Var(_) | Protocol::End => {}
+    }
+}
 
-        let aura_annotations = extract_aura_annotations(&full_input_str)
-            .map_err(|err| syn::Error::new(proc_macro2::Span::call_site(), err.to_string()))?;
+fn generate_helpers(messages: &[MessageType]) -> TokenStream {
+    let variants = messages.iter().map(|msg| {
+        let name = &msg.name;
+        quote! { #name(#name) }
+    });
 
-        Ok(ChoreographyInput {
-            _protocol_name: protocol_name,
-            roles,
-            aura_annotations,
-        })
+    let message_enum = quote! {
+        #[derive(Message)]
+        enum Label {
+            #(#variants),*
+        }
+    };
+
+    let message_structs = messages.iter().map(|msg| {
+        let name = &msg.name;
+        if let Some(payload) = &msg.payload {
+            quote! {
+                #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+                struct #name #payload;
+            }
+        } else {
+            quote! {
+                #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+                struct #name();
+            }
+        }
+    });
+
+    quote! {
+        #message_enum
+        #(#message_structs)*
+        type Channel = Bidirectional<UnboundedSender<Label>, UnboundedReceiver<Label>>;
+    }
+}
+
+fn hoist_choice_blocks(tokens: TokenStream) -> TokenStream {
+    let (transformed, hoisted) = transform_token_stream(tokens);
+    if hoisted.is_empty() {
+        return transformed;
+    }
+
+    let mut out = TokenStream::new();
+    let items: Vec<_> = hoisted.into_values().collect();
+    out.extend(quote! { #(#items)* });
+    out.extend(transformed);
+    out
+}
+
+fn transform_token_stream(
+    tokens: TokenStream,
+) -> (TokenStream, BTreeMap<String, TokenStream>) {
+    let mut out = TokenStream::new();
+    let mut hoisted = BTreeMap::new();
+
+    for tt in tokens {
+        match tt {
+            TokenTree::Group(group) => {
+                if let Some((ident, items)) = extract_choice_block(&group) {
+                    hoisted.entry(ident.to_string()).or_insert(items);
+                    out.extend(std::iter::once(TokenTree::Ident(ident)));
+                } else {
+                    let (inner, inner_hoisted) = transform_token_stream(group.stream());
+                    let mut new_group = Group::new(group.delimiter(), {
+                        if group.delimiter() == proc_macro2::Delimiter::Brace
+                            && !inner_hoisted.is_empty()
+                        {
+                            let mut combined = TokenStream::new();
+                            let items = inner_hoisted.into_values();
+                            combined.extend(quote! { #(#items)* });
+                            combined.extend(inner);
+                            combined
+                        } else {
+                            for (key, item) in inner_hoisted {
+                                hoisted.entry(key).or_insert(item);
+                            }
+                            inner
+                        }
+                    });
+                    new_group.set_span(group.span());
+                    out.extend(std::iter::once(TokenTree::Group(new_group)));
+                }
+            }
+            other => out.extend(std::iter::once(other)),
+        }
+    }
+
+    (out, hoisted)
+}
+
+fn extract_choice_block(group: &Group) -> Option<(Ident, TokenStream)> {
+    if group.delimiter() != proc_macro2::Delimiter::Brace {
+        return None;
+    }
+
+    let stream = group.stream();
+    let block: syn::Block = syn::parse2(quote!({ #stream })).ok()?;
+    if block.stmts.is_empty() {
+        return None;
+    }
+
+    let mut items = Vec::new();
+    let mut tail_ident: Option<Ident> = None;
+
+    for (idx, stmt) in block.stmts.iter().enumerate() {
+        match stmt {
+            Stmt::Item(item) => items.push(item),
+            Stmt::Expr(expr, None) if idx == block.stmts.len().saturating_sub(1) => {
+                if let Expr::Path(path) = expr {
+                    if path.path.segments.len() == 1 {
+                        tail_ident = Some(path.path.segments[0].ident.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let first_enum = match items.first() {
+        Some(syn::Item::Enum(item_enum)) => item_enum,
+        _ => return None,
+    };
+
+    let enum_ident = first_enum.ident.clone();
+    let tail_ident = tail_ident?;
+    if enum_ident != tail_ident {
+        return None;
+    }
+    if !enum_ident.to_string().starts_with("Choice") {
+        return None;
+    }
+
+    let item_tokens = quote! { #(#items)* };
+    Some((enum_ident, item_tokens))
+}
+
+fn rewrite_generated_code(tokens: TokenStream, role_ident: &Ident) -> TokenStream {
+    let mut file: syn::File = match syn::parse2(tokens.clone()) {
+        Ok(file) => file,
+        Err(_) => return tokens,
+    };
+
+    let mut rewriter = RumpsteakPathRewriter;
+    rewriter.visit_file_mut(&mut file);
+    let mut role_renamer = RoleRenamer {
+        role_ident: role_ident.clone(),
+    };
+    role_renamer.visit_file_mut(&mut file);
+    rewrite_runner_modules(&mut file.items);
+
+    quote! { #file }
+}
+
+fn rewrite_runner_modules(items: &mut Vec<syn::Item>) {
+    for item in items.iter_mut() {
+        if let syn::Item::Mod(module) = item {
+            if let Some((_, ref mut inner_items)) = module.content {
+                if module.ident == "runners" {
+                    module
+                        .attrs
+                        .push(syn::parse_quote!(#[allow(unreachable_code, unreachable_patterns)]));
+                    rewrite_runner_imports(inner_items);
+                } else {
+                    rewrite_runner_modules(inner_items);
+                }
+            }
+        }
+    }
+}
+
+fn rewrite_runner_imports(items: &mut Vec<syn::Item>) {
+    let mut insert_pos = 0usize;
+    let mut has_adapter_alias = false;
+
+    for (idx, item) in items.iter_mut().enumerate() {
+        match item {
+            syn::Item::Use(item_use) => {
+                if is_super_glob(item_use) {
+                    insert_pos = idx + 1;
+                }
+
+                if use_tree_contains_adapter(item_use) {
+                    strip_adapter_from_use(item_use);
+                }
+
+                if is_adapter_alias_use(item_use) {
+                    has_adapter_alias = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if !has_adapter_alias {
+        let adapter_use: syn::ItemUse = syn::parse_quote! {
+            use ::aura_mpst::ChoreographicAdapterExt as ChoreographicAdapter;
+        };
+        items.insert(insert_pos, syn::Item::Use(adapter_use));
+    }
+}
+
+fn is_super_glob(item_use: &syn::ItemUse) -> bool {
+    matches!(
+        &item_use.tree,
+        syn::UseTree::Path(path)
+            if path.ident == "super" && matches!(&*path.tree, syn::UseTree::Glob(_))
+    )
+}
+
+fn is_adapter_alias_use(item_use: &syn::ItemUse) -> bool {
+    match &item_use.tree {
+        syn::UseTree::Path(path) if path.ident == "aura_mpst" => {
+            matches!(&*path.tree, syn::UseTree::Rename(rename) if rename.ident == "ChoreographicAdapter")
+        }
+        _ => false,
+    }
+}
+
+fn use_tree_contains_adapter(item_use: &syn::ItemUse) -> bool {
+    match &item_use.tree {
+        syn::UseTree::Path(path) => {
+            if path.ident == "aura_mpst" {
+                if let syn::UseTree::Path(inner) = &*path.tree {
+                    if inner.ident != "rumpsteak_aura_choreography" {
+                        return false;
+                    }
+                    return contains_name(&inner.tree, "ChoreographicAdapter");
+                }
+                return false;
+            }
+
+            if path.ident == "rumpsteak_aura_choreography" {
+                return contains_name(&path.tree, "ChoreographicAdapter");
+            }
+
+            false
+        }
+        _ => false,
+    }
+}
+
+fn contains_name(tree: &syn::UseTree, name: &str) -> bool {
+    match tree {
+        syn::UseTree::Name(item) => item.ident == name,
+        syn::UseTree::Rename(item) => item.ident == name,
+        syn::UseTree::Group(group) => group.items.iter().any(|item| contains_name(item, name)),
+        syn::UseTree::Path(path) => contains_name(&path.tree, name),
+        syn::UseTree::Glob(_) => false,
+    }
+}
+
+fn strip_adapter_from_use(item_use: &mut syn::ItemUse) {
+    fn strip(tree: &mut syn::UseTree) {
+        match tree {
+            syn::UseTree::Group(group) => {
+                let mut filtered = syn::punctuated::Punctuated::new();
+                for item in group.items.iter() {
+                    let is_adapter = matches!(
+                        item,
+                        syn::UseTree::Name(name) if name.ident == "ChoreographicAdapter"
+                    ) || matches!(
+                        item,
+                        syn::UseTree::Rename(rename) if rename.ident == "ChoreographicAdapter"
+                    );
+                    if !is_adapter {
+                        filtered.push(item.clone());
+                    }
+                }
+                group.items = filtered;
+            }
+            syn::UseTree::Path(path) => strip(&mut path.tree),
+            _ => {}
+        }
+    }
+
+    strip(&mut item_use.tree);
+}
+
+struct RumpsteakPathRewriter;
+
+impl VisitMut for RumpsteakPathRewriter {
+    fn visit_path_mut(&mut self, path: &mut syn::Path) {
+        if let Some(first) = path.segments.first() {
+            if first.ident == "rumpsteak_aura_choreography" {
+                let mut segments = syn::punctuated::Punctuated::new();
+                segments.push(syn::PathSegment::from(Ident::new(
+                    "aura_mpst",
+                    first.ident.span(),
+                )));
+                segments.push(first.clone());
+                for seg in path.segments.iter().skip(1) {
+                    segments.push(seg.clone());
+                }
+                path.segments = segments;
+            }
+        }
+        visit_mut::visit_path_mut(self, path);
+    }
+
+    fn visit_use_tree_mut(&mut self, tree: &mut syn::UseTree) {
+        if let syn::UseTree::Path(path) = tree {
+            if path.ident == "rumpsteak_aura_choreography" {
+                let span = path.ident.span();
+                let inner = (*path.tree).clone();
+                let wrapped = syn::UseTree::Path(syn::UsePath {
+                    ident: Ident::new("rumpsteak_aura_choreography", span),
+                    colon2_token: Default::default(),
+                    tree: Box::new(inner),
+                });
+                *tree = syn::UseTree::Path(syn::UsePath {
+                    ident: Ident::new("aura_mpst", span),
+                    colon2_token: Default::default(),
+                    tree: Box::new(wrapped),
+                });
+                return;
+            }
+        }
+        visit_mut::visit_use_tree_mut(self, tree);
+    }
+}
+
+struct RoleRenamer {
+    role_ident: Ident,
+}
+
+impl VisitMut for RoleRenamer {
+    fn visit_item_enum_mut(&mut self, item: &mut syn::ItemEnum) {
+        if item.ident == "Role" {
+            item.ident = self.role_ident.clone();
+        }
+        visit_mut::visit_item_enum_mut(self, item);
+    }
+
+    fn visit_path_mut(&mut self, path: &mut syn::Path) {
+        if let Some(first) = path.segments.first_mut() {
+            if first.ident == "Role" {
+                first.ident = self.role_ident.clone();
+            }
+        }
+        visit_mut::visit_path_mut(self, path);
+    }
+}
+
+fn read_choreography_source(expr: Expr) -> Result<(String, proc_macro2::Span), syn::Error> {
+    match expr {
+        Expr::Lit(ExprLit {
+            lit: Lit::Str(lit),
+            ..
+        }) => Ok((lit.value(), lit.span())),
+        Expr::Macro(ExprMacro { mac, .. }) if mac.path.is_ident("include_str") => {
+            let lit: LitStr = syn::parse2(mac.tokens)?;
+            let path = PathBuf::from(lit.value());
+            let base_dir = std::env::var("CARGO_MANIFEST_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| PathBuf::from("."));
+            let full_path = if path.is_absolute() {
+                path
+            } else {
+                base_dir.join(path)
+            };
+            let contents = std::fs::read_to_string(&full_path).map_err(|err| {
+                syn::Error::new(
+                    lit.span(),
+                    format!(
+                        "Failed to read choreography file {}: {err}",
+                        full_path.display()
+                    ),
+                )
+            })?;
+            Ok((contents, lit.span()))
+        }
+        other => Err(syn::Error::new(
+            other.span(),
+            "choreography! expects a string literal or include_str!(\"path.choreo\")",
+        )),
     }
 }
 
@@ -99,11 +579,12 @@ impl Parse for ChoreographyInput {
 ///
 /// Uses namespace-aware rumpsteak-aura generation to avoid module conflicts
 pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> {
-    // Try to parse the input to extract roles and protocol name for Aura wrapper
-    let parsed_input = syn::parse2::<ChoreographyInput>(input.clone())?;
+    // Parse DSL input to extract roles and protocol name for Aura wrapper
+    let parsed_input = parse_choreography_source(input.clone())?;
 
     // Generate the rumpsteak-aura choreography using namespace-aware functions
-    let rumpsteak_output = choreography_impl_namespace_aware(input.clone()).unwrap_or_else(|err| {
+    let rumpsteak_output =
+        choreography_impl_namespace_aware(&parsed_input.choreography).unwrap_or_else(|err| {
         // If rumpsteak fails, generate a helpful error message but continue with Aura wrapper
         let _error_msg = err.to_string();
         quote! {
@@ -117,14 +598,13 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     });
 
     // Generate the Aura wrapper module with namespace support
-    // Extract namespace from the original input - we need to re-parse to get namespace
-    let namespace = extract_namespace_from_input(input.clone());
-    let message_type_names = extract_message_type_names(&input);
+    let namespace = parsed_input.namespace.clone();
+    let message_type_names = extract_message_type_names(&parsed_input.choreography);
     let aura_wrapper =
         generate_aura_wrapper(&parsed_input, namespace.as_deref(), &message_type_names);
 
     // Extract namespace for uniqueness check (reuse from aura_wrapper if available)
-    let namespace = extract_namespace_from_input(input.clone());
+    let namespace = parsed_input.namespace.clone();
 
     // Generate a uniqueness marker to catch duplicate namespaces at compile time
     let namespace_uniqueness_check = if let Some(ns) = &namespace {
@@ -144,8 +624,9 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
         // No namespace specified - generate a helpful compile error
         quote! {
             compile_error!(
-                "Choreography is missing a namespace attribute. \
-                 Add #[namespace = \"unique_name\"] before your choreography! macro. \
+                "Choreography is missing a namespace. \
+                 Add `module <name> exposing (...)` to your .choreo file \
+                 or use #[namespace = \"unique_name\"] inside the choreography! macro. \
                  Each choreography in the same file must have a unique namespace."
             );
         }
@@ -204,12 +685,7 @@ fn collect_message_type_names(protocol: &Protocol, names: &mut BTreeSet<String>)
     }
 }
 
-fn extract_message_type_names(input: &TokenStream) -> Vec<String> {
-    let input_str = input.to_string();
-    let choreography = match parse_choreography_str(&input_str) {
-        Ok(choreo) => choreo,
-        Err(_) => return Vec::new(),
-    };
+fn extract_message_type_names(choreography: &Choreography) -> Vec<String> {
     let mut names = BTreeSet::new();
     collect_message_type_names(&choreography.protocol, &mut names);
     names.into_iter().collect()
@@ -835,184 +1311,113 @@ fn generate_aura_wrapper(
 /// Namespace-aware rumpsteak-aura implementation
 ///
 /// Uses the namespace-aware rumpsteak functions to avoid module conflicts
-fn choreography_impl_namespace_aware(input: TokenStream) -> Result<TokenStream, syn::Error> {
-    // Convert token stream to string for parsing
-    let input_str = input.to_string();
-
-    // Parse the choreography to extract namespace information
-    match parse_choreography_str(&input_str) {
-        Ok(choreo) => {
-            // Project to local types
-            let mut local_types = Vec::new();
-            for role in &choreo.roles {
-                match project(&choreo, role) {
-                    Ok(local_type) => {
-                        local_types.push((role.clone(), local_type));
-                    }
-                    Err(err) => {
-                        return Err(syn::Error::new(
-                            proc_macro2::Span::call_site(),
-                            format!("Projection failed for role {}: {}", role.name, err),
-                        ));
-                    }
-                }
+fn choreography_impl_namespace_aware(
+    choreography: &Choreography,
+) -> Result<TokenStream, syn::Error> {
+    // Project to local types
+    let mut local_types = Vec::new();
+    for role in &choreography.roles {
+        match project(choreography, role) {
+            Ok(local_type) => {
+                local_types.push((role.clone(), local_type));
             }
+            Err(err) => {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    format!(
+                        "Projection failed for role {}: {}",
+                        role.name().to_string(),
+                        err
+                    ),
+                ));
+            }
+        }
+    }
 
-            // Generate code with namespace support
-            let generated_code = generate_choreography_code_with_namespacing(&choreo, &local_types);
+    let mut message_map = BTreeMap::new();
+    collect_messages(&choreography.protocol, &mut message_map);
+    let messages: Vec<_> = message_map.into_values().collect();
+    let helpers = generate_helpers(&messages);
 
-            // Add necessary imports for the generated rumpsteak code
-            let imports = quote! {
-                #[allow(unused_imports)]
-                use super::{Ping, Pong};
+    // Generate code and hoist inline choice enums (choices need item-level definitions)
+    let generated_code = generate_choreography_code(
+        &choreography.name.to_string(),
+        &choreography.roles,
+        &local_types,
+    );
+    let generated_code = hoist_choice_blocks(generated_code);
+    let role_ident = quote::format_ident!("{}Role", choreography.name);
+    let generated_code = rewrite_generated_code(generated_code, &role_ident);
 
-                // Standard rumpsteak-aura imports
-                use rumpsteak_aura::{
-                    channel::{Bidirectional, Pair}, session, try_session,
-                    Branch, End, Message, Receive, Role, Roles, Select, Send, Sealable
-                };
-                use futures::channel::mpsc;
-                use futures::{Sink, Stream};
-                use std::pin::Pin;
-                use std::task::{Context, Poll};
+    let generated_code = if let Some(ns) = &choreography.namespace {
+        let ns_ident = quote::format_ident!("{}", ns);
+        quote! {
+            pub mod #ns_ident {
+                use super::*;
+                #generated_code
+            }
+            pub use #ns_ident::*;
+        }
+    } else {
+        quote! {
+            mod __generated_choreography {
+                use super::*;
+                #generated_code
+            }
+            pub use __generated_choreography::*;
+        }
+    };
 
-                // Label type for message routing
-                #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-                pub enum Label {
-                    Ping(Ping),
-                    Pong(Pong),
-                }
-
-                const CHANNEL_BUFFER: usize = 64;
-
-                #[derive(Debug)]
-                pub struct BoundedSender<T>(mpsc::Sender<T>);
-
-                #[derive(Debug)]
-                pub struct BoundedReceiver<T>(mpsc::Receiver<T>);
-
-                impl<T> Clone for BoundedSender<T> {
-                    fn clone(&self) -> Self {
-                        Self(self.0.clone())
-                    }
-                }
-
-                impl<T> Pair<BoundedReceiver<T>> for BoundedSender<T> {
-                    fn pair() -> (Self, BoundedReceiver<T>) {
-                        let (sender, receiver) = mpsc::channel(CHANNEL_BUFFER);
-                        (BoundedSender(sender), BoundedReceiver(receiver))
-                    }
-                }
-
-                impl<T> Pair<BoundedSender<T>> for BoundedReceiver<T> {
-                    fn pair() -> (Self, BoundedSender<T>) {
-                        let (sender, receiver) = Pair::pair();
-                        (receiver, sender)
-                    }
-                }
-
-                impl<T> Sealable for BoundedSender<T> {
-                    fn seal(&mut self) {
-                        self.0.close_channel();
-                    }
-
-                    fn is_sealed(&self) -> bool {
-                        self.0.is_closed()
-                    }
-                }
-
-                impl<T> Sealable for BoundedReceiver<T> {
-                    fn seal(&mut self) {
-                        self.0.close();
-                    }
-
-                    fn is_sealed(&self) -> bool {
-                        false
-                    }
-                }
-
-                impl<T> Sink<T> for BoundedSender<T> {
-                    type Error = <mpsc::Sender<T> as Sink<T>>::Error;
-
-                    fn poll_ready(
-                        self: Pin<&mut Self>,
-                        cx: &mut Context<'_>,
-                    ) -> Poll<Result<(), Self::Error>> {
-                        Pin::new(&mut self.get_mut().0).poll_ready(cx)
-                    }
-
-                    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-                        Pin::new(&mut self.get_mut().0).start_send(item)
-                    }
-
-                    fn poll_flush(
-                        self: Pin<&mut Self>,
-                        cx: &mut Context<'_>,
-                    ) -> Poll<Result<(), Self::Error>> {
-                        Pin::new(&mut self.get_mut().0).poll_flush(cx)
-                    }
-
-                    fn poll_close(
-                        self: Pin<&mut Self>,
-                        cx: &mut Context<'_>,
-                    ) -> Poll<Result<(), Self::Error>> {
-                        Pin::new(&mut self.get_mut().0).poll_close(cx)
-                    }
-                }
-
-                impl<T> Stream for BoundedReceiver<T> {
-                    type Item = <mpsc::Receiver<T> as Stream>::Item;
-
-                    fn poll_next(
-                        self: Pin<&mut Self>,
-                        cx: &mut Context<'_>,
-                    ) -> Poll<Option<Self::Item>> {
-                        Pin::new(&mut self.get_mut().0).poll_next(cx)
-                    }
-                }
-
-                fn channel() -> (BoundedSender<Label>, BoundedReceiver<Label>) {
-                    Pair::pair()
-                }
-
-                // Channel type definition
-                type Channel = Bidirectional<BoundedSender<Label>, BoundedReceiver<Label>>;
-            };
-
-            // Generate module name using namespace
-            let module_name = if let Some(ns) = &choreo.namespace {
+    // Generate module name using namespace
+    let module_name = if let Some(ns) = &choreography.namespace {
                 quote::format_ident!("rumpsteak_session_types_{}", ns)
             } else {
                 quote::format_ident!("rumpsteak_session_types")
             };
 
-            Ok(quote! {
-                /// Rumpsteak-aura generated session types and choreographic projections
-                pub mod #module_name {
-                    #imports
-                    #generated_code
-                }
-            })
+    let imports = quote! {
+        #[allow(unused_imports)]
+        use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+        use rumpsteak_aura::{
+            channel::*,
+            Branch, End, Message, Receive, Role, Roles, Route, Sealable, Select, Send, session,
+        };
+    };
+
+    Ok(quote! {
+        /// Rumpsteak-aura generated session types and choreographic projections
+        pub mod #module_name {
+            #imports
+            #helpers
+            #generated_code
         }
-        Err(err) => {
-            let error_msg = err.to_string();
-            Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                format!("Choreography parsing error: {}", error_msg),
-            ))
-        }
-    }
+    })
 }
 
-/// Extract namespace from choreography input tokens
-fn extract_namespace_from_input(input: TokenStream) -> Option<String> {
-    let input_str = input.to_string();
-
-    // Simple regex-based extraction of namespace attribute
-    // Pattern: #[namespace = "namespace_name"]
-    let re = regex::Regex::new(r#"#\s*\[\s*namespace\s*=\s*"([^"]+)"\s*\]"#).ok()?;
-    let captures = re.captures(&input_str)?;
-    captures.get(1).map(|m| m.as_str().to_string())
+/// Extract namespace from macro attributes (#[namespace = "..."]).
+fn extract_namespace_from_attrs(attrs: &[Attribute]) -> Result<Option<String>, syn::Error> {
+    for attr in attrs {
+        if !attr.path().is_ident("namespace") {
+            continue;
+        }
+        let meta = attr.meta.clone();
+        if let syn::Meta::NameValue(nv) = meta {
+            if let syn::Expr::Lit(expr_lit) = nv.value {
+                if let syn::Lit::Str(lit_str) = expr_lit.lit {
+                    return Ok(Some(lit_str.value()));
+                }
+            }
+            return Err(syn::Error::new(
+                attr.span(),
+                "namespace must be a string literal (e.g. #[namespace = \"foo\"])",
+            ));
+        }
+        return Err(syn::Error::new(
+            attr.span(),
+            "namespace must be a name-value attribute (e.g. #[namespace = \"foo\"])",
+        ));
+    }
+    Ok(None)
 }
 
 /// Generate leakage integration code from annotations

@@ -2,6 +2,7 @@
 name = "hello-choreo"
 version = "0.1.0"
 edition = "2021"
+include = ["src/**", "Cargo.toml"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -11,6 +12,6 @@ async-trait = "0.1"
 aura-macros = { path = "../../crates/aura-macros" }
 aura-core = { path = "../../crates/aura-core" }
 aura-mpst = { path = "../../crates/aura-mpst" }
-rumpsteak-aura-choreography = "0.7.0"
-rumpsteak-aura = "0.7.0"
+rumpsteak-aura-choreography = "0.8.1"
+rumpsteak-aura = "0.8.1"
 bincode = "1.3"

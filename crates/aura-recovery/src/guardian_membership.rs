@@ -93,61 +93,7 @@ pub struct ChangeCompletion {
 }
 
 // Guardian Membership Change Choreography - 3 phase protocol
-choreography! {
-    #[namespace = "guardian_membership_change"]
-    protocol GuardianMembershipChange {
-        roles: ChangeInitiator, Guardian1, Guardian2, Guardian3;
-
-        // Phase 1: Membership change proposal to all guardians
-        ChangeInitiator[guard_capability = "initiate_membership_change",
-                        flow_cost = 350,
-                        journal_facts = "membership_change_proposed",
-                        leakage_budget = [1, 0, 0]]
-        -> Guardian1: ProposeChange(MembershipProposal);
-
-        ChangeInitiator[guard_capability = "initiate_membership_change",
-                        flow_cost = 350]
-        -> Guardian2: ProposeChange(MembershipProposal);
-
-        ChangeInitiator[guard_capability = "initiate_membership_change",
-                        flow_cost = 350]
-        -> Guardian3: ProposeChange(MembershipProposal);
-
-        // Phase 2: Guardian votes back to change initiator
-        Guardian1[guard_capability = "vote_membership_change,verify_membership_proposal",
-                   flow_cost = 220,
-                   journal_facts = "membership_vote_cast",
-                   leakage_budget = [0, 1, 0]]
-        -> ChangeInitiator: CastVote(GuardianVote);
-
-        Guardian2[guard_capability = "vote_membership_change,verify_membership_proposal",
-                   flow_cost = 220,
-                   journal_facts = "membership_vote_cast"]
-        -> ChangeInitiator: CastVote(GuardianVote);
-
-        Guardian3[guard_capability = "vote_membership_change,verify_membership_proposal",
-                   flow_cost = 220,
-                   journal_facts = "membership_vote_cast"]
-        -> ChangeInitiator: CastVote(GuardianVote);
-
-        // Phase 3: Change completion broadcast to all guardians
-        ChangeInitiator[guard_capability = "complete_membership_change",
-                        flow_cost = 180,
-                        journal_facts = "membership_change_completed",
-                        journal_merge = true]
-        -> Guardian1: CompleteChange(ChangeCompletion);
-
-        ChangeInitiator[guard_capability = "complete_membership_change",
-                        flow_cost = 180,
-                        journal_merge = true]
-        -> Guardian2: CompleteChange(ChangeCompletion);
-
-        ChangeInitiator[guard_capability = "complete_membership_change",
-                        flow_cost = 180,
-                        journal_merge = true]
-        -> Guardian3: CompleteChange(ChangeCompletion);
-    }
-}
+choreography!(include_str!("src/guardian_membership.choreo"));
 
 /// Guardian membership coordinator.
 ///
