@@ -53,6 +53,8 @@ use std::sync::Arc;
 
 use crate::core::default_context_id_for_authority;
 use crate::runtime::services::ServiceError;
+use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
+use aura_core::ceremony::SupersessionReason;
 
 mod amp;
 mod consensus;
@@ -1080,23 +1082,38 @@ impl RuntimeBridge for AgentRuntimeBridge {
             guardian_ids.len()
         );
 
-        // Step 3: Register ceremony with tracker
-        let tracker = self.agent.ceremony_tracker().await;
-        tracker
-            .register(
-                ceremony_id.clone(),
+        // Step 3: Register ceremony with runner (and supersede stale candidates)
+        let runner = self.agent.ceremony_runner().await;
+        let now_ms = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?
+            .ts_ms;
+        for old_id in runner
+            .check_supersession_candidates(
                 aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
-                threshold_k_value,
-                total_n,
-                participants,
-                new_epoch.value(),
-                None,
-                None,
+                Some(&prestate_hash),
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to register ceremony: {}", e))
-            })?;
+        {
+            let _ = runner
+                .supersede(&old_id, &ceremony_id, SupersessionReason::NewerRequest, now_ms)
+                .await;
+        }
+        runner
+            .start(CeremonyInitRequest {
+                ceremony_id: ceremony_id.clone(),
+                kind: aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
+                threshold_k: threshold_k_value,
+                total_n,
+                participants,
+                new_epoch: new_epoch.value(),
+                enrollment_device_id: None,
+                enrollment_nickname_suggestion: None,
+                prestate_hash: Some(prestate_hash),
+            })
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to register ceremony: {}", e)))?;
 
         // Step 4: Send guardian invitations with key packages
         // This routes through the proper aura-recovery protocol
@@ -1324,26 +1341,41 @@ impl RuntimeBridge for AgentRuntimeBridge {
             hex::encode(ceremony_hash.as_bytes())
         ));
 
-        let tracker = self.agent.ceremony_tracker().await;
-        tracker
-            .register(
-                ceremony_id.clone(),
+        let runner = self.agent.ceremony_runner().await;
+        let now_ms = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?
+            .ts_ms;
+        for old_id in runner
+            .check_supersession_candidates(
                 aura_app::runtime_bridge::CeremonyKind::DeviceRotation,
-                threshold_value,
-                total_n,
-                participants,
-                pending_epoch.value(),
-                None,
-                None,
+                Some(&prestate_hash),
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
-            })?;
+        {
+            let _ = runner
+                .supersede(&old_id, &ceremony_id, SupersessionReason::NewerRequest, now_ms)
+                .await;
+        }
+        runner
+            .start(CeremonyInitRequest {
+                ceremony_id: ceremony_id.clone(),
+                kind: aura_app::runtime_bridge::CeremonyKind::DeviceRotation,
+                threshold_k: threshold_value,
+                total_n,
+                participants,
+                new_epoch: pending_epoch.value(),
+                enrollment_device_id: None,
+                enrollment_nickname_suggestion: None,
+                prestate_hash: Some(prestate_hash),
+            })
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to register ceremony: {e}")))?;
 
         // Mark the initiator as accepted (their key package is already local).
-        let _ = tracker
-            .mark_accepted(&ceremony_id, ParticipantIdentity::device(current_device_id))
+        let _ = runner
+            .record_response(&ceremony_id, ParticipantIdentity::device(current_device_id))
             .await;
 
         // Send key packages to other devices.
@@ -1644,27 +1676,42 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let acceptance_n = acceptors.len() as u16;
         let acceptance_threshold = threshold_k.min(acceptance_n);
 
-        let tracker = self.agent.ceremony_tracker().await;
+        let runner = self.agent.ceremony_runner().await;
         let nickname_for_tracker = if nickname_suggestion.is_empty() {
             None
         } else {
             Some(nickname_suggestion.clone())
         };
-        tracker
-            .register(
-                ceremony_id.clone(),
+        let now_ms = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?
+            .ts_ms;
+        for old_id in runner
+            .check_supersession_candidates(
                 aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
-                acceptance_threshold,
-                acceptance_n,
-                acceptors,
-                pending_epoch.value(),
-                Some(new_device_id),
-                nickname_for_tracker,
+                Some(&prestate_hash),
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
-            })?;
+        {
+            let _ = runner
+                .supersede(&old_id, &ceremony_id, SupersessionReason::NewerRequest, now_ms)
+                .await;
+        }
+        runner
+            .start(CeremonyInitRequest {
+                ceremony_id: ceremony_id.clone(),
+                kind: aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
+                threshold_k: acceptance_threshold,
+                total_n: acceptance_n,
+                participants: acceptors,
+                new_epoch: pending_epoch.value(),
+                enrollment_device_id: Some(new_device_id),
+                enrollment_nickname_suggestion: nickname_for_tracker,
+                prestate_hash: Some(prestate_hash),
+            })
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to register ceremony: {e}")))?;
 
         // Distribute new-epoch key packages to existing devices (so they are not bricked).
         if !other_device_ids.is_empty() {
@@ -1990,25 +2037,40 @@ impl RuntimeBridge for AgentRuntimeBridge {
             hex::encode(ceremony_hash.as_bytes())
         ));
 
-        let tracker = self.agent.ceremony_tracker().await;
-        tracker
-            .register(
-                ceremony_id.clone(),
+        let runner = self.agent.ceremony_runner().await;
+        let now_ms = effects
+            .physical_time()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to read time: {e}")))?
+            .ts_ms;
+        for old_id in runner
+            .check_supersession_candidates(
                 aura_app::runtime_bridge::CeremonyKind::DeviceRemoval,
-                threshold_k,
-                total_n,
-                participants.clone(),
-                pending_epoch.value(),
-                Some(target_device_id),
-                None,
+                Some(&prestate_hash),
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
-            })?;
+        {
+            let _ = runner
+                .supersede(&old_id, &ceremony_id, SupersessionReason::NewerRequest, now_ms)
+                .await;
+        }
+        runner
+            .start(CeremonyInitRequest {
+                ceremony_id: ceremony_id.clone(),
+                kind: aura_app::runtime_bridge::CeremonyKind::DeviceRemoval,
+                threshold_k,
+                total_n,
+                participants: participants.clone(),
+                new_epoch: pending_epoch.value(),
+                enrollment_device_id: Some(target_device_id),
+                enrollment_nickname_suggestion: None,
+                prestate_hash: Some(prestate_hash),
+            })
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to register ceremony: {e}")))?;
 
-        let _ = tracker
-            .mark_accepted(&ceremony_id, ParticipantIdentity::device(current_device_id))
+        let _ = runner
+            .record_response(&ceremony_id, ParticipantIdentity::device(current_device_id))
             .await;
 
         use base64::Engine;
@@ -2098,11 +2160,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                     ))
                 })?;
             if !has_commit {
-                let _ = tracker
-                    .mark_failed(
-                        &ceremony_id,
-                        Some("Missing consensus DKG transcript".to_string()),
-                    )
+                let _ = runner
+                    .abort(&ceremony_id, Some("Missing consensus DKG transcript".to_string()))
                     .await;
                 return Err(IntentError::validation_failed(
                     "Missing consensus DKG transcript".to_string(),
@@ -2124,8 +2183,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             let attested = match self.sign_tree_op(&op).await {
                 Ok(attested) => attested,
                 Err(e) => {
-                    let _ = tracker
-                        .mark_failed(&ceremony_id, Some(format!("Failed to sign tree op: {e}")))
+                    let _ = runner
+                        .abort(&ceremony_id, Some(format!("Failed to sign tree op: {e}")))
                         .await;
                     return Err(IntentError::internal_error(format!(
                         "Failed to sign tree op: {e}"
@@ -2134,8 +2193,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             };
 
             if let Err(e) = effects.apply_attested_op(attested).await {
-                let _ = tracker
-                    .mark_failed(&ceremony_id, Some(format!("Failed to apply tree op: {e}")))
+                let _ = runner
+                    .abort(&ceremony_id, Some(format!("Failed to apply tree op: {e}")))
                     .await;
                 return Err(IntentError::internal_error(format!(
                     "Failed to apply tree op for device removal: {e}"
@@ -2146,15 +2205,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .commit_key_rotation(&authority_id, pending_epoch.value())
                 .await
             {
-                let _ = tracker
-                    .mark_failed(&ceremony_id, Some(format!("Commit failed: {e}")))
+                let _ = runner
+                    .abort(&ceremony_id, Some(format!("Commit failed: {e}")))
                     .await;
                 return Err(IntentError::internal_error(format!(
                     "Failed to commit key rotation: {e}"
                 )));
             }
 
-            let _ = tracker.mark_committed(&ceremony_id).await;
+            let _ = runner.commit(&ceremony_id, CeremonyCommitMetadata::default()).await;
         }
 
         Ok(ceremony_id.to_string())
@@ -2171,8 +2230,15 @@ impl RuntimeBridge for AgentRuntimeBridge {
             tracing::debug!("Failed to process ceremony acceptances: {}", e);
         }
 
+        let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
         let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id.to_string());
+
+        let _status = runner
+            .status(&ceremony_id)
+            .await
+            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
+        let _timed_out = runner.is_timed_out(&ceremony_id).await.unwrap_or(false);
 
         let state = tracker
             .get(&ceremony_id)
@@ -2212,8 +2278,14 @@ impl RuntimeBridge for AgentRuntimeBridge {
             tracing::debug!("Failed to process ceremony acceptances: {}", e);
         }
 
+        let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
         let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id.to_string());
+        let _status = runner
+            .status(&ceremony_id)
+            .await
+            .map_err(|e| IntentError::validation_failed(format!("Ceremony not found: {}", e)))?;
+        let _timed_out = runner.is_timed_out(&ceremony_id).await.unwrap_or(false);
         let state = tracker
             .get(&ceremony_id)
             .await
@@ -2241,6 +2313,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             tracing::debug!("Failed to process ceremony acceptances: {}", e);
         }
 
+        let runner = self.agent.ceremony_runner().await;
         let tracker = self.agent.ceremony_tracker().await;
         let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id.to_string());
         let state = tracker.get(&ceremony_id).await?;
@@ -2251,8 +2324,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 .await?;
         }
 
-        tracker
-            .mark_failed(&ceremony_id, Some("Canceled".to_string()))
+        runner
+            .abort(&ceremony_id, Some("Canceled".to_string()))
             .await?;
 
         Ok(())

@@ -8,6 +8,7 @@
 pub mod auth_manager;
 pub mod authority_manager;
 pub mod authority_state;
+pub mod ceremony_runner;
 pub mod ceremony_tracker;
 pub mod context_manager;
 pub mod device_nickname_manager;

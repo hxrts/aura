@@ -719,16 +719,16 @@ pub use super::reductions::{
 mod tests {
     use super::*;
     use crate::fact_registry::build_fact_registry;
-    use aura_chat::{ChatDelta, ChatFact, CHAT_FACT_TYPE_ID};
+    use aura_chat::{ChatDelta, ChatFact};
     use aura_core::{
         identifiers::{AuthorityId, ChannelId, ContextId, InvitationId},
         time::{OrderTime, PhysicalTime, TimeStamp},
     };
-    use aura_invitation::{InvitationDelta, InvitationFact, INVITATION_FACT_TYPE_ID};
+    use aura_invitation::{InvitationDelta, InvitationFact};
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_journal::DomainFact;
     use aura_recovery::RecoveryDelta;
-    use aura_social::{HomeId, SocialFact, SOCIAL_FACT_TYPE_ID};
+    use aura_social::{HomeId, SocialFact};
     use tokio::sync::mpsc;
 
     /// Helper to create a test context ID

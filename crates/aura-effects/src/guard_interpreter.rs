@@ -369,18 +369,18 @@ mod tests {
     impl JournalEffects for MockJournalEffects {
         async fn merge_facts(
             &self,
-            target: &aura_core::Journal,
-            _delta: &aura_core::Journal,
+            target: aura_core::Journal,
+            _delta: aura_core::Journal,
         ) -> Result<aura_core::Journal> {
-            Ok(target.clone())
+            Ok(target)
         }
 
         async fn refine_caps(
             &self,
-            target: &aura_core::Journal,
-            _refinement: &aura_core::Journal,
+            target: aura_core::Journal,
+            _refinement: aura_core::Journal,
         ) -> Result<aura_core::Journal> {
-            Ok(target.clone())
+            Ok(target)
         }
 
         async fn get_journal(&self) -> Result<aura_core::Journal> {

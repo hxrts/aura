@@ -20,6 +20,7 @@
 use proc_macro::TokenStream;
 
 mod choreography;
+mod ceremony_facts;
 mod domain_fact;
 mod effect_handlers;
 mod effect_system;
@@ -124,6 +125,19 @@ pub fn derive_domain_fact(input: TokenStream) -> TokenStream {
 /// Note: Effect implementations in aura-effects are the abstraction boundary where
 /// direct OS calls are expected. Application code should always use injected effects,
 /// never call OS functions directly.
+
+/// Attribute macro that adds canonical ceremony helpers to fact enums.
+///
+/// This macro expects the enum to define the standard ceremony variants:
+/// `CeremonyInitiated`, `CeremonyAcceptanceReceived`, `CeremonyCommitted`,
+/// `CeremonyAborted`, and `CeremonySuperseded`.
+///
+/// It generates `ceremony_id()` and `ceremony_timestamp_ms()` accessors.
+#[proc_macro_attribute]
+pub fn ceremony_facts(attr: TokenStream, item: TokenStream) -> TokenStream {
+    ceremony_facts::ceremony_facts_impl(attr, item)
+}
+
 #[proc_macro]
 pub fn aura_effect_handlers(input: TokenStream) -> TokenStream {
     match effect_handlers::aura_effect_handlers_impl(input) {

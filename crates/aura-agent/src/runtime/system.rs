@@ -7,6 +7,7 @@ use super::services::{
     ReceiptManager, RendezvousManager, RuntimeService, RuntimeTaskRegistry, ServiceError,
     SocialManager, SyncServiceManager, ThresholdSigningService,
 };
+use super::services::ceremony_runner::CeremonyRunner;
 use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
 };
@@ -58,6 +59,9 @@ pub struct RuntimeSystem {
     /// Ceremony tracker (for guardian ceremony coordination)
     ceremony_tracker: CeremonyTracker,
 
+    /// Ceremony runner (shared Category C orchestration API)
+    ceremony_runner: CeremonyRunner,
+
     /// Threshold signing service (shared state across runtime operations)
     threshold_signing: ThresholdSigningService,
 
@@ -94,6 +98,8 @@ impl RuntimeSystem {
         authority_id: AuthorityId,
     ) -> Self {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
+        let ceremony_tracker = CeremonyTracker::new();
+        let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         Self {
             effect_executor,
             effect_system,
@@ -106,7 +112,8 @@ impl RuntimeSystem {
             sync_manager: None,
             rendezvous_manager: None,
             social_manager: None,
-            ceremony_tracker: CeremonyTracker::new(),
+            ceremony_tracker,
+            ceremony_runner,
             threshold_signing,
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
@@ -132,6 +139,8 @@ impl RuntimeSystem {
         authority_id: AuthorityId,
     ) -> Self {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
+        let ceremony_tracker = CeremonyTracker::new();
+        let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         Self {
             effect_executor,
             effect_system,
@@ -144,7 +153,8 @@ impl RuntimeSystem {
             sync_manager: Some(sync_manager),
             rendezvous_manager: None,
             social_manager: None,
-            ceremony_tracker: CeremonyTracker::new(),
+            ceremony_tracker,
+            ceremony_runner,
             threshold_signing,
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
@@ -170,6 +180,8 @@ impl RuntimeSystem {
         authority_id: AuthorityId,
     ) -> Self {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
+        let ceremony_tracker = CeremonyTracker::new();
+        let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         Self {
             effect_executor,
             effect_system,
@@ -182,7 +194,8 @@ impl RuntimeSystem {
             sync_manager: None,
             rendezvous_manager: Some(rendezvous_manager),
             social_manager: None,
-            ceremony_tracker: CeremonyTracker::new(),
+            ceremony_tracker,
+            ceremony_runner,
             threshold_signing,
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
@@ -209,6 +222,8 @@ impl RuntimeSystem {
         authority_id: AuthorityId,
     ) -> Self {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
+        let ceremony_tracker = CeremonyTracker::new();
+        let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         Self {
             effect_executor,
             effect_system,
@@ -221,7 +236,8 @@ impl RuntimeSystem {
             sync_manager,
             rendezvous_manager,
             social_manager,
-            ceremony_tracker: CeremonyTracker::new(),
+            ceremony_tracker,
+            ceremony_runner,
             threshold_signing,
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
@@ -233,6 +249,11 @@ impl RuntimeSystem {
     /// Get the ceremony tracker
     pub fn ceremony_tracker(&self) -> &CeremonyTracker {
         &self.ceremony_tracker
+    }
+
+    /// Get the ceremony runner
+    pub fn ceremony_runner(&self) -> &CeremonyRunner {
+        &self.ceremony_runner
     }
 
     /// Get the shared threshold signing service.

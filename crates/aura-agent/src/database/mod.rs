@@ -331,11 +331,11 @@ mod tests {
     impl JournalEffects for TestJournalHandler {
         async fn merge_facts(
             &self,
-            target: &aura_core::Journal,
-            delta: &aura_core::Journal,
+            target: aura_core::Journal,
+            delta: aura_core::Journal,
         ) -> Result<aura_core::Journal, AuraError> {
             // Simple merge: combine facts from both journals
-            let mut result = target.clone();
+            let mut result = target;
             for (key, value) in delta.facts.iter() {
                 result.facts.insert(key.clone(), value.clone())?;
             }
@@ -344,10 +344,10 @@ mod tests {
 
         async fn refine_caps(
             &self,
-            target: &aura_core::Journal,
-            _refinement: &aura_core::Journal,
+            target: aura_core::Journal,
+            _refinement: aura_core::Journal,
         ) -> Result<aura_core::Journal, AuraError> {
-            Ok(target.clone())
+            Ok(target)
         }
 
         async fn get_journal(&self) -> Result<aura_core::Journal, AuraError> {
@@ -441,7 +441,7 @@ mod tests {
             .expect("insert fact should succeed");
 
         // Merge facts - should trigger indexing of delta
-        let _result = wrapper.merge_facts(&target, &delta).await.unwrap();
+        let _result = wrapper.merge_facts(target, delta).await.unwrap();
 
         // Query should find the merged facts
         let facts = wrapper.facts_by_predicate("event.type").await.unwrap();

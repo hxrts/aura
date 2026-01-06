@@ -483,6 +483,54 @@ impl CeremonyTracker {
         .await
     }
 
+
+    /// Mark a ceremony as committed (key rotation activated), with optional metadata.
+    pub async fn mark_committed_with_metadata(
+        &self,
+        ceremony_id: &CeremonyId,
+        committed_at: Option<PhysicalTime>,
+        consensus_id: Option<ConsensusId>,
+    ) -> Result<(), IntentError> {
+        with_state_mut_validated(
+            &self.state,
+            |tracker| {
+                let state = tracker.ceremonies.get_mut(ceremony_id).ok_or_else(|| {
+                    IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
+                })?;
+
+                if state.is_committed {
+                    if let Some(committed_at) = committed_at {
+                        state.committed_at = Some(committed_at);
+                    }
+                    if let Some(consensus_id) = consensus_id {
+                        state.committed_consensus_id = Some(consensus_id);
+                    }
+                    return Ok(());
+                }
+
+                state.is_committed = true;
+                state.agreement_mode = AgreementMode::ConsensusFinalized;
+                if let Some(committed_at) = committed_at {
+                    state.committed_at = Some(committed_at);
+                }
+                if let Some(consensus_id) = consensus_id {
+                    state.committed_consensus_id = Some(consensus_id);
+                }
+
+                tracing::info!(
+                    ceremony_id = %ceremony_id,
+                    accepted = state.accepted_participants.len(),
+                    threshold = state.threshold_k,
+                    "Ceremony committed"
+                );
+
+                Ok(())
+            },
+            |tracker| tracker.validate(),
+        )
+        .await
+    }
+
     /// Mark a ceremony as committed (key rotation activated).
     ///
     /// This is only called after threshold is reached and `commit_key_rotation` succeeds.

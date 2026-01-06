@@ -318,7 +318,7 @@ async fn test_merge_facts() {
         .unwrap_or_else(|err| panic!("get journal failed: {err}"));
     let delta = aura_core::Journal::new();
 
-    let result = effects.merge_facts(&target, &delta).await;
+    let result = effects.merge_facts(target, delta).await;
     assert!(result.is_ok());
 }
 
@@ -332,7 +332,7 @@ async fn test_refine_caps() {
         .unwrap_or_else(|err| panic!("get journal failed: {err}"));
     let refinement = aura_core::Journal::new();
 
-    let result = effects.refine_caps(&target, &refinement).await;
+    let result = effects.refine_caps(target, refinement).await;
     assert!(result.is_ok());
 }
 

@@ -2,7 +2,7 @@
 
 This audit tracks every `choreography!` usage in the codebase and whether it is wired into the runtime execution path. Each entry is either Wired (executed via the choreographic runtime) or Spec-only (definition exists but not yet integrated).
 
-**Last Updated**: 2026-01-01
+**Last Updated**: 2026-01-06
 
 ---
 
@@ -83,6 +83,26 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 | Low | DkdChoreography, EpochRotationProtocol, SessionCoordinationChoreography | Can remain spec-only longer |
 
 ---
+
+
+## Wiring Plan + Ownership (Pre‑MPST)
+
+This section captures the **owner**, **runtime registration point**, and **blocking dependencies** for each choreography. This is the pre‑MPST wiring plan used to sequence integration work.
+
+| Protocol | Owner (crate) | Runtime registration point | Guard chain integration | Dependencies / Blocks |
+|----------|--------------|----------------------------|-------------------------|-----------------------|
+| RecoveryProtocol | `aura-recovery` | `aura-recovery/src/choreography_runtime.rs` + `aura-agent/src/runtime/choreography_adapter.rs` | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| GuardianCeremony | `aura-recovery` | `aura-recovery/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| GuardianSetup | `aura-recovery` | `aura-recovery/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| InvitationExchange | `aura-invitation` | `aura-invitation/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| GuardianInvitation | `aura-invitation` | `aura-invitation/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| RendezvousExchange | `aura-rendezvous` | `aura-rendezvous/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| RelayedRendezvous | `aura-rendezvous` | `aura-rendezvous/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| AmpTransport | `aura-amp` | `aura-amp/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| GuardianAuthRelational | `aura-authentication` | `aura-authentication/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| DkdChoreography | `aura-authentication` | `aura-authentication/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| EpochRotationProtocol | `aura-sync` | `aura-sync/src/choreography_runtime.rs` + adapter | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
+| SessionCoordinationChoreography | `aura-agent` | `aura-agent/src/handlers/sessions/coordination.rs` | `aura-agent/src/runtime/effects/choreography.rs` | MPST runtime integration (`work/029.md`) |
 
 ## Runtime Infrastructure
 

@@ -1106,8 +1106,8 @@ mod tests {
     impl JournalEffects for TestEffects {
         async fn merge_facts(
             &self,
-            target: &Journal,
-            delta: &Journal,
+            target: Journal,
+            delta: Journal,
         ) -> Result<Journal, AuraError> {
             let mut merged = Journal::new();
             merged.facts = target.facts.clone();
@@ -1118,8 +1118,8 @@ mod tests {
 
         async fn refine_caps(
             &self,
-            target: &Journal,
-            refinement: &Journal,
+            target: Journal,
+            refinement: Journal,
         ) -> Result<Journal, AuraError> {
             let mut refined = Journal::new();
             refined.facts = target.facts.clone();

@@ -48,20 +48,20 @@ impl TestEffects {
 impl JournalEffects for TestEffects {
     async fn merge_facts(
         &self,
-        target: &Journal,
-        delta: &Journal,
+        target: Journal,
+        delta: Journal,
     ) -> Result<Journal, aura_core::AuraError> {
-        let mut merged = target.clone();
+        let mut merged = target;
         merged.merge_facts(delta.facts.clone());
         Ok(merged)
     }
 
     async fn refine_caps(
         &self,
-        target: &Journal,
-        refinement: &Journal,
+        target: Journal,
+        refinement: Journal,
     ) -> Result<Journal, aura_core::AuraError> {
-        let mut refined = target.clone();
+        let mut refined = target;
         refined.refine_caps(refinement.caps.clone());
         Ok(refined)
     }

@@ -18,7 +18,7 @@
 use iocraft::prelude::*;
 
 use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL};
-use aura_app::ui::types::format_timestamp;
+use aura_app::ui::types::{format_timestamp, ChatState};
 
 use crate::tui::callbacks::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
@@ -154,9 +154,8 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Get AppCoreContext for reactive signal subscription (required for domain data)
     let app_ctx = hooks.use_context::<AppCoreContext>();
 
-    // Initialize reactive state with defaults - will be populated by signal subscriptions
-    let reactive_channels = hooks.use_state(Vec::new);
-    let reactive_messages = hooks.use_state(Vec::new);
+    // Initialize reactive chat state - populated by signal subscription
+    let reactive_chat_state = hooks.use_state(ChatState::default);
     let reactive_contacts: State<Vec<Contact>> = hooks.use_state(Vec::new);
 
     // Subscribe to contacts signal for nickname lookup
@@ -178,51 +177,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Subscribe to chat signal updates
     // Uses the unified ReactiveEffects system from aura-core
     hooks.use_future({
-        let mut reactive_channels = reactive_channels.clone();
-        let mut reactive_messages = reactive_messages.clone();
-        let reactive_contacts = reactive_contacts.clone();
+        let mut reactive_chat_state = reactive_chat_state.clone();
         let app_core = app_ctx.app_core.clone();
         let update_tx = props.update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                // Read current contacts for nickname lookup
-                let contacts = reactive_contacts.read().clone();
-
-                // Channel selection is managed by TUI state, not app state
-                // All channels start unselected; TUI navigation handles selection
-                let channels: Vec<Channel> = chat_state
-                    .all_channels()
-                    .map(|c| {
-                        Channel::new(c.id.to_string(), &c.name).with_unread(c.unread_count as usize)
-                    })
-                    .collect();
-
-                // Get messages for the first channel as default
-                // The shell's shared subscription handles proper selection-aware messages
-                let first_channel_id = chat_state.all_channels().next().map(|c| &c.id);
-                let app_messages = first_channel_id
-                    .map(|id| chat_state.messages_for_channel(id))
-                    .unwrap_or(&[]);
-
-                let messages: Vec<Message> = app_messages
-                    .iter()
-                    .map(|m| {
-                        let ts_str = format_timestamp(m.timestamp);
-                        // Use contact lookup for sender display name (convert AuthorityId to string)
-                        let sender_id_str = m.sender_id.to_string();
-                        let sender_display = format_contact_name(&sender_id_str, &contacts);
-                        Message::new(&m.id, &sender_display, &m.content)
-                            .with_timestamp(ts_str)
-                            .own(m.is_own)
-                            .with_status(m.delivery_status.into())
-                            .with_finalized(m.is_finalized)
-                    })
-                    .collect();
-
-                reactive_channels.set(channels);
-                reactive_messages.set(messages);
-
-                // Sync navigation state via UiUpdate channel
+                // Sync navigation state via UiUpdate channel before consuming chat_state
                 // This ensures channel_count is updated when channels change
                 // Selection is managed by TUI state, not app state
                 if let Some(ref tx) = update_tx {
@@ -237,14 +197,38 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         selected_index: None, // TUI manages selection
                     });
                 }
+
+                // Update chat state; selection-aware message rendering happens at render time.
+                reactive_chat_state.set(chat_state);
             })
             .await;
         }
     });
 
     // Use reactive state for rendering (populated by signal subscription)
-    let channels = reactive_channels.read().clone();
-    let messages = reactive_messages.read().clone();
+    let chat_state = reactive_chat_state.read().clone();
+    let contacts = reactive_contacts.read().clone();
+    let channels: Vec<Channel> = chat_state.all_channels().map(Channel::from).collect();
+    let selected_channel_id = channels
+        .get(props.view.selected_channel)
+        .and_then(|ch| ch.id.parse::<aura_core::identifiers::ChannelId>().ok());
+    let app_messages = selected_channel_id
+        .as_ref()
+        .map(|id| chat_state.messages_for_channel(id))
+        .unwrap_or(&[]);
+    let messages: Vec<Message> = app_messages
+        .iter()
+        .map(|m| {
+            let ts_str = format_timestamp(m.timestamp);
+            let sender_id_str = m.sender_id.to_string();
+            let sender_display = format_contact_name(&sender_id_str, &contacts);
+            Message::new(&m.id, &sender_display, &m.content)
+                .with_timestamp(ts_str)
+                .own(m.is_own)
+                .with_status(m.delivery_status.into())
+                .with_finalized(m.is_finalized)
+        })
+        .collect();
 
     let empty_message = if channels.is_empty() {
         "Select a channel to view messages.".to_string()

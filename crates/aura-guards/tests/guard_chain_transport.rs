@@ -181,19 +181,19 @@ impl StorageExtendedEffects for TestEffects {
 
 #[async_trait]
 impl JournalEffects for TestEffects {
-    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
-        let mut merged = target.clone();
-        merged.merge(delta);
+    async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError> {
+        let mut merged = target;
+        merged.merge(&delta);
         Ok(merged)
     }
 
     async fn refine_caps(
         &self,
-        target: &Journal,
-        refinement: &Journal,
+        target: Journal,
+        refinement: Journal,
     ) -> Result<Journal, AuraError> {
-        let mut merged = target.clone();
-        merged.merge(refinement);
+        let mut merged = target;
+        merged.merge(&refinement);
         Ok(merged)
     }
 
