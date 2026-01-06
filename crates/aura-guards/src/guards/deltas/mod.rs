@@ -163,7 +163,7 @@ async fn merge_json_fact<E: aura_core::effects::JournalEffects + TimeEffects>(
     let delta = journal_from_json_fact(fact)?;
 
     let merged = effect_system
-        .merge_facts(&current, &delta)
+        .merge_facts(current, delta)
         .await
         .map_err(|e| AuraError::internal(format!("Failed to merge journal: {e}")))?;
 

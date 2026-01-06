@@ -19,13 +19,15 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait JournalEffects: Send + Sync {
     /// Merge facts using join semilattice operation
-    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError>;
+    ///
+    /// Takes ownership of both journals to avoid cloning facts during merge.
+    async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError>;
 
     /// Refine capabilities using meet semilattice operation
     async fn refine_caps(
         &self,
-        target: &Journal,
-        refinement: &Journal,
+        target: Journal,
+        refinement: Journal,
     ) -> Result<Journal, AuraError>;
 
     /// Get current journal state
@@ -62,14 +64,14 @@ pub trait JournalEffects: Send + Sync {
 /// Blanket implementation for Arc<T> where T: JournalEffects
 #[async_trait]
 impl<T: JournalEffects + ?Sized> JournalEffects for std::sync::Arc<T> {
-    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
+    async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError> {
         (**self).merge_facts(target, delta).await
     }
 
     async fn refine_caps(
         &self,
-        target: &Journal,
-        refinement: &Journal,
+        target: Journal,
+        refinement: Journal,
     ) -> Result<Journal, AuraError> {
         (**self).refine_caps(target, refinement).await
     }

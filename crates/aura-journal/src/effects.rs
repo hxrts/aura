@@ -272,37 +272,35 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects> Journa
 impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects + Send + Sync>
     JournalEffects for JournalHandler<C, S, A>
 {
-    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
-        for content in self.extract_fact_contents(delta) {
+    async fn merge_facts(&self, mut target: Journal, delta: Journal) -> Result<Journal, AuraError> {
+        for content in self.extract_fact_contents(&delta) {
             self.authorize_fact(&content).await?;
             self.verify_fact_signature(&content).await?;
         }
 
-        let mut merged = target.clone();
-        merged.merge_facts(delta.read_facts().clone());
-        Ok(merged)
+        target.merge_facts(delta.facts);
+        Ok(target)
     }
 
     async fn refine_caps(
         &self,
-        target: &Journal,
-        refinement: &Journal,
+        mut target: Journal,
+        refinement: Journal,
     ) -> Result<Journal, AuraError> {
-        for content in self.extract_fact_contents(refinement) {
+        for content in self.extract_fact_contents(&refinement) {
             self.authorize_fact(&content).await?;
             self.verify_fact_signature(&content).await?;
         }
 
-        let mut refined = target.clone();
-        refined.refine_caps(refinement.read_caps().clone());
+        target.refine_caps(refinement.caps);
 
-        if refined.read_caps().is_empty() {
+        if target.read_caps().is_empty() {
             return Err(AuraError::permission_denied(
                 "capability refinement produced empty frontier",
             ));
         }
 
-        Ok(refined)
+        Ok(target)
     }
 
     async fn get_journal(&self) -> Result<Journal, AuraError> {

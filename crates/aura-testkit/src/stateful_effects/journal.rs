@@ -72,24 +72,22 @@ impl Default for MockJournalHandler {
 impl JournalEffects for MockJournalHandler {
     async fn merge_facts(
         &self,
-        target: &CoreJournal,
-        delta: &CoreJournal,
+        mut target: CoreJournal,
+        delta: CoreJournal,
     ) -> Result<CoreJournal, AuraError> {
-        // Mock implementation: create a new journal with combined facts
-        let mut result = target.clone();
-        result.merge_facts(delta.facts.clone());
-        Ok(result)
+        // Mock implementation: merge facts from delta into target
+        target.merge_facts(delta.facts);
+        Ok(target)
     }
 
     async fn refine_caps(
         &self,
-        target: &CoreJournal,
-        refinement: &CoreJournal,
+        mut target: CoreJournal,
+        refinement: CoreJournal,
     ) -> Result<CoreJournal, AuraError> {
         // Mock implementation: apply refinements to capabilities
-        let mut result = target.clone();
-        result.refine_caps(refinement.caps.clone());
-        Ok(result)
+        target.refine_caps(refinement.caps);
+        Ok(target)
     }
 
     async fn get_journal(&self) -> Result<CoreJournal, AuraError> {

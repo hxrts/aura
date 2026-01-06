@@ -203,7 +203,7 @@ where
                 // Merge the fact into the current journal
                 let updated = self
                     .journal
-                    .merge_facts(&current, &delta)
+                    .merge_facts(current, delta)
                     .await
                     .map_err(|e| {
                         error!("Failed to merge facts: {}", e);

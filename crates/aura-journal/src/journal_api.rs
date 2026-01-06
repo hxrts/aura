@@ -80,14 +80,16 @@ impl Journal {
         })
     }
 
-    /// Merge with another journal
-    pub fn merge(&mut self, other: &Journal) -> Result<(), AuraError> {
-        // Merge semilattice components
+    /// Merge with another journal, consuming it
+    ///
+    /// Takes ownership of `other` to avoid cloning facts during merge.
+    pub fn merge(&mut self, other: Journal) -> Result<(), AuraError> {
+        // Merge semilattice components (these clone internally as needed)
         self.account_state = self.account_state.join(&other.account_state);
         self.op_log = self.op_log.join(&other.op_log);
 
-        // Merge fact journals
-        self.fact_journal.join_assign(&other.fact_journal);
+        // Merge fact journals - takes ownership to avoid cloning
+        self.fact_journal.join_assign(other.fact_journal);
 
         Ok(())
     }

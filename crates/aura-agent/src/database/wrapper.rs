@@ -106,19 +106,19 @@ impl<J: JournalEffects> std::fmt::Debug for IndexedJournalWrapper<J> {
 impl<J: JournalEffects> JournalEffects for IndexedJournalWrapper<J> {
     async fn merge_facts(
         &self,
-        target: &aura_core::Journal,
-        delta: &aura_core::Journal,
+        target: aura_core::Journal,
+        delta: aura_core::Journal,
     ) -> Result<aura_core::Journal, AuraError> {
+        // Index the delta facts before consuming it
+        self.index_journal(&delta);
         let result = self.inner.merge_facts(target, delta).await?;
-        // Index the delta facts
-        self.index_journal(delta);
         Ok(result)
     }
 
     async fn refine_caps(
         &self,
-        target: &aura_core::Journal,
-        refinement: &aura_core::Journal,
+        target: aura_core::Journal,
+        refinement: aura_core::Journal,
     ) -> Result<aura_core::Journal, AuraError> {
         self.inner.refine_caps(target, refinement).await
     }

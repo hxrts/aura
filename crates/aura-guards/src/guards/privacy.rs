@@ -351,8 +351,9 @@ async fn append_leakage_facts<E: GuardEffects + PhysicalTimeEffects + GuardConte
         return Ok(());
     }
 
+    let current = effect_system.get_journal().await?;
     let merged = effect_system
-        .merge_facts(&effect_system.get_journal().await?, &delta)
+        .merge_facts(current, delta)
         .await?;
     effect_system.persist_journal(&merged).await?;
 
@@ -416,8 +417,9 @@ pub async fn reset_privacy_budget<E: GuardEffects + PhysicalTimeEffects + GuardC
         .facts
         .insert(reset_key, FactValue::Bytes(reset_bytes))?;
 
+    let current = effect_system.get_journal().await?;
     let merged = effect_system
-        .merge_facts(&effect_system.get_journal().await?, &delta)
+        .merge_facts(current, delta)
         .await?;
     effect_system.persist_journal(&merged).await?;
 

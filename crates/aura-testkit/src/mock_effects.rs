@@ -716,20 +716,18 @@ impl FlowBudgetEffects for MockEffects {
 // Simplified implementations for completeness
 #[async_trait]
 impl JournalEffects for MockEffects {
-    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
-        let mut merged = target.clone();
-        merged.merge_facts(delta.read_facts().clone());
-        Ok(merged)
+    async fn merge_facts(&self, mut target: Journal, delta: Journal) -> Result<Journal, AuraError> {
+        target.merge_facts(delta.facts);
+        Ok(target)
     }
 
     async fn refine_caps(
         &self,
-        target: &Journal,
-        refinement: &Journal,
+        mut target: Journal,
+        refinement: Journal,
     ) -> Result<Journal, AuraError> {
-        let mut refined = target.clone();
-        refined.refine_caps(refinement.read_caps().clone());
-        Ok(refined)
+        target.refine_caps(refinement.caps);
+        Ok(target)
     }
 
     async fn get_journal(&self) -> Result<Journal, AuraError> {

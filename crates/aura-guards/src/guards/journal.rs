@@ -490,7 +490,7 @@ impl JournalCoupler {
         match &annotation.op_type {
             JournalOpType::AddFacts => {
                 if let Some(delta) = &annotation.delta {
-                    let updated_journal = effect_system.merge_facts(current_journal, delta).await?;
+                    let updated_journal = effect_system.merge_facts(current_journal.clone(), delta.clone()).await?;
                     let journal_op = JournalOperation::MergeFacts {
                         facts: delta.clone(),
                         description: annotation
@@ -513,7 +513,7 @@ impl JournalCoupler {
             JournalOpType::RefineCaps => {
                 if let Some(refinement) = &annotation.delta {
                     let updated_journal = effect_system
-                        .refine_caps(current_journal, refinement)
+                        .refine_caps(current_journal.clone(), refinement.clone())
                         .await?;
                     let journal_op = JournalOperation::RefineCapabilities {
                         refinement: refinement.clone(),
@@ -536,8 +536,8 @@ impl JournalCoupler {
             JournalOpType::Merge => {
                 if let Some(delta) = &annotation.delta {
                     // Apply both facts and capabilities
-                    let with_facts = effect_system.merge_facts(current_journal, delta).await?;
-                    let final_journal = effect_system.refine_caps(&with_facts, delta).await?;
+                    let with_facts = effect_system.merge_facts(current_journal.clone(), delta.clone()).await?;
+                    let final_journal = effect_system.refine_caps(with_facts, delta.clone()).await?;
                     let journal_op = JournalOperation::GeneralMerge {
                         delta: delta.clone(),
                         description: annotation
@@ -562,8 +562,8 @@ impl JournalCoupler {
                 // Otherwise, we log a warning since this may indicate a misconfiguration.
                 if let Some(delta) = &annotation.delta {
                     // Apply the delta if provided with the custom operation
-                    let with_facts = effect_system.merge_facts(current_journal, delta).await?;
-                    let final_journal = effect_system.refine_caps(&with_facts, delta).await?;
+                    let with_facts = effect_system.merge_facts(current_journal.clone(), delta.clone()).await?;
+                    let final_journal = effect_system.refine_caps(with_facts, delta.clone()).await?;
 
                     debug!(
                         custom_op = custom_op,

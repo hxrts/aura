@@ -7,14 +7,14 @@ use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, FlowCost, Journal
 // Implementation of JournalEffects
 #[async_trait]
 impl JournalEffects for AuraEffectSystem {
-    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
+    async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError> {
         self.journal_handler().merge_facts(target, delta).await
     }
 
     async fn refine_caps(
         &self,
-        target: &Journal,
-        refinement: &Journal,
+        target: Journal,
+        refinement: Journal,
     ) -> Result<Journal, AuraError> {
         self.journal_handler().refine_caps(target, refinement).await
     }

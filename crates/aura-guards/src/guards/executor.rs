@@ -421,7 +421,7 @@ where
                 let delta = Journal::with_facts(entry.fact.clone());
                 let merged = self
                     .effects
-                    .merge_facts(&current, &delta)
+                    .merge_facts(current, delta)
                     .await
                     .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {e}")))?;
                 self.effects
@@ -501,7 +501,7 @@ where
                 let delta = Journal::with_facts(entry.fact.clone());
                 let merged = self
                     .effects
-                    .merge_facts(&current, &delta)
+                    .merge_facts(current, delta)
                     .await
                     .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {e}")))?;
                 self.effects

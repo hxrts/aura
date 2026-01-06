@@ -63,9 +63,9 @@ pub fn journal_join(j1: &Journal, j2: &Journal) -> Journal {
 
 /// In-place journal merge.
 ///
-/// More efficient version that modifies `j1` in place.
+/// More efficient version that modifies `j1` in place by consuming `j2`.
 #[inline]
-pub fn journal_join_assign(j1: &mut Journal, j2: &Journal) {
+pub fn journal_join_assign(j1: &mut Journal, j2: Journal) {
     j1.join_assign(j2);
 }
 

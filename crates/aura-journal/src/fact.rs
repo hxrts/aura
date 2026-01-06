@@ -105,13 +105,15 @@ impl JoinSemilattice for Journal {
 }
 
 impl Journal {
-    /// In-place join operation for efficiency
-    pub fn join_assign(&mut self, other: &Self) {
+    /// In-place join operation that consumes the other journal
+    ///
+    /// Takes ownership of `other` to avoid cloning facts during merge.
+    pub fn join_assign(&mut self, other: Self) {
         assert_eq!(
             self.namespace, other.namespace,
             "Cannot merge journals from different namespaces"
         );
-        self.facts.extend(other.facts.clone());
+        self.facts.extend(other.facts);
     }
 
     /// Add a fact with options

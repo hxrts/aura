@@ -92,39 +92,41 @@ impl JournalAnnotation {
     }
 
     /// Apply this annotation to a journal using effects
+    ///
+    /// Takes ownership of `target` to avoid cloning during merge operations.
     pub async fn apply(
         &self,
         effects: &impl JournalEffects,
-        target: &Journal,
+        target: Journal,
     ) -> AuraResult<Journal> {
         match &self.op_type {
             JournalOpType::AddFacts => {
                 if let Some(delta) = &self.delta {
-                    effects.merge_facts(target, delta).await
+                    effects.merge_facts(target, delta.clone()).await
                 } else {
                     // Without specific delta, return unchanged journal
-                    Ok(target.clone())
+                    Ok(target)
                 }
             }
             JournalOpType::RefineCaps => {
                 if let Some(refinement) = &self.delta {
-                    effects.refine_caps(target, refinement).await
+                    effects.refine_caps(target, refinement.clone()).await
                 } else {
-                    Ok(target.clone())
+                    Ok(target)
                 }
             }
             JournalOpType::Merge => {
                 if let Some(delta) = &self.delta {
                     // General merge - apply both facts and caps
-                    let with_facts = effects.merge_facts(target, delta).await?;
-                    effects.refine_caps(&with_facts, delta).await
+                    let with_facts = effects.merge_facts(target, delta.clone()).await?;
+                    effects.refine_caps(with_facts, delta.clone()).await
                 } else {
-                    Ok(target.clone())
+                    Ok(target)
                 }
             }
             JournalOpType::Custom(_) => {
                 // Custom operations are application-specific
-                Ok(target.clone())
+                Ok(target)
             }
         }
     }
@@ -170,14 +172,16 @@ impl DeltaAnnotation {
     }
 
     /// Apply this delta to a journal
+    ///
+    /// Takes ownership of `target` to avoid cloning during merge operations.
     pub async fn apply(
         &self,
         effects: &impl JournalEffects,
-        target: &Journal,
+        target: Journal,
     ) -> AuraResult<Journal> {
         // Apply as a general merge operation
-        let with_facts = effects.merge_facts(target, &self.delta).await?;
-        effects.refine_caps(&with_facts, &self.delta).await
+        let with_facts = effects.merge_facts(target, self.delta.clone()).await?;
+        effects.refine_caps(with_facts, self.delta.clone()).await
     }
 }
 
@@ -188,16 +192,18 @@ pub trait JournalCoupling {
     fn journal_annotations(&self) -> &HashMap<String, JournalAnnotation>;
 
     /// Apply all journal annotations
+    ///
+    /// Takes ownership of `journal` to avoid cloning during merge operations.
     async fn apply_all_annotations(
         &self,
         effects: &impl JournalEffects,
-        journal: &Journal,
+        journal: Journal,
     ) -> AuraResult<Journal> {
-        let mut current = journal.clone();
+        let mut current = journal;
 
         for (name, annotation) in self.journal_annotations() {
             tracing::debug!("Applying journal annotation: {}", name);
-            current = annotation.apply(effects, &current).await.map_err(|e| {
+            current = annotation.apply(effects, current).await.map_err(|e| {
                 AuraError::internal(format!("Journal annotation '{name}' failed: {e}"))
             })?;
         }

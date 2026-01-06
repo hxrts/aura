@@ -51,7 +51,7 @@ pub async fn persist_fact_value<E: JournalEffects>(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to load journal: {e}")))?;
     let merged = effects
-        .merge_facts(&current, &delta)
+        .merge_facts(current, delta)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to merge journal facts: {e}")))?;
     effects

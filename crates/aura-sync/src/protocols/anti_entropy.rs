@@ -817,7 +817,7 @@ impl AntiEntropyProtocol {
                         });
 
                         // Apply journal delta using CRDT merge operation
-                        match effects.merge_facts(&current_journal, &journal_delta).await {
+                        match effects.merge_facts(current_journal, journal_delta).await {
                             Ok(updated_journal) => {
                                 // Persist the updated journal state
                                 if let Err(e) = effects.persist_journal(&updated_journal).await {

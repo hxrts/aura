@@ -503,16 +503,16 @@ impl ConsoleEffects for CompositeTestHandler {
 impl JournalEffects for CompositeTestHandler {
     async fn merge_facts(
         &self,
-        target: &aura_core::Journal,
-        delta: &aura_core::Journal,
+        target: aura_core::Journal,
+        delta: aura_core::Journal,
     ) -> Result<aura_core::Journal, aura_core::AuraError> {
         self.journal.merge_facts(target, delta).await
     }
 
     async fn refine_caps(
         &self,
-        target: &aura_core::Journal,
-        refinement: &aura_core::Journal,
+        target: aura_core::Journal,
+        refinement: aura_core::Journal,
     ) -> Result<aura_core::Journal, aura_core::AuraError> {
         self.journal.refine_caps(target, refinement).await
     }
