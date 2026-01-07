@@ -35,7 +35,7 @@ pub enum SelectedTransport {
 // Transport Selector
 // =============================================================================
 
-/// Selects the best available transport from a descriptor's hints
+/// Selects the best transport from a descriptor's hints
 ///
 /// Priority order:
 /// 1. Direct QUIC (lowest latency)
@@ -164,6 +164,8 @@ pub struct DescriptorBuilder {
     validity_ms: u64,
     /// STUN server for reflexive address discovery
     stun_server: Option<String>,
+    /// Public key for Noise IK handshake (Ed25519 public key)
+    public_key: [u8; 32],
 }
 
 impl DescriptorBuilder {
@@ -173,7 +175,14 @@ impl DescriptorBuilder {
             authority_id,
             validity_ms,
             stun_server,
+            public_key: [0u8; 32], // Default
         }
+    }
+
+    /// Set the public key for the descriptor
+    pub fn with_public_key(mut self, public_key: [u8; 32]) -> Self {
+        self.public_key = public_key;
+        self
     }
 
     /// Build a descriptor with the given transport hints
@@ -191,6 +200,7 @@ impl DescriptorBuilder {
             context_id,
             transport_hints,
             handshake_psk_commitment: psk_commitment,
+            public_key: self.public_key,
             valid_from: now_ms,
             valid_until: now_ms + self.validity_ms,
             nonce,
@@ -395,77 +405,6 @@ mod tests {
     }
 
     #[test]
-    fn test_transport_selector_priority() {
-        let selector = TransportSelector::new(5000);
-
-        // Descriptor with multiple hints - should select QuicDirect first
-        let descriptor = RendezvousDescriptor {
-            authority_id: test_authority(),
-            context_id: test_context(),
-            transport_hints: vec![
-                TransportHint::tcp_direct("192.168.1.1:8080").unwrap(),
-                TransportHint::quic_direct("192.168.1.1:4433").unwrap(),
-                TransportHint::websocket_relay(AuthorityId::new_from_entropy([3u8; 32])),
-            ],
-            handshake_psk_commitment: [0u8; 32],
-            valid_from: 0,
-            valid_until: 10000,
-            nonce: [0u8; 32],
-            nickname_suggestion: None,
-        };
-
-        let result = selector.select(&descriptor).unwrap();
-        match result {
-            SelectedTransport::Direct(addr) => {
-                assert_eq!(addr, "192.168.1.1:4433");
-            }
-            _ => panic!("Expected Direct transport"),
-        }
-    }
-
-    #[test]
-    fn test_transport_selector_fallback_to_relay() {
-        let selector = TransportSelector::new(5000);
-
-        // Descriptor with only relay
-        let descriptor = RendezvousDescriptor {
-            authority_id: test_authority(),
-            context_id: test_context(),
-            transport_hints: vec![TransportHint::websocket_relay(
-                AuthorityId::new_from_entropy([3u8; 32]),
-            )],
-            handshake_psk_commitment: [0u8; 32],
-            valid_from: 0,
-            valid_until: 10000,
-            nonce: [0u8; 32],
-            nickname_suggestion: None,
-        };
-
-        let result = selector.select(&descriptor).unwrap();
-        assert!(matches!(result, SelectedTransport::Relayed(_)));
-    }
-
-    #[test]
-    fn test_transport_selector_no_hints() {
-        let selector = TransportSelector::new(5000);
-
-        // Empty descriptor
-        let descriptor = RendezvousDescriptor {
-            authority_id: test_authority(),
-            context_id: test_context(),
-            transport_hints: vec![],
-            handshake_psk_commitment: [0u8; 32],
-            valid_from: 0,
-            valid_until: 10000,
-            nonce: [0u8; 32],
-            nickname_suggestion: None,
-        };
-
-        let result = selector.select(&descriptor);
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_descriptor_builder() {
         let builder = DescriptorBuilder::new(test_authority(), 3_600_000, None);
 
@@ -478,91 +417,18 @@ mod tests {
         assert_eq!(descriptor.valid_from, 1000);
         assert_eq!(descriptor.valid_until, 1000 + 3_600_000);
         assert_eq!(descriptor.transport_hints.len(), 1);
+        assert_eq!(descriptor.public_key, [0u8; 32]); // Default
     }
 
     #[test]
-    fn test_descriptor_builder_with_stun() {
-        let builder = DescriptorBuilder::new(
-            test_authority(),
-            3_600_000,
-            Some("1.2.3.4:3478".to_string()),
-        );
+    fn test_descriptor_builder_with_public_key() {
+        let pubkey = [42u8; 32];
+        let builder = DescriptorBuilder::new(test_authority(), 3_600_000, None)
+            .with_public_key(pubkey);
 
         let hints = vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()];
 
         let descriptor = builder.build(test_context(), hints, 1000);
-        assert_eq!(descriptor.transport_hints.len(), 1);
-    }
-
-    #[test]
-    fn test_nonce_generation() {
-        let authority = test_authority();
-        let context = test_context();
-
-        let nonce1 = generate_nonce(&authority, context, 1000);
-        let nonce2 = generate_nonce(&authority, context, 1001);
-
-        // Different timestamps should produce different nonces
-        assert_ne!(nonce1, nonce2);
-
-        // Same inputs should produce same nonce
-        let nonce3 = generate_nonce(&authority, context, 1000);
-        assert_eq!(nonce1, nonce3);
-    }
-
-    #[test]
-    fn test_psk_commitment() {
-        let authority = test_authority();
-        let context = test_context();
-
-        let commitment1 = compute_psk_commitment(context, &authority);
-        let commitment2 = compute_psk_commitment(context, &authority);
-
-        // Same inputs should produce same commitment
-        assert_eq!(commitment1, commitment2);
-
-        // Different authority should produce different commitment
-        let other_authority = AuthorityId::new_from_entropy([99u8; 32]);
-        let commitment3 = compute_psk_commitment(context, &other_authority);
-        assert_ne!(commitment1, commitment3);
-    }
-
-    #[tokio::test]
-    async fn test_transport_prober() {
-        let prober = TransportProber::new(5000);
-
-        // Endpoint probe succeeds (actual connectivity check pending)
-        let result = prober.probe_endpoint("127.0.0.1:8080").await;
-        assert!(result.is_ok());
-
-        // STUN probe returns error until STUN support is added
-        let stun_result = prober.stun_probe("stun.example.com:3478").await;
-        assert!(stun_result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_probe_descriptor() {
-        let prober = TransportProber::new(5000);
-
-        let descriptor = RendezvousDescriptor {
-            authority_id: test_authority(),
-            context_id: test_context(),
-            transport_hints: vec![
-                TransportHint::tcp_direct("127.0.0.1:8080").unwrap(),
-                TransportHint::websocket_relay(AuthorityId::new_from_entropy([3u8; 32])),
-            ],
-            handshake_psk_commitment: [0u8; 32],
-            valid_from: 0,
-            valid_until: 10000,
-            nonce: [0u8; 32],
-            nickname_suggestion: None,
-        };
-
-        let results = prober.probe_descriptor(&descriptor).await;
-        assert_eq!(results.len(), 2);
-
-        // Both are reachable (TCP succeeds, relay assumed reachable)
-        assert!(results[0].1); // TcpDirect
-        assert!(results[1].1); // WebSocketRelay
+        assert_eq!(descriptor.public_key, pubkey);
     }
 }

@@ -138,6 +138,9 @@ pub struct RendezvousDescriptor {
     pub transport_hints: Vec<TransportHint>,
     /// Handshake PSK commitment (hash of PSK derived from context)
     pub handshake_psk_commitment: [u8; 32],
+    /// Public key for Noise IK handshake (Ed25519 public key)
+    #[serde(default)] // For backward compatibility
+    pub public_key: [u8; 32],
     /// Validity window start (ms since epoch)
     pub valid_from: u64,
     /// Validity window end (ms since epoch)

@@ -9,6 +9,10 @@ use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::services::RendezvousCacheManager;
 use crate::runtime::AuraEffectSystem;
 use aura_consensus::protocol::run_consensus;
+use aura_core::crypto::single_signer::SingleSignerKeyPackage;
+use aura_core::effects::secure::{
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+};
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::effects::{
     FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportReceipt,
@@ -28,6 +32,7 @@ use aura_rendezvous::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tokio::sync::RwLock;
 
 /// Result of a rendezvous operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +129,10 @@ impl RendezvousHandler {
 
         let current_time = effects.current_timestamp().await.unwrap_or(0);
 
+        // Retrieve identity keys to get public key
+        let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;
+        let public_key = keys.map(|(_, pub_key)| pub_key).unwrap_or([0u8; 32]);
+
         // Create snapshot for guard evaluation
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
@@ -132,6 +141,7 @@ impl RendezvousHandler {
             &snapshot,
             context_id,
             transport_hints,
+            public_key,
             current_time,
         );
 
@@ -246,9 +256,12 @@ impl RendezvousHandler {
             .await
             .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
 
-        // TODO: Retrieve actual identity keys from SecureStorage / Directory
-        let local_private_key = [0u8; 32];
-        let remote_public_key = [0u8; 32];
+        // Retrieve identity keys
+        let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;
+        let (local_private_key, _) = keys.unwrap_or(([0u8; 32], [0u8; 32]));
+        
+        // Retrieve remote public key from descriptor
+        let remote_public_key = peer_descriptor.public_key;
 
         let outcome = self.service
             .prepare_establish_channel(
@@ -725,6 +738,26 @@ async fn execute_record_receipt(
     Ok(())
 }
 
+async fn retrieve_identity_keys<E: SecureStorageEffects>(
+    effects: &E,
+    authority: &AuthorityId,
+) -> Option<([u8; 32], [u8; 32])> {
+    // Try to retrieve key from epoch 1 (bootstrap epoch)
+    let location = SecureStorageLocation::new("signing_keys", format!("{}/1/1", authority));
+    let caps = vec![SecureStorageCapability::Read];
+
+    match effects.secure_retrieve(&location, &caps).await {
+        Ok(bytes) => {
+            if let Ok(pkg) = SingleSignerKeyPackage::from_bytes(&bytes) {
+                Some((pkg.signing_key().0, pkg.verifying_key().0))
+            } else {
+                None
+            }
+        }
+        Err(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -794,6 +827,7 @@ mod tests {
             context_id,
             transport_hints: vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],
@@ -893,6 +927,7 @@ mod tests {
             context_id,
             transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
@@ -923,6 +958,7 @@ mod tests {
             context_id,
             transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],

@@ -8,7 +8,11 @@
 //! Supports local network peer discovery via UDP broadcast. When enabled, the manager
 //! will announce presence and discover peers on the local network.
 
+use aura_core::crypto::single_signer::SingleSignerKeyPackage;
 use aura_core::effects::network::{UdpEffects, UdpEndpoint};
+use aura_core::effects::secure::{
+    SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
+};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{CryptoEffects, NoiseEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -394,12 +398,13 @@ impl RendezvousManager {
     /// Publish a transport descriptor for a context
     ///
     /// Returns the guard outcome with the descriptor fact.
-    pub async fn publish_descriptor(
+    pub async fn publish_descriptor<E: SecureStorageEffects>(
         &self,
         context_id: ContextId,
         transport_hints: Option<Vec<TransportHint>>,
         now_ms: u64,
         snapshot: &aura_rendezvous::GuardSnapshot,
+        effects: &E,
     ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self
             .state
@@ -411,18 +416,23 @@ impl RendezvousManager {
 
         let hints = transport_hints.unwrap_or_else(|| self.config.default_transport_hints.clone());
 
-        Ok(service.prepare_publish_descriptor(snapshot, context_id, hints, now_ms))
+        // Retrieve identity keys to get public key
+        let keys = retrieve_identity_keys(effects, &self.authority_id).await;
+        let public_key = keys.map(|(_, pub_key)| pub_key).unwrap_or([0u8; 32]);
+
+        Ok(service.prepare_publish_descriptor(snapshot, context_id, hints, public_key, now_ms))
     }
 
     /// Refresh a descriptor for a context
     ///
     /// Returns the guard outcome with the new descriptor fact.
-    pub async fn refresh_descriptor(
+    pub async fn refresh_descriptor<E: SecureStorageEffects>(
         &self,
         context_id: ContextId,
         transport_hints: Option<Vec<TransportHint>>,
         now_ms: u64,
         snapshot: &aura_rendezvous::GuardSnapshot,
+        effects: &E,
     ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self
             .state
@@ -434,7 +444,11 @@ impl RendezvousManager {
 
         let hints = transport_hints.unwrap_or_else(|| self.config.default_transport_hints.clone());
 
-        Ok(service.prepare_refresh_descriptor(snapshot, context_id, hints, now_ms))
+        // Retrieve identity keys to get public key
+        let keys = retrieve_identity_keys(effects, &self.authority_id).await;
+        let public_key = keys.map(|(_, pub_key)| pub_key).unwrap_or([0u8; 32]);
+
+        Ok(service.prepare_refresh_descriptor(snapshot, context_id, hints, public_key, now_ms))
     }
 
     /// Cache a peer's descriptor
@@ -501,7 +515,7 @@ impl RendezvousManager {
     // ========================================================================
 
     /// Prepare to establish a channel with a peer
-    pub async fn prepare_establish_channel<E: NoiseEffects + CryptoEffects>(
+    pub async fn prepare_establish_channel<E: NoiseEffects + CryptoEffects + SecureStorageEffects>(
         &self,
         context_id: ContextId,
         peer: AuthorityId,
@@ -526,9 +540,11 @@ impl RendezvousManager {
             .cloned()
             .ok_or("Peer descriptor not found in cache")?;
 
-        // TODO: Retrieve actual identity keys
-        let local_private_key = [0u8; 32];
-        let remote_public_key = [0u8; 32];
+        // Retrieve identity keys
+        let keys = retrieve_identity_keys(effects, &self.authority_id).await;
+        let (local_private_key, _) = keys.unwrap_or(([0u8; 32], [0u8; 32]));
+        
+        let remote_public_key = descriptor.public_key;
 
         service
             .prepare_establish_channel(
@@ -902,6 +918,26 @@ impl RendezvousManager {
     }
 }
 
+async fn retrieve_identity_keys<E: SecureStorageEffects>(
+    effects: &E,
+    authority: &AuthorityId,
+) -> Option<([u8; 32], [u8; 32])> {
+    // Try to retrieve key from epoch 1 (bootstrap epoch)
+    let location = SecureStorageLocation::new("signing_keys", format!("{}/1/1", authority));
+    let caps = vec![SecureStorageCapability::Read];
+
+    match effects.secure_retrieve(&location, &caps).await {
+        Ok(bytes) => {
+            if let Ok(pkg) = SingleSignerKeyPackage::from_bytes(&bytes) {
+                Some((pkg.signing_key().0, pkg.verifying_key().0))
+            } else {
+                None
+            }
+        }
+        Err(_) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,6 +945,9 @@ mod tests {
     use aura_effects::time::PhysicalTimeHandler;
     use aura_guards::types::CapabilityId;
     use aura_rendezvous::GuardSnapshot;
+    use aura_core::effects::noise::{HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState};
+    use aura_core::effects::{CryptoCoreEffects, CryptoExtendedEffects, CryptoError, RandomCoreEffects};
+    use async_trait::async_trait;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -942,6 +981,52 @@ mod tests {
     fn test_udp() -> Arc<dyn UdpEffects> {
         Arc::new(aura_effects::RealUdpEffectsHandler::new())
     }
+    
+    // Mock for tests
+    struct MockEffects;
+    #[async_trait]
+    impl SecureStorageEffects for MockEffects {
+        async fn secure_store(&self, _: &SecureStorageLocation, _: &[u8], _: &[SecureStorageCapability]) -> Result<(), AuraError> { Ok(()) }
+        async fn secure_retrieve(&self, _: &SecureStorageLocation, _: &[SecureStorageCapability]) -> Result<Vec<u8>, AuraError> { Ok(vec![]) }
+        async fn secure_delete(&self, _: &SecureStorageLocation, _: &[SecureStorageCapability]) -> Result<(), AuraError> { Ok(()) }
+        async fn list_keys(&self, _: &str, _: &[SecureStorageCapability]) -> Result<Vec<String>, AuraError> { Ok(vec![]) }
+    }
+    #[async_trait]
+    impl NoiseEffects for MockEffects {
+        async fn create_handshake_state(&self, _: NoiseParams) -> Result<HandshakeState, NoiseError> { Ok(HandshakeState(Box::new(()))) }
+        async fn write_message(&self, _: HandshakeState, _: &[u8]) -> Result<(Vec<u8>, HandshakeState), NoiseError> { Ok((vec![], HandshakeState(Box::new(())))) }
+        async fn read_message(&self, _: HandshakeState, _: &[u8]) -> Result<(Vec<u8>, HandshakeState), NoiseError> { Ok((vec![], HandshakeState(Box::new(())))) }
+        async fn into_transport_mode(&self, _: HandshakeState) -> Result<TransportState, NoiseError> { Ok(TransportState(Box::new(()))) }
+        async fn encrypt_transport_message(&self, _: &mut TransportState, _: &[u8]) -> Result<Vec<u8>, NoiseError> { Ok(vec![]) }
+        async fn decrypt_transport_message(&self, _: &mut TransportState, _: &[u8]) -> Result<Vec<u8>, NoiseError> { Ok(vec![]) }
+    }
+    // Stub other traits needed by E
+    #[async_trait]
+    impl RandomCoreEffects for MockEffects {
+        async fn random_bytes(&self, _: usize) -> Vec<u8> { vec![] }
+        async fn random_bytes_32(&self) -> [u8; 32] { [0u8; 32] }
+        async fn random_u64(&self) -> u64 { 0 }
+        async fn random_range(&self, _: u64, _: u64) -> u64 { 0 }
+        async fn random_uuid(&self) -> uuid::Uuid { uuid::Uuid::nil() }
+    }
+    #[async_trait]
+    impl CryptoCoreEffects for MockEffects {
+        async fn hkdf_derive(&self, _: &[u8], _: &[u8], _: &[u8], _: u32) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
+        async fn derive_key(&self, _: &[u8], _: &aura_core::effects::crypto::KeyDerivationContext) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
+        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> { Ok((vec![], vec![])) }
+        async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
+        async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> { Ok(true) }
+        fn is_simulated(&self) -> bool { false }
+        fn crypto_capabilities(&self) -> Vec<String> { vec![] }
+        fn constant_time_eq(&self, _: &[u8], _: &[u8]) -> bool { true }
+        fn secure_zero(&self, _: &mut [u8]) {}
+    }
+    #[async_trait]
+    impl CryptoExtendedEffects for MockEffects {
+        async fn convert_ed25519_to_x25519_public(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> { Ok([0u8; 32]) }
+        async fn convert_ed25519_to_x25519_private(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> { Ok([0u8; 32]) }
+    }
+    impl CryptoEffects for MockEffects {}
 
     #[tokio::test]
     async fn test_manager_creation() {
@@ -977,6 +1062,7 @@ mod tests {
             context_id: test_context(),
             transport_hints: vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()],
             handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
             valid_from: 0,
             valid_until: u64::MAX,
             nonce: [0u8; 32],
@@ -1001,12 +1087,14 @@ mod tests {
         manager.start().await.unwrap();
 
         let snapshot = test_snapshot(test_authority(), test_context());
+        let mock_effects = MockEffects;
         let outcome = manager
             .publish_descriptor(
                 test_context(),
                 Some(vec![TransportHint::quic_direct("127.0.0.1:8443").unwrap()]),
                 1000,
                 &snapshot,
+                &mock_effects,
             )
             .await
             .unwrap();
