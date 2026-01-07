@@ -157,6 +157,7 @@ impl TransportSelector {
 // =============================================================================
 
 /// Builds transport descriptors for publication
+#[derive(Debug, Clone)]
 pub struct DescriptorBuilder {
     /// Local authority ID
     authority_id: AuthorityId,
@@ -164,8 +165,6 @@ pub struct DescriptorBuilder {
     validity_ms: u64,
     /// STUN server for reflexive address discovery
     stun_server: Option<String>,
-    /// Public key for Noise IK handshake (Ed25519 public key)
-    public_key: [u8; 32],
 }
 
 impl DescriptorBuilder {
@@ -175,21 +174,15 @@ impl DescriptorBuilder {
             authority_id,
             validity_ms,
             stun_server,
-            public_key: [0u8; 32], // Default
         }
     }
 
-    /// Set the public key for the descriptor
-    pub fn with_public_key(mut self, public_key: [u8; 32]) -> Self {
-        self.public_key = public_key;
-        self
-    }
-
-    /// Build a descriptor with the given transport hints
+    /// Build a descriptor with the given transport hints and identity public key
     pub fn build(
         &self,
         context_id: ContextId,
         transport_hints: Vec<TransportHint>,
+        public_key: [u8; 32],
         now_ms: u64,
     ) -> RendezvousDescriptor {
         let nonce = generate_nonce(&self.authority_id, context_id, now_ms);
@@ -200,7 +193,7 @@ impl DescriptorBuilder {
             context_id,
             transport_hints,
             handshake_psk_commitment: psk_commitment,
-            public_key: self.public_key,
+            public_key,
             valid_from: now_ms,
             valid_until: now_ms + self.validity_ms,
             nonce,
@@ -212,6 +205,7 @@ impl DescriptorBuilder {
     ///
     /// # Arguments
     /// * `context_id` - The context for this descriptor
+    /// * `public_key` - Identity public key
     /// * `local_addresses` - Local addresses to advertise (must be valid socket addresses)
     /// * `now_ms` - Current timestamp in milliseconds
     /// * `prober` - Transport prober for STUN discovery
@@ -221,6 +215,7 @@ impl DescriptorBuilder {
     pub async fn build_with_discovery(
         &self,
         context_id: ContextId,
+        public_key: [u8; 32],
         local_addresses: Vec<String>,
         now_ms: u64,
         prober: &TransportProber,
@@ -253,7 +248,7 @@ impl DescriptorBuilder {
             }
         }
 
-        Ok(self.build(context_id, hints, now_ms))
+        Ok(self.build(context_id, hints, public_key, now_ms))
     }
 }
 
@@ -410,25 +405,24 @@ mod tests {
 
         let hints = vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()];
 
-        let descriptor = builder.build(test_context(), hints, 1000);
+        let descriptor = builder.build(test_context(), hints, [0u8; 32], 1000);
 
         assert_eq!(descriptor.authority_id, test_authority());
         assert_eq!(descriptor.context_id, test_context());
         assert_eq!(descriptor.valid_from, 1000);
         assert_eq!(descriptor.valid_until, 1000 + 3_600_000);
         assert_eq!(descriptor.transport_hints.len(), 1);
-        assert_eq!(descriptor.public_key, [0u8; 32]); // Default
+        assert_eq!(descriptor.public_key, [0u8; 32]);
     }
 
     #[test]
     fn test_descriptor_builder_with_public_key() {
         let pubkey = [42u8; 32];
-        let builder = DescriptorBuilder::new(test_authority(), 3_600_000, None)
-            .with_public_key(pubkey);
+        let builder = DescriptorBuilder::new(test_authority(), 3_600_000, None);
 
         let hints = vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()];
 
-        let descriptor = builder.build(test_context(), hints, 1000);
+        let descriptor = builder.build(test_context(), hints, pubkey, 1000);
         assert_eq!(descriptor.public_key, pubkey);
     }
 }

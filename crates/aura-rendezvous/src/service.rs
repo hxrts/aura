@@ -282,6 +282,7 @@ impl RendezvousService {
         snapshot: &GuardSnapshot,
         context_id: ContextId,
         transport_hints: Vec<TransportHint>,
+        public_key: [u8; 32],
         now_ms: u64,
     ) -> GuardOutcome {
         // Check capability
@@ -300,7 +301,7 @@ impl RendezvousService {
         // Build descriptor
         let descriptor = self
             .descriptor_builder
-            .build(context_id, transport_hints, now_ms);
+            .build(context_id, transport_hints, public_key, now_ms);
 
         // Create fact
         let fact = RendezvousFact::Descriptor(descriptor);
@@ -340,9 +341,10 @@ impl RendezvousService {
         snapshot: &GuardSnapshot,
         context_id: ContextId,
         transport_hints: Vec<TransportHint>,
+        public_key: [u8; 32],
         now_ms: u64,
     ) -> GuardOutcome {
-        self.prepare_publish_descriptor(snapshot, context_id, transport_hints, now_ms)
+        self.prepare_publish_descriptor(snapshot, context_id, transport_hints, public_key, now_ms)
     }
 
     // =========================================================================
@@ -756,6 +758,7 @@ mod tests {
             &snapshot,
             test_context(),
             vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
+            [0u8; 32],
             1000,
         );
 
@@ -776,6 +779,7 @@ mod tests {
             context_id: test_context(),
             transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
             handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
             valid_from: 0,
             valid_until: 10000,
             nonce: [0u8; 32],

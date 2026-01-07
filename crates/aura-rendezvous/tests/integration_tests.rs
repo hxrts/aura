@@ -17,11 +17,12 @@ use async_trait::async_trait;
 use aura_core::effects::noise::{
     HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState,
 };
+use aura_core::effects::{CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 use aura_rendezvous::{
     facts::{RendezvousDescriptor, RendezvousFact, TransportHint},
-    new_channel::{ChannelManager, HandshakeConfig, Handshaker, SecureChannel},
+    new_channel::{ChannelManager, HandshakeConfig, HandshakeStatus, Handshaker, SecureChannel},
     protocol::guards,
     service::{EffectCommand, GuardDecision, GuardSnapshot, RendezvousConfig, RendezvousService},
 };
@@ -58,6 +59,7 @@ fn test_descriptor(authority: AuthorityId, context: ContextId) -> RendezvousDesc
         context_id: context,
         transport_hints: vec![TransportHint::quic_direct("192.168.1.1:8443").unwrap()],
         handshake_psk_commitment: [42u8; 32],
+        public_key: [0u8; 32],
         valid_from: 0,
         valid_until: 10_000,
         nonce: [0u8; 32],
@@ -110,6 +112,74 @@ impl NoiseEffects for MockNoise {
     }
 }
 
+// Stub other traits needed by E
+#[async_trait]
+impl RandomCoreEffects for MockNoise {
+    async fn random_bytes(&self, _: usize) -> Vec<u8> {
+        vec![]
+    }
+    async fn random_bytes_32(&self) -> [u8; 32] {
+        [0u8; 32]
+    }
+    async fn random_u64(&self) -> u64 {
+        0
+    }
+    async fn random_range(&self, _: u64, _: u64) -> u64 {
+        0
+    }
+    async fn random_uuid(&self) -> uuid::Uuid {
+        uuid::Uuid::nil()
+    }
+}
+#[async_trait]
+impl CryptoCoreEffects for MockNoise {
+    async fn hkdf_derive(
+        &self,
+        _: &[u8],
+        _: &[u8],
+        _: &[u8],
+        _: u32,
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![])
+    }
+    async fn derive_key(
+        &self,
+        _: &[u8],
+        _: &aura_core::effects::crypto::KeyDerivationContext,
+    ) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![])
+    }
+    async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+        Ok((vec![], vec![]))
+    }
+    async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        Ok(vec![])
+    }
+    async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> {
+        Ok(true)
+    }
+    fn is_simulated(&self) -> bool {
+        false
+    }
+    fn crypto_capabilities(&self) -> Vec<String> {
+        vec![]
+    }
+    fn constant_time_eq(&self, _: &[u8], _: &[u8]) -> bool {
+        true
+    }
+    fn secure_zero(&self, _: &mut [u8]) {}
+}
+#[async_trait]
+impl CryptoExtendedEffects for MockNoise {
+    async fn convert_ed25519_to_x25519_public(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> {
+        Ok([0u8; 32])
+    }
+    async fn convert_ed25519_to_x25519_private(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> {
+        Ok([0u8; 32])
+    }
+}
+impl aura_core::effects::CryptoEffects for MockNoise {}
+
 // =============================================================================
 // Descriptor Publication Tests
 // =============================================================================
@@ -127,7 +197,7 @@ fn test_descriptor_publication_flow() {
     let hints = vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()];
 
     // Act: Prepare descriptor publication
-    let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, 1000);
+    let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, [0u8; 32], 1000);
 
     // Assert: Should be allowed with correct effects
     assert!(matches!(outcome.decision, GuardDecision::Allow));
@@ -165,7 +235,7 @@ async fn test_channel_establishment_flow() {
     let bob_descriptor = test_descriptor(bob, context);
 
     let snapshot = test_snapshot(alice, context);
-    let mock_noise = MockNoise;
+    let mock_effects = MockNoise;
 
     // Act: Prepare channel establishment
     let outcome = service
@@ -174,9 +244,11 @@ async fn test_channel_establishment_flow() {
             context,
             bob,
             &psk,
+            &[0u8; 32],
+            &[0u8; 32],
             1000,
             &bob_descriptor,
-            &mock_noise,
+            &mock_effects,
         )
         .await
         .unwrap();
@@ -205,7 +277,7 @@ async fn test_channel_establishment_requires_descriptor() {
     let snapshot = test_snapshot(alice, context);
     let other_context = test_context(101);
     let mismatched_descriptor = test_descriptor(bob, other_context);
-    let mock_noise = MockNoise;
+    let mock_effects = MockNoise;
 
     let result = service
         .prepare_establish_channel(
@@ -213,9 +285,11 @@ async fn test_channel_establishment_requires_descriptor() {
             context,
             bob,
             &psk,
+            &[0u8; 32],
+            &[0u8; 32],
             1000,
             &mismatched_descriptor,
-            &mock_noise,
+            &mock_effects,
         )
         .await;
 
@@ -237,7 +311,7 @@ async fn test_channel_establishment_rejects_expired_descriptor() {
 
     let mut expired_descriptor = test_descriptor(bob, context);
     expired_descriptor.valid_until = 900;
-    let mock_noise = MockNoise;
+    let mock_effects = MockNoise;
 
     let result = service
         .prepare_establish_channel(
@@ -245,9 +319,11 @@ async fn test_channel_establishment_rejects_expired_descriptor() {
             context,
             bob,
             &psk,
+            &[0u8; 32],
+            &[0u8; 32],
             1000,
             &expired_descriptor,
-            &mock_noise,
+            &mock_effects,
         )
         .await;
 
@@ -265,7 +341,7 @@ async fn test_handshake_initiator_responder_flow() {
     let context = test_context(100);
     let psk = [42u8; 32];
     let epoch = 1u64;
-    let mock_noise = MockNoise;
+    let mock_effects = MockNoise;
 
     // Alice initiates
     let alice_config = HandshakeConfig {
@@ -289,37 +365,37 @@ async fn test_handshake_initiator_responder_flow() {
 
     // Step 1: Alice creates init message
     let init_msg = alice_handshaker
-        .create_init_message(epoch, &mock_noise)
+        .create_init_message(epoch, &[0u8; 32], &[0u8; 32], &mock_effects)
         .await
         .unwrap();
     assert!(!init_msg.is_empty());
 
     // Step 2: Bob processes init
     bob_handshaker
-        .process_init(&init_msg, epoch, &mock_noise)
+        .process_init(&init_msg, epoch, &[0u8; 32], &mock_effects)
         .await
         .unwrap();
 
     // Step 3: Bob creates response
     let response_msg = bob_handshaker
-        .create_response(epoch, &mock_noise)
+        .create_response(epoch, &mock_effects)
         .await
         .unwrap();
     assert!(!response_msg.is_empty());
 
     // Step 4: Alice processes response
     alice_handshaker
-        .process_response(&response_msg, &mock_noise)
+        .process_response(&response_msg, &mock_effects)
         .await
         .unwrap();
 
     // Step 5: Both complete
     let (alice_result, _) = alice_handshaker
-        .complete(epoch, true, &mock_noise)
+        .complete(epoch, true, &mock_effects)
         .await
         .unwrap();
     let (bob_result, _) = bob_handshaker
-        .complete(epoch, false, &mock_noise)
+        .complete(epoch, false, &mock_effects)
         .await
         .unwrap();
 
@@ -352,22 +428,23 @@ async fn test_handshake_psk_mismatch_detection() {
         psk_commitment: wrong_commitment,
         epoch: 1,
     };
-    let mock_noise = MockNoise;
+    let mock_effects = MockNoise;
 
     // Bob should reject (PSK commitment doesn't match)
-    let (outcome, _) = service
+    let outcome = service
         .prepare_handle_handshake(
             &snapshot,
             context,
             alice,
             handshake,
             &expected_psk,
-            &mock_noise,
+            &[0u8; 32],
+            &mock_effects,
         )
         .await
         .unwrap();
 
-    assert!(matches!(outcome.decision, GuardDecision::Deny { .. }));
+    assert!(matches!(outcome.0.decision, GuardDecision::Deny { .. }));
 }
 
 // =============================================================================
@@ -459,7 +536,7 @@ fn test_insufficient_flow_budget_blocks_publish() {
 
     let hints = vec![TransportHint::quic_direct("10.0.0.1:8443").unwrap()];
 
-    let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, 1000);
+    let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, [0u8; 32], 1000);
 
     // Should be denied
     assert!(matches!(outcome.decision, GuardDecision::Deny { .. }));
@@ -487,7 +564,7 @@ async fn test_missing_capability_blocks_connect() {
     snapshot.capabilities = vec![aura_guards::types::CapabilityId::from(
         guards::CAP_RENDEZVOUS_PUBLISH,
     )]; // Only publish
-    let mock_noise = MockNoise;
+    let mock_effects = MockNoise;
 
     let result = service
         .prepare_establish_channel(
@@ -495,9 +572,11 @@ async fn test_missing_capability_blocks_connect() {
             context,
             bob,
             &psk,
+            &[0u8; 32],
+            &[0u8; 32],
             1000,
             &bob_descriptor,
-            &mock_noise,
+            &mock_effects,
         )
         .await;
 
@@ -525,7 +604,7 @@ async fn test_complete_discovery_to_channel_flow() {
     let context = test_context(100);
     let psk = [42u8; 32];
     let epoch = 1u64;
-    let mock_noise = MockNoise;
+    let mock_effects = MockNoise;
 
     // Both create services
     let config = RendezvousConfig::default();
@@ -536,7 +615,7 @@ async fn test_complete_discovery_to_channel_flow() {
     let bob_snapshot = test_snapshot(bob, context);
     let bob_hints = vec![TransportHint::quic_direct("10.0.0.2:8443").unwrap()];
     let publish_outcome =
-        bob_service.prepare_publish_descriptor(&bob_snapshot, context, bob_hints, 1000);
+        bob_service.prepare_publish_descriptor(&bob_snapshot, context, bob_hints, [0u8; 32], 1000);
     assert!(matches!(publish_outcome.decision, GuardDecision::Allow));
 
     // Step 2: Alice receives Bob's descriptor (simulated journal sync)
@@ -552,9 +631,11 @@ async fn test_complete_discovery_to_channel_flow() {
             context,
             bob,
             &psk,
+            &[0u8; 32],
+            &[0u8; 32],
             1000,
             &bob_descriptor,
-            &mock_noise,
+            &mock_effects,
         )
         .await
         .unwrap();
@@ -580,27 +661,27 @@ async fn test_complete_discovery_to_channel_flow() {
     let mut bob_handshaker = Handshaker::new(bob_hs_config);
 
     let init = alice_handshaker
-        .create_init_message(epoch, &mock_noise)
+        .create_init_message(epoch, &[0u8; 32], &[0u8; 32], &mock_effects)
         .await
         .unwrap();
     bob_handshaker
-        .process_init(&init, epoch, &mock_noise)
+        .process_init(&init, epoch, &[0u8; 32], &mock_effects)
         .await
         .unwrap();
     let response = bob_handshaker
-        .create_response(epoch, &mock_noise)
+        .create_response(epoch, &mock_effects)
         .await
         .unwrap();
     alice_handshaker
-        .process_response(&response, &mock_noise)
+        .process_response(&response, &mock_effects)
         .await
         .unwrap();
     let (alice_result, _) = alice_handshaker
-        .complete(epoch, true, &mock_noise)
+        .complete(epoch, true, &mock_effects)
         .await
         .unwrap();
     let (bob_result, _) = bob_handshaker
-        .complete(epoch, false, &mock_noise)
+        .complete(epoch, false, &mock_effects)
         .await
         .unwrap();
 
@@ -641,6 +722,7 @@ fn test_transport_hint_serialization() {
         context_id: test_context(100),
         transport_hints: vec![hint.clone()],
         handshake_psk_commitment: [0u8; 32],
+        public_key: [0u8; 32],
         valid_from: 0,
         valid_until: 10_000,
         nonce: [0u8; 32],
@@ -671,6 +753,7 @@ fn test_relay_transport_hint() {
         context_id: test_context(100),
         transport_hints: vec![hint],
         handshake_psk_commitment: [0u8; 32],
+        public_key: [0u8; 32],
         valid_from: 0,
         valid_until: 10_000,
         nonce: [0u8; 32],

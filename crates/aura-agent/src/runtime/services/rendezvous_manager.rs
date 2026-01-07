@@ -929,7 +929,9 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
     match effects.secure_retrieve(&location, &caps).await {
         Ok(bytes) => {
             if let Ok(pkg) = SingleSignerKeyPackage::from_bytes(&bytes) {
-                Some((pkg.signing_key().0, pkg.verifying_key().0))
+                let signing_key = pkg.signing_key().try_into().unwrap_or([0u8; 32]);
+                let verifying_key = pkg.verifying_key().try_into().unwrap_or([0u8; 32]);
+                Some((signing_key, verifying_key))
             } else {
                 None
             }
