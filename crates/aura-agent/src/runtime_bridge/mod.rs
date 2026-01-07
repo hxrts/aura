@@ -1071,7 +1071,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         static CEREMONY_NONCE: AtomicU64 = AtomicU64::new(0);
         let nonce = CEREMONY_NONCE.fetch_add(1, Ordering::Relaxed);
         let ceremony_id_hash = GuardianCeremonyId::new(prestate_hash, operation_hash, nonce);
-        let ceremony_id = aura_core::identifiers::CeremonyId::new(ceremony_id_hash.to_string());
+        let ceremony_id = aura_core::identifiers::CeremonyId::new(hex::encode(ceremony_id_hash.0 .0));
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -1104,6 +1104,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .start(CeremonyInitRequest {
                 ceremony_id: ceremony_id.clone(),
                 kind: aura_app::runtime_bridge::CeremonyKind::GuardianRotation,
+                initiator_id: authority_id,
                 threshold_k: threshold_k_value,
                 total_n,
                 participants,
@@ -1115,40 +1116,26 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
             .map_err(|e| IntentError::internal_error(format!("Failed to register ceremony: {}", e)))?;
 
-        // Step 4: Send guardian invitations with key packages
-        // This routes through the proper aura-recovery protocol
+        // Step 4: Execute guardian ceremony choreography (send proposals + collect responses)
         let recovery_service = self
             .agent
             .recovery()
             .map_err(|e| service_unavailable_with_detail("recovery_service", e))?;
 
-        for (idx, guardian_id) in guardian_ids.iter().enumerate() {
-            let key_package = &key_packages[idx];
-
-            tracing::debug!(
-                guardian_id = %guardian_id,
-                key_package_size = key_package.len(),
-                "Sending guardian invitation through protocol"
-            );
-
-            // Send through proper protocol (not mock!)
-            // This should trigger the choreography-based guardian ceremony
-            recovery_service
-                .send_guardian_invitation(
-                    all_guardian_authority_ids[idx],
-                    ceremony_id_hash,
-                    prestate_hash,
-                    operation.clone(),
-                    key_package,
-                )
-                .await
-                .map_err(|e| {
-                    IntentError::internal_error(format!(
-                        "Failed to send guardian invitation to {}: {}",
-                        guardian_id, e
-                    ))
-                })?;
-        }
+        recovery_service
+            .execute_guardian_ceremony_initiator(
+                ceremony_id_hash,
+                prestate_hash,
+                operation.clone(),
+                all_guardian_authority_ids.clone(),
+                key_packages.clone(),
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!(
+                    "Failed to execute guardian ceremony choreography: {e}"
+                ))
+            })?;
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -1362,6 +1349,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .start(CeremonyInitRequest {
                 ceremony_id: ceremony_id.clone(),
                 kind: aura_app::runtime_bridge::CeremonyKind::DeviceRotation,
+                initiator_id: authority_id,
                 threshold_k: threshold_value,
                 total_n,
                 participants,
@@ -1702,6 +1690,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .start(CeremonyInitRequest {
                 ceremony_id: ceremony_id.clone(),
                 kind: aura_app::runtime_bridge::CeremonyKind::DeviceEnrollment,
+                initiator_id: authority_id,
                 threshold_k: acceptance_threshold,
                 total_n: acceptance_n,
                 participants: acceptors,
@@ -2058,6 +2047,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .start(CeremonyInitRequest {
                 ceremony_id: ceremony_id.clone(),
                 kind: aura_app::runtime_bridge::CeremonyKind::DeviceRemoval,
+                initiator_id: authority_id,
                 threshold_k,
                 total_n,
                 participants: participants.clone(),

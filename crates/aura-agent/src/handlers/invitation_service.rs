@@ -60,7 +60,7 @@ impl InvitationServiceApi {
     ) -> AgentResult<Invitation> {
         self.handler
             .create_invitation(
-                &self.effects,
+                self.effects.clone(),
                 receiver_id,
                 InvitationType::Channel {
                     home_id,
@@ -92,7 +92,7 @@ impl InvitationServiceApi {
     ) -> AgentResult<Invitation> {
         self.handler
             .create_invitation(
-                &self.effects,
+                self.effects.clone(),
                 receiver_id,
                 InvitationType::Guardian { subject_authority },
                 message,
@@ -120,7 +120,7 @@ impl InvitationServiceApi {
     ) -> AgentResult<Invitation> {
         self.handler
             .create_invitation(
-                &self.effects,
+                self.effects.clone(),
                 receiver_id,
                 InvitationType::Contact { nickname },
                 message,
@@ -149,7 +149,7 @@ impl InvitationServiceApi {
     ) -> AgentResult<Invitation> {
         self.handler
             .create_invitation(
-                &self.effects,
+                self.effects.clone(),
                 receiver_id,
                 InvitationType::DeviceEnrollment {
                     subject_authority,
@@ -177,7 +177,7 @@ impl InvitationServiceApi {
     /// Result of the acceptance
     pub async fn accept(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
         self.handler
-            .accept_invitation(&self.effects, invitation_id)
+            .accept_invitation(self.effects.clone(), invitation_id)
             .await
     }
 
@@ -190,7 +190,7 @@ impl InvitationServiceApi {
     /// Result of the decline
     pub async fn decline(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
         self.handler
-            .decline_invitation(&self.effects, invitation_id)
+            .decline_invitation(self.effects.clone(), invitation_id)
             .await
     }
 
@@ -327,11 +327,16 @@ mod tests {
         AuthorityContext::new(authority_id)
     }
 
+    fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
+        let mut config = AgentConfig::default();
+        config.device_id = authority.device_id();
+        Arc::new(AuraEffectSystem::testing(&config).unwrap())
+    }
+
     #[tokio::test]
     async fn test_invitation_service_creation() {
         let authority_context = create_test_authority(110);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
 
         let service = InvitationServiceApi::new(effects, authority_context);
         assert!(service.is_ok());
@@ -340,8 +345,7 @@ mod tests {
     #[tokio::test]
     async fn test_invite_as_contact() {
         let authority_context = create_test_authority(111);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let service = InvitationServiceApi::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([112u8; 32]);
@@ -363,8 +367,7 @@ mod tests {
     #[tokio::test]
     async fn test_invite_as_guardian() {
         let authority_context = create_test_authority(113);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let service = InvitationServiceApi::new(effects, authority_context.clone()).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([114u8; 32]);
@@ -385,8 +388,7 @@ mod tests {
     #[tokio::test]
     async fn test_invite_to_channel() {
         let authority_context = create_test_authority(115);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let service = InvitationServiceApi::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([116u8; 32]);
@@ -401,8 +403,7 @@ mod tests {
     #[tokio::test]
     async fn test_accept_decline_flow() {
         let authority_context = create_test_authority(117);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let service = InvitationServiceApi::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([118u8; 32]);
@@ -435,8 +436,7 @@ mod tests {
     #[tokio::test]
     async fn test_is_pending() {
         let authority_context = create_test_authority(120);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let service = InvitationServiceApi::new(effects, authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([121u8; 32]);

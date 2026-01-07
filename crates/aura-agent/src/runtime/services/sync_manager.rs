@@ -9,12 +9,21 @@ use super::RuntimeTaskRegistry;
 use async_trait::async_trait;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::PhysicalTimeEffects;
-use aura_core::DeviceId;
+use aura_core::{AuthorityId, DeviceId};
+use crate::runtime::AuraEffectSystem;
+use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use aura_sync::protocols::epoch_runners::{
+    execute_as as epoch_execute_as, EpochRotationProtocolRole,
+};
+use aura_sync::protocols::{EpochCommit, EpochConfirmation, EpochRotationProposal};
 use aura_sync::services::{Service, SyncService, SyncServiceConfig};
 use aura_sync::verification::{MerkleVerifier, VerificationResult};
+use aura_core::hash::hash;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 /// Configuration for the sync service manager
 #[derive(Debug, Clone)]
@@ -588,6 +597,132 @@ impl SyncServiceManager {
             }
         }
     }
+}
+
+// =============================================================================
+// Choreography Wiring (execute_as)
+// =============================================================================
+
+impl SyncServiceManager {
+    /// Execute epoch rotation protocol as coordinator.
+    pub async fn execute_epoch_rotation_coordinator(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        coordinator_id: AuthorityId,
+        participant1_id: AuthorityId,
+        participant2_id: AuthorityId,
+        proposal: EpochRotationProposal,
+        commit: EpochCommit,
+    ) -> Result<(), String> {
+        let mut role_map = HashMap::new();
+        role_map.insert(EpochRotationProtocolRole::Coordinator, coordinator_id);
+        role_map.insert(EpochRotationProtocolRole::Participant1, participant1_id);
+        role_map.insert(EpochRotationProtocolRole::Participant2, participant2_id);
+
+        let proposal_type = std::any::type_name::<EpochRotationProposal>();
+        let commit_type = std::any::type_name::<EpochCommit>();
+
+        let session_id = epoch_rotation_session_id(&proposal.rotation_id);
+        let mut proposals = VecDeque::new();
+        proposals.push_back(proposal);
+        let mut commits = VecDeque::new();
+        commits.push_back(commit);
+
+        let mut adapter = AuraProtocolAdapter::new(
+            effects,
+            coordinator_id,
+            EpochRotationProtocolRole::Coordinator,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if request.type_name == proposal_type {
+                return proposals
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            if request.type_name == commit_type {
+                return commits
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| format!("epoch rotation start failed: {e}"))?;
+
+        let result = epoch_execute_as(EpochRotationProtocolRole::Coordinator, &mut adapter)
+            .await
+            .map_err(|e| format!("epoch rotation failed: {e}"));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    /// Execute epoch rotation protocol as participant.
+    pub async fn execute_epoch_rotation_participant(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        role: EpochRotationProtocolRole,
+        coordinator_id: AuthorityId,
+        participant1_id: AuthorityId,
+        participant2_id: AuthorityId,
+        confirmation: EpochConfirmation,
+    ) -> Result<(), String> {
+        let participant_id = match role {
+            EpochRotationProtocolRole::Participant1 => participant1_id,
+            EpochRotationProtocolRole::Participant2 => participant2_id,
+            EpochRotationProtocolRole::Coordinator => {
+                return Err("participant role required".to_string())
+            }
+        };
+
+        let mut role_map = HashMap::new();
+        role_map.insert(EpochRotationProtocolRole::Coordinator, coordinator_id);
+        role_map.insert(EpochRotationProtocolRole::Participant1, participant1_id);
+        role_map.insert(EpochRotationProtocolRole::Participant2, participant2_id);
+
+        let confirmation_type = std::any::type_name::<EpochConfirmation>();
+        let session_id = epoch_rotation_session_id(&confirmation.rotation_id);
+        let mut confirmations = VecDeque::new();
+        confirmations.push_back(confirmation);
+
+        let mut adapter = AuraProtocolAdapter::new(
+            effects,
+            participant_id,
+            role,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if request.type_name == confirmation_type {
+                return confirmations
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| format!("epoch rotation start failed: {e}"))?;
+
+        let result = epoch_execute_as(role, &mut adapter)
+            .await
+            .map_err(|e| format!("epoch rotation failed: {e}"));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+}
+
+fn epoch_rotation_session_id(rotation_id: &str) -> Uuid {
+    let digest = hash(rotation_id.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
 }
 
 #[cfg(test)]

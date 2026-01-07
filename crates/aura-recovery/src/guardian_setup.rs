@@ -264,7 +264,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             }),
         };
 
-        // Execute the choreographic protocol (simulated)
+        // Execute the choreographic protocol using the runtime adapter.
         let acceptances = self.execute_choreographic_setup(invitation).await?;
 
         // Check if we have enough acceptances

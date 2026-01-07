@@ -6,9 +6,23 @@
 use super::rendezvous::{ChannelResult, RendezvousHandler, RendezvousResult};
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
+use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_rendezvous::protocol::{
+    DescriptorAnswer, DescriptorOffer, HandshakeComplete, HandshakeInit, RelayComplete,
+    RelayForward, RelayRequest, RelayResponse,
+};
+use aura_rendezvous::protocol::exchange_runners::{
+    execute_as as exchange_execute_as, RendezvousExchangeRole,
+};
+use aura_rendezvous::protocol::relayed_runners::{
+    execute_as as relayed_execute_as, RelayedRendezvousRole,
+};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Rendezvous service
 ///
@@ -194,6 +208,293 @@ impl RendezvousServiceApi {
     }
 
     // ========================================================================
+    // Choreography Wiring (execute_as)
+    // ========================================================================
+
+    /// Execute direct rendezvous exchange as initiator.
+    pub async fn execute_rendezvous_exchange_initiator(
+        &self,
+        context_id: ContextId,
+        responder: AuthorityId,
+        offer_descriptor: RendezvousDescriptor,
+        handshake_init: HandshakeInit,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.handler.authority_context().authority_id();
+
+        let mut role_map = HashMap::new();
+        role_map.insert(RendezvousExchangeRole::Initiator, authority_id);
+        role_map.insert(RendezvousExchangeRole::Responder, responder);
+
+        let offer_type = std::any::type_name::<DescriptorOffer>();
+        let handshake_type = std::any::type_name::<HandshakeInit>();
+
+        let mut offers = VecDeque::new();
+        offers.push_back(DescriptorOffer {
+            descriptor: offer_descriptor,
+        });
+        let mut handshakes = VecDeque::new();
+        handshakes.push_back(handshake_init);
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            RendezvousExchangeRole::Initiator,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if request.type_name == offer_type {
+                return offers
+                    .pop_front()
+                    .map(|offer| Box::new(offer) as Box<dyn std::any::Any + Send>);
+            }
+            if request.type_name == handshake_type {
+                return handshakes
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        let session_id = rendezvous_exchange_session_id(context_id, authority_id, responder);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("rendezvous exchange start failed: {e}")))?;
+
+        let result = exchange_execute_as(RendezvousExchangeRole::Initiator, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("rendezvous exchange failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    /// Execute direct rendezvous exchange as responder.
+    pub async fn execute_rendezvous_exchange_responder(
+        &self,
+        context_id: ContextId,
+        initiator: AuthorityId,
+        answer_descriptor: RendezvousDescriptor,
+        handshake_complete: HandshakeComplete,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.handler.authority_context().authority_id();
+
+        let mut role_map = HashMap::new();
+        role_map.insert(RendezvousExchangeRole::Initiator, initiator);
+        role_map.insert(RendezvousExchangeRole::Responder, authority_id);
+
+        let answer_type = std::any::type_name::<DescriptorAnswer>();
+        let completion_type = std::any::type_name::<HandshakeComplete>();
+
+        let mut answers = VecDeque::new();
+        answers.push_back(DescriptorAnswer {
+            descriptor: answer_descriptor,
+        });
+        let mut completions = VecDeque::new();
+        completions.push_back(handshake_complete);
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            RendezvousExchangeRole::Responder,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if request.type_name == answer_type {
+                return answers
+                    .pop_front()
+                    .map(|answer| Box::new(answer) as Box<dyn std::any::Any + Send>);
+            }
+            if request.type_name == completion_type {
+                return completions
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        let session_id = rendezvous_exchange_session_id(context_id, initiator, authority_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("rendezvous exchange start failed: {e}")))?;
+
+        let result = exchange_execute_as(RendezvousExchangeRole::Responder, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("rendezvous exchange failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    /// Execute relayed rendezvous as initiator.
+    pub async fn execute_relayed_rendezvous_initiator(
+        &self,
+        context_id: ContextId,
+        relay: AuthorityId,
+        responder: AuthorityId,
+        request: RelayRequest,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.handler.authority_context().authority_id();
+
+        let mut role_map = HashMap::new();
+        role_map.insert(RelayedRendezvousRole::Initiator, authority_id);
+        role_map.insert(RelayedRendezvousRole::Relay, relay);
+        role_map.insert(RelayedRendezvousRole::Responder, responder);
+
+        let request_type = std::any::type_name::<RelayRequest>();
+        let mut requests = VecDeque::new();
+        requests.push_back(request);
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            RelayedRendezvousRole::Initiator,
+            role_map,
+        )
+        .with_message_provider(move |request_ctx, _received| {
+            if request_ctx.type_name == request_type {
+                return requests
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        let session_id =
+            relayed_rendezvous_session_id(context_id, authority_id, relay, responder);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("relayed rendezvous start failed: {e}")))?;
+
+        let result = relayed_execute_as(RelayedRendezvousRole::Initiator, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("relayed rendezvous failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    /// Execute relayed rendezvous as relay.
+    pub async fn execute_relayed_rendezvous_relay(
+        &self,
+        context_id: ContextId,
+        initiator: AuthorityId,
+        responder: AuthorityId,
+        forward: RelayForward,
+        complete: RelayComplete,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.handler.authority_context().authority_id();
+
+        let mut role_map = HashMap::new();
+        role_map.insert(RelayedRendezvousRole::Initiator, initiator);
+        role_map.insert(RelayedRendezvousRole::Relay, authority_id);
+        role_map.insert(RelayedRendezvousRole::Responder, responder);
+
+        let forward_type = std::any::type_name::<RelayForward>();
+        let complete_type = std::any::type_name::<RelayComplete>();
+
+        let mut forwards = VecDeque::new();
+        forwards.push_back(forward);
+        let mut completes = VecDeque::new();
+        completes.push_back(complete);
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            RelayedRendezvousRole::Relay,
+            role_map,
+        )
+        .with_message_provider(move |request_ctx, _received| {
+            if request_ctx.type_name == forward_type {
+                return forwards
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            if request_ctx.type_name == complete_type {
+                return completes
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        let session_id =
+            relayed_rendezvous_session_id(context_id, initiator, authority_id, responder);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("relayed rendezvous start failed: {e}")))?;
+
+        let result = relayed_execute_as(RelayedRendezvousRole::Relay, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("relayed rendezvous failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    /// Execute relayed rendezvous as responder.
+    pub async fn execute_relayed_rendezvous_responder(
+        &self,
+        context_id: ContextId,
+        initiator: AuthorityId,
+        relay: AuthorityId,
+        response: RelayResponse,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.handler.authority_context().authority_id();
+
+        let mut role_map = HashMap::new();
+        role_map.insert(RelayedRendezvousRole::Initiator, initiator);
+        role_map.insert(RelayedRendezvousRole::Relay, relay);
+        role_map.insert(RelayedRendezvousRole::Responder, authority_id);
+
+        let response_type = std::any::type_name::<RelayResponse>();
+        let mut responses = VecDeque::new();
+        responses.push_back(response);
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            RelayedRendezvousRole::Responder,
+            role_map,
+        )
+        .with_message_provider(move |request_ctx, _received| {
+            if request_ctx.type_name == response_type {
+                return responses
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        let session_id =
+            relayed_rendezvous_session_id(context_id, initiator, relay, authority_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("relayed rendezvous start failed: {e}")))?;
+
+        let result = relayed_execute_as(RelayedRendezvousRole::Responder, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("relayed rendezvous failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    // ========================================================================
     // Maintenance Operations
     // ========================================================================
 
@@ -208,6 +509,40 @@ impl RendezvousServiceApi {
     pub fn authority_context(&self) -> &AuthorityContext {
         self.handler.authority_context()
     }
+}
+
+fn rendezvous_exchange_session_id(
+    context_id: ContextId,
+    initiator: AuthorityId,
+    responder: AuthorityId,
+) -> Uuid {
+    let mut material = Vec::new();
+    material.extend_from_slice(context_id.as_bytes());
+    material.extend_from_slice(&initiator.to_bytes());
+    material.extend_from_slice(&responder.to_bytes());
+    material.extend_from_slice(b"rendezvous-exchange");
+    let digest = hash(&material);
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
+}
+
+fn relayed_rendezvous_session_id(
+    context_id: ContextId,
+    initiator: AuthorityId,
+    relay: AuthorityId,
+    responder: AuthorityId,
+) -> Uuid {
+    let mut material = Vec::new();
+    material.extend_from_slice(context_id.as_bytes());
+    material.extend_from_slice(&initiator.to_bytes());
+    material.extend_from_slice(&relay.to_bytes());
+    material.extend_from_slice(&responder.to_bytes());
+    material.extend_from_slice(b"rendezvous-relayed");
+    let digest = hash(&material);
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
 }
 
 use aura_protocol::effects::EffectApiEffects;

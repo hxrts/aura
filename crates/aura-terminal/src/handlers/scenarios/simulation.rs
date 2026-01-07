@@ -4,14 +4,16 @@
 
 use crate::error::{TerminalError, TerminalResult};
 use aura_agent::handlers::{
-    GuardianProfile, GuardianSet, GuardianSetupCoordinator, RecoveryContext, RecoveryOperationType,
+    RecoveryServiceApi,
 };
-use aura_agent::AgentConfig;
-use aura_app::ui::types::RecoveryRequest;
+use aura_agent::core::AuthorityContext;
+use aura_agent::runtime::SharedTransport;
+use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::handlers::HandlerContext;
 
@@ -43,7 +45,7 @@ pub async fn simulate_cli_recovery_demo(
         .await
         .map_err(|e| TerminalError::Operation(format!("Failed to read time: {e}")))?;
 
-    // Run guardian setup choreography via recovery coordinator using simulation effects
+    // Run guardian setup choreography via execute_as runtime wiring
     run_guardian_setup_choreography(&mut steps).await?;
 
     // Phase 1: Alice & Carol pre-setup (log only)
@@ -222,42 +224,87 @@ pub async fn simulate_cli_recovery_demo(
 
 /// Run the guardian setup choreography
 async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalResult<()> {
-    let effect_system = Arc::new(aura_agent::AuraEffectSystem::testing(
-        &AgentConfig::default(),
+    let shared_transport = SharedTransport::new();
+    let config = AgentConfig::default();
+
+    let initiator_id = crate::ids::authority_id("scenario:guardian-setup:initiator");
+    let account_id = crate::ids::authority_id("scenario:guardian-setup:account");
+    let guardians = vec![
+        crate::ids::authority_id("guardian:alice"),
+        crate::ids::authority_id("guardian:carol"),
+        crate::ids::authority_id("guardian:dave"),
+    ];
+
+    let initiator_effects = Arc::new(AuraEffectSystem::simulation_with_shared_transport_for_authority(
+        &config,
+        42,
+        initiator_id,
+        shared_transport.clone(),
     )?);
-    let coordinator = GuardianSetupCoordinator::new(effect_system);
+    let initiator_service =
+        RecoveryServiceApi::new(initiator_effects, AuthorityContext::new(initiator_id))?;
 
-    let guardians = GuardianSet::new(vec![
-        GuardianProfile::with_label(crate::ids::authority_id("guardian:alice"), "alice"),
-        GuardianProfile::with_label(crate::ids::authority_id("guardian:carol"), "carol"),
-    ]);
+    let mut guardian_services = Vec::new();
+    for (index, guardian_id) in guardians.iter().copied().enumerate() {
+        let guardian_effects = Arc::new(
+            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+                &config,
+                100 + index as u64,
+                guardian_id,
+                shared_transport.clone(),
+            )?,
+        );
+        let service =
+            RecoveryServiceApi::new(guardian_effects, AuthorityContext::new(guardian_id))?;
+        guardian_services.push(service);
+    }
 
-    let timestamp = 0;
-
-    let recovery_context = RecoveryContext {
-        operation_type: RecoveryOperationType::GuardianSetModification,
-        justification: "Initial guardian setup for Bob".to_string(),
-        is_emergency: false,
-        timestamp,
+    let setup_id = format!("setup_{}_{}", account_id, Uuid::new_v4());
+    let invitation = aura_recovery::guardian_setup::GuardianInvitation {
+        setup_id: setup_id.clone(),
+        account_id,
+        target_guardians: guardians.clone(),
+        threshold: 2,
+        timestamp: aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
+            ts_ms: 0,
+            uncertainty: None,
+        }),
     };
 
-    let request = RecoveryRequest {
-        initiator_id: crate::ids::authority_id("scenario:guardian-setup:initiator"),
-        account_id: crate::ids::authority_id("scenario:guardian-setup:account"),
-        context: recovery_context,
-        threshold: 2u16,
-        guardians,
-    };
+    let mut guardian_tasks = Vec::new();
+    for service in guardian_services.into_iter() {
+        let invite = invitation.clone();
+        guardian_tasks.push(tokio::spawn(async move {
+            service.execute_guardian_setup_guardian(invite, true).await
+        }));
+    }
 
-    let response = coordinator.execute_setup(request).await.map_err(|e| {
-        TerminalError::Operation(format!("Guardian setup choreography failed: {}", e))
-    })?;
+    let initiator_task = tokio::spawn(async move {
+        initiator_service
+            .execute_guardian_setup_initiator_with_id(
+                &setup_id,
+                account_id,
+                guardians,
+                2,
+            )
+            .await
+    });
+
+    let response = initiator_task
+        .await
+        .map_err(|e| TerminalError::Operation(format!("Guardian setup join failed: {e}")))?
+        .map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))?;
+
+    for task in guardian_tasks {
+        task.await
+            .map_err(|e| TerminalError::Operation(format!("Guardian setup join failed: {e}")))?
+            .map_err(|e| TerminalError::Operation(format!("Guardian setup failed: {e}")))?;
+    }
 
     if !response.success {
-        return Err(TerminalError::Operation(format!(
-            "Guardian setup failed: {}",
-            response.error.unwrap_or_else(|| "unknown error".into())
-        )));
+        return Err(TerminalError::Operation(
+            "Guardian setup failed: threshold not met".to_string(),
+        ));
     }
 
     steps.push(SimStep {

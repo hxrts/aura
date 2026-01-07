@@ -25,10 +25,9 @@ aura-maintenance = { path = "../aura-maintenance" }
 aura-rendezvous = { path = "../aura-rendezvous" }
 aura-effects = { path = "../aura-effects" }
 aura-anti-entropy = { path = "../aura-anti-entropy" }
+aura-macros = { path = "../aura-macros" }
+aura-mpst = { path = "../aura-mpst" }
 
-# Note: aura-macros and aura-mpst intentionally omitted
-# This crate demonstrates semantic library independence by using
-# pure effect composition without choreography dependencies
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

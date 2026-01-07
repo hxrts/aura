@@ -27,12 +27,38 @@ use aura_guards::types::CapabilityId;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
+use aura_invitation::protocol::exchange_runners::{
+    execute_as as invitation_execute_as, InvitationExchangeRole,
+};
+use aura_invitation::protocol::exchange::rumpsteak_session_types_invitation::message_wrappers::{
+    InvitationAck as ExchangeInvitationAck,
+    InvitationOffer as ExchangeInvitationOffer,
+    InvitationResponse as ExchangeInvitationResponse,
+};
+use aura_invitation::protocol::guardian_runners::{
+    execute_as as guardian_execute_as, GuardianInvitationRole,
+};
+use aura_invitation::protocol::guardian::rumpsteak_session_types_invitation_guardian::message_wrappers::{
+    GuardianAccept as GuardianInvitationAccept,
+    GuardianConfirm as GuardianInvitationConfirm,
+    GuardianRequest as GuardianInvitationRequest,
+};
+use aura_invitation::{
+    GuardianAccept, GuardianConfirm, GuardianRequest, InvitationAck, InvitationOffer,
+    InvitationResponse,
+};
 use aura_journal::fact::{FactContent, RelationalFact};
+use std::sync::Arc;
 use aura_journal::DomainFact;
 use aura_protocol::effects::EffectApiEffects;
+use aura_protocol::effects::ChoreographyError;
+use aura_core::effects::TransportError;
+use aura_core::util::serialization::from_slice;
+use crate::runtime::choreography_adapter::AuraProtocolAdapter;
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
 use std::collections::HashMap;
 use std::str::FromStr;
+use uuid::Uuid;
 
 // Re-export types from aura_invitation for public API
 pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
@@ -298,7 +324,7 @@ impl InvitationHandler {
     /// Create an invitation
     pub async fn create_invitation(
         &self,
-        effects: &AuraEffectSystem,
+        effects: Arc<AuraEffectSystem>,
         receiver_id: AuthorityId,
         invitation_type: InvitationType,
         message: Option<String>,
@@ -313,7 +339,7 @@ impl InvitationHandler {
         let expires_at = expires_in_ms.map(|ms| current_time + ms);
 
         // Build snapshot and prepare through service
-        let snapshot = self.build_snapshot(effects).await;
+        let snapshot = self.build_snapshot(effects.as_ref()).await;
 
         let outcome = self.service.prepare_send_invitation(
             &snapshot,
@@ -325,7 +351,7 @@ impl InvitationHandler {
         );
 
         // Execute the outcome (handles denial and effects)
-        execute_guard_outcome(outcome, &self.context.authority, effects).await?;
+        execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
 
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
@@ -341,7 +367,7 @@ impl InvitationHandler {
 
         // Persist the invitation to storage (so it survives service recreation)
         Self::persist_created_invitation(
-            effects,
+            effects.as_ref(),
             self.context.authority.authority_id(),
             &invitation,
         )
@@ -352,36 +378,47 @@ impl InvitationHandler {
             .cache_invitation(invitation.clone())
             .await;
 
+        match invitation.invitation_type {
+            InvitationType::Guardian { .. } => {
+                self.execute_guardian_invitation_principal(effects.clone(), &invitation)
+                    .await?;
+            }
+            _ => {
+                self.execute_invitation_exchange_sender(effects.clone(), &invitation)
+                    .await?;
+            }
+        }
+
         Ok(invitation)
     }
 
     /// Accept an invitation
     pub async fn accept_invitation(
         &self,
-        effects: &AuraEffectSystem,
+        effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         let now_ms = effects.current_timestamp().await.unwrap_or(0);
-        self.validate_cached_invitation_accept(effects, invitation_id, now_ms)
+        self.validate_cached_invitation_accept(effects.as_ref(), invitation_id, now_ms)
             .await?;
 
         // Build snapshot and prepare through service
-        let snapshot = self.build_snapshot(effects).await;
+        let snapshot = self.build_snapshot(effects.as_ref()).await;
         let outcome = self
             .service
             .prepare_accept_invitation(&snapshot, invitation_id);
 
         // Execute the outcome
-        execute_guard_outcome(outcome, &self.context.authority, effects).await?;
+        execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
 
         // Best-effort: accepting a contact invitation should add the sender as a contact.
         //
         // This needs to be fact-backed so the Contacts reactive view (CONTACTS_SIGNAL)
         // can converge from journal state rather than UI-local mutations.
         if let Some((contact_id, nickname)) = self
-            .resolve_contact_invitation(effects, invitation_id)
+            .resolve_contact_invitation(effects.as_ref(), invitation_id)
             .await?
         {
             let now_ms = effects.current_timestamp().await.unwrap_or(0);
@@ -406,7 +443,7 @@ impl InvitationHandler {
         }
 
         if let Some(channel_invite) = self
-            .resolve_channel_invitation(effects, invitation_id)
+            .resolve_channel_invitation(effects.as_ref(), invitation_id)
             .await?
         {
             let ChannelBootstrapPackage { bootstrap_id, key } = channel_invite.package;
@@ -441,7 +478,7 @@ impl InvitationHandler {
 
         // Device enrollment: install share + notify initiator device runtime.
         if let Some(enrollment) = self
-            .resolve_device_enrollment_invitation(effects, invitation_id)
+            .resolve_device_enrollment_invitation(effects.as_ref(), invitation_id)
             .await?
         {
             let participant =
@@ -568,6 +605,23 @@ impl InvitationHandler {
                 inv.status = InvitationStatus::Accepted;
             })
             .await;
+
+        if let Some(invitation) =
+            self.load_invitation_for_choreography(effects.as_ref(), invitation_id).await
+        {
+            match invitation.invitation_type {
+                InvitationType::Guardian { .. } => {
+                    let _ = self
+                        .execute_guardian_invitation_guardian(effects.clone(), &invitation)
+                        .await;
+                }
+                _ => {
+                    let _ = self
+                        .execute_invitation_exchange_receiver(effects.clone(), &invitation, true)
+                        .await;
+                }
+            }
+        }
 
         Ok(InvitationResult {
             success: true,
@@ -897,22 +951,22 @@ impl InvitationHandler {
     /// Decline an invitation
     pub async fn decline_invitation(
         &self,
-        effects: &AuraEffectSystem,
+        effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        self.validate_cached_invitation_decline(effects, invitation_id)
+        self.validate_cached_invitation_decline(effects.as_ref(), invitation_id)
             .await?;
 
         // Build snapshot and prepare through service
-        let snapshot = self.build_snapshot(effects).await;
+        let snapshot = self.build_snapshot(effects.as_ref()).await;
         let outcome = self
             .service
             .prepare_decline_invitation(&snapshot, invitation_id);
 
         // Execute the outcome
-        execute_guard_outcome(outcome, &self.context.authority, effects).await?;
+        execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
 
         // Update cache if we have this invitation
         let _ = self
@@ -921,6 +975,16 @@ impl InvitationHandler {
                 inv.status = InvitationStatus::Declined;
             })
             .await;
+
+        if let Some(invitation) =
+            self.load_invitation_for_choreography(effects.as_ref(), invitation_id).await
+        {
+            if !matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
+                let _ = self
+                    .execute_invitation_exchange_receiver(effects.clone(), &invitation, false)
+                    .await;
+            }
+        }
 
         Ok(InvitationResult {
             success: true,
@@ -966,6 +1030,306 @@ impl InvitationHandler {
         self.invitation_cache
             .list_pending(|inv| inv.status == InvitationStatus::Pending)
             .await
+    }
+
+    async fn load_invitation_for_choreography(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+    ) -> Option<Invitation> {
+        if let Some(inv) = self.invitation_cache.get_invitation(invitation_id).await {
+            return Some(inv);
+        }
+
+        let own_id = self.context.authority.authority_id();
+        if let Some(inv) = Self::load_created_invitation(effects, own_id, invitation_id).await {
+            return Some(inv);
+        }
+
+        if let Some(shareable) =
+            Self::load_imported_invitation(effects, own_id, invitation_id).await
+        {
+            let now_ms = effects.current_timestamp().await.unwrap_or(0);
+            return Some(Invitation {
+                invitation_id: shareable.invitation_id,
+                context_id: self.context.effect_context.context_id(),
+                sender_id: shareable.sender_id,
+                receiver_id: own_id,
+                invitation_type: shareable.invitation_type,
+                status: InvitationStatus::Pending,
+                created_at: now_ms,
+                expires_at: shareable.expires_at,
+                message: shareable.message,
+            });
+        }
+
+        None
+    }
+
+    fn invitation_session_id(invitation_id: &InvitationId) -> Uuid {
+        let digest = hash(invitation_id.as_str().as_bytes());
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(bytes)
+    }
+
+    fn build_invitation_offer(invitation: &Invitation) -> InvitationOffer {
+        let mut material = Vec::new();
+        material.extend_from_slice(invitation.invitation_id.as_str().as_bytes());
+        material.extend_from_slice(&invitation.sender_id.to_bytes());
+        material.extend_from_slice(&invitation.receiver_id.to_bytes());
+        if let Some(expires_at) = invitation.expires_at {
+            material.extend_from_slice(&expires_at.to_le_bytes());
+        }
+        let commitment_hash = hash(&material);
+
+        InvitationOffer {
+            invitation_id: invitation.invitation_id.clone(),
+            invitation_type: invitation.invitation_type.clone(),
+            sender: invitation.sender_id,
+            message: invitation.message.clone(),
+            expires_at_ms: invitation.expires_at,
+            commitment: commitment_hash,
+        }
+    }
+
+    fn type_matches(type_name: &str, expected_suffix: &str) -> bool {
+        type_name.ends_with(expected_suffix)
+    }
+
+    async fn execute_invitation_exchange_sender(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.context.authority.authority_id();
+        let mut role_map = HashMap::new();
+        role_map.insert(InvitationExchangeRole::Sender, authority_id);
+        role_map.insert(InvitationExchangeRole::Receiver, invitation.receiver_id);
+
+        let offer = ExchangeInvitationOffer(Self::build_invitation_offer(invitation));
+        let invitation_id = invitation.invitation_id.clone();
+
+        let mut adapter = AuraProtocolAdapter::new(
+            effects.clone(),
+            authority_id,
+            InvitationExchangeRole::Sender,
+            role_map,
+        )
+        .with_message_provider(move |request, received| {
+            if Self::type_matches(request.type_name, "InvitationOffer") {
+                return Some(Box::new(offer.clone()));
+            }
+
+            if Self::type_matches(request.type_name, "InvitationAck") {
+                let mut accepted = false;
+                for msg in received {
+                    if Self::type_matches(msg.type_name, "InvitationResponse") {
+                        if let Ok(response) = from_slice::<InvitationResponse>(&msg.bytes) {
+                            accepted = response.accepted;
+                            break;
+                        }
+                    }
+                }
+                let status = if accepted {
+                    "accepted"
+                } else {
+                    "declined"
+                };
+                let ack = ExchangeInvitationAck(InvitationAck {
+                    invitation_id: invitation_id.clone(),
+                    success: true,
+                    status: status.to_string(),
+                });
+                return Some(Box::new(ack));
+            }
+
+            None
+        });
+
+        let session_id = Self::invitation_session_id(&invitation.invitation_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("invitation start failed: {e}")))?;
+
+        let result = invitation_execute_as(InvitationExchangeRole::Sender, &mut adapter).await;
+
+        let _ = adapter.end_session().await;
+        match result {
+            Ok(()) => Ok(()),
+            Err(err) if Self::is_transport_no_message(&err) => Ok(()),
+            Err(err) => Err(AgentError::internal(format!(
+                "invitation exchange failed: {err}"
+            ))),
+        }
+    }
+
+    async fn execute_invitation_exchange_receiver(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+        accepted: bool,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.context.authority.authority_id();
+        let mut role_map = HashMap::new();
+        role_map.insert(InvitationExchangeRole::Sender, invitation.sender_id);
+        role_map.insert(InvitationExchangeRole::Receiver, authority_id);
+
+        let response = ExchangeInvitationResponse(InvitationResponse {
+            invitation_id: invitation.invitation_id.clone(),
+            accepted,
+            message: None,
+            signature: Vec::new(),
+        });
+        let mut adapter = AuraProtocolAdapter::new(
+            effects.clone(),
+            authority_id,
+            InvitationExchangeRole::Receiver,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if Self::type_matches(request.type_name, "InvitationResponse") {
+                return Some(Box::new(response.clone()));
+            }
+            None
+        });
+
+        let session_id = Self::invitation_session_id(&invitation.invitation_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("invitation start failed: {e}")))?;
+
+        let result = invitation_execute_as(InvitationExchangeRole::Receiver, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("invitation exchange failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    async fn execute_guardian_invitation_principal(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.context.authority.authority_id();
+        let mut role_map = HashMap::new();
+        role_map.insert(GuardianInvitationRole::Principal, authority_id);
+        role_map.insert(GuardianInvitationRole::Guardian, invitation.receiver_id);
+
+        let role_description = invitation
+            .message
+            .clone()
+            .unwrap_or_else(|| "guardian invitation".to_string());
+        let request = GuardianInvitationRequest(GuardianRequest {
+            invitation_id: invitation.invitation_id.clone(),
+            principal: authority_id,
+            role_description,
+            recovery_capabilities: Vec::new(),
+            expires_at_ms: invitation.expires_at,
+        });
+        let invitation_id = invitation.invitation_id.clone();
+
+        let mut adapter = AuraProtocolAdapter::new(
+            effects.clone(),
+            authority_id,
+            GuardianInvitationRole::Principal,
+            role_map,
+        )
+        .with_message_provider(move |request_ctx, _received| {
+            if Self::type_matches(request_ctx.type_name, "GuardianRequest") {
+                return Some(Box::new(request.clone()));
+            }
+
+            if Self::type_matches(request_ctx.type_name, "GuardianConfirm") {
+                let confirm = GuardianInvitationConfirm(GuardianConfirm {
+                    invitation_id: invitation_id.clone(),
+                    established: true,
+                    relationship_id: None,
+                });
+                return Some(Box::new(confirm));
+            }
+
+            None
+        });
+
+        let session_id = Self::invitation_session_id(&invitation.invitation_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian invite start failed: {e}")))?;
+
+        let result = guardian_execute_as(GuardianInvitationRole::Principal, &mut adapter).await;
+
+        let _ = adapter.end_session().await;
+        match result {
+            Ok(()) => Ok(()),
+            Err(err) if Self::is_transport_no_message(&err) => Ok(()),
+            Err(err) => Err(AgentError::internal(format!(
+                "guardian invite failed: {err}"
+            ))),
+        }
+    }
+
+    fn is_transport_no_message(err: &ChoreographyError) -> bool {
+        match err {
+            ChoreographyError::Transport { source } => source
+                .downcast_ref::<TransportError>()
+                .is_some_and(|inner| matches!(inner, TransportError::NoMessage)),
+            _ => false,
+        }
+    }
+
+    async fn execute_guardian_invitation_guardian(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.context.authority.authority_id();
+        let mut role_map = HashMap::new();
+        role_map.insert(GuardianInvitationRole::Principal, invitation.sender_id);
+        role_map.insert(GuardianInvitationRole::Guardian, authority_id);
+
+        let accept = GuardianInvitationAccept(GuardianAccept {
+            invitation_id: invitation.invitation_id.clone(),
+            signature: Vec::new(),
+            recovery_public_key: Vec::new(),
+        });
+        let mut adapter = AuraProtocolAdapter::new(
+            effects.clone(),
+            authority_id,
+            GuardianInvitationRole::Guardian,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if Self::type_matches(request.type_name, "GuardianAccept") {
+                return Some(Box::new(accept.clone()));
+            }
+            None
+        });
+
+        let session_id = Self::invitation_session_id(&invitation.invitation_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian invite start failed: {e}")))?;
+
+        let result = guardian_execute_as(GuardianInvitationRole::Guardian, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian invite failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
     }
 
     /// Get an invitation by ID (from in-memory cache only)
@@ -1413,31 +1777,35 @@ mod tests {
         AuthorityContext::new(authority_id)
     }
 
+    fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
+        let mut config = AgentConfig::default();
+        config.device_id = authority.device_id();
+        Arc::new(AuraEffectSystem::testing(&config).unwrap())
+    }
+
     #[tokio::test]
     async fn test_execute_allowed_outcome() {
         let authority = create_test_authority(130);
-        let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = effects_for(&authority);
 
         let outcome = GuardOutcome::allowed(vec![EffectCommand::ChargeFlowBudget {
             cost: FlowCost::new(1),
         }]);
 
-        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_execute_denied_outcome() {
         let authority = create_test_authority(131);
-        let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = effects_for(&authority);
 
         let outcome = GuardOutcome::denied(aura_guards::types::GuardViolation::other(
             "Test denial reason",
         ));
 
-        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
         assert!(result.is_err());
         let error = result.unwrap_err();
         assert!(error.to_string().contains("Test denial reason"));
@@ -1446,8 +1814,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_journal_append() {
         let authority = create_test_authority(132);
-        let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = effects_for(&authority);
 
         let fact = InvitationFact::sent_ms(
             ContextId::new_from_entropy([232u8; 32]),
@@ -1462,15 +1829,14 @@ mod tests {
 
         let outcome = GuardOutcome::allowed(vec![EffectCommand::JournalAppend { fact }]);
 
-        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_execute_notify_peer() {
         let authority = create_test_authority(134);
-        let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = effects_for(&authority);
 
         let peer = AuthorityId::new_from_entropy([135u8; 32]);
         let outcome = GuardOutcome::allowed(vec![EffectCommand::NotifyPeer {
@@ -1478,30 +1844,28 @@ mod tests {
             invitation_id: InvitationId::new("inv-notify"),
         }]);
 
-        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_execute_record_receipt() {
         let authority = create_test_authority(136);
-        let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = effects_for(&authority);
 
         let outcome = GuardOutcome::allowed(vec![EffectCommand::RecordReceipt {
             operation: "send_invitation".to_string(),
             peer: Some(AuthorityId::new_from_entropy([137u8; 32])),
         }]);
 
-        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_execute_multiple_commands() {
         let authority = create_test_authority(138);
-        let config = AgentConfig::default();
-        let effects = AuraEffectSystem::testing(&config).unwrap();
+        let effects = effects_for(&authority);
 
         let peer = AuthorityId::new_from_entropy([139u8; 32]);
         let outcome = GuardOutcome::allowed(vec![
@@ -1518,22 +1882,21 @@ mod tests {
             },
         ]);
 
-        let result = execute_guard_outcome(outcome, &authority, &effects).await;
+        let result = execute_guard_outcome(outcome, &authority, effects.as_ref()).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn invitation_can_be_created() {
         let authority_context = create_test_authority(91);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let handler = InvitationHandler::new(authority_context.clone()).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([92u8; 32]);
 
         let invitation = handler
             .create_invitation(
-                &effects,
+                effects.clone(),
                 receiver_id,
                 InvitationType::Contact {
                     nickname: Some("alice".to_string()),
@@ -1554,15 +1917,14 @@ mod tests {
     #[tokio::test]
     async fn invitation_can_be_accepted() {
         let authority_context = create_test_authority(93);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([94u8; 32]);
 
         let invitation = handler
             .create_invitation(
-                &effects,
+                effects.clone(),
                 receiver_id,
                 InvitationType::Guardian {
                     subject_authority: AuthorityId::new_from_entropy([95u8; 32]),
@@ -1574,7 +1936,7 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .accept_invitation(&effects, &invitation.invitation_id)
+            .accept_invitation(effects.clone(), &invitation.invitation_id)
             .await
             .unwrap();
 
@@ -1585,15 +1947,14 @@ mod tests {
     #[tokio::test]
     async fn invitation_can_be_declined() {
         let authority_context = create_test_authority(96);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([97u8; 32]);
 
         let invitation = handler
             .create_invitation(
-                &effects,
+                effects.clone(),
                 receiver_id,
                 InvitationType::Channel {
                     home_id: "home-123".to_string(),
@@ -1607,7 +1968,7 @@ mod tests {
             .unwrap();
 
         let result = handler
-            .decline_invitation(&effects, &invitation.invitation_id)
+            .decline_invitation(effects.clone(), &invitation.invitation_id)
             .await
             .unwrap();
 
@@ -1647,7 +2008,7 @@ mod tests {
         assert_eq!(imported.receiver_id, own_authority);
 
         handler
-            .accept_invitation(&effects, &imported.invitation_id)
+            .accept_invitation(effects.clone(), &imported.invitation_id)
             .await
             .unwrap();
 
@@ -1723,7 +2084,7 @@ mod tests {
 
         // Accept using a separate handler instance to ensure we don't rely on in-memory caches.
         handler_accept
-            .accept_invitation(&effects, &imported.invitation_id)
+            .accept_invitation(effects.clone(), &imported.invitation_id)
             .await
             .unwrap();
 
@@ -1770,7 +2131,7 @@ mod tests {
         let receiver_id = AuthorityId::new_from_entropy([125u8; 32]);
         let invitation = handler_create
             .create_invitation(
-                &effects,
+                effects.clone(),
                 receiver_id,
                 InvitationType::Contact {
                     nickname: Some("Bob".to_string()),
@@ -1800,15 +2161,14 @@ mod tests {
     #[tokio::test]
     async fn invitation_can_be_cancelled() {
         let authority_context = create_test_authority(98);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         let receiver_id = AuthorityId::new_from_entropy([99u8; 32]);
 
         let invitation = handler
             .create_invitation(
-                &effects,
+                effects.clone(),
                 receiver_id,
                 InvitationType::Contact { nickname: None },
                 None,
@@ -1833,14 +2193,13 @@ mod tests {
     #[tokio::test]
     async fn list_pending_shows_only_pending() {
         let authority_context = create_test_authority(100);
-        let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let effects = effects_for(&authority_context);
         let handler = InvitationHandler::new(authority_context).unwrap();
 
         // Create 3 invitations
         let inv1 = handler
             .create_invitation(
-                &effects,
+                effects.clone(),
                 AuthorityId::new_from_entropy([101u8; 32]),
                 InvitationType::Contact { nickname: None },
                 None,
@@ -1851,7 +2210,7 @@ mod tests {
 
         let inv2 = handler
             .create_invitation(
-                &effects,
+                effects.clone(),
                 AuthorityId::new_from_entropy([102u8; 32]),
                 InvitationType::Contact { nickname: None },
                 None,
@@ -1862,7 +2221,7 @@ mod tests {
 
         let _inv3 = handler
             .create_invitation(
-                &effects,
+                effects.clone(),
                 AuthorityId::new_from_entropy([103u8; 32]),
                 InvitationType::Contact { nickname: None },
                 None,
@@ -1873,11 +2232,11 @@ mod tests {
 
         // Accept one, decline another
         handler
-            .accept_invitation(&effects, &inv1.invitation_id)
+            .accept_invitation(effects.clone(), &inv1.invitation_id)
             .await
             .unwrap();
         handler
-            .decline_invitation(&effects, &inv2.invitation_id)
+            .decline_invitation(effects.clone(), &inv2.invitation_id)
             .await
             .unwrap();
 

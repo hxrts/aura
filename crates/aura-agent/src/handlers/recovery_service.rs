@@ -9,9 +9,32 @@ use super::recovery::{
 };
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::RandomCoreEffects;
+use aura_core::crypto::Ed25519Signature;
+use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
 use aura_core::identifiers::{AuthorityId, RecoveryId};
+use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::util::serialization::from_slice;
+use aura_core::hash::hash;
+use aura_protocol::effects::TreeEffects;
+use aura_recovery::ceremony_runners::{execute_as as guardian_execute_as, GuardianCeremonyRole};
+use aura_recovery::guardian_ceremony::{
+    CeremonyAbort, CeremonyCommit, CeremonyProposal, CeremonyResponse, CeremonyResponseMsg,
+    GuardianRotationOp,
+};
+use aura_recovery::guardian_setup::{GuardianAcceptance, GuardianInvitation, SetupCompletion};
+use aura_recovery::recovery_protocol::{
+    GuardianApproval as ProtocolGuardianApproval,
+    RecoveryOperation as ProtocolRecoveryOperation,
+    RecoveryOutcome,
+    RecoveryRequest as ProtocolRecoveryRequest,
+};
+use aura_recovery::recovery_runners::{execute_as as recovery_execute_as, RecoveryProtocolRole};
+use aura_recovery::setup_runners::{execute_as as setup_execute_as, GuardianSetupRole};
+use aura_recovery::types::{GuardianProfile, GuardianSet};
+use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Recovery service API
 ///
@@ -57,7 +80,8 @@ impl RecoveryServiceApi {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
-        self.handler
+        let request = self
+            .handler
             .initiate(
                 &self.effects,
                 RecoveryOperation::AddDevice { device_public_key },
@@ -66,7 +90,9 @@ impl RecoveryServiceApi {
                 justification,
                 expires_in_ms,
             )
-            .await
+            .await?;
+        self.spawn_recovery_protocol(&request).await?;
+        Ok(request)
     }
 
     /// Initiate a recovery ceremony to remove a compromised device
@@ -88,7 +114,8 @@ impl RecoveryServiceApi {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
-        self.handler
+        let request = self
+            .handler
             .initiate(
                 &self.effects,
                 RecoveryOperation::RemoveDevice { leaf_index },
@@ -97,7 +124,9 @@ impl RecoveryServiceApi {
                 justification,
                 expires_in_ms,
             )
-            .await
+            .await?;
+        self.spawn_recovery_protocol(&request).await?;
+        Ok(request)
     }
 
     /// Initiate a full tree replacement recovery
@@ -119,7 +148,8 @@ impl RecoveryServiceApi {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
-        self.handler
+        let request = self
+            .handler
             .initiate(
                 &self.effects,
                 RecoveryOperation::ReplaceTree { new_public_key },
@@ -128,7 +158,9 @@ impl RecoveryServiceApi {
                 justification,
                 expires_in_ms,
             )
-            .await
+            .await?;
+        self.spawn_recovery_protocol(&request).await?;
+        Ok(request)
     }
 
     /// Initiate a guardian set update
@@ -152,7 +184,8 @@ impl RecoveryServiceApi {
         justification: String,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<RecoveryRequest> {
-        self.handler
+        let request = self
+            .handler
             .initiate(
                 &self.effects,
                 RecoveryOperation::UpdateGuardians {
@@ -164,7 +197,9 @@ impl RecoveryServiceApi {
                 justification,
                 expires_in_ms,
             )
-            .await
+            .await?;
+        self.spawn_recovery_protocol(&request).await?;
+        Ok(request)
     }
 
     /// Submit a guardian approval for an active recovery
@@ -175,7 +210,19 @@ impl RecoveryServiceApi {
     /// # Returns
     /// The updated recovery state
     pub async fn submit_approval(&self, approval: GuardianApproval) -> AgentResult<RecoveryState> {
-        self.handler.submit_approval(&self.effects, approval).await
+        let state = self
+            .handler
+            .submit_approval(&self.effects, approval.clone())
+            .await?;
+        if let Some(recovery) = self.handler.get_recovery(&approval.recovery_id).await {
+            let _ = self
+                .execute_recovery_protocol_guardian(
+                    &approval,
+                    recovery.request.account_authority,
+                )
+                .await;
+        }
+        Ok(state)
     }
 
     /// Complete a recovery ceremony
@@ -240,6 +287,141 @@ impl RecoveryServiceApi {
                 | Some(RecoveryState::CollectingShares { .. })
                 | Some(RecoveryState::Reconstructing { .. })
         )
+    }
+
+    async fn spawn_recovery_protocol(&self, request: &RecoveryRequest) -> AgentResult<()> {
+        let protocol_request = self.map_recovery_request(request).await?;
+        let guardians = request.guardians.clone();
+        let effects = self.effects.clone();
+        let authority_id = self.handler.authority_context().authority_id();
+
+        for guardian_id in guardians {
+            let protocol_request = protocol_request.clone();
+            let effects = effects.clone();
+            tokio::spawn(async move {
+                let account_fut = execute_recovery_protocol_account(
+                    effects.clone(),
+                    authority_id,
+                    guardian_id,
+                    protocol_request.clone(),
+                );
+                let coordinator_fut = execute_recovery_protocol_coordinator(
+                    effects.clone(),
+                    authority_id,
+                    guardian_id,
+                    protocol_request.clone(),
+                );
+                let _ = tokio::join!(account_fut, coordinator_fut);
+            });
+        }
+
+        Ok(())
+    }
+
+    async fn map_recovery_request(
+        &self,
+        request: &RecoveryRequest,
+    ) -> AgentResult<ProtocolRecoveryRequest> {
+        use crate::core::AgentError;
+        use aura_core::tree::LeafPublicKey;
+        use std::collections::BTreeMap;
+
+        let new_tree_commitment = self
+            .effects
+            .get_current_commitment()
+            .await
+            .map_err(|e| AgentError::effects(format!("get tree commitment: {e}")))?;
+
+        let operation = match &request.operation {
+            RecoveryOperation::ReplaceTree { new_public_key } => {
+                let pkg = aura_core::frost::PublicKeyPackage::new(
+                    new_public_key.clone(),
+                    BTreeMap::new(),
+                    1,
+                    1,
+                );
+                ProtocolRecoveryOperation::ReplaceTree { new_public_key: pkg }
+            }
+            RecoveryOperation::AddDevice { device_public_key } => {
+                let key = LeafPublicKey::try_from(device_public_key.clone()).map_err(|e| {
+                    AgentError::invalid(format!("Invalid device public key: {e}"))
+                })?;
+                ProtocolRecoveryOperation::AddDevice { device_public_key: key }
+            }
+            RecoveryOperation::RemoveDevice { leaf_index } => {
+                ProtocolRecoveryOperation::RemoveDevice { leaf_index: *leaf_index }
+            }
+            RecoveryOperation::UpdateGuardians {
+                new_guardians,
+                new_threshold,
+            } => ProtocolRecoveryOperation::UpdateGuardians {
+                new_guardians: new_guardians.clone(),
+                new_threshold: *new_threshold,
+            },
+        };
+
+        Ok(ProtocolRecoveryRequest {
+            recovery_id: request.recovery_id.clone(),
+            account_authority: request.account_authority,
+            new_tree_commitment,
+            operation,
+            justification: request.justification.clone(),
+        })
+    }
+
+    async fn execute_recovery_protocol_guardian(
+        &self,
+        approval: &GuardianApproval,
+        account_authority: AuthorityId,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let signature = Ed25519Signature::try_from(approval.signature.clone()).map_err(|e| {
+            AgentError::invalid(format!("Invalid guardian signature: {e}"))
+        })?;
+
+        let protocol_approval = ProtocolGuardianApproval {
+            guardian_id: approval.guardian_id,
+            recovery_id: approval.recovery_id.clone(),
+            signature,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: approval.approved_at,
+                uncertainty: None,
+            }),
+        };
+
+        let mut role_map = HashMap::new();
+        role_map.insert(RecoveryProtocolRole::Account, account_authority);
+        role_map.insert(RecoveryProtocolRole::Coordinator, account_authority);
+        role_map.insert(RecoveryProtocolRole::Guardian, approval.guardian_id);
+
+        let approval_type = std::any::type_name::<ProtocolGuardianApproval>();
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            approval.guardian_id,
+            RecoveryProtocolRole::Guardian,
+            role_map,
+        )
+        .with_message_provider(move |request_ctx, _received| {
+            if request_ctx.type_name == approval_type {
+                return Some(Box::new(protocol_approval.clone()));
+            }
+            None
+        });
+
+        let session_id = recovery_session_id(&approval.recovery_id, &approval.guardian_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("recovery guardian start failed: {e}")))?;
+
+        let result = recovery_execute_as(RecoveryProtocolRole::Guardian, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("recovery guardian failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
     }
 
     /// Prepare guardian ceremony by generating FROST threshold keys
@@ -511,6 +693,416 @@ impl RecoveryServiceApi {
         Ok(())
     }
 
+    /// Execute guardian ceremony as initiator using choreographic protocol.
+    pub async fn execute_guardian_ceremony_initiator(
+        &self,
+        ceremony_id: aura_recovery::CeremonyId,
+        prestate_hash: aura_core::Hash32,
+        operation: GuardianRotationOp,
+        guardians: Vec<AuthorityId>,
+        key_packages: Vec<Vec<u8>>,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        if guardians.len() != key_packages.len() {
+            return Err(AgentError::invalid(
+                "guardian list and key package length mismatch",
+            ));
+        }
+
+        let authority_id = self.handler.authority_context().authority_id();
+        let mut role_map = HashMap::new();
+        role_map.insert(GuardianCeremonyRole::Initiator, authority_id);
+
+        let guardian_roles: Vec<GuardianCeremonyRole> = (0..guardians.len())
+            .map(|i| GuardianCeremonyRole::Guardian(i as u32))
+            .collect();
+
+        for (idx, guardian_id) in guardians.iter().enumerate() {
+            role_map.insert(GuardianCeremonyRole::Guardian(idx as u32), *guardian_id);
+        }
+
+        let mut proposals = VecDeque::new();
+        for (_guardian_id, key_package) in guardians.iter().zip(key_packages.iter()) {
+            let nonce_bytes = self.effects.random_bytes(12).await;
+            let mut encryption_nonce = [0u8; 12];
+            encryption_nonce.copy_from_slice(&nonce_bytes[..12]);
+            let ephemeral_public_key = self.effects.random_bytes(32).await;
+            proposals.push_back(CeremonyProposal {
+                ceremony_id,
+                initiator_id: authority_id,
+                prestate_hash,
+                operation: operation.clone(),
+                encrypted_key_package: key_package.clone(),
+                encryption_nonce,
+                ephemeral_public_key,
+            });
+        }
+
+        let threshold_k = operation.threshold_k as usize;
+        let proposal_type = std::any::type_name::<CeremonyProposal>();
+        let commit_type = std::any::type_name::<CeremonyCommit>();
+        let abort_type = std::any::type_name::<CeremonyAbort>();
+        let response_type = std::any::type_name::<CeremonyResponseMsg>();
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            GuardianCeremonyRole::Initiator,
+            role_map,
+        )
+        .with_role_family("Guardian", guardian_roles)
+        .with_message_provider(move |request, received| {
+            if request.type_name == proposal_type {
+                return proposals
+                    .pop_front()
+                    .map(|proposal| Box::new(proposal) as Box<dyn std::any::Any + Send>);
+            }
+
+            if request.type_name == commit_type {
+                let mut accepted = Vec::new();
+                for msg in received {
+                    if msg.type_name == response_type {
+                        if let Ok(response) =
+                            from_slice::<CeremonyResponseMsg>(&msg.bytes)
+                        {
+                            if response.response == CeremonyResponse::Accept {
+                                accepted.push(response.guardian_id);
+                            }
+                        }
+                    }
+                }
+                let commit = CeremonyCommit {
+                    ceremony_id,
+                    new_epoch: operation.new_epoch,
+                    threshold_signature: Vec::new(),
+                    participants: accepted,
+                };
+                return Some(Box::new(commit));
+            }
+
+            if request.type_name == abort_type {
+                let mut declined = false;
+                for msg in received {
+                    if msg.type_name == response_type {
+                        if let Ok(response) =
+                            from_slice::<CeremonyResponseMsg>(&msg.bytes)
+                        {
+                            if response.response == CeremonyResponse::Decline {
+                                declined = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                let reason = if declined {
+                    "guardian_declined"
+                } else {
+                    "threshold_not_met"
+                };
+                let abort = CeremonyAbort {
+                    ceremony_id,
+                    reason: reason.to_string(),
+                };
+                return Some(Box::new(abort));
+            }
+
+            None
+        })
+        .with_branch_decider(move |received| {
+            let mut accepted = 0usize;
+            let mut declined = 0usize;
+            for msg in received {
+                if msg.type_name == response_type {
+                    if let Ok(response) = from_slice::<CeremonyResponseMsg>(&msg.bytes) {
+                        match response.response {
+                            CeremonyResponse::Accept => accepted += 1,
+                            CeremonyResponse::Decline => declined += 1,
+                            CeremonyResponse::Pending => {}
+                        }
+                    }
+                }
+            }
+            if declined > 0 {
+                Some("Abort".to_string())
+            } else if accepted >= threshold_k {
+                Some("Commit".to_string())
+            } else {
+                Some("Abort".to_string())
+            }
+        });
+
+        let session_id = Self::ceremony_session_id(ceremony_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian ceremony start failed: {e}")))?;
+
+        let result = guardian_execute_as(GuardianCeremonyRole::Initiator, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian ceremony failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    /// Execute guardian ceremony as a guardian (accept/decline).
+    pub async fn execute_guardian_ceremony_guardian(
+        &self,
+        initiator_id: AuthorityId,
+        ceremony_id: aura_recovery::CeremonyId,
+        response: CeremonyResponse,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.handler.authority_context().authority_id();
+        let mut role_map = HashMap::new();
+        role_map.insert(GuardianCeremonyRole::Initiator, initiator_id);
+
+        let response_type = std::any::type_name::<CeremonyResponseMsg>();
+        let response_msg = CeremonyResponseMsg {
+            ceremony_id,
+            guardian_id: authority_id,
+            response,
+            signature: Vec::new(),
+        };
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            GuardianCeremonyRole::Guardian(0),
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if request.type_name == response_type {
+                return Some(Box::new(response_msg.clone()));
+            }
+            None
+        });
+
+        let session_id = Self::ceremony_session_id(ceremony_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian ceremony start failed: {e}")))?;
+
+        let result = guardian_execute_as(GuardianCeremonyRole::Guardian(0), &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian ceremony failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    /// Execute guardian setup ceremony as initiator using choreographic protocol.
+    pub async fn execute_guardian_setup_initiator(
+        &self,
+        account_id: AuthorityId,
+        guardians: Vec<AuthorityId>,
+        threshold: u16,
+    ) -> AgentResult<(String, SetupCompletion)> {
+        let setup_id = self.build_guardian_setup_id(account_id).await?;
+        let completion = self
+            .execute_guardian_setup_initiator_with_id(
+                &setup_id,
+                account_id,
+                guardians,
+                threshold,
+            )
+            .await?;
+        Ok((setup_id, completion))
+    }
+
+    /// Execute guardian setup ceremony with a known setup id.
+    pub async fn execute_guardian_setup_initiator_with_id(
+        &self,
+        setup_id: &str,
+        account_id: AuthorityId,
+        guardians: Vec<AuthorityId>,
+        threshold: u16,
+    ) -> AgentResult<SetupCompletion> {
+        use crate::core::AgentError;
+
+        validate_guardian_setup_inputs(&guardians, threshold)?;
+
+        let authority_id = self.handler.authority_context().authority_id();
+        let timestamp = self.guardian_setup_timestamp().await?;
+
+        let mut invitations = VecDeque::new();
+        for _ in 0..guardians.len() {
+            invitations.push_back(GuardianInvitation {
+                setup_id: setup_id.to_string(),
+                account_id,
+                target_guardians: guardians.clone(),
+                threshold,
+                timestamp: timestamp.clone(),
+            });
+        }
+
+        let mut role_map = HashMap::new();
+        role_map.insert(GuardianSetupRole::SetupInitiator, authority_id);
+        role_map.insert(GuardianSetupRole::Guardian1, guardians[0]);
+        role_map.insert(GuardianSetupRole::Guardian2, guardians[1]);
+        role_map.insert(GuardianSetupRole::Guardian3, guardians[2]);
+
+        let invitation_type = std::any::type_name::<GuardianInvitation>();
+        let completion_type = std::any::type_name::<SetupCompletion>();
+        let acceptance_type = std::any::type_name::<GuardianAcceptance>();
+
+        let setup_id_owned = setup_id.to_string();
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            GuardianSetupRole::SetupInitiator,
+            role_map,
+        )
+        .with_message_provider(move |request, received| {
+            if request.type_name == invitation_type {
+                return invitations
+                    .pop_front()
+                    .map(|inv| Box::new(inv) as Box<dyn std::any::Any + Send>);
+            }
+
+            if request.type_name == completion_type {
+                let acceptances = collect_guardian_acceptances(received, acceptance_type);
+                let completion = build_guardian_setup_completion(
+                    &setup_id_owned,
+                    threshold,
+                    acceptances,
+                );
+                return Some(Box::new(completion));
+            }
+
+            None
+        });
+
+        let session_id = guardian_setup_session_id(setup_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian setup start failed: {e}")))?;
+
+        let result = setup_execute_as(GuardianSetupRole::SetupInitiator, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian setup failed: {e}")));
+
+        let acceptances =
+            collect_guardian_acceptances(adapter.received_messages(), acceptance_type);
+        let completion =
+            build_guardian_setup_completion(setup_id, threshold, acceptances);
+
+        let _ = adapter.end_session().await;
+        result.map(|_| completion)
+    }
+
+    /// Execute guardian setup ceremony as a guardian (accept/decline).
+    pub async fn execute_guardian_setup_guardian(
+        &self,
+        invitation: GuardianInvitation,
+        accepted: bool,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        validate_guardian_setup_inputs(&invitation.target_guardians, invitation.threshold)?;
+
+        let authority_id = self.handler.authority_context().authority_id();
+        let guardian_index = invitation
+            .target_guardians
+            .iter()
+            .position(|id| *id == authority_id)
+            .ok_or_else(|| {
+                AgentError::invalid("Guardian not listed in setup invitation".to_string())
+            })?;
+
+        let guardian_role = match guardian_index {
+            0 => GuardianSetupRole::Guardian1,
+            1 => GuardianSetupRole::Guardian2,
+            2 => GuardianSetupRole::Guardian3,
+            _ => {
+                return Err(AgentError::invalid(
+                    "Guardian setup requires exactly three guardians".to_string(),
+                ))
+            }
+        };
+
+        let mut role_map = HashMap::new();
+        role_map.insert(GuardianSetupRole::SetupInitiator, invitation.account_id);
+        role_map.insert(GuardianSetupRole::Guardian1, invitation.target_guardians[0]);
+        role_map.insert(GuardianSetupRole::Guardian2, invitation.target_guardians[1]);
+        role_map.insert(GuardianSetupRole::Guardian3, invitation.target_guardians[2]);
+
+        let acceptance_type = std::any::type_name::<GuardianAcceptance>();
+        let setup_id = invitation.setup_id.clone();
+        let timestamp = self.guardian_setup_timestamp().await?;
+        let (_, public_key) = self
+            .effects
+            .ed25519_generate_keypair()
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian keygen failed: {e}")))?;
+        let acceptance = GuardianAcceptance {
+            guardian_id: authority_id,
+            setup_id: setup_id.clone(),
+            accepted,
+            public_key,
+            timestamp,
+        };
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            guardian_role,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if request.type_name == acceptance_type {
+                return Some(Box::new(acceptance.clone()));
+            }
+            None
+        });
+
+        let session_id = guardian_setup_session_id(&setup_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian setup start failed: {e}")))?;
+
+        let result = setup_execute_as(guardian_role, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("guardian setup failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    fn ceremony_session_id(ceremony_id: aura_recovery::CeremonyId) -> Uuid {
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&ceremony_id.0 .0[..16]);
+        Uuid::from_bytes(bytes)
+    }
+
+    async fn build_guardian_setup_id(&self, account_id: AuthorityId) -> AgentResult<String> {
+        let now_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or_default();
+        Ok(format!("setup_{}_{}", account_id, now_ms))
+    }
+
+    async fn guardian_setup_timestamp(&self) -> AgentResult<TimeStamp> {
+        let now_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or_default();
+        Ok(TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: now_ms,
+            uncertainty: None,
+        }))
+    }
+
     /// Process incoming guardian acceptance responses from transport
     ///
     /// This method should be called periodically to check for acceptance messages
@@ -557,6 +1149,209 @@ impl RecoveryServiceApi {
         }
 
         Ok(acceptances)
+    }
+}
+
+async fn execute_recovery_protocol_account(
+    effects: Arc<AuraEffectSystem>,
+    authority_id: AuthorityId,
+    guardian_id: AuthorityId,
+    request: ProtocolRecoveryRequest,
+) -> AgentResult<()> {
+    use crate::core::AgentError;
+
+    let mut role_map = HashMap::new();
+    role_map.insert(RecoveryProtocolRole::Account, authority_id);
+    role_map.insert(RecoveryProtocolRole::Coordinator, authority_id);
+    role_map.insert(RecoveryProtocolRole::Guardian, guardian_id);
+
+    let request_type = std::any::type_name::<ProtocolRecoveryRequest>();
+
+    let session_id = recovery_session_id(&request.recovery_id, &guardian_id);
+    let request_clone = request.clone();
+    let mut adapter = AuraProtocolAdapter::new(
+        effects.clone(),
+        authority_id,
+        RecoveryProtocolRole::Account,
+        role_map,
+    )
+    .with_message_provider(move |request_ctx, _received| {
+        if request_ctx.type_name == request_type {
+            return Some(Box::new(request_clone.clone()));
+        }
+        None
+    });
+    adapter
+        .start_session(session_id)
+        .await
+        .map_err(|e| AgentError::internal(format!("recovery account start failed: {e}")))?;
+
+    let result = recovery_execute_as(RecoveryProtocolRole::Account, &mut adapter)
+        .await
+        .map_err(|e| AgentError::internal(format!("recovery account failed: {e}")));
+
+    let _ = adapter.end_session().await;
+    result
+}
+
+async fn execute_recovery_protocol_coordinator(
+    effects: Arc<AuraEffectSystem>,
+    authority_id: AuthorityId,
+    guardian_id: AuthorityId,
+    request: ProtocolRecoveryRequest,
+) -> AgentResult<()> {
+    use crate::core::AgentError;
+
+    let mut role_map = HashMap::new();
+    role_map.insert(RecoveryProtocolRole::Account, authority_id);
+    role_map.insert(RecoveryProtocolRole::Coordinator, authority_id);
+    role_map.insert(RecoveryProtocolRole::Guardian, guardian_id);
+
+    let request_type = std::any::type_name::<ProtocolRecoveryRequest>();
+    let approval_type = std::any::type_name::<ProtocolGuardianApproval>();
+    let outcome_type = std::any::type_name::<RecoveryOutcome>();
+
+    let session_id = recovery_session_id(&request.recovery_id, &guardian_id);
+    let request_clone = request.clone();
+    let mut adapter = AuraProtocolAdapter::new(
+        effects.clone(),
+        authority_id,
+        RecoveryProtocolRole::Coordinator,
+        role_map,
+    )
+    .with_message_provider(move |request_ctx, received| {
+        if request_ctx.type_name == request_type {
+            return Some(Box::new(request_clone.clone()));
+        }
+
+        if request_ctx.type_name == outcome_type {
+            let mut approvals = Vec::new();
+            for msg in received {
+                if msg.type_name == approval_type {
+                    if let Ok(approval) =
+                        from_slice::<ProtocolGuardianApproval>(&msg.bytes)
+                    {
+                        approvals.push(approval);
+                    }
+                }
+            }
+            let success = !approvals.is_empty();
+            let outcome = RecoveryOutcome {
+                success,
+                recovery_grant: None,
+                error: if success {
+                    None
+                } else {
+                    Some("no approvals".to_string())
+                },
+                approvals,
+            };
+            return Some(Box::new(outcome));
+        }
+
+        None
+    });
+
+    adapter
+        .start_session(session_id)
+        .await
+        .map_err(|e| AgentError::internal(format!("recovery coordinator start failed: {e}")))?;
+
+    let result = recovery_execute_as(RecoveryProtocolRole::Coordinator, &mut adapter)
+        .await
+        .map_err(|e| AgentError::internal(format!("recovery coordinator failed: {e}")));
+
+    let _ = adapter.end_session().await;
+    result
+}
+
+fn recovery_session_id(recovery_id: &RecoveryId, guardian_id: &AuthorityId) -> Uuid {
+    let mut material = Vec::new();
+    material.extend_from_slice(recovery_id.as_str().as_bytes());
+    material.extend_from_slice(&guardian_id.to_bytes());
+    let digest = hash(&material);
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
+}
+
+fn guardian_setup_session_id(setup_id: &str) -> Uuid {
+    let digest = hash(setup_id.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
+}
+
+fn validate_guardian_setup_inputs(
+    guardians: &[AuthorityId],
+    threshold: u16,
+) -> AgentResult<()> {
+    use crate::core::AgentError;
+
+    if guardians.len() != 3 {
+        return Err(AgentError::invalid(
+            "Guardian setup requires exactly three guardians".to_string(),
+        ));
+    }
+
+    if threshold == 0 {
+        return Err(AgentError::invalid(
+            "Guardian setup threshold must be at least 1".to_string(),
+        ));
+    }
+
+    if threshold as usize > guardians.len() {
+        return Err(AgentError::invalid(format!(
+            "Guardian setup threshold {} exceeds guardian count {}",
+            threshold,
+            guardians.len()
+        )));
+    }
+
+    Ok(())
+}
+
+fn collect_guardian_acceptances(
+    received: &[ReceivedMessage],
+    acceptance_type: &'static str,
+) -> Vec<GuardianAcceptance> {
+    let mut acceptances = Vec::new();
+    for msg in received {
+        if msg.type_name == acceptance_type {
+            if let Ok(acceptance) = from_slice::<GuardianAcceptance>(&msg.bytes) {
+                acceptances.push(acceptance);
+            }
+        }
+    }
+    acceptances
+}
+
+fn build_guardian_setup_completion(
+    setup_id: &str,
+    threshold: u16,
+    acceptances: Vec<GuardianAcceptance>,
+) -> SetupCompletion {
+    let accepted_guardians: Vec<AuthorityId> = acceptances
+        .iter()
+        .filter(|acceptance| acceptance.accepted)
+        .map(|acceptance| acceptance.guardian_id)
+        .collect();
+
+    let guardian_set = GuardianSet::new(
+        accepted_guardians
+            .iter()
+            .copied()
+            .map(GuardianProfile::new)
+            .collect(),
+    );
+
+    SetupCompletion {
+        setup_id: setup_id.to_string(),
+        success: accepted_guardians.len() >= threshold as usize,
+        guardian_set,
+        threshold,
+        encrypted_shares: Vec::new(),
+        public_key_package: Vec::new(),
     }
 }
 

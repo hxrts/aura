@@ -104,6 +104,15 @@ pub use epochs::{
     EpochRotationProposal, RotationStatus,
 };
 
+/// Re-exports for EpochRotation choreography runners
+pub mod epoch_runners {
+    pub use crate::protocols::epochs::rumpsteak_session_types_epoch_rotation::epoch_rotation::EpochRotationProtocolRole;
+    pub use crate::protocols::epochs::rumpsteak_session_types_epoch_rotation::epoch_rotation::runners::{
+        execute_as, run_coordinator, run_participant1, run_participant2,
+        CoordinatorOutput, Participant1Output, Participant2Output,
+    };
+}
+
 pub use ota_ceremony::{
     OTACeremonyConfig, OTACeremonyEffects, OTACeremonyExecutor, OTACeremonyFact, OTACeremonyId,
     OTACeremonyState, OTACeremonyStatus, ReadinessCommitment,

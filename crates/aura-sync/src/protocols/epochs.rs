@@ -8,8 +8,7 @@ use crate::core::sync_protocol_error;
 use aura_core::time::PhysicalTime;
 use aura_core::types::Epoch;
 use aura_core::{AuraError, ContextId, DeviceId};
-// Note: aura-sync intentionally avoids aura-macros for semantic independence
-// use aura_macros::choreography;
+use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -266,11 +265,4 @@ impl EpochRotationCoordinator {
 
 // Choreographic Protocol Definition
 // Coordinated epoch rotation across multiple participants
-// NOTE: Choreography block commented out to maintain aura-sync's semantic independence.
-// This protocol should be implemented using pure effect composition instead of macros.
-//
-// BISCUIT INTEGRATION: When re-enabling choreography, these guard_capability annotations
-// are compatible with BiscuitGuardEvaluator for token-based authorization.
-/*
 choreography!(include_str!("src/protocols/epochs.choreo"));
-*/

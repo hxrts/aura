@@ -346,7 +346,7 @@ mod tests {
         let device1 = make_device_id(1);
         let device2 = make_device_id(2);
 
-        let (bus, mut transports) = SimulatedTransport::create_network(&[device1, device2]);
+        let (_bus, transports) = SimulatedTransport::create_network(&[device1, device2]);
 
         let transport1 = &transports[0];
         let transport2 = &transports[1];
@@ -374,7 +374,7 @@ mod tests {
         let device1 = make_device_id(1);
         let device2 = make_device_id(2);
 
-        let (bus, transports) = SimulatedTransport::create_network(&[device1, device2]);
+        let (_bus, transports) = SimulatedTransport::create_network(&[device1, device2]);
 
         let transport1 = &transports[0];
         let transport2 = &transports[1];

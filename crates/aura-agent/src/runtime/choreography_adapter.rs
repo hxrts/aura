@@ -42,6 +42,21 @@ impl AuraHandlerAdapter {
     }
 }
 
+/// Metadata captured for received choreography messages.
+#[derive(Debug, Clone)]
+pub struct ReceivedMessage {
+    pub type_name: &'static str,
+    pub bytes: Vec<u8>,
+}
+
+/// Request passed to dynamic message providers.
+#[derive(Debug)]
+pub struct MessageRequest<R: RoleId> {
+    #[allow(dead_code)]
+    pub to: R,
+    pub type_name: &'static str,
+}
+
 /// Runtime adapter used by generated choreography runners.
 ///
 /// This adapter implements the `ChoreographicAdapter` trait from rumpsteak-aura,
@@ -52,7 +67,6 @@ impl AuraHandlerAdapter {
 /// For protocols with parameterized roles (e.g., `Witness[N]`), use `with_role_family()`
 /// to register role instances that can be resolved during broadcast/collect operations.
 #[allow(dead_code)]
-#[derive(Debug)]
 pub struct AuraProtocolAdapter<E, R>
 where
     E: ChoreographicEffects + ?Sized,
@@ -66,6 +80,11 @@ where
     role_families: HashMap<String, Vec<R>>,
     outbound: VecDeque<Box<dyn Any + Send>>,
     branch_choices: VecDeque<R::Label>,
+    received: Vec<ReceivedMessage>,
+    message_provider: Option<
+        Box<dyn FnMut(MessageRequest<R>, &[ReceivedMessage]) -> Option<Box<dyn Any + Send>> + Send>,
+    >,
+    branch_decider: Option<Box<dyn FnMut(&[ReceivedMessage]) -> Option<String> + Send>>,
 }
 
 #[allow(dead_code)]
@@ -96,6 +115,9 @@ where
             role_families: HashMap::new(),
             outbound: VecDeque::new(),
             branch_choices: VecDeque::new(),
+            received: Vec::new(),
+            message_provider: None,
+            branch_decider: None,
         }
     }
 
@@ -127,6 +149,26 @@ where
         self
     }
 
+    /// Provide outbound messages dynamically when the queue is empty.
+    pub fn with_message_provider(
+        mut self,
+        provider: impl FnMut(MessageRequest<R>, &[ReceivedMessage]) -> Option<Box<dyn Any + Send>>
+            + Send
+            + 'static,
+    ) -> Self {
+        self.message_provider = Some(Box::new(provider));
+        self
+    }
+
+    /// Provide branch decisions dynamically based on received messages.
+    pub fn with_branch_decider(
+        mut self,
+        decider: impl FnMut(&[ReceivedMessage]) -> Option<String> + Send + 'static,
+    ) -> Self {
+        self.branch_decider = Some(Box::new(decider));
+        self
+    }
+
     pub fn push_message<M: Message>(&mut self, message: M) {
         self.outbound.push_back(Box::new(message));
     }
@@ -135,7 +177,11 @@ where
         self.branch_choices.push_back(label);
     }
 
-    pub async fn start_session(&self, session_id: Uuid) -> Result<(), ChoreographyError> {
+    pub fn received_messages(&self) -> &[ReceivedMessage] {
+        &self.received
+    }
+
+    pub async fn start_session(&mut self, session_id: Uuid) -> Result<(), ChoreographyError> {
         let mut roles = Vec::new();
         let self_role = self.map_role(self.self_role)?;
         roles.push(self_role);
@@ -150,7 +196,7 @@ where
         self.effects.start_session(session_id, roles).await
     }
 
-    pub async fn end_session(&self) -> Result<(), ChoreographyError> {
+    pub async fn end_session(&mut self) -> Result<(), ChoreographyError> {
         self.effects.end_session().await
     }
 
@@ -202,6 +248,10 @@ where
     async fn recv<M: Message>(&mut self, from: Self::Role) -> Result<M, Self::Error> {
         let role = self.map_role(from)?;
         let payload = self.effects.receive_from_role_bytes(role).await?;
+        self.received.push(ReceivedMessage {
+            type_name: std::any::type_name::<M>(),
+            bytes: payload.clone(),
+        });
         from_slice(&payload).map_err(|err| ChoreographyError::DeserializationFailed {
             reason: err.to_string(),
         })
@@ -275,13 +325,29 @@ where
 {
     async fn provide_message<M: Message>(
         &mut self,
-        _to: Self::Role,
+        to: Self::Role,
     ) -> Result<M, Self::Error> {
-        let boxed = self.outbound.pop_front().ok_or_else(|| {
-            ChoreographyError::ProtocolViolation {
-                message: "no queued message for provide_message".to_string(),
+        let boxed = match self.outbound.pop_front() {
+            Some(boxed) => boxed,
+            None => {
+                if let Some(provider) = self.message_provider.as_mut() {
+                    provider(
+                        MessageRequest {
+                            to,
+                            type_name: std::any::type_name::<M>(),
+                        },
+                        &self.received,
+                    )
+                    .ok_or_else(|| ChoreographyError::ProtocolViolation {
+                        message: "message provider returned None".to_string(),
+                    })?
+                } else {
+                    return Err(ChoreographyError::ProtocolViolation {
+                        message: "no queued message for provide_message".to_string(),
+                    });
+                }
             }
-        })?;
+        };
 
         boxed.downcast::<M>().map(|msg| *msg).map_err(|_| {
             ChoreographyError::ProtocolViolation {
@@ -294,11 +360,28 @@ where
     }
 
     async fn select_branch<L: LabelId>(&mut self, choices: &[L]) -> Result<L, Self::Error> {
-        let choice = self.branch_choices.pop_front().ok_or_else(|| {
-            ChoreographyError::ProtocolViolation {
-                message: "no queued branch choice for select_branch".to_string(),
+        let choice = match self.branch_choices.pop_front() {
+            Some(choice) => choice,
+            None => {
+                if let Some(decider) = self.branch_decider.as_mut() {
+                    let label = decider(&self.received).ok_or_else(|| {
+                        ChoreographyError::ProtocolViolation {
+                            message: "branch decider returned None".to_string(),
+                        }
+                    })?;
+                    let selected = choices
+                        .iter()
+                        .copied()
+                        .find(|choice| choice.as_str() == label);
+                    return selected.ok_or_else(|| ChoreographyError::ProtocolViolation {
+                        message: "branch decider returned invalid label".to_string(),
+                    });
+                }
+                return Err(ChoreographyError::ProtocolViolation {
+                    message: "no queued branch choice for select_branch".to_string(),
+                });
             }
-        })?;
+        };
 
         let selected = choices
             .iter()

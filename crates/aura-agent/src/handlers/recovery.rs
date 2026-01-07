@@ -175,6 +175,11 @@ impl RecoveryHandler {
         self.recovery_manager.get_state(recovery_id).await
     }
 
+    /// Get the full recovery record (request + approvals)
+    pub(crate) async fn get_recovery(&self, recovery_id: &RecoveryId) -> Option<ActiveRecovery> {
+        self.recovery_manager.get_recovery(recovery_id).await
+    }
+
     /// Initiate a recovery ceremony
     pub async fn initiate(
         &self,

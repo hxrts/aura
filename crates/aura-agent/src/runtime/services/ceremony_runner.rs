@@ -20,6 +20,7 @@ use aura_core::{DeviceId, Hash32};
 pub struct CeremonyInitRequest {
     pub ceremony_id: CeremonyId,
     pub kind: CeremonyKind,
+    pub initiator_id: aura_core::identifiers::AuthorityId,
     pub threshold_k: u16,
     pub total_n: u16,
     pub participants: Vec<ParticipantIdentity>,
@@ -53,6 +54,7 @@ impl CeremonyRunner {
             .register_with_prestate(
                 request.ceremony_id,
                 request.kind,
+                request.initiator_id,
                 request.threshold_k,
                 request.total_n,
                 request.participants,

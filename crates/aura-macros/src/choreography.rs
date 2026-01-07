@@ -25,7 +25,7 @@ use syn::spanned::Spanned;
 use syn::{
     parse::Parse,
     visit_mut::{self, VisitMut},
-    Attribute, Expr, ExprLit, ExprMacro, Ident, Lit, LitStr, Stmt,
+    Attribute, Expr, ExprLit, ExprMacro, Ident, Lit, LitStr, Stmt, Type,
 };
 
 // Import Biscuit-related types for the updated annotation system
@@ -214,14 +214,20 @@ fn generate_helpers(messages: &[MessageType]) -> TokenStream {
     let message_structs = messages.iter().map(|msg| {
         let name = &msg.name;
         if let Some(payload) = &msg.payload {
+            let parsed: Type = syn::parse2(payload.clone())
+                .unwrap_or_else(|_| syn::parse2(payload.clone()).expect("payload type"));
+            let payload_ty = match parsed {
+                Type::Paren(paren) => *paren.elem,
+                other => other,
+            };
             quote! {
                 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-                struct #name #payload;
+                pub struct #name(pub #payload_ty);
             }
         } else {
             quote! {
                 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-                struct #name();
+                pub struct #name();
             }
         }
     });
@@ -583,8 +589,10 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     let parsed_input = parse_choreography_source(input.clone())?;
 
     // Generate the rumpsteak-aura choreography using namespace-aware functions
+    let message_type_names = extract_message_type_names(&parsed_input.choreography);
     let rumpsteak_output =
-        choreography_impl_namespace_aware(&parsed_input.choreography).unwrap_or_else(|err| {
+        choreography_impl_namespace_aware(&parsed_input.choreography, &message_type_names)
+            .unwrap_or_else(|err| {
         // If rumpsteak fails, generate a helpful error message but continue with Aura wrapper
         let _error_msg = err.to_string();
         quote! {
@@ -599,7 +607,6 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
 
     // Generate the Aura wrapper module with namespace support
     let namespace = parsed_input.namespace.clone();
-    let message_type_names = extract_message_type_names(&parsed_input.choreography);
     let aura_wrapper =
         generate_aura_wrapper(&parsed_input, namespace.as_deref(), &message_type_names);
 
@@ -1313,6 +1320,7 @@ fn generate_aura_wrapper(
 /// Uses the namespace-aware rumpsteak functions to avoid module conflicts
 fn choreography_impl_namespace_aware(
     choreography: &Choreography,
+    message_type_names: &[String],
 ) -> Result<TokenStream, syn::Error> {
     // Project to local types
     let mut local_types = Vec::new();
@@ -1384,12 +1392,29 @@ fn choreography_impl_namespace_aware(
         };
     };
 
+    let message_reexports = message_type_names.iter().map(|name| {
+        let ident = quote::format_ident!("{}", name);
+        quote! { pub use super::#ident; }
+    });
+
+    let message_wrapper_module = if message_type_names.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            /// Re-exported message wrapper types for choreography adapters.
+            pub mod message_wrappers {
+                #(#message_reexports)*
+            }
+        }
+    };
+
     Ok(quote! {
         /// Rumpsteak-aura generated session types and choreographic projections
         pub mod #module_name {
             #imports
             #helpers
             #generated_code
+            #message_wrapper_module
         }
     })
 }

@@ -147,10 +147,10 @@ pub struct FlowBudgetGuard;
 
 impl Guard for FlowBudgetGuard {
     fn evaluate(&self, snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
-        // Check if authority has sufficient budget
+        // Check if the sender has sufficient budget for the target peer.
         if !snapshot
             .budgets
-            .has_budget(&request.context, &request.authority, request.cost)
+            .has_budget(&request.context, &request.peer, request.cost)
         {
             return GuardOutcome::denied("Insufficient flow budget");
         }
@@ -300,13 +300,17 @@ mod tests {
         AuthorityId::new_from_entropy([72u8; 32])
     }
 
+    fn test_peer() -> AuthorityId {
+        AuthorityId::new_from_entropy([1u8; 32])
+    }
+
     fn test_context() -> aura_core::ContextId {
         aura_core::ContextId::new_from_entropy([73u8; 32])
     }
 
     fn test_snapshot() -> GuardSnapshot {
         let mut budgets = HashMap::new();
-        budgets.insert((test_context(), test_authority()), FlowCost::new(1000));
+        budgets.insert((test_context(), test_peer()), FlowCost::new(1000));
 
         let mut metadata = HashMap::new();
         metadata.insert("authz:test_op".to_string(), "allow".to_string());
@@ -339,16 +343,17 @@ mod tests {
         let guard = FlowBudgetGuard;
         let authority = test_authority();
         let context = test_context();
+        let peer = test_peer();
         let mut snapshot = test_snapshot();
 
         // Set up budget
         let mut budgets = HashMap::new();
-        budgets.insert((context, authority), FlowCost::new(1000));
+        budgets.insert((context, peer), FlowCost::new(1000));
         snapshot.budgets = FlowBudgetView::new(budgets);
 
         let request = GuardRequest::new(authority, "test_op", FlowCost::new(100))
             .with_context_id(context)
-            .with_peer(AuthorityId::new_from_entropy([1u8; 32]));
+            .with_peer(peer);
         let outcome = guard.evaluate(&snapshot, &request);
 
         assert!(outcome.is_authorized());
@@ -422,14 +427,16 @@ mod tests {
         let mut snapshot = test_snapshot();
         let authority = test_authority();
         let context = test_context();
+        let peer = test_peer();
 
         // Set up budget
         let mut budgets = HashMap::new();
-        budgets.insert((context, authority), FlowCost::new(1000));
+        budgets.insert((context, peer), FlowCost::new(1000));
         snapshot.budgets = FlowBudgetView::new(budgets);
 
         let request = GuardRequest::new(authority, "test_op", FlowCost::new(100))
             .with_context_id(context)
+            .with_peer(peer)
             .with_metadata_leakage(16);
 
         let outcome = chain.evaluate(&snapshot, &request);

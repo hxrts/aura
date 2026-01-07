@@ -6,8 +6,15 @@
 use super::auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult};
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::identifiers::{AccountId, DeviceId};
+use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use aura_authentication::dkd::{DkdMessage, DkdSessionId};
+use aura_authentication::dkd_runners::{execute_as as dkd_execute_as, DkdChoreographyRole};
+use aura_core::effects::PhysicalTimeEffects;
+use aura_core::hash;
+use aura_core::identifiers::{AccountId, AuthorityId, DeviceId};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Authentication service API
 ///
@@ -94,6 +101,158 @@ impl AuthServiceApi {
     pub fn supported_methods(&self) -> Vec<AuthMethod> {
         vec![AuthMethod::DeviceKey, AuthMethod::ThresholdSignature]
     }
+
+    // ========================================================================
+    // DKD Choreography (execute_as)
+    // ========================================================================
+
+    /// Execute DKD choreography as the initiator with a single participant.
+    pub async fn execute_dkd_initiator(
+        &self,
+        participant: AuthorityId,
+    ) -> AgentResult<DkdSessionId> {
+        use crate::core::AgentError;
+
+        let authority_id = self.handler.authority_context().authority_id();
+        let session_id = DkdSessionId::deterministic(&Uuid::new_v4().to_string());
+        let timestamp = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
+
+        let mut role_map = HashMap::new();
+        role_map.insert(DkdChoreographyRole::Initiator, authority_id);
+        role_map.insert(DkdChoreographyRole::Participant, participant);
+
+        let initiate_type = std::any::type_name::<DkdMessage>();
+
+        let mut outbound = VecDeque::new();
+        outbound.push_back(DkdMessage {
+            session_id: session_id.clone(),
+            message_type: "initiate".to_string(),
+            payload: hash::hash(format!("init:{}", session_id.0).as_bytes()).to_vec(),
+            sender: DeviceId::from_uuid(authority_id.0),
+            timestamp,
+        });
+        outbound.push_back(DkdMessage {
+            session_id: session_id.clone(),
+            message_type: "reveal_request".to_string(),
+            payload: hash::hash(format!("reveal:{}", session_id.0).as_bytes()).to_vec(),
+            sender: DeviceId::from_uuid(authority_id.0),
+            timestamp,
+        });
+        outbound.push_back(DkdMessage {
+            session_id: session_id.clone(),
+            message_type: "key_derived".to_string(),
+            payload: hash::hash(format!("key:{}", session_id.0).as_bytes()).to_vec(),
+            sender: DeviceId::from_uuid(authority_id.0),
+            timestamp,
+        });
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            DkdChoreographyRole::Initiator,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if request.type_name == initiate_type {
+                return outbound
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        let session_uuid = dkd_session_uuid(&session_id);
+        adapter
+            .start_session(session_uuid)
+            .await
+            .map_err(|e| AgentError::internal(format!("dkd start failed: {e}")))?;
+
+        let result = dkd_execute_as(DkdChoreographyRole::Initiator, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("dkd failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result.map(|_| session_id)
+    }
+
+    /// Execute DKD choreography as the participant for an existing session.
+    pub async fn execute_dkd_participant(
+        &self,
+        initiator: AuthorityId,
+        session_id: DkdSessionId,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.handler.authority_context().authority_id();
+        let timestamp = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
+
+        let mut role_map = HashMap::new();
+        role_map.insert(DkdChoreographyRole::Initiator, initiator);
+        role_map.insert(DkdChoreographyRole::Participant, authority_id);
+
+        let message_type = std::any::type_name::<DkdMessage>();
+
+        let mut outbound = VecDeque::new();
+        outbound.push_back(DkdMessage {
+            session_id: session_id.clone(),
+            message_type: "commitment".to_string(),
+            payload: hash::hash(format!("commit:{}", session_id.0).as_bytes()).to_vec(),
+            sender: DeviceId::from_uuid(authority_id.0),
+            timestamp,
+        });
+        outbound.push_back(DkdMessage {
+            session_id: session_id.clone(),
+            message_type: "reveal".to_string(),
+            payload: hash::hash(format!("reveal:{}", session_id.0).as_bytes()).to_vec(),
+            sender: DeviceId::from_uuid(authority_id.0),
+            timestamp,
+        });
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            DkdChoreographyRole::Participant,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if request.type_name == message_type {
+                return outbound
+                    .pop_front()
+                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        let session_uuid = dkd_session_uuid(&session_id);
+        adapter
+            .start_session(session_uuid)
+            .await
+            .map_err(|e| AgentError::internal(format!("dkd start failed: {e}")))?;
+
+        let result = dkd_execute_as(DkdChoreographyRole::Participant, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("dkd failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+}
+
+fn dkd_session_uuid(session_id: &DkdSessionId) -> Uuid {
+    let digest = hash::hash(session_id.0.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
 }
 
 #[cfg(test)]

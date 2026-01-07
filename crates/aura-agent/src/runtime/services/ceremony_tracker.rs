@@ -31,7 +31,7 @@ use aura_core::domain::status::{
     CeremonyResponse, CeremonyState as StatusCeremonyState, CeremonyStatus, ParticipantResponse,
     SupersessionReason as StatusSupersessionReason,
 };
-use aura_core::identifiers::CeremonyId;
+use aura_core::identifiers::{AuthorityId, CeremonyId};
 use aura_core::query::ConsensusId;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity};
 use aura_core::time::PhysicalTime;
@@ -115,6 +115,9 @@ pub struct TrackedCeremony {
 
     /// Ceremony kind
     pub kind: CeremonyKind,
+
+    /// Authority that initiated the ceremony
+    pub initiator_id: AuthorityId,
 
     /// Threshold required for completion (k)
     pub threshold_k: u16,
@@ -296,6 +299,7 @@ impl CeremonyTracker {
         &self,
         ceremony_id: CeremonyId,
         kind: CeremonyKind,
+        initiator_id: AuthorityId,
         threshold_k: u16,
         total_n: u16,
         participants: Vec<ParticipantIdentity>,
@@ -306,6 +310,7 @@ impl CeremonyTracker {
         self.register_with_prestate(
             ceremony_id,
             kind,
+            initiator_id,
             threshold_k,
             total_n,
             participants,
@@ -323,6 +328,7 @@ impl CeremonyTracker {
         &self,
         ceremony_id: CeremonyId,
         kind: CeremonyKind,
+        initiator_id: AuthorityId,
         threshold_k: u16,
         total_n: u16,
         participants: Vec<ParticipantIdentity>,
@@ -344,6 +350,7 @@ impl CeremonyTracker {
         let state = TrackedCeremony {
             ceremony_id: ceremony_id.clone(),
             kind,
+            initiator_id,
             threshold_k,
             total_n,
             participants: participants_set,
@@ -920,6 +927,7 @@ mod tests {
             .register(
                 ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
+                a,
                 2,
                 3,
                 vec![
@@ -954,6 +962,7 @@ mod tests {
             .register(
                 ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
+                a,
                 2,
                 3,
                 vec![
@@ -1005,6 +1014,7 @@ mod tests {
             .register(
                 ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
+                a,
                 2,
                 3,
                 vec![
@@ -1051,6 +1061,7 @@ mod tests {
             .register(
                 ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
+                a,
                 2,
                 2,
                 vec![
@@ -1097,6 +1108,7 @@ mod tests {
             .register(
                 ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
+                a,
                 2,
                 3,
                 vec![
@@ -1138,6 +1150,7 @@ mod tests {
             .register(
                 ceremony_id.clone(),
                 CeremonyKind::GuardianRotation,
+                a,
                 2,
                 3,
                 vec![
@@ -1166,12 +1179,14 @@ mod tests {
     async fn test_device_enrollment_ceremony_acceptance() {
         let tracker = CeremonyTracker::new();
         let device = DeviceId::new_from_entropy([9u8; 32]);
+        let initiator = AuthorityId::new_from_entropy([1u8; 32]);
         let ceremony_id = test_ceremony_id("ceremony-device-1");
 
         tracker
             .register(
                 ceremony_id.clone(),
                 CeremonyKind::DeviceEnrollment,
+                initiator,
                 1,
                 1,
                 vec![ParticipantIdentity::device(device)],
@@ -1202,12 +1217,14 @@ mod tests {
         let tracker = CeremonyTracker::new();
         let device_a = DeviceId::new_from_entropy([10u8; 32]);
         let device_b = DeviceId::new_from_entropy([11u8; 32]);
+        let initiator = AuthorityId::new_from_entropy([2u8; 32]);
         let ceremony_id = test_ceremony_id("ceremony-rotate-1");
 
         tracker
             .register(
                 ceremony_id.clone(),
                 CeremonyKind::DeviceRotation,
+                initiator,
                 2,
                 2,
                 vec![
@@ -1243,12 +1260,14 @@ mod tests {
         let tracker = CeremonyTracker::new();
         let device_a = DeviceId::new_from_entropy([12u8; 32]);
         let device_b = DeviceId::new_from_entropy([13u8; 32]);
+        let initiator = AuthorityId::new_from_entropy([3u8; 32]);
         let ceremony_id = test_ceremony_id("ceremony-remove-1");
 
         tracker
             .register(
                 ceremony_id.clone(),
                 CeremonyKind::DeviceRemoval,
+                initiator,
                 2,
                 2,
                 vec![
@@ -1313,6 +1332,7 @@ mod tests {
                 TrackedCeremony {
                     ceremony_id: CeremonyId::new("proptest"),
                     kind: CeremonyKind::GuardianRotation,
+                    initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
                     threshold_k: threshold,
                     total_n: participants_set.len() as u16,
                     participants: participants_set,
@@ -1354,6 +1374,7 @@ mod tests {
                     map.insert(test_ceremony_id("test"), TrackedCeremony {
                         ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
+                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
                         threshold_k: 1,
                         total_n: participants_set.len() as u16,
                         participants: participants_set,
@@ -1408,6 +1429,7 @@ mod tests {
                     map.insert(test_ceremony_id("test"), TrackedCeremony {
                         ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
+                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
                         threshold_k: 1,
                         total_n: num_participants as u16,
                         participants: participants_set.clone(),
@@ -1457,6 +1479,7 @@ mod tests {
                     map.insert(test_ceremony_id("test"), TrackedCeremony {
                         ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
+                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
                         threshold_k: threshold,
                         total_n: num_participants as u16,
                         participants: participants_set,
@@ -1517,6 +1540,7 @@ mod tests {
                     map.insert(test_ceremony_id("test"), TrackedCeremony {
                         ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
+                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
                         threshold_k: threshold,
                         total_n: num_participants as u16,
                         participants: participants_set,
@@ -1573,6 +1597,7 @@ mod tests {
                     map.insert(test_ceremony_id("test"), TrackedCeremony {
                         ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
+                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
                         threshold_k: 2,
                         total_n: 2,
                         participants: participants_set,
@@ -1631,6 +1656,7 @@ mod tests {
                     map.insert(test_ceremony_id("test"), TrackedCeremony {
                         ceremony_id: test_ceremony_id("test"),
                         kind: CeremonyKind::GuardianRotation,
+                        initiator_id: AuthorityId::new_from_entropy([0u8; 32]),
                         threshold_k: 2,
                         total_n: 2,
                         participants: participants_set,
