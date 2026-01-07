@@ -28,7 +28,7 @@ This uses the CLI scenario runner plus the simulator to execute the guardian set
 
 Once Bob adds Alice and Carol as guardians and configures the threshold to 2-of-3, subsequent signing operations that require guardian approval use the full FROST threshold protocol.
 
-See [Crypto Architecture](../116_crypto.md#7-signing-modes-single-signer-vs-threshold) for details on signing modes.
+See [Crypto Architecture](116_crypto.md#7-signing-modes-single-signer-vs-threshold) for details on signing modes.
 
 ## What Happens in Each Phase
 
@@ -57,7 +57,7 @@ See [Crypto Architecture](../116_crypto.md#7-signing-modes-single-signer-vs-thre
    - Guardian approval threshold (2) is met.
 
 7) **account_restoration**
-   - Threshold key recovery runs; Bob’s chat history is synchronized back.
+   - Threshold key recovery runs; Bob's chat history is synchronized back.
 
 8) **post_recovery_messaging**
    - Bob sends messages again and sees full history; group remains functional.

@@ -159,7 +159,7 @@ async fn test_account_creation_callback_flow() {
 ///
 /// **NOTE**: This is NOT a test of catastrophic guardian-based recovery!
 ///
-/// In true catastrophic recovery (see docs/demo/cli_recovery.md):
+/// In true catastrophic recovery (see docs/811_recovery_tui_demo.md):
 /// 1. Bob LOSES ALL DEVICES (no access to original device_id)
 /// 2. Bob creates a NEW device with a NEW device_id
 /// 3. Alice + Carol (guardians) provide key_shares and partial_signatures
@@ -323,7 +323,7 @@ async fn test_device_id_determinism() {
     println!("\n=== Device ID Determinism Test PASSED ===");
     println!("This validates device_id → authority_id is deterministic.");
     println!("\nFor REAL catastrophic recovery (guardian-based), see:");
-    println!("  docs/demo/cli_recovery.md");
+    println!("  docs/811_recovery_tui_demo.md");
     println!("  cargo run -p aura-terminal -- scenarios run --pattern cli_recovery_demo");
 }
 

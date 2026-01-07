@@ -36,6 +36,7 @@
 - [Maintenance and OTA Guide](808_maintenance_guide.md)
 - [Generative Testing Guide](809_generative_testing_guide.md)
 - [Reactive Signals Guide](810_reactive_signals_guide.md)
+- [Recovery TUI Demo](811_recovery_tui_demo.md)
 - [Verification Coverage](998_verification_coverage.md)
 - [Aura Crate Structure and Dependency Graph](999_project_structure.md)
 
@@ -46,7 +47,3 @@
 - [Recoverable Ratchets](blog/002_recoverable_ratchets.md)
 - [The Shape of Agreement](blog/003_the_shape_of_agreement.md)
 - [Aura Consensus](blog/004_aura_consensus.md)
-
-# Demo
-
-- [Aura CLI Recovery Demo (CLI + Simulator)](demo/cli_recovery.md)
