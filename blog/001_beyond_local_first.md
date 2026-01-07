@@ -52,7 +52,7 @@ In this sense, Aura is not only Local-First. It is Network-Native, where the net
 
 ## See Also
 
-- [Authority and Identity](../100_authority_and_identity.md) - Relational identity model and contextual isolation
-- [Relational Contexts](../103_relational_contexts.md) - Shared state machines and collective resources
-- [Authorization](../109_authorization.md) - Consent primitives and capability attenuation
-- [Rendezvous](../110_rendezvous.md) - Peer discovery without servers
+- [Authority and Identity](docs/100_authority_and_identity.md) - Relational identity model and contextual isolation
+- [Relational Contexts](docs/103_relational_contexts.md) - Shared state machines and collective resources
+- [Authorization](docs/109_authorization.md) - Consent primitives and capability attenuation
+- [Rendezvous](docs/110_rendezvous.md) - Peer discovery without servers

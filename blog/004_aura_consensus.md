@@ -286,8 +286,8 @@ The protocol integrates CRDT based state, threshold signatures, and session styl
 
 ## See Also
 
-- [Consensus](../104_consensus.md) - Full consensus specification and implementation
-- [Journal](../102_journal.md) - CRDT fact stores and deterministic reduction
-- [Relational Contexts](../103_relational_contexts.md) - Context scoped witness groups
-- [System Architecture](../001_system_architecture.md) - Integration with choreographic protocols
-- [Distributed Systems Contract](../004_distributed_systems_contract.md) - Safety and liveness guarantees
+- [Consensus](docs/104_consensus.md) - Full consensus specification and implementation
+- [Journal](docs/102_journal.md) - CRDT fact stores and deterministic reduction
+- [Relational Contexts](docs/103_relational_contexts.md) - Context scoped witness groups
+- [System Architecture](docs/001_system_architecture.md) - Integration with choreographic protocols
+- [Distributed Systems Contract](docs/004_distributed_systems_contract.md) - Safety and liveness guarantees

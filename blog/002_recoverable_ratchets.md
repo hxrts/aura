@@ -4,7 +4,7 @@ The design of secure messaging protocols like MLS and TreeKEM typically focuses 
 
 In Aura, both state and identity are distributed. Multiple devices form a single authority. Facts replicate across nodes via CRDT journals. There is no central ordering service. This changes the problem. We need messaging with explicit safety, liveness, and partition tolerance properties.
 
-The Aura Messaging Protocol (AMP) brings a distributed systems lens to secure messaging. It provides the same cryptographic guarantees as TreeKEM-based protocols while supporting deterministic recovery from replicated state alone. See the [protocol specification](../112_amp.md) for complete technical details and the [comparison section](#comparison-with-existing-protocols) for how AMP differs from MLS and Keyhive.
+The Aura Messaging Protocol (AMP) brings a distributed systems lens to secure messaging. It provides the same cryptographic guarantees as TreeKEM-based protocols while supporting deterministic recovery from replicated state alone. See the [protocol specification](docs/112_amp.md) for complete technical details and the [comparison section](#comparison-with-existing-protocols) for how AMP differs from MLS and Keyhive.
 
 ## Requirements
 
@@ -170,7 +170,9 @@ MLS assumes ordered delivery. Keyhive assumes eventual consistency everywhere. A
 
 ## See Also
 
-- [Aura Messaging Protocol Specification](../112_amp.md) for complete technical details
-- [System Architecture](../001_system_architecture.md) for broader system context
-- [Accounts and Commitment Tree](../101_accounts_and_commitment_tree.md) for tree operation details
-- [Journal System](../102_journal.md) for CRDT journal mechanics
+- [Aura Messaging Protocol Specification](docs/112_amp.md) for complete technical details
+- [System Architecture](docs/001_system_architecture.md) for broader system context
+- [Accounts and Commitment Tree](docs/101_accounts_and_commitment_tree.md) for tree operation details
+- [Journal System](docs/102_journal.md) for CRDT journal mechanics
+- [Relational Contexts](docs/103_relational_contexts.md) for shared state machines
+- [Distributed Systems Contract](docs/004_distributed_systems_contract.md) for consistency guarantees

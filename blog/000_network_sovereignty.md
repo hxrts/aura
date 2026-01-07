@@ -1,5 +1,24 @@
 # Network Sovereignty
 
+- Sovereignty is a framework for understanding the architecture of control in systems that regulate collective behavior
+- We call these regulatory systems “institutions”
+- The particular institutions we’re interested in today are crypto protocols
+- The degree of sovereignty held by an institution constitutes its capacity to self-govern and act within its asserted limits
+- A blockchain is delimited by its consensus protocol, along with a shared commitment to a set of social practices
+- In order to evaluate sovereignty we need to think about who is in control during steady-state — but also under extenuating circumstances, over long timespans, and through various means of indirection
+- In this sense one must bring an expansive lens to any analysis of sovereignty, understand the meta
+- Because sovereignty operates at the apex of control, it encompasses aspects beyond what one might typically consider “protocol design”
+    - A state asserting jurisdiction to impose overriding legal authority
+    - Market forces, which might be the exchange rate of key assets, or effects at a distance from exogenous derivatives
+    - Prevailing norms, including user expectations, or interoperability standards
+    - Or fundamental architectural constraints, including the limitations of a geographically distributed system, or the affordances of deployed cryptographic primitives
+- It’s important to distinguish sovereignty from independence, as sovereignty is necessarily achieved through the recognition of others — a border is only real to the extent that insiders believe and outsiders recognize that belief
+- Moreover sovereignty as a means toward collective self-determination isn’t zero sum — establishing a trade-route may result in some amount of economic dependence (giving up a degree of sovereignty) while at the same time providing the resources to remove other dependencies and take greater action 
+- Sovereignty is not a good in itself, we should keep in mind sovereignty has a dual history
+- One of collective liberation, one of imperialism and disenfranchisement — both originate with sovereignty
+- The specifics of who a sovereign institution recognizes as valid, which among them expresses control, and how they choose act in the world all matter
+- Needless to say sovereignty is a complex topic—fraught, but incredibly powerful—and absolutely essential to what all of us are doing here in crypto.
+
 ## Life Post-Internet
 
 We often describe our world as “networked,” yet we still imagine politics as if it were contained inside nation states and their borders. Digital platforms and protocols are treated as secondary infrastructure, layered beneath law and policy that remain territorial at their core. This framing misses a quieter shift that has already changed how collective life is organized.
