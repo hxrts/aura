@@ -490,7 +490,6 @@ impl CeremonyTracker {
         .await
     }
 
-
     /// Mark a ceremony as committed (key rotation activated), with optional metadata.
     pub async fn mark_committed_with_metadata(
         &self,

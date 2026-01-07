@@ -76,9 +76,7 @@ use async_trait::async_trait;
 /// outbound messages and choice decisions. This trait extends the upstream
 /// adapter with those hooks.
 #[async_trait]
-pub trait ChoreographicAdapterExt:
-    rumpsteak_aura_choreography::ChoreographicAdapter
-{
+pub trait ChoreographicAdapterExt: rumpsteak_aura_choreography::ChoreographicAdapter {
     /// Provide the next outbound message for a send.
     async fn provide_message<M: rumpsteak_aura_choreography::Message>(
         &mut self,

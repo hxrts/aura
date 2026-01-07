@@ -69,7 +69,6 @@ pub struct EpochRotationProposal {
     pub timestamp: PhysicalTime,
 }
 
-
 /// Epoch confirmation from participant
 ///
 /// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
@@ -83,7 +82,6 @@ pub struct EpochConfirmation {
     pub confirmation_timestamp: PhysicalTime,
 }
 
-
 /// Synchronized epoch commit
 ///
 /// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
@@ -95,7 +93,6 @@ pub struct EpochCommit {
     pub commit_timestamp: PhysicalTime,
     pub participants: Vec<DeviceId>,
 }
-
 
 impl Default for EpochConfig {
     fn default() -> Self {

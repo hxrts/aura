@@ -6,19 +6,19 @@
 use super::state::{with_state_mut, with_state_mut_validated};
 use super::traits::{RuntimeService, ServiceError, ServiceHealth};
 use super::RuntimeTaskRegistry;
+use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::PhysicalTimeEffects;
+use aura_core::hash::hash;
 use aura_core::{AuthorityId, DeviceId};
-use crate::runtime::AuraEffectSystem;
-use crate::runtime::choreography_adapter::AuraProtocolAdapter;
 use aura_sync::protocols::epoch_runners::{
     execute_as as epoch_execute_as, EpochRotationProtocolRole,
 };
 use aura_sync::protocols::{EpochCommit, EpochConfirmation, EpochRotationProposal};
 use aura_sync::services::{Service, SyncService, SyncServiceConfig};
 use aura_sync::verification::{MerkleVerifier, VerificationResult};
-use aura_core::hash::hash;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -689,20 +689,15 @@ impl SyncServiceManager {
         let mut confirmations = VecDeque::new();
         confirmations.push_back(confirmation);
 
-        let mut adapter = AuraProtocolAdapter::new(
-            effects,
-            participant_id,
-            role,
-            role_map,
-        )
-        .with_message_provider(move |request, _received| {
-            if request.type_name == confirmation_type {
-                return confirmations
-                    .pop_front()
-                    .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
+        let mut adapter = AuraProtocolAdapter::new(effects, participant_id, role, role_map)
+            .with_message_provider(move |request, _received| {
+                if request.type_name == confirmation_type {
+                    return confirmations
+                        .pop_front()
+                        .map(|msg| Box::new(msg) as Box<dyn std::any::Any + Send>);
+                }
+                None
+            });
 
         adapter
             .start_session(session_id)

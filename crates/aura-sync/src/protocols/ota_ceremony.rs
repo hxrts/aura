@@ -1104,11 +1104,7 @@ mod tests {
 
     #[async_trait]
     impl JournalEffects for TestEffects {
-        async fn merge_facts(
-            &self,
-            target: Journal,
-            delta: Journal,
-        ) -> Result<Journal, AuraError> {
+        async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError> {
             let mut merged = Journal::new();
             merged.facts = target.facts.clone();
             merged.caps = target.caps.clone();

@@ -16,11 +16,11 @@
 use async_trait::async_trait;
 use aura_core::identifiers::AuthorityId;
 use aura_core::util::serialization::{from_slice, to_vec};
+use aura_mpst::rumpsteak_aura_choreography::{LabelId, Message, RoleId};
+use aura_mpst::ChoreographicAdapterExt;
 use aura_protocol::effects::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, RoleIndex,
 };
-use aura_mpst::rumpsteak_aura_choreography::{LabelId, Message, RoleId};
-use aura_mpst::ChoreographicAdapterExt;
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -204,14 +204,15 @@ where
         let authority_id = if role == self.self_role {
             self.authority_id
         } else {
-            *self.role_map.get(&role).ok_or_else(|| {
-                ChoreographyError::RoleNotFound {
+            *self
+                .role_map
+                .get(&role)
+                .ok_or_else(|| ChoreographyError::RoleNotFound {
                     role: ChoreographicRole::new(
                         aura_core::DeviceId::from_uuid(self.authority_id.0),
                         RoleIndex::new(0).expect("role index"),
                     ),
-                }
-            })?
+                })?
         };
 
         let role_index = role.role_index().unwrap_or(0);
@@ -262,12 +263,11 @@ where
     /// For a choreography with `roles Coordinator, Witness[N]`, calling
     /// `resolve_family("Witness")` returns all registered witness roles.
     fn resolve_family(&self, family: &str) -> Result<Vec<Self::Role>, Self::Error> {
-        let roles = self
-            .role_families
-            .get(family)
-            .ok_or_else(|| ChoreographyError::RoleFamilyNotFound {
+        let roles = self.role_families.get(family).ok_or_else(|| {
+            ChoreographyError::RoleFamilyNotFound {
                 family: family.to_string(),
-            })?;
+            }
+        })?;
 
         if roles.is_empty() {
             return Err(ChoreographyError::EmptyRoleFamily {
@@ -287,12 +287,11 @@ where
         start: u32,
         end: u32,
     ) -> Result<Vec<Self::Role>, Self::Error> {
-        let all_roles = self
-            .role_families
-            .get(family)
-            .ok_or_else(|| ChoreographyError::RoleFamilyNotFound {
+        let all_roles = self.role_families.get(family).ok_or_else(|| {
+            ChoreographyError::RoleFamilyNotFound {
                 family: family.to_string(),
-            })?;
+            }
+        })?;
 
         let start_idx = start as usize;
         let end_idx = end as usize;
@@ -323,10 +322,7 @@ where
     E: ChoreographicEffects + ?Sized,
     R: RoleId,
 {
-    async fn provide_message<M: Message>(
-        &mut self,
-        to: Self::Role,
-    ) -> Result<M, Self::Error> {
+    async fn provide_message<M: Message>(&mut self, to: Self::Role) -> Result<M, Self::Error> {
         let boxed = match self.outbound.pop_front() {
             Some(boxed) => boxed,
             None => {
@@ -349,14 +345,15 @@ where
             }
         };
 
-        boxed.downcast::<M>().map(|msg| *msg).map_err(|_| {
-            ChoreographyError::ProtocolViolation {
+        boxed
+            .downcast::<M>()
+            .map(|msg| *msg)
+            .map_err(|_| ChoreographyError::ProtocolViolation {
                 message: format!(
                     "queued message type mismatch (expected {})",
                     std::any::type_name::<M>()
                 ),
-            }
-        })
+            })
     }
 
     async fn select_branch<L: LabelId>(&mut self, choices: &[L]) -> Result<L, Self::Error> {

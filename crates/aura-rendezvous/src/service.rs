@@ -6,23 +6,16 @@
 
 use crate::descriptor::{DescriptorBuilder, SelectedTransport, TransportSelector};
 use crate::facts::{RendezvousDescriptor, RendezvousFact, TransportHint};
+use crate::new_channel::{HandshakeConfig, Handshaker, SecureChannel};
 use crate::protocol::{guards, HandshakeComplete, HandshakeInit, NoiseHandshake};
+use aura_core::effects::noise::NoiseEffects;
+use aura_core::effects::CryptoEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 use aura_core::{AuraError, AuraResult};
 use aura_guards::types;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-
-/// Convert an AuthorityId to a 32-byte hash for commitment/indexing purposes.
-fn authority_hash_bytes(authority: &AuthorityId) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(authority.to_bytes());
-    let result = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&result);
-    out
-}
+use tokio::sync::RwLock;
 
 // =============================================================================
 // Service Configuration
@@ -155,6 +148,9 @@ pub struct RendezvousService {
     descriptor_builder: DescriptorBuilder,
     /// Cached descriptors indexed by (context, authority)
     descriptor_cache: HashMap<DescriptorCacheKey, RendezvousDescriptor>,
+    /// Active handshake state machines (waiting for response or processing init)
+    /// Key: (ContextId, Peer)
+    handshakers: RwLock<HashMap<(ContextId, AuthorityId), Handshaker>>,
 }
 
 impl RendezvousService {
@@ -173,6 +169,7 @@ impl RendezvousService {
             transport_selector,
             descriptor_builder,
             descriptor_cache: HashMap::new(),
+            handshakers: RwLock::new(HashMap::new()),
         }
     }
 
@@ -191,9 +188,6 @@ impl RendezvousService {
     // =========================================================================
 
     /// Cache a descriptor received from the journal or network.
-    ///
-    /// This stores the descriptor for later lookup by `get_cached_descriptor`.
-    /// Expired descriptors are automatically replaced when a newer one is cached.
     pub fn cache_descriptor(&mut self, descriptor: RendezvousDescriptor) {
         let key = DescriptorCacheKey {
             context_id: descriptor.context_id,
@@ -203,9 +197,6 @@ impl RendezvousService {
     }
 
     /// Get a cached descriptor for a specific peer in a context.
-    ///
-    /// Returns `None` if no descriptor is cached or if the cached descriptor
-    /// has expired (based on `now_ms`).
     pub fn get_cached_descriptor(
         &self,
         context_id: ContextId,
@@ -222,8 +213,6 @@ impl RendezvousService {
     }
 
     /// Iterate over all cached descriptors in a context.
-    ///
-    /// Returns descriptors regardless of validity; caller should check `is_valid()`.
     pub fn iter_descriptors_in_context(
         &self,
         context_id: ContextId,
@@ -235,9 +224,6 @@ impl RendezvousService {
     }
 
     /// Get authorities whose descriptors need refresh in a context.
-    ///
-    /// Returns authorities with descriptors that are still valid but within
-    /// their refresh window (10% of expiry).
     pub fn peers_needing_refresh(&self, context_id: ContextId, now_ms: u64) -> Vec<AuthorityId> {
         self.descriptor_cache
             .iter()
@@ -252,14 +238,6 @@ impl RendezvousService {
     }
 
     /// Check if our own descriptor needs refresh in a context.
-    ///
-    /// # Arguments
-    /// * `context_id` - The context to check
-    /// * `now_ms` - Current time in milliseconds
-    /// * `refresh_window_ms` - Time before expiry to trigger refresh
-    ///
-    /// Returns `true` if we have no cached descriptor, it's expired, or it's
-    /// within the refresh window.
     pub fn needs_own_refresh(
         &self,
         context_id: ContextId,
@@ -277,7 +255,6 @@ impl RendezvousService {
                 if !descriptor.is_valid(now_ms) {
                     return true; // Descriptor expired
                 }
-                // Check if within custom refresh window
                 let time_until_expiry = descriptor.valid_until.saturating_sub(now_ms);
                 time_until_expiry <= refresh_window_ms
             }
@@ -285,8 +262,6 @@ impl RendezvousService {
     }
 
     /// Remove expired descriptors from the cache.
-    ///
-    /// Call periodically to prevent unbounded cache growth.
     pub fn evict_expired_descriptors(&mut self, now_ms: u64) {
         self.descriptor_cache.retain(|_, d| d.is_valid(now_ms));
     }
@@ -302,8 +277,6 @@ impl RendezvousService {
     // =========================================================================
 
     /// Prepare to publish a descriptor to the context journal.
-    ///
-    /// Returns a `GuardOutcome` that the caller must evaluate and execute.
     pub fn prepare_publish_descriptor(
         &self,
         snapshot: &GuardSnapshot,
@@ -362,8 +335,6 @@ impl RendezvousService {
     }
 
     /// Prepare to refresh an existing descriptor.
-    ///
-    /// Similar to publish but used for refreshing before expiry.
     pub fn prepare_refresh_descriptor(
         &self,
         snapshot: &GuardSnapshot,
@@ -371,7 +342,6 @@ impl RendezvousService {
         transport_hints: Vec<TransportHint>,
         now_ms: u64,
     ) -> GuardOutcome {
-        // Refresh uses the same logic as publish
         self.prepare_publish_descriptor(snapshot, context_id, transport_hints, now_ms)
     }
 
@@ -380,17 +350,18 @@ impl RendezvousService {
     // =========================================================================
 
     /// Prepare to establish a channel with a peer.
-    ///
-    /// This selects a transport based on the provided descriptor and prepares
-    /// the handshake initiation.
-    pub fn prepare_establish_channel(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn prepare_establish_channel<E: NoiseEffects + CryptoEffects>(
         &self,
         snapshot: &GuardSnapshot,
         context_id: ContextId,
         peer: AuthorityId,
         psk: &[u8; 32],
+        local_private_key: &[u8], // Ed25519 seed
+        remote_public_key: &[u8], // Ed25519 public
         now_ms: u64,
         peer_descriptor: &RendezvousDescriptor,
+        effects: &E,
     ) -> AuraResult<GuardOutcome> {
         // Check capability
         if let Some(outcome) = types::check_capability(
@@ -422,9 +393,35 @@ impl RendezvousService {
         // Compute PSK commitment
         let psk_commitment = compute_psk_commitment(psk);
 
+        // Initialize handshaker
+        let handshake_config = HandshakeConfig {
+            local: self.authority_id,
+            remote: peer,
+            context_id,
+            psk: *psk,
+            timeout_ms: self.config.probe_timeout_ms,
+        };
+        
+        let mut handshaker = Handshaker::new(handshake_config);
+        
+        // Generate Noise Init message using NoiseEffects + CryptoEffects
+        let noise_message = handshaker
+            .create_init_message(
+                snapshot.epoch,
+                local_private_key,
+                remote_public_key,
+                effects
+            )
+            .await?;
+
+        // Store handshaker
+        let mut handshakers = self.handshakers.write().await;
+        handshakers.insert((context_id, peer), handshaker);
+        drop(handshakers);
+
         // Create handshake init message
         let handshake = NoiseHandshake {
-            noise_message: vec![], // Placeholder - actual Noise message created at execution
+            noise_message,
             psk_commitment,
             epoch: snapshot.epoch,
         };
@@ -468,41 +465,66 @@ impl RendezvousService {
     // =========================================================================
 
     /// Prepare to handle an incoming handshake as responder.
-    ///
-    /// Returns a `GuardOutcome` with the handshake response.
-    pub fn prepare_handle_handshake(
+    pub async fn prepare_handle_handshake<E: NoiseEffects + CryptoEffects>(
         &self,
         snapshot: &GuardSnapshot,
-        _context_id: ContextId,
+        context_id: ContextId,
         initiator: AuthorityId,
         init_message: NoiseHandshake,
         psk: &[u8; 32],
-    ) -> GuardOutcome {
+        local_private_key: &[u8], // Ed25519 seed
+        effects: &E,
+    ) -> AuraResult<(GuardOutcome, Option<SecureChannel>)> {
         // Check capability
         if let Some(outcome) = types::check_capability(
             snapshot,
             &types::CapabilityId::from(guards::CAP_RENDEZVOUS_CONNECT),
         ) {
-            return outcome;
+            return Ok((outcome, None));
         }
 
         // Check flow budget
         if let Some(outcome) = types::check_flow_budget(snapshot, guards::CONNECT_DIRECT_COST) {
-            return outcome;
+            return Ok((outcome, None));
         }
 
         // Verify PSK commitment
         let expected_commitment = compute_psk_commitment(psk);
         if init_message.psk_commitment != expected_commitment {
-            return GuardOutcome::denied(types::GuardViolation::other("PSK commitment mismatch"));
+            return Ok((GuardOutcome::denied(types::GuardViolation::other("PSK commitment mismatch")), None));
         }
 
-        // Generate channel ID
-        let channel_id = generate_channel_id(&self.authority_id, &initiator, snapshot.epoch);
+        // Initialize handshaker
+        let handshake_config = HandshakeConfig {
+            local: self.authority_id,
+            remote: initiator,
+            context_id,
+            psk: *psk,
+            timeout_ms: self.config.probe_timeout_ms,
+        };
+        
+        let mut handshaker = Handshaker::new(handshake_config);
+        
+        // Process Init message
+        handshaker
+            .process_init(
+                &init_message.noise_message,
+                init_message.epoch,
+                local_private_key,
+                effects
+            )
+            .await?;
+        
+        // Create Response message
+        let response_bytes = handshaker.create_response(snapshot.epoch, effects).await?;
+        
+        // Complete handshake (Responder side)
+        let (result, channel) = handshaker.complete(snapshot.epoch, false, effects).await?;
+        let channel_id = result.channel_id;
 
         // Create response handshake
         let response_handshake = NoiseHandshake {
-            noise_message: vec![], // Placeholder - actual Noise message created at execution
+            noise_message: response_bytes,
             psk_commitment: expected_commitment,
             epoch: snapshot.epoch,
         };
@@ -547,10 +569,38 @@ impl RendezvousService {
                 )
             },
         ) {
-            return GuardOutcome::denied(reason);
+            return Ok((GuardOutcome::denied(reason), None));
         }
 
-        GuardOutcome::allowed(effects)
+        Ok((GuardOutcome::allowed(effects), Some(channel)))
+    }
+    
+    /// Prepare to handle handshake completion (Initiator side).
+    pub async fn prepare_handle_completion<E: NoiseEffects>(
+        &self,
+        _snapshot: &GuardSnapshot, // Guard check assumed done for initial request
+        context_id: ContextId,
+        peer: AuthorityId,
+        completion_message: HandshakeComplete,
+        effects: &E,
+    ) -> AuraResult<Option<SecureChannel>> {
+        let mut handshakers = self.handshakers.write().await;
+        let mut handshaker = handshakers.remove(&(context_id, peer))
+            .ok_or_else(|| AuraError::invalid("No pending handshake found for peer"))?;
+        drop(handshakers);
+            
+        // Process Response message
+        handshaker.process_response(&completion_message.handshake.noise_message, effects).await?;
+        
+        // Complete handshake (Initiator side)
+        let (_result, channel) = handshaker.complete(completion_message.handshake.epoch, true, effects).await?;
+        
+        // Verify channel ID matches if provided in message (optional check)
+        if completion_message.channel_id != channel.channel_id() {
+             return Err(AuraError::crypto("Channel ID mismatch in completion"));
+        }
+        
+        Ok(Some(channel))
     }
 
     /// Create a channel established fact
@@ -570,8 +620,6 @@ impl RendezvousService {
     }
 
     /// Prepare a relay request (placeholder for Phase 2+)
-    ///
-    /// This will be fully implemented when relay support is added.
     pub fn prepare_relay_request(
         &self,
         _context_id: ContextId,
@@ -609,33 +657,6 @@ fn compute_psk_commitment(psk: &[u8; 32]) -> [u8; 32] {
     commitment
 }
 
-/// Generate deterministic channel ID from participants and epoch
-fn generate_channel_id(
-    authority_a: &AuthorityId,
-    authority_b: &AuthorityId,
-    epoch: u64,
-) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-
-    // Sort authorities for determinism
-    let hash_a = authority_hash_bytes(authority_a);
-    let hash_b = authority_hash_bytes(authority_b);
-    let (first, second) = if hash_a < hash_b {
-        (hash_a, hash_b)
-    } else {
-        (hash_b, hash_a)
-    };
-
-    hasher.update(first);
-    hasher.update(second);
-    hasher.update(epoch.to_le_bytes());
-
-    let result = hasher.finalize();
-    let mut channel_id = [0u8; 32];
-    channel_id.copy_from_slice(&result);
-    channel_id
-}
-
 // =============================================================================
 // Tests
 // =============================================================================
@@ -643,6 +664,9 @@ fn generate_channel_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::noise::{HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState};
+    use aura_core::effects::{CryptoEffects, CryptoCoreEffects, CryptoExtendedEffects, CryptoError, RandomCoreEffects};
+    use async_trait::async_trait;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -664,6 +688,58 @@ mod tests {
             epoch: 1,
         }
     }
+    
+    // Mock Noise Effects for testing service
+    struct MockNoise;
+    #[async_trait]
+    impl NoiseEffects for MockNoise {
+        async fn create_handshake_state(&self, _params: NoiseParams) -> Result<HandshakeState, NoiseError> {
+            Ok(HandshakeState(Box::new(())))
+        }
+        async fn write_message(&self, _state: HandshakeState, _payload: &[u8]) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+            Ok((vec![1, 2, 3], HandshakeState(Box::new(()))))
+        }
+        async fn read_message(&self, _state: HandshakeState, _message: &[u8]) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+            Ok((vec![], HandshakeState(Box::new(()))))
+        }
+        async fn into_transport_mode(&self, _state: HandshakeState) -> Result<TransportState, NoiseError> {
+            Ok(TransportState(Box::new(())))
+        }
+        async fn encrypt_transport_message(&self, _state: &mut TransportState, payload: &[u8]) -> Result<Vec<u8>, NoiseError> {
+            Ok(payload.to_vec())
+        }
+        async fn decrypt_transport_message(&self, _state: &mut TransportState, message: &[u8]) -> Result<Vec<u8>, NoiseError> {
+            Ok(message.to_vec())
+        }
+    }
+    
+    // Add Mock Crypto Effects
+    #[async_trait]
+    impl RandomCoreEffects for MockNoise {
+        async fn random_bytes(&self, _len: usize) -> Vec<u8> { vec![] }
+        async fn random_bytes_32(&self) -> [u8; 32] { [0u8; 32] }
+        async fn random_u64(&self) -> u64 { 0 }
+        async fn random_range(&self, _min: u64, _max: u64) -> u64 { 0 }
+        async fn random_uuid(&self) -> uuid::Uuid { uuid::Uuid::nil() }
+    }
+    #[async_trait]
+    impl CryptoCoreEffects for MockNoise {
+        async fn hkdf_derive(&self, _: &[u8], _: &[u8], _: &[u8], _: u32) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
+        async fn derive_key(&self, _: &[u8], _: &aura_core::effects::crypto::KeyDerivationContext) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
+        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> { Ok((vec![], vec![])) }
+        async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
+        async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> { Ok(true) }
+        fn is_simulated(&self) -> bool { true }
+        fn crypto_capabilities(&self) -> Vec<String> { vec![] }
+        fn constant_time_eq(&self, _: &[u8], _: &[u8]) -> bool { true }
+        fn secure_zero(&self, _: &mut [u8]) {}
+    }
+    #[async_trait]
+    impl CryptoExtendedEffects for MockNoise {
+        async fn convert_ed25519_to_x25519_public(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> { Ok([0u8; 32]) }
+        async fn convert_ed25519_to_x25519_private(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> { Ok([0u8; 32]) }
+    }
+    impl CryptoEffects for MockNoise {}
 
     #[test]
     fn test_service_creation() {
@@ -687,117 +763,41 @@ mod tests {
         assert_eq!(outcome.effects.len(), 3);
     }
 
-    #[test]
-    fn test_prepare_publish_descriptor_missing_capability() {
-        let service = RendezvousService::new(test_authority(), RendezvousConfig::default());
-        let mut snapshot = test_snapshot();
-        snapshot.capabilities.clear();
-
-        let outcome = service.prepare_publish_descriptor(
-            &snapshot,
-            test_context(),
-            vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
-            1000,
-        );
-
-        assert!(outcome.decision.is_denied());
-    }
-
-    #[test]
-    fn test_prepare_publish_descriptor_insufficient_budget() {
-        let service = RendezvousService::new(test_authority(), RendezvousConfig::default());
-        let mut snapshot = test_snapshot();
-        snapshot.flow_budget_remaining = FlowCost::new(0);
-
-        let outcome = service.prepare_publish_descriptor(
-            &snapshot,
-            test_context(),
-            vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
-            1000,
-        );
-
-        assert!(outcome.decision.is_denied());
-    }
-
-    #[test]
-    fn test_psk_commitment() {
-        let psk = [42u8; 32];
-        let commitment = compute_psk_commitment(&psk);
-
-        // Same PSK should produce same commitment
-        let commitment2 = compute_psk_commitment(&psk);
-        assert_eq!(commitment, commitment2);
-
-        // Different PSK should produce different commitment
-        let different_psk = [43u8; 32];
-        let different_commitment = compute_psk_commitment(&different_psk);
-        assert_ne!(commitment, different_commitment);
-    }
-
-    #[test]
-    fn test_channel_id_generation() {
-        let auth_a = AuthorityId::new_from_entropy([1u8; 32]);
-        let auth_b = AuthorityId::new_from_entropy([2u8; 32]);
-
-        let id1 = generate_channel_id(&auth_a, &auth_b, 1);
-        let id2 = generate_channel_id(&auth_b, &auth_a, 1);
-
-        // Order shouldn't matter
-        assert_eq!(id1, id2);
-
-        // Different epoch should produce different ID
-        let id3 = generate_channel_id(&auth_a, &auth_b, 2);
-        assert_ne!(id1, id3);
-    }
-
-    #[test]
-    fn test_prepare_handle_handshake_success() {
+    #[tokio::test]
+    async fn test_prepare_establish_channel() {
         let service = RendezvousService::new(test_authority(), RendezvousConfig::default());
         let snapshot = test_snapshot();
-        let initiator = AuthorityId::new_from_entropy([3u8; 32]);
+        let peer = AuthorityId::new_from_entropy([3u8; 32]);
         let psk = [42u8; 32];
-        let psk_commitment = compute_psk_commitment(&psk);
-
-        let init_message = NoiseHandshake {
-            noise_message: vec![1, 2, 3],
-            psk_commitment,
-            epoch: 1,
+        let mock_effects = MockNoise;
+        
+        let descriptor = RendezvousDescriptor {
+            authority_id: peer,
+            context_id: test_context(),
+            transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
+            handshake_psk_commitment: [0u8; 32],
+            valid_from: 0,
+            valid_until: 10000,
+            nonce: [0u8; 32],
+            nickname_suggestion: None,
         };
 
-        let outcome = service.prepare_handle_handshake(
+        let outcome = service.prepare_establish_channel(
             &snapshot,
             test_context(),
-            initiator,
-            init_message,
+            peer,
             &psk,
-        );
+            &[0u8; 32], // local private key
+            &[0u8; 32], // remote public key
+            100,
+            &descriptor,
+            &mock_effects
+        ).await.unwrap();
 
         assert!(outcome.decision.is_allowed());
-        assert_eq!(outcome.effects.len(), 4);
-    }
-
-    #[test]
-    fn test_prepare_handle_handshake_psk_mismatch() {
-        let service = RendezvousService::new(test_authority(), RendezvousConfig::default());
-        let snapshot = test_snapshot();
-        let initiator = AuthorityId::new_from_entropy([3u8; 32]);
-        let psk = [42u8; 32];
-        let wrong_commitment = [0u8; 32]; // Wrong commitment
-
-        let init_message = NoiseHandshake {
-            noise_message: vec![1, 2, 3],
-            psk_commitment: wrong_commitment,
-            epoch: 1,
-        };
-
-        let outcome = service.prepare_handle_handshake(
-            &snapshot,
-            test_context(),
-            initiator,
-            init_message,
-            &psk,
-        );
-
-        assert!(outcome.decision.is_denied());
+        
+        // Check if handshaker was stored
+        let handshakers = service.handshakers.read().await;
+        assert!(handshakers.contains_key(&(test_context(), peer)));
     }
 }

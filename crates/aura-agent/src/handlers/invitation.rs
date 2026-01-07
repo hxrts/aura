@@ -606,8 +606,9 @@ impl InvitationHandler {
             })
             .await;
 
-        if let Some(invitation) =
-            self.load_invitation_for_choreography(effects.as_ref(), invitation_id).await
+        if let Some(invitation) = self
+            .load_invitation_for_choreography(effects.as_ref(), invitation_id)
+            .await
         {
             match invitation.invitation_type {
                 InvitationType::Guardian { .. } => {
@@ -976,8 +977,9 @@ impl InvitationHandler {
             })
             .await;
 
-        if let Some(invitation) =
-            self.load_invitation_for_choreography(effects.as_ref(), invitation_id).await
+        if let Some(invitation) = self
+            .load_invitation_for_choreography(effects.as_ref(), invitation_id)
+            .await
         {
             if !matches!(invitation.invitation_type, InvitationType::Guardian { .. }) {
                 let _ = self
@@ -1133,11 +1135,7 @@ impl InvitationHandler {
                         }
                     }
                 }
-                let status = if accepted {
-                    "accepted"
-                } else {
-                    "declined"
-                };
+                let status = if accepted { "accepted" } else { "declined" };
                 let ack = ExchangeInvitationAck(InvitationAck {
                     invitation_id: invitation_id.clone(),
                     success: true,

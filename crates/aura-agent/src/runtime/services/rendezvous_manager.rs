@@ -10,6 +10,7 @@
 
 use aura_core::effects::network::{UdpEffects, UdpEndpoint};
 use aura_core::effects::time::PhysicalTimeEffects;
+use aura_core::effects::{CryptoEffects, NoiseEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
@@ -500,13 +501,14 @@ impl RendezvousManager {
     // ========================================================================
 
     /// Prepare to establish a channel with a peer
-    pub async fn prepare_establish_channel(
+    pub async fn prepare_establish_channel<E: NoiseEffects + CryptoEffects>(
         &self,
         context_id: ContextId,
         peer: AuthorityId,
         psk: &[u8; 32],
         now_ms: u64,
         snapshot: &aura_rendezvous::GuardSnapshot,
+        effects: &E,
     ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self
             .state
@@ -524,8 +526,23 @@ impl RendezvousManager {
             .cloned()
             .ok_or("Peer descriptor not found in cache")?;
 
+        // TODO: Retrieve actual identity keys
+        let local_private_key = [0u8; 32];
+        let remote_public_key = [0u8; 32];
+
         service
-            .prepare_establish_channel(snapshot, context_id, peer, psk, now_ms, &descriptor)
+            .prepare_establish_channel(
+                snapshot,
+                context_id,
+                peer,
+                psk,
+                &local_private_key,
+                &remote_public_key,
+                now_ms,
+                &descriptor,
+                effects
+            )
+            .await
             .map_err(|e| format!("Failed to prepare channel: {e}"))
     }
 

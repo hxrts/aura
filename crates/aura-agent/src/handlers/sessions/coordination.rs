@@ -5,9 +5,9 @@
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::handlers::shared::HandlerUtilities;
+use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage};
 use crate::runtime::services::SessionManager;
 use crate::runtime::AuraEffectSystem;
-use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage};
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
     RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects,
@@ -31,8 +31,8 @@ use std::sync::Arc;
 // 4. Coordinator creates session and distributes session handles
 choreography!(include_str!("src/handlers/sessions/coordination.choreo"));
 
-use self::rumpsteak_session_types_session_coordination::session_coordination::SessionCoordinationChoreographyRole;
 use self::rumpsteak_session_types_session_coordination::runners::execute_as as coordination_execute_as;
+use self::rumpsteak_session_types_session_coordination::session_coordination::SessionCoordinationChoreographyRole;
 
 // Message types for session coordination choreography
 
@@ -548,12 +548,10 @@ impl SessionOperations {
             .await
             .map_err(|e| AgentError::internal(format!("session coordination start failed: {e}")))?;
 
-        let result = coordination_execute_as(
-            SessionCoordinationChoreographyRole::Initiator,
-            &mut adapter,
-        )
-        .await
-        .map_err(|e| AgentError::internal(format!("session coordination failed: {e}")));
+        let result =
+            coordination_execute_as(SessionCoordinationChoreographyRole::Initiator, &mut adapter)
+                .await
+                .map_err(|e| AgentError::internal(format!("session coordination failed: {e}")));
 
         let _ = adapter.end_session().await;
         result
@@ -652,19 +650,17 @@ impl SessionOperations {
 
         let role = session_participant_role(authority_id, &participants)?;
 
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            role,
-            role_map,
-        )
-        .with_role_family("Participants", participant_roles)
-        .with_message_provider(move |request, _received| {
-            if request.type_name == decision_type {
-                return Some(Box::new(decision_payload.clone()) as Box<dyn std::any::Any + Send>);
-            }
-            None
-        });
+        let mut adapter =
+            AuraProtocolAdapter::new(self.effects.clone(), authority_id, role, role_map)
+                .with_role_family("Participants", participant_roles)
+                .with_message_provider(move |request, _received| {
+                    if request.type_name == decision_type {
+                        return Some(
+                            Box::new(decision_payload.clone()) as Box<dyn std::any::Any + Send>
+                        );
+                    }
+                    None
+                });
 
         let session_uuid = session_coordination_session_id(&decision.session_id);
         adapter
@@ -692,10 +688,16 @@ fn build_session_role_map(
     initiator: AuthorityId,
     coordinator: AuthorityId,
     participants: &[AuthorityId],
-) -> (HashMap<SessionCoordinationChoreographyRole, AuthorityId>, Vec<SessionCoordinationChoreographyRole>) {
+) -> (
+    HashMap<SessionCoordinationChoreographyRole, AuthorityId>,
+    Vec<SessionCoordinationChoreographyRole>,
+) {
     let mut role_map = HashMap::new();
     role_map.insert(SessionCoordinationChoreographyRole::Initiator, initiator);
-    role_map.insert(SessionCoordinationChoreographyRole::Coordinator, coordinator);
+    role_map.insert(
+        SessionCoordinationChoreographyRole::Coordinator,
+        coordinator,
+    );
 
     let mut roles = Vec::new();
     for (idx, participant) in participants.iter().enumerate() {

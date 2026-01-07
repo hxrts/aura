@@ -227,19 +227,19 @@ pub const RELAYED_PROTOCOL_ID: &str = "rendezvous_relay.relayed.v1";
 
 /// Re-exports for RendezvousExchange choreography runners
 pub mod exchange_runners {
-    pub use super::exchange::rumpsteak_session_types_rendezvous::rendezvous::RendezvousExchangeRole;
     pub use super::exchange::rumpsteak_session_types_rendezvous::rendezvous::runners::{
         execute_as, run_initiator, run_responder, InitiatorOutput, ResponderOutput,
     };
+    pub use super::exchange::rumpsteak_session_types_rendezvous::rendezvous::RendezvousExchangeRole;
 }
 
 /// Re-exports for RelayedRendezvous choreography runners
 pub mod relayed_runners {
-    pub use super::relayed::rumpsteak_session_types_rendezvous_relay::rendezvous_relay::RelayedRendezvousRole;
     pub use super::relayed::rumpsteak_session_types_rendezvous_relay::rendezvous_relay::runners::{
-        execute_as, run_initiator, run_relay, run_responder,
-        InitiatorOutput, RelayOutput, ResponderOutput,
+        execute_as, run_initiator, run_relay, run_responder, InitiatorOutput, RelayOutput,
+        ResponderOutput,
     };
+    pub use super::relayed::rumpsteak_session_types_rendezvous_relay::rendezvous_relay::RelayedRendezvousRole;
 }
 
 // =============================================================================

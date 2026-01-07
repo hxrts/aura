@@ -63,6 +63,7 @@ pub mod journal;
 pub mod leakage; // Privacy leakage tracking
 pub mod ledger; // Event sourcing and audit trails
 pub mod network;
+pub mod noise;
 pub mod query; // Datalog query effects (bridges Journal + Biscuit + Reactive)
 pub mod random;
 pub mod reactive; // FRP as algebraic effects
@@ -143,6 +144,7 @@ pub use network::{
     NetworkAddress, NetworkCoreEffects, NetworkEffects, NetworkError, NetworkExtendedEffects,
     PeerEvent, PeerEventStream, UdpEffects, UdpEndpoint, UdpEndpointEffects,
 };
+pub use noise::{HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState};
 pub use query::{QueryEffects, QueryError, QuerySubscription};
 #[cfg(feature = "simulation")]
 pub use quint::{

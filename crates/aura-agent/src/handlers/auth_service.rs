@@ -5,8 +5,8 @@
 
 use super::auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult};
 use crate::core::{AgentResult, AuthorityContext};
-use crate::runtime::AuraEffectSystem;
 use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use crate::runtime::AuraEffectSystem;
 use aura_authentication::dkd::{DkdMessage, DkdSessionId};
 use aura_authentication::dkd_runners::{execute_as as dkd_execute_as, DkdChoreographyRole};
 use aura_core::effects::PhysicalTimeEffects;

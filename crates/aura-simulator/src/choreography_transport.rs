@@ -77,9 +77,12 @@ impl SimulatedMessageBus {
         to: ChoreographicRole,
         message: Vec<u8>,
     ) -> Result<(), ChoreographyError> {
-        let mut queues = self.queues.write().map_err(|_| ChoreographyError::InternalError {
-            message: "Failed to acquire queue lock".to_string(),
-        })?;
+        let mut queues = self
+            .queues
+            .write()
+            .map_err(|_| ChoreographyError::InternalError {
+                message: "Failed to acquire queue lock".to_string(),
+            })?;
 
         let key = (from, to);
         queues.entry(key).or_default().push_back(message.clone());
@@ -99,9 +102,12 @@ impl SimulatedMessageBus {
         from: ChoreographicRole,
         to: ChoreographicRole,
     ) -> Result<Vec<u8>, ChoreographyError> {
-        let mut queues = self.queues.write().map_err(|_| ChoreographyError::InternalError {
-            message: "Failed to acquire queue lock".to_string(),
-        })?;
+        let mut queues = self
+            .queues
+            .write()
+            .map_err(|_| ChoreographyError::InternalError {
+                message: "Failed to acquire queue lock".to_string(),
+            })?;
 
         let key = (from, to);
         let message = queues
@@ -125,7 +131,11 @@ impl SimulatedMessageBus {
         self.queues
             .read()
             .ok()
-            .map(|q| q.get(&(from, to)).map(|queue| !queue.is_empty()).unwrap_or(false))
+            .map(|q| {
+                q.get(&(from, to))
+                    .map(|queue| !queue.is_empty())
+                    .unwrap_or(false)
+            })
             .unwrap_or(false)
     }
 
@@ -138,7 +148,11 @@ impl SimulatedMessageBus {
 
     /// Get all recorded events
     pub fn get_events(&self) -> Vec<ChoreographyEvent> {
-        self.events.read().ok().map(|e| e.clone()).unwrap_or_default()
+        self.events
+            .read()
+            .ok()
+            .map(|e| e.clone())
+            .unwrap_or_default()
     }
 
     /// Get current metrics
@@ -193,7 +207,11 @@ impl SimulatedTransport {
     /// * `bus` - Shared message bus for simulation
     /// * `device_id` - Device ID for this transport
     /// * `role_index` - Role index for this transport (0-based)
-    pub fn new(bus: Arc<SimulatedMessageBus>, device_id: DeviceId, role_index: u32) -> Option<Self> {
+    pub fn new(
+        bus: Arc<SimulatedMessageBus>,
+        device_id: DeviceId,
+        role_index: u32,
+    ) -> Option<Self> {
         let role_index = RoleIndex::new(role_index)?;
         Some(Self {
             bus,
@@ -362,7 +380,10 @@ mod tests {
 
         // Send message from role1 to role2
         let message = b"hello".to_vec();
-        transport1.send_to_role_bytes(role2, message.clone()).await.unwrap();
+        transport1
+            .send_to_role_bytes(role2, message.clone())
+            .await
+            .unwrap();
 
         // Receive message at role2
         let received = transport2.receive_from_role_bytes(role1).await.unwrap();
@@ -382,8 +403,14 @@ mod tests {
         let role2 = transport2.current_role();
 
         // Send multiple messages
-        transport1.send_to_role_bytes(role2, b"msg1".to_vec()).await.unwrap();
-        transport1.send_to_role_bytes(role2, b"msg2".to_vec()).await.unwrap();
+        transport1
+            .send_to_role_bytes(role2, b"msg1".to_vec())
+            .await
+            .unwrap();
+        transport1
+            .send_to_role_bytes(role2, b"msg2".to_vec())
+            .await
+            .unwrap();
 
         let metrics = transport1.get_metrics().await;
         assert_eq!(metrics.messages_sent, 2);

@@ -44,6 +44,8 @@ postcard = { workspace = true }
 
 # Cryptography
 ed25519-dalek = { workspace = true }
+curve25519-dalek = { workspace = true }
+snow = "0.9.6"
 frost-core = { workspace = true }
 frost-ed25519 = { workspace = true }
 hkdf = { workspace = true }

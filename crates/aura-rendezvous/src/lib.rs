@@ -115,7 +115,7 @@ pub use descriptor::{
 
 // Re-export channel types
 pub use new_channel::{
-    ChannelManager, ChannelState, HandshakeConfig, HandshakeResult, HandshakeState, Handshaker,
+    ChannelManager, ChannelState, HandshakeConfig, HandshakeResult, HandshakeStatus, Handshaker,
     SecureChannel,
 };
 

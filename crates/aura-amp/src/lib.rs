@@ -99,8 +99,8 @@ pub use consensus::{
 
 /// Re-exports for AmpTransport choreography runners
 pub mod amp_runners {
-    pub use crate::choreography::rumpsteak_session_types_amp_transport::amp_transport::AmpTransportRole;
     pub use crate::choreography::rumpsteak_session_types_amp_transport::amp_transport::runners::{
         execute_as, run_receiver, run_sender, ReceiverOutput, SenderOutput,
     };
+    pub use crate::choreography::rumpsteak_session_types_amp_transport::amp_transport::AmpTransportRole;
 }

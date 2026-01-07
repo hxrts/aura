@@ -248,6 +248,7 @@ The following locations may directly use cryptographic libraries.
 | `aura-core/src/crypto/*` | ed25519_dalek, frost_ed25519 | Type wrappers |
 | `aura-core/src/types/authority.rs` | ed25519_dalek | Authority trait types |
 | `aura-effects/src/*` | All crypto libs | Production handlers |
+| `aura-effects/src/noise.rs` | snow | Noise Protocol implementation |
 | `aura-testkit/*` | All crypto libs | Test infrastructure |
 | `**/tests/*`, `*_test.rs` | OsRng | Test-only randomness |
 | `#[cfg(test)]` modules | OsRng | Test-only randomness |

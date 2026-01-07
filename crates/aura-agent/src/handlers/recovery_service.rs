@@ -8,13 +8,14 @@ use super::recovery::{
     RecoveryState,
 };
 use crate::core::{AgentResult, AuthorityContext};
+use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage};
 use crate::runtime::AuraEffectSystem;
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, RecoveryId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::from_slice;
-use aura_core::hash::hash;
 use aura_protocol::effects::TreeEffects;
 use aura_recovery::ceremony_runners::{execute_as as guardian_execute_as, GuardianCeremonyRole};
 use aura_recovery::guardian_ceremony::{
@@ -23,15 +24,12 @@ use aura_recovery::guardian_ceremony::{
 };
 use aura_recovery::guardian_setup::{GuardianAcceptance, GuardianInvitation, SetupCompletion};
 use aura_recovery::recovery_protocol::{
-    GuardianApproval as ProtocolGuardianApproval,
-    RecoveryOperation as ProtocolRecoveryOperation,
-    RecoveryOutcome,
-    RecoveryRequest as ProtocolRecoveryRequest,
+    GuardianApproval as ProtocolGuardianApproval, RecoveryOperation as ProtocolRecoveryOperation,
+    RecoveryOutcome, RecoveryRequest as ProtocolRecoveryRequest,
 };
 use aura_recovery::recovery_runners::{execute_as as recovery_execute_as, RecoveryProtocolRole};
 use aura_recovery::setup_runners::{execute_as as setup_execute_as, GuardianSetupRole};
 use aura_recovery::types::{GuardianProfile, GuardianSet};
-use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -216,10 +214,7 @@ impl RecoveryServiceApi {
             .await?;
         if let Some(recovery) = self.handler.get_recovery(&approval.recovery_id).await {
             let _ = self
-                .execute_recovery_protocol_guardian(
-                    &approval,
-                    recovery.request.account_authority,
-                )
+                .execute_recovery_protocol_guardian(&approval, recovery.request.account_authority)
                 .await;
         }
         Ok(state)
@@ -340,16 +335,21 @@ impl RecoveryServiceApi {
                     1,
                     1,
                 );
-                ProtocolRecoveryOperation::ReplaceTree { new_public_key: pkg }
+                ProtocolRecoveryOperation::ReplaceTree {
+                    new_public_key: pkg,
+                }
             }
             RecoveryOperation::AddDevice { device_public_key } => {
-                let key = LeafPublicKey::try_from(device_public_key.clone()).map_err(|e| {
-                    AgentError::invalid(format!("Invalid device public key: {e}"))
-                })?;
-                ProtocolRecoveryOperation::AddDevice { device_public_key: key }
+                let key = LeafPublicKey::try_from(device_public_key.clone())
+                    .map_err(|e| AgentError::invalid(format!("Invalid device public key: {e}")))?;
+                ProtocolRecoveryOperation::AddDevice {
+                    device_public_key: key,
+                }
             }
             RecoveryOperation::RemoveDevice { leaf_index } => {
-                ProtocolRecoveryOperation::RemoveDevice { leaf_index: *leaf_index }
+                ProtocolRecoveryOperation::RemoveDevice {
+                    leaf_index: *leaf_index,
+                }
             }
             RecoveryOperation::UpdateGuardians {
                 new_guardians,
@@ -376,9 +376,8 @@ impl RecoveryServiceApi {
     ) -> AgentResult<()> {
         use crate::core::AgentError;
 
-        let signature = Ed25519Signature::try_from(approval.signature.clone()).map_err(|e| {
-            AgentError::invalid(format!("Invalid guardian signature: {e}"))
-        })?;
+        let signature = Ed25519Signature::try_from(approval.signature.clone())
+            .map_err(|e| AgentError::invalid(format!("Invalid guardian signature: {e}")))?;
 
         let protocol_approval = ProtocolGuardianApproval {
             guardian_id: approval.guardian_id,
@@ -763,9 +762,7 @@ impl RecoveryServiceApi {
                 let mut accepted = Vec::new();
                 for msg in received {
                     if msg.type_name == response_type {
-                        if let Ok(response) =
-                            from_slice::<CeremonyResponseMsg>(&msg.bytes)
-                        {
+                        if let Ok(response) = from_slice::<CeremonyResponseMsg>(&msg.bytes) {
                             if response.response == CeremonyResponse::Accept {
                                 accepted.push(response.guardian_id);
                             }
@@ -785,9 +782,7 @@ impl RecoveryServiceApi {
                 let mut declined = false;
                 for msg in received {
                     if msg.type_name == response_type {
-                        if let Ok(response) =
-                            from_slice::<CeremonyResponseMsg>(&msg.bytes)
-                        {
+                        if let Ok(response) = from_slice::<CeremonyResponseMsg>(&msg.bytes) {
                             if response.response == CeremonyResponse::Decline {
                                 declined = true;
                                 break;
@@ -903,12 +898,7 @@ impl RecoveryServiceApi {
     ) -> AgentResult<(String, SetupCompletion)> {
         let setup_id = self.build_guardian_setup_id(account_id).await?;
         let completion = self
-            .execute_guardian_setup_initiator_with_id(
-                &setup_id,
-                account_id,
-                guardians,
-                threshold,
-            )
+            .execute_guardian_setup_initiator_with_id(&setup_id, account_id, guardians, threshold)
             .await?;
         Ok((setup_id, completion))
     }
@@ -965,11 +955,8 @@ impl RecoveryServiceApi {
 
             if request.type_name == completion_type {
                 let acceptances = collect_guardian_acceptances(received, acceptance_type);
-                let completion = build_guardian_setup_completion(
-                    &setup_id_owned,
-                    threshold,
-                    acceptances,
-                );
+                let completion =
+                    build_guardian_setup_completion(&setup_id_owned, threshold, acceptances);
                 return Some(Box::new(completion));
             }
 
@@ -988,8 +975,7 @@ impl RecoveryServiceApi {
 
         let acceptances =
             collect_guardian_acceptances(adapter.received_messages(), acceptance_type);
-        let completion =
-            build_guardian_setup_completion(setup_id, threshold, acceptances);
+        let completion = build_guardian_setup_completion(setup_id, threshold, acceptances);
 
         let _ = adapter.end_session().await;
         result.map(|_| completion)
@@ -1047,18 +1033,14 @@ impl RecoveryServiceApi {
             timestamp,
         };
 
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            guardian_role,
-            role_map,
-        )
-        .with_message_provider(move |request, _received| {
-            if request.type_name == acceptance_type {
-                return Some(Box::new(acceptance.clone()));
-            }
-            None
-        });
+        let mut adapter =
+            AuraProtocolAdapter::new(self.effects.clone(), authority_id, guardian_role, role_map)
+                .with_message_provider(move |request, _received| {
+                    if request.type_name == acceptance_type {
+                        return Some(Box::new(acceptance.clone()));
+                    }
+                    None
+                });
 
         let session_id = guardian_setup_session_id(&setup_id);
         adapter
@@ -1228,9 +1210,7 @@ async fn execute_recovery_protocol_coordinator(
             let mut approvals = Vec::new();
             for msg in received {
                 if msg.type_name == approval_type {
-                    if let Ok(approval) =
-                        from_slice::<ProtocolGuardianApproval>(&msg.bytes)
-                    {
+                    if let Ok(approval) = from_slice::<ProtocolGuardianApproval>(&msg.bytes) {
                         approvals.push(approval);
                     }
                 }
@@ -1282,10 +1262,7 @@ fn guardian_setup_session_id(setup_id: &str) -> Uuid {
     Uuid::from_bytes(bytes)
 }
 
-fn validate_guardian_setup_inputs(
-    guardians: &[AuthorityId],
-    threshold: u16,
-) -> AgentResult<()> {
+fn validate_guardian_setup_inputs(guardians: &[AuthorityId], threshold: u16) -> AgentResult<()> {
     use crate::core::AgentError;
 
     if guardians.len() != 3 {

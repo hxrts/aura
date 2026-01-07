@@ -550,8 +550,10 @@ impl ReactiveView for HomeSignalView {
         let mut changed = false;
 
         for fact in facts {
-            let FactContent::Relational(RelationalFact::Generic { context_id, envelope }) =
-                &fact.content
+            let FactContent::Relational(RelationalFact::Generic {
+                context_id,
+                envelope,
+            }) = &fact.content
             else {
                 continue;
             };

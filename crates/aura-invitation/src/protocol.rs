@@ -245,10 +245,10 @@ pub enum GuardianInvitationState {
 
 /// Re-exports for InvitationExchange choreography runners
 pub mod exchange_runners {
-    pub use super::exchange::rumpsteak_session_types_invitation::invitation::InvitationExchangeRole;
     pub use super::exchange::rumpsteak_session_types_invitation::invitation::runners::{
         execute_as, run_receiver, run_sender, ReceiverOutput, SenderOutput,
     };
+    pub use super::exchange::rumpsteak_session_types_invitation::invitation::InvitationExchangeRole;
 }
 
 /// Re-exports for GuardianInvitation choreography runners

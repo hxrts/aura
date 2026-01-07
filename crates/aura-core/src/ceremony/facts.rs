@@ -23,8 +23,12 @@ pub struct CeremonyFactMeta {
 /// Canonical ceremony fact set used across Category C protocols.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StandardCeremonyFact {
-    Initiated { meta: CeremonyFactMeta },
-    AcceptanceReceived { meta: CeremonyFactMeta },
+    Initiated {
+        meta: CeremonyFactMeta,
+    },
+    AcceptanceReceived {
+        meta: CeremonyFactMeta,
+    },
     Committed {
         meta: CeremonyFactMeta,
         consensus_id: Option<ConsensusId>,

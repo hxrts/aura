@@ -776,8 +776,12 @@ impl ProtocolTestRunner {
                 if let Some(obs) = &mut self.observer {
                     obs.on_send(&from_role, to, message_type, message.len());
                 }
-                self.message_queue
-                    .push_back((index, to_idx, message.clone(), message_type.clone()));
+                self.message_queue.push_back((
+                    index,
+                    to_idx,
+                    message.clone(),
+                    message_type.clone(),
+                ));
             }
         }
 

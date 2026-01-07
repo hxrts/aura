@@ -64,6 +64,7 @@ mod flow;
 mod guard;
 mod journal;
 mod network;
+mod noise;
 mod storage;
 mod sync;
 mod system;

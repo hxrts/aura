@@ -324,7 +324,9 @@ impl GuardianAuthHandler {
                     .context
                     .generic_fact_envelopes("recovery_request")
                     .iter()
-                    .filter_map(|env| serde_json::from_slice::<RecoveryRequestRecord>(&env.payload).ok())
+                    .filter_map(|env| {
+                        serde_json::from_slice::<RecoveryRequestRecord>(&env.payload).ok()
+                    })
                     .filter(|record| record.guardian_id == guardian_id)
                     .max_by_key(|record| record.requested_at);
 

@@ -111,11 +111,20 @@ impl PartialOrd for GenericBinding {
 impl Ord for GenericBinding {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Compare by type_id first, then schema_version, then payload
-        match self.envelope.type_id.as_str().cmp(other.envelope.type_id.as_str()) {
+        match self
+            .envelope
+            .type_id
+            .as_str()
+            .cmp(other.envelope.type_id.as_str())
+        {
             std::cmp::Ordering::Equal => {}
             ord => return ord,
         }
-        match self.envelope.schema_version.cmp(&other.envelope.schema_version) {
+        match self
+            .envelope
+            .schema_version
+            .cmp(&other.envelope.schema_version)
+        {
             std::cmp::Ordering::Equal => {}
             ord => return ord,
         }
@@ -218,7 +227,6 @@ impl GenericBinding {
     pub fn consensus_proof(&self) -> Option<&super::consensus::ConsensusProof> {
         self.consensus_proof.as_ref()
     }
-
 }
 
 #[cfg(test)]

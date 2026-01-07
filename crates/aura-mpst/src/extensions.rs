@@ -16,7 +16,6 @@ pub struct ValidateCapability {
     pub role: RoleId,
 }
 
-
 /// Extension for executing guard chain validations
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExecuteGuardChain {
@@ -27,7 +26,6 @@ pub struct ExecuteGuardChain {
     /// Operation being guarded
     pub operation: String,
 }
-
 
 /// Extension for tracking flow costs in protocols
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -40,7 +38,6 @@ pub struct ChargeFlowCost {
     pub role: RoleId,
 }
 
-
 /// Extension for journal fact recording
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JournalFact {
@@ -52,7 +49,6 @@ pub struct JournalFact {
     pub operation: String,
 }
 
-
 /// Extension for journal merge operations
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JournalMerge {
@@ -61,7 +57,6 @@ pub struct JournalMerge {
     /// Multiple roles that can participate in the merge operation
     pub roles: Vec<RoleId>,
 }
-
 
 /// Wrapper enum for concrete extension types
 #[derive(Clone, Debug, Serialize, Deserialize)]

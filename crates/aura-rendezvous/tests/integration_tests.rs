@@ -13,6 +13,10 @@
     clippy::disallowed_methods
 )] // Tests use unwrap for clarity; allow test-only hash utilities
 
+use async_trait::async_trait;
+use aura_core::effects::noise::{
+    HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState,
+};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 use aura_rendezvous::{
@@ -61,6 +65,51 @@ fn test_descriptor(authority: AuthorityId, context: ContextId) -> RendezvousDesc
     }
 }
 
+struct MockNoise;
+#[async_trait]
+impl NoiseEffects for MockNoise {
+    async fn create_handshake_state(
+        &self,
+        _params: NoiseParams,
+    ) -> Result<HandshakeState, NoiseError> {
+        Ok(HandshakeState(Box::new(())))
+    }
+    async fn write_message(
+        &self,
+        _state: HandshakeState,
+        _payload: &[u8],
+    ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+        Ok((vec![1, 2, 3], HandshakeState(Box::new(()))))
+    }
+    async fn read_message(
+        &self,
+        _state: HandshakeState,
+        _message: &[u8],
+    ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+        Ok((vec![], HandshakeState(Box::new(()))))
+    }
+    async fn into_transport_mode(
+        &self,
+        _state: HandshakeState,
+    ) -> Result<TransportState, NoiseError> {
+        Ok(TransportState(Box::new(())))
+    }
+    async fn encrypt_transport_message(
+        &self,
+        _state: &mut TransportState,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, NoiseError> {
+        Ok(payload.to_vec())
+    }
+    async fn decrypt_transport_message(
+        &self,
+        _state: &mut TransportState,
+        message: &[u8],
+    ) -> Result<Vec<u8>, NoiseError> {
+        Ok(message.to_vec())
+    }
+}
+
 // =============================================================================
 // Descriptor Publication Tests
 // =============================================================================
@@ -103,23 +152,33 @@ fn test_descriptor_publication_flow() {
 // Channel Establishment Tests
 // =============================================================================
 
-#[test]
-fn test_channel_establishment_flow() {
+#[tokio::test]
+async fn test_channel_establishment_flow() {
     let alice = test_authority(1);
     let bob = test_authority(2);
     let context = test_context(100);
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let service = RendezvousService::new(alice, config);
+    let mut service = RendezvousService::new(alice, config);
 
     let bob_descriptor = test_descriptor(bob, context);
 
     let snapshot = test_snapshot(alice, context);
+    let mock_noise = MockNoise;
 
     // Act: Prepare channel establishment
     let outcome = service
-        .prepare_establish_channel(&snapshot, context, bob, &psk, 1000, &bob_descriptor)
+        .prepare_establish_channel(
+            &snapshot,
+            context,
+            bob,
+            &psk,
+            1000,
+            &bob_descriptor,
+            &mock_noise,
+        )
+        .await
         .unwrap();
 
     // Assert: Should be allowed
@@ -133,50 +192,64 @@ fn test_channel_establishment_flow() {
     assert!(has_handshake, "Should include handshake send");
 }
 
-#[test]
-fn test_channel_establishment_requires_descriptor() {
+#[tokio::test]
+async fn test_channel_establishment_requires_descriptor() {
     let alice = test_authority(1);
     let bob = test_authority(2);
     let context = test_context(100);
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let service = RendezvousService::new(alice, config);
+    let mut service = RendezvousService::new(alice, config);
 
     let snapshot = test_snapshot(alice, context);
     let other_context = test_context(101);
     let mismatched_descriptor = test_descriptor(bob, other_context);
+    let mock_noise = MockNoise;
 
-    let result = service.prepare_establish_channel(
-        &snapshot,
-        context,
-        bob,
-        &psk,
-        1000,
-        &mismatched_descriptor,
-    );
+    let result = service
+        .prepare_establish_channel(
+            &snapshot,
+            context,
+            bob,
+            &psk,
+            1000,
+            &mismatched_descriptor,
+            &mock_noise,
+        )
+        .await;
 
     // Should fail - no descriptor
     assert!(result.is_err());
 }
 
-#[test]
-fn test_channel_establishment_rejects_expired_descriptor() {
+#[tokio::test]
+async fn test_channel_establishment_rejects_expired_descriptor() {
     let alice = test_authority(1);
     let bob = test_authority(2);
     let context = test_context(100);
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let service = RendezvousService::new(alice, config);
+    let mut service = RendezvousService::new(alice, config);
 
     let snapshot = test_snapshot(alice, context);
 
     let mut expired_descriptor = test_descriptor(bob, context);
     expired_descriptor.valid_until = 900;
+    let mock_noise = MockNoise;
 
-    let result =
-        service.prepare_establish_channel(&snapshot, context, bob, &psk, 1000, &expired_descriptor);
+    let result = service
+        .prepare_establish_channel(
+            &snapshot,
+            context,
+            bob,
+            &psk,
+            1000,
+            &expired_descriptor,
+            &mock_noise,
+        )
+        .await;
 
     assert!(result.is_err());
 }
@@ -185,13 +258,14 @@ fn test_channel_establishment_rejects_expired_descriptor() {
 // Handshake Flow Tests
 // =============================================================================
 
-#[test]
-fn test_handshake_initiator_responder_flow() {
+#[tokio::test]
+async fn test_handshake_initiator_responder_flow() {
     let alice = test_authority(1);
     let bob = test_authority(2);
     let context = test_context(100);
     let psk = [42u8; 32];
     let epoch = 1u64;
+    let mock_noise = MockNoise;
 
     // Alice initiates
     let alice_config = HandshakeConfig {
@@ -214,22 +288,40 @@ fn test_handshake_initiator_responder_flow() {
     let mut bob_handshaker = Handshaker::new(bob_config);
 
     // Step 1: Alice creates init message
-    let init_msg = alice_handshaker.create_init_message(epoch).unwrap();
+    let init_msg = alice_handshaker
+        .create_init_message(epoch, &mock_noise)
+        .await
+        .unwrap();
     assert!(!init_msg.is_empty());
 
     // Step 2: Bob processes init
-    bob_handshaker.process_init(&init_msg, epoch).unwrap();
+    bob_handshaker
+        .process_init(&init_msg, epoch, &mock_noise)
+        .await
+        .unwrap();
 
     // Step 3: Bob creates response
-    let response_msg = bob_handshaker.create_response(epoch).unwrap();
+    let response_msg = bob_handshaker
+        .create_response(epoch, &mock_noise)
+        .await
+        .unwrap();
     assert!(!response_msg.is_empty());
 
     // Step 4: Alice processes response
-    alice_handshaker.process_response(&response_msg).unwrap();
+    alice_handshaker
+        .process_response(&response_msg, &mock_noise)
+        .await
+        .unwrap();
 
     // Step 5: Both complete
-    let alice_result = alice_handshaker.complete(epoch, true).unwrap();
-    let bob_result = bob_handshaker.complete(epoch, false).unwrap();
+    let (alice_result, _) = alice_handshaker
+        .complete(epoch, true, &mock_noise)
+        .await
+        .unwrap();
+    let (bob_result, _) = bob_handshaker
+        .complete(epoch, false, &mock_noise)
+        .await
+        .unwrap();
 
     // Channel IDs should match
     assert_eq!(alice_result.channel_id, bob_result.channel_id);
@@ -237,14 +329,14 @@ fn test_handshake_initiator_responder_flow() {
     assert!(!bob_result.is_initiator);
 }
 
-#[test]
-fn test_handshake_psk_mismatch_detection() {
+#[tokio::test]
+async fn test_handshake_psk_mismatch_detection() {
     let alice = test_authority(1);
     let bob = test_authority(2);
     let context = test_context(100);
 
     let config = RendezvousConfig::default();
-    let service = RendezvousService::new(bob, config);
+    let mut service = RendezvousService::new(bob, config);
 
     // Bob's expected PSK
     let expected_psk = [42u8; 32];
@@ -260,10 +352,20 @@ fn test_handshake_psk_mismatch_detection() {
         psk_commitment: wrong_commitment,
         epoch: 1,
     };
+    let mock_noise = MockNoise;
 
     // Bob should reject (PSK commitment doesn't match)
-    let outcome =
-        service.prepare_handle_handshake(&snapshot, context, alice, handshake, &expected_psk);
+    let (outcome, _) = service
+        .prepare_handle_handshake(
+            &snapshot,
+            context,
+            alice,
+            handshake,
+            &expected_psk,
+            &mock_noise,
+        )
+        .await
+        .unwrap();
 
     assert!(matches!(outcome.decision, GuardDecision::Deny { .. }));
 }
@@ -285,7 +387,7 @@ fn test_channel_manager_lifecycle() {
 
     // Create and register channel
     let channel_id = [77u8; 32];
-    let mut channel = SecureChannel::new(channel_id, context, alice, bob, 1);
+    let mut channel = SecureChannel::new(channel_id, context, alice, bob, 1, None);
     channel.mark_active(); // Make it active
 
     assert!(channel.is_active());
@@ -317,11 +419,11 @@ fn test_channel_manager_epoch_advancement() {
     let mut manager = ChannelManager::new();
 
     // Create and register channels at epoch 1
-    let mut ch1 = SecureChannel::new([1u8; 32], context, alice, bob, 1);
+    let mut ch1 = SecureChannel::new([1u8; 32], context, alice, bob, 1, None);
     ch1.mark_active();
     manager.register(ch1);
 
-    let mut ch2 = SecureChannel::new([2u8; 32], context, alice, carol, 1);
+    let mut ch2 = SecureChannel::new([2u8; 32], context, alice, carol, 1, None);
     ch2.mark_active();
     manager.register(ch2);
 
@@ -369,15 +471,15 @@ fn test_insufficient_flow_budget_blocks_publish() {
     }
 }
 
-#[test]
-fn test_missing_capability_blocks_connect() {
+#[tokio::test]
+async fn test_missing_capability_blocks_connect() {
     let alice = test_authority(1);
     let bob = test_authority(2);
     let context = test_context(100);
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let service = RendezvousService::new(alice, config);
+    let mut service = RendezvousService::new(alice, config);
     let bob_descriptor = test_descriptor(bob, context);
 
     // Snapshot WITHOUT connect capability
@@ -385,9 +487,19 @@ fn test_missing_capability_blocks_connect() {
     snapshot.capabilities = vec![aura_guards::types::CapabilityId::from(
         guards::CAP_RENDEZVOUS_PUBLISH,
     )]; // Only publish
+    let mock_noise = MockNoise;
 
-    let result =
-        service.prepare_establish_channel(&snapshot, context, bob, &psk, 1000, &bob_descriptor);
+    let result = service
+        .prepare_establish_channel(
+            &snapshot,
+            context,
+            bob,
+            &psk,
+            1000,
+            &bob_descriptor,
+            &mock_noise,
+        )
+        .await;
 
     // Should be denied
     assert!(result.is_ok());
@@ -405,14 +517,15 @@ fn test_missing_capability_blocks_connect() {
 // End-to-End Flow Tests
 // =============================================================================
 
-#[test]
-fn test_complete_discovery_to_channel_flow() {
+#[tokio::test]
+async fn test_complete_discovery_to_channel_flow() {
     // Setup: Alice and Bob in same context
     let alice = test_authority(1);
     let bob = test_authority(2);
     let context = test_context(100);
     let psk = [42u8; 32];
     let epoch = 1u64;
+    let mock_noise = MockNoise;
 
     // Both create services
     let config = RendezvousConfig::default();
@@ -430,9 +543,20 @@ fn test_complete_discovery_to_channel_flow() {
     let bob_descriptor = test_descriptor(bob, context);
 
     // Step 3: Alice initiates channel establishment
+    // Requires mutable service for Alice
+    let mut alice_service = alice_service; // rebind mut
     let alice_snapshot = test_snapshot(alice, context);
     let establish_outcome = alice_service
-        .prepare_establish_channel(&alice_snapshot, context, bob, &psk, 1000, &bob_descriptor)
+        .prepare_establish_channel(
+            &alice_snapshot,
+            context,
+            bob,
+            &psk,
+            1000,
+            &bob_descriptor,
+            &mock_noise,
+        )
+        .await
         .unwrap();
     assert!(matches!(establish_outcome.decision, GuardDecision::Allow));
 
@@ -455,12 +579,30 @@ fn test_complete_discovery_to_channel_flow() {
     };
     let mut bob_handshaker = Handshaker::new(bob_hs_config);
 
-    let init = alice_handshaker.create_init_message(epoch).unwrap();
-    bob_handshaker.process_init(&init, epoch).unwrap();
-    let response = bob_handshaker.create_response(epoch).unwrap();
-    alice_handshaker.process_response(&response).unwrap();
-    let alice_result = alice_handshaker.complete(epoch, true).unwrap();
-    let bob_result = bob_handshaker.complete(epoch, false).unwrap();
+    let init = alice_handshaker
+        .create_init_message(epoch, &mock_noise)
+        .await
+        .unwrap();
+    bob_handshaker
+        .process_init(&init, epoch, &mock_noise)
+        .await
+        .unwrap();
+    let response = bob_handshaker
+        .create_response(epoch, &mock_noise)
+        .await
+        .unwrap();
+    alice_handshaker
+        .process_response(&response, &mock_noise)
+        .await
+        .unwrap();
+    let (alice_result, _) = alice_handshaker
+        .complete(epoch, true, &mock_noise)
+        .await
+        .unwrap();
+    let (bob_result, _) = bob_handshaker
+        .complete(epoch, false, &mock_noise)
+        .await
+        .unwrap();
 
     // Step 5: Both have matching channels
     assert_eq!(alice_result.channel_id, bob_result.channel_id);
@@ -471,11 +613,11 @@ fn test_complete_discovery_to_channel_flow() {
 
     let channel_id = alice_result.channel_id;
 
-    let mut alice_ch = SecureChannel::new(channel_id, context, alice, bob, epoch);
+    let mut alice_ch = SecureChannel::new(channel_id, context, alice, bob, epoch, None);
     alice_ch.mark_active();
     alice_channels.register(alice_ch);
 
-    let mut bob_ch = SecureChannel::new(channel_id, context, bob, alice, epoch);
+    let mut bob_ch = SecureChannel::new(channel_id, context, bob, alice, epoch, None);
     bob_ch.mark_active();
     bob_channels.register(bob_ch);
 

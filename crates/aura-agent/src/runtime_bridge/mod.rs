@@ -52,8 +52,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::core::default_context_id_for_authority;
-use crate::runtime::services::ServiceError;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyInitRequest};
+use crate::runtime::services::ServiceError;
 use aura_core::ceremony::SupersessionReason;
 
 mod amp;
@@ -1071,7 +1071,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
         static CEREMONY_NONCE: AtomicU64 = AtomicU64::new(0);
         let nonce = CEREMONY_NONCE.fetch_add(1, Ordering::Relaxed);
         let ceremony_id_hash = GuardianCeremonyId::new(prestate_hash, operation_hash, nonce);
-        let ceremony_id = aura_core::identifiers::CeremonyId::new(hex::encode(ceremony_id_hash.0 .0));
+        let ceremony_id =
+            aura_core::identifiers::CeremonyId::new(hex::encode(ceremony_id_hash.0 .0));
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -1097,7 +1098,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
         {
             let _ = runner
-                .supersede(&old_id, &ceremony_id, SupersessionReason::NewerRequest, now_ms)
+                .supersede(
+                    &old_id,
+                    &ceremony_id,
+                    SupersessionReason::NewerRequest,
+                    now_ms,
+                )
                 .await;
         }
         runner
@@ -1114,7 +1120,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 prestate_hash: Some(prestate_hash),
             })
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to register ceremony: {}", e)))?;
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to register ceremony: {}", e))
+            })?;
 
         // Step 4: Execute guardian ceremony choreography (send proposals + collect responses)
         let recovery_service = self
@@ -1342,7 +1350,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
         {
             let _ = runner
-                .supersede(&old_id, &ceremony_id, SupersessionReason::NewerRequest, now_ms)
+                .supersede(
+                    &old_id,
+                    &ceremony_id,
+                    SupersessionReason::NewerRequest,
+                    now_ms,
+                )
                 .await;
         }
         runner
@@ -1359,7 +1372,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 prestate_hash: Some(prestate_hash),
             })
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to register ceremony: {e}")))?;
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
+            })?;
 
         // Mark the initiator as accepted (their key package is already local).
         let _ = runner
@@ -1683,7 +1698,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
         {
             let _ = runner
-                .supersede(&old_id, &ceremony_id, SupersessionReason::NewerRequest, now_ms)
+                .supersede(
+                    &old_id,
+                    &ceremony_id,
+                    SupersessionReason::NewerRequest,
+                    now_ms,
+                )
                 .await;
         }
         runner
@@ -1700,7 +1720,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 prestate_hash: Some(prestate_hash),
             })
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to register ceremony: {e}")))?;
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
+            })?;
 
         // Distribute new-epoch key packages to existing devices (so they are not bricked).
         if !other_device_ids.is_empty() {
@@ -2040,7 +2062,12 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .await
         {
             let _ = runner
-                .supersede(&old_id, &ceremony_id, SupersessionReason::NewerRequest, now_ms)
+                .supersede(
+                    &old_id,
+                    &ceremony_id,
+                    SupersessionReason::NewerRequest,
+                    now_ms,
+                )
                 .await;
         }
         runner
@@ -2057,7 +2084,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 prestate_hash: Some(prestate_hash),
             })
             .await
-            .map_err(|e| IntentError::internal_error(format!("Failed to register ceremony: {e}")))?;
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to register ceremony: {e}"))
+            })?;
 
         let _ = runner
             .record_response(&ceremony_id, ParticipantIdentity::device(current_device_id))
@@ -2151,7 +2180,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 })?;
             if !has_commit {
                 let _ = runner
-                    .abort(&ceremony_id, Some("Missing consensus DKG transcript".to_string()))
+                    .abort(
+                        &ceremony_id,
+                        Some("Missing consensus DKG transcript".to_string()),
+                    )
                     .await;
                 return Err(IntentError::validation_failed(
                     "Missing consensus DKG transcript".to_string(),
@@ -2203,7 +2235,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 )));
             }
 
-            let _ = runner.commit(&ceremony_id, CeremonyCommitMetadata::default()).await;
+            let _ = runner
+                .commit(&ceremony_id, CeremonyCommitMetadata::default())
+                .await;
         }
 
         Ok(ceremony_id.to_string())

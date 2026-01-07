@@ -109,10 +109,7 @@ impl<'a, E: ?Sized + JournalEffects + OrderClockEffects> AmpContextStore<'a, E> 
         delta.facts.insert(key, FactValue::Bytes(bytes))?;
 
         let current = self.effects.get_journal().await?;
-        let merged = self
-            .effects
-            .merge_facts(current, delta)
-            .await?;
+        let merged = self.effects.merge_facts(current, delta).await?;
         self.effects.persist_journal(&merged).await?;
         Ok(())
     }

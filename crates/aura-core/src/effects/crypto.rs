@@ -347,6 +347,30 @@ pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
         let _ = (old_shares, old_threshold, new_threshold, new_max_signers);
         Err(AuraError::crypto("frost_rotate_keys not supported"))
     }
+
+    // ====== Key Conversion ======
+
+    /// Convert Ed25519 public key to X25519 (Curve25519) public key for Diffie-Hellman.
+    async fn convert_ed25519_to_x25519_public(
+        &self,
+        ed25519_public_key: &[u8],
+    ) -> Result<[u8; 32], CryptoError> {
+        let _ = ed25519_public_key;
+        Err(AuraError::crypto(
+            "convert_ed25519_to_x25519_public not supported",
+        ))
+    }
+
+    /// Convert Ed25519 private key (seed) to X25519 (Curve25519) private key for Diffie-Hellman.
+    async fn convert_ed25519_to_x25519_private(
+        &self,
+        ed25519_private_key: &[u8],
+    ) -> Result<[u8; 32], CryptoError> {
+        let _ = ed25519_private_key;
+        Err(AuraError::crypto(
+            "convert_ed25519_to_x25519_private not supported",
+        ))
+    }
 }
 
 /// Combined cryptographic effects surface (core + extended).

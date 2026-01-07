@@ -19,8 +19,8 @@
 
 use proc_macro::TokenStream;
 
-mod choreography;
 mod ceremony_facts;
+mod choreography;
 mod domain_fact;
 mod effect_handlers;
 mod effect_system;

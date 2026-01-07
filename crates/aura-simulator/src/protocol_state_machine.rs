@@ -167,7 +167,12 @@ impl ProtocolStateMachine {
     }
 
     /// Queue an outgoing message (for use during step execution)
-    pub fn queue_output(&self, to: impl Into<String>, message: Vec<u8>, message_type: impl Into<String>) {
+    pub fn queue_output(
+        &self,
+        to: impl Into<String>,
+        message: Vec<u8>,
+        message_type: impl Into<String>,
+    ) {
         let to = to.into();
         let message_type = message_type.into();
 
@@ -265,12 +270,8 @@ impl ProtocolStateMachine {
                 *self.state.write() = ParticipantState::Ready;
                 StepResult::Chose { branch: choice }
             }
-            ParticipantState::Complete => {
-                StepResult::Complete
-            }
-            ParticipantState::Failed { error } => {
-                StepResult::Error { message: error }
-            }
+            ParticipantState::Complete => StepResult::Complete,
+            ParticipantState::Failed { error } => StepResult::Error { message: error },
         }
     }
 
@@ -406,11 +407,19 @@ impl ProtocolScheduler {
         *self.total_steps.write() += 1;
 
         // Handle the result
-        if let StepResult::Send { to, message, message_type } = &result {
+        if let StepResult::Send {
+            to,
+            message,
+            message_type,
+        } = &result
+        {
             if let Some(to_idx) = self.role_index(to) {
-                self.message_queue
-                    .write()
-                    .push_back((index, to_idx, message.clone(), message_type.clone()));
+                self.message_queue.write().push_back((
+                    index,
+                    to_idx,
+                    message.clone(),
+                    message_type.clone(),
+                ));
             }
         }
 
@@ -484,7 +493,10 @@ mod tests {
         let sm = ProtocolStateMachine::new("Alice");
 
         sm.wait_for("Bob");
-        assert!(matches!(sm.state(), ParticipantState::WaitingForMessage { .. }));
+        assert!(matches!(
+            sm.state(),
+            ParticipantState::WaitingForMessage { .. }
+        ));
 
         sm.ready_to_send("Bob");
         assert!(matches!(sm.state(), ParticipantState::ReadyToSend { .. }));

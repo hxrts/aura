@@ -3,10 +3,8 @@
 //! Simulates the full CLI recovery demo flow using the simulator.
 
 use crate::error::{TerminalError, TerminalResult};
-use aura_agent::handlers::{
-    RecoveryServiceApi,
-};
 use aura_agent::core::AuthorityContext;
+use aura_agent::handlers::RecoveryServiceApi;
 use aura_agent::runtime::SharedTransport;
 use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_core::effects::PhysicalTimeEffects;
@@ -235,12 +233,14 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
         crate::ids::authority_id("guardian:dave"),
     ];
 
-    let initiator_effects = Arc::new(AuraEffectSystem::simulation_with_shared_transport_for_authority(
-        &config,
-        42,
-        initiator_id,
-        shared_transport.clone(),
-    )?);
+    let initiator_effects = Arc::new(
+        AuraEffectSystem::simulation_with_shared_transport_for_authority(
+            &config,
+            42,
+            initiator_id,
+            shared_transport.clone(),
+        )?,
+    );
     let initiator_service =
         RecoveryServiceApi::new(initiator_effects, AuthorityContext::new(initiator_id))?;
 
@@ -281,12 +281,7 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
 
     let initiator_task = tokio::spawn(async move {
         initiator_service
-            .execute_guardian_setup_initiator_with_id(
-                &setup_id,
-                account_id,
-                guardians,
-                2,
-            )
+            .execute_guardian_setup_initiator_with_id(&setup_id, account_id, guardians, 2)
             .await
     });
 

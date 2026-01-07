@@ -33,15 +33,15 @@ pub(super) async fn respond_to_guardian_ceremony(
             )
             .await
             .map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to record guardian acceptance: {}",
-                    e
-                ))
+                IntentError::internal_error(format!("Failed to record guardian acceptance: {}", e))
             })?;
     } else {
         // Mark ceremony as failed due to decline
         runner
-            .abort(&ceremony_id, Some("Guardian declined invitation".to_string()))
+            .abort(
+                &ceremony_id,
+                Some("Guardian declined invitation".to_string()),
+            )
             .await
             .map_err(|e| {
                 IntentError::internal_error(format!("Failed to record guardian decline: {}", e))
@@ -81,9 +81,7 @@ pub(super) async fn respond_to_guardian_ceremony(
         )
         .await
         .map_err(|e| {
-            IntentError::internal_error(format!(
-                "Guardian ceremony choreography failed: {e}"
-            ))
+            IntentError::internal_error(format!("Guardian ceremony choreography failed: {e}"))
         })?;
 
     Ok(())

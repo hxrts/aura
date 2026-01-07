@@ -936,6 +936,54 @@ impl CryptoExtendedEffects for RealCryptoHandler {
         self.frost_generate_keys(new_threshold, new_max_signers)
             .await
     }
+
+    async fn convert_ed25519_to_x25519_public(
+        &self,
+        ed25519_public_key: &[u8],
+    ) -> Result<[u8; 32], CryptoError> {
+        use curve25519_dalek::edwards::CompressedEdwardsY;
+
+        let bytes: [u8; 32] = ed25519_public_key
+            .try_into()
+            .map_err(|_| CryptoError::invalid("Invalid Ed25519 public key length"))?;
+
+        let compressed = CompressedEdwardsY::from_slice(&bytes)
+            .map_err(|_| CryptoError::invalid("Invalid Ed25519 public key bytes"))?;
+
+        let point = compressed
+            .decompress()
+            .ok_or_else(|| CryptoError::invalid("Failed to decompress Ed25519 point"))?;
+
+        Ok(point.to_montgomery().to_bytes())
+    }
+
+    async fn convert_ed25519_to_x25519_private(
+        &self,
+        ed25519_private_key: &[u8],
+    ) -> Result<[u8; 32], CryptoError> {
+        use sha2::{Digest, Sha512};
+
+        if ed25519_private_key.len() != 32 {
+            return Err(CryptoError::invalid(
+                "Invalid Ed25519 private key length (expected 32-byte seed)",
+            ));
+        }
+
+        // Input is 32-byte seed. Hash it to get 64 bytes.
+        let mut hasher = Sha512::new();
+        hasher.update(ed25519_private_key);
+        let digest = hasher.finalize();
+
+        // Clamp the lower 32 bytes to get the scalar
+        let mut scalar_bytes = [0u8; 32];
+        scalar_bytes.copy_from_slice(&digest[0..32]);
+
+        scalar_bytes[0] &= 248;
+        scalar_bytes[31] &= 127;
+        scalar_bytes[31] |= 64;
+
+        Ok(scalar_bytes)
+    }
 }
 
 #[cfg(test)]

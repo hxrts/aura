@@ -13,9 +13,7 @@ use proc_macro2::{Group, TokenStream, TokenTree};
 use quote::quote;
 use rumpsteak_aura_choreography::{
     ast::{Choreography, MessageType, Protocol},
-    compiler::{
-        codegen::generate_choreography_code, parse_choreography_str, project,
-    },
+    compiler::{codegen::generate_choreography_code, parse_choreography_str, project},
     extensions::ExtensionRegistry,
     parse_and_generate_with_extensions,
 };
@@ -60,9 +58,8 @@ fn parse_choreography_source(input: TokenStream) -> Result<ChoreographyInput, sy
     let (dsl, span) = read_choreography_source(parsed.expr)?;
 
     let parser_dsl = strip_aura_annotations_for_parser(&dsl);
-    let mut choreography = parse_choreography_str(&parser_dsl).map_err(|err| {
-        syn::Error::new(span, format!("Choreography parse error: {err}"))
-    })?;
+    let mut choreography = parse_choreography_str(&parser_dsl)
+        .map_err(|err| syn::Error::new(span, format!("Choreography parse error: {err}")))?;
     let namespace = match (namespace_attr, choreography.namespace.clone()) {
         (Some(attr), Some(parsed_ns)) => {
             if parsed_ns != attr {
@@ -189,9 +186,7 @@ fn collect_messages(protocol: &Protocol, out: &mut BTreeMap<String, MessageType>
         Protocol::Rec { body, .. } => {
             collect_messages(body, out);
         }
-        Protocol::Extension {
-            continuation, ..
-        } => {
+        Protocol::Extension { continuation, .. } => {
             collect_messages(continuation, out);
         }
         Protocol::Var(_) | Protocol::End => {}
@@ -252,9 +247,7 @@ fn hoist_choice_blocks(tokens: TokenStream) -> TokenStream {
     out
 }
 
-fn transform_token_stream(
-    tokens: TokenStream,
-) -> (TokenStream, BTreeMap<String, TokenStream>) {
+fn transform_token_stream(tokens: TokenStream) -> (TokenStream, BTreeMap<String, TokenStream>) {
     let mut out = TokenStream::new();
     let mut hoisted = BTreeMap::new();
 
@@ -549,8 +542,7 @@ impl VisitMut for RoleRenamer {
 fn read_choreography_source(expr: Expr) -> Result<(String, proc_macro2::Span), syn::Error> {
     match expr {
         Expr::Lit(ExprLit {
-            lit: Lit::Str(lit),
-            ..
+            lit: Lit::Str(lit), ..
         }) => Ok((lit.value(), lit.span())),
         Expr::Macro(ExprMacro { mac, .. }) if mac.path.is_ident("include_str") => {
             let lit: LitStr = syn::parse2(mac.tokens)?;
@@ -593,17 +585,17 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     let rumpsteak_output =
         choreography_impl_namespace_aware(&parsed_input.choreography, &message_type_names)
             .unwrap_or_else(|err| {
-        // If rumpsteak fails, generate a helpful error message but continue with Aura wrapper
-        let _error_msg = err.to_string();
-        quote! {
-            /// Rumpsteak integration failed - using Aura-only mode
-            pub mod rumpsteak_session_types {
-                // Rumpsteak integration error (this is expected in some cases):
-                // #error_msg
-                // Using Aura choreography system only.
-            }
-        }
-    });
+                // If rumpsteak fails, generate a helpful error message but continue with Aura wrapper
+                let _error_msg = err.to_string();
+                quote! {
+                    /// Rumpsteak integration failed - using Aura-only mode
+                    pub mod rumpsteak_session_types {
+                        // Rumpsteak integration error (this is expected in some cases):
+                        // #error_msg
+                        // Using Aura choreography system only.
+                    }
+                }
+            });
 
     // Generate the Aura wrapper module with namespace support
     let namespace = parsed_input.namespace.clone();
@@ -1378,10 +1370,10 @@ fn choreography_impl_namespace_aware(
 
     // Generate module name using namespace
     let module_name = if let Some(ns) = &choreography.namespace {
-                quote::format_ident!("rumpsteak_session_types_{}", ns)
-            } else {
-                quote::format_ident!("rumpsteak_session_types")
-            };
+        quote::format_ident!("rumpsteak_session_types_{}", ns)
+    } else {
+        quote::format_ident!("rumpsteak_session_types")
+    };
 
     let imports = quote! {
         #[allow(unused_imports)]

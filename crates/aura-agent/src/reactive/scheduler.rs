@@ -433,8 +433,10 @@ impl ReactiveScheduler {
 
     fn inspect_generic_facts(&self, facts: &[Fact]) {
         for fact in facts {
-            if let FactContent::Relational(RelationalFact::Generic { context_id, envelope }) =
-                &fact.content
+            if let FactContent::Relational(RelationalFact::Generic {
+                context_id,
+                envelope,
+            }) = &fact.content
             {
                 let binding = self.fact_registry.reduce_envelope(*context_id, envelope);
                 let binding_type_desc = format!("{:?}", binding.binding_type);

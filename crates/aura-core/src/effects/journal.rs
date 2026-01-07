@@ -24,11 +24,8 @@ pub trait JournalEffects: Send + Sync {
     async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError>;
 
     /// Refine capabilities using meet semilattice operation
-    async fn refine_caps(
-        &self,
-        target: Journal,
-        refinement: Journal,
-    ) -> Result<Journal, AuraError>;
+    async fn refine_caps(&self, target: Journal, refinement: Journal)
+        -> Result<Journal, AuraError>;
 
     /// Get current journal state
     async fn get_journal(&self) -> Result<Journal, AuraError>;

@@ -88,6 +88,7 @@ pub mod error;
 pub mod guard_interpreter;
 pub mod identifiers;
 pub mod leakage;
+pub mod noise;
 pub mod query;
 pub mod random;
 pub mod reactive;
@@ -121,6 +122,7 @@ pub use identifiers::{
     new_operation_id, new_session_id,
 };
 pub use leakage::ProductionLeakageHandler;
+pub use noise::RealNoiseHandler;
 pub use random::RealRandomHandler;
 pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
 pub use secure::RealSecureStorageHandler;

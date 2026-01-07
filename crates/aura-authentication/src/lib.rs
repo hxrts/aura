@@ -144,10 +144,10 @@ pub use view::{
 
 /// Re-exports for DkdChoreography runners
 pub mod dkd_runners {
-    pub use crate::dkd::rumpsteak_session_types_dkd_protocol::dkd_protocol::DkdChoreographyRole;
     pub use crate::dkd::rumpsteak_session_types_dkd_protocol::dkd_protocol::runners::{
         execute_as, run_initiator, run_participant, InitiatorOutput, ParticipantOutput,
     };
+    pub use crate::dkd::rumpsteak_session_types_dkd_protocol::dkd_protocol::DkdChoreographyRole;
 }
 
 /// Re-exports for GuardianAuthRelational choreography runners

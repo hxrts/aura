@@ -5,19 +5,19 @@
 
 use super::rendezvous::{ChannelResult, RendezvousHandler, RendezvousResult};
 use crate::core::{AgentResult, AuthorityContext};
-use crate::runtime::AuraEffectSystem;
 use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use crate::runtime::AuraEffectSystem;
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_rendezvous::protocol::{
-    DescriptorAnswer, DescriptorOffer, HandshakeComplete, HandshakeInit, RelayComplete,
-    RelayForward, RelayRequest, RelayResponse,
-};
 use aura_rendezvous::protocol::exchange_runners::{
     execute_as as exchange_execute_as, RendezvousExchangeRole,
 };
 use aura_rendezvous::protocol::relayed_runners::{
     execute_as as relayed_execute_as, RelayedRendezvousRole,
+};
+use aura_rendezvous::protocol::{
+    DescriptorAnswer, DescriptorOffer, HandshakeComplete, HandshakeInit, RelayComplete,
+    RelayForward, RelayRequest, RelayResponse,
 };
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use std::collections::{HashMap, VecDeque};
@@ -367,8 +367,7 @@ impl RendezvousServiceApi {
             None
         });
 
-        let session_id =
-            relayed_rendezvous_session_id(context_id, authority_id, relay, responder);
+        let session_id = relayed_rendezvous_session_id(context_id, authority_id, relay, responder);
         adapter
             .start_session(session_id)
             .await
@@ -479,8 +478,7 @@ impl RendezvousServiceApi {
             None
         });
 
-        let session_id =
-            relayed_rendezvous_session_id(context_id, initiator, relay, authority_id);
+        let session_id = relayed_rendezvous_session_id(context_id, initiator, relay, authority_id);
         adapter
             .start_session(session_id)
             .await

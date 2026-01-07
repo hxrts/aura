@@ -17,9 +17,10 @@ impl AuraAgent {
         self.runtime().ceremony_tracker().clone()
     }
 
-
     /// Get the ceremony runner for Category C orchestration
-    pub async fn ceremony_runner(&self) -> crate::runtime::services::ceremony_runner::CeremonyRunner {
+    pub async fn ceremony_runner(
+        &self,
+    ) -> crate::runtime::services::ceremony_runner::CeremonyRunner {
         self.runtime().ceremony_runner().clone()
     }
 

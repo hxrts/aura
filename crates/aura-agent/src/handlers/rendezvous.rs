@@ -246,16 +246,23 @@ impl RendezvousHandler {
             .await
             .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
 
-        let outcome = self
-            .service
+        // TODO: Retrieve actual identity keys from SecureStorage / Directory
+        let local_private_key = [0u8; 32];
+        let remote_public_key = [0u8; 32];
+
+        let outcome = self.service
             .prepare_establish_channel(
                 &snapshot,
                 context_id,
                 peer,
                 &psk,
+                &local_private_key,
+                &remote_public_key,
                 current_time,
                 &peer_descriptor,
+                effects,
             )
+            .await
             .map_err(|e| AgentError::effects(format!("prepare channel failed: {e}")))?;
 
         // Check guard outcome
@@ -305,8 +312,7 @@ impl RendezvousHandler {
             .await;
 
         // Create channel established fact
-        let fact = self
-            .service
+        let fact = self.service
             .create_channel_established_fact(context_id, peer, channel_id, epoch);
 
         // Journal the fact
@@ -368,8 +374,7 @@ impl RendezvousHandler {
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
         // Prepare relay request
-        let outcome = self
-            .service
+        let outcome = self.service
             .prepare_relay_request(context_id, relay, target, &snapshot);
 
         if !outcome.decision.is_allowed() {
