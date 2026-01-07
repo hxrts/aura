@@ -299,9 +299,9 @@ impl RendezvousService {
         }
 
         // Build descriptor
-        let descriptor = self
-            .descriptor_builder
-            .build(context_id, transport_hints, public_key, now_ms);
+        let descriptor =
+            self.descriptor_builder
+                .build(context_id, transport_hints, public_key, now_ms);
 
         // Create fact
         let fact = RendezvousFact::Descriptor(descriptor);
@@ -403,16 +403,16 @@ impl RendezvousService {
             psk: *psk,
             timeout_ms: self.config.probe_timeout_ms,
         };
-        
+
         let mut handshaker = Handshaker::new(handshake_config);
-        
+
         // Generate Noise Init message using NoiseEffects + CryptoEffects
         let noise_message = handshaker
             .create_init_message(
                 snapshot.epoch,
                 local_private_key,
                 remote_public_key,
-                effects
+                effects,
             )
             .await?;
 
@@ -467,6 +467,7 @@ impl RendezvousService {
     // =========================================================================
 
     /// Prepare to handle an incoming handshake as responder.
+    #[allow(clippy::too_many_arguments)]
     pub async fn prepare_handle_handshake<E: NoiseEffects + CryptoEffects>(
         &self,
         snapshot: &GuardSnapshot,
@@ -493,7 +494,10 @@ impl RendezvousService {
         // Verify PSK commitment
         let expected_commitment = compute_psk_commitment(psk);
         if init_message.psk_commitment != expected_commitment {
-            return Ok((GuardOutcome::denied(types::GuardViolation::other("PSK commitment mismatch")), None));
+            return Ok((
+                GuardOutcome::denied(types::GuardViolation::other("PSK commitment mismatch")),
+                None,
+            ));
         }
 
         // Initialize handshaker
@@ -504,22 +508,22 @@ impl RendezvousService {
             psk: *psk,
             timeout_ms: self.config.probe_timeout_ms,
         };
-        
+
         let mut handshaker = Handshaker::new(handshake_config);
-        
+
         // Process Init message
         handshaker
             .process_init(
                 &init_message.noise_message,
                 init_message.epoch,
                 local_private_key,
-                effects
+                effects,
             )
             .await?;
-        
+
         // Create Response message
         let response_bytes = handshaker.create_response(snapshot.epoch, effects).await?;
-        
+
         // Complete handshake (Responder side)
         let (result, channel) = handshaker.complete(snapshot.epoch, false, effects).await?;
         let channel_id = result.channel_id;
@@ -576,7 +580,7 @@ impl RendezvousService {
 
         Ok((GuardOutcome::allowed(effects), Some(channel)))
     }
-    
+
     /// Prepare to handle handshake completion (Initiator side).
     pub async fn prepare_handle_completion<E: NoiseEffects>(
         &self,
@@ -587,21 +591,26 @@ impl RendezvousService {
         effects: &E,
     ) -> AuraResult<Option<SecureChannel>> {
         let mut handshakers = self.handshakers.write().await;
-        let mut handshaker = handshakers.remove(&(context_id, peer))
+        let mut handshaker = handshakers
+            .remove(&(context_id, peer))
             .ok_or_else(|| AuraError::invalid("No pending handshake found for peer"))?;
         drop(handshakers);
-            
+
         // Process Response message
-        handshaker.process_response(&completion_message.handshake.noise_message, effects).await?;
-        
+        handshaker
+            .process_response(&completion_message.handshake.noise_message, effects)
+            .await?;
+
         // Complete handshake (Initiator side)
-        let (_result, channel) = handshaker.complete(completion_message.handshake.epoch, true, effects).await?;
-        
+        let (_result, channel) = handshaker
+            .complete(completion_message.handshake.epoch, true, effects)
+            .await?;
+
         // Verify channel ID matches if provided in message (optional check)
         if completion_message.channel_id != channel.channel_id() {
-             return Err(AuraError::crypto("Channel ID mismatch in completion"));
+            return Err(AuraError::crypto("Channel ID mismatch in completion"));
         }
-        
+
         Ok(Some(channel))
     }
 
@@ -666,9 +675,13 @@ fn compute_psk_commitment(psk: &[u8; 32]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::noise::{HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState};
-    use aura_core::effects::{CryptoEffects, CryptoCoreEffects, CryptoExtendedEffects, CryptoError, RandomCoreEffects};
     use async_trait::async_trait;
+    use aura_core::effects::noise::{
+        HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState,
+    };
+    use aura_core::effects::{
+        CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
+    };
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -690,58 +703,120 @@ mod tests {
             epoch: 1,
         }
     }
-    
+
     // Mock Noise Effects for testing service
     struct MockNoise;
     #[async_trait]
     impl NoiseEffects for MockNoise {
-        async fn create_handshake_state(&self, _params: NoiseParams) -> Result<HandshakeState, NoiseError> {
+        async fn create_handshake_state(
+            &self,
+            _params: NoiseParams,
+        ) -> Result<HandshakeState, NoiseError> {
             Ok(HandshakeState(Box::new(())))
         }
-        async fn write_message(&self, _state: HandshakeState, _payload: &[u8]) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+        async fn write_message(
+            &self,
+            _state: HandshakeState,
+            _payload: &[u8],
+        ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
             Ok((vec![1, 2, 3], HandshakeState(Box::new(()))))
         }
-        async fn read_message(&self, _state: HandshakeState, _message: &[u8]) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+        async fn read_message(
+            &self,
+            _state: HandshakeState,
+            _message: &[u8],
+        ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
             Ok((vec![], HandshakeState(Box::new(()))))
         }
-        async fn into_transport_mode(&self, _state: HandshakeState) -> Result<TransportState, NoiseError> {
+        async fn into_transport_mode(
+            &self,
+            _state: HandshakeState,
+        ) -> Result<TransportState, NoiseError> {
             Ok(TransportState(Box::new(())))
         }
-        async fn encrypt_transport_message(&self, _state: &mut TransportState, payload: &[u8]) -> Result<Vec<u8>, NoiseError> {
+        async fn encrypt_transport_message(
+            &self,
+            _state: &mut TransportState,
+            payload: &[u8],
+        ) -> Result<Vec<u8>, NoiseError> {
             Ok(payload.to_vec())
         }
-        async fn decrypt_transport_message(&self, _state: &mut TransportState, message: &[u8]) -> Result<Vec<u8>, NoiseError> {
+        async fn decrypt_transport_message(
+            &self,
+            _state: &mut TransportState,
+            message: &[u8],
+        ) -> Result<Vec<u8>, NoiseError> {
             Ok(message.to_vec())
         }
     }
-    
+
     // Add Mock Crypto Effects
     #[async_trait]
     impl RandomCoreEffects for MockNoise {
-        async fn random_bytes(&self, _len: usize) -> Vec<u8> { vec![] }
-        async fn random_bytes_32(&self) -> [u8; 32] { [0u8; 32] }
-        async fn random_u64(&self) -> u64 { 0 }
-        async fn random_range(&self, _min: u64, _max: u64) -> u64 { 0 }
-        async fn random_uuid(&self) -> uuid::Uuid { uuid::Uuid::nil() }
+        async fn random_bytes(&self, _len: usize) -> Vec<u8> {
+            vec![]
+        }
+        async fn random_bytes_32(&self) -> [u8; 32] {
+            [0u8; 32]
+        }
+        async fn random_u64(&self) -> u64 {
+            0
+        }
     }
     #[async_trait]
     impl CryptoCoreEffects for MockNoise {
-        async fn hkdf_derive(&self, _: &[u8], _: &[u8], _: &[u8], _: u32) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
-        async fn derive_key(&self, _: &[u8], _: &aura_core::effects::crypto::KeyDerivationContext) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
-        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> { Ok((vec![], vec![])) }
-        async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
-        async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> { Ok(true) }
-        fn is_simulated(&self) -> bool { true }
-        fn crypto_capabilities(&self) -> Vec<String> { vec![] }
-        fn constant_time_eq(&self, _: &[u8], _: &[u8]) -> bool { true }
+        async fn hkdf_derive(
+            &self,
+            _: &[u8],
+            _: &[u8],
+            _: &[u8],
+            _: u32,
+        ) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![])
+        }
+        async fn derive_key(
+            &self,
+            _: &[u8],
+            _: &aura_core::effects::crypto::KeyDerivationContext,
+        ) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![])
+        }
+        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+            Ok((vec![], vec![]))
+        }
+        async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![])
+        }
+        async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> {
+            Ok(true)
+        }
+        fn is_simulated(&self) -> bool {
+            true
+        }
+        fn crypto_capabilities(&self) -> Vec<String> {
+            vec![]
+        }
+        fn constant_time_eq(&self, _: &[u8], _: &[u8]) -> bool {
+            true
+        }
         fn secure_zero(&self, _: &mut [u8]) {}
     }
     #[async_trait]
     impl CryptoExtendedEffects for MockNoise {
-        async fn convert_ed25519_to_x25519_public(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> { Ok([0u8; 32]) }
-        async fn convert_ed25519_to_x25519_private(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> { Ok([0u8; 32]) }
+        async fn convert_ed25519_to_x25519_public(
+            &self,
+            _: &[u8],
+        ) -> Result<[u8; 32], CryptoError> {
+            Ok([0u8; 32])
+        }
+        async fn convert_ed25519_to_x25519_private(
+            &self,
+            _: &[u8],
+        ) -> Result<[u8; 32], CryptoError> {
+            Ok([0u8; 32])
+        }
     }
-    impl CryptoEffects for MockNoise {}
+    // Note: CryptoEffects has a blanket impl, so we don't need to impl it explicitly
 
     #[test]
     fn test_service_creation() {
@@ -773,7 +848,7 @@ mod tests {
         let peer = AuthorityId::new_from_entropy([3u8; 32]);
         let psk = [42u8; 32];
         let mock_effects = MockNoise;
-        
+
         let descriptor = RendezvousDescriptor {
             authority_id: peer,
             context_id: test_context(),
@@ -786,20 +861,23 @@ mod tests {
             nickname_suggestion: None,
         };
 
-        let outcome = service.prepare_establish_channel(
-            &snapshot,
-            test_context(),
-            peer,
-            &psk,
-            &[0u8; 32], // local private key
-            &[0u8; 32], // remote public key
-            100,
-            &descriptor,
-            &mock_effects
-        ).await.unwrap();
+        let outcome = service
+            .prepare_establish_channel(
+                &snapshot,
+                test_context(),
+                peer,
+                &psk,
+                &[0u8; 32], // local private key
+                &[0u8; 32], // remote public key
+                100,
+                &descriptor,
+                &mock_effects,
+            )
+            .await
+            .unwrap();
 
         assert!(outcome.decision.is_allowed());
-        
+
         // Check if handshaker was stored
         let handshakers = service.handshakers.read().await;
         assert!(handshakers.contains_key(&(test_context(), peer)));

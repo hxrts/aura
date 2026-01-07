@@ -225,6 +225,7 @@ mod tests {
             context_id: context,
             transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
             handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
             valid_from,
             valid_until,
             nonce: [0u8; 32],

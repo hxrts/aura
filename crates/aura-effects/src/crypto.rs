@@ -1369,9 +1369,9 @@ mod single_signer_tests {
 #[cfg(test)]
 mod key_conversion_tests {
     use super::*;
-    use proptest::prelude::*;
-    use curve25519_dalek::scalar::Scalar;
     use curve25519_dalek::montgomery::MontgomeryPoint;
+    use curve25519_dalek::scalar::Scalar;
+    use proptest::prelude::*;
 
     proptest! {
         #[test]
@@ -1379,21 +1379,21 @@ mod key_conversion_tests {
             let runtime = tokio::runtime::Runtime::new().unwrap();
             runtime.block_on(async {
                 let handler = RealCryptoHandler::seeded(seed);
-                
+
                 // 1. Generate Ed25519 keypair
                 let (ed_priv, ed_pub) = handler.ed25519_generate_keypair().await.unwrap();
-                
+
                 // 2. Convert to X25519
                 let x25519_priv_bytes = handler.convert_ed25519_to_x25519_private(&ed_priv).await.unwrap();
                 let x25519_pub_bytes = handler.convert_ed25519_to_x25519_public(&ed_pub).await.unwrap();
-                
+
                 // 3. Verify consistency using curve25519-dalek directly
                 let mut scalar_bytes = [0u8; 32];
                 scalar_bytes.copy_from_slice(&x25519_priv_bytes);
                 let scalar = Scalar::from_bytes_mod_order(scalar_bytes);
-                
+
                 let derived_point = MontgomeryPoint::mul_base(&scalar);
-                
+
                 assert_eq!(derived_point.to_bytes(), x25519_pub_bytes, "Derived X25519 public key should match converted Ed25519 public key");
             });
         }

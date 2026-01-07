@@ -333,6 +333,7 @@ mod tests {
             context_id: ContextId::new_from_entropy([2u8; 32]),
             transport_hints: vec![TransportHint::tcp_direct("127.0.0.1:8080").unwrap()],
             handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
             valid_from: 1000,
             valid_until: 2000,
             nonce: [3u8; 32],

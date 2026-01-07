@@ -4,7 +4,9 @@
 //! This module provides the SecureChannel type that integrates with
 //! the guard chain for authorized communication.
 
-use aura_core::effects::noise::{HandshakeState as NoiseHandshakeState, NoiseEffects, NoiseParams, TransportState};
+use aura_core::effects::noise::{
+    HandshakeState as NoiseHandshakeState, NoiseEffects, NoiseParams, TransportState,
+};
 use aura_core::effects::CryptoEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
@@ -469,8 +471,12 @@ impl Handshaker {
         }
 
         // Convert keys to X25519
-        let x25519_local = effects.convert_ed25519_to_x25519_private(local_private_key).await?;
-        let x25519_remote = effects.convert_ed25519_to_x25519_public(remote_public_key).await?;
+        let x25519_local = effects
+            .convert_ed25519_to_x25519_private(local_private_key)
+            .await?;
+        let x25519_remote = effects
+            .convert_ed25519_to_x25519_public(remote_public_key)
+            .await?;
 
         let params = NoiseParams {
             local_private_key: x25519_local,
@@ -478,9 +484,9 @@ impl Handshaker {
             psk: self.config.psk,
             is_initiator: true,
         };
-        
+
         let noise_state = effects.create_handshake_state(params).await?;
-        
+
         // Generate channel ID
         self.channel_id = Some(generate_channel_id(
             &self.config.local,
@@ -511,7 +517,9 @@ impl Handshaker {
         }
 
         // Convert keys to X25519
-        let x25519_local = effects.convert_ed25519_to_x25519_private(local_private_key).await?;
+        let x25519_local = effects
+            .convert_ed25519_to_x25519_private(local_private_key)
+            .await?;
         // Note: remote public key not needed for responder in IK pattern initially?
         // But NoiseParams expects it.
         // If we don't know it, we might need a different NoiseParams or allow placeholder.
@@ -521,15 +529,15 @@ impl Handshaker {
         // I'll assume we can pass all-zeros if unknown, or Snow handles it.
         // Wait, Snow's builder methods might panic if key missing when required?
         // I'll use a placeholder for now, assuming responder learns it.
-        let x25519_remote = [0u8; 32]; 
+        let x25519_remote = [0u8; 32];
 
         let params = NoiseParams {
             local_private_key: x25519_local,
-            remote_public_key: x25519_remote, 
+            remote_public_key: x25519_remote,
             psk: self.config.psk,
             is_initiator: false,
         };
-        
+
         let noise_state = effects.create_handshake_state(params).await?;
 
         // Generate same channel ID
@@ -555,8 +563,11 @@ impl Handshaker {
         if self.state != HandshakeStatus::InitReceived {
             return Err(AuraError::invalid("Invalid state for create_response"));
         }
-        
-        let noise_state = self.noise_state.take().ok_or_else(|| AuraError::internal("Missing noise state"))?;
+
+        let noise_state = self
+            .noise_state
+            .take()
+            .ok_or_else(|| AuraError::internal("Missing noise state"))?;
 
         // Payload can include confirmation
         let payload = b"ACK";
@@ -576,8 +587,11 @@ impl Handshaker {
         if self.state != HandshakeStatus::InitSent {
             return Err(AuraError::invalid("Invalid state for process_response"));
         }
-        
-        let noise_state = self.noise_state.take().ok_or_else(|| AuraError::internal("Missing noise state"))?;
+
+        let noise_state = self
+            .noise_state
+            .take()
+            .ok_or_else(|| AuraError::internal("Missing noise state"))?;
 
         let (_payload, new_state) = effects.read_message(noise_state, message).await?;
 
@@ -605,8 +619,11 @@ impl Handshaker {
         let channel_id = self
             .channel_id
             .ok_or_else(|| AuraError::internal("Channel ID not generated"))?;
-            
-        let noise_state = self.noise_state.take().ok_or_else(|| AuraError::internal("Missing noise state"))?;
+
+        let noise_state = self
+            .noise_state
+            .take()
+            .ok_or_else(|| AuraError::internal("Missing noise state"))?;
         let transport_state = effects.into_transport_mode(noise_state).await?;
 
         self.state = HandshakeStatus::Complete;
@@ -616,7 +633,7 @@ impl Handshaker {
             epoch,
             is_initiator,
         };
-        
+
         let mut channel = SecureChannel::new(
             result.channel_id,
             self.config.context_id,

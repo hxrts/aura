@@ -103,6 +103,7 @@ fn strip_aura_annotations_for_parser(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
 
+    #[allow(clippy::while_let_on_iterator)]
     while let Some(ch) = chars.next() {
         if ch != '[' {
             out.push(ch);
@@ -209,6 +210,7 @@ fn generate_helpers(messages: &[MessageType]) -> TokenStream {
     let message_structs = messages.iter().map(|msg| {
         let name = &msg.name;
         if let Some(payload) = &msg.payload {
+            #[allow(clippy::expect_used)]
             let parsed: Type = syn::parse2(payload.clone())
                 .unwrap_or_else(|_| syn::parse2(payload.clone()).expect("payload type"));
             let payload_ty = match parsed {
@@ -303,11 +305,9 @@ fn extract_choice_block(group: &Group) -> Option<(Ident, TokenStream)> {
     for (idx, stmt) in block.stmts.iter().enumerate() {
         match stmt {
             Stmt::Item(item) => items.push(item),
-            Stmt::Expr(expr, None) if idx == block.stmts.len().saturating_sub(1) => {
-                if let Expr::Path(path) = expr {
-                    if path.path.segments.len() == 1 {
-                        tail_ident = Some(path.path.segments[0].ident.clone());
-                    }
+            Stmt::Expr(Expr::Path(path), None) if idx == block.stmts.len().saturating_sub(1) => {
+                if path.path.segments.len() == 1 {
+                    tail_ident = Some(path.path.segments[0].ident.clone());
                 }
             }
             _ => {}
@@ -349,7 +349,7 @@ fn rewrite_generated_code(tokens: TokenStream, role_ident: &Ident) -> TokenStrea
     quote! { #file }
 }
 
-fn rewrite_runner_modules(items: &mut Vec<syn::Item>) {
+fn rewrite_runner_modules(items: &mut [syn::Item]) {
     for item in items.iter_mut() {
         if let syn::Item::Mod(module) = item {
             if let Some((_, ref mut inner_items)) = module.content {
@@ -371,21 +371,18 @@ fn rewrite_runner_imports(items: &mut Vec<syn::Item>) {
     let mut has_adapter_alias = false;
 
     for (idx, item) in items.iter_mut().enumerate() {
-        match item {
-            syn::Item::Use(item_use) => {
-                if is_super_glob(item_use) {
-                    insert_pos = idx + 1;
-                }
-
-                if use_tree_contains_adapter(item_use) {
-                    strip_adapter_from_use(item_use);
-                }
-
-                if is_adapter_alias_use(item_use) {
-                    has_adapter_alias = true;
-                }
+        if let syn::Item::Use(item_use) = item {
+            if is_super_glob(item_use) {
+                insert_pos = idx + 1;
             }
-            _ => {}
+
+            if use_tree_contains_adapter(item_use) {
+                strip_adapter_from_use(item_use);
+            }
+
+            if is_adapter_alias_use(item_use) {
+                has_adapter_alias = true;
+            }
         }
     }
 
@@ -1324,11 +1321,7 @@ fn choreography_impl_namespace_aware(
             Err(err) => {
                 return Err(syn::Error::new(
                     proc_macro2::Span::call_site(),
-                    format!(
-                        "Projection failed for role {}: {}",
-                        role.name().to_string(),
-                        err
-                    ),
+                    format!("Projection failed for role {}: {}", role.name(), err),
                 ));
             }
         }
@@ -1402,6 +1395,7 @@ fn choreography_impl_namespace_aware(
 
     Ok(quote! {
         /// Rumpsteak-aura generated session types and choreographic projections
+        #[allow(clippy::diverging_sub_expression)]
         pub mod #module_name {
             #imports
             #helpers

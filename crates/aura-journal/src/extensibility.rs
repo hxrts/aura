@@ -289,6 +289,8 @@ mod tests {
         }
 
         fn to_envelope(&self) -> FactEnvelope {
+            // SAFETY: TestFact serialization is deterministic and should never fail in tests.
+            #[allow(clippy::expect_used)]
             let payload =
                 aura_core::util::serialization::to_vec(self).expect("TestFact serialization");
             FactEnvelope {
@@ -400,7 +402,7 @@ mod tests {
         assert!(restored.is_some());
 
         // Wrong type should fail
-        let mut wrong_envelope = envelope.clone();
+        let mut wrong_envelope = envelope;
         wrong_envelope.type_id = aura_core::types::facts::FactTypeId::from("wrong");
         let wrong_type: Option<TestFact> = parse_envelope(&wrong_envelope, "test");
         assert!(wrong_type.is_none());

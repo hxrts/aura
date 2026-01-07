@@ -57,6 +57,7 @@ pub trait NoiseEffects: Send + Sync {
 
     /// Transition to transport mode (Split).
     /// Returns the TransportState representing the secure channel pair.
+    #[allow(clippy::wrong_self_convention)]
     async fn into_transport_mode(
         &self,
         state: HandshakeState,

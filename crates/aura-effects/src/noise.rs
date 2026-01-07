@@ -36,7 +36,7 @@ impl NoiseEffects for RealNoiseHandler {
         let builder = Builder::new(
             params_str
                 .parse()
-                .map_err(|e| AuraError::crypto(format!("Invalid Noise params: {}", e)))?,
+                .map_err(|e| AuraError::crypto(format!("Invalid Noise params: {e}")))?,
         );
 
         let builder = builder
@@ -51,7 +51,7 @@ impl NoiseEffects for RealNoiseHandler {
         };
 
         let state = state
-            .map_err(|e| AuraError::crypto(format!("Failed to build handshake state: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("Failed to build handshake state: {e}")))?;
 
         Ok(HandshakeState(Box::new(state)))
     }
@@ -70,7 +70,7 @@ impl NoiseEffects for RealNoiseHandler {
         let mut output = vec![0u8; 65535]; // Max noise message size
         let len = inner_state
             .write_message(payload, &mut output)
-            .map_err(|e| AuraError::crypto(format!("Handshake write failed: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("Handshake write failed: {e}")))?;
 
         output.truncate(len);
 
@@ -91,7 +91,7 @@ impl NoiseEffects for RealNoiseHandler {
         let mut payload = vec![0u8; 65535];
         let len = inner_state
             .read_message(message, &mut payload)
-            .map_err(|e| AuraError::crypto(format!("Handshake read failed: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("Handshake read failed: {e}")))?;
 
         payload.truncate(len);
 
@@ -109,7 +109,7 @@ impl NoiseEffects for RealNoiseHandler {
             .map_err(|_| AuraError::internal("Invalid handshake state type"))?;
 
         let transport = inner_state.into_transport_mode().map_err(|e| {
-            AuraError::crypto(format!("Failed to transition to transport mode: {}", e))
+            AuraError::crypto(format!("Failed to transition to transport mode: {e}"))
         })?;
 
         Ok(TransportState(Box::new(transport)))
@@ -129,7 +129,7 @@ impl NoiseEffects for RealNoiseHandler {
                                                         // Note: snow::TransportState::write_message handles encryption
         let len = inner_state
             .write_message(payload, &mut output)
-            .map_err(|e| AuraError::crypto(format!("Transport encrypt failed: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("Transport encrypt failed: {e}")))?;
 
         output.truncate(len);
         Ok(output)
@@ -148,7 +148,7 @@ impl NoiseEffects for RealNoiseHandler {
         let mut output = vec![0u8; message.len()];
         let len = inner_state
             .read_message(message, &mut output)
-            .map_err(|e| AuraError::crypto(format!("Transport decrypt failed: {}", e)))?;
+            .map_err(|e| AuraError::crypto(format!("Transport decrypt failed: {e}")))?;
 
         output.truncate(len);
         Ok(output)

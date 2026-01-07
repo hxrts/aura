@@ -66,6 +66,11 @@ pub struct MessageRequest<R: RoleId> {
 ///
 /// For protocols with parameterized roles (e.g., `Witness[N]`), use `with_role_family()`
 /// to register role instances that can be resolved during broadcast/collect operations.
+type MessageProviderFn<R> =
+    Box<dyn FnMut(MessageRequest<R>, &[ReceivedMessage]) -> Option<Box<dyn Any + Send>> + Send>;
+
+type BranchDeciderFn = Box<dyn FnMut(&[ReceivedMessage]) -> Option<String> + Send>;
+
 #[allow(dead_code)]
 pub struct AuraProtocolAdapter<E, R>
 where
@@ -81,10 +86,8 @@ where
     outbound: VecDeque<Box<dyn Any + Send>>,
     branch_choices: VecDeque<R::Label>,
     received: Vec<ReceivedMessage>,
-    message_provider: Option<
-        Box<dyn FnMut(MessageRequest<R>, &[ReceivedMessage]) -> Option<Box<dyn Any + Send>> + Send>,
-    >,
-    branch_decider: Option<Box<dyn FnMut(&[ReceivedMessage]) -> Option<String> + Send>>,
+    message_provider: Option<MessageProviderFn<R>>,
+    branch_decider: Option<BranchDeciderFn>,
 }
 
 #[allow(dead_code)]
@@ -186,7 +189,7 @@ where
         let self_role = self.map_role(self.self_role)?;
         roles.push(self_role);
 
-        for (role, _) in &self.role_map {
+        for role in self.role_map.keys() {
             let mapped = self.map_role(*role)?;
             if mapped != self_role {
                 roles.push(mapped);

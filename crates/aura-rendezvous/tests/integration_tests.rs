@@ -17,12 +17,14 @@ use async_trait::async_trait;
 use aura_core::effects::noise::{
     HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState,
 };
-use aura_core::effects::{CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects};
+use aura_core::effects::{
+    CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
+};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::FlowCost;
 use aura_rendezvous::{
     facts::{RendezvousDescriptor, RendezvousFact, TransportHint},
-    new_channel::{ChannelManager, HandshakeConfig, HandshakeStatus, Handshaker, SecureChannel},
+    new_channel::{ChannelManager, HandshakeConfig, Handshaker, SecureChannel},
     protocol::guards,
     service::{EffectCommand, GuardDecision, GuardSnapshot, RendezvousConfig, RendezvousService},
 };
@@ -124,12 +126,6 @@ impl RandomCoreEffects for MockNoise {
     async fn random_u64(&self) -> u64 {
         0
     }
-    async fn random_range(&self, _: u64, _: u64) -> u64 {
-        0
-    }
-    async fn random_uuid(&self) -> uuid::Uuid {
-        uuid::Uuid::nil()
-    }
 }
 #[async_trait]
 impl CryptoCoreEffects for MockNoise {
@@ -178,7 +174,7 @@ impl CryptoExtendedEffects for MockNoise {
         Ok([0u8; 32])
     }
 }
-impl aura_core::effects::CryptoEffects for MockNoise {}
+// Note: CryptoEffects has a blanket impl, so we don't need to impl it explicitly
 
 // =============================================================================
 // Descriptor Publication Tests

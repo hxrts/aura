@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn test_envelope_access() {
         let envelope = test_envelope("chat/v2", b"chat data");
-        let binding = GenericBinding::try_new(envelope.clone()).unwrap();
+        let binding = GenericBinding::try_new(envelope).unwrap();
 
         assert_eq!(binding.envelope().type_id.as_str(), "chat/v2");
         assert_eq!(binding.envelope().schema_version, 1);

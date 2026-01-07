@@ -148,6 +148,9 @@ impl DomainFact for DeviceNamingFact {
     }
 
     fn to_envelope(&self) -> FactEnvelope {
+        // SAFETY: DeviceNamingFact serialization is deterministic and should never fail.
+        // This is a fact serialization context where panic is acceptable.
+        #[allow(clippy::expect_used)]
         let payload = aura_core::util::serialization::to_vec(self)
             .expect("DeviceNamingFact serialization should not fail");
         FactEnvelope {

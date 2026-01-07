@@ -124,7 +124,6 @@ pub fn derive_domain_fact(input: TokenStream) -> TokenStream {
 /// Note: Effect implementations in aura-effects are the abstraction boundary where
 /// direct OS calls are expected. Application code should always use injected effects,
 /// never call OS functions directly.
-
 /// Attribute macro that adds canonical ceremony helpers to fact enums.
 ///
 /// This macro expects the enum to define the standard ceremony variants:

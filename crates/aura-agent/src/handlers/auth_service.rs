@@ -114,7 +114,8 @@ impl AuthServiceApi {
         use crate::core::AgentError;
 
         let authority_id = self.handler.authority_context().authority_id();
-        let session_id = DkdSessionId::deterministic(&Uuid::new_v4().to_string());
+        // Use authority_id for deterministic session ID instead of random UUID
+        let session_id = DkdSessionId::deterministic(&authority_id.to_string());
         let timestamp = self
             .effects
             .physical_time()

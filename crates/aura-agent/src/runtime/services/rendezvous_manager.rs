@@ -515,7 +515,9 @@ impl RendezvousManager {
     // ========================================================================
 
     /// Prepare to establish a channel with a peer
-    pub async fn prepare_establish_channel<E: NoiseEffects + CryptoEffects + SecureStorageEffects>(
+    pub async fn prepare_establish_channel<
+        E: NoiseEffects + CryptoEffects + SecureStorageEffects,
+    >(
         &self,
         context_id: ContextId,
         peer: AuthorityId,
@@ -543,7 +545,7 @@ impl RendezvousManager {
         // Retrieve identity keys
         let keys = retrieve_identity_keys(effects, &self.authority_id).await;
         let (local_private_key, _) = keys.unwrap_or(([0u8; 32], [0u8; 32]));
-        
+
         let remote_public_key = descriptor.public_key;
 
         service
@@ -556,7 +558,7 @@ impl RendezvousManager {
                 &remote_public_key,
                 now_ms,
                 &descriptor,
-                effects
+                effects,
             )
             .await
             .map_err(|e| format!("Failed to prepare channel: {e}"))
@@ -943,13 +945,17 @@ async fn retrieve_identity_keys<E: SecureStorageEffects>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use aura_core::effects::noise::{
+        HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState,
+    };
+    use aura_core::effects::{
+        CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
+    };
     use aura_core::FlowCost;
     use aura_effects::time::PhysicalTimeHandler;
     use aura_guards::types::CapabilityId;
     use aura_rendezvous::GuardSnapshot;
-    use aura_core::effects::noise::{HandshakeState, NoiseEffects, NoiseError, NoiseParams, TransportState};
-    use aura_core::effects::{CryptoCoreEffects, CryptoExtendedEffects, CryptoError, RandomCoreEffects};
-    use async_trait::async_trait;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -983,50 +989,155 @@ mod tests {
     fn test_udp() -> Arc<dyn UdpEffects> {
         Arc::new(aura_effects::RealUdpEffectsHandler::new())
     }
-    
+
     // Mock for tests
     struct MockEffects;
     #[async_trait]
     impl SecureStorageEffects for MockEffects {
-        async fn secure_store(&self, _: &SecureStorageLocation, _: &[u8], _: &[SecureStorageCapability]) -> Result<(), AuraError> { Ok(()) }
-        async fn secure_retrieve(&self, _: &SecureStorageLocation, _: &[SecureStorageCapability]) -> Result<Vec<u8>, AuraError> { Ok(vec![]) }
-        async fn secure_delete(&self, _: &SecureStorageLocation, _: &[SecureStorageCapability]) -> Result<(), AuraError> { Ok(()) }
-        async fn list_keys(&self, _: &str, _: &[SecureStorageCapability]) -> Result<Vec<String>, AuraError> { Ok(vec![]) }
+        async fn secure_store(
+            &self,
+            _: &SecureStorageLocation,
+            _: &[u8],
+            _: &[SecureStorageCapability],
+        ) -> Result<(), AuraError> {
+            Ok(())
+        }
+        async fn secure_retrieve(
+            &self,
+            _: &SecureStorageLocation,
+            _: &[SecureStorageCapability],
+        ) -> Result<Vec<u8>, AuraError> {
+            Ok(vec![])
+        }
+        async fn secure_delete(
+            &self,
+            _: &SecureStorageLocation,
+            _: &[SecureStorageCapability],
+        ) -> Result<(), AuraError> {
+            Ok(())
+        }
+        async fn list_keys(
+            &self,
+            _: &str,
+            _: &[SecureStorageCapability],
+        ) -> Result<Vec<String>, AuraError> {
+            Ok(vec![])
+        }
     }
     #[async_trait]
     impl NoiseEffects for MockEffects {
-        async fn create_handshake_state(&self, _: NoiseParams) -> Result<HandshakeState, NoiseError> { Ok(HandshakeState(Box::new(()))) }
-        async fn write_message(&self, _: HandshakeState, _: &[u8]) -> Result<(Vec<u8>, HandshakeState), NoiseError> { Ok((vec![], HandshakeState(Box::new(())))) }
-        async fn read_message(&self, _: HandshakeState, _: &[u8]) -> Result<(Vec<u8>, HandshakeState), NoiseError> { Ok((vec![], HandshakeState(Box::new(())))) }
-        async fn into_transport_mode(&self, _: HandshakeState) -> Result<TransportState, NoiseError> { Ok(TransportState(Box::new(()))) }
-        async fn encrypt_transport_message(&self, _: &mut TransportState, _: &[u8]) -> Result<Vec<u8>, NoiseError> { Ok(vec![]) }
-        async fn decrypt_transport_message(&self, _: &mut TransportState, _: &[u8]) -> Result<Vec<u8>, NoiseError> { Ok(vec![]) }
+        async fn create_handshake_state(
+            &self,
+            _: NoiseParams,
+        ) -> Result<HandshakeState, NoiseError> {
+            Ok(HandshakeState(Box::new(())))
+        }
+        async fn write_message(
+            &self,
+            _: HandshakeState,
+            _: &[u8],
+        ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+            Ok((vec![], HandshakeState(Box::new(()))))
+        }
+        async fn read_message(
+            &self,
+            _: HandshakeState,
+            _: &[u8],
+        ) -> Result<(Vec<u8>, HandshakeState), NoiseError> {
+            Ok((vec![], HandshakeState(Box::new(()))))
+        }
+        async fn into_transport_mode(
+            &self,
+            _: HandshakeState,
+        ) -> Result<TransportState, NoiseError> {
+            Ok(TransportState(Box::new(())))
+        }
+        async fn encrypt_transport_message(
+            &self,
+            _: &mut TransportState,
+            _: &[u8],
+        ) -> Result<Vec<u8>, NoiseError> {
+            Ok(vec![])
+        }
+        async fn decrypt_transport_message(
+            &self,
+            _: &mut TransportState,
+            _: &[u8],
+        ) -> Result<Vec<u8>, NoiseError> {
+            Ok(vec![])
+        }
     }
     // Stub other traits needed by E
     #[async_trait]
     impl RandomCoreEffects for MockEffects {
-        async fn random_bytes(&self, _: usize) -> Vec<u8> { vec![] }
-        async fn random_bytes_32(&self) -> [u8; 32] { [0u8; 32] }
-        async fn random_u64(&self) -> u64 { 0 }
-        async fn random_range(&self, _: u64, _: u64) -> u64 { 0 }
-        async fn random_uuid(&self) -> uuid::Uuid { uuid::Uuid::nil() }
+        async fn random_bytes(&self, _: usize) -> Vec<u8> {
+            vec![]
+        }
+        async fn random_bytes_32(&self) -> [u8; 32] {
+            [0u8; 32]
+        }
+        async fn random_u64(&self) -> u64 {
+            0
+        }
+        async fn random_range(&self, _: u64, _: u64) -> u64 {
+            0
+        }
+        async fn random_uuid(&self) -> uuid::Uuid {
+            uuid::Uuid::nil()
+        }
     }
     #[async_trait]
     impl CryptoCoreEffects for MockEffects {
-        async fn hkdf_derive(&self, _: &[u8], _: &[u8], _: &[u8], _: u32) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
-        async fn derive_key(&self, _: &[u8], _: &aura_core::effects::crypto::KeyDerivationContext) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
-        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> { Ok((vec![], vec![])) }
-        async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> { Ok(vec![]) }
-        async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> { Ok(true) }
-        fn is_simulated(&self) -> bool { false }
-        fn crypto_capabilities(&self) -> Vec<String> { vec![] }
-        fn constant_time_eq(&self, _: &[u8], _: &[u8]) -> bool { true }
+        async fn hkdf_derive(
+            &self,
+            _: &[u8],
+            _: &[u8],
+            _: &[u8],
+            _: u32,
+        ) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![])
+        }
+        async fn derive_key(
+            &self,
+            _: &[u8],
+            _: &aura_core::effects::crypto::KeyDerivationContext,
+        ) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![])
+        }
+        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+            Ok((vec![], vec![]))
+        }
+        async fn ed25519_sign(&self, _: &[u8], _: &[u8]) -> Result<Vec<u8>, CryptoError> {
+            Ok(vec![])
+        }
+        async fn ed25519_verify(&self, _: &[u8], _: &[u8], _: &[u8]) -> Result<bool, CryptoError> {
+            Ok(true)
+        }
+        fn is_simulated(&self) -> bool {
+            false
+        }
+        fn crypto_capabilities(&self) -> Vec<String> {
+            vec![]
+        }
+        fn constant_time_eq(&self, _: &[u8], _: &[u8]) -> bool {
+            true
+        }
         fn secure_zero(&self, _: &mut [u8]) {}
     }
     #[async_trait]
     impl CryptoExtendedEffects for MockEffects {
-        async fn convert_ed25519_to_x25519_public(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> { Ok([0u8; 32]) }
-        async fn convert_ed25519_to_x25519_private(&self, _: &[u8]) -> Result<[u8; 32], CryptoError> { Ok([0u8; 32]) }
+        async fn convert_ed25519_to_x25519_public(
+            &self,
+            _: &[u8],
+        ) -> Result<[u8; 32], CryptoError> {
+            Ok([0u8; 32])
+        }
+        async fn convert_ed25519_to_x25519_private(
+            &self,
+            _: &[u8],
+        ) -> Result<[u8; 32], CryptoError> {
+            Ok([0u8; 32])
+        }
     }
     impl CryptoEffects for MockEffects {}
 

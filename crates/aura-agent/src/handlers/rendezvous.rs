@@ -258,11 +258,12 @@ impl RendezvousHandler {
         // Retrieve identity keys
         let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;
         let (local_private_key, _) = keys.unwrap_or(([0u8; 32], [0u8; 32]));
-        
+
         // Retrieve remote public key from descriptor
         let remote_public_key = peer_descriptor.public_key;
 
-        let outcome = self.service
+        let outcome = self
+            .service
             .prepare_establish_channel(
                 &snapshot,
                 context_id,
@@ -324,7 +325,8 @@ impl RendezvousHandler {
             .await;
 
         // Create channel established fact
-        let fact = self.service
+        let fact = self
+            .service
             .create_channel_established_fact(context_id, peer, channel_id, epoch);
 
         // Journal the fact
@@ -386,7 +388,8 @@ impl RendezvousHandler {
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
         // Prepare relay request
-        let outcome = self.service
+        let outcome = self
+            .service
             .prepare_relay_request(context_id, relay, target, &snapshot);
 
         if !outcome.decision.is_allowed() {
