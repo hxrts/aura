@@ -13,7 +13,11 @@ use aura_core::{AuraError, ContextId, Prestate, Result};
 use aura_journal::fact::DkgTranscriptCommit;
 use std::collections::BTreeSet;
 
-pub fn run_dkg_ceremony(config: &DkgConfig, packages: Vec<DealerPackage>) -> Result<DkgTranscript> {
+/// Aggregate a DKG transcript from validated dealer packages.
+pub fn aggregate_dkg_transcript(
+    config: &DkgConfig,
+    packages: Vec<DealerPackage>,
+) -> Result<DkgTranscript> {
     validate_config(config)?;
     validate_packages(config, &packages)?;
 
@@ -22,6 +26,10 @@ pub fn run_dkg_ceremony(config: &DkgConfig, packages: Vec<DealerPackage>) -> Res
     }
 
     finalize_transcript(config, packages)
+}
+
+pub fn run_dkg_ceremony(config: &DkgConfig, packages: Vec<DealerPackage>) -> Result<DkgTranscript> {
+    aggregate_dkg_transcript(config, packages)
 }
 
 pub async fn persist_transcript<S: DkgTranscriptStore + ?Sized>(
