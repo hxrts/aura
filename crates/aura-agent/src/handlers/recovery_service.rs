@@ -28,7 +28,13 @@ use aura_recovery::guardian_ceremony::{
     CeremonyAbort, CeremonyCommit, CeremonyProposal, CeremonyResponse, CeremonyResponseMsg,
     GuardianRotationOp,
 };
+use aura_recovery::guardian_membership::{
+    ChangeCompletion, GuardianVote, MembershipChange, MembershipProposal,
+};
 use aura_recovery::guardian_setup::{GuardianAcceptance, GuardianInvitation, SetupCompletion};
+use aura_recovery::membership_runners::{
+    execute_as as membership_execute_as, GuardianMembershipChangeRole,
+};
 use aura_recovery::recovery_protocol::{
     GuardianApproval as ProtocolGuardianApproval, RecoveryOperation as ProtocolRecoveryOperation,
     RecoveryOutcome, RecoveryRequest as ProtocolRecoveryRequest,
@@ -1208,6 +1214,274 @@ impl RecoveryServiceApi {
         }))
     }
 
+    // =========================================================================
+    // Guardian Membership Change Methods
+    // =========================================================================
+
+    /// Initiate a guardian membership change ceremony.
+    ///
+    /// Executes the GuardianMembershipChange choreography as the ChangeInitiator role.
+    /// This is a 3-phase protocol:
+    /// 1. ProposeChange: ChangeInitiator → Guardian1/2/3
+    /// 2. CastVote: Guardian1/2/3 → ChangeInitiator
+    /// 3. CompleteChange: ChangeInitiator → Guardian1/2/3
+    ///
+    /// # Arguments
+    /// * `change` - The membership change to propose (AddGuardian, RemoveGuardian, UpdateGuardian)
+    /// * `guardians` - Current guardian authorities (exactly 3 required for choreography)
+    /// * `threshold` - Required number of approvals
+    /// * `new_threshold` - Optional new threshold after the change
+    ///
+    /// # Returns
+    /// The change completion result with the new guardian set
+    pub async fn initiate_membership_change(
+        &self,
+        change: MembershipChange,
+        guardians: Vec<AuthorityId>,
+        threshold: u32,
+        new_threshold: Option<u16>,
+    ) -> AgentResult<ChangeCompletion> {
+        use crate::core::AgentError;
+
+        if guardians.len() != 3 {
+            return Err(AgentError::invalid(
+                "Guardian membership change choreography requires exactly three guardians".to_string(),
+            ));
+        }
+
+        let authority_id = self.handler.authority_context().authority_id();
+        let now_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or_default();
+
+        let change_id = format!("membership_{}_{}", authority_id, now_ms);
+
+        // Build role mapping: ChangeInitiator + Guardian1/2/3
+        let mut role_map = HashMap::new();
+        role_map.insert(GuardianMembershipChangeRole::ChangeInitiator, authority_id);
+        role_map.insert(GuardianMembershipChangeRole::Guardian1, guardians[0]);
+        role_map.insert(GuardianMembershipChangeRole::Guardian2, guardians[1]);
+        role_map.insert(GuardianMembershipChangeRole::Guardian3, guardians[2]);
+
+        // Build proposals for each guardian (Phase 1)
+        let mut proposals = VecDeque::new();
+        for _ in 0..3 {
+            proposals.push_back(MembershipProposal {
+                change_id: change_id.clone(),
+                account_id: authority_id, // Account is the initiator
+                proposer_id: authority_id,
+                change: change.clone(),
+                new_threshold,
+                timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                    ts_ms: now_ms,
+                    uncertainty: None,
+                }),
+            });
+        }
+
+        // Type names for message provider
+        let proposal_type = std::any::type_name::<MembershipProposal>();
+        let completion_type = std::any::type_name::<ChangeCompletion>();
+        let vote_type = std::any::type_name::<GuardianVote>();
+
+        let threshold_usize = threshold as usize;
+        let change_id_owned = change_id.clone();
+        let new_threshold_final = new_threshold.unwrap_or(threshold as u16);
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            GuardianMembershipChangeRole::ChangeInitiator,
+            role_map,
+        )
+        .with_message_provider(move |request, received| {
+            // Phase 1: Provide proposals to guardians
+            if request.type_name == proposal_type {
+                return proposals
+                    .pop_front()
+                    .map(|p| Box::new(p) as Box<dyn std::any::Any + Send>);
+            }
+
+            // Phase 3: Build completion based on votes received
+            if request.type_name == completion_type {
+                let mut accepted_guardians = Vec::new();
+                for msg in received {
+                    if msg.type_name == vote_type {
+                        if let Ok(vote) = from_slice::<GuardianVote>(&msg.bytes) {
+                            if vote.approved {
+                                accepted_guardians.push(vote.guardian_id);
+                            }
+                        }
+                    }
+                }
+
+                let success = accepted_guardians.len() >= threshold_usize;
+                let new_guardian_set = GuardianSet::new(
+                    accepted_guardians
+                        .iter()
+                        .copied()
+                        .map(GuardianProfile::new)
+                        .collect(),
+                );
+
+                let completion = ChangeCompletion {
+                    change_id: change_id_owned.clone(),
+                    success,
+                    new_guardian_set,
+                    new_threshold: new_threshold_final,
+                    change_evidence: Vec::new(),
+                };
+                return Some(Box::new(completion));
+            }
+
+            None
+        });
+
+        let session_id = membership_session_id(&change_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("membership change start failed: {e}")))?;
+
+        let result = membership_execute_as(
+            GuardianMembershipChangeRole::ChangeInitiator,
+            &mut adapter,
+        )
+        .await
+        .map_err(|e| AgentError::internal(format!("membership change failed: {e}")));
+
+        // Extract the completion from received messages
+        let completion = {
+            let vote_type_str = std::any::type_name::<GuardianVote>();
+            let mut accepted_guardians = Vec::new();
+            for msg in adapter.received_messages() {
+                if msg.type_name == vote_type_str {
+                    if let Ok(vote) = from_slice::<GuardianVote>(&msg.bytes) {
+                        if vote.approved {
+                            accepted_guardians.push(vote.guardian_id);
+                        }
+                    }
+                }
+            }
+
+            ChangeCompletion {
+                change_id,
+                success: accepted_guardians.len() >= threshold_usize,
+                new_guardian_set: GuardianSet::new(
+                    accepted_guardians
+                        .into_iter()
+                        .map(GuardianProfile::new)
+                        .collect(),
+                ),
+                new_threshold: new_threshold_final,
+                change_evidence: Vec::new(),
+            }
+        };
+
+        let _ = adapter.end_session().await;
+        result.map(|_| completion)
+    }
+
+    /// Vote on a guardian membership change as a guardian.
+    ///
+    /// Executes the GuardianMembershipChange choreography as a Guardian role.
+    ///
+    /// # Arguments
+    /// * `proposal` - The membership proposal to vote on
+    /// * `initiator_id` - Authority of the change initiator
+    /// * `guardian_index` - Index of this guardian (0, 1, or 2)
+    /// * `approved` - Whether to approve the change
+    /// * `rationale` - Reason for the vote
+    ///
+    /// # Returns
+    /// The guardian's vote
+    pub async fn vote_membership_change(
+        &self,
+        proposal: MembershipProposal,
+        initiator_id: AuthorityId,
+        guardian_index: usize,
+        approved: bool,
+        rationale: String,
+    ) -> AgentResult<GuardianVote> {
+        use crate::core::AgentError;
+
+        let authority_id = self.handler.authority_context().authority_id();
+
+        let guardian_role = match guardian_index {
+            0 => GuardianMembershipChangeRole::Guardian1,
+            1 => GuardianMembershipChangeRole::Guardian2,
+            2 => GuardianMembershipChangeRole::Guardian3,
+            _ => {
+                return Err(AgentError::invalid(
+                    "Guardian index must be 0, 1, or 2".to_string(),
+                ))
+            }
+        };
+
+        let now_ms = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or_default();
+
+        // Create vote signature
+        let mut sig_input = Vec::new();
+        sig_input.extend_from_slice(&authority_id.to_bytes());
+        sig_input.extend_from_slice(proposal.change_id.as_bytes());
+        sig_input.push(approved as u8);
+        let vote_signature = hash(&sig_input).to_vec();
+
+        let vote = GuardianVote {
+            change_id: proposal.change_id.clone(),
+            guardian_id: authority_id,
+            approved,
+            vote_signature,
+            rationale,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            }),
+        };
+
+        // Build role mapping
+        let mut role_map = HashMap::new();
+        role_map.insert(GuardianMembershipChangeRole::ChangeInitiator, initiator_id);
+        // We only know the initiator; other guardians are resolved by transport
+
+        let vote_type = std::any::type_name::<GuardianVote>();
+        let vote_clone = vote.clone();
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            authority_id,
+            guardian_role,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if request.type_name == vote_type {
+                return Some(Box::new(vote_clone.clone()));
+            }
+            None
+        });
+
+        let session_id = membership_session_id(&proposal.change_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("membership vote start failed: {e}")))?;
+
+        let result = membership_execute_as(guardian_role, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("membership vote failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result.map(|_| vote)
+    }
+
     /// Process incoming guardian acceptance responses from transport
     ///
     /// This method should be called periodically to check for acceptance messages
@@ -1380,6 +1654,13 @@ fn recovery_session_id(recovery_id: &RecoveryId, guardian_id: &AuthorityId) -> U
 
 fn guardian_setup_session_id(setup_id: &str) -> Uuid {
     let digest = hash(setup_id.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
+}
+
+fn membership_session_id(change_id: &str) -> Uuid {
+    let digest = hash(change_id.as_bytes());
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
     Uuid::from_bytes(bytes)
@@ -1650,5 +1931,87 @@ mod tests {
         // Should have 2 active
         let active = service.list_active().await;
         assert_eq!(active.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_membership_change_requires_three_guardians() {
+        let authority_context = create_test_authority(170);
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+
+        // Two guardians should fail
+        let guardians = vec![
+            AuthorityId::new_from_entropy([171u8; 32]),
+            AuthorityId::new_from_entropy([172u8; 32]),
+        ];
+
+        let result = service
+            .initiate_membership_change(
+                MembershipChange::AddGuardian {
+                    guardian: GuardianProfile::new(AuthorityId::new_from_entropy([173u8; 32])),
+                },
+                guardians,
+                2,
+                None,
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("exactly three guardians"));
+    }
+
+    #[tokio::test]
+    async fn test_membership_change_invalid_guardian_index() {
+        let authority_context = create_test_authority(174);
+        let config = AgentConfig::default();
+        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        let service = RecoveryServiceApi::new(effects, authority_context).unwrap();
+
+        let proposal = MembershipProposal {
+            change_id: "test-change-123".to_string(),
+            account_id: AuthorityId::new_from_entropy([175u8; 32]),
+            proposer_id: AuthorityId::new_from_entropy([176u8; 32]),
+            change: MembershipChange::AddGuardian {
+                guardian: GuardianProfile::new(AuthorityId::new_from_entropy([177u8; 32])),
+            },
+            new_threshold: None,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1000,
+                uncertainty: None,
+            }),
+        };
+
+        // Invalid guardian index (3 - only 0, 1, 2 valid)
+        let result = service
+            .vote_membership_change(
+                proposal,
+                AuthorityId::new_from_entropy([178u8; 32]),
+                3, // Invalid
+                true,
+                "Test vote".to_string(),
+            )
+            .await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Guardian index must be 0, 1, or 2"));
+    }
+
+    #[tokio::test]
+    async fn test_membership_session_id_deterministic() {
+        let change_id = "test-membership-change-001";
+        let session_id1 = membership_session_id(change_id);
+        let session_id2 = membership_session_id(change_id);
+        assert_eq!(session_id1, session_id2);
+
+        // Different change_id should produce different session
+        let session_id3 = membership_session_id("different-change-id");
+        assert_ne!(session_id1, session_id3);
     }
 }

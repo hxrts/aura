@@ -8,8 +8,11 @@
 
 use crate::core::{AgentError, AgentResult};
 use crate::handlers::shared::context_commitment_from_journal;
+use crate::runtime::choreography_adapter::AuraProtocolAdapter;
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::AuraEffectSystem;
+use aura_protocol::amp::amp_runners::{execute_as as amp_execute_as, AmpTransportRole};
+use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
 use aura_chat::types::{ChatMember, ChatRole};
 use aura_chat::{
@@ -33,6 +36,7 @@ use aura_protocol::amp::{
     AmpJournalEffects,
 };
 use aura_protocol::effects::TreeEffects;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Chat service API for the agent layer.
@@ -889,4 +893,132 @@ impl ChatServiceApi {
             metadata: std::collections::HashMap::default(),
         })
     }
+
+    // =========================================================================
+    // AmpTransport Choreography (execute_as)
+    // =========================================================================
+
+    /// Execute AmpTransport choreography as the Sender role.
+    ///
+    /// Sends an AMP message to a receiver and receives the acknowledgment receipt.
+    ///
+    /// # Arguments
+    /// * `sender_id` - AuthorityId of the sender
+    /// * `receiver_id` - AuthorityId of the receiver
+    /// * `context_id` - ContextId for the AMP channel
+    /// * `message` - The AMP message to send
+    ///
+    /// # Returns
+    /// Ok(()) on successful protocol completion
+    pub async fn execute_amp_transport_as_sender(
+        &self,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+        context_id: ContextId,
+        message: AmpMessage,
+    ) -> AgentResult<()> {
+        let mut role_map = HashMap::new();
+        role_map.insert(AmpTransportRole::Sender, sender_id);
+        role_map.insert(AmpTransportRole::Receiver, receiver_id);
+
+        let message_type = std::any::type_name::<AmpMessage>();
+        let message_clone = message.clone();
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            sender_id,
+            AmpTransportRole::Sender,
+            role_map,
+        )
+        .with_message_provider(move |req_ctx, _received| {
+            if req_ctx.type_name == message_type {
+                return Some(Box::new(message_clone.clone()) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        let session_uuid = amp_session_uuid(&context_id, &sender_id, &receiver_id);
+        adapter
+            .start_session(session_uuid)
+            .await
+            .map_err(|e| AgentError::internal(format!("AMP transport start failed: {e}")))?;
+
+        amp_execute_as(AmpTransportRole::Sender, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("AMP transport failed: {e}")))?;
+
+        let _ = adapter.end_session().await;
+        Ok(())
+    }
+
+    /// Execute AmpTransport choreography as the Receiver role.
+    ///
+    /// Receives an AMP message from a sender and sends back an acknowledgment receipt.
+    ///
+    /// # Arguments
+    /// * `sender_id` - AuthorityId of the sender
+    /// * `receiver_id` - AuthorityId of the receiver
+    /// * `context_id` - ContextId for the AMP channel
+    /// * `channel_id` - ChannelId for the receipt
+    /// * `chan_epoch` - Current channel epoch for the receipt
+    /// * `ratchet_gen` - Current ratchet generation for the receipt
+    ///
+    /// # Returns
+    /// Ok(()) on successful protocol completion
+    pub async fn execute_amp_transport_as_receiver(
+        &self,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        chan_epoch: u64,
+        ratchet_gen: u64,
+    ) -> AgentResult<()> {
+        let mut role_map = HashMap::new();
+        role_map.insert(AmpTransportRole::Sender, sender_id);
+        role_map.insert(AmpTransportRole::Receiver, receiver_id);
+
+        let receipt_type = std::any::type_name::<AmpReceipt>();
+        let receipt = AmpReceipt {
+            context: context_id,
+            channel: channel_id,
+            chan_epoch,
+            ratchet_gen,
+        };
+
+        let mut adapter = AuraProtocolAdapter::new(
+            self.effects.clone(),
+            receiver_id,
+            AmpTransportRole::Receiver,
+            role_map,
+        )
+        .with_message_provider(move |req_ctx, _received| {
+            if req_ctx.type_name == receipt_type {
+                return Some(Box::new(receipt) as Box<dyn std::any::Any + Send>);
+            }
+            None
+        });
+
+        let session_uuid = amp_session_uuid(&context_id, &sender_id, &receiver_id);
+        adapter
+            .start_session(session_uuid)
+            .await
+            .map_err(|e| AgentError::internal(format!("AMP transport start failed: {e}")))?;
+
+        amp_execute_as(AmpTransportRole::Receiver, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("AMP transport failed: {e}")))?;
+
+        let _ = adapter.end_session().await;
+        Ok(())
+    }
+}
+
+fn amp_session_uuid(context_id: &ContextId, sender: &AuthorityId, receiver: &AuthorityId) -> Uuid {
+    // Create deterministic session ID from context + sender + receiver
+    let key = format!("amp_transport:{}:{}:{}", context_id.0, sender, receiver);
+    let digest = hash(key.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(bytes)
 }
