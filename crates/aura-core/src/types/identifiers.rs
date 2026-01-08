@@ -403,6 +403,11 @@ impl DeviceId {
     pub fn to_hex(&self) -> String {
         hex::encode(self.0.as_bytes())
     }
+
+    /// Get the inner UUID
+    pub fn uuid(&self) -> Uuid {
+        self.0
+    }
 }
 
 impl fmt::Display for DeviceId {

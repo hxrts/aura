@@ -66,3 +66,9 @@ aura-macros = { path = "../aura-macros" }
 aura-anti-entropy = { path = "../aura-anti-entropy" }
 aura-guards = { path = "../aura-guards" }
 proptest = { workspace = true }
+# Protocol tests dependencies
+aura-authentication = { path = "../aura-authentication" }
+aura-invitation = { path = "../aura-invitation" }
+aura-recovery = { path = "../aura-recovery" }
+aura-rendezvous = { path = "../aura-rendezvous" }
+aura-mpst = { path = "../aura-mpst" }

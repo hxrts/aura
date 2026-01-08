@@ -149,6 +149,9 @@ pub use runtime::{
     SharedTransport,
 };
 
+// Protocol adapter for choreography execution (used by tests)
+pub use runtime::choreography_adapter::{AuraProtocolAdapter, MessageRequest, ReceivedMessage};
+
 // Sync service types
 pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
 
