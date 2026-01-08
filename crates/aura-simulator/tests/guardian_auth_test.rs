@@ -3,6 +3,8 @@
 //! Tests the guardian authentication choreography harness setup.
 //! Full protocol execution requires actual guardian auth message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
+
 use aura_agent::AuraProtocolAdapter;
 use aura_authentication::guardian_auth_runners::GuardianAuthRelationalRole;
 use aura_core::{AuthorityId, DeviceId};
@@ -51,14 +53,18 @@ async fn guardian_auth_adapter_setup() {
     let account_effects = TestEffectSystem::new(
         bus.clone(),
         account_device,
-        GuardianAuthRelationalRole::Account.role_index().unwrap_or(0),
+        GuardianAuthRelationalRole::Account
+            .role_index()
+            .unwrap_or(0),
     )
     .expect("effects");
 
     let guardian_effects = TestEffectSystem::new(
         bus.clone(),
         guardian_device,
-        GuardianAuthRelationalRole::Guardian.role_index().unwrap_or(1),
+        GuardianAuthRelationalRole::Guardian
+            .role_index()
+            .unwrap_or(1),
     )
     .expect("effects");
 

@@ -3,6 +3,8 @@
 //! Tests the guardian membership change choreography harness setup.
 //! Full protocol execution requires actual membership change message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
+
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
@@ -45,7 +47,10 @@ async fn guardian_membership_adapter_setup() {
     let guardian3_auth = AuthorityId::from_uuid(guardian3_device.uuid());
 
     let mut role_map = HashMap::new();
-    role_map.insert(GuardianMembershipChangeRole::ChangeInitiator, initiator_auth);
+    role_map.insert(
+        GuardianMembershipChangeRole::ChangeInitiator,
+        initiator_auth,
+    );
     role_map.insert(GuardianMembershipChangeRole::Guardian1, guardian1_auth);
     role_map.insert(GuardianMembershipChangeRole::Guardian2, guardian2_auth);
     role_map.insert(GuardianMembershipChangeRole::Guardian3, guardian3_auth);
@@ -71,14 +76,18 @@ async fn guardian_membership_adapter_setup() {
     let guardian1_effects = TestEffectSystem::new(
         bus.clone(),
         guardian1_device,
-        GuardianMembershipChangeRole::Guardian1.role_index().unwrap_or(1),
+        GuardianMembershipChangeRole::Guardian1
+            .role_index()
+            .unwrap_or(1),
     )
     .expect("guardian1 transport");
 
     let guardian2_effects = TestEffectSystem::new(
         bus.clone(),
         guardian2_device,
-        GuardianMembershipChangeRole::Guardian2.role_index().unwrap_or(2),
+        GuardianMembershipChangeRole::Guardian2
+            .role_index()
+            .unwrap_or(2),
     )
     .expect("guardian2 transport");
 

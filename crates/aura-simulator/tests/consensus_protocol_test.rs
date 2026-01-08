@@ -3,6 +3,8 @@
 //! Tests the consensus choreography harness setup.
 //! Full protocol execution requires actual consensus message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods, clippy::useless_vec)]
+
 use aura_agent::AuraProtocolAdapter;
 use aura_consensus::protocol::runners::AuraConsensusRole;
 use aura_core::{AuthorityId, DeviceId};

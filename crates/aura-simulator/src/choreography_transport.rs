@@ -361,7 +361,9 @@ impl ChoreographicEffects for SimulatedTransport {
 use aura_core::effects::authorization::{AuthorizationDecision, AuthorizationError};
 use aura_core::effects::leakage::{LeakageBudget, LeakageEvent};
 use aura_core::effects::storage::{StorageError, StorageStats};
-use aura_core::effects::time::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError};
+use aura_core::effects::time::{
+    LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError,
+};
 use aura_core::effects::{
     BiscuitAuthorizationEffects, FlowBudgetEffects, JournalEffects, RandomCoreEffects,
     StorageCoreEffects, StorageExtendedEffects,
@@ -370,8 +372,8 @@ use aura_core::flow::{FlowBudget, Receipt};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::scope::{AuthorizationOp, ResourceScope};
 use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
-use aura_core::{AuraError, FlowCost, Journal, Result as AuraResult};
 use aura_core::ExecutionMode;
+use aura_core::{AuraError, FlowCost, Journal, Result as AuraResult};
 use aura_guards::guards::GuardContextProvider;
 
 /// Combined effect system for choreography protocol testing.
@@ -492,7 +494,7 @@ impl ChoreographicEffects for TestEffectSystem {
     }
 
     async fn set_timeout(&self, timeout_ms: u64) {
-        self.transport.set_timeout(timeout_ms).await
+        self.transport.set_timeout(timeout_ms).await;
     }
 
     async fn get_metrics(&self) -> ChoreographyMetrics {
@@ -590,7 +592,11 @@ impl StorageCoreEffects for TestEffectSystem {
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
         let storage = self.storage.lock().unwrap();
         match prefix {
-            Some(p) => Ok(storage.keys().filter(|k| k.starts_with(p)).cloned().collect()),
+            Some(p) => Ok(storage
+                .keys()
+                .filter(|k| k.starts_with(p))
+                .cloned()
+                .collect()),
             None => Ok(storage.keys().cloned().collect()),
         }
     }
@@ -842,9 +848,9 @@ mod tests {
         let role1 = transport1.current_role();
         let role2 = transport2.current_role();
 
-        // Start session
+        // Start session (use nil UUID for determinism in tests)
         transport1
-            .start_session(Uuid::new_v4(), vec![role1, role2])
+            .start_session(Uuid::nil(), vec![role1, role2])
             .await
             .unwrap();
 

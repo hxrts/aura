@@ -82,16 +82,16 @@ impl<'a> GuardianHandler<'a> {
             .await
         {
             Ok(reached) => reached,
-                Err(e) => {
-                    tracing::warn!(
-                        ceremony_id = %ceremony_id,
-                        guardian_id = %guardian_id,
-                        error = %e,
-                        "Failed to mark guardian as accepted"
-                    );
-                    return ProcessResult::Skip;
-                }
-            };
+            Err(e) => {
+                tracing::warn!(
+                    ceremony_id = %ceremony_id,
+                    guardian_id = %guardian_id,
+                    error = %e,
+                    "Failed to mark guardian as accepted"
+                );
+                return ProcessResult::Skip;
+            }
+        };
 
         if !threshold_reached {
             return ProcessResult::Processed;

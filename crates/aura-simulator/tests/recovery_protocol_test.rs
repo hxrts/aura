@@ -3,6 +3,8 @@
 //! Tests the recovery protocol choreography harness setup.
 //! Full protocol execution requires actual recovery message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
+
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
@@ -48,17 +50,26 @@ async fn recovery_protocol_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let account_effects =
-        TestEffectSystem::new(bus.clone(), account_device, RecoveryProtocolRole::Account.role_index().unwrap_or(0))
-            .expect("effects");
+    let account_effects = TestEffectSystem::new(
+        bus.clone(),
+        account_device,
+        RecoveryProtocolRole::Account.role_index().unwrap_or(0),
+    )
+    .expect("effects");
 
-    let guardian_effects =
-        TestEffectSystem::new(bus.clone(), guardian_device, RecoveryProtocolRole::Guardian.role_index().unwrap_or(1))
-            .expect("effects");
+    let guardian_effects = TestEffectSystem::new(
+        bus.clone(),
+        guardian_device,
+        RecoveryProtocolRole::Guardian.role_index().unwrap_or(1),
+    )
+    .expect("effects");
 
-    let coordinator_effects =
-        TestEffectSystem::new(bus.clone(), coordinator_device, RecoveryProtocolRole::Coordinator.role_index().unwrap_or(2))
-            .expect("effects");
+    let coordinator_effects = TestEffectSystem::new(
+        bus.clone(),
+        coordinator_device,
+        RecoveryProtocolRole::Coordinator.role_index().unwrap_or(2),
+    )
+    .expect("effects");
 
     // Verify adapters can be created
     let mut account_adapter = AuraProtocolAdapter::new(

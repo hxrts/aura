@@ -232,7 +232,12 @@ impl<T: ThresholdSigningEffects + ?Sized> ThresholdSigningEffects for std::sync:
         participants: &[ParticipantIdentity],
     ) -> Result<(u64, Vec<Vec<u8>>, PublicKeyPackage), ThresholdSigningError> {
         (**self)
-            .rotate_keys(authority, new_threshold, new_total_participants, participants)
+            .rotate_keys(
+                authority,
+                new_threshold,
+                new_total_participants,
+                participants,
+            )
             .await
     }
 
@@ -249,7 +254,9 @@ impl<T: ThresholdSigningEffects + ?Sized> ThresholdSigningEffects for std::sync:
         authority: &AuthorityId,
         failed_epoch: u64,
     ) -> Result<(), ThresholdSigningError> {
-        (**self).rollback_key_rotation(authority, failed_epoch).await
+        (**self)
+            .rollback_key_rotation(authority, failed_epoch)
+            .await
     }
 }
 

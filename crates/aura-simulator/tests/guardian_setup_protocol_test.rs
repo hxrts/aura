@@ -3,6 +3,8 @@
 //! Tests the guardian setup choreography harness setup.
 //! Full protocol execution requires actual guardian setup message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
+
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
@@ -62,9 +64,7 @@ async fn guardian_setup_adapter_setup() {
     let initiator_effects = TestEffectSystem::new(
         bus.clone(),
         initiator_device,
-        GuardianSetupRole::SetupInitiator
-            .role_index()
-            .unwrap_or(0),
+        GuardianSetupRole::SetupInitiator.role_index().unwrap_or(0),
     )
     .expect("effects");
 

@@ -1119,7 +1119,7 @@ mod tests {
         async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError> {
             let mut merged = Journal::new();
             merged.facts = target.facts.clone();
-            merged.caps = target.caps.clone();
+            merged.caps = target.caps;
             merged.merge_facts(delta.read_facts().clone());
             Ok(merged)
         }
@@ -1131,7 +1131,7 @@ mod tests {
         ) -> Result<Journal, AuraError> {
             let mut refined = Journal::new();
             refined.facts = target.facts.clone();
-            refined.caps = target.caps.clone();
+            refined.caps = target.caps;
             refined.refine_caps(refinement.read_caps().clone());
             Ok(refined)
         }

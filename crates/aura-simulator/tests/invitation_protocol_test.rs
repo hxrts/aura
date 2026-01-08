@@ -3,6 +3,8 @@
 //! Tests the invitation exchange choreography harness setup.
 //! Full protocol execution requires actual invitation message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
+
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_invitation::protocol::exchange_runners::InvitationExchangeRole;

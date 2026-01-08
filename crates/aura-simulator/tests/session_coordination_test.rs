@@ -3,6 +3,8 @@
 //! Tests the session coordination choreography harness setup.
 //! Full protocol execution requires actual session coordination message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
+
 use aura_agent::handlers::SessionCoordinationRole;
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
@@ -68,7 +70,9 @@ async fn session_coordination_adapter_setup() {
     let coordinator_effects = TestEffectSystem::new(
         bus.clone(),
         coordinator_device,
-        SessionCoordinationRole::Coordinator.role_index().unwrap_or(1),
+        SessionCoordinationRole::Coordinator
+            .role_index()
+            .unwrap_or(1),
     )
     .expect("effects");
 

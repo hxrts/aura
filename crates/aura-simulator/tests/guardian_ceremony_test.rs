@@ -3,6 +3,8 @@
 //! Tests the guardian ceremony choreography harness setup.
 //! Full protocol execution requires actual guardian ceremony message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
+
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;

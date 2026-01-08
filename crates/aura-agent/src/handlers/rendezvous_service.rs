@@ -87,7 +87,9 @@ impl RendezvousServiceApi {
 
         let prestate_hash = Hash32(hash(context_id.as_bytes()));
         let initiator_id = self.handler.authority_context().authority_id();
-        let participants = vec![aura_core::threshold::ParticipantIdentity::guardian(initiator_id)];
+        let participants = vec![aura_core::threshold::ParticipantIdentity::guardian(
+            initiator_id,
+        )];
 
         self.ceremony_runner
             .start(CeremonyInitRequest {

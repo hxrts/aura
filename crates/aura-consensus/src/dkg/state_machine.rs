@@ -110,8 +110,7 @@ impl DkgCollectionState {
             return Err(AuraError::invalid("DKG state already aggregated"));
         }
 
-        let mut packages: Vec<DealerPackage> =
-            self.packages.values().cloned().collect();
+        let mut packages: Vec<DealerPackage> = self.packages.values().cloned().collect();
 
         if packages.len() < self.config.threshold as usize {
             return Err(AuraError::invalid(

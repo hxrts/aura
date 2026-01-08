@@ -11,10 +11,14 @@
 //! - Resource exhaustion handling
 //! - Timing fault resilience
 
+#![allow(clippy::expect_used)]
+
 use aura_core::effects::{ByzantineType, ChaosEffects, CorruptionType, ResourceType};
-use aura_simulator::handlers::SimulationFaultHandler;
-use aura_simulator::protocol_state_machine::{ParticipantState, ProtocolScheduler, ProtocolStateMachine, StepResult};
 use aura_simulator::choreography_observer::SimulatorObserver;
+use aura_simulator::handlers::SimulationFaultHandler;
+use aura_simulator::protocol_state_machine::{
+    ParticipantState, ProtocolScheduler, ProtocolStateMachine, StepResult,
+};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -152,10 +156,7 @@ async fn test_fault_handler_multiple_faults() {
         .expect("corruption");
 
     handler
-        .inject_network_delay(
-            (Duration::from_millis(10), Duration::from_millis(50)),
-            None,
-        )
+        .inject_network_delay((Duration::from_millis(10), Duration::from_millis(50)), None)
         .await
         .expect("delay");
 

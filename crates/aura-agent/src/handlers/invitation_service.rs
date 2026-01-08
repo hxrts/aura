@@ -15,8 +15,8 @@ use crate::runtime::AuraEffectSystem;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
-use aura_core::Hash32;
 use aura_core::DeviceId;
+use aura_core::Hash32;
 use std::sync::Arc;
 
 /// Invitation service API
@@ -273,9 +273,7 @@ impl InvitationServiceApi {
                     .ceremony_runner
                     .record_response(
                         &ceremony_id,
-                        aura_core::threshold::ParticipantIdentity::guardian(
-                            invitation.receiver_id,
-                        ),
+                        aura_core::threshold::ParticipantIdentity::guardian(invitation.receiver_id),
                     )
                     .await
                     .map_err(|e| {
@@ -470,8 +468,10 @@ mod tests {
     }
 
     fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
-        let mut config = AgentConfig::default();
-        config.device_id = authority.device_id();
+        let config = AgentConfig {
+            device_id: authority.device_id(),
+            ..Default::default()
+        };
         Arc::new(AuraEffectSystem::testing(&config).unwrap())
     }
 

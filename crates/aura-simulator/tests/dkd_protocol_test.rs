@@ -3,6 +3,8 @@
 //! Tests the distributed key derivation choreography harness setup.
 //! Full protocol execution requires actual DKD message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
+
 use aura_agent::AuraProtocolAdapter;
 use aura_authentication::dkd_runners::DkdChoreographyRole;
 use aura_core::{AuthorityId, DeviceId};

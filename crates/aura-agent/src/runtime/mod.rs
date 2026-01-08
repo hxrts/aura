@@ -65,6 +65,7 @@ pub mod time_handler;
 
 // Re-export main types for convenience
 pub use builder::EffectSystemBuilder;
+#[allow(unused_imports)] // Re-exported for public API
 pub use choreography_adapter::{
     AuraHandlerAdapter, AuraProtocolAdapter, ChoreographyAdapter, GuardConfig,
     MessageGuardRequirements,
@@ -74,6 +75,7 @@ pub use effects::AuraEffectSystem;
 pub use shared_transport::SharedTransport;
 
 // Re-export JournalCoupler for choreography journal coupling
+#[allow(unused_imports)] // Re-exported for public API
 pub use aura_guards::guards::journal::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };

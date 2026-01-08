@@ -1776,8 +1776,10 @@ mod tests {
     }
 
     fn effects_for(authority: &AuthorityContext) -> Arc<AuraEffectSystem> {
-        let mut config = AgentConfig::default();
-        config.device_id = authority.device_id();
+        let config = AgentConfig {
+            device_id: authority.device_id(),
+            ..Default::default()
+        };
         Arc::new(AuraEffectSystem::testing(&config).unwrap())
     }
 

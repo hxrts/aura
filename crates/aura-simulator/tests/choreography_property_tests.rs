@@ -9,8 +9,12 @@
 //! These tests correspond to verification/quint/sessions/choreography.qnt
 //! and validate that the Rust implementation maintains the same properties.
 
-use aura_simulator::liveness::{BoundedLivenessChecker, BoundedLivenessProperty, SynchronyAssumption};
-use aura_simulator::protocol_state_machine::{ParticipantState, ProtocolScheduler, ProtocolStateMachine};
+use aura_simulator::liveness::{
+    BoundedLivenessChecker, BoundedLivenessProperty, SynchronyAssumption,
+};
+use aura_simulator::protocol_state_machine::{
+    ParticipantState, ProtocolScheduler, ProtocolStateMachine,
+};
 use serde_json::json;
 
 // =============================================================================

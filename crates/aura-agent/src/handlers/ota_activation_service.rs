@@ -35,8 +35,7 @@ impl OtaActivationServiceApi {
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
-        let ceremony_runner =
-            CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new());
+        let ceremony_runner = CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new());
         Self::new_with_runner_and_config(
             effects,
             authority_context,
@@ -142,7 +141,9 @@ impl OtaActivationServiceApi {
             })
             .await
         {
-            let _ = self.abort_activation(ceremony_id, "Failed to register ceremony").await;
+            let _ = self
+                .abort_activation(ceremony_id, "Failed to register ceremony")
+                .await;
             return Err(AgentError::internal(format!(
                 "Failed to register OTA ceremony: {err}"
             )));
@@ -170,9 +171,7 @@ impl OtaActivationServiceApi {
             self.ceremony_runner
                 .record_response(&runner_id, ParticipantIdentity::device(commitment.device))
                 .await
-                .map_err(|e| {
-                    AgentError::internal(format!("Failed to record OTA response: {e}"))
-                })?;
+                .map_err(|e| AgentError::internal(format!("Failed to record OTA response: {e}")))?;
         }
 
         Ok(threshold_reached)

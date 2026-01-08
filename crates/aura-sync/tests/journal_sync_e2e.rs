@@ -52,7 +52,7 @@ impl JournalEffects for TestEffects {
         delta: Journal,
     ) -> Result<Journal, aura_core::AuraError> {
         let mut merged = target;
-        merged.merge_facts(delta.facts.clone());
+        merged.merge_facts(delta.facts);
         Ok(merged)
     }
 
@@ -62,7 +62,7 @@ impl JournalEffects for TestEffects {
         refinement: Journal,
     ) -> Result<Journal, aura_core::AuraError> {
         let mut refined = target;
-        refined.refine_caps(refinement.caps.clone());
+        refined.refine_caps(refinement.caps);
         Ok(refined)
     }
 

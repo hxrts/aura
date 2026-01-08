@@ -10,6 +10,8 @@
 //! - No deadlock occurs when honest majority can communicate
 //! - Byzantine faults (up to threshold) do not prevent progress
 
+#![allow(clippy::uninlined_format_args)]
+
 use aura_simulator::liveness::{
     check_consensus_terminates_within, consensus_liveness_checker, BoundedLivenessChecker,
     BoundedLivenessProperty, SynchronyAssumption,

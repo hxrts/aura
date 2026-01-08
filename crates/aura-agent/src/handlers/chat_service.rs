@@ -11,8 +11,6 @@ use crate::handlers::shared::context_commitment_from_journal;
 use crate::runtime::choreography_adapter::AuraProtocolAdapter;
 use crate::runtime::consensus::build_consensus_params;
 use crate::runtime::AuraEffectSystem;
-use aura_protocol::amp::amp_runners::{execute_as as amp_execute_as, AmpTransportRole};
-use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_chat::guards::{EffectCommand, GuardOutcome, GuardSnapshot};
 use aura_chat::types::{ChatMember, ChatRole};
 use aura_chat::{
@@ -31,10 +29,12 @@ use aura_core::{Hash32, Prestate};
 use aura_guards::{types::CapabilityId, GuardContextProvider};
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_journal::DomainFact;
+use aura_protocol::amp::amp_runners::{execute_as as amp_execute_as, AmpTransportRole};
 use aura_protocol::amp::{
     commit_bump_with_consensus, emit_proposed_bump, get_channel_state, AmpChannelCoordinator,
     AmpJournalEffects,
 };
+use aura_protocol::amp::{AmpMessage, AmpReceipt};
 use aura_protocol::effects::TreeEffects;
 use std::collections::HashMap;
 use uuid::Uuid;

@@ -17,8 +17,8 @@ use crate::runtime::AuraEffectSystem;
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, RecoveryId};
 use aura_core::identifiers::CeremonyId;
+use aura_core::identifiers::{AuthorityId, RecoveryId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::from_slice;
 use aura_core::TimeEffects;
@@ -1245,7 +1245,8 @@ impl RecoveryServiceApi {
 
         if guardians.len() != 3 {
             return Err(AgentError::invalid(
-                "Guardian membership change choreography requires exactly three guardians".to_string(),
+                "Guardian membership change choreography requires exactly three guardians"
+                    .to_string(),
             ));
         }
 
@@ -1346,12 +1347,10 @@ impl RecoveryServiceApi {
             .await
             .map_err(|e| AgentError::internal(format!("membership change start failed: {e}")))?;
 
-        let result = membership_execute_as(
-            GuardianMembershipChangeRole::ChangeInitiator,
-            &mut adapter,
-        )
-        .await
-        .map_err(|e| AgentError::internal(format!("membership change failed: {e}")));
+        let result =
+            membership_execute_as(GuardianMembershipChangeRole::ChangeInitiator, &mut adapter)
+                .await
+                .map_err(|e| AgentError::internal(format!("membership change failed: {e}")));
 
         // Extract the completion from received messages
         let completion = {
@@ -1455,18 +1454,14 @@ impl RecoveryServiceApi {
         let vote_type = std::any::type_name::<GuardianVote>();
         let vote_clone = vote.clone();
 
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            guardian_role,
-            role_map,
-        )
-        .with_message_provider(move |request, _received| {
-            if request.type_name == vote_type {
-                return Some(Box::new(vote_clone.clone()));
-            }
-            None
-        });
+        let mut adapter =
+            AuraProtocolAdapter::new(self.effects.clone(), authority_id, guardian_role, role_map)
+                .with_message_provider(move |request, _received| {
+                    if request.type_name == vote_type {
+                        return Some(Box::new(vote_clone.clone()));
+                    }
+                    None
+                });
 
         let session_id = membership_session_id(&proposal.change_id);
         adapter

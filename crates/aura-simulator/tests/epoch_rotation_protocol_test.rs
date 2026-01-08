@@ -3,6 +3,8 @@
 //! Tests the epoch rotation choreography harness setup.
 //! Full protocol execution requires actual epoch rotation message types.
 
+#![allow(clippy::expect_used, clippy::disallowed_methods)]
+
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
