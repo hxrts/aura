@@ -55,6 +55,65 @@ pub trait ChoreographicEffects: Send + Sync {
     async fn get_metrics(&self) -> ChoreographyMetrics;
 }
 
+/// Blanket implementation for Arc<T> where T: ChoreographicEffects
+#[async_trait]
+impl<T: ChoreographicEffects + ?Sized> ChoreographicEffects for std::sync::Arc<T> {
+    async fn send_to_role_bytes(
+        &self,
+        role: ChoreographicRole,
+        message: Vec<u8>,
+    ) -> Result<(), ChoreographyError> {
+        (**self).send_to_role_bytes(role, message).await
+    }
+
+    async fn receive_from_role_bytes(
+        &self,
+        role: ChoreographicRole,
+    ) -> Result<Vec<u8>, ChoreographyError> {
+        (**self).receive_from_role_bytes(role).await
+    }
+
+    async fn broadcast_bytes(&self, message: Vec<u8>) -> Result<(), ChoreographyError> {
+        (**self).broadcast_bytes(message).await
+    }
+
+    fn current_role(&self) -> ChoreographicRole {
+        (**self).current_role()
+    }
+
+    fn all_roles(&self) -> Vec<ChoreographicRole> {
+        (**self).all_roles()
+    }
+
+    async fn is_role_active(&self, role: ChoreographicRole) -> bool {
+        (**self).is_role_active(role).await
+    }
+
+    async fn start_session(
+        &self,
+        session_id: Uuid,
+        roles: Vec<ChoreographicRole>,
+    ) -> Result<(), ChoreographyError> {
+        (**self).start_session(session_id, roles).await
+    }
+
+    async fn end_session(&self) -> Result<(), ChoreographyError> {
+        (**self).end_session().await
+    }
+
+    async fn emit_choreo_event(&self, event: ChoreographyEvent) -> Result<(), ChoreographyError> {
+        (**self).emit_choreo_event(event).await
+    }
+
+    async fn set_timeout(&self, timeout_ms: u64) {
+        (**self).set_timeout(timeout_ms).await
+    }
+
+    async fn get_metrics(&self) -> ChoreographyMetrics {
+        (**self).get_metrics().await
+    }
+}
+
 /// Role in a choreographic protocol
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
