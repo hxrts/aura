@@ -7,7 +7,7 @@ use aura_agent::AuraProtocolAdapter;
 use aura_consensus::protocol::runners::AuraConsensusRole;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
-use aura_simulator::{SimulatedMessageBus, SimulatedTransport};
+use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,23 +51,23 @@ async fn consensus_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let coordinator_transport = SimulatedTransport::new(
+    let coordinator_effects = TestEffectSystem::new(
         bus.clone(),
         coordinator_device,
         AuraConsensusRole::Coordinator.role_index().unwrap_or(0),
     )
-    .expect("coordinator transport");
+    .expect("coordinator effects");
 
-    let witness_a_transport = SimulatedTransport::new(
+    let witness_a_effects = TestEffectSystem::new(
         bus.clone(),
         witness_a,
         AuraConsensusRole::Witness(0).role_index().unwrap_or(0),
     )
-    .expect("witness transport");
+    .expect("witness effects");
 
     // Verify adapters can be created with role family
     let mut coordinator_adapter = AuraProtocolAdapter::new(
-        Arc::new(coordinator_transport),
+        Arc::new(coordinator_effects),
         coordinator_auth,
         AuraConsensusRole::Coordinator,
         role_map.clone(),
@@ -75,7 +75,7 @@ async fn consensus_adapter_setup() {
     .with_role_family("Witness", witness_roles.clone());
 
     let mut witness_adapter = AuraProtocolAdapter::new(
-        Arc::new(witness_a_transport),
+        Arc::new(witness_a_effects),
         witness_auths[0],
         AuraConsensusRole::Witness(0),
         role_map.clone(),

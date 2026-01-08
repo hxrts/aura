@@ -3,7 +3,8 @@ use aura_consensus::protocol::runners::{execute_as as consensus_execute_as, Aura
 use aura_consensus::protocol::ConsensusParams;
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::ParticipantIdentity;
-use aura_core::{AuraError, Hash32, Prestate};
+use aura_core::{AuraError, Hash32, PhysicalTimeEffects, Prestate, TimeEffects};
+use aura_guards::prelude::{GuardContextProvider, GuardEffects};
 use aura_protocol::effects::ChoreographicEffects;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -143,7 +144,11 @@ pub(super) async fn execute_consensus_as<E>(
     session_id: Uuid,
 ) -> Result<(), IntentError>
 where
-    E: ChoreographicEffects + ?Sized,
+    E: ChoreographicEffects
+        + GuardEffects
+        + GuardContextProvider
+        + PhysicalTimeEffects
+        + TimeEffects,
 {
     // Build witness roles for the role family
     let witness_roles: Vec<AuraConsensusRole> = (0..witnesses.len())

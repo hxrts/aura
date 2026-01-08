@@ -7,7 +7,7 @@ use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_invitation::protocol::exchange_runners::InvitationExchangeRole;
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
-use aura_simulator::{SimulatedMessageBus, SimulatedTransport};
+use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,30 +43,30 @@ async fn invitation_exchange_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let sender_transport = SimulatedTransport::new(
+    let sender_effects = TestEffectSystem::new(
         bus.clone(),
         sender_device,
         InvitationExchangeRole::Sender.role_index().unwrap_or(0),
     )
-    .expect("sender transport");
+    .expect("effects");
 
-    let receiver_transport = SimulatedTransport::new(
+    let receiver_effects = TestEffectSystem::new(
         bus.clone(),
         receiver_device,
         InvitationExchangeRole::Receiver.role_index().unwrap_or(1),
     )
-    .expect("receiver transport");
+    .expect("effects");
 
     // Verify adapters can be created
     let mut sender_adapter = AuraProtocolAdapter::new(
-        Arc::new(sender_transport),
+        Arc::new(sender_effects),
         sender_auth,
         InvitationExchangeRole::Sender,
         role_map.clone(),
     );
 
     let mut receiver_adapter = AuraProtocolAdapter::new(
-        Arc::new(receiver_transport),
+        Arc::new(receiver_effects),
         receiver_auth,
         InvitationExchangeRole::Receiver,
         role_map.clone(),

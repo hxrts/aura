@@ -6,7 +6,7 @@
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
-use aura_simulator::{SimulatedMessageBus, SimulatedTransport};
+use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_sync::protocols::epoch_runners::EpochRotationProtocolRole;
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;
@@ -52,16 +52,16 @@ async fn epoch_rotation_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let coordinator_transport = SimulatedTransport::new(
+    let coordinator_effects = TestEffectSystem::new(
         bus.clone(),
         coordinator_device,
         EpochRotationProtocolRole::Coordinator
             .role_index()
             .unwrap_or(0),
     )
-    .expect("coordinator transport");
+    .expect("effects");
 
-    let participant1_transport = SimulatedTransport::new(
+    let participant1_effects = TestEffectSystem::new(
         bus.clone(),
         participant1_device,
         EpochRotationProtocolRole::Participant1
@@ -72,7 +72,7 @@ async fn epoch_rotation_adapter_setup() {
 
     // Verify adapters can be created with role family
     let mut coordinator_adapter = AuraProtocolAdapter::new(
-        Arc::new(coordinator_transport),
+        Arc::new(coordinator_effects),
         coordinator_auth,
         EpochRotationProtocolRole::Coordinator,
         role_map.clone(),
@@ -80,7 +80,7 @@ async fn epoch_rotation_adapter_setup() {
     .with_role_family("Participant", participant_roles.clone());
 
     let mut participant1_adapter = AuraProtocolAdapter::new(
-        Arc::new(participant1_transport),
+        Arc::new(participant1_effects),
         participant1_auth,
         EpochRotationProtocolRole::Participant1,
         role_map.clone(),

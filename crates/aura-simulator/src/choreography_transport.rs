@@ -354,6 +354,471 @@ impl ChoreographicEffects for SimulatedTransport {
     }
 }
 
+// ===========================================================================
+// TestEffectSystem - Combined effects for choreography protocol testing
+// ===========================================================================
+
+use aura_core::effects::authorization::{AuthorizationDecision, AuthorizationError};
+use aura_core::effects::leakage::{LeakageBudget, LeakageEvent};
+use aura_core::effects::storage::{StorageError, StorageStats};
+use aura_core::effects::time::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError};
+use aura_core::effects::{
+    BiscuitAuthorizationEffects, FlowBudgetEffects, JournalEffects, RandomCoreEffects,
+    StorageCoreEffects, StorageExtendedEffects,
+};
+use aura_core::flow::{FlowBudget, Receipt};
+use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::scope::{AuthorizationOp, ResourceScope};
+use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
+use aura_core::{AuraError, FlowCost, Journal, Result as AuraResult};
+use aura_core::ExecutionMode;
+use aura_guards::guards::GuardContextProvider;
+
+/// Combined effect system for choreography protocol testing.
+///
+/// This type combines `SimulatedTransport` (for choreographic effects) with
+/// mock implementations of all other required traits (guard effects, time effects, etc.).
+/// This allows protocol tests to use `AuraProtocolAdapter` with its full trait bounds.
+///
+/// # Example
+///
+/// ```ignore
+/// let bus = Arc::new(SimulatedMessageBus::new());
+/// let effects = TestEffectSystem::new(bus.clone(), device_id, role_index)?;
+/// let adapter = AuraProtocolAdapter::new(Arc::new(effects), authority_id, role, role_map);
+/// ```
+pub struct TestEffectSystem {
+    /// The simulated transport for choreographic effects
+    transport: SimulatedTransport,
+    /// Authority ID for guard context
+    authority_id: AuthorityId,
+    /// Storage backend (simple in-memory)
+    storage: std::sync::Mutex<HashMap<String, Vec<u8>>>,
+    /// Physical time counter (deterministic)
+    physical_time_ms: std::sync::Mutex<u64>,
+    /// Logical clock state
+    logical_clock: std::sync::Mutex<LogicalTime>,
+}
+
+impl std::fmt::Debug for TestEffectSystem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestEffectSystem")
+            .field("transport", &self.transport)
+            .field("authority_id", &self.authority_id)
+            .finish()
+    }
+}
+
+impl TestEffectSystem {
+    /// Create a new test effect system
+    pub fn new(
+        bus: Arc<SimulatedMessageBus>,
+        device_id: DeviceId,
+        role_index: u32,
+    ) -> Option<Self> {
+        let transport = SimulatedTransport::new(bus, device_id, role_index)?;
+        Some(Self {
+            transport,
+            authority_id: AuthorityId::from_uuid(device_id.uuid()),
+            storage: std::sync::Mutex::new(HashMap::new()),
+            physical_time_ms: std::sync::Mutex::new(1640995200000), // 2022-01-01
+            logical_clock: std::sync::Mutex::new(LogicalTime {
+                vector: VectorClock::default(),
+                lamport: 0,
+            }),
+        })
+    }
+
+    /// Create with explicit authority ID
+    pub fn with_authority(mut self, authority_id: AuthorityId) -> Self {
+        self.authority_id = authority_id;
+        self
+    }
+
+    /// Get the underlying transport
+    pub fn transport(&self) -> &SimulatedTransport {
+        &self.transport
+    }
+}
+
+// Delegate ChoreographicEffects to transport
+#[async_trait]
+impl ChoreographicEffects for TestEffectSystem {
+    async fn send_to_role_bytes(
+        &self,
+        role: ChoreographicRole,
+        message: Vec<u8>,
+    ) -> Result<(), ChoreographyError> {
+        self.transport.send_to_role_bytes(role, message).await
+    }
+
+    async fn receive_from_role_bytes(
+        &self,
+        role: ChoreographicRole,
+    ) -> Result<Vec<u8>, ChoreographyError> {
+        self.transport.receive_from_role_bytes(role).await
+    }
+
+    async fn broadcast_bytes(&self, message: Vec<u8>) -> Result<(), ChoreographyError> {
+        self.transport.broadcast_bytes(message).await
+    }
+
+    fn current_role(&self) -> ChoreographicRole {
+        self.transport.current_role()
+    }
+
+    fn all_roles(&self) -> Vec<ChoreographicRole> {
+        self.transport.all_roles()
+    }
+
+    async fn is_role_active(&self, role: ChoreographicRole) -> bool {
+        self.transport.is_role_active(role).await
+    }
+
+    async fn start_session(
+        &self,
+        session_id: Uuid,
+        roles: Vec<ChoreographicRole>,
+    ) -> Result<(), ChoreographyError> {
+        self.transport.start_session(session_id, roles).await
+    }
+
+    async fn end_session(&self) -> Result<(), ChoreographyError> {
+        self.transport.end_session().await
+    }
+
+    async fn emit_choreo_event(&self, event: ChoreographyEvent) -> Result<(), ChoreographyError> {
+        self.transport.emit_choreo_event(event).await
+    }
+
+    async fn set_timeout(&self, timeout_ms: u64) {
+        self.transport.set_timeout(timeout_ms).await
+    }
+
+    async fn get_metrics(&self) -> ChoreographyMetrics {
+        self.transport.get_metrics().await
+    }
+}
+
+// GuardContextProvider implementation
+impl GuardContextProvider for TestEffectSystem {
+    fn authority_id(&self) -> AuthorityId {
+        self.authority_id
+    }
+
+    fn get_metadata(&self, _key: &str) -> Option<String> {
+        None
+    }
+
+    fn execution_mode(&self) -> ExecutionMode {
+        ExecutionMode::Testing
+    }
+
+    fn can_perform_operation(&self, _operation: &str) -> bool {
+        true
+    }
+}
+
+// PhysicalTimeEffects implementation
+#[async_trait]
+impl PhysicalTimeEffects for TestEffectSystem {
+    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+        let ts_ms = *self.physical_time_ms.lock().unwrap();
+        Ok(PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        })
+    }
+
+    async fn sleep_ms(&self, duration_ms: u64) -> Result<(), TimeError> {
+        let mut ts = self.physical_time_ms.lock().unwrap();
+        *ts += duration_ms;
+        Ok(())
+    }
+}
+
+// TimeEffects - extends PhysicalTimeEffects with current_timestamp (has default impl)
+impl aura_core::TimeEffects for TestEffectSystem {}
+
+// LogicalClockEffects implementation
+#[async_trait]
+impl LogicalClockEffects for TestEffectSystem {
+    async fn logical_advance(
+        &self,
+        _observed: Option<&VectorClock>,
+    ) -> Result<LogicalTime, TimeError> {
+        let mut clock = self.logical_clock.lock().unwrap();
+        clock.lamport += 1;
+        Ok(clock.clone())
+    }
+
+    async fn logical_now(&self) -> Result<LogicalTime, TimeError> {
+        let clock = self.logical_clock.lock().unwrap();
+        Ok(clock.clone())
+    }
+}
+
+#[async_trait]
+impl OrderClockEffects for TestEffectSystem {
+    async fn order_time(&self) -> Result<OrderTime, TimeError> {
+        let ts = *self.physical_time_ms.lock().unwrap();
+        let mut bytes = [0u8; 32];
+        bytes[..8].copy_from_slice(&ts.to_le_bytes());
+        Ok(OrderTime(bytes))
+    }
+}
+
+// StorageEffects implementation
+#[async_trait]
+impl StorageCoreEffects for TestEffectSystem {
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        let mut storage = self.storage.lock().unwrap();
+        storage.insert(key.to_string(), value);
+        Ok(())
+    }
+
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        let storage = self.storage.lock().unwrap();
+        Ok(storage.get(key).cloned())
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, StorageError> {
+        let mut storage = self.storage.lock().unwrap();
+        Ok(storage.remove(key).is_some())
+    }
+
+    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        let storage = self.storage.lock().unwrap();
+        match prefix {
+            Some(p) => Ok(storage.keys().filter(|k| k.starts_with(p)).cloned().collect()),
+            None => Ok(storage.keys().cloned().collect()),
+        }
+    }
+}
+
+#[async_trait]
+impl StorageExtendedEffects for TestEffectSystem {
+    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        let storage = self.storage.lock().unwrap();
+        Ok(storage.contains_key(key))
+    }
+
+    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
+        let mut storage = self.storage.lock().unwrap();
+        for (key, value) in pairs {
+            storage.insert(key, value);
+        }
+        Ok(())
+    }
+
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+        let storage = self.storage.lock().unwrap();
+        let mut result = HashMap::new();
+        for key in keys {
+            if let Some(value) = storage.get(key) {
+                result.insert(key.clone(), value.clone());
+            }
+        }
+        Ok(result)
+    }
+
+    async fn clear_all(&self) -> Result<(), StorageError> {
+        let mut storage = self.storage.lock().unwrap();
+        storage.clear();
+        Ok(())
+    }
+
+    async fn stats(&self) -> Result<StorageStats, StorageError> {
+        let storage = self.storage.lock().unwrap();
+        Ok(StorageStats {
+            key_count: storage.len() as u64,
+            total_size: storage.values().map(|v| v.len() as u64).sum(),
+            available_space: Some(u64::MAX),
+            backend_type: "test".to_string(),
+        })
+    }
+}
+
+// FlowBudgetEffects implementation
+#[async_trait]
+impl FlowBudgetEffects for TestEffectSystem {
+    async fn charge_flow(
+        &self,
+        _context: &ContextId,
+        _authority: &AuthorityId,
+        cost: FlowCost,
+    ) -> AuraResult<Receipt> {
+        use aura_core::types::Epoch;
+        Ok(Receipt {
+            ctx: ContextId::from_uuid(Uuid::nil()),
+            src: self.authority_id,
+            dst: self.authority_id,
+            epoch: Epoch(0),
+            cost,
+            nonce: aura_core::FlowNonce::new(0),
+            prev: aura_core::Hash32::new([0; 32]),
+            sig: aura_core::ReceiptSig::new(vec![0xAB; 64])?,
+        })
+    }
+}
+
+// JournalEffects implementation
+#[async_trait]
+impl JournalEffects for TestEffectSystem {
+    async fn merge_facts(&self, mut target: Journal, delta: Journal) -> Result<Journal, AuraError> {
+        target.merge_facts(delta.facts);
+        Ok(target)
+    }
+
+    async fn refine_caps(
+        &self,
+        mut target: Journal,
+        refinement: Journal,
+    ) -> Result<Journal, AuraError> {
+        target.refine_caps(refinement.caps);
+        Ok(target)
+    }
+
+    async fn get_journal(&self) -> Result<Journal, AuraError> {
+        Ok(Journal::new())
+    }
+
+    async fn persist_journal(&self, _journal: &Journal) -> Result<(), AuraError> {
+        Ok(())
+    }
+
+    async fn get_flow_budget(
+        &self,
+        _context: &ContextId,
+        _authority: &AuthorityId,
+    ) -> Result<FlowBudget, AuraError> {
+        Ok(FlowBudget {
+            limit: 1000,
+            spent: 0,
+            epoch: aura_core::types::Epoch(0),
+        })
+    }
+
+    async fn update_flow_budget(
+        &self,
+        _context: &ContextId,
+        _authority: &AuthorityId,
+        budget: &FlowBudget,
+    ) -> Result<FlowBudget, AuraError> {
+        Ok(*budget)
+    }
+
+    async fn charge_flow_budget(
+        &self,
+        _context: &ContextId,
+        _authority: &AuthorityId,
+        _cost: FlowCost,
+    ) -> Result<FlowBudget, AuraError> {
+        Ok(FlowBudget {
+            limit: 1000,
+            spent: 0,
+            epoch: aura_core::types::Epoch(0),
+        })
+    }
+}
+
+// RandomCoreEffects implementation
+#[async_trait]
+impl RandomCoreEffects for TestEffectSystem {
+    async fn random_bytes(&self, len: usize) -> Vec<u8> {
+        vec![0x42; len]
+    }
+
+    async fn random_bytes_32(&self) -> [u8; 32] {
+        [0x42; 32]
+    }
+
+    async fn random_u64(&self) -> u64 {
+        42
+    }
+}
+
+// AuthorizationEffects implementation (capability lattice)
+#[async_trait]
+impl aura_core::effects::AuthorizationEffects for TestEffectSystem {
+    async fn verify_capability(
+        &self,
+        _capabilities: &aura_core::Cap,
+        _operation: AuthorizationOp,
+        _scope: &ResourceScope,
+    ) -> Result<bool, AuthorizationError> {
+        // Test implementation: always authorize
+        Ok(true)
+    }
+
+    async fn delegate_capabilities(
+        &self,
+        _source_capabilities: &aura_core::Cap,
+        requested_capabilities: &aura_core::Cap,
+        _target_authority: &AuthorityId,
+    ) -> Result<aura_core::Cap, AuthorizationError> {
+        // Test implementation: return requested capabilities as-is
+        Ok(requested_capabilities.clone())
+    }
+}
+
+// BiscuitAuthorizationEffects implementation
+#[async_trait]
+impl BiscuitAuthorizationEffects for TestEffectSystem {
+    async fn authorize_biscuit(
+        &self,
+        _token_data: &[u8],
+        _operation: AuthorizationOp,
+        _scope: &ResourceScope,
+    ) -> Result<AuthorizationDecision, AuthorizationError> {
+        Ok(AuthorizationDecision {
+            authorized: true,
+            reason: Some("Test authorization".to_string()),
+        })
+    }
+
+    async fn authorize_fact(
+        &self,
+        _token_data: &[u8],
+        _fact_type: &str,
+        _scope: &ResourceScope,
+    ) -> Result<bool, AuthorizationError> {
+        Ok(true)
+    }
+}
+
+// LeakageEffects implementation
+#[async_trait]
+impl aura_core::effects::LeakageEffects for TestEffectSystem {
+    async fn record_leakage(&self, _event: LeakageEvent) -> AuraResult<()> {
+        Ok(())
+    }
+
+    async fn get_leakage_budget(&self, _context_id: ContextId) -> AuraResult<LeakageBudget> {
+        Ok(LeakageBudget::default())
+    }
+
+    async fn check_leakage_budget(
+        &self,
+        _context_id: ContextId,
+        _observer: aura_core::effects::leakage::ObserverClass,
+        _amount: u64,
+    ) -> AuraResult<bool> {
+        Ok(true)
+    }
+
+    async fn get_leakage_history(
+        &self,
+        _context_id: ContextId,
+        _since_timestamp: Option<&aura_core::time::PhysicalTime>,
+    ) -> AuraResult<Vec<LeakageEvent>> {
+        Ok(Vec::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

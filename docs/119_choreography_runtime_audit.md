@@ -10,8 +10,8 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 
 | Status | Count | Protocols |
 |--------|-------|-----------|
-| Wired | 11 | AuraConsensus, GuardianCeremony, GuardianSetup, RecoveryProtocol, InvitationExchange, GuardianInvitation, RendezvousExchange, RelayedRendezvous, DkdChoreography, EpochRotationProtocol, SessionCoordinationChoreography |
-| Spec-only | 3 | AmpTransport, GuardianAuthRelational, GuardianMembershipChange |
+| Wired | 14 | AuraConsensus, GuardianCeremony, GuardianSetup, RecoveryProtocol, InvitationExchange, GuardianInvitation, RendezvousExchange, RelayedRendezvous, DkdChoreography, EpochRotationProtocol, SessionCoordinationChoreography, AmpTransport, GuardianAuthRelational, GuardianMembershipChange |
+| Spec-only | 0 | |
 | **Total** | **14** | |
 
 ---
@@ -28,7 +28,7 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| AmpTransport | `crates/aura-amp/src/choreography.choreo` | Spec-only | CHOREO-AMP-001 | Needs MPST runner + adapter wiring |
+| AmpTransport | `crates/aura-amp/src/choreography.choreo` | Wired | CHOREO-AMP-001 | execute_as wired in chat service |
 
 ### Rendezvous
 
@@ -41,7 +41,7 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| GuardianAuthRelational | `crates/aura-authentication/src/guardian_auth_relational.choreo` | Spec-only | CHOREO-AUTH-001 | Needs runtime adapter |
+| GuardianAuthRelational | `crates/aura-authentication/src/guardian_auth_relational.choreo` | Wired | CHOREO-AUTH-001 | execute_as wired in auth service |
 | DkdChoreography | `crates/aura-authentication/src/dkd.choreo` | Wired | CHOREO-AUTH-002 | Distributed key derivation (execute_as wired in auth service) |
 
 ### Recovery
@@ -49,7 +49,7 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
 | RecoveryProtocol | `crates/aura-recovery/src/recovery_protocol.choreo` | Wired | CHOREO-REC-001 | Account recovery flow (execute_as wired in recovery service) |
-| GuardianMembershipChange | `crates/aura-recovery/src/guardian_membership.choreo` | Spec-only | CHOREO-REC-002 | Guardian add/remove |
+| GuardianMembershipChange | `crates/aura-recovery/src/guardian_membership.choreo` | Wired | CHOREO-REC-002 | Guardian add/remove (execute_as wired in recovery service) |
 | GuardianCeremony | `crates/aura-recovery/src/guardian_ceremony.choreo` | Wired | CHOREO-REC-003 | Guardian key ceremony (execute_as wired in runtime bridge + recovery service) |
 | GuardianSetup | `crates/aura-recovery/src/guardian_setup.choreo` | Wired | CHOREO-REC-004 | Initial guardian setup (execute_as wired in recovery service + simulation) |
 
@@ -95,13 +95,13 @@ This section captures the **owner**, **runtime entry point**, and **blocking dep
 | RecoveryProtocol | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | GuardianCeremony | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | GuardianSetup | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
-| GuardianMembershipChange | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| GuardianMembershipChange | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | execute_as wired in recovery service |
 | InvitationExchange | `aura-invitation` | `crates/aura-agent/src/handlers/invitation.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | execute_as wiring in invitation handler |
 | GuardianInvitation | `aura-invitation` | `crates/aura-agent/src/handlers/invitation.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | execute_as wiring in invitation handler |
 | RendezvousExchange | `aura-rendezvous` | `crates/aura-agent/src/handlers/rendezvous_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | RelayedRendezvous | `aura-rendezvous` | `crates/aura-agent/src/handlers/rendezvous_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
-| AmpTransport | `aura-amp` | `crates/aura-agent/src/runtime_bridge/amp.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
-| GuardianAuthRelational | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| AmpTransport | `aura-amp` | `crates/aura-agent/src/handlers/chat_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | execute_as wired in chat service |
+| GuardianAuthRelational | `aura-authentication` | `crates/aura-agent/src/handlers/auth_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | execute_as wired in auth service |
 | DkdChoreography | `aura-authentication` | `crates/aura-authentication/src/dkd.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | EpochRotationProtocol | `aura-sync` | `crates/aura-agent/src/runtime/services/sync_manager.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | SessionCoordinationChoreography | `aura-agent` | `crates/aura-agent/src/handlers/sessions/coordination.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |

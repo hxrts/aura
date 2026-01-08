@@ -164,7 +164,7 @@ pub use handlers::{
 pub use testkit_bridge::{MiddlewareConfig as HandlerConfig, TestkitSimulatorBridge};
 
 // Re-export choreography transport
-pub use choreography_transport::{SimulatedMessageBus, SimulatedTransport};
+pub use choreography_transport::{SimulatedMessageBus, SimulatedTransport, TestEffectSystem};
 
 // Re-export choreography observer
 pub use choreography_observer::{ObserverStatistics, ProtocolEvent, SimulatorObserver};

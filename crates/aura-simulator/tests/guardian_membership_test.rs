@@ -7,7 +7,7 @@ use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
 use aura_recovery::membership_runners::GuardianMembershipChangeRole;
-use aura_simulator::{SimulatedMessageBus, SimulatedTransport};
+use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -59,23 +59,23 @@ async fn guardian_membership_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let initiator_transport = SimulatedTransport::new(
+    let initiator_effects = TestEffectSystem::new(
         bus.clone(),
         initiator_device,
         GuardianMembershipChangeRole::ChangeInitiator
             .role_index()
             .unwrap_or(0),
     )
-    .expect("initiator transport");
+    .expect("effects");
 
-    let guardian1_transport = SimulatedTransport::new(
+    let guardian1_effects = TestEffectSystem::new(
         bus.clone(),
         guardian1_device,
         GuardianMembershipChangeRole::Guardian1.role_index().unwrap_or(1),
     )
     .expect("guardian1 transport");
 
-    let guardian2_transport = SimulatedTransport::new(
+    let guardian2_effects = TestEffectSystem::new(
         bus.clone(),
         guardian2_device,
         GuardianMembershipChangeRole::Guardian2.role_index().unwrap_or(2),
@@ -84,7 +84,7 @@ async fn guardian_membership_adapter_setup() {
 
     // Verify adapters can be created with role family
     let mut initiator_adapter = AuraProtocolAdapter::new(
-        Arc::new(initiator_transport),
+        Arc::new(initiator_effects),
         initiator_auth,
         GuardianMembershipChangeRole::ChangeInitiator,
         role_map.clone(),
@@ -92,7 +92,7 @@ async fn guardian_membership_adapter_setup() {
     .with_role_family("Guardian", guardian_roles.clone());
 
     let mut guardian1_adapter = AuraProtocolAdapter::new(
-        Arc::new(guardian1_transport),
+        Arc::new(guardian1_effects),
         guardian1_auth,
         GuardianMembershipChangeRole::Guardian1,
         role_map.clone(),
@@ -100,7 +100,7 @@ async fn guardian_membership_adapter_setup() {
     .with_role_family("Guardian", guardian_roles.clone());
 
     let mut guardian2_adapter = AuraProtocolAdapter::new(
-        Arc::new(guardian2_transport),
+        Arc::new(guardian2_effects),
         guardian2_auth,
         GuardianMembershipChangeRole::Guardian2,
         role_map.clone(),

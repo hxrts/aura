@@ -7,7 +7,7 @@ use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
 use aura_recovery::recovery_runners::RecoveryProtocolRole;
-use aura_simulator::{SimulatedMessageBus, SimulatedTransport};
+use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,35 +48,35 @@ async fn recovery_protocol_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let account_transport =
-        SimulatedTransport::new(bus.clone(), account_device, RecoveryProtocolRole::Account.role_index().unwrap_or(0))
-            .expect("account transport");
+    let account_effects =
+        TestEffectSystem::new(bus.clone(), account_device, RecoveryProtocolRole::Account.role_index().unwrap_or(0))
+            .expect("effects");
 
-    let guardian_transport =
-        SimulatedTransport::new(bus.clone(), guardian_device, RecoveryProtocolRole::Guardian.role_index().unwrap_or(1))
-            .expect("guardian transport");
+    let guardian_effects =
+        TestEffectSystem::new(bus.clone(), guardian_device, RecoveryProtocolRole::Guardian.role_index().unwrap_or(1))
+            .expect("effects");
 
-    let coordinator_transport =
-        SimulatedTransport::new(bus.clone(), coordinator_device, RecoveryProtocolRole::Coordinator.role_index().unwrap_or(2))
-            .expect("coordinator transport");
+    let coordinator_effects =
+        TestEffectSystem::new(bus.clone(), coordinator_device, RecoveryProtocolRole::Coordinator.role_index().unwrap_or(2))
+            .expect("effects");
 
     // Verify adapters can be created
     let mut account_adapter = AuraProtocolAdapter::new(
-        Arc::new(account_transport),
+        Arc::new(account_effects),
         account_auth,
         RecoveryProtocolRole::Account,
         role_map.clone(),
     );
 
     let mut guardian_adapter = AuraProtocolAdapter::new(
-        Arc::new(guardian_transport),
+        Arc::new(guardian_effects),
         guardian_auth,
         RecoveryProtocolRole::Guardian,
         role_map.clone(),
     );
 
     let mut coordinator_adapter = AuraProtocolAdapter::new(
-        Arc::new(coordinator_transport),
+        Arc::new(coordinator_effects),
         coordinator_auth,
         RecoveryProtocolRole::Coordinator,
         role_map.clone(),

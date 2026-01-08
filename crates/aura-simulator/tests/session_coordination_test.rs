@@ -7,7 +7,7 @@ use aura_agent::handlers::SessionCoordinationRole;
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
-use aura_simulator::{SimulatedMessageBus, SimulatedTransport};
+use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -58,21 +58,21 @@ async fn session_coordination_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let initiator_transport = SimulatedTransport::new(
+    let initiator_effects = TestEffectSystem::new(
         bus.clone(),
         initiator_device,
         SessionCoordinationRole::Initiator.role_index().unwrap_or(0),
     )
-    .expect("initiator transport");
+    .expect("effects");
 
-    let coordinator_transport = SimulatedTransport::new(
+    let coordinator_effects = TestEffectSystem::new(
         bus.clone(),
         coordinator_device,
         SessionCoordinationRole::Coordinator.role_index().unwrap_or(1),
     )
-    .expect("coordinator transport");
+    .expect("effects");
 
-    let participant1_transport = SimulatedTransport::new(
+    let participant1_effects = TestEffectSystem::new(
         bus.clone(),
         participant1_device,
         SessionCoordinationRole::Participants(0)
@@ -83,7 +83,7 @@ async fn session_coordination_adapter_setup() {
 
     // Verify adapters can be created with role family
     let mut initiator_adapter = AuraProtocolAdapter::new(
-        Arc::new(initiator_transport),
+        Arc::new(initiator_effects),
         initiator_auth,
         SessionCoordinationRole::Initiator,
         role_map.clone(),
@@ -91,7 +91,7 @@ async fn session_coordination_adapter_setup() {
     .with_role_family("Participants", participant_roles.clone());
 
     let mut coordinator_adapter = AuraProtocolAdapter::new(
-        Arc::new(coordinator_transport),
+        Arc::new(coordinator_effects),
         coordinator_auth,
         SessionCoordinationRole::Coordinator,
         role_map.clone(),
@@ -99,7 +99,7 @@ async fn session_coordination_adapter_setup() {
     .with_role_family("Participants", participant_roles.clone());
 
     let mut participant1_adapter = AuraProtocolAdapter::new(
-        Arc::new(participant1_transport),
+        Arc::new(participant1_effects),
         participant1_auth,
         SessionCoordinationRole::Participants(0),
         role_map.clone(),

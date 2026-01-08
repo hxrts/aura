@@ -266,6 +266,13 @@ pub enum ChoreographyError {
         /// End of the requested range
         end: u32,
     },
+
+    /// Authorization failed (guard chain denied)
+    #[error("Authorization failed: {reason}")]
+    AuthorizationFailed {
+        /// Reason for authorization failure
+        reason: String,
+    },
 }
 
 impl From<rumpsteak_aura_choreography::ChoreographyError> for ChoreographyError {
@@ -297,6 +304,7 @@ impl aura_core::ProtocolErrorCode for ChoreographyError {
             ChoreographyError::InvalidRoleFamilyRange { .. } => {
                 "choreography_invalid_role_family_range"
             }
+            ChoreographyError::AuthorizationFailed { .. } => "choreography_authorization_failed",
         }
     }
 }

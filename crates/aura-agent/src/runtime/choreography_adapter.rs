@@ -12,10 +12,27 @@
 //! let adapter = AuraProtocolAdapter::new(effects, authority_id, self_role, role_map)
 //!     .with_role_family("Witness", witness_roles.clone());
 //! ```
+//!
+//! ## Guard Chain Enforcement
+//!
+//! The adapter supports guard chain enforcement for choreography sends. Configure
+//! guards using `with_guard_config()`:
+//!
+//! ```ignore
+//! let guard_config = GuardConfig::new(context_id)
+//!     .with_message_guard::<MyMessage>("cap:my_capability", 100);
+//!
+//! let adapter = AuraProtocolAdapter::new(effects, authority_id, self_role, role_map)
+//!     .with_guard_config(guard_config);
+//! ```
 
 use async_trait::async_trait;
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
+use aura_core::FlowCost;
+use aura_guards::guards::journal::JournalCoupler;
+use aura_guards::prelude::{GuardContextProvider, GuardEffects, SendGuardChain};
+use aura_guards::LeakageBudget;
 use aura_mpst::rumpsteak_aura_choreography::{LabelId, Message, RoleId};
 use aura_mpst::ChoreographicAdapterExt;
 use aura_protocol::effects::{
@@ -24,7 +41,116 @@ use aura_protocol::effects::{
 use std::any::Any;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use tracing::{debug, warn};
 use uuid::Uuid;
+
+/// Guard requirements for a specific message type.
+#[derive(Debug, Clone)]
+pub struct MessageGuardRequirements {
+    /// Required capability for sending this message (e.g., "cap:amp_send")
+    pub capability: String,
+    /// Flow cost for sending this message
+    pub flow_cost: FlowCost,
+    /// Optional leakage budget for this message
+    pub leakage_budget: Option<LeakageBudget>,
+    /// Journal facts to record after successful send (from choreography annotation)
+    pub journal_facts: Option<String>,
+    /// Whether to merge journal after this message (from choreography annotation)
+    pub journal_merge: bool,
+}
+
+impl MessageGuardRequirements {
+    /// Create guard requirements with capability and flow cost.
+    pub fn new(capability: impl Into<String>, flow_cost: impl Into<FlowCost>) -> Self {
+        Self {
+            capability: capability.into(),
+            flow_cost: flow_cost.into(),
+            leakage_budget: None,
+            journal_facts: None,
+            journal_merge: false,
+        }
+    }
+
+    /// Add leakage budget to the guard requirements.
+    pub fn with_leakage_budget(mut self, budget: LeakageBudget) -> Self {
+        self.leakage_budget = Some(budget);
+        self
+    }
+
+    /// Set journal facts to record after successful send.
+    pub fn with_journal_facts(mut self, facts: impl Into<String>) -> Self {
+        self.journal_facts = Some(facts.into());
+        self
+    }
+
+    /// Enable journal merge after this message.
+    pub fn with_journal_merge(mut self, merge: bool) -> Self {
+        self.journal_merge = merge;
+        self
+    }
+}
+
+/// Configuration for guard chain enforcement in choreography execution.
+///
+/// Maps message type names to their guard requirements (capability + flow cost).
+#[derive(Debug, Clone, Default)]
+pub struct GuardConfig {
+    /// Context ID for guard evaluation
+    pub context_id: Option<ContextId>,
+    /// Map of message type name -> guard requirements
+    guards: HashMap<String, MessageGuardRequirements>,
+}
+
+impl GuardConfig {
+    /// Create a new guard config with the given context ID.
+    pub fn new(context_id: ContextId) -> Self {
+        Self {
+            context_id: Some(context_id),
+            guards: HashMap::new(),
+        }
+    }
+
+    /// Create an empty guard config (no guard enforcement).
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Add guard requirements for a specific message type.
+    ///
+    /// The type name is derived from `std::any::type_name::<M>()`.
+    pub fn with_message_guard<M: 'static>(
+        mut self,
+        capability: impl Into<String>,
+        flow_cost: impl Into<FlowCost>,
+    ) -> Self {
+        let type_name = std::any::type_name::<M>().to_string();
+        self.guards.insert(
+            type_name,
+            MessageGuardRequirements::new(capability, flow_cost),
+        );
+        self
+    }
+
+    /// Add guard requirements for a message type by name.
+    pub fn with_named_guard(
+        mut self,
+        type_name: impl Into<String>,
+        requirements: MessageGuardRequirements,
+    ) -> Self {
+        self.guards.insert(type_name.into(), requirements);
+        self
+    }
+
+    /// Get guard requirements for a message type.
+    pub fn get_guard(&self, type_name: &str) -> Option<&MessageGuardRequirements> {
+        self.guards.get(type_name)
+    }
+
+    /// Check if guard enforcement is enabled (context_id is set).
+    pub fn is_enabled(&self) -> bool {
+        self.context_id.is_some()
+    }
+}
 
 /// Adapter for choreography integration
 #[derive(Debug)]
@@ -71,10 +197,27 @@ type MessageProviderFn<R> =
 
 type BranchDeciderFn = Box<dyn FnMut(&[ReceivedMessage]) -> Option<String> + Send>;
 
+/// Runtime adapter used by generated choreography runners.
+///
+/// This adapter implements the `ChoreographicAdapter` trait from rumpsteak-aura,
+/// bridging Aura's effect system with the choreographic programming model.
+///
+/// ## Features
+///
+/// - **Role Family Support**: For protocols with parameterized roles (e.g., `Witness[N]`),
+///   use `with_role_family()` to register role instances.
+/// - **Guard Chain Enforcement**: When configured via `with_guard_config()`, evaluates
+///   CapGuard and FlowGuard before each send operation.
+/// - **Journal Coupling**: When configured via `with_journal_coupler()`, records journal
+///   facts after successful sends.
 #[allow(dead_code)]
 pub struct AuraProtocolAdapter<E, R>
 where
-    E: ChoreographicEffects + ?Sized,
+    E: ChoreographicEffects
+        + GuardEffects
+        + GuardContextProvider
+        + aura_core::PhysicalTimeEffects
+        + aura_core::TimeEffects,
     R: RoleId,
 {
     effects: Arc<E>,
@@ -88,12 +231,20 @@ where
     received: Vec<ReceivedMessage>,
     message_provider: Option<MessageProviderFn<R>>,
     branch_decider: Option<BranchDeciderFn>,
+    /// Guard chain configuration for send operations
+    guard_config: GuardConfig,
+    /// Journal coupler for fact recording after successful sends
+    journal_coupler: Option<JournalCoupler>,
 }
 
 #[allow(dead_code)]
 impl<E, R> AuraProtocolAdapter<E, R>
 where
-    E: ChoreographicEffects + ?Sized,
+    E: ChoreographicEffects
+        + GuardEffects
+        + GuardContextProvider
+        + aura_core::PhysicalTimeEffects
+        + aura_core::TimeEffects,
     R: RoleId,
 {
     /// Create a new protocol adapter.
@@ -121,6 +272,8 @@ where
             received: Vec::new(),
             message_provider: None,
             branch_decider: None,
+            guard_config: GuardConfig::default(),
+            journal_coupler: None,
         }
     }
 
@@ -170,6 +323,61 @@ where
     ) -> Self {
         self.branch_decider = Some(Box::new(decider));
         self
+    }
+
+    /// Configure guard chain enforcement for send operations.
+    ///
+    /// When configured, the adapter will evaluate guard chain requirements
+    /// (capability checks and flow budget charges) before each send operation.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let guard_config = GuardConfig::new(context_id)
+    ///     .with_message_guard::<MyMessage>("cap:my_capability", 100);
+    ///
+    /// let adapter = AuraProtocolAdapter::new(effects, auth_id, role, role_map)
+    ///     .with_guard_config(guard_config);
+    /// ```
+    pub fn with_guard_config(mut self, config: GuardConfig) -> Self {
+        self.guard_config = config;
+        self
+    }
+
+    /// Get the current guard configuration.
+    pub fn guard_config(&self) -> &GuardConfig {
+        &self.guard_config
+    }
+
+    /// Configure journal coupler for fact recording after successful sends.
+    ///
+    /// When configured, the adapter will call `couple_with_send` after each
+    /// successful send operation to record journal facts per choreography annotations.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use aura_guards::guards::journal::{JournalCoupler, JournalCouplerBuilder};
+    /// use aura_mpst::journal::{JournalAnnotation, JournalOpType};
+    ///
+    /// let coupler = JournalCouplerBuilder::new()
+    ///     .with_annotation(
+    ///         "send_coupling",
+    ///         JournalAnnotation::add_facts("Protocol message sent"),
+    ///     )
+    ///     .build();
+    ///
+    /// let adapter = AuraProtocolAdapter::new(effects, auth_id, role, role_map)
+    ///     .with_journal_coupler(coupler);
+    /// ```
+    pub fn with_journal_coupler(mut self, coupler: JournalCoupler) -> Self {
+        self.journal_coupler = Some(coupler);
+        self
+    }
+
+    /// Get a reference to the journal coupler if configured.
+    pub fn journal_coupler(&self) -> Option<&JournalCoupler> {
+        self.journal_coupler.as_ref()
     }
 
     pub fn push_message<M: Message>(&mut self, message: M) {
@@ -235,7 +443,11 @@ where
 impl<E, R> aura_mpst::rumpsteak_aura_choreography::ChoreographicAdapter
     for AuraProtocolAdapter<E, R>
 where
-    E: ChoreographicEffects + ?Sized,
+    E: ChoreographicEffects
+        + GuardEffects
+        + GuardContextProvider
+        + aura_core::PhysicalTimeEffects
+        + aura_core::TimeEffects,
     R: RoleId,
 {
     type Error = ChoreographyError;
@@ -246,7 +458,98 @@ where
         let payload = to_vec(&msg).map_err(|err| ChoreographyError::SerializationFailed {
             reason: err.to_string(),
         })?;
-        self.effects.send_to_role_bytes(role, payload).await
+
+        // Track receipt from guard evaluation for journal coupling
+        let mut guard_receipt: Option<aura_core::Receipt> = None;
+        let type_name = std::any::type_name::<M>();
+
+        // Evaluate guard chain if configured
+        if let Some(context_id) = self.guard_config.context_id {
+            if let Some(guard_req) = self.guard_config.get_guard(type_name) {
+                let peer = self
+                    .role_map
+                    .get(&to)
+                    .copied()
+                    .unwrap_or(self.authority_id);
+
+                debug!(
+                    message_type = type_name,
+                    capability = %guard_req.capability,
+                    flow_cost = ?guard_req.flow_cost,
+                    context = ?context_id,
+                    peer = ?peer,
+                    "Evaluating guard chain for choreography send"
+                );
+
+                let mut guard = SendGuardChain::new(
+                    aura_guards::guards::CapabilityId::from(guard_req.capability.as_str()),
+                    context_id,
+                    peer,
+                    guard_req.flow_cost,
+                );
+
+                if let Some(ref leakage) = guard_req.leakage_budget {
+                    guard = guard.with_leakage_budget(leakage.clone());
+                }
+
+                let result = guard.evaluate(&*self.effects).await.map_err(|e| {
+                    ChoreographyError::AuthorizationFailed {
+                        reason: format!("Guard chain evaluation failed: {e}"),
+                    }
+                })?;
+
+                if !result.authorized {
+                    return Err(ChoreographyError::AuthorizationFailed {
+                        reason: result
+                            .denial_reason
+                            .unwrap_or_else(|| "Guard chain denied send".to_string()),
+                    });
+                }
+
+                debug!(
+                    message_type = type_name,
+                    receipt = ?result.receipt,
+                    "Guard chain authorized choreography send"
+                );
+
+                guard_receipt = result.receipt;
+            }
+        }
+
+        // Send the message
+        self.effects.send_to_role_bytes(role, payload).await?;
+
+        // Couple journal operations after successful send
+        if let Some(ref coupler) = self.journal_coupler {
+            debug!(
+                message_type = type_name,
+                "Coupling journal operations after choreography send"
+            );
+
+            let coupling_result = coupler
+                .couple_with_send(&*self.effects, &guard_receipt)
+                .await
+                .map_err(|e| {
+                    warn!(
+                        message_type = type_name,
+                        error = %e,
+                        "Journal coupling failed after send (message was sent)"
+                    );
+                    ChoreographyError::InternalError {
+                        message: format!("Journal coupling failed: {e}"),
+                    }
+                })?;
+
+            if coupling_result.operations_applied > 0 {
+                debug!(
+                    message_type = type_name,
+                    operations_applied = coupling_result.operations_applied,
+                    "Journal coupling completed successfully"
+                );
+            }
+        }
+
+        Ok(())
     }
 
     async fn recv<M: Message>(&mut self, from: Self::Role) -> Result<M, Self::Error> {
@@ -322,7 +625,11 @@ where
 #[async_trait]
 impl<E, R> ChoreographicAdapterExt for AuraProtocolAdapter<E, R>
 where
-    E: ChoreographicEffects + ?Sized,
+    E: ChoreographicEffects
+        + GuardEffects
+        + GuardContextProvider
+        + aura_core::PhysicalTimeEffects
+        + aura_core::TimeEffects,
     R: RoleId,
 {
     async fn provide_message<M: Message>(&mut self, to: Self::Role) -> Result<M, Self::Error> {

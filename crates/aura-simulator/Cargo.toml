@@ -59,12 +59,14 @@ sysinfo = { workspace = true }
 toml = { workspace = true }
 chrono = { workspace = true }
 
+# Guard infrastructure for TestEffectSystem
+aura-guards = { path = "../aura-guards" }
+
 [dev-dependencies]
 # tokio-test = { workspace = true } # removed - unused
 tempfile = { workspace = true }
 aura-macros = { path = "../aura-macros" }
 aura-anti-entropy = { path = "../aura-anti-entropy" }
-aura-guards = { path = "../aura-guards" }
 proptest = { workspace = true }
 # Protocol tests dependencies
 aura-authentication = { path = "../aura-authentication" }

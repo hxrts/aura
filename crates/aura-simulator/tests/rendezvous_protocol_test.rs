@@ -7,7 +7,7 @@ use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
 use aura_rendezvous::protocol::exchange_runners::RendezvousExchangeRole;
-use aura_simulator::{SimulatedMessageBus, SimulatedTransport};
+use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,30 +43,30 @@ async fn rendezvous_exchange_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let initiator_transport = SimulatedTransport::new(
+    let initiator_effects = TestEffectSystem::new(
         bus.clone(),
         initiator_device,
         RendezvousExchangeRole::Initiator.role_index().unwrap_or(0),
     )
-    .expect("initiator transport");
+    .expect("effects");
 
-    let responder_transport = SimulatedTransport::new(
+    let responder_effects = TestEffectSystem::new(
         bus.clone(),
         responder_device,
         RendezvousExchangeRole::Responder.role_index().unwrap_or(1),
     )
-    .expect("responder transport");
+    .expect("effects");
 
     // Verify adapters can be created
     let mut initiator_adapter = AuraProtocolAdapter::new(
-        Arc::new(initiator_transport),
+        Arc::new(initiator_effects),
         initiator_auth,
         RendezvousExchangeRole::Initiator,
         role_map.clone(),
     );
 
     let mut responder_adapter = AuraProtocolAdapter::new(
-        Arc::new(responder_transport),
+        Arc::new(responder_effects),
         responder_auth,
         RendezvousExchangeRole::Responder,
         role_map.clone(),

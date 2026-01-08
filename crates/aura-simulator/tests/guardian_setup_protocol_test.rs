@@ -7,7 +7,7 @@ use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
 use aura_recovery::setup_runners::GuardianSetupRole;
-use aura_simulator::{SimulatedMessageBus, SimulatedTransport};
+use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -59,16 +59,16 @@ async fn guardian_setup_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let initiator_transport = SimulatedTransport::new(
+    let initiator_effects = TestEffectSystem::new(
         bus.clone(),
         initiator_device,
         GuardianSetupRole::SetupInitiator
             .role_index()
             .unwrap_or(0),
     )
-    .expect("initiator transport");
+    .expect("effects");
 
-    let guardian1_transport = SimulatedTransport::new(
+    let guardian1_effects = TestEffectSystem::new(
         bus.clone(),
         guardian1_device,
         GuardianSetupRole::Guardian1.role_index().unwrap_or(1),
@@ -77,7 +77,7 @@ async fn guardian_setup_adapter_setup() {
 
     // Verify adapters can be created with role family
     let mut initiator_adapter = AuraProtocolAdapter::new(
-        Arc::new(initiator_transport),
+        Arc::new(initiator_effects),
         initiator_auth,
         GuardianSetupRole::SetupInitiator,
         role_map.clone(),
@@ -85,7 +85,7 @@ async fn guardian_setup_adapter_setup() {
     .with_role_family("Guardian", guardian_roles.clone());
 
     let mut guardian1_adapter = AuraProtocolAdapter::new(
-        Arc::new(guardian1_transport),
+        Arc::new(guardian1_effects),
         guardian1_auth,
         GuardianSetupRole::Guardian1,
         role_map.clone(),

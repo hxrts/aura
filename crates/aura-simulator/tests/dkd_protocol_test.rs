@@ -7,7 +7,7 @@ use aura_agent::AuraProtocolAdapter;
 use aura_authentication::dkd_runners::DkdChoreographyRole;
 use aura_core::{AuthorityId, DeviceId};
 use aura_mpst::rumpsteak_aura_choreography::RoleId;
-use aura_simulator::{SimulatedMessageBus, SimulatedTransport};
+use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,30 +43,30 @@ async fn dkd_choreography_adapter_setup() {
     let bus = Arc::new(SimulatedMessageBus::new());
     let session_id = Uuid::new_v4();
 
-    let initiator_transport = SimulatedTransport::new(
+    let initiator_effects = TestEffectSystem::new(
         bus.clone(),
         initiator_device,
         DkdChoreographyRole::Initiator.role_index().unwrap_or(0),
     )
-    .expect("initiator transport");
+    .expect("effects");
 
-    let participant_transport = SimulatedTransport::new(
+    let participant_effects = TestEffectSystem::new(
         bus.clone(),
         participant_device,
         DkdChoreographyRole::Participant.role_index().unwrap_or(1),
     )
-    .expect("participant transport");
+    .expect("effects");
 
     // Verify adapters can be created
     let mut initiator_adapter = AuraProtocolAdapter::new(
-        Arc::new(initiator_transport),
+        Arc::new(initiator_effects),
         initiator_auth,
         DkdChoreographyRole::Initiator,
         role_map.clone(),
     );
 
     let mut participant_adapter = AuraProtocolAdapter::new(
-        Arc::new(participant_transport),
+        Arc::new(participant_effects),
         participant_auth,
         DkdChoreographyRole::Participant,
         role_map.clone(),

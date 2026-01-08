@@ -65,10 +65,18 @@ pub mod time_handler;
 
 // Re-export main types for convenience
 pub use builder::EffectSystemBuilder;
-pub use choreography_adapter::{AuraHandlerAdapter, ChoreographyAdapter};
+pub use choreography_adapter::{
+    AuraHandlerAdapter, AuraProtocolAdapter, ChoreographyAdapter, GuardConfig,
+    MessageGuardRequirements,
+};
 pub use context::EffectContext;
 pub use effects::AuraEffectSystem;
 pub use shared_transport::SharedTransport;
+
+// Re-export JournalCoupler for choreography journal coupling
+pub use aura_guards::guards::journal::{
+    CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
+};
 
 // Subsystem re-exports (available for incremental adoption; see Task 3.6 in work/033.md)
 #[allow(unused_imports)]
