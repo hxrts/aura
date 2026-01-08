@@ -99,6 +99,8 @@ pub enum CeremonyKind {
     DeviceEnrollment,
     /// Device removal ceremony (account authority membership change + rotation).
     DeviceRemoval,
+    /// Guardian-based recovery ceremony.
+    Recovery,
 }
 
 /// Result of starting a device enrollment ceremony.

@@ -7,15 +7,21 @@ use super::recovery::{
     GuardianApproval, RecoveryHandler, RecoveryOperation, RecoveryRequest, RecoveryResult,
     RecoveryState,
 };
-use crate::core::{AgentResult, AuthorityContext};
+use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage};
+use crate::runtime::services::ceremony_runner::{
+    CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
+};
+use crate::runtime::services::CeremonyTracker;
 use crate::runtime::AuraEffectSystem;
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, RecoveryId};
+use aura_core::identifiers::CeremonyId;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::from_slice;
+use aura_core::TimeEffects;
 use aura_protocol::effects::TreeEffects;
 use aura_recovery::ceremony_runners::{execute_as as guardian_execute_as, GuardianCeremonyRole};
 use aura_recovery::guardian_ceremony::{
@@ -41,6 +47,7 @@ use uuid::Uuid;
 pub struct RecoveryServiceApi {
     handler: RecoveryHandler,
     effects: Arc<AuraEffectSystem>,
+    ceremony_runner: CeremonyRunner,
 }
 
 impl std::fmt::Debug for RecoveryServiceApi {
@@ -56,7 +63,91 @@ impl RecoveryServiceApi {
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
         let handler = RecoveryHandler::new(authority_context)?;
-        Ok(Self { handler, effects })
+        let ceremony_runner = CeremonyRunner::new(CeremonyTracker::new());
+        Ok(Self {
+            handler,
+            effects,
+            ceremony_runner,
+        })
+    }
+
+    /// Create a new recovery service with a shared ceremony runner.
+    pub fn new_with_runner(
+        effects: Arc<AuraEffectSystem>,
+        authority_context: AuthorityContext,
+        ceremony_runner: CeremonyRunner,
+    ) -> AgentResult<Self> {
+        let handler = RecoveryHandler::new(authority_context)?;
+        Ok(Self {
+            handler,
+            effects,
+            ceremony_runner,
+        })
+    }
+
+    async fn register_recovery_ceremony(
+        &self,
+        request: &RecoveryRequest,
+    ) -> AgentResult<CeremonyId> {
+        let ceremony_id = CeremonyId::new(request.recovery_id.to_string());
+        let total_n = u16::try_from(request.guardians.len()).map_err(|_| {
+            AgentError::config("Recovery guardian set exceeds supported size".to_string())
+        })?;
+        let threshold_k = u16::try_from(request.threshold).map_err(|_| {
+            AgentError::config("Recovery threshold exceeds supported size".to_string())
+        })?;
+        let participants = request
+            .guardians
+            .iter()
+            .copied()
+            .map(aura_core::threshold::ParticipantIdentity::guardian)
+            .collect::<Vec<_>>();
+
+        let tree_state = self
+            .effects
+            .get_current_state()
+            .await
+            .map_err(|e| AgentError::effects(format!("Failed to read tree state: {e}")))?;
+
+        let now_ms = self.effects.current_timestamp_ms().await;
+        let prestate_hash = Some(aura_core::Hash32(tree_state.root_commitment));
+
+        for old_id in self
+            .ceremony_runner
+            .check_supersession_candidates(
+                aura_app::runtime_bridge::CeremonyKind::Recovery,
+                prestate_hash.as_ref(),
+            )
+            .await
+        {
+            let _ = self
+                .ceremony_runner
+                .supersede(
+                    &old_id,
+                    &ceremony_id,
+                    aura_core::ceremony::SupersessionReason::NewerRequest,
+                    now_ms,
+                )
+                .await;
+        }
+
+        self.ceremony_runner
+            .start(CeremonyInitRequest {
+                ceremony_id: ceremony_id.clone(),
+                kind: aura_app::runtime_bridge::CeremonyKind::Recovery,
+                initiator_id: request.account_authority,
+                threshold_k,
+                total_n,
+                participants,
+                new_epoch: tree_state.epoch.value(),
+                enrollment_device_id: None,
+                enrollment_nickname_suggestion: None,
+                prestate_hash,
+            })
+            .await
+            .map_err(|e| AgentError::internal(format!("Failed to register ceremony: {e}")))?;
+
+        Ok(ceremony_id)
     }
 
     /// Initiate a recovery ceremony to add a new device
@@ -89,6 +180,7 @@ impl RecoveryServiceApi {
                 expires_in_ms,
             )
             .await?;
+        let _ = self.register_recovery_ceremony(&request).await?;
         self.spawn_recovery_protocol(&request).await?;
         Ok(request)
     }
@@ -123,6 +215,7 @@ impl RecoveryServiceApi {
                 expires_in_ms,
             )
             .await?;
+        let _ = self.register_recovery_ceremony(&request).await?;
         self.spawn_recovery_protocol(&request).await?;
         Ok(request)
     }
@@ -157,6 +250,7 @@ impl RecoveryServiceApi {
                 expires_in_ms,
             )
             .await?;
+        let _ = self.register_recovery_ceremony(&request).await?;
         self.spawn_recovery_protocol(&request).await?;
         Ok(request)
     }
@@ -196,6 +290,7 @@ impl RecoveryServiceApi {
                 expires_in_ms,
             )
             .await?;
+        let _ = self.register_recovery_ceremony(&request).await?;
         self.spawn_recovery_protocol(&request).await?;
         Ok(request)
     }
@@ -212,6 +307,17 @@ impl RecoveryServiceApi {
             .handler
             .submit_approval(&self.effects, approval.clone())
             .await?;
+        let ceremony_id = CeremonyId::new(approval.recovery_id.to_string());
+        let _ = self
+            .ceremony_runner
+            .record_response(
+                &ceremony_id,
+                aura_core::threshold::ParticipantIdentity::guardian(approval.guardian_id),
+            )
+            .await
+            .map_err(|e| {
+                AgentError::internal(format!("Failed to record recovery approval: {e}"))
+            })?;
         if let Some(recovery) = self.handler.get_recovery(&approval.recovery_id).await {
             let _ = self
                 .execute_recovery_protocol_guardian(&approval, recovery.request.account_authority)
@@ -228,7 +334,20 @@ impl RecoveryServiceApi {
     /// # Returns
     /// The recovery result
     pub async fn complete(&self, recovery_id: &RecoveryId) -> AgentResult<RecoveryResult> {
-        self.handler.complete(&self.effects, recovery_id).await
+        let result = self.handler.complete(&self.effects, recovery_id).await?;
+        let ceremony_id = CeremonyId::new(recovery_id.to_string());
+        let committed_at = self.effects.physical_time().await.ok();
+        let _ = self
+            .ceremony_runner
+            .commit(
+                &ceremony_id,
+                CeremonyCommitMetadata {
+                    committed_at,
+                    consensus_id: None,
+                },
+            )
+            .await;
+        Ok(result)
     }
 
     /// Cancel a recovery ceremony
@@ -244,9 +363,13 @@ impl RecoveryServiceApi {
         recovery_id: &RecoveryId,
         reason: String,
     ) -> AgentResult<RecoveryResult> {
-        self.handler
-            .cancel(&self.effects, recovery_id, reason)
-            .await
+        let result = self
+            .handler
+            .cancel(&self.effects, recovery_id, reason.clone())
+            .await?;
+        let ceremony_id = CeremonyId::new(recovery_id.to_string());
+        let _ = self.ceremony_runner.abort(&ceremony_id, Some(reason)).await;
+        Ok(result)
     }
 
     /// Get the state of a recovery ceremony

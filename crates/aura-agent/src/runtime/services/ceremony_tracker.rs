@@ -277,6 +277,7 @@ impl CeremonyTracker {
                 policy_for(CeremonyFlow::DeviceEnrollment).initial_mode()
             }
             CeremonyKind::DeviceRemoval => policy_for(CeremonyFlow::DeviceRemoval).initial_mode(),
+            CeremonyKind::Recovery => policy_for(CeremonyFlow::RecoveryExecution).initial_mode(),
         }
     }
     /// Create a new ceremony tracker

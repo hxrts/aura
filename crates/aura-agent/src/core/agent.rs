@@ -31,11 +31,15 @@ impl AuraAgent {
     /// Create a new agent with the given runtime system
     pub(crate) fn new(runtime: RuntimeSystem, authority_id: AuthorityId) -> Self {
         let context = AuthorityContext::new_with_device(authority_id, runtime.device_id());
-        let services = ServiceRegistry::new(runtime.effects(), context.clone());
+        let services = ServiceRegistry::new(
+            runtime.effects(),
+            runtime.ceremony_runner().clone(),
+            context.clone(),
+        );
         Self {
-            context,
             runtime,
             services,
+            context,
         }
     }
 
@@ -119,9 +123,9 @@ impl AuraAgent {
     }
 }
 
-#[derive(Debug)]
 struct ServiceRegistry {
     effects: Arc<AuraEffectSystem>,
+    ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
     authority_context: AuthorityContext,
     account_id: AccountId,
     sessions: OnceCell<SessionServiceApi>,
@@ -132,10 +136,15 @@ struct ServiceRegistry {
 }
 
 impl ServiceRegistry {
-    fn new(effects: Arc<AuraEffectSystem>, authority_context: AuthorityContext) -> Self {
+    fn new(
+        effects: Arc<AuraEffectSystem>,
+        ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
+        authority_context: AuthorityContext,
+    ) -> Self {
         let account_id = authority_context.account_id();
         Self {
             effects,
+            ceremony_runner,
             authority_context,
             account_id,
             sessions: OnceCell::new(),
@@ -187,7 +196,11 @@ impl ServiceRegistry {
     fn recovery(&self) -> AgentResult<RecoveryServiceApi> {
         self.recovery
             .get_or_try_init(|| {
-                RecoveryServiceApi::new(self.effects.clone(), self.authority_context.clone())
+                RecoveryServiceApi::new_with_runner(
+                    self.effects.clone(),
+                    self.authority_context.clone(),
+                    self.ceremony_runner.clone(),
+                )
             })
             .cloned()
     }

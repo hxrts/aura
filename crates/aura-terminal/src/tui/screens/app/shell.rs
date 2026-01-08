@@ -705,6 +705,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                                 "Device threshold ceremony complete ({threshold}-of-{total_count})"
                                                             )
                                                         }
+                                                        aura_app::ui::types::CeremonyKind::Recovery => {
+                                                            "Recovery ceremony complete".to_string()
+                                                        }
                                                     },
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));
