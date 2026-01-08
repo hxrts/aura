@@ -708,6 +708,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                         aura_app::ui::types::CeremonyKind::Recovery => {
                                                             "Recovery ceremony complete".to_string()
                                                         }
+                                                        aura_app::ui::types::CeremonyKind::Invitation => {
+                                                            "Invitation ceremony complete".to_string()
+                                                        }
                                                     },
                                                     crate::tui::state_machine::ToastLevel::Success,
                                                 ));

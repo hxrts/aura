@@ -101,6 +101,8 @@ pub enum CeremonyKind {
     DeviceRemoval,
     /// Guardian-based recovery ceremony.
     Recovery,
+    /// Invitation ceremony (contact/guardian/channel).
+    Invitation,
 }
 
 /// Result of starting a device enrollment ceremony.

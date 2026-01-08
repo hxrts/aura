@@ -7,10 +7,15 @@ use super::invitation::{
     Invitation, InvitationHandler, InvitationResult, InvitationStatus, InvitationType,
     ShareableInvitation, ShareableInvitationError,
 };
-use crate::core::{AgentResult, AuthorityContext};
+use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::runtime::services::ceremony_runner::{
+    CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
+};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::amp::ChannelBootstrapPackage;
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
+use aura_core::Hash32;
 use aura_core::DeviceId;
 use std::sync::Arc;
 
@@ -21,6 +26,7 @@ use std::sync::Arc;
 pub struct InvitationServiceApi {
     handler: InvitationHandler,
     effects: Arc<AuraEffectSystem>,
+    ceremony_runner: CeremonyRunner,
 }
 
 impl std::fmt::Debug for InvitationServiceApi {
@@ -37,7 +43,72 @@ impl InvitationServiceApi {
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
         let handler = InvitationHandler::new(authority_context)?;
-        Ok(Self { handler, effects })
+        let ceremony_runner = CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new());
+        Ok(Self {
+            handler,
+            effects,
+            ceremony_runner,
+        })
+    }
+
+    /// Create a new invitation service with a shared ceremony runner.
+    pub fn new_with_runner(
+        effects: Arc<AuraEffectSystem>,
+        authority_context: AuthorityContext,
+        ceremony_runner: CeremonyRunner,
+    ) -> AgentResult<Self> {
+        let handler = InvitationHandler::new(authority_context)?;
+        Ok(Self {
+            handler,
+            effects,
+            ceremony_runner,
+        })
+    }
+
+    fn should_track_ceremony(invitation_type: &InvitationType) -> bool {
+        matches!(
+            invitation_type,
+            InvitationType::Contact { .. }
+                | InvitationType::Guardian { .. }
+                | InvitationType::Channel { .. }
+        )
+    }
+
+    async fn ensure_invitation_ceremony(
+        &self,
+        invitation: &Invitation,
+    ) -> AgentResult<Option<CeremonyId>> {
+        if !Self::should_track_ceremony(&invitation.invitation_type) {
+            return Ok(None);
+        }
+
+        let ceremony_id = CeremonyId::new(invitation.invitation_id.to_string());
+        if self.ceremony_runner.status(&ceremony_id).await.is_ok() {
+            return Ok(Some(ceremony_id));
+        }
+
+        let prestate_hash = Hash32(hash(invitation.invitation_id.as_str().as_bytes()));
+        let participants = vec![aura_core::threshold::ParticipantIdentity::guardian(
+            invitation.receiver_id,
+        )];
+
+        self.ceremony_runner
+            .start(CeremonyInitRequest {
+                ceremony_id: ceremony_id.clone(),
+                kind: aura_app::runtime_bridge::CeremonyKind::Invitation,
+                initiator_id: invitation.sender_id,
+                threshold_k: 1,
+                total_n: 1,
+                participants,
+                new_epoch: 0,
+                enrollment_device_id: None,
+                enrollment_nickname_suggestion: None,
+                prestate_hash: Some(prestate_hash),
+            })
+            .await
+            .map_err(|e| AgentError::internal(format!("Failed to register ceremony: {e}")))?;
+
+        Ok(Some(ceremony_id))
     }
 
     /// Create an invitation to a channel/home
@@ -58,7 +129,8 @@ impl InvitationServiceApi {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        self.handler
+        let invitation = self
+            .handler
             .create_invitation(
                 self.effects.clone(),
                 receiver_id,
@@ -70,7 +142,9 @@ impl InvitationServiceApi {
                 message,
                 expires_in_ms,
             )
-            .await
+            .await?;
+        let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        Ok(invitation)
     }
 
     /// Create an invitation to become a guardian
@@ -90,7 +164,8 @@ impl InvitationServiceApi {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        self.handler
+        let invitation = self
+            .handler
             .create_invitation(
                 self.effects.clone(),
                 receiver_id,
@@ -98,7 +173,9 @@ impl InvitationServiceApi {
                 message,
                 expires_in_ms,
             )
-            .await
+            .await?;
+        let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        Ok(invitation)
     }
 
     /// Create an invitation to become a contact
@@ -118,7 +195,8 @@ impl InvitationServiceApi {
         message: Option<String>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        self.handler
+        let invitation = self
+            .handler
             .create_invitation(
                 self.effects.clone(),
                 receiver_id,
@@ -126,7 +204,9 @@ impl InvitationServiceApi {
                 message,
                 expires_in_ms,
             )
-            .await
+            .await?;
+        let _ = self.ensure_invitation_ceremony(&invitation).await?;
+        Ok(invitation)
     }
 
     /// Create an invitation to enroll a new device for the current authority.
@@ -147,7 +227,8 @@ impl InvitationServiceApi {
         public_key_package: Vec<u8>,
         expires_in_ms: Option<u64>,
     ) -> AgentResult<Invitation> {
-        self.handler
+        let invitation = self
+            .handler
             .create_invitation(
                 self.effects.clone(),
                 receiver_id,
@@ -165,7 +246,8 @@ impl InvitationServiceApi {
                 None,
                 expires_in_ms,
             )
-            .await
+            .await?;
+        Ok(invitation)
     }
 
     /// Accept an invitation
@@ -176,9 +258,37 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the acceptance
     pub async fn accept(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
-        self.handler
+        let result = self
+            .handler
             .accept_invitation(self.effects.clone(), invitation_id)
+            .await?;
+
+        if let Some(invitation) = self
+            .handler
+            .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
             .await
+        {
+            if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
+                let _ = self
+                    .ceremony_runner
+                    .record_response(
+                        &ceremony_id,
+                        aura_core::threshold::ParticipantIdentity::guardian(
+                            invitation.receiver_id,
+                        ),
+                    )
+                    .await
+                    .map_err(|e| {
+                        AgentError::internal(format!("Failed to record invitation acceptance: {e}"))
+                    })?;
+                let _ = self
+                    .ceremony_runner
+                    .commit(&ceremony_id, CeremonyCommitMetadata::default())
+                    .await;
+            }
+        }
+
+        Ok(result)
     }
 
     /// Decline an invitation
@@ -189,9 +299,25 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the decline
     pub async fn decline(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
-        self.handler
+        let result = self
+            .handler
             .decline_invitation(self.effects.clone(), invitation_id)
+            .await?;
+
+        if let Some(invitation) = self
+            .handler
+            .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
             .await
+        {
+            if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
+                let _ = self
+                    .ceremony_runner
+                    .abort(&ceremony_id, Some("Invitation declined".to_string()))
+                    .await;
+            }
+        }
+
+        Ok(result)
     }
 
     /// Cancel an invitation (sender only)
@@ -202,9 +328,25 @@ impl InvitationServiceApi {
     /// # Returns
     /// Result of the cancellation
     pub async fn cancel(&self, invitation_id: &InvitationId) -> AgentResult<InvitationResult> {
-        self.handler
+        let result = self
+            .handler
             .cancel_invitation(&self.effects, invitation_id)
+            .await?;
+
+        if let Some(invitation) = self
+            .handler
+            .get_invitation_with_storage(self.effects.as_ref(), invitation_id)
             .await
+        {
+            if let Some(ceremony_id) = self.ensure_invitation_ceremony(&invitation).await? {
+                let _ = self
+                    .ceremony_runner
+                    .abort(&ceremony_id, Some("Invitation canceled".to_string()))
+                    .await;
+            }
+        }
+
+        Ok(result)
     }
 
     /// List pending invitations

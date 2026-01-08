@@ -188,7 +188,11 @@ impl ServiceRegistry {
     fn invitations(&self) -> AgentResult<InvitationServiceApi> {
         self.invitations
             .get_or_try_init(|| {
-                InvitationServiceApi::new(self.effects.clone(), self.authority_context.clone())
+                InvitationServiceApi::new_with_runner(
+                    self.effects.clone(),
+                    self.authority_context.clone(),
+                    self.ceremony_runner.clone(),
+                )
             })
             .cloned()
     }
