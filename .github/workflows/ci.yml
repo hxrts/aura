@@ -106,7 +106,7 @@ jobs:
           use-verbose-mode: "yes"
           config-file: ".github/config/markdown-link-check.json"
           base-branch: "main"
-          paths: "docs"
+          folder-path: "docs"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Optional checks (warnings only)
