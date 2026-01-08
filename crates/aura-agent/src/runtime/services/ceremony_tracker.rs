@@ -279,6 +279,10 @@ impl CeremonyTracker {
             CeremonyKind::DeviceRemoval => policy_for(CeremonyFlow::DeviceRemoval).initial_mode(),
             CeremonyKind::Recovery => policy_for(CeremonyFlow::RecoveryExecution).initial_mode(),
             CeremonyKind::Invitation => policy_for(CeremonyFlow::Invitation).initial_mode(),
+            CeremonyKind::RendezvousSecureChannel => {
+                policy_for(CeremonyFlow::RendezvousSecureChannel).initial_mode()
+            }
+            CeremonyKind::OtaActivation => policy_for(CeremonyFlow::OtaActivation).initial_mode(),
         }
     }
     /// Create a new ceremony tracker

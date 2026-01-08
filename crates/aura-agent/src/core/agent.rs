@@ -4,7 +4,8 @@
 
 use super::{AgentError, AgentResult, AuthorityContext};
 use crate::handlers::{
-    AuthServiceApi, ChatServiceApi, InvitationServiceApi, RecoveryServiceApi, SessionServiceApi,
+    AuthServiceApi, ChatServiceApi, InvitationServiceApi, OtaActivationServiceApi,
+    RecoveryServiceApi, SessionServiceApi,
 };
 use crate::runtime::services::ThresholdSigningService;
 use crate::runtime::system::RuntimeSystem;
@@ -102,6 +103,13 @@ impl AuraAgent {
         self.services.recovery()
     }
 
+    /// Get the OTA activation service
+    ///
+    /// Provides access to OTA hard-fork activation ceremonies through the shared runner.
+    pub fn ota_activation(&self) -> AgentResult<OtaActivationServiceApi> {
+        self.services.ota_activation()
+    }
+
     /// Get the threshold signing service
     ///
     /// Provides access to unified threshold signing operations including:
@@ -133,6 +141,7 @@ struct ServiceRegistry {
     chat: OnceCell<ChatServiceApi>,
     invitations: OnceCell<InvitationServiceApi>,
     recovery: OnceCell<RecoveryServiceApi>,
+    ota_activation: OnceCell<OtaActivationServiceApi>,
 }
 
 impl ServiceRegistry {
@@ -152,6 +161,7 @@ impl ServiceRegistry {
             chat: OnceCell::new(),
             invitations: OnceCell::new(),
             recovery: OnceCell::new(),
+            ota_activation: OnceCell::new(),
         }
     }
 
@@ -201,6 +211,18 @@ impl ServiceRegistry {
         self.recovery
             .get_or_try_init(|| {
                 RecoveryServiceApi::new_with_runner(
+                    self.effects.clone(),
+                    self.authority_context.clone(),
+                    self.ceremony_runner.clone(),
+                )
+            })
+            .cloned()
+    }
+
+    fn ota_activation(&self) -> AgentResult<OtaActivationServiceApi> {
+        self.ota_activation
+            .get_or_try_init(|| {
+                OtaActivationServiceApi::new_with_runner(
                     self.effects.clone(),
                     self.authority_context.clone(),
                     self.ceremony_runner.clone(),

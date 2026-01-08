@@ -10,6 +10,7 @@ pub mod invitation;
 pub mod invitation_service;
 pub mod logical_clock_service;
 pub mod ota;
+pub mod ota_activation_service;
 pub mod recovery;
 pub mod recovery_service;
 pub mod rendezvous;
@@ -36,6 +37,7 @@ pub use invitation::{
     ShareableInvitation, ShareableInvitationError,
 };
 pub use invitation_service::InvitationServiceApi;
+pub use ota_activation_service::OtaActivationServiceApi;
 
 // Re-export recovery types for public API
 pub use recovery::{

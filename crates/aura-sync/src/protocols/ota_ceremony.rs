@@ -465,6 +465,21 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
         proposal: UpgradeProposal,
         current_epoch: Epoch,
     ) -> AuraResult<OTACeremonyId> {
+        let prestate_hash = self.compute_prestate_hash().await?;
+        self.initiate_ceremony_with_prestate(proposal, current_epoch, prestate_hash)
+            .await
+    }
+
+    /// Initiate a new OTA activation ceremony with a provided prestate hash.
+    ///
+    /// This allows callers to bind external ceremony tracking to the same prestate
+    /// hash used to compute the ceremony ID.
+    pub async fn initiate_ceremony_with_prestate(
+        &mut self,
+        proposal: UpgradeProposal,
+        current_epoch: Epoch,
+        prestate_hash: Hash32,
+    ) -> AuraResult<OTACeremonyId> {
         // Verify this is a hard fork
         if proposal.kind != UpgradeKind::HardFork {
             return Err(AuraError::invalid(
@@ -481,9 +496,6 @@ impl<E: OTACeremonyEffects> OTACeremonyExecutor<E> {
                 proposal.activation_epoch, current_epoch, self.config.min_activation_notice_epochs
             )));
         }
-
-        // Get current prestate
-        let prestate_hash = self.compute_prestate_hash().await?;
 
         // Compute upgrade hash
         let upgrade_hash = proposal.compute_hash();

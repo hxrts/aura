@@ -191,6 +191,68 @@ pub trait ThresholdSigningEffects: Send + Sync {
     ) -> Result<(), ThresholdSigningError>;
 }
 
+/// Blanket implementation for Arc<T> where T: ThresholdSigningEffects
+#[async_trait]
+impl<T: ThresholdSigningEffects + ?Sized> ThresholdSigningEffects for std::sync::Arc<T> {
+    async fn bootstrap_authority(
+        &self,
+        authority: &AuthorityId,
+    ) -> Result<PublicKeyPackage, ThresholdSigningError> {
+        (**self).bootstrap_authority(authority).await
+    }
+
+    async fn sign(
+        &self,
+        context: SigningContext,
+    ) -> Result<ThresholdSignature, ThresholdSigningError> {
+        (**self).sign(context).await
+    }
+
+    async fn threshold_config(&self, authority: &AuthorityId) -> Option<ThresholdConfig> {
+        (**self).threshold_config(authority).await
+    }
+
+    async fn threshold_state(&self, authority: &AuthorityId) -> Option<ThresholdState> {
+        (**self).threshold_state(authority).await
+    }
+
+    async fn has_signing_capability(&self, authority: &AuthorityId) -> bool {
+        (**self).has_signing_capability(authority).await
+    }
+
+    async fn public_key_package(&self, authority: &AuthorityId) -> Option<PublicKeyPackage> {
+        (**self).public_key_package(authority).await
+    }
+
+    async fn rotate_keys(
+        &self,
+        authority: &AuthorityId,
+        new_threshold: u16,
+        new_total_participants: u16,
+        participants: &[ParticipantIdentity],
+    ) -> Result<(u64, Vec<Vec<u8>>, PublicKeyPackage), ThresholdSigningError> {
+        (**self)
+            .rotate_keys(authority, new_threshold, new_total_participants, participants)
+            .await
+    }
+
+    async fn commit_key_rotation(
+        &self,
+        authority: &AuthorityId,
+        new_epoch: u64,
+    ) -> Result<(), ThresholdSigningError> {
+        (**self).commit_key_rotation(authority, new_epoch).await
+    }
+
+    async fn rollback_key_rotation(
+        &self,
+        authority: &AuthorityId,
+        failed_epoch: u64,
+    ) -> Result<(), ThresholdSigningError> {
+        (**self).rollback_key_rotation(authority, failed_epoch).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

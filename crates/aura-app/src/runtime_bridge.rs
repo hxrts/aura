@@ -103,6 +103,10 @@ pub enum CeremonyKind {
     Recovery,
     /// Invitation ceremony (contact/guardian/channel).
     Invitation,
+    /// Rendezvous secure-channel ceremony.
+    RendezvousSecureChannel,
+    /// OTA hard-fork activation ceremony.
+    OtaActivation,
 }
 
 /// Result of starting a device enrollment ceremony.

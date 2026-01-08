@@ -4,11 +4,15 @@
 //! Wraps `RendezvousHandler` with ergonomic methods and proper error handling.
 
 use super::rendezvous::{ChannelResult, RendezvousHandler, RendezvousResult};
-use crate::core::{AgentResult, AuthorityContext};
+use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::choreography_adapter::AuraProtocolAdapter;
+use crate::runtime::services::ceremony_runner::{
+    CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
+};
 use crate::runtime::AuraEffectSystem;
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId};
+use aura_core::Hash32;
 use aura_rendezvous::protocol::exchange_runners::{
     execute_as as exchange_execute_as, RendezvousExchangeRole,
 };
@@ -30,6 +34,7 @@ use uuid::Uuid;
 pub struct RendezvousServiceApi {
     handler: RendezvousHandler,
     effects: Arc<AuraEffectSystem>,
+    ceremony_runner: CeremonyRunner,
 }
 
 impl RendezvousServiceApi {
@@ -39,7 +44,68 @@ impl RendezvousServiceApi {
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
         let handler = RendezvousHandler::new(authority_context)?;
-        Ok(Self { handler, effects })
+        let ceremony_runner = CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new());
+        Ok(Self {
+            handler,
+            effects,
+            ceremony_runner,
+        })
+    }
+
+    /// Create a new rendezvous service with a shared ceremony runner.
+    pub fn new_with_runner(
+        effects: Arc<AuraEffectSystem>,
+        authority_context: AuthorityContext,
+        ceremony_runner: CeremonyRunner,
+    ) -> AgentResult<Self> {
+        let handler = RendezvousHandler::new(authority_context)?;
+        Ok(Self {
+            handler,
+            effects,
+            ceremony_runner,
+        })
+    }
+
+    fn rendezvous_ceremony_id(&self, context_id: ContextId, peer: AuthorityId) -> CeremonyId {
+        let mut material = Vec::with_capacity(32 * 3);
+        material.extend_from_slice(context_id.as_bytes());
+        material.extend_from_slice(&self.handler.authority_context().authority_id().to_bytes());
+        material.extend_from_slice(&peer.to_bytes());
+        let digest = hash(&material);
+        CeremonyId::new(format!("rendezvous-{}", hex::encode(digest)))
+    }
+
+    async fn ensure_rendezvous_ceremony(
+        &self,
+        context_id: ContextId,
+        peer: AuthorityId,
+    ) -> AgentResult<CeremonyId> {
+        let ceremony_id = self.rendezvous_ceremony_id(context_id, peer);
+        if self.ceremony_runner.status(&ceremony_id).await.is_ok() {
+            return Ok(ceremony_id);
+        }
+
+        let prestate_hash = Hash32(hash(context_id.as_bytes()));
+        let initiator_id = self.handler.authority_context().authority_id();
+        let participants = vec![aura_core::threshold::ParticipantIdentity::guardian(initiator_id)];
+
+        self.ceremony_runner
+            .start(CeremonyInitRequest {
+                ceremony_id: ceremony_id.clone(),
+                kind: aura_app::runtime_bridge::CeremonyKind::RendezvousSecureChannel,
+                initiator_id,
+                threshold_k: 1,
+                total_n: 1,
+                participants,
+                new_epoch: 0,
+                enrollment_device_id: None,
+                enrollment_nickname_suggestion: None,
+                prestate_hash: Some(prestate_hash),
+            })
+            .await
+            .map_err(|e| AgentError::internal(format!("Failed to register ceremony: {e}")))?;
+
+        Ok(ceremony_id)
     }
 
     // ========================================================================
@@ -156,6 +222,7 @@ impl RendezvousServiceApi {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> AgentResult<ChannelResult> {
+        let _ = self.ensure_rendezvous_ceremony(context_id, peer).await?;
         self.handler
             .initiate_channel(&self.effects, context_id, peer)
             .await
@@ -178,9 +245,30 @@ impl RendezvousServiceApi {
         channel_id: [u8; 32],
         epoch: u64,
     ) -> AgentResult<ChannelResult> {
-        self.handler
+        let result = self
+            .handler
             .complete_channel(&self.effects, context_id, peer, channel_id, epoch)
+            .await?;
+
+        let ceremony_id = self.ensure_rendezvous_ceremony(context_id, peer).await?;
+        let _ = self
+            .ceremony_runner
+            .record_response(
+                &ceremony_id,
+                aura_core::threshold::ParticipantIdentity::guardian(
+                    self.handler.authority_context().authority_id(),
+                ),
+            )
             .await
+            .map_err(|e| {
+                AgentError::internal(format!("Failed to record rendezvous completion: {e}"))
+            })?;
+        let _ = self
+            .ceremony_runner
+            .commit(&ceremony_id, CeremonyCommitMetadata::default())
+            .await;
+
+        Ok(result)
     }
 
     // ========================================================================
