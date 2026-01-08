@@ -38,6 +38,11 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
+/// Message queue key type: (from_role, to_role)
+type MessageQueueKey = (ChoreographicRole, ChoreographicRole);
+/// Message queue storage type
+type MessageQueues = HashMap<MessageQueueKey, VecDeque<Vec<u8>>>;
+
 /// Shared message bus for simulation
 ///
 /// This structure holds the message queues for all roles in a simulation.
@@ -45,7 +50,7 @@ use uuid::Uuid;
 #[derive(Debug, Default)]
 pub struct SimulatedMessageBus {
     /// Message queues: (from_role, to_role) -> queue of messages
-    queues: RwLock<HashMap<(ChoreographicRole, ChoreographicRole), VecDeque<Vec<u8>>>>,
+    queues: RwLock<MessageQueues>,
     /// Active roles in the current session
     roles: RwLock<Vec<ChoreographicRole>>,
     /// Current session ID

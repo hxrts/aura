@@ -106,7 +106,7 @@ impl<T: ChoreographicEffects + ?Sized> ChoreographicEffects for std::sync::Arc<T
     }
 
     async fn set_timeout(&self, timeout_ms: u64) {
-        (**self).set_timeout(timeout_ms).await
+        (**self).set_timeout(timeout_ms).await;
     }
 
     async fn get_metrics(&self) -> ChoreographyMetrics {

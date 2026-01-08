@@ -16,8 +16,8 @@ use aura_core::{DeviceId, Hash32};
 use aura_sync::protocols::ota_ceremony::{
     OTACeremonyConfig, OTACeremonyExecutor, OTACeremonyId, ReadinessCommitment, UpgradeProposal,
 };
-use parking_lot::RwLock;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// OTA activation ceremony service API.
 #[derive(Clone)]
@@ -112,13 +112,13 @@ impl OtaActivationServiceApi {
         }
 
         let prestate_hash = self.compute_prestate_hash().await?;
-        let ceremony_id = {
-            let mut executor = self.executor.write();
-            executor
-                .initiate_ceremony_with_prestate(proposal.clone(), current_epoch, prestate_hash)
-                .await
-                .map_err(|e| AgentError::runtime(format!("Failed to initiate OTA ceremony: {e}")))?
-        };
+        let ceremony_id = self
+            .executor
+            .write()
+            .await
+            .initiate_ceremony_with_prestate(proposal.clone(), current_epoch, prestate_hash)
+            .await
+            .map_err(|e| AgentError::runtime(format!("Failed to initiate OTA ceremony: {e}")))?;
 
         let runner_id = Self::runner_ceremony_id(ceremony_id);
         let participants = participants
@@ -157,15 +157,13 @@ impl OtaActivationServiceApi {
         ceremony_id: OTACeremonyId,
         commitment: ReadinessCommitment,
     ) -> AgentResult<bool> {
-        let threshold_reached = {
-            let mut executor = self.executor.write();
-            executor
-                .process_commitment(ceremony_id, commitment.clone())
-                .await
-                .map_err(|e| {
-                    AgentError::runtime(format!("Failed to process OTA commitment: {e}"))
-                })?
-        };
+        let threshold_reached = self
+            .executor
+            .write()
+            .await
+            .process_commitment(ceremony_id, commitment.clone())
+            .await
+            .map_err(|e| AgentError::runtime(format!("Failed to process OTA commitment: {e}")))?;
 
         if commitment.ready {
             let runner_id = Self::runner_ceremony_id(ceremony_id);
@@ -182,12 +180,13 @@ impl OtaActivationServiceApi {
 
     /// Commit the OTA activation ceremony and update the shared runner status.
     pub async fn commit_activation(&self, ceremony_id: OTACeremonyId) -> AgentResult<Epoch> {
-        let activation_epoch = {
-            let mut executor = self.executor.write();
-            executor.commit_ceremony(ceremony_id).await.map_err(|e| {
-                AgentError::runtime(format!("Failed to commit OTA ceremony: {e}"))
-            })?
-        };
+        let activation_epoch = self
+            .executor
+            .write()
+            .await
+            .commit_ceremony(ceremony_id)
+            .await
+            .map_err(|e| AgentError::runtime(format!("Failed to commit OTA ceremony: {e}")))?;
 
         let committed_at = self
             .effects
@@ -216,13 +215,12 @@ impl OtaActivationServiceApi {
         ceremony_id: OTACeremonyId,
         reason: &str,
     ) -> AgentResult<()> {
-        {
-            let mut executor = self.executor.write();
-            executor
-                .abort_ceremony(ceremony_id, reason)
-                .await
-                .map_err(|e| AgentError::runtime(format!("Failed to abort OTA ceremony: {e}")))?;
-        }
+        self.executor
+            .write()
+            .await
+            .abort_ceremony(ceremony_id, reason)
+            .await
+            .map_err(|e| AgentError::runtime(format!("Failed to abort OTA ceremony: {e}")))?;
 
         let runner_id = Self::runner_ceremony_id(ceremony_id);
         self.ceremony_runner

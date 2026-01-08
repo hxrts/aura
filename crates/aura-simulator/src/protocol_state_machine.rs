@@ -37,6 +37,9 @@ use std::sync::Arc;
 
 use crate::choreography_observer::SimulatorObserver;
 
+/// Scheduler message queue entry: (from_idx, to_idx, message, message_type)
+type SchedulerMessage = (usize, usize, Vec<u8>, String);
+
 /// State of a protocol participant
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParticipantState {
@@ -336,8 +339,8 @@ impl std::fmt::Debug for ProtocolStateMachine {
 pub struct ProtocolScheduler {
     /// Participants in the protocol
     participants: Vec<ProtocolStateMachine>,
-    /// Message queue between participants (from_idx, to_idx, message)
-    message_queue: RwLock<VecDeque<(usize, usize, Vec<u8>, String)>>,
+    /// Message queue between participants
+    message_queue: RwLock<VecDeque<SchedulerMessage>>,
     /// Total steps executed across all participants
     total_steps: RwLock<usize>,
 }
