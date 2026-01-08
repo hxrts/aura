@@ -6,6 +6,7 @@
 
 use super::ProcessResult;
 use crate::runtime::effects::AuraEffectSystem;
+use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyRunner};
 use crate::runtime::services::CeremonyTracker;
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
@@ -20,6 +21,7 @@ pub struct GuardianHandler<'a> {
     authority_id: AuthorityId,
     effects: &'a AuraEffectSystem,
     ceremony_tracker: &'a CeremonyTracker,
+    ceremony_runner: &'a CeremonyRunner,
     signing_service: &'a ThresholdSigningService,
 }
 
@@ -29,12 +31,14 @@ impl<'a> GuardianHandler<'a> {
         authority_id: AuthorityId,
         effects: &'a AuraEffectSystem,
         ceremony_tracker: &'a CeremonyTracker,
+        ceremony_runner: &'a CeremonyRunner,
         signing_service: &'a ThresholdSigningService,
     ) -> Self {
         Self {
             authority_id,
             effects,
             ceremony_tracker,
+            ceremony_runner,
             signing_service,
         }
     }
@@ -59,8 +63,8 @@ impl<'a> GuardianHandler<'a> {
                     "Invalid guardian authority id in acceptance"
                 );
                 let _ = self
-                    .ceremony_tracker
-                    .mark_failed(
+                    .ceremony_runner
+                    .abort(
                         &ceremony_id,
                         Some(format!("Invalid guardian id in acceptance: {guardian_id}")),
                     )
@@ -70,24 +74,24 @@ impl<'a> GuardianHandler<'a> {
         };
 
         let threshold_reached = match self
-            .ceremony_tracker
-            .mark_accepted(
+            .ceremony_runner
+            .record_response(
                 &ceremony_id,
                 aura_core::threshold::ParticipantIdentity::guardian(guardian_authority),
             )
             .await
         {
             Ok(reached) => reached,
-            Err(e) => {
-                tracing::warn!(
-                    ceremony_id = %ceremony_id,
-                    guardian_id = %guardian_id,
-                    error = %e,
-                    "Failed to mark guardian as accepted"
-                );
-                return ProcessResult::Skip;
-            }
-        };
+                Err(e) => {
+                    tracing::warn!(
+                        ceremony_id = %ceremony_id,
+                        guardian_id = %guardian_id,
+                        error = %e,
+                        "Failed to mark guardian as accepted"
+                    );
+                    return ProcessResult::Skip;
+                }
+            };
 
         if !threshold_reached {
             return ProcessResult::Processed;
@@ -140,8 +144,8 @@ impl<'a> GuardianHandler<'a> {
                 Ok(true) => {}
                 Ok(false) => {
                     let _ = self
-                        .ceremony_tracker
-                        .mark_failed(
+                        .ceremony_runner
+                        .abort(
                             ceremony_id,
                             Some("Missing consensus DKG transcript".to_string()),
                         )
@@ -155,8 +159,8 @@ impl<'a> GuardianHandler<'a> {
                         "Failed to verify DKG transcript commit"
                     );
                     let _ = self
-                        .ceremony_tracker
-                        .mark_failed(ceremony_id, Some(format!("Transcript check failed: {e}")))
+                        .ceremony_runner
+                        .abort(ceremony_id, Some(format!("Transcript check failed: {e}")))
                         .await;
                     return Err(());
                 }
@@ -181,8 +185,8 @@ impl<'a> GuardianHandler<'a> {
                 "Failed to commit guardian key rotation"
             );
             let _ = self
-                .ceremony_tracker
-                .mark_failed(ceremony_id, Some(format!("Commit failed: {e}")))
+                .ceremony_runner
+                .abort(ceremony_id, Some(format!("Commit failed: {e}")))
                 .await;
             return Err(());
         }
@@ -199,8 +203,8 @@ impl<'a> GuardianHandler<'a> {
                 "Failed to update guardian signing context"
             );
             let _ = self
-                .ceremony_tracker
-                .mark_failed(ceremony_id, Some(format!("Commit failed: {e}")))
+                .ceremony_runner
+                .abort(ceremony_id, Some(format!("Commit failed: {e}")))
                 .await;
             return Err(());
         }
@@ -238,8 +242,8 @@ impl<'a> GuardianHandler<'a> {
                     "Failed to commit GuardianBinding facts"
                 );
                 let _ = self
-                    .ceremony_tracker
-                    .mark_failed(
+                    .ceremony_runner
+                    .abort(
                         ceremony_id,
                         Some(format!("Failed to commit guardian bindings: {e}")),
                     )
@@ -248,7 +252,10 @@ impl<'a> GuardianHandler<'a> {
             }
         }
 
-        let _ = self.ceremony_tracker.mark_committed(ceremony_id).await;
+        let _ = self
+            .ceremony_runner
+            .commit(ceremony_id, CeremonyCommitMetadata::default())
+            .await;
         Ok(())
     }
 }

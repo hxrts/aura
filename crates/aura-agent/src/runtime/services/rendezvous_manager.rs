@@ -951,7 +951,9 @@ mod tests {
     };
     use aura_core::effects::{
         CryptoCoreEffects, CryptoError, CryptoExtendedEffects, RandomCoreEffects,
+        SecureStorageError,
     };
+    use aura_core::time::PhysicalTime;
     use aura_core::FlowCost;
     use aura_effects::time::PhysicalTimeHandler;
     use aura_guards::types::CapabilityId;
@@ -999,29 +1001,67 @@ mod tests {
             _: &SecureStorageLocation,
             _: &[u8],
             _: &[SecureStorageCapability],
-        ) -> Result<(), AuraError> {
+        ) -> Result<(), SecureStorageError> {
             Ok(())
         }
         async fn secure_retrieve(
             &self,
             _: &SecureStorageLocation,
             _: &[SecureStorageCapability],
-        ) -> Result<Vec<u8>, AuraError> {
+        ) -> Result<Vec<u8>, SecureStorageError> {
             Ok(vec![])
         }
         async fn secure_delete(
             &self,
             _: &SecureStorageLocation,
             _: &[SecureStorageCapability],
-        ) -> Result<(), AuraError> {
+        ) -> Result<(), SecureStorageError> {
             Ok(())
         }
-        async fn list_keys(
+        async fn secure_exists(
+            &self,
+            _: &SecureStorageLocation,
+        ) -> Result<bool, SecureStorageError> {
+            Ok(false)
+        }
+        async fn secure_list_keys(
             &self,
             _: &str,
             _: &[SecureStorageCapability],
-        ) -> Result<Vec<String>, AuraError> {
+        ) -> Result<Vec<String>, SecureStorageError> {
             Ok(vec![])
+        }
+        async fn secure_generate_key(
+            &self,
+            _: &SecureStorageLocation,
+            _: &str,
+            _: &[SecureStorageCapability],
+        ) -> Result<Option<Vec<u8>>, SecureStorageError> {
+            Ok(None)
+        }
+        async fn secure_create_time_bound_token(
+            &self,
+            _: &SecureStorageLocation,
+            _: &[SecureStorageCapability],
+            _: &PhysicalTime,
+        ) -> Result<Vec<u8>, SecureStorageError> {
+            Ok(vec![])
+        }
+        async fn secure_access_with_token(
+            &self,
+            _: &[u8],
+            _: &SecureStorageLocation,
+        ) -> Result<Vec<u8>, SecureStorageError> {
+            Ok(vec![])
+        }
+        async fn get_device_attestation(&self) -> Result<Vec<u8>, SecureStorageError> {
+            Ok(vec![])
+        }
+        async fn is_secure_storage_available(&self) -> bool {
+            false
+        }
+        fn get_secure_storage_capabilities(&self) -> Vec<String> {
+            vec![]
         }
     }
     #[async_trait]
@@ -1079,12 +1119,6 @@ mod tests {
         async fn random_u64(&self) -> u64 {
             0
         }
-        async fn random_range(&self, _: u64, _: u64) -> u64 {
-            0
-        }
-        async fn random_uuid(&self) -> uuid::Uuid {
-            uuid::Uuid::nil()
-        }
     }
     #[async_trait]
     impl CryptoCoreEffects for MockEffects {
@@ -1139,7 +1173,6 @@ mod tests {
             Ok([0u8; 32])
         }
     }
-    impl CryptoEffects for MockEffects {}
 
     #[tokio::test]
     async fn test_manager_creation() {

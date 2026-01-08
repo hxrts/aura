@@ -6,6 +6,7 @@
 
 use super::ProcessResult;
 use crate::runtime::effects::AuraEffectSystem;
+use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyRunner};
 use crate::runtime::services::CeremonyTracker;
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
@@ -18,6 +19,7 @@ pub struct ThresholdHandler<'a> {
     authority_id: AuthorityId,
     effects: &'a AuraEffectSystem,
     ceremony_tracker: &'a CeremonyTracker,
+    ceremony_runner: &'a CeremonyRunner,
     #[allow(dead_code)]
     signing_service: &'a ThresholdSigningService,
 }
@@ -28,12 +30,14 @@ impl<'a> ThresholdHandler<'a> {
         authority_id: AuthorityId,
         effects: &'a AuraEffectSystem,
         ceremony_tracker: &'a CeremonyTracker,
+        ceremony_runner: &'a CeremonyRunner,
         signing_service: &'a ThresholdSigningService,
     ) -> Self {
         Self {
             authority_id,
             effects,
             ceremony_tracker,
+            ceremony_runner,
             signing_service,
         }
     }
@@ -250,8 +254,8 @@ impl<'a> ThresholdHandler<'a> {
 
         let participant = aura_core::threshold::ParticipantIdentity::device(acceptor_device_id);
         let threshold_reached = match self
-            .ceremony_tracker
-            .mark_accepted(&ceremony_id, participant)
+            .ceremony_runner
+            .record_response(&ceremony_id, participant)
             .await
         {
             Ok(reached) => reached,
@@ -275,6 +279,10 @@ impl<'a> ThresholdHandler<'a> {
                     "Failed to send threshold commit messages"
                 );
             }
+            let _ = self
+                .ceremony_runner
+                .commit(&ceremony_id, CeremonyCommitMetadata::default())
+                .await;
         }
 
         ProcessResult::Processed

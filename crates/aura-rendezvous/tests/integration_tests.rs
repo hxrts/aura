@@ -226,7 +226,7 @@ async fn test_channel_establishment_flow() {
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
+    let service = RendezvousService::new(alice, config);
 
     let bob_descriptor = test_descriptor(bob, context);
 
@@ -268,7 +268,7 @@ async fn test_channel_establishment_requires_descriptor() {
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
+    let service = RendezvousService::new(alice, config);
 
     let snapshot = test_snapshot(alice, context);
     let other_context = test_context(101);
@@ -301,7 +301,7 @@ async fn test_channel_establishment_rejects_expired_descriptor() {
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
+    let service = RendezvousService::new(alice, config);
 
     let snapshot = test_snapshot(alice, context);
 
@@ -408,7 +408,7 @@ async fn test_handshake_psk_mismatch_detection() {
     let context = test_context(100);
 
     let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(bob, config);
+    let service = RendezvousService::new(bob, config);
 
     // Bob's expected PSK
     let expected_psk = [42u8; 32];
@@ -552,7 +552,7 @@ async fn test_missing_capability_blocks_connect() {
     let psk = [42u8; 32];
 
     let config = RendezvousConfig::default();
-    let mut service = RendezvousService::new(alice, config);
+    let service = RendezvousService::new(alice, config);
     let bob_descriptor = test_descriptor(bob, context);
 
     // Snapshot WITHOUT connect capability
@@ -619,7 +619,7 @@ async fn test_complete_discovery_to_channel_flow() {
 
     // Step 3: Alice initiates channel establishment
     // Requires mutable service for Alice
-    let mut alice_service = alice_service; // rebind mut
+    let alice_service = alice_service;
     let alice_snapshot = test_snapshot(alice, context);
     let establish_outcome = alice_service
         .prepare_establish_channel(

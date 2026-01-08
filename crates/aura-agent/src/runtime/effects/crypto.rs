@@ -171,6 +171,26 @@ impl CryptoExtendedEffects for AuraEffectSystem {
         self.crypto.handler().ed25519_public_key(private_key).await
     }
 
+    async fn convert_ed25519_to_x25519_public(
+        &self,
+        ed25519_public_key: &[u8],
+    ) -> Result<[u8; 32], CryptoError> {
+        self.crypto
+            .handler()
+            .convert_ed25519_to_x25519_public(ed25519_public_key)
+            .await
+    }
+
+    async fn convert_ed25519_to_x25519_private(
+        &self,
+        ed25519_private_key: &[u8],
+    ) -> Result<[u8; 32], CryptoError> {
+        self.crypto
+            .handler()
+            .convert_ed25519_to_x25519_private(ed25519_private_key)
+            .await
+    }
+
     async fn chacha20_encrypt(
         &self,
         plaintext: &[u8],

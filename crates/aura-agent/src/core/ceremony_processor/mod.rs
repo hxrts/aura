@@ -20,6 +20,7 @@ mod guardian;
 mod threshold;
 
 use crate::runtime::effects::AuraEffectSystem;
+use crate::runtime::services::ceremony_runner::CeremonyRunner;
 use crate::runtime::services::CeremonyTracker;
 use crate::AgentResult;
 use crate::ThresholdSigningService;
@@ -49,6 +50,7 @@ pub struct CeremonyProcessor<'a> {
     authority_id: AuthorityId,
     effects: &'a AuraEffectSystem,
     ceremony_tracker: CeremonyTracker,
+    ceremony_runner: CeremonyRunner,
     signing_service: ThresholdSigningService,
 }
 
@@ -58,12 +60,14 @@ impl<'a> CeremonyProcessor<'a> {
         authority_id: AuthorityId,
         effects: &'a AuraEffectSystem,
         ceremony_tracker: CeremonyTracker,
+        ceremony_runner: CeremonyRunner,
         signing_service: ThresholdSigningService,
     ) -> Self {
         Self {
             authority_id,
             effects,
             ceremony_tracker,
+            ceremony_runner,
             signing_service,
         }
     }
@@ -114,6 +118,7 @@ impl<'a> CeremonyProcessor<'a> {
                     self.authority_id,
                     self.effects,
                     &self.ceremony_tracker,
+                    &self.ceremony_runner,
                     &self.signing_service,
                 )
                 .handle(&envelope)
@@ -124,6 +129,7 @@ impl<'a> CeremonyProcessor<'a> {
                     self.authority_id,
                     self.effects,
                     &self.ceremony_tracker,
+                    &self.ceremony_runner,
                     &self.signing_service,
                 )
                 .handle_key_package(&envelope)
@@ -134,6 +140,7 @@ impl<'a> CeremonyProcessor<'a> {
                     self.authority_id,
                     self.effects,
                     &self.ceremony_tracker,
+                    &self.ceremony_runner,
                     &self.signing_service,
                 )
                 .handle_acceptance(&envelope)
@@ -144,6 +151,7 @@ impl<'a> CeremonyProcessor<'a> {
                     self.authority_id,
                     self.effects,
                     &self.ceremony_tracker,
+                    &self.ceremony_runner,
                     &self.signing_service,
                 )
                 .handle_key_package(&envelope)
@@ -154,6 +162,7 @@ impl<'a> CeremonyProcessor<'a> {
                     self.authority_id,
                     self.effects,
                     &self.ceremony_tracker,
+                    &self.ceremony_runner,
                     &self.signing_service,
                 )
                 .handle_acceptance(&envelope)
@@ -165,6 +174,7 @@ impl<'a> CeremonyProcessor<'a> {
                     self.authority_id,
                     self.effects,
                     &self.ceremony_tracker,
+                    &self.ceremony_runner,
                     &self.signing_service,
                 )
                 .handle(&envelope, &content_type)

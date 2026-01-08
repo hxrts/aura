@@ -35,6 +35,7 @@ impl AuraAgent {
     /// Number of acceptances processed and number of ceremonies completed
     pub async fn process_ceremony_acceptances(&self) -> AgentResult<(usize, usize)> {
         let ceremony_tracker = self.ceremony_tracker().await;
+        let ceremony_runner = self.ceremony_runner().await;
         let authority_id = self.authority_id();
         let effects = self.runtime().effects();
         let signing_service = self.threshold_signing();
@@ -43,6 +44,7 @@ impl AuraAgent {
             authority_id,
             effects.as_ref(),
             ceremony_tracker,
+            ceremony_runner,
             signing_service,
         )
         .process_all()

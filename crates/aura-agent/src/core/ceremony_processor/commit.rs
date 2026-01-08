@@ -6,6 +6,7 @@
 
 use super::ProcessResult;
 use crate::runtime::effects::AuraEffectSystem;
+use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyRunner};
 use crate::runtime::services::CeremonyTracker;
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
@@ -19,6 +20,7 @@ pub struct CommitHandler<'a> {
     effects: &'a AuraEffectSystem,
     #[allow(dead_code)]
     ceremony_tracker: &'a CeremonyTracker,
+    ceremony_runner: &'a CeremonyRunner,
     signing_service: &'a ThresholdSigningService,
 }
 
@@ -28,12 +30,14 @@ impl<'a> CommitHandler<'a> {
         authority_id: AuthorityId,
         effects: &'a AuraEffectSystem,
         ceremony_tracker: &'a CeremonyTracker,
+        ceremony_runner: &'a CeremonyRunner,
         signing_service: &'a ThresholdSigningService,
     ) -> Self {
         Self {
             authority_id,
             effects,
             ceremony_tracker,
+            ceremony_runner,
             signing_service,
         }
     }
@@ -47,6 +51,10 @@ impl<'a> CommitHandler<'a> {
             );
             return ProcessResult::Skip;
         };
+        let ceremony_id = envelope
+            .metadata
+            .get("ceremony-id")
+            .map(|id| aura_core::identifiers::CeremonyId::new(id.clone()));
 
         let new_epoch: u64 = match new_epoch_str.parse() {
             Ok(v) => v,
@@ -89,6 +97,13 @@ impl<'a> CommitHandler<'a> {
                 error = %e,
                 "Failed to update signing context for committed device threshold epoch"
             );
+        }
+
+        if let Some(ceremony_id) = ceremony_id.as_ref() {
+            let _ = self
+                .ceremony_runner
+                .commit(ceremony_id, CeremonyCommitMetadata::default())
+                .await;
         }
 
         ProcessResult::Committed
