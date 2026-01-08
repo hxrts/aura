@@ -77,18 +77,13 @@ pub struct ProtocolTest {
 }
 
 /// Test execution mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecutionMode {
     /// Sequential execution (default, safer for debugging)
+    #[default]
     Sequential,
     /// Parallel execution (faster, more realistic)
     Parallel,
-}
-
-impl Default for ExecutionMode {
-    fn default() -> Self {
-        Self::Sequential
-    }
 }
 
 impl ProtocolTest {
