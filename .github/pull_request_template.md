@@ -36,3 +36,11 @@
 - [ ] I have commented my code in hard-to-understand areas
 - [ ] I have made corresponding changes to the documentation
 - [ ] My changes generate no new warnings
+
+## Protocol Definition of Done (if applicable)
+
+- [ ] Choreography is wired via `execute_as` (not spec-only)
+- [ ] Category C flows use the shared ceremony runner
+- [ ] Standard ceremony facts + supersession are emitted and reduced
+- [ ] Status surfaces `agreement_mode`, `reversion_risk`, `prestate_hash`
+- [ ] Protocol tests added (ProtocolTest + simulation at minimum)

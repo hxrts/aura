@@ -194,6 +194,10 @@ ci-effects:
     fi
     echo "No effects violations found"
 
+# Choreography wiring lint
+ci-choreo:
+    scripts/check-choreo-wiring.sh
+
 # Quint typecheck
 ci-quint-typecheck:
     #!/usr/bin/env bash
@@ -279,7 +283,7 @@ ci-dry-run:
 
     # Environment check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    printf "[0/7] Rust version... "
+    printf "[0/8] Rust version... "
     if [[ "$LOCAL_RUST" == "{{CI_RUST_VERSION}}" ]]; then
         echo -e "${GREEN}$LOCAL_RUST${NC} (matches CI)"
     elif [[ "$LOCAL_RUST" < "{{CI_RUST_VERSION}}" ]]; then
@@ -294,10 +298,11 @@ ci-dry-run:
     run_step "2/7" "Clippy"  "just ci-clippy"
     run_step "3/7" "Build"   "just ci-build"
     run_step "4/7" "Test"    "just ci-test"
-    run_step "5/7" "Effects" "just ci-effects"
+    run_step "5/8" "Effects" "just ci-effects"
+    run_step "6/8" "Choreo"  "just ci-choreo"
 
     # Quint (optional - skip if not installed)
-    printf "[6/7] Quint... "
+    printf "[7/8] Quint... "
     if command -v quint &>/dev/null; then
         if just ci-quint-typecheck >/dev/null 2>&1; then
             echo -e "${GREEN}OK${NC}"
@@ -310,7 +315,7 @@ ci-dry-run:
     fi
 
     # Architecture check (warning only)
-    printf "[7/7] Architecture... "
+    printf "[8/8] Architecture... "
     if ./scripts/check-arch.sh --quick >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
     else

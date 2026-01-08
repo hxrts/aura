@@ -2,7 +2,7 @@
 
 This audit tracks every `choreography!` usage in the codebase and whether it is wired into the runtime execution path. Each entry is either Wired (executed via the choreographic runtime) or Spec-only (definition exists but not yet integrated).
 
-**Last Updated**: 2026-01-07
+**Last Updated**: 2026-01-08
 
 ---
 
@@ -10,8 +10,8 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 
 | Status | Count | Protocols |
 |--------|-------|-----------|
-| Wired | 10 | GuardianCeremony, GuardianSetup, RecoveryProtocol, InvitationExchange, GuardianInvitation, RendezvousExchange, RelayedRendezvous, DkdChoreography, EpochRotationProtocol, SessionCoordinationChoreography |
-| Spec-only | 4 | AuraConsensus, AmpTransport, GuardianAuthRelational, GuardianMembershipChange |
+| Wired | 11 | AuraConsensus, GuardianCeremony, GuardianSetup, RecoveryProtocol, InvitationExchange, GuardianInvitation, RendezvousExchange, RelayedRendezvous, DkdChoreography, EpochRotationProtocol, SessionCoordinationChoreography |
+| Spec-only | 3 | AmpTransport, GuardianAuthRelational, GuardianMembershipChange |
 | **Total** | **14** | |
 
 ---
@@ -22,7 +22,7 @@ This audit tracks every `choreography!` usage in the codebase and whether it is 
 
 | Protocol | Location | Status | Ticket | Notes |
 |----------|----------|--------|--------|-------|
-| AuraConsensus | `crates/aura-consensus/src/protocol/choreography.choreo` | Spec-only | CHOREO-CONS-001 | Awaiting `execute_as` wiring |
+| AuraConsensus | `crates/aura-consensus/src/protocol/choreography.choreo` | Wired | CHOREO-CONS-001 | execute_as wired in runtime bridge |
 
 ### Transport & Channels
 
@@ -91,7 +91,7 @@ This section captures the **owner**, **runtime entry point**, and **blocking dep
 
 | Protocol | Owner (crate) | Runtime entry point (execute_as) | Guard chain integration | Dependencies / Blocks |
 |----------|--------------|-----------------------------------|-------------------------|-----------------------|
-| AuraConsensus | `aura-consensus` | `crates/aura-agent/src/runtime_bridge/consensus.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution in rumpsteak‑aura + wiring |
+| AuraConsensus | `aura-consensus` | `crates/aura-agent/src/runtime_bridge/consensus.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | execute_as wired in runtime bridge |
 | RecoveryProtocol | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | GuardianCeremony | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | GuardianSetup | `aura-recovery` | `crates/aura-agent/src/handlers/recovery_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
@@ -99,7 +99,7 @@ This section captures the **owner**, **runtime entry point**, and **blocking dep
 | InvitationExchange | `aura-invitation` | `crates/aura-agent/src/handlers/invitation.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | execute_as wiring in invitation handler |
 | GuardianInvitation | `aura-invitation` | `crates/aura-agent/src/handlers/invitation.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | execute_as wiring in invitation handler |
 | RendezvousExchange | `aura-rendezvous` | `crates/aura-agent/src/handlers/rendezvous_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
-| RelayedRendezvous | `aura-rendezvous` | `crates/aura-agent/src/runtime/services/rendezvous_manager.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
+| RelayedRendezvous | `aura-rendezvous` | `crates/aura-agent/src/handlers/rendezvous_service.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | AmpTransport | `aura-amp` | `crates/aura-agent/src/runtime_bridge/amp.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | GuardianAuthRelational | `aura-authentication` | `crates/aura-authentication/src/guardian_auth_relational.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
 | DkdChoreography | `aura-authentication` | `crates/aura-authentication/src/dkd.rs` | `crates/aura-agent/src/runtime/effects/choreography.rs` | Role‑family resolution + wiring |
