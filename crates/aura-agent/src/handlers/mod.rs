@@ -22,6 +22,7 @@ pub mod shared;
 pub use sessions::coordination::SessionOperations;
 pub use sessions::service::SessionServiceApi;
 pub use sessions::shared::{SessionHandle, SessionStats};
+pub use sessions::SessionCoordinationRole;
 
 // Re-export auth types for public API
 pub use auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult};

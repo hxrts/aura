@@ -16,6 +16,9 @@ pub mod threshold;
 // Re-export the main session operations handler
 pub use coordination::SessionOperations;
 
+// Re-export coordination role for tests
+pub use coordination::SessionCoordinationRole;
+
 // Re-export service API for public API
 pub use service::SessionServiceApi;
 

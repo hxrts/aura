@@ -34,6 +34,9 @@ choreography!(include_str!("src/handlers/sessions/coordination.choreo"));
 use self::rumpsteak_session_types_session_coordination::runners::execute_as as coordination_execute_as;
 use self::rumpsteak_session_types_session_coordination::session_coordination::SessionCoordinationChoreographyRole;
 
+// Re-export role type for external use (tests, etc.)
+pub use self::rumpsteak_session_types_session_coordination::session_coordination::SessionCoordinationChoreographyRole as SessionCoordinationRole;
+
 // Message types for session coordination choreography
 
 /// Session creation request message
