@@ -283,6 +283,7 @@ pub const GUARDIAN_PROTOCOL_ID: &str = "invitation_guardian.guardian.v1";
 mod tests {
     use super::*;
     use aura_core::identifiers::{AuthorityId, InvitationId};
+    use aura_core::util::serialization::{from_slice, to_vec};
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -299,8 +300,8 @@ mod tests {
             commitment: [42u8; 32],
         };
 
-        let bytes = serde_json::to_vec(&offer).unwrap();
-        let restored: InvitationOffer = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&offer).unwrap();
+        let restored: InvitationOffer = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert!(matches!(
@@ -319,8 +320,8 @@ mod tests {
             signature: vec![1, 2, 3, 4],
         };
 
-        let bytes = serde_json::to_vec(&response).unwrap();
-        let restored: InvitationResponse = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&response).unwrap();
+        let restored: InvitationResponse = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert!(restored.accepted);
@@ -336,8 +337,8 @@ mod tests {
             expires_at_ms: Some(2000000),
         };
 
-        let bytes = serde_json::to_vec(&request).unwrap();
-        let restored: GuardianRequest = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&request).unwrap();
+        let restored: GuardianRequest = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert_eq!(restored.role_description, "Primary guardian");
@@ -351,8 +352,8 @@ mod tests {
             recovery_public_key: vec![9, 10, 11, 12],
         };
 
-        let bytes = serde_json::to_vec(&accept).unwrap();
-        let restored: GuardianAccept = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&accept).unwrap();
+        let restored: GuardianAccept = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert_eq!(restored.recovery_public_key, vec![9, 10, 11, 12]);
@@ -428,8 +429,8 @@ mod tests {
             status: "relationship_established".to_string(),
         };
 
-        let bytes = serde_json::to_vec(&ack).unwrap();
-        let restored: InvitationAck = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&ack).unwrap();
+        let restored: InvitationAck = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.invitation_id.as_str(), "inv-123");
         assert!(restored.success);
@@ -443,8 +444,8 @@ mod tests {
             reason: Some("Unable to commit".to_string()),
         };
 
-        let bytes = serde_json::to_vec(&decline).unwrap();
-        let restored: GuardianDecline = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&decline).unwrap();
+        let restored: GuardianDecline = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert_eq!(restored.reason, Some("Unable to commit".to_string()));
@@ -458,8 +459,8 @@ mod tests {
             relationship_id: Some("rel-789".to_string()),
         };
 
-        let bytes = serde_json::to_vec(&confirm).unwrap();
-        let restored: GuardianConfirm = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&confirm).unwrap();
+        let restored: GuardianConfirm = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert!(restored.established);

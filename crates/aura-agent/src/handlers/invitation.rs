@@ -407,6 +407,11 @@ impl InvitationHandler {
                 self.execute_guardian_invitation_principal(effects.clone(), &invitation)
                     .await?;
             }
+            // Device enrollment invitations are out-of-band (QR code transfer).
+            // The new device doesn't exist yet, so skip the exchange choreography.
+            InvitationType::DeviceEnrollment { .. } => {
+                // No exchange needed - invitation will be imported on the new device
+            }
             _ => {
                 self.execute_invitation_exchange_sender(effects.clone(), &invitation)
                     .await?;

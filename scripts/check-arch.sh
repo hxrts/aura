@@ -821,6 +821,41 @@ check_serialization() {
   session_hits=$(rg --no-heading "SessionId::new\\(" crates -g "*.rs" \
     | grep -Ev "/tests/|/benches/|/examples/|cfg(test)|cfg\\(test\\)" || true)
   emit_hits "SessionId::new() outside tests" "$session_hits"
+
+  # ─── Wire protocol types must use DAG-CBOR tests (not serde_json) ───
+  section "Wire protocol types — require DAG-CBOR tests"
+
+  # Wire protocol types (protocol.rs in feature crates) define messages
+  # sent between devices. Tests must use DAG-CBOR (aura_core::util::serialization)
+  # not serde_json, since DAG-CBOR is the runtime format.
+  #
+  # Bug pattern: tests pass with serde_json but fail at runtime with DAG-CBOR
+  # because the formats have different behaviors for missing/extra fields.
+
+  local using_serde_json=""
+
+  # Find protocol.rs files using serde_json instead of DAG-CBOR for tests
+  local protocol_files
+  protocol_files=$(rg -l "#\[derive.*Serialize.*Deserialize|#\[derive.*Deserialize.*Serialize" crates -g "protocol.rs" \
+    | grep -Ev "/tests/|/benches/|/examples/" || true)
+
+  for file in $protocol_files; do
+    [[ -z "$file" ]] && continue
+    # Check if the file uses serde_json in tests (should use DAG-CBOR instead)
+    if grep -qE "serde_json::(to_vec|from_slice|to_string|from_str)" "$file" 2>/dev/null; then
+      # Verify it's not also using DAG-CBOR (which would be OK)
+      if ! grep -qE "aura_core::util::serialization|serde_ipld_dagcbor" "$file" 2>/dev/null; then
+        using_serde_json+="$file -- tests use serde_json but runtime uses DAG-CBOR"$'\n'
+      fi
+    fi
+  done
+
+  if [[ -n "$using_serde_json" ]]; then
+    emit_hits "Wire protocol using wrong serialization" "$using_serde_json"
+    hint "Replace serde_json with aura_core::util::serialization::{to_vec, from_slice} in tests"
+  else
+    info "Wire protocol types: serialization format consistent"
+  fi
 }
 
 

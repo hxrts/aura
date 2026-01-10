@@ -249,6 +249,7 @@ pub mod relayed_runners {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::util::serialization::{from_slice, to_vec};
 
     #[test]
     fn test_noise_handshake_serialization() {
@@ -258,8 +259,8 @@ mod tests {
             epoch: 5,
         };
 
-        let bytes = serde_json::to_vec(&handshake).unwrap();
-        let restored: NoiseHandshake = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&handshake).unwrap();
+        let restored: NoiseHandshake = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.noise_message, vec![1, 2, 3, 4]);
         assert_eq!(restored.psk_commitment, [42u8; 32]);
@@ -274,8 +275,8 @@ mod tests {
             ttl: 3,
         };
 
-        let bytes = serde_json::to_vec(&envelope).unwrap();
-        let restored: RelayEnvelope = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&envelope).unwrap();
+        let restored: RelayEnvelope = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.ciphertext, vec![10, 20, 30]);
         assert_eq!(restored.routing_tag, [99u8; 32]);
@@ -341,8 +342,8 @@ mod tests {
         };
 
         let offer = DescriptorOffer { descriptor };
-        let bytes = serde_json::to_vec(&offer).unwrap();
-        let restored: DescriptorOffer = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&offer).unwrap();
+        let restored: DescriptorOffer = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.descriptor.valid_from, 1000);
     }
@@ -357,8 +358,8 @@ mod tests {
             },
         };
 
-        let bytes = serde_json::to_vec(&init).unwrap();
-        let restored: HandshakeInit = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&init).unwrap();
+        let restored: HandshakeInit = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.handshake.epoch, 1);
     }
@@ -374,8 +375,8 @@ mod tests {
             channel_id: [9u8; 32],
         };
 
-        let bytes = serde_json::to_vec(&complete).unwrap();
-        let restored: HandshakeComplete = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&complete).unwrap();
+        let restored: HandshakeComplete = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.channel_id, [9u8; 32]);
     }
@@ -393,8 +394,8 @@ mod tests {
             },
         };
 
-        let bytes = serde_json::to_vec(&request).unwrap();
-        let restored: RelayRequest = serde_json::from_slice(&bytes).unwrap();
+        let bytes = to_vec(&request).unwrap();
+        let restored: RelayRequest = from_slice(&bytes).unwrap();
 
         assert_eq!(restored.envelope.ttl, 2);
     }

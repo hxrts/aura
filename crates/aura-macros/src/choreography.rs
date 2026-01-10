@@ -219,6 +219,7 @@ fn generate_helpers(messages: &[MessageType]) -> TokenStream {
             };
             quote! {
                 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+                #[serde(transparent)]
                 pub struct #name(pub #payload_ty);
             }
         } else {
