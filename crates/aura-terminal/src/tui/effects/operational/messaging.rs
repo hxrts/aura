@@ -19,9 +19,12 @@ use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflow functions for convenience
+// Note: Primary functions accept typed ChannelId directly (typesafe API)
+// TUI uses *_by_name variants for string-based user input
 pub use aura_app::ui::workflows::messaging::{
-    close_channel, create_channel, invite_user_to_channel, join_channel, leave_channel,
-    send_action, send_direct_message, send_message, set_topic, start_direct_chat,
+    close_channel_by_name, create_channel, invite_user_to_channel, join_channel_by_name,
+    leave_channel_by_name, send_action_by_name, send_direct_message, send_message_by_name,
+    set_topic_by_name, start_direct_chat,
 };
 
 /// Handle messaging commands
@@ -61,7 +64,8 @@ pub async fn handle_messaging(
 
         EffectCommand::SendMessage { channel, content } => {
             let timestamp = super::time::current_time_ms(app_core).await;
-            match send_message(app_core, channel, content, timestamp).await {
+            // Use send_message_by_name for string-based channel input from TUI
+            match send_message_by_name(app_core, channel, content, timestamp).await {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!("Message sent: {message_id}")))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to send message: {e}"
@@ -96,7 +100,8 @@ pub async fn handle_messaging(
         }
 
         EffectCommand::SetTopic { channel, text } => {
-            match set_topic(
+            // Use set_topic_by_name for string-based channel input from TUI
+            match set_topic_by_name(
                 app_core,
                 channel,
                 text,
@@ -114,7 +119,8 @@ pub async fn handle_messaging(
         EffectCommand::SendAction { channel, action } => {
             // IRC-style /me action - use workflow
             let timestamp = super::time::current_time_ms(app_core).await;
-            match send_action(app_core, channel, action, timestamp).await {
+            // Use send_action_by_name for string-based channel input from TUI
+            match send_action_by_name(app_core, channel, action, timestamp).await {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!("Action sent: {message_id}")))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to send action: {e}"
@@ -134,22 +140,29 @@ pub async fn handle_messaging(
             }
         }
 
-        EffectCommand::JoinChannel { channel } => match join_channel(app_core, channel).await {
-            Ok(()) => Some(Ok(OpResponse::Data(format!("Joined channel: {channel}")))),
-            Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                "Failed to join channel: {e}"
-            )))),
-        },
+        EffectCommand::JoinChannel { channel } => {
+            // Use join_channel_by_name for string-based channel input from TUI
+            match join_channel_by_name(app_core, channel).await {
+                Ok(()) => Some(Ok(OpResponse::Data(format!("Joined channel: {channel}")))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to join channel: {e}"
+                )))),
+            }
+        }
 
-        EffectCommand::LeaveChannel { channel } => match leave_channel(app_core, channel).await {
-            Ok(()) => Some(Ok(OpResponse::Ok)),
-            Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                "Failed to leave channel: {e}"
-            )))),
-        },
+        EffectCommand::LeaveChannel { channel } => {
+            // Use leave_channel_by_name for string-based channel input from TUI
+            match leave_channel_by_name(app_core, channel).await {
+                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to leave channel: {e}"
+                )))),
+            }
+        }
 
         EffectCommand::CloseChannel { channel } => {
-            match close_channel(
+            // Use close_channel_by_name for string-based channel input from TUI
+            match close_channel_by_name(
                 app_core,
                 channel,
                 super::time::current_time_ms(app_core).await,
@@ -169,7 +182,8 @@ pub async fn handle_messaging(
             content,
         } => {
             let timestamp = super::time::current_time_ms(app_core).await;
-            match send_message(app_core, channel, content, timestamp).await {
+            // Use send_message_by_name for string-based channel input from TUI
+            match send_message_by_name(app_core, channel, content, timestamp).await {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!(
                     "Message retried: {message_id}"
                 )))),

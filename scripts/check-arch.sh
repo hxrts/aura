@@ -663,6 +663,38 @@ check_reactive() {
   fi
 
   verbose "Props: only view state (focus, selection), callbacks, config"
+
+  # ─── Fact commit synchronization ───
+  section "Fact commit sync — await view updates after commit"
+
+  # Find files that commit facts but don't await reactive processing
+  # Allowlist: tests, background sync operations, fire-and-forget contexts, utility helpers
+  local commit_allow="crates/aura-testkit/|/tests/|_test\\.rs|crates/aura-simulator/|crates/aura-sync/|handlers/shared\\.rs"
+  local commit_files missing_sync=""
+
+  # Find all files that call commit_generic_fact_bytes
+  commit_files=$(rg -l "commit_generic_fact_bytes" crates -g "*.rs" | grep -Ev "$commit_allow" || true)
+
+  for f in $commit_files; do
+    [[ -z "$f" ]] && continue
+    # Check if the file has synchronization pattern:
+    # - await_next_view_update (explicit wait)
+    # - fire_and_forget (explicit acknowledgment)
+    # - FactCommitResult (using the typesafe wrapper)
+    if ! grep -qE "await_next_view_update|fire_and_forget|FactCommitResult" "$f" 2>/dev/null; then
+      # Additional check: if it's a service/handler that should sync
+      if grep -qE "impl.*Handler|impl.*Service|async fn (accept|create|import|send)" "$f" 2>/dev/null; then
+        missing_sync+="$f"$'\n'
+      fi
+    fi
+  done
+
+  if [[ -n "$missing_sync" ]]; then
+    emit_hits "Fact commit without view sync" "$missing_sync"
+    hint "Add await_next_view_update() after commit, or use FactCommitResult pattern"
+  else
+    info "Fact commit sync: all commits synchronized"
+  fi
 }
 
 

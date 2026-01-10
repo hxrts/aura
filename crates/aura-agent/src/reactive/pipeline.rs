@@ -30,6 +30,7 @@ use crate::runtime::AuraEffectSystem;
 pub struct ReactivePipeline {
     fact_tx: mpsc::Sender<FactSource>,
     shutdown_tx: mpsc::Sender<()>,
+    update_tx: broadcast::Sender<ViewUpdate>,
     updates: broadcast::Receiver<ViewUpdate>,
     scheduler_task: Option<JoinHandle<()>>,
 }
@@ -47,7 +48,7 @@ impl ReactivePipeline {
         own_authority: AuthorityId,
         reactive: ReactiveHandler,
     ) -> Self {
-        let (mut scheduler, fact_tx, shutdown_tx) =
+        let (mut scheduler, fact_tx, shutdown_tx, update_tx) =
             ReactiveScheduler::new(scheduler_config, fact_registry, time_effects);
 
         // Register UI-facing signal views (scheduler → signals).
@@ -71,6 +72,7 @@ impl ReactivePipeline {
         Self {
             fact_tx,
             shutdown_tx,
+            update_tx,
             updates,
             scheduler_task,
         }
@@ -89,6 +91,13 @@ impl ReactivePipeline {
     /// Direct sender for injecting facts (useful for tests).
     pub fn fact_sender(&self) -> mpsc::Sender<FactSource> {
         self.fact_tx.clone()
+    }
+
+    /// Get the view update sender for attaching to the effect system.
+    ///
+    /// This allows callers to subscribe to view updates and await fact processing.
+    pub fn update_sender(&self) -> broadcast::Sender<ViewUpdate> {
+        self.update_tx.clone()
     }
 
     /// Shutdown the scheduler.

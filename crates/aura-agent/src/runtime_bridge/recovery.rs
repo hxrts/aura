@@ -64,6 +64,32 @@ pub(super) async fn respond_to_guardian_ceremony(
         aura_recovery::CeremonyId(Hash32(bytes))
     };
 
+    // Determine role index by sorting guardians and finding our position.
+    // The initiator assigns Guardian1 to guardians[0] and Guardian2 to guardians[1],
+    // so we must use the same deterministic ordering on both sides.
+    let my_authority_id = bridge.agent.authority_id();
+    let mut guardian_ids: Vec<_> = ceremony_state
+        .participants
+        .iter()
+        .filter_map(|p| {
+            if let aura_core::threshold::ParticipantIdentity::Guardian(id) = p {
+                Some(*id)
+            } else {
+                None
+            }
+        })
+        .collect();
+    guardian_ids.sort();
+    let role_index = guardian_ids
+        .iter()
+        .position(|id| *id == my_authority_id)
+        .ok_or_else(|| {
+            IntentError::validation_failed(format!(
+                "Current authority {} not found in ceremony guardians",
+                my_authority_id
+            ))
+        })?;
+
     let recovery_service = bridge
         .agent
         .recovery()
@@ -78,6 +104,7 @@ pub(super) async fn respond_to_guardian_ceremony(
             ceremony_state.initiator_id,
             protocol_ceremony_id,
             response,
+            role_index,
         )
         .await
         .map_err(|e| {

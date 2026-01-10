@@ -1005,12 +1005,13 @@ impl HomeCallbacks {
             let content_clone = content;
             spawn_ctx(ctx.clone(), async move {
                 // Use the current home channel for home messaging
-                let channel = match aura_app::ui::workflows::messaging::current_home_channel_id(
+                // Use current_home_channel_ref for display/legacy string format
+                let channel = match aura_app::ui::workflows::messaging::current_home_channel_ref(
                     ctx.app_core_raw(),
                 )
                 .await
                 {
-                    Ok(channel_id) => channel_id,
+                    Ok(channel_ref) => channel_ref,
                     Err(e) => {
                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                             "send",

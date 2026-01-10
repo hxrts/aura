@@ -782,6 +782,9 @@ impl ChatServiceApi {
             .await
             .map_err(|e| AgentError::effects(format!("Failed to commit edit fact: {e}")))?;
 
+        // Wait for the reactive scheduler to process the fact before returning
+        self.effects.await_next_view_update().await;
+
         // Return the updated message representation
         Ok(ChatMessage {
             id: message_id.clone(),

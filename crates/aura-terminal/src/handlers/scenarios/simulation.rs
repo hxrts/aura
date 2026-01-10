@@ -5,7 +5,7 @@
 use crate::error::{TerminalError, TerminalResult};
 use aura_agent::core::AuthorityContext;
 use aura_agent::handlers::RecoveryServiceApi;
-use aura_agent::runtime::SharedTransport;
+use aura_agent::SharedTransport;
 use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;

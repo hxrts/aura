@@ -191,7 +191,7 @@ async fn demo_device_enrollment_flow_commits_and_updates_settings() {
         .await
         .expect("import device enrollment code should succeed");
     runtime_b
-        .accept_invitation(&invitation.invitation_id)
+        .accept_invitation(invitation.invitation_id.as_str())
         .await
         .expect("accept device enrollment invitation should succeed");
 

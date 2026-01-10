@@ -31,12 +31,12 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
     let content = props.content.clone();
     let timestamp = props.timestamp.clone();
 
-    let (border_color, align) = if props.is_own {
+    let (border_color, justify) = if props.is_own {
         // Blue border for local user's messages, right-aligned
-        (Theme::ACCENT, AlignItems::FlexEnd)
+        (Theme::ACCENT, JustifyContent::FlexEnd)
     } else {
         // Default border for other users' messages, left-aligned
-        (Theme::BORDER, AlignItems::FlexStart)
+        (Theme::BORDER, JustifyContent::FlexStart)
     };
 
     // Status icon for own messages based on delivery status
@@ -61,8 +61,9 @@ pub fn MessageBubble(props: &MessageBubbleProps) -> impl Into<AnyElement<'static
 
     element! {
         View(
-            align_items: align,
-            margin_bottom: Spacing::XS,
+            flex_direction: FlexDirection::Row,
+            justify_content: justify,
+            width: 100pct,
         ) {
             View(
                 flex_direction: FlexDirection::Column,
@@ -113,29 +114,34 @@ pub fn CompactMessage(props: &CompactMessageProps) -> impl Into<AnyElement<'stat
     let content = props.content.clone();
     let timestamp = props.timestamp.clone();
 
-    let border_color = if props.is_own {
-        // Blue border for local user's messages
-        Theme::ACCENT
+    let (border_color, justify) = if props.is_own {
+        // Blue border for local user's messages, right-aligned
+        (Theme::ACCENT, JustifyContent::FlexEnd)
     } else {
-        // Default border for other users' messages
-        Theme::BORDER
+        // Default border for other users' messages, left-aligned
+        (Theme::BORDER, JustifyContent::FlexStart)
     };
 
     element! {
         View(
             flex_direction: FlexDirection::Row,
-            max_width: 70pct,
-            border_style: Borders::PRIMARY,
-            border_color: border_color,
-            padding_left: Spacing::PANEL_PADDING,
-            padding_right: Spacing::PANEL_PADDING,
-            margin_bottom: Spacing::XS,
-            gap: Spacing::SM,
+            justify_content: justify,
+            width: 100pct,
         ) {
-            View(flex_grow: 1.0) {
-                Text(content: content, wrap: TextWrap::Wrap)
+            View(
+                flex_direction: FlexDirection::Row,
+                max_width: 70pct,
+                border_style: Borders::PRIMARY,
+                border_color: border_color,
+                padding_left: Spacing::PANEL_PADDING,
+                padding_right: Spacing::PANEL_PADDING,
+                gap: Spacing::SM,
+            ) {
+                View(flex_grow: 1.0) {
+                    Text(content: content, wrap: TextWrap::Wrap)
+                }
+                Text(content: timestamp, color: Theme::TEXT_MUTED)
             }
-            Text(content: timestamp, color: Theme::TEXT_MUTED)
         }
     }
 }
@@ -186,16 +192,17 @@ pub struct MessageGroupHeaderProps {
 #[component]
 pub fn MessageGroupHeader(props: &MessageGroupHeaderProps) -> impl Into<AnyElement<'static>> {
     let sender = props.sender.clone();
-    let align = if props.is_own {
-        AlignItems::FlexEnd
+    let justify = if props.is_own {
+        JustifyContent::FlexEnd
     } else {
-        AlignItems::FlexStart
+        JustifyContent::FlexStart
     };
 
     element! {
         View(
-            align_items: align,
-            margin_bottom: Spacing::XS,
+            flex_direction: FlexDirection::Row,
+            justify_content: justify,
+            width: 100pct,
         ) {
             Text(content: sender, weight: Weight::Bold, color: Theme::TEXT_HIGHLIGHT)
         }

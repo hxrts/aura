@@ -9,15 +9,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
+use aura_app::ui::signals::CHAT_SIGNAL;
 use aura_app::ui::workflows::messaging;
 use aura_app::{AppConfig, AppCore};
+use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_terminal::demo::{spawn_amp_echo_listener, DemoSimulator};
+use aura_terminal::demo::{spawn_amp_echo_listener, DemoSimulator, EchoPeer};
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
-use support::signals::wait_for_chat_extended;
 
 mod support;
 
@@ -79,12 +80,23 @@ async fn demo_amp_channel_echoes_peer_message() {
         .expect("init signals");
 
     // Start demo AMP echo listener to surface peer auto-replies in chat state.
+    let peers = vec![
+        EchoPeer {
+            authority_id: simulator.alice_authority(),
+            name: "Alice".to_string(),
+        },
+        EchoPeer {
+            authority_id: simulator.carol_authority(),
+            name: "Carol".to_string(),
+        },
+    ];
     let _listener = spawn_amp_echo_listener(
         shared_transport.clone(),
         bob_authority,
         bob_device_id.to_string(),
         app_core.clone(),
         agent.runtime().effects(),
+        peers,
     );
 
     // Create a channel with Alice + Carol as members.
@@ -92,7 +104,8 @@ async fn demo_amp_channel_echoes_peer_message() {
         simulator.alice_authority().to_string(),
         simulator.carol_authority().to_string(),
     ];
-    let _channel_id = messaging::create_channel(&app_core, "guardians", None, &members, 0, 1)
+    // Now returns typed ChannelId - this enforces type safety!
+    let channel_id = messaging::create_channel(&app_core, "guardians", None, &members, 0, 1)
         .await
         .expect("create channel");
 
@@ -100,16 +113,44 @@ async fn demo_amp_channel_echoes_peer_message() {
     tokio::time::sleep(Duration::from_millis(400)).await;
 
     let content = "echo-test";
-    messaging::send_message(&app_core, "guardians", content, 2)
+
+    // Subscribe to chat signal BEFORE sending to catch all updates
+    let mut chat_stream = {
+        let core = app_core.read().await;
+        core.subscribe(&*CHAT_SIGNAL)
+    };
+
+    // Using typed ChannelId ensures we send to the EXACT channel we created
+    messaging::send_message(&app_core, channel_id, content, 2)
         .await
         .expect("send message");
 
-    // Expect an auto-echo from Alice or Carol in the same channel.
-    wait_for_chat_extended(&app_core, |state| {
-        state
-            .all_messages()
-            .iter()
-            .any(|msg| msg.content == content && msg.sender_id != bob_authority)
-    })
-    .await;
+    // Wait for signal updates and check each one for the echo
+    let mut found_echo = false;
+    let timeout = Duration::from_secs(5);
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    while tokio::time::Instant::now() < deadline {
+        tokio::select! {
+            Ok(chat_state) = chat_stream.recv() => {
+                if chat_state
+                    .all_messages()
+                    .iter()
+                    .any(|msg| msg.content == content && msg.sender_id != bob_authority)
+                {
+                    found_echo = true;
+                    break;
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                // Just a timeout to prevent infinite loop
+            }
+        }
+    }
+
+    assert!(
+        found_echo,
+        "Expected an echo message from Alice or Carol, but none was found within {:?}",
+        timeout
+    );
 }

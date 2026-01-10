@@ -399,6 +399,44 @@ impl AuraEffectSystem {
         self.journal.attach_fact_sink(tx);
     }
 
+    /// Attach a view update sender for awaiting fact processing.
+    ///
+    /// This is called during runtime startup when the ReactivePipeline is started.
+    pub fn attach_view_update_sender(
+        &self,
+        tx: tokio::sync::broadcast::Sender<crate::reactive::ViewUpdate>,
+    ) {
+        self.journal.attach_view_update_sender(tx);
+    }
+
+    /// Wait for the reactive scheduler to process the next batch of facts.
+    ///
+    /// This is useful after committing facts to ensure the reactive views
+    /// have been updated before continuing. Returns immediately if no
+    /// view update subscription is available (e.g., in tests).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// effects.commit_generic_fact_bytes(context, type_id, bytes).await?;
+    /// effects.await_next_view_update().await; // Ensure views are updated
+    /// ```
+    pub async fn await_next_view_update(&self) {
+        use crate::reactive::ViewUpdate;
+
+        let Some(mut rx) = self.journal.subscribe_view_updates() else {
+            return;
+        };
+
+        loop {
+            match rx.recv().await {
+                Ok(ViewUpdate::Batch { .. }) => return,
+                Ok(_) => continue,
+                Err(_) => return, // Channel closed or lagged, just return
+            }
+        }
+    }
+
     pub(crate) fn requeue_envelope(&self, envelope: TransportEnvelope) {
         self.transport.queue_envelope(envelope);
     }

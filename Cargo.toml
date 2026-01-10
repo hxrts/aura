@@ -110,8 +110,8 @@ futures-util = { version = "0.3", features = ["alloc"] }
 futures-signals = "0.3"
 
 # Session types & choreographic programming
-rumpsteak-aura = "0.8.1"
-rumpsteak-aura-choreography = "0.8.1"
+rumpsteak-aura = "0.8.2"
+rumpsteak-aura-choreography = "0.8.2"
 signature = "2.2"
 
 # KeyJournal dependencies - external libraries for threshold operations and graph algorithms

@@ -339,6 +339,10 @@ impl RuntimeSystem {
         // go through the single typed-fact pipeline (work/002.md C2).
         self.effect_system.attach_fact_sink(pipeline.fact_sender());
 
+        // Attach the view update sender so callers can await fact processing completion.
+        self.effect_system
+            .attach_view_update_sender(pipeline.update_sender());
+
         // Replay existing persisted facts to seed scheduler-driven UI signals.
         let existing = self
             .effect_system

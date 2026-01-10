@@ -415,6 +415,48 @@ pub struct CeremonyAbort {
     pub reason: String,
 }
 
+/// Unified ceremony result message (commit or abort)
+///
+/// This replaces the protocol-level choice between CommitCeremony and AbortCeremony
+/// with a single message type that indicates the outcome.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CeremonyResult {
+    /// Ceremony ID
+    pub ceremony_id: CeremonyId,
+    /// Whether the ceremony was committed (true) or aborted (false)
+    pub committed: bool,
+    /// New epoch if committed
+    pub new_epoch: Option<u64>,
+    /// Participants if committed
+    pub participants: Vec<AuthorityId>,
+    /// Reason for abort if not committed
+    pub abort_reason: Option<String>,
+}
+
+impl CeremonyResult {
+    /// Create a commit result
+    pub fn commit(ceremony_id: CeremonyId, new_epoch: u64, participants: Vec<AuthorityId>) -> Self {
+        Self {
+            ceremony_id,
+            committed: true,
+            new_epoch: Some(new_epoch),
+            participants,
+            abort_reason: None,
+        }
+    }
+
+    /// Create an abort result
+    pub fn abort(ceremony_id: CeremonyId, reason: String) -> Self {
+        Self {
+            ceremony_id,
+            committed: false,
+            new_epoch: None,
+            participants: Vec::new(),
+            abort_reason: Some(reason),
+        }
+    }
+}
+
 // ============================================================================
 // Ceremony Executor
 // ============================================================================

@@ -29,7 +29,7 @@ use aura_core::effects::amp::{
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::threshold::ThresholdConfig;
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
@@ -60,8 +60,8 @@ pub struct MockRuntimeBridge {
     reactive_handler: ReactiveHandler,
     /// Committed relational facts
     facts: Arc<RwLock<Vec<RelationalFact>>>,
-    /// Created invitations
-    invitations: Arc<RwLock<HashMap<String, InvitationInfo>>>,
+    /// Created invitations (keyed by typed InvitationId)
+    invitations: Arc<RwLock<HashMap<InvitationId, InvitationInfo>>>,
     /// Contacts (simulated from accepted invitations)
     contacts: Arc<RwLock<Vec<Contact>>>,
     /// Mock nickname suggestion
@@ -211,7 +211,12 @@ impl MockRuntimeBridge {
 
     /// Get created invitations for test assertions
     pub async fn get_invitations(&self) -> HashMap<String, InvitationInfo> {
-        self.invitations.read().await.clone()
+        self.invitations
+            .read()
+            .await
+            .iter()
+            .map(|(k, v)| (k.as_str().to_string(), v.clone()))
+            .collect()
     }
 
     /// Advance the mock time by the given milliseconds
@@ -224,8 +229,14 @@ impl MockRuntimeBridge {
         self.current_time_ms.store(ms, Ordering::SeqCst);
     }
 
-    fn next_id(&self) -> String {
+    /// Generate a unique string ID for general use
+    fn next_string_id(&self) -> String {
         format!("mock-{}", self.id_counter.fetch_add(1, Ordering::SeqCst))
+    }
+
+    /// Generate a unique InvitationId
+    fn next_invitation_id(&self) -> InvitationId {
+        InvitationId::new(self.next_string_id())
     }
 
     fn now_ms(&self) -> u64 {
@@ -570,7 +581,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         _total_n: u16,
         _guardian_ids: &[String],
     ) -> Result<String, IntentError> {
-        Ok(self.next_id())
+        Ok(self.next_string_id())
     }
 
     async fn initiate_device_threshold_ceremony(
@@ -579,7 +590,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         _total_n: u16,
         _device_ids: &[String],
     ) -> Result<String, IntentError> {
-        Ok(self.next_id())
+        Ok(self.next_string_id())
     }
 
     async fn initiate_device_enrollment_ceremony(
@@ -587,7 +598,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         nickname_suggestion: String,
     ) -> Result<DeviceEnrollmentStart, IntentError> {
         Ok(DeviceEnrollmentStart {
-            ceremony_id: self.next_id(),
+            ceremony_id: self.next_string_id(),
             enrollment_code: format!("aura-enroll:mock:{nickname_suggestion}"),
             pending_epoch: Epoch::new(1),
             device_id: DeviceId::new_from_entropy([3u8; 32]),
@@ -598,7 +609,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         &self,
         _device_id: String,
     ) -> Result<String, IntentError> {
-        Ok(self.next_id())
+        Ok(self.next_string_id())
     }
 
     async fn get_ceremony_status(&self, ceremony_id: &str) -> Result<CeremonyStatus, IntentError> {
@@ -662,7 +673,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         let invitations = self.invitations.read().await;
 
         // Check if we have this invitation already
-        if let Some(inv) = invitations.get(invitation_id) {
+        let key = InvitationId::new(invitation_id.to_string());
+        if let Some(inv) = invitations.get(&key) {
             // Generate a valid aura:v1:base64 code from the invitation
             let invitation_data = serde_json::json!({
                 "version": 1,
@@ -739,7 +751,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
-        let invitation_id = self.next_id();
+        let invitation_id = self.next_invitation_id();
         let now = self.now_ms();
         let expires_at_ms = ttl_ms.map(|ttl| now + ttl);
 
@@ -767,7 +779,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
-        let invitation_id = self.next_id();
+        let invitation_id = self.next_invitation_id();
         let now = self.now_ms();
         let expires_at_ms = ttl_ms.map(|ttl| now + ttl);
 
@@ -798,7 +810,7 @@ impl RuntimeBridge for MockRuntimeBridge {
         message: Option<String>,
         ttl_ms: Option<u64>,
     ) -> Result<InvitationInfo, IntentError> {
-        let invitation_id = self.next_id();
+        let invitation_id = self.next_invitation_id();
         let now = self.now_ms();
         let expires_at_ms = ttl_ms.map(|ttl| now + ttl);
 
@@ -826,7 +838,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         // First, update the invitation status
         let invitation = {
             let mut invitations = self.invitations.write().await;
-            if let Some(inv) = invitations.get_mut(invitation_id) {
+            let key = InvitationId::new(invitation_id.to_string());
+            if let Some(inv) = invitations.get_mut(&key) {
                 inv.status = InvitationBridgeStatus::Accepted;
                 Some(inv.clone())
             } else {
@@ -885,7 +898,8 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
         let mut invitations = self.invitations.write().await;
-        if let Some(inv) = invitations.get_mut(invitation_id) {
+        let key = InvitationId::new(invitation_id.to_string());
+        if let Some(inv) = invitations.get_mut(&key) {
             inv.status = InvitationBridgeStatus::Declined;
             Ok(())
         } else {
@@ -897,7 +911,8 @@ impl RuntimeBridge for MockRuntimeBridge {
 
     async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
         let mut invitations = self.invitations.write().await;
-        if let Some(inv) = invitations.get_mut(invitation_id) {
+        let key = InvitationId::new(invitation_id.to_string());
+        if let Some(inv) = invitations.get_mut(&key) {
             inv.status = InvitationBridgeStatus::Cancelled;
             Ok(())
         } else {
@@ -942,8 +957,8 @@ impl RuntimeBridge for MockRuntimeBridge {
         let invitation_id = data
             .get("invitation_id")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| self.next_id());
+            .map(|s| InvitationId::new(s.to_string()))
+            .unwrap_or_else(|| self.next_invitation_id());
 
         let sender_uuid_str = data
             .get("sender_id")
@@ -1095,19 +1110,19 @@ mod tests {
 
         // Export invitation
         let code = bridge
-            .export_invitation(&invite.invitation_id)
+            .export_invitation(invite.invitation_id.as_str())
             .await
             .expect("Should export");
         assert!(code.starts_with("aura:v1:"));
 
         // Accept invitation
         bridge
-            .accept_invitation(&invite.invitation_id)
+            .accept_invitation(invite.invitation_id.as_str())
             .await
             .expect("Should accept");
 
         let invitations = bridge.get_invitations().await;
-        let updated = invitations.get(&invite.invitation_id).unwrap();
+        let updated = invitations.get(invite.invitation_id.as_str()).unwrap();
         assert_eq!(updated.status, InvitationBridgeStatus::Accepted);
     }
 

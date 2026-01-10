@@ -302,12 +302,19 @@ impl ReactiveView for ContactsSignalView {
                             added_at,
                             ..
                         } => {
+                            tracing::debug!(
+                                contact_id = %contact_id,
+                                nickname = %nickname,
+                                added_at = added_at.ts_ms,
+                                "ContactsSignalView: Processing ContactFact::Added"
+                            );
+
                             let suggested_name = if nickname.trim().is_empty()
                                 || nickname == contact_id.to_string()
                             {
                                 None
                             } else {
-                                Some(nickname)
+                                Some(nickname.clone())
                             };
 
                             if let Some(contact) = state.contact_mut(&contact_id) {
@@ -372,6 +379,13 @@ impl ReactiveView for ContactsSignalView {
         }
 
         let snapshot = state.clone();
+        let contact_count = snapshot.contact_count();
+        let contact_ids: Vec<_> = snapshot.all_contacts().map(|c| c.id).collect();
+        tracing::debug!(
+            contact_count,
+            contact_ids = ?contact_ids,
+            "ContactsSignalView: Emitting updated contacts"
+        );
         drop(state);
 
         if let Err(e) = self.reactive.emit(&*CONTACTS_SIGNAL, snapshot).await {

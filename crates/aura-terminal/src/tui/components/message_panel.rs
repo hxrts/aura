@@ -95,6 +95,7 @@ pub fn MessagePanel(props: &MessagePanelProps) -> impl Into<AnyElement<'static>>
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
                 overflow: Overflow::Hidden,
+                gap: 0,
             ) {
                 #(if messages.is_empty() {
                     empty_message

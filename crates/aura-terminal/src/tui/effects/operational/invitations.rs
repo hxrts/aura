@@ -17,8 +17,10 @@ use super::EffectCommand;
 
 // Re-export workflows for convenience
 pub use aura_app::ui::workflows::invitation::{
-    accept_invitation, cancel_invitation, create_channel_invitation, create_contact_invitation,
-    create_guardian_invitation, decline_invitation, export_invitation, import_invitation_details,
+    accept_invitation, accept_invitation_by_str, cancel_invitation_by_str,
+    create_channel_invitation, create_contact_invitation, create_guardian_invitation,
+    decline_invitation_by_str, export_invitation, export_invitation_by_str,
+    import_invitation_details,
 };
 
 /// Handle invitation commands
@@ -148,7 +150,7 @@ pub async fn handle_invitations(
 
             match export_invitation(app_core, &info.invitation_id).await {
                 Ok(code) => Some(Ok(OpResponse::InvitationCode {
-                    id: info.invitation_id,
+                    id: info.invitation_id.as_str().to_string(),
                     code,
                 })),
                 Err(e) => Some(Err(OpError::Failed(format!(
@@ -186,7 +188,7 @@ pub async fn handle_invitations(
             match create_channel_invitation(app_core, receiver, home_id, None, None, None).await {
                 Ok(info) => Some(Ok(OpResponse::Data(format!(
                     "Home invitation sent: {}",
-                    info.invitation_id
+                    info.invitation_id.as_str()
                 )))),
                 Err(e) => Some(Err(OpError::Failed(format!(
                     "Failed to send home invitation: {e}"
@@ -196,7 +198,7 @@ pub async fn handle_invitations(
 
         EffectCommand::ExportInvitation { invitation_id } => {
             // Delegate to workflow
-            match export_invitation(app_core, invitation_id).await {
+            match export_invitation_by_str(app_core, invitation_id).await {
                 Ok(code) => Some(Ok(OpResponse::InvitationCode {
                     id: invitation_id.clone(),
                     code,
@@ -255,7 +257,7 @@ pub async fn handle_invitations(
                     };
 
                     Some(Ok(OpResponse::InvitationImported {
-                        invitation_id: invitation.invitation_id,
+                        invitation_id: invitation.invitation_id.as_str().to_string(),
                         sender_id: invitation.sender_id.to_string(),
                         invitation_type,
                         expires_at: invitation.expires_at_ms,
@@ -269,7 +271,7 @@ pub async fn handle_invitations(
         }
 
         EffectCommand::AcceptInvitation { invitation_id } => {
-            match accept_invitation(app_core, invitation_id).await {
+            match accept_invitation_by_str(app_core, invitation_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
                     "Failed to accept invitation: {e}"
@@ -278,7 +280,7 @@ pub async fn handle_invitations(
         }
 
         EffectCommand::DeclineInvitation { invitation_id } => {
-            match decline_invitation(app_core, invitation_id).await {
+            match decline_invitation_by_str(app_core, invitation_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
                     "Failed to decline invitation: {e}"
@@ -287,7 +289,7 @@ pub async fn handle_invitations(
         }
 
         EffectCommand::CancelInvitation { invitation_id } => {
-            match cancel_invitation(app_core, invitation_id).await {
+            match cancel_invitation_by_str(app_core, invitation_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(OpError::Failed(format!(
                     "Failed to cancel invitation: {e}"

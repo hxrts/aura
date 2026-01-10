@@ -1,4 +1,5 @@
 use aura_app::runtime_bridge::{InvitationBridgeStatus, InvitationBridgeType, InvitationInfo};
+use aura_core::identifiers::InvitationId;
 use aura_core::types::Epoch;
 
 /// Convert domain Invitation to bridge InvitationInfo.
@@ -6,7 +7,7 @@ pub(super) fn convert_invitation_to_bridge_info(
     invitation: &crate::handlers::invitation::Invitation,
 ) -> InvitationInfo {
     InvitationInfo {
-        invitation_id: invitation.invitation_id.to_string(),
+        invitation_id: InvitationId::new(invitation.invitation_id.to_string()),
         sender_id: invitation.sender_id,
         receiver_id: invitation.receiver_id,
         invitation_type: convert_invitation_type_to_bridge(&invitation.invitation_type),

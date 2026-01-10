@@ -956,7 +956,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         guardian_ids: &[String],
     ) -> Result<String, IntentError> {
         use aura_core::hash::hash;
-        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy};
+        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity};
         use aura_recovery::guardian_ceremony::GuardianState;
         use aura_recovery::{CeremonyId as GuardianCeremonyId, GuardianRotationOp};
 
@@ -1130,7 +1130,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .recovery()
             .map_err(|e| service_unavailable_with_detail("recovery_service", e))?;
 
-        recovery_service
+        let accepted_guardians = recovery_service
             .execute_guardian_ceremony_initiator(
                 ceremony_id_hash,
                 prestate_hash,
@@ -1145,9 +1145,38 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 ))
             })?;
 
+        // Step 5: Record accepted participants before committing
+        for guardian_id in &accepted_guardians {
+            runner
+                .record_response(
+                    &ceremony_id,
+                    ParticipantIdentity::guardian(*guardian_id),
+                )
+                .await
+                .map_err(|e| {
+                    IntentError::internal_error(format!(
+                        "Failed to record guardian acceptance: {e}"
+                    ))
+                })?;
+        }
+
+        // Step 6: Mark ceremony as committed after successful choreography completion
+        runner
+            .commit(
+                &ceremony_id,
+                CeremonyCommitMetadata {
+                    committed_at: None,
+                    consensus_id: None,
+                },
+            )
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to commit ceremony: {e}"))
+            })?;
+
         tracing::info!(
             ceremony_id = %ceremony_id,
-            "All guardian invitations sent successfully"
+            "Guardian ceremony completed successfully"
         );
 
         Ok(ceremony_id.to_string())

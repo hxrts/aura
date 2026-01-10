@@ -24,7 +24,7 @@ use aura_core::{
         ChannelCloseParams, ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams,
         ChannelSendParams,
     },
-    identifiers::{AuthorityId, ChannelId, ContextId},
+    identifiers::{AuthorityId, ChannelId, ContextId, InvitationId},
     AuraError,
 };
 use aura_journal::fact::FactOptions;
@@ -65,16 +65,31 @@ fn channel_id_from_input(channel: &str) -> ChannelId {
     parse_channel_ref(channel).to_channel_id()
 }
 
-/// Get current home channel id (e.g., "home:<id>") with fallback.
-pub async fn current_home_channel_id(app_core: &Arc<RwLock<AppCore>>) -> Result<String, AuraError> {
+/// Get current home channel id as a typed ChannelId.
+///
+/// Returns the actual home channel ChannelId from the homes signal.
+/// Falls back to a deterministic default if no home is selected.
+pub async fn current_home_channel_id(app_core: &Arc<RwLock<AppCore>>) -> Result<ChannelId, AuraError> {
     let homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
         .await
         .ok();
-    let home_id = homes
-        .and_then(|homes| homes.current_home_id().map(|id| id.to_string()))
-        .unwrap_or_else(|| "home".to_string());
 
-    Ok(format!("home:{home_id}"))
+    if let Some(homes) = homes {
+        if let Some(channel_id) = homes.current_home_id() {
+            return Ok(*channel_id);
+        }
+    }
+
+    // Fallback: derive a default channel ID from "home" string
+    Ok(channel_id_from_input("home"))
+}
+
+/// Get current home channel reference string (e.g., "home:<id>") for display.
+///
+/// Returns a formatted string suitable for display or legacy APIs that take strings.
+pub async fn current_home_channel_ref(app_core: &Arc<RwLock<AppCore>>) -> Result<String, AuraError> {
+    let channel_id = current_home_channel_id(app_core).await?;
+    Ok(format!("home:{channel_id}"))
 }
 
 async fn context_id_for_channel(
@@ -183,11 +198,16 @@ pub async fn send_direct_message(
 /// Create a group channel (home channel) in chat state.
 ///
 /// **What it does**: Creates a chat channel and selects it
-/// **Returns**: Channel ID
+/// **Returns**: ChannelId (typed) - use this directly in send_message, not a string!
 /// **Signal pattern**: Updates `CHAT_SIGNAL` directly
 ///
 /// **Note**: This is currently UI-local state only; persistence will be provided by
 /// runtime-backed AMP/Chat facts when fully wired.
+///
+/// # Type Safety
+/// Returns `ChannelId` to ensure callers use the exact channel identity.
+/// Do NOT convert to string and back - use the returned `ChannelId` directly
+/// with `send_message` and other channel operations.
 pub async fn create_channel(
     app_core: &Arc<RwLock<AppCore>>,
     name: &str,
@@ -195,7 +215,7 @@ pub async fn create_channel(
     members: &[String],
     threshold_k: u8,
     timestamp_ms: u64,
-) -> Result<String, AuraError> {
+) -> Result<ChannelId, AuraError> {
     let backend = messaging_backend(app_core).await;
     let member_ids: Vec<AuthorityId> = members
         .iter()
@@ -302,7 +322,7 @@ pub async fn create_channel(
                 None,
             )
             .await?;
-            invitation_ids.push(invitation.invitation_id);
+            invitation_ids.push(invitation.invitation_id.as_str().to_string());
         }
 
         if !invitation_ids.is_empty() {
@@ -313,14 +333,15 @@ pub async fn create_channel(
         }
     }
 
-    Ok(channel_id.to_string())
+    Ok(channel_id)
 }
 
-/// Join an existing channel.
-pub async fn join_channel(app_core: &Arc<RwLock<AppCore>>, channel: &str) -> Result<(), AuraError> {
+/// Join an existing channel using a typed ChannelId.
+pub async fn join_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
-
-    let channel_id = channel_id_from_input(channel);
     let context_id = current_home_context_or_fallback(app_core).await?;
 
     runtime
@@ -335,14 +356,21 @@ pub async fn join_channel(app_core: &Arc<RwLock<AppCore>>, channel: &str) -> Res
     Ok(())
 }
 
-/// Leave a channel.
+/// Join an existing channel by name (legacy/convenience API).
+pub async fn join_channel_by_name(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+) -> Result<(), AuraError> {
+    let channel_id = channel_id_from_input(channel_name);
+    join_channel(app_core, channel_id).await
+}
+
+/// Leave a channel using a typed ChannelId.
 pub async fn leave_channel(
     app_core: &Arc<RwLock<AppCore>>,
-    channel: &str,
+    channel_id: ChannelId,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
-
-    let channel_id = channel_id_from_input(channel);
     let context_id = current_home_context_or_fallback(app_core).await?;
 
     runtime
@@ -357,18 +385,25 @@ pub async fn leave_channel(
     Ok(())
 }
 
-/// Close/archive a channel.
+/// Leave a channel by name (legacy/convenience API).
+pub async fn leave_channel_by_name(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+) -> Result<(), AuraError> {
+    let channel_id = channel_id_from_input(channel_name);
+    leave_channel(app_core, channel_id).await
+}
+
+/// Close/archive a channel using a typed ChannelId.
 ///
 /// Today this is a UI-local operation that removes the channel from `CHAT_SIGNAL`.
 /// A fully persisted implementation will commit a `ChatFact::ChannelClosed` fact.
 pub async fn close_channel(
     app_core: &Arc<RwLock<AppCore>>,
-    channel: &str,
+    channel_id: ChannelId,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
-
-    let channel_id = channel_id_from_input(channel);
     let context_id = context_id_for_channel(app_core, channel_id).await?;
 
     runtime
@@ -391,19 +426,27 @@ pub async fn close_channel(
     Ok(())
 }
 
-/// Set a channel topic.
+/// Close/archive a channel by name (legacy/convenience API).
+pub async fn close_channel_by_name(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let channel_id = channel_id_from_input(channel_name);
+    close_channel(app_core, channel_id, timestamp_ms).await
+}
+
+/// Set a channel topic using a typed ChannelId.
 ///
 /// Today this is a UI-local operation that updates the channel entry in `CHAT_SIGNAL`.
 /// A fully persisted implementation will commit a topic fact (see work/007.md).
 pub async fn set_topic(
     app_core: &Arc<RwLock<AppCore>>,
-    channel: &str,
+    channel_id: ChannelId,
     text: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
-
-    let channel_id = channel_id_from_input(channel);
     let context_id = context_id_for_channel(app_core, channel_id).await?;
 
     runtime
@@ -414,21 +457,56 @@ pub async fn set_topic(
     Ok(())
 }
 
-/// Send a message to a group/channel.
+/// Set a channel topic by name (legacy/convenience API).
+pub async fn set_topic_by_name(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    text: &str,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let channel_id = channel_id_from_input(channel_name);
+    set_topic(app_core, channel_id, text, timestamp_ms).await
+}
+
+/// Send a message to a group/channel using a typed ChannelId.
 ///
 /// **What it does**: Appends a message to the selected channel's message list
 /// **Returns**: Message ID
 /// **Signal pattern**: Updates `CHAT_SIGNAL` directly
 ///
+/// # Type Safety
+/// This function accepts `ChannelId` directly to ensure you're using the exact
+/// channel identity returned by `create_channel`. Using the typed ID prevents
+/// mismatches between runtime-generated IDs and name-based hash IDs.
+///
 /// **Note**: This is currently UI-local state only; persistence will be provided by
 /// runtime-backed AMP/Chat facts when fully wired.
 pub async fn send_message(
     app_core: &Arc<RwLock<AppCore>>,
-    channel: &str,
+    channel_id: ChannelId,
     content: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    let channel_ref = parse_channel_ref(channel);
+    send_message_ref(app_core, ChannelRef::Id(channel_id), content, timestamp_ms).await
+}
+
+/// Send a message to a group/channel by name (legacy/convenience API).
+///
+/// **What it does**: Looks up channel by name and sends message
+/// **Returns**: Message ID
+/// **Signal pattern**: Updates `CHAT_SIGNAL` directly
+///
+/// # Warning
+/// Prefer `send_message` with a typed `ChannelId` when possible. Name-based
+/// lookup uses hash derivation which may not match runtime-created channels.
+/// Use this only when you don't have the original `ChannelId` from `create_channel`.
+pub async fn send_message_by_name(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    content: &str,
+    timestamp_ms: u64,
+) -> Result<String, AuraError> {
+    let channel_ref = parse_channel_ref(channel_name);
     send_message_ref(app_core, channel_ref, content, timestamp_ms).await
 }
 
@@ -630,12 +708,23 @@ pub async fn get_chat_state(app_core: &Arc<RwLock<AppCore>>) -> Result<ChatState
 /// * `timestamp_ms` - Current timestamp in milliseconds (caller provides via effect system)
 pub async fn send_action(
     app_core: &Arc<RwLock<AppCore>>,
-    channel_id_str: &str,
+    channel_id: ChannelId,
     action: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
     let content = format!("* You {action}");
-    send_message(app_core, channel_id_str, &content, timestamp_ms).await
+    send_message(app_core, channel_id, &content, timestamp_ms).await
+}
+
+/// Send an action/emote message to a channel by name (legacy/convenience API).
+pub async fn send_action_by_name(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_name: &str,
+    action: &str,
+    timestamp_ms: u64,
+) -> Result<String, AuraError> {
+    let content = format!("* You {action}");
+    send_message_by_name(app_core, channel_name, &content, timestamp_ms).await
 }
 
 /// Invite a user to join a channel
@@ -653,13 +742,14 @@ pub async fn send_action(
 /// * `channel_id` - Channel to invite user to (required - UI manages selection)
 /// * `message` - Optional invitation message
 /// * `ttl_ms` - Optional time-to-live for the invitation
+/// Invite a user to a channel. Returns typed InvitationId.
 pub async fn invite_user_to_channel(
     app_core: &Arc<RwLock<AppCore>>,
     target_user_id: &str,
     channel_id: &str,
     message: Option<String>,
     ttl_ms: Option<u64>,
-) -> Result<String, AuraError> {
+) -> Result<InvitationId, AuraError> {
     // Parse target user ID as AuthorityId
     let receiver = parse_authority_id(target_user_id)?;
 

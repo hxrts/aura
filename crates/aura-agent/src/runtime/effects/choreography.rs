@@ -33,6 +33,14 @@ impl ChoreographicEffects for AuraEffectSystem {
         };
 
         let peer = AuthorityId::from_uuid(role.device_id.0);
+        eprintln!(
+            "[DEBUG] Choreography send: from {:?} to {:?} (authority {}), context {:?}, {} bytes",
+            current_role.device_id,
+            role.device_id,
+            peer,
+            context_id,
+            message.len()
+        );
         let kb_units = ((message.len() as u32).saturating_add(1023)) / 1024;
         let flow_cost = DEFAULT_CHOREO_FLOW_COST
             .saturating_add(kb_units.saturating_mul(CHOREO_FLOW_COST_PER_KB));
@@ -85,12 +93,27 @@ impl ChoreographicEffects for AuraEffectSystem {
                 sig: receipt.sig.clone().into_bytes(),
             });
 
+        // Include choreography metadata so receivers can identify and route these messages
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            "application/aura-choreography".to_string(),
+        );
+
+        // Include session_id so guardians can join the correct session
+        {
+            let state = self.choreography_state.read();
+            if let Some(session_id) = state.session_id {
+                metadata.insert("session-id".to_string(), session_id.to_string());
+            }
+        }
+
         let envelope = TransportEnvelope {
             destination: peer,
             source: AuthorityId::from_uuid(current_role.device_id.0),
             context: context_id,
             payload: message,
-            metadata: HashMap::new(),
+            metadata,
             receipt: transport_receipt,
         };
 
@@ -107,6 +130,7 @@ impl ChoreographicEffects for AuraEffectSystem {
         Ok(())
     }
 
+    #[allow(clippy::disallowed_methods)] // Instant::now() legitimate for network receive timeout
     async fn receive_from_role_bytes(
         &self,
         role: ChoreographicRole,
@@ -118,15 +142,50 @@ impl ChoreographicEffects for AuraEffectSystem {
                 .ok_or(ChoreographyError::SessionNotStarted)?
         };
 
-        let envelope = TransportEffects::receive_envelope_from(
-            self,
-            AuthorityId::from_uuid(role.device_id.0),
+        // Poll for messages with timeout to allow async guardians time to respond.
+        // Default timeout of 5 seconds with 50ms polling interval.
+        let timeout_ms = {
+            let state = self.choreography_state.read();
+            state.timeout_ms.unwrap_or(5000)
+        };
+        let start = std::time::Instant::now();
+        let poll_interval = std::time::Duration::from_millis(50);
+
+        let source_authority = AuthorityId::from_uuid(role.device_id.0);
+        tracing::debug!(
+            "Choreography receive: waiting for message from {:?} (authority {:?}) in context {:?}, timeout={}ms",
+            role.device_id,
+            source_authority,
             context_id,
-        )
-        .await
-        .map_err(|e| ChoreographyError::Transport {
-            source: Box::new(e),
-        })?;
+            timeout_ms
+        );
+
+        let envelope = loop {
+            match TransportEffects::receive_envelope_from(
+                self,
+                AuthorityId::from_uuid(role.device_id.0),
+                context_id,
+            )
+            .await
+            {
+                Ok(env) => break env,
+                Err(aura_core::effects::TransportError::NoMessage) => {
+                    // Check timeout
+                    if start.elapsed().as_millis() as u64 > timeout_ms {
+                        return Err(ChoreographyError::Transport {
+                            source: Box::new(aura_core::effects::TransportError::NoMessage),
+                        });
+                    }
+                    // Yield to allow other tasks (like DemoSimulator) to process
+                    tokio::time::sleep(poll_interval).await;
+                }
+                Err(e) => {
+                    return Err(ChoreographyError::Transport {
+                        source: Box::new(e),
+                    });
+                }
+            }
+        };
 
         {
             let mut state = self.choreography_state.write();
@@ -210,6 +269,13 @@ impl ChoreographicEffects for AuraEffectSystem {
             })?;
 
         let context_id = ContextId::new_from_entropy(hash(session_id.as_bytes()));
+        tracing::debug!(
+            "Choreography start_session: session_id={}, context_id={:?}, authority={:?}, roles={:?}",
+            session_id,
+            context_id,
+            self.authority_id,
+            roles.iter().map(|r| r.device_id).collect::<Vec<_>>()
+        );
         let started_at_ms = self
             .physical_time()
             .await

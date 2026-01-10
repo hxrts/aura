@@ -603,7 +603,7 @@ fn test_contact_select_state_machine() {
     let mut state = ContactSelectState::new();
 
     assert!(!state.visible);
-    assert!(state.is_empty());
+    assert!(state.contacts.is_empty());
     assert!(!state.can_select());
 
     // Create test contacts
@@ -616,7 +616,7 @@ fn test_contact_select_state_machine() {
     // Show with contacts
     state.show("Select Guardian", contacts);
     assert!(state.visible);
-    assert_eq!(state.contact_count(), 3);
+    assert_eq!(state.contacts.len(), 3);
     assert_eq!(state.selected_index, 0);
     assert!(state.can_select());
 
@@ -640,7 +640,7 @@ fn test_contact_select_state_machine() {
     // Hide
     state.hide();
     assert!(!state.visible);
-    assert!(state.is_empty());
+    assert!(state.contacts.is_empty());
 
     println!("✓ ContactSelectState state machine works correctly");
 }
@@ -1886,16 +1886,10 @@ async fn test_neighborhood_navigation_flow() {
         let core = app_core.write().await;
 
         // Create neighborhood state with home and neighbors
-        let neighborhood = NeighborhoodState {
-            home_home_id: home_home_id.clone(),
-            home_name: "My Home".to_string(),
-            position: Some(TraversalPosition {
-                current_home_id: home_home_id.clone(),
-                current_home_name: "My Home".to_string(),
-                depth: 2, // Interior depth
-                path: vec![home_home_id.clone()],
-            }),
-            neighbors: vec![
+        let mut neighborhood = NeighborhoodState::from_parts(
+            home_home_id.clone(),
+            "My Home".to_string(),
+            vec![
                 NeighborHome {
                     id: alice_home_id.clone(),
                     name: "Alice's Home".to_string(),
@@ -1921,9 +1915,15 @@ async fn test_neighborhood_navigation_flow() {
                     can_traverse: false,
                 },
             ],
-            max_depth: 3,
-            loading: false,
-        };
+        );
+        neighborhood.position = Some(TraversalPosition {
+            current_home_id: home_home_id.clone(),
+            current_home_name: "My Home".to_string(),
+            depth: 2, // Interior depth
+            path: vec![home_home_id.clone()],
+        });
+        neighborhood.max_depth = 3;
+        neighborhood.loading = false;
 
         core.views().set_neighborhood(neighborhood);
     }
@@ -2078,7 +2078,7 @@ async fn test_message_delivery_status_flow() {
     // Phase 1: Test DeliveryStatus enum values
     println!("Phase 1: Testing DeliveryStatus enum");
 
-    assert_eq!(DeliveryStatus::Sending.indicator(), "⏳");
+    assert_eq!(DeliveryStatus::Sending.indicator(), "◐");
     assert_eq!(DeliveryStatus::Sent.indicator(), "✓");
     assert_eq!(DeliveryStatus::Delivered.indicator(), "✓✓");
     assert_eq!(DeliveryStatus::Failed.indicator(), "✗");
@@ -3387,11 +3387,7 @@ async fn test_snapshot_data_accuracy() {
     let contacts_snapshot = ctx.snapshot_contacts();
 
     // Verify has_pending_suggestion logic - computed by comparing nickname_suggestion to nickname
-    for contact in &contacts_snapshot
-        .all_contacts()
-        .cloned()
-        .collect::<Vec<_>>()
-    {
+    for contact in &contacts_snapshot.contacts {
         // has_pending_suggestion is true when nickname_suggestion differs from nickname
         let has_pending_suggestion = contact
             .nickname_suggestion

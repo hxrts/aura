@@ -32,6 +32,7 @@ pub use hints::DemoHints;
 pub use signal_coordinator::DemoSignalCoordinator;
 pub use simulator::spawn_amp_echo_listener;
 pub use simulator::DemoSimulator;
+pub use simulator::EchoPeer;
 
 use crate::error::{TerminalError, TerminalResult};
 use aura_core::time::{PhysicalTime, TimeStamp};

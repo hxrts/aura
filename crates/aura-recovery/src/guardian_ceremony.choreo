@@ -1,18 +1,18 @@
 module guardian_ceremony exposing (GuardianCeremony)
 
 protocol GuardianCeremony =
-  roles Initiator, Guardian[n]
+  roles Initiator, Guardian1, Guardian2
 
-  @parallel
-  Initiator[guard_capability = "initiate_guardian_ceremony", flow_cost = 500, journal_facts = "ceremony_initiated", leakage_budget = [1, 0, 0]] -> Guardian[*] : ProposeRotation(crate::guardian_ceremony::CeremonyProposal)
+  Initiator -> Guardian1 : ProposeRotation(crate::guardian_ceremony::CeremonyProposal)
+  Initiator -> Guardian2 : ProposeRotation(crate::guardian_ceremony::CeremonyProposal)
 
-  @parallel
-  Guardian[*][guard_capability = "respond_guardian_ceremony", flow_cost = 200, journal_facts = "guardian_responded", leakage_budget = [0, 1, 0]] -> Initiator : RespondCeremony(crate::guardian_ceremony::CeremonyResponseMsg)
+  Guardian1 -> Initiator : RespondCeremony(crate::guardian_ceremony::CeremonyResponseMsg)
+  Guardian2 -> Initiator : RespondCeremony(crate::guardian_ceremony::CeremonyResponseMsg)
 
   case choose Initiator of
-    Commit ->
-      @parallel
-      Initiator[guard_capability = "commit_guardian_ceremony", flow_cost = 300, journal_facts = "ceremony_committed", journal_merge = true] -> Guardian[*] : CommitCeremony(crate::guardian_ceremony::CeremonyCommit)
-    Abort ->
-      @parallel
-      Initiator[guard_capability = "abort_guardian_ceremony", flow_cost = 100, journal_facts = "ceremony_aborted"] -> Guardian[*] : AbortCeremony(crate::guardian_ceremony::CeremonyAbort)
+    finalize ->
+      Initiator -> Guardian1 : CommitCeremony(crate::guardian_ceremony::CeremonyCommit)
+      Initiator -> Guardian2 : CommitCeremony(crate::guardian_ceremony::CeremonyCommit)
+    cancel ->
+      Initiator -> Guardian1 : AbortCeremony(crate::guardian_ceremony::CeremonyAbort)
+      Initiator -> Guardian2 : AbortCeremony(crate::guardian_ceremony::CeremonyAbort)

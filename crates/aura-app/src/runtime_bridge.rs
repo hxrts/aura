@@ -42,7 +42,7 @@ use aura_core::effects::amp::{
     ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
 };
 use aura_core::effects::task::{CancellationToken, TaskSpawner};
-use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::threshold::{
     AgreementMode, ParticipantIdentity, SigningContext, ThresholdConfig, ThresholdSignature,
 };
@@ -250,8 +250,8 @@ pub enum InvitationBridgeStatus {
 /// Workflows convert this to `views::invitations::Invitation` with resolved names.
 #[derive(Debug, Clone)]
 pub struct InvitationInfo {
-    /// Unique invitation identifier
-    pub invitation_id: String,
+    /// Unique invitation identifier (typed for type safety)
+    pub invitation_id: InvitationId,
     /// Sender authority ID
     pub sender_id: AuthorityId,
     /// Receiver authority ID

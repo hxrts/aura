@@ -17,13 +17,13 @@
 #![allow(clippy::disallowed_types)]
 
 use crate::database::IndexedJournalHandler;
-use crate::reactive::FactSource;
+use crate::reactive::{FactSource, ViewUpdate};
 use aura_authorization::BiscuitAuthorizationBridge;
 use aura_journal::extensibility::FactRegistry;
 use biscuit_auth::Biscuit;
 use parking_lot::Mutex;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 /// Journal subsystem grouping fact storage and publication.
 ///
@@ -49,6 +49,11 @@ pub struct JournalSubsystem {
     /// Only the channel sender clone is accessed (brief operation).
     fact_publish_tx: Mutex<Option<mpsc::Sender<FactSource>>>,
 
+    /// Reactive scheduler view update subscription
+    ///
+    /// Used to wait for fact processing completion.
+    view_update_tx: Mutex<Option<broadcast::Sender<ViewUpdate>>>,
+
     /// Biscuit authorization policy for journal operations
     ///
     /// Tuple of (token, bridge) for capability-based authorization.
@@ -66,6 +71,7 @@ impl JournalSubsystem {
             indexed_journal: Arc::new(IndexedJournalHandler::with_capacity(capacity)),
             fact_registry,
             fact_publish_tx: Mutex::new(None),
+            view_update_tx: Mutex::new(None),
             journal_policy: None,
             journal_verifying_key: None,
         }
@@ -83,6 +89,7 @@ impl JournalSubsystem {
             indexed_journal,
             fact_registry,
             fact_publish_tx: Mutex::new(fact_publish_tx),
+            view_update_tx: Mutex::new(None),
             journal_policy,
             journal_verifying_key,
         }
@@ -158,6 +165,27 @@ impl JournalSubsystem {
         }
         Ok(())
     }
+
+    /// Attach a view update sender for awaiting fact processing
+    ///
+    /// This allows commit operations to wait for the reactive scheduler
+    /// to process their facts before returning.
+    pub fn attach_view_update_sender(&self, tx: broadcast::Sender<ViewUpdate>) {
+        *self.view_update_tx.lock() = Some(tx);
+    }
+
+    /// Subscribe to view updates for awaiting fact processing
+    ///
+    /// Returns None if no view update sender is attached.
+    pub fn subscribe_view_updates(&self) -> Option<broadcast::Receiver<ViewUpdate>> {
+        self.view_update_tx.lock().as_ref().map(|tx| tx.subscribe())
+    }
+
+    /// Check if view update subscription is available
+    #[allow(dead_code)]
+    pub fn has_view_update_sender(&self) -> bool {
+        self.view_update_tx.lock().is_some()
+    }
 }
 
 /// Errors from journal subsystem operations
@@ -174,6 +202,7 @@ impl Clone for JournalSubsystem {
             indexed_journal: self.indexed_journal.clone(),
             fact_registry: self.fact_registry.clone(),
             fact_publish_tx: Mutex::new(self.fact_publish_tx.lock().clone()),
+            view_update_tx: Mutex::new(self.view_update_tx.lock().clone()),
             journal_policy: self.journal_policy.clone(),
             journal_verifying_key: self.journal_verifying_key.clone(),
         }

@@ -50,8 +50,9 @@ pub use reductions::{
     RecoveryReduction,
 };
 pub use scheduler::{
-    topological_sort_dag, AnyView, FactSource, ReactiveScheduler, ReactiveView, SchedulerConfig,
-    ViewAdapter, ViewNode, ViewReduction, ViewUpdate,
+    topological_sort_dag, AnyView, FactCommitError, FactCommitResult, FactSource,
+    ReactiveScheduler, ReactiveView, SchedulerConfig, ViewAdapter, ViewNode, ViewReduction,
+    ViewUpdate,
 };
 
 // Re-export domain delta types from their source crates

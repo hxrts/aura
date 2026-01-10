@@ -22,8 +22,10 @@ use aura_core::effects::{AmpChannelEffects, ChannelJoinParams, ExecutionMode, Tr
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::util::serialization::{from_slice, to_vec};
 use aura_effects::time::PhysicalTimeHandler;
 use aura_effects::ReactiveEffects;
+use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
 use serde::Serialize;
 use std::str::FromStr;
 
@@ -235,6 +237,12 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
             }
         };
 
+        tracing::debug!(
+            "{name} received envelope from {} with content-type {:?}",
+            envelope.source,
+            envelope.metadata.get("content-type")
+        );
+
         if let Some(content_type) = envelope.metadata.get("content-type").cloned() {
             match content_type.as_str() {
                 "application/aura-guardian-proposal" => {
@@ -331,6 +339,76 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                         }
                     }
                 }
+                "application/aura-choreography" => {
+                    // Handle choreography-based guardian ceremony messages
+                    tracing::debug!(
+                        "{name} received choreography message from {} with {} bytes",
+                        envelope.source,
+                        envelope.payload.len()
+                    );
+
+                    // Try to deserialize as CeremonyProposal (bincode format)
+                    if let Ok(proposal) = from_slice::<CeremonyProposal>(&envelope.payload) {
+                        tracing::info!(
+                            "{name} received guardian ceremony proposal for ceremony {}",
+                            proposal.ceremony_id
+                        );
+
+                        // Create response accepting the ceremony
+                        let response_msg = CeremonyResponseMsg {
+                            ceremony_id: proposal.ceremony_id,
+                            guardian_id: agent.authority_id(),
+                            response: CeremonyResponse::Accept,
+                            signature: Vec::new(), // Signature would be added in production
+                        };
+
+                        // Serialize response in bincode format (same as choreography uses)
+                        let payload = match to_vec(&response_msg) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "{name} failed to serialize ceremony response: {e}"
+                                );
+                                continue;
+                            }
+                        };
+
+                        // Include choreography metadata so the response is routed correctly
+                        let mut response_metadata = std::collections::HashMap::new();
+                        response_metadata.insert(
+                            "content-type".to_string(),
+                            "application/aura-choreography".to_string(),
+                        );
+                        if let Some(session_id) = envelope.metadata.get("session-id") {
+                            response_metadata
+                                .insert("session-id".to_string(), session_id.clone());
+                        }
+
+                        let response = aura_core::effects::TransportEnvelope {
+                            destination: envelope.source,
+                            source: agent.authority_id(),
+                            context: envelope.context,
+                            payload,
+                            metadata: response_metadata,
+                            receipt: None,
+                        };
+
+                        if let Err(e) = effects.send_envelope(response).await {
+                            tracing::warn!(
+                                "{name} failed to send choreography ceremony response: {e}"
+                            );
+                        } else {
+                            tracing::info!(
+                                "{name} sent guardian ceremony acceptance for ceremony {}",
+                                proposal.ceremony_id
+                            );
+                        }
+                    } else {
+                        tracing::debug!(
+                            "{name} received choreography message (not a ceremony proposal)"
+                        );
+                    }
+                }
                 _ => {}
             }
         }
@@ -359,20 +437,31 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
     Ok(())
 }
 
+/// Peer authority info for echo responses.
+#[derive(Clone)]
+pub struct EchoPeer {
+    /// Authority ID of the peer
+    pub authority_id: AuthorityId,
+    /// Display name for echo messages
+    pub name: String,
+}
+
 /// Spawn a background listener that echoes messages from Bob back through demo peers.
 ///
 /// This listens to chat state changes and when Bob sends a message, Alice and Carol
-/// will respond with an echo message through the AMP channel.
+/// will respond with an echo message. The peers must be members of the channel
+/// for their messages to appear.
 pub fn spawn_amp_echo_listener(
     _shared_transport: SharedTransport,
     bob_authority: AuthorityId,
     _bob_device_id: String,
     app_core: Arc<RwLock<AppCore>>,
-    effects: Arc<AuraEffectSystem>,
+    _effects: Arc<AuraEffectSystem>,
+    peers: Vec<EchoPeer>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        use aura_app::ui::signals::{CHAT_SIGNAL, HOMES_SIGNAL};
-        use aura_core::effects::amp::ChannelSendParams;
+        use aura_app::ui::signals::CHAT_SIGNAL;
+        use aura_app::ui::types::chat::Message as ChatMessage;
 
         let mut chat_stream = {
             let core = app_core.read().await;
@@ -380,6 +469,8 @@ pub fn spawn_amp_echo_listener(
         };
 
         let mut seen_messages: HashSet<String> = HashSet::new();
+
+        tracing::debug!("Demo echo: listener started, waiting for chat updates");
 
         loop {
             let chat_state = match chat_stream.recv().await {
@@ -396,34 +487,58 @@ pub fn spawn_amp_echo_listener(
                 if !seen_messages.insert(msg.id.clone()) {
                     continue;
                 }
+                tracing::debug!("Demo echo: will echo message '{}' from Bob", msg.content);
 
-                let context_id = {
+                // Check if any of our peers are members of this channel
+                let channel_members: HashSet<AuthorityId> = chat_state
+                    .channel(&msg.channel_id)
+                    .map(|ch| ch.member_ids.iter().cloned().collect())
+                    .unwrap_or_default();
+
+                // Collect echo messages first, then emit them sequentially
+                let mut echo_messages = Vec::new();
+
+                for peer in &peers {
+                    // Skip if peer isn't a member (unless channel has no members listed,
+                    // which can happen in demo mode before membership is fully synced)
+                    if !channel_members.is_empty() && !channel_members.contains(&peer.authority_id) {
+                        continue;
+                    }
+
+                    let reply = format!("{}", msg.content);
+                    let now = PhysicalTimeHandler::new().physical_time_now_ms();
+
+                    let echo_msg = ChatMessage {
+                        id: format!("echo-{}-{}-{}", peer.name.to_lowercase(), msg.id, now),
+                        channel_id: msg.channel_id,
+                        sender_id: peer.authority_id,
+                        sender_name: peer.name.clone(),
+                        content: reply,
+                        timestamp: now,
+                        is_own: false,
+                        reply_to: None,
+                        is_read: false,
+                        delivery_status: Default::default(),
+                        epoch_hint: None,
+                        is_finalized: false,
+                    };
+
+                    echo_messages.push((peer.name.clone(), echo_msg));
+                }
+
+                // Emit all echo messages in a single atomic update
+                if !echo_messages.is_empty() {
                     let core = app_core.read().await;
-                    let homes = core.read(&*HOMES_SIGNAL).await.unwrap_or_default();
-                    homes
-                        .home_state(&msg.channel_id)
-                        .and_then(|home| home.context_id)
-                        .unwrap_or_else(|| {
-                            EffectContext::with_authority(bob_authority).context_id()
-                        })
-                };
+                    let mut updated_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
 
-                let reply = format!("received: {}", msg.content);
+                    for (peer_name, echo_msg) in echo_messages {
+                        tracing::debug!("Demo echo: adding {} echo to signal", peer_name);
+                        updated_state.apply_message(msg.channel_id, echo_msg);
+                    }
 
-                // Send echo reply through AMP effects
-                let params = ChannelSendParams {
-                    context: context_id,
-                    channel: msg.channel_id,
-                    sender: bob_authority, // Echo as if from Bob's perspective
-                    plaintext: reply.as_bytes().to_vec(),
-                    reply_to: None,
-                };
-
-                if let Err(err) = effects.send_message(params).await {
-                    tracing::warn!(
-                        error = %err,
-                        "Demo echo send failed"
-                    );
+                    if let Err(e) = core.emit(&*CHAT_SIGNAL, updated_state).await {
+                        tracing::warn!("Demo echo: failed to emit: {}", e);
+                    }
                 }
             }
         }

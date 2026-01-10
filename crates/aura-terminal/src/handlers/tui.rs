@@ -40,7 +40,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::cli::tui::TuiArgs;
 #[cfg(feature = "development")]
-use crate::demo::{spawn_amp_echo_listener, DemoSimulator};
+use crate::demo::{spawn_amp_echo_listener, DemoSimulator, EchoPeer};
 use crate::handlers::tui_stdio::{during_fullscreen, PreFullscreenStdio};
 use crate::tui::{
     context::{InitializedAppCore, IoContext},
@@ -680,12 +680,26 @@ async fn handle_tui_launch(
             let bob_device_id = device_id_for_account.to_string();
             let app_core_for_echo = app_core.raw().clone();
             let effects = agent.runtime().effects();
+
+            // Create echo peers for Alice and Carol
+            let peers = vec![
+                EchoPeer {
+                    authority_id: sim.alice_authority(),
+                    name: "Alice".to_string(),
+                },
+                EchoPeer {
+                    authority_id: sim.carol_authority(),
+                    name: "Carol".to_string(),
+                },
+            ];
+
             let _amp_echo_handle = spawn_amp_echo_listener(
                 shared_transport,
                 authority_id,
                 bob_device_id,
                 app_core_for_echo,
                 effects,
+                peers,
             );
         }
     }

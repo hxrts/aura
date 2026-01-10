@@ -15,7 +15,7 @@ mod development {
         let alice_parsed = ShareableInvitation::from_code(&hints.alice_invite_code)
             .expect("Alice's invitation code should be parseable");
         assert_eq!(alice_parsed.version, 1);
-        assert!(!alice_parsed.invitation_id.is_empty());
+        assert!(!alice_parsed.invitation_id.0.is_empty());
         // Verify the invitation type is Contact (not Guardian)
         match alice_parsed.invitation_type {
             aura_invitation::InvitationType::Contact { nickname } => {
@@ -31,7 +31,7 @@ mod development {
         let carol_parsed = ShareableInvitation::from_code(&hints.carol_invite_code)
             .expect("Carol's invitation code should be parseable");
         assert_eq!(carol_parsed.version, 1);
-        assert!(!carol_parsed.invitation_id.is_empty());
+        assert!(!carol_parsed.invitation_id.0.is_empty());
         match carol_parsed.invitation_type {
             aura_invitation::InvitationType::Contact { nickname } => {
                 assert_eq!(nickname, Some("Carol".to_string()));

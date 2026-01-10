@@ -23,7 +23,12 @@ use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::from_slice;
 use aura_core::TimeEffects;
 use aura_protocol::effects::TreeEffects;
-use aura_recovery::ceremony_runners::{execute_as as guardian_execute_as, GuardianCeremonyRole};
+use aura_recovery::ceremony_runners::{
+    execute_as as guardian_execute_as, AbortCeremony, CommitCeremony, GuardianCeremonyRole,
+    ProposeRotation,
+};
+// Note: RespondCeremony is a received message type (Guardian -> Initiator) so we don't need
+// to construct it - we only match on the type name suffix when processing received messages.
 use aura_recovery::guardian_ceremony::{
     CeremonyAbort, CeremonyCommit, CeremonyProposal, CeremonyResponse, CeremonyResponseMsg,
     GuardianRotationOp,
@@ -822,6 +827,7 @@ impl RecoveryServiceApi {
     }
 
     /// Execute guardian ceremony as initiator using choreographic protocol.
+    /// Returns the list of guardians who accepted (for recording in the tracker).
     pub async fn execute_guardian_ceremony_initiator(
         &self,
         ceremony_id: aura_recovery::CeremonyId,
@@ -829,8 +835,15 @@ impl RecoveryServiceApi {
         operation: GuardianRotationOp,
         guardians: Vec<AuthorityId>,
         key_packages: Vec<Vec<u8>>,
-    ) -> AgentResult<()> {
+    ) -> AgentResult<Vec<AuthorityId>> {
         use crate::core::AgentError;
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+
+        eprintln!(
+            "[DEBUG] execute_guardian_ceremony_initiator: guardians={:?}",
+            guardians.iter().map(|g| g.to_string()).collect::<Vec<_>>()
+        );
 
         if guardians.len() != key_packages.len() {
             return Err(AgentError::invalid(
@@ -839,19 +852,30 @@ impl RecoveryServiceApi {
         }
 
         let authority_id = self.handler.authority_context().authority_id();
-        let mut role_map = HashMap::new();
-        role_map.insert(GuardianCeremonyRole::Initiator, authority_id);
 
-        let guardian_roles: Vec<GuardianCeremonyRole> = (0..guardians.len())
-            .map(|i| GuardianCeremonyRole::Guardian(i as u32))
-            .collect();
-
-        for (idx, guardian_id) in guardians.iter().enumerate() {
-            role_map.insert(GuardianCeremonyRole::Guardian(idx as u32), *guardian_id);
+        // The guardian ceremony protocol supports exactly 2 guardians
+        if guardians.len() != 2 {
+            return Err(AgentError::invalid(format!(
+                "Guardian ceremony requires exactly 2 guardians, got {}",
+                guardians.len()
+            )));
         }
 
+        // Sort guardians for deterministic role assignment. Both initiator and guardians
+        // must use the same ordering: sorted_guardians[0] = Guardian1, sorted_guardians[1] = Guardian2.
+        // Sort pairs of (guardian, key_package) to keep them matched.
+        let mut guardian_packages: Vec<_> = guardians.into_iter().zip(key_packages).collect();
+        guardian_packages.sort_by_key(|(g, _)| *g);
+        let (sorted_guardians, sorted_key_packages): (Vec<_>, Vec<_>) =
+            guardian_packages.into_iter().unzip();
+
+        let mut role_map = HashMap::new();
+        role_map.insert(GuardianCeremonyRole::Initiator, authority_id);
+        role_map.insert(GuardianCeremonyRole::Guardian1, sorted_guardians[0]);
+        role_map.insert(GuardianCeremonyRole::Guardian2, sorted_guardians[1]);
+
         let mut proposals = VecDeque::new();
-        for (_guardian_id, key_package) in guardians.iter().zip(key_packages.iter()) {
+        for key_package in sorted_key_packages.iter() {
             let nonce_bytes = self.effects.random_bytes(12).await;
             let mut encryption_nonce = [0u8; 12];
             encryption_nonce.copy_from_slice(&nonce_bytes[..12]);
@@ -868,10 +892,16 @@ impl RecoveryServiceApi {
         }
 
         let threshold_k = operation.threshold_k as usize;
-        let proposal_type = std::any::type_name::<CeremonyProposal>();
-        let commit_type = std::any::type_name::<CeremonyCommit>();
-        let abort_type = std::any::type_name::<CeremonyAbort>();
-        let response_type = std::any::type_name::<CeremonyResponseMsg>();
+        // Shared state to capture accepted guardians for return
+        let accepted_guardians: Arc<RwLock<Vec<AuthorityId>>> = Arc::new(RwLock::new(Vec::new()));
+        let accepted_guardians_capture = accepted_guardians.clone();
+
+        // The choreography macro generates wrapper types with these message labels:
+        // - ProposeRotation (wraps CeremonyProposal)
+        // - RespondCeremony (wraps CeremonyResponseMsg)
+        // - CommitCeremony (wraps CeremonyCommit)
+        // - AbortCeremony (wraps CeremonyAbort)
+        // We match on the suffix since the full path varies.
 
         let mut adapter = AuraProtocolAdapter::new(
             self.effects.clone(),
@@ -879,18 +909,23 @@ impl RecoveryServiceApi {
             GuardianCeremonyRole::Initiator,
             role_map,
         )
-        .with_role_family("Guardian", guardian_roles)
         .with_message_provider(move |request, received| {
-            if request.type_name == proposal_type {
-                return proposals
-                    .pop_front()
-                    .map(|proposal| Box::new(proposal) as Box<dyn std::any::Any + Send>);
+            eprintln!(
+                "[DEBUG] message_provider called for type: {}, received.len={}",
+                request.type_name,
+                received.len()
+            );
+            // Match on message labels (suffixes) since the macro generates wrapper types
+            if request.type_name.ends_with("ProposeRotation") {
+                return proposals.pop_front().map(|proposal| {
+                    Box::new(ProposeRotation(proposal)) as Box<dyn std::any::Any + Send>
+                });
             }
 
-            if request.type_name == commit_type {
+            if request.type_name.ends_with("CommitCeremony") {
                 let mut accepted = Vec::new();
                 for msg in received {
-                    if msg.type_name == response_type {
+                    if msg.type_name.ends_with("RespondCeremony") {
                         if let Ok(response) = from_slice::<CeremonyResponseMsg>(&msg.bytes) {
                             if response.response == CeremonyResponse::Accept {
                                 accepted.push(response.guardian_id);
@@ -898,19 +933,23 @@ impl RecoveryServiceApi {
                         }
                     }
                 }
+                // Capture accepted guardians in shared state
+                if let Ok(mut guard) = accepted_guardians_capture.try_write() {
+                    *guard = accepted.clone();
+                }
                 let commit = CeremonyCommit {
                     ceremony_id,
                     new_epoch: operation.new_epoch,
                     threshold_signature: Vec::new(),
                     participants: accepted,
                 };
-                return Some(Box::new(commit));
+                return Some(Box::new(CommitCeremony(commit)));
             }
 
-            if request.type_name == abort_type {
+            if request.type_name.ends_with("AbortCeremony") {
                 let mut declined = false;
                 for msg in received {
-                    if msg.type_name == response_type {
+                    if msg.type_name.ends_with("RespondCeremony") {
                         if let Ok(response) = from_slice::<CeremonyResponseMsg>(&msg.bytes) {
                             if response.response == CeremonyResponse::Decline {
                                 declined = true;
@@ -928,7 +967,7 @@ impl RecoveryServiceApi {
                     ceremony_id,
                     reason: reason.to_string(),
                 };
-                return Some(Box::new(abort));
+                return Some(Box::new(AbortCeremony(abort)));
             }
 
             None
@@ -937,7 +976,7 @@ impl RecoveryServiceApi {
             let mut accepted = 0usize;
             let mut declined = 0usize;
             for msg in received {
-                if msg.type_name == response_type {
+                if msg.type_name.ends_with("RespondCeremony") {
                     if let Ok(response) = from_slice::<CeremonyResponseMsg>(&msg.bytes) {
                         match response.response {
                             CeremonyResponse::Accept => accepted += 1,
@@ -948,40 +987,81 @@ impl RecoveryServiceApi {
                 }
             }
             if declined > 0 {
-                Some("Abort".to_string())
+                Some("cancel".to_string())
             } else if accepted >= threshold_k {
-                Some("Commit".to_string())
+                Some("finalize".to_string())
             } else {
-                Some("Abort".to_string())
+                Some("cancel".to_string())
             }
         });
 
         let session_id = Self::ceremony_session_id(ceremony_id);
+        eprintln!("[DEBUG] starting session with session_id={}", session_id);
         adapter
             .start_session(session_id)
             .await
             .map_err(|e| AgentError::internal(format!("guardian ceremony start failed: {e}")))?;
+        eprintln!("[DEBUG] session started, executing guardian_execute_as...");
 
-        let result = guardian_execute_as(GuardianCeremonyRole::Initiator, &mut adapter)
+        guardian_execute_as(GuardianCeremonyRole::Initiator, &mut adapter)
             .await
-            .map_err(|e| AgentError::internal(format!("guardian ceremony failed: {e}")));
+            .map_err(|e| {
+                let error_str = e.to_string();
+                eprintln!("[DEBUG] guardian_execute_as failed with: {}", error_str);
+                // Detect peer connectivity issues and provide actionable error message
+                if error_str.contains("message provider returned None")
+                    || error_str.contains("Protocol violation")
+                    || error_str.contains("Transport error")
+                    || error_str.contains("No message available")
+                {
+                    AgentError::internal(
+                        "guardian ceremony failed: no responses received from guardians. \
+                         Ensure guardian peers are online and connected."
+                            .to_string(),
+                    )
+                } else {
+                    AgentError::internal(format!("guardian ceremony failed: {e}"))
+                }
+            })?;
 
         let _ = adapter.end_session().await;
-        result
+
+        // Return the captured accepted guardians
+        let accepted = accepted_guardians.read().await.clone();
+        Ok(accepted)
     }
 
     /// Execute guardian ceremony as a guardian (accept/decline).
+    ///
+    /// The `role_index` parameter specifies which guardian role this peer plays:
+    /// - 0 = Guardian1
+    /// - 1 = Guardian2
     pub async fn execute_guardian_ceremony_guardian(
         &self,
         initiator_id: AuthorityId,
         ceremony_id: aura_recovery::CeremonyId,
         response: CeremonyResponse,
+        role_index: usize,
     ) -> AgentResult<()> {
         use crate::core::AgentError;
 
         let authority_id = self.handler.authority_context().authority_id();
+
+        // Determine which guardian role this peer plays
+        let guardian_role = match role_index {
+            0 => GuardianCeremonyRole::Guardian1,
+            1 => GuardianCeremonyRole::Guardian2,
+            _ => {
+                return Err(AgentError::invalid(format!(
+                    "Invalid guardian role index: {} (must be 0 or 1)",
+                    role_index
+                )))
+            }
+        };
+
         let mut role_map = HashMap::new();
         role_map.insert(GuardianCeremonyRole::Initiator, initiator_id);
+        role_map.insert(guardian_role, authority_id);
 
         let response_type = std::any::type_name::<CeremonyResponseMsg>();
         let response_msg = CeremonyResponseMsg {
@@ -994,7 +1074,7 @@ impl RecoveryServiceApi {
         let mut adapter = AuraProtocolAdapter::new(
             self.effects.clone(),
             authority_id,
-            GuardianCeremonyRole::Guardian(0),
+            guardian_role,
             role_map,
         )
         .with_message_provider(move |request, _received| {
@@ -1010,7 +1090,7 @@ impl RecoveryServiceApi {
             .await
             .map_err(|e| AgentError::internal(format!("guardian ceremony start failed: {e}")))?;
 
-        let result = guardian_execute_as(GuardianCeremonyRole::Guardian(0), &mut adapter)
+        let result = guardian_execute_as(guardian_role, &mut adapter)
             .await
             .map_err(|e| AgentError::internal(format!("guardian ceremony failed: {e}")));
 
@@ -1100,7 +1180,21 @@ impl RecoveryServiceApi {
 
         let result = setup_execute_as(GuardianSetupRole::SetupInitiator, &mut adapter)
             .await
-            .map_err(|e| AgentError::internal(format!("guardian setup failed: {e}")));
+            .map_err(|e| {
+                let error_str = e.to_string();
+                // Detect peer connectivity issues and provide actionable error message
+                if error_str.contains("message provider returned None")
+                    || error_str.contains("Protocol violation")
+                {
+                    AgentError::internal(
+                        "guardian setup failed: no responses received from guardians. \
+                         Ensure guardian peers are online and connected."
+                            .to_string(),
+                    )
+                } else {
+                    AgentError::internal(format!("guardian setup failed: {e}"))
+                }
+            });
 
         let acceptances =
             collect_guardian_acceptances(adapter.received_messages(), acceptance_type);

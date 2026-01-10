@@ -256,19 +256,43 @@ impl InvitationHandler {
             .get_invitation_with_storage(effects, invitation_id)
             .await
         {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                status = ?invitation.status,
+                sender = %invitation.sender_id,
+                "Validating invitation for accept"
+            );
+
             if !invitation.is_pending() {
+                tracing::warn!(
+                    invitation_id = %invitation_id,
+                    status = ?invitation.status,
+                    sender = %invitation.sender_id,
+                    "Invitation is not pending"
+                );
                 return Err(AgentError::invalid(format!(
-                    "Invitation {} is not pending (status: {:?})",
-                    invitation_id, invitation.status
+                    "Invitation {} is not pending (status: {:?}, sender: {})",
+                    invitation_id, invitation.status, invitation.sender_id
                 )));
             }
 
             if invitation.is_expired(now_ms) {
+                tracing::warn!(
+                    invitation_id = %invitation_id,
+                    expires_at = ?invitation.expires_at,
+                    now_ms = now_ms,
+                    "Invitation has expired"
+                );
                 return Err(AgentError::invalid(format!(
-                    "Invitation {} has expired",
-                    invitation_id
+                    "Invitation {} has expired (expires_at: {:?}, now: {})",
+                    invitation_id, invitation.expires_at, now_ms
                 )));
             }
+        } else {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                "Invitation not found in cache or storage, proceeding anyway"
+            );
         }
 
         Ok(())
@@ -398,6 +422,12 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
         invitation_id: &InvitationId,
     ) -> AgentResult<InvitationResult> {
+        tracing::debug!(
+            invitation_id = %invitation_id,
+            authority = %self.context.authority.authority_id(),
+            "Accepting invitation"
+        );
+
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
         let now_ms = effects.current_timestamp().await.unwrap_or(0);
@@ -409,6 +439,13 @@ impl InvitationHandler {
         let outcome = self
             .service
             .prepare_accept_invitation(&snapshot, invitation_id);
+
+        tracing::debug!(
+            invitation_id = %invitation_id,
+            allowed = %outcome.is_allowed(),
+            denied = %outcome.is_denied(),
+            "Guard outcome for invitation accept"
+        );
 
         // Execute the outcome
         execute_guard_outcome(outcome, &self.context.authority, effects.as_ref()).await?;
@@ -427,12 +464,20 @@ impl InvitationHandler {
                 context_id,
                 owner_id: self.context.authority.authority_id(),
                 contact_id,
-                nickname,
+                nickname: nickname.clone(),
                 added_at: PhysicalTime {
                     ts_ms: now_ms,
                     uncertainty: None,
                 },
             };
+
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                contact_id = %contact_id,
+                nickname = %nickname,
+                context_id = %context_id,
+                "Committing ContactFact::Added for accepted invitation"
+            );
 
             effects
                 .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID, fact.to_bytes())
@@ -440,6 +485,22 @@ impl InvitationHandler {
                 .map_err(|e| {
                     crate::core::AgentError::effects(format!("commit contact fact: {e}"))
                 })?;
+
+            // Wait for the reactive scheduler to process the committed fact.
+            // This ensures the contact appears in the UI before we return "success".
+            // Without this, there's a race condition where the TUI refreshes before
+            // the scheduler has processed the new ContactFact.
+            effects.await_next_view_update().await;
+
+            tracing::debug!(
+                contact_id = %contact_id,
+                "ContactFact committed successfully"
+            );
+        } else {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                "No contact resolution for invitation (not a contact invitation or already resolved)"
+            );
         }
 
         if let Some(channel_invite) = self
@@ -639,8 +700,20 @@ impl InvitationHandler {
     ) -> AgentResult<Option<(AuthorityId, String)>> {
         let own_id = self.context.authority.authority_id();
 
+        tracing::debug!(
+            invitation_id = %invitation_id,
+            own_authority = %own_id,
+            "resolve_contact_invitation: starting lookup"
+        );
+
         // First try the local cache (fast path when the same handler instance is reused).
         if let Some(inv) = self.invitation_cache.get_invitation(invitation_id).await {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                invitation_type = ?inv.invitation_type,
+                sender_id = %inv.sender_id,
+                "resolve_contact_invitation: found in cache"
+            );
             if let InvitationType::Contact { nickname } = &inv.invitation_type {
                 let other = if inv.sender_id == own_id {
                     inv.receiver_id
@@ -648,8 +721,18 @@ impl InvitationHandler {
                     inv.sender_id
                 };
                 let nickname = nickname.clone().unwrap_or_else(|| other.to_string());
+                tracing::debug!(
+                    contact_id = %other,
+                    nickname = %nickname,
+                    "resolve_contact_invitation: resolved from cache"
+                );
                 return Ok(Some((other, nickname)));
             }
+        } else {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                "resolve_contact_invitation: not found in cache"
+            );
         }
 
         // Next try the persisted imported invitation store (covers out-of-band imports across
@@ -657,13 +740,29 @@ impl InvitationHandler {
         if let Some(shareable) =
             Self::load_imported_invitation(effects, own_id, invitation_id).await
         {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                invitation_type = ?shareable.invitation_type,
+                sender_id = %shareable.sender_id,
+                "resolve_contact_invitation: found in persisted store"
+            );
             if let InvitationType::Contact { nickname } = shareable.invitation_type {
                 if shareable.sender_id != own_id {
                     let other = shareable.sender_id;
                     let nickname = nickname.unwrap_or_else(|| other.to_string());
+                    tracing::debug!(
+                        contact_id = %other,
+                        nickname = %nickname,
+                        "resolve_contact_invitation: resolved from persisted store"
+                    );
                     return Ok(Some((other, nickname)));
                 }
             }
+        } else {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                "resolve_contact_invitation: not found in persisted store"
+            );
         }
 
         // Fallback: attempt to resolve from committed InvitationFact::Sent.
@@ -907,6 +1006,13 @@ impl InvitationHandler {
         let shareable = ShareableInvitation::from_code(code)
             .map_err(|e| crate::core::AgentError::invalid(format!("{e}")))?;
 
+        tracing::debug!(
+            invitation_id = %shareable.invitation_id,
+            sender = %shareable.sender_id,
+            invitation_type = ?shareable.invitation_type,
+            "Importing invitation code"
+        );
+
         // Persist the shareable invitation so later operations (accept/decline) can resolve it
         // even if AuraAgent constructs a fresh InvitationService/InvitationHandler.
         Self::persist_imported_invitation(
@@ -920,6 +1026,11 @@ impl InvitationHandler {
 
         // Fast path: already cached.
         if let Some(existing) = self.invitation_cache.get_invitation(&invitation_id).await {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                status = ?existing.status,
+                "Returning existing cached invitation"
+            );
             return Ok(existing);
         }
 
@@ -2408,5 +2519,118 @@ mod tests {
         let code = shareable.to_code();
         let decoded = ShareableInvitation::from_code(&code).unwrap();
         assert_eq!(decoded.invitation_id, invitation.invitation_id);
+    }
+
+    /// Test that importing and accepting multiple contact invitations works sequentially.
+    ///
+    /// This test mimics the TUI demo mode flow where:
+    /// 1. Alice's invitation is imported and accepted
+    /// 2. Carol's invitation is imported and accepted
+    ///
+    /// Both should succeed without interfering with each other.
+    #[tokio::test]
+    async fn importing_multiple_contact_invitations_sequentially() {
+        let own_authority = AuthorityId::new_from_entropy([150u8; 32]);
+        let config = AgentConfig::default();
+        let effects =
+            Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
+
+        let authority_context = AuthorityContext::new(own_authority);
+        let handler = InvitationHandler::new(authority_context).unwrap();
+
+        // Create Alice's invitation (matching DemoHints pattern)
+        let alice_sender_id = AuthorityId::new_from_entropy([151u8; 32]);
+        let alice_shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-demo-alice-sequential"),
+            sender_id: alice_sender_id,
+            invitation_type: InvitationType::Contact {
+                nickname: Some("Alice".to_string()),
+            },
+            expires_at: None,
+            message: Some("Contact invitation from Alice (demo)".to_string()),
+        };
+        let alice_code = alice_shareable.to_code();
+
+        // Create Carol's invitation (matching DemoHints pattern - different seed)
+        let carol_sender_id = AuthorityId::new_from_entropy([152u8; 32]);
+        let carol_shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-demo-carol-sequential"),
+            sender_id: carol_sender_id,
+            invitation_type: InvitationType::Contact {
+                nickname: Some("Carol".to_string()),
+            },
+            expires_at: None,
+            message: Some("Contact invitation from Carol (demo)".to_string()),
+        };
+        let carol_code = carol_shareable.to_code();
+
+        // Import and accept Alice's invitation
+        let alice_imported = handler
+            .import_invitation_code(&effects, &alice_code)
+            .await
+            .expect("Alice import should succeed");
+        assert_eq!(alice_imported.sender_id, alice_sender_id);
+        assert_eq!(alice_imported.invitation_id.as_str(), "inv-demo-alice-sequential");
+
+        handler
+            .accept_invitation(effects.clone(), &alice_imported.invitation_id)
+            .await
+            .expect("Alice accept should succeed");
+
+        // Import and accept Carol's invitation (this is the step that was failing in TUI)
+        let carol_imported = handler
+            .import_invitation_code(&effects, &carol_code)
+            .await
+            .expect("Carol import should succeed");
+        assert_eq!(carol_imported.sender_id, carol_sender_id);
+        assert_eq!(carol_imported.invitation_id.as_str(), "inv-demo-carol-sequential");
+
+        // This is the critical assertion - Carol's accept should work after Alice's
+        handler
+            .accept_invitation(effects.clone(), &carol_imported.invitation_id)
+            .await
+            .expect("Carol accept should succeed after Alice");
+
+        // Verify both contacts were added
+        let committed = effects.load_committed_facts(own_authority).await.unwrap();
+
+        let mut contact_facts: Vec<ContactFact> = Vec::new();
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+
+            if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
+                continue;
+            }
+
+            if let Some(contact_fact) = ContactFact::from_envelope(&envelope) {
+                contact_facts.push(contact_fact);
+            }
+        }
+
+        // Verify we have both Alice and Carol as contacts
+        // (other tests may add additional contact facts, so we just verify these two are present)
+        let contact_ids: Vec<AuthorityId> = contact_facts
+            .iter()
+            .filter_map(|f| match f {
+                ContactFact::Added { contact_id, .. } => Some(*contact_id),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            contact_ids.contains(&alice_sender_id),
+            "Alice should be in contacts, found: {:?}",
+            contact_ids
+        );
+        assert!(
+            contact_ids.contains(&carol_sender_id),
+            "Carol should be in contacts, found: {:?}",
+            contact_ids
+        );
     }
 }

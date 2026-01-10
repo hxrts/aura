@@ -107,6 +107,102 @@ pub enum ViewUpdate {
     },
 }
 
+/// Result of committing facts that allows awaiting reactive processing.
+///
+/// This type enforces explicit handling of the asynchronous gap between
+/// fact commitment and reactive view updates. Callers must choose between:
+/// - `await_processed()`: Wait for the reactive scheduler to process the fact
+/// - `fire_and_forget()`: Explicitly acknowledge they don't need to wait
+///
+/// # Example
+///
+/// ```ignore
+/// let result = effects.commit_contact_fact(fact).await?;
+///
+/// // Option 1: Wait for views to update (typesafe - compiler enforces choice)
+/// result.await_processed().await?;
+///
+/// // Option 2: Explicitly acknowledge we don't need to wait
+/// result.fire_and_forget();
+/// ```
+pub struct FactCommitResult<T> {
+    /// The committed fact(s)
+    pub value: T,
+    /// Subscription to view updates for awaiting processing
+    update_rx: Option<broadcast::Receiver<ViewUpdate>>,
+}
+
+/// Error when waiting for fact processing
+#[derive(Debug, Clone)]
+pub enum FactCommitError {
+    /// The reactive scheduler was shut down
+    SchedulerShutdown,
+}
+
+impl std::fmt::Display for FactCommitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SchedulerShutdown => write!(f, "Reactive scheduler shut down"),
+        }
+    }
+}
+
+impl std::error::Error for FactCommitError {}
+
+impl<T> FactCommitResult<T> {
+    /// Create a new commit result with view update subscription
+    pub fn new(value: T, update_rx: Option<broadcast::Receiver<ViewUpdate>>) -> Self {
+        Self { value, update_rx }
+    }
+
+    /// Create a commit result without view update subscription (fire-and-forget only)
+    pub fn without_subscription(value: T) -> Self {
+        Self {
+            value,
+            update_rx: None,
+        }
+    }
+
+    /// Wait for the reactive scheduler to process this fact.
+    ///
+    /// This waits until the next `ViewUpdate::Batch` is received, which
+    /// indicates the scheduler has processed at least one batch of facts
+    /// (including this one, since facts are processed in order).
+    ///
+    /// Returns immediately if no view update subscription is available.
+    pub async fn await_processed(mut self) -> Result<T, FactCommitError> {
+        if let Some(ref mut rx) = self.update_rx {
+            loop {
+                match rx.recv().await {
+                    Ok(ViewUpdate::Batch { .. }) => return Ok(self.value),
+                    Ok(_) => continue, // Wait for Batch specifically
+                    Err(broadcast::error::RecvError::Closed) => {
+                        return Err(FactCommitError::SchedulerShutdown)
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+        } else {
+            // No subscription available - return immediately
+            // This happens in tests or when reactive pipeline isn't running
+            Ok(self.value)
+        }
+    }
+
+    /// Explicitly acknowledge that we don't need to wait for processing.
+    ///
+    /// This consumes the result without waiting, making it clear at the
+    /// call site that the caller is aware of the async processing gap.
+    pub fn fire_and_forget(self) -> T {
+        self.value
+    }
+
+    /// Get a reference to the committed value without consuming the result.
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+}
+
 /// Trait for reactive views that can be updated from journal facts
 pub trait ReactiveView: Send + Sync {
     /// Update the view based on new facts
@@ -231,7 +327,7 @@ pub struct ReactiveScheduler {
 impl ReactiveScheduler {
     /// Create a new reactive scheduler
     ///
-    /// Returns a tuple of (scheduler, fact_sender, shutdown_sender)
+    /// Returns a tuple of (scheduler, fact_sender, shutdown_sender, update_sender)
     ///
     /// # Parameters
     /// - `config`: Scheduler configuration
@@ -241,7 +337,12 @@ impl ReactiveScheduler {
         config: SchedulerConfig,
         fact_registry: Arc<FactRegistry>,
         time_effects: Arc<dyn PhysicalTimeEffects>,
-    ) -> (Self, mpsc::Sender<FactSource>, mpsc::Sender<()>) {
+    ) -> (
+        Self,
+        mpsc::Sender<FactSource>,
+        mpsc::Sender<()>,
+        broadcast::Sender<ViewUpdate>,
+    ) {
         let (fact_tx, fact_rx) = mpsc::channel(256);
         let (update_tx, _) = broadcast::channel(1024);
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
@@ -249,14 +350,14 @@ impl ReactiveScheduler {
             config,
             views: Vec::new(),
             fact_rx,
-            update_tx,
+            update_tx: update_tx.clone(),
             shutdown_rx,
             stats: Arc::new(RwLock::new(SchedulerStats::default())),
             fact_registry,
             time_effects,
         };
 
-        (scheduler, fact_tx, shutdown_tx)
+        (scheduler, fact_tx, shutdown_tx, update_tx)
     }
 
     /// Register a view with the scheduler
@@ -835,7 +936,9 @@ mod tests {
     ) {
         use aura_effects::time::PhysicalTimeHandler;
         let time_effects = Arc::new(PhysicalTimeHandler);
-        ReactiveScheduler::new(config, Arc::new(build_fact_registry()), time_effects)
+        let (scheduler, fact_tx, shutdown_tx, _update_tx) =
+            ReactiveScheduler::new(config, Arc::new(build_fact_registry()), time_effects);
+        (scheduler, fact_tx, shutdown_tx)
     }
 
     #[test]

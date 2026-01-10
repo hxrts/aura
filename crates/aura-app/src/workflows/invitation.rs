@@ -147,7 +147,7 @@ use async_lock::RwLock;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 #[cfg(feature = "signals")]
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::AuthorityId;
+use aura_core::identifiers::{AuthorityId, InvitationId};
 use aura_core::AuraError;
 use std::sync::Arc;
 
@@ -290,16 +290,25 @@ pub async fn import_invitation_details(
 /// **Signal pattern**: Read-only operation (no emission)
 ///
 /// This method is implemented via RuntimeBridge.export_invitation().
+/// Takes a typed InvitationId, returns the shareable invitation code as String.
 pub async fn export_invitation(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation_id: &str,
+    invitation_id: &InvitationId,
 ) -> Result<String, AuraError> {
     let runtime = require_runtime(app_core).await?;
 
     runtime
-        .export_invitation(invitation_id)
+        .export_invitation(invitation_id.as_str())
         .await
         .map_err(|e| AuraError::agent(format!("Failed to export invitation: {e}")))
+}
+
+/// Export an invitation by string ID (legacy/convenience API).
+pub async fn export_invitation_by_str(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+) -> Result<String, AuraError> {
+    export_invitation(app_core, &InvitationId::new(invitation_id)).await
 }
 
 /// Get current invitations state
@@ -317,12 +326,12 @@ pub async fn list_invitations(app_core: &Arc<RwLock<AppCore>>) -> InvitationsSta
 
 /// Accept an invitation
 ///
-/// **What it does**: Accepts a received invitation via RuntimeBridge
+/// **What it does**: Accepts a received invitation via RuntimeBridge using typed InvitationId
 /// **Returns**: Unit result
 /// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn accept_invitation(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation_id: &str,
+    invitation_id: &InvitationId,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
@@ -345,7 +354,7 @@ pub async fn accept_invitation(
     };
 
     runtime
-        .accept_invitation(invitation_id)
+        .accept_invitation(invitation_id.as_str())
         .await
         .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
 
@@ -385,38 +394,62 @@ pub async fn accept_invitation(
     Ok(())
 }
 
-/// Decline an invitation
+/// Accept an invitation by string ID (legacy/convenience API).
+pub async fn accept_invitation_by_str(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+) -> Result<(), AuraError> {
+    accept_invitation(app_core, &InvitationId::new(invitation_id)).await
+}
+
+/// Decline an invitation using typed InvitationId
 ///
 /// **What it does**: Declines a received invitation via RuntimeBridge
 /// **Returns**: Unit result
 /// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn decline_invitation(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation_id: &str,
+    invitation_id: &InvitationId,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
     runtime
-        .decline_invitation(invitation_id)
+        .decline_invitation(invitation_id.as_str())
         .await
         .map_err(|e| AuraError::agent(format!("Failed to decline invitation: {e}")))
 }
 
-/// Cancel an invitation
+/// Decline an invitation by string ID (legacy/convenience API).
+pub async fn decline_invitation_by_str(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+) -> Result<(), AuraError> {
+    decline_invitation(app_core, &InvitationId::new(invitation_id)).await
+}
+
+/// Cancel an invitation using typed InvitationId
 ///
 /// **What it does**: Cancels a sent invitation via RuntimeBridge
 /// **Returns**: Unit result
 /// **Signal pattern**: RuntimeBridge handles signal emission
 pub async fn cancel_invitation(
     app_core: &Arc<RwLock<AppCore>>,
-    invitation_id: &str,
+    invitation_id: &InvitationId,
 ) -> Result<(), AuraError> {
     let runtime = require_runtime(app_core).await?;
 
     runtime
-        .cancel_invitation(invitation_id)
+        .cancel_invitation(invitation_id.as_str())
         .await
         .map_err(|e| AuraError::agent(format!("Failed to cancel invitation: {e}")))
+}
+
+/// Cancel an invitation by string ID (legacy/convenience API).
+pub async fn cancel_invitation_by_str(
+    app_core: &Arc<RwLock<AppCore>>,
+    invitation_id: &str,
+) -> Result<(), AuraError> {
+    cancel_invitation(app_core, &InvitationId::new(invitation_id)).await
 }
 
 /// Import an invitation from a shareable code
@@ -575,9 +608,10 @@ pub fn format_invitation_type_detailed(inv_type: InvitationType, context: Option
 ///
 /// This is used by UI to quickly accept a pending home invitation without
 /// requiring the user to select a specific invitation ID.
+/// Returns the typed InvitationId of the accepted invitation.
 pub async fn accept_pending_home_invitation(
     app_core: &Arc<RwLock<AppCore>>,
-) -> Result<String, AuraError> {
+) -> Result<InvitationId, AuraError> {
     let runtime = require_runtime(app_core).await?;
 
     // Get pending invitations
@@ -593,7 +627,7 @@ pub async fn accept_pending_home_invitation(
     match home_invitation {
         Some(inv) => {
             runtime
-                .accept_invitation(&inv.invitation_id)
+                .accept_invitation(inv.invitation_id.as_str())
                 .await
                 .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
             Ok(inv.invitation_id.clone())

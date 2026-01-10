@@ -3,8 +3,10 @@
 //! This module contains query operations that are portable across all frontends.
 //! These are read-only operations that query contact and channel state.
 
+use crate::signal_defs::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::parse::parse_authority_id;
+use crate::workflows::signals::read_signal;
 use crate::workflows::snapshot_policy::full_snapshot;
 use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
@@ -117,10 +119,20 @@ pub async fn get_user_info(
 
 /// Get list of all contacts
 ///
-/// **What it does**: Queries all contacts from snapshot
+/// **What it does**: Queries all contacts from CONTACTS_SIGNAL (preferred) or ViewState snapshot
 /// **Returns**: List of contacts
 /// **Signal pattern**: Read-only operation (no emission)
+///
+/// This function reads from CONTACTS_SIGNAL first, which is populated by the agent's
+/// reactive pipeline. Falls back to ViewState snapshot if the signal is not available.
 pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
+    // Try to read from CONTACTS_SIGNAL first (populated by agent's reactive pipeline)
+    if let Ok(contacts_state) = read_signal(app_core, &*CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME).await
+    {
+        return contacts_state.all_contacts().cloned().collect();
+    }
+
+    // Fallback to ViewState snapshot (for offline/non-agent mode)
     let snapshot = full_snapshot(app_core).await;
     snapshot.contacts.all_contacts().cloned().collect()
 }
