@@ -1,0 +1,10 @@
+module invitation_device_enrollment exposing (DeviceEnrollment)
+
+protocol DeviceEnrollment =
+  roles Initiator, Invitee
+
+  Initiator[guard_capability = "invitation:device:enroll", flow_cost = 2, journal_facts = "InvitationFact::DeviceEnrollmentRequested"] -> Invitee : DeviceEnrollmentRequest(crate::DeviceEnrollmentRequest)
+
+  Invitee[guard_capability = "invitation:device:accept", flow_cost = 2, journal_facts = "InvitationFact::DeviceEnrollmentAccepted"] -> Initiator : DeviceEnrollmentAccept(crate::DeviceEnrollmentAccept)
+
+  Initiator[guard_capability = "invitation:device:enroll", flow_cost = 1, journal_facts = "InvitationFact::DeviceEnrollmentConfirmed"] -> Invitee : DeviceEnrollmentConfirm(crate::DeviceEnrollmentConfirm)

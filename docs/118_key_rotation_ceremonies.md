@@ -137,9 +137,33 @@ Fast paths (A1/A2) are provisional. Durable shared state must be finalized by A3
 - Pending epoch becomes active.
 - Guardian-binding facts are emitted (fact-based journals).
 
-### Device enrollment (“Add device”)
+### Device enrollment ("Add device")
 
-**What changes**: The device participant set for the *account authority* (a membership change under the account’s commitment tree) and the signing configuration associated with that membership.
+**What changes**: The device participant set for the *account authority* (a membership change under the account's commitment tree) and the signing configuration associated with that membership.
+
+**Choreography**: Device enrollment uses the `DeviceEnrollment` choreography with a 3-message flow:
+
+```
+Initiator ──DeviceEnrollmentRequest──> Invitee
+Initiator <──DeviceEnrollmentAccept─── Invitee
+Initiator ──DeviceEnrollmentConfirm──> Invitee
+```
+
+This mirrors the `GuardianInvitation` pattern. The choreography is defined in `crates/aura-invitation/src/protocol.device_enrollment.choreo` with guards:
+- `guard_capability = "invitation:device:enroll"` for Initiator messages
+- `guard_capability = "invitation:device:accept"` for Invitee response
+
+**Two-step exchange**: Device enrollment requires a two-phase out-of-band exchange:
+
+1. **Mobile creates authority first**: The new device creates its own authority on first launch and displays an authority QR code or identifier.
+2. **Bob scans/enters Mobile's authority**: The initiating device captures the invitee's authority_id (via QR scan or manual entry).
+3. **Bob creates addressed invitation**: The enrollment invitation is created with `receiver_id` set to Mobile's authority.
+4. **Choreography runs**: The DeviceEnrollment protocol executes between the two known authorities.
+
+This approach differs from legacy "bearer token" invitations where the receiver was unknown. With addressed invitations:
+- The invitation is cryptographically bound to the specific invitee authority
+- No intermediate rendezvous is required for authority discovery
+- The choreography mirrors inter-authority communication patterns used elsewhere
 
 **Acceptance**: The invited device runtime must accept and install the share. Depending on policy, existing participants may also need to approve (e.g., current device + guardians).
 

@@ -43,7 +43,16 @@ use aura_invitation::protocol::guardian::rumpsteak_session_types_invitation_guar
     GuardianConfirm as GuardianInvitationConfirm,
     GuardianRequest as GuardianInvitationRequest,
 };
+use aura_invitation::protocol::device_enrollment_runners::{
+    execute_as as device_enrollment_execute_as, DeviceEnrollmentRole,
+};
+use aura_invitation::protocol::device_enrollment::rumpsteak_session_types_invitation_device_enrollment::message_wrappers::{
+    DeviceEnrollmentAccept as DeviceEnrollmentAcceptWrapper,
+    DeviceEnrollmentConfirm as DeviceEnrollmentConfirmWrapper,
+    DeviceEnrollmentRequest as DeviceEnrollmentRequestWrapper,
+};
 use aura_invitation::{
+    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest,
     GuardianAccept, GuardianConfirm, GuardianRequest, InvitationAck, InvitationOffer,
     InvitationResponse,
 };
@@ -407,10 +416,14 @@ impl InvitationHandler {
                 self.execute_guardian_invitation_principal(effects.clone(), &invitation)
                     .await?;
             }
-            // Device enrollment invitations are out-of-band (QR code transfer).
-            // The new device doesn't exist yet, so skip the exchange choreography.
             InvitationType::DeviceEnrollment { .. } => {
-                // No exchange needed - invitation will be imported on the new device
+                // For the two-step exchange flow (when invitee has their own authority),
+                // run the device enrollment choreography. For legacy self-addressed
+                // invitations, skip (invitee will accept via import).
+                if invitation.receiver_id != invitation.sender_id {
+                    self.execute_device_enrollment_initiator(effects.clone(), &invitation)
+                        .await?;
+                }
             }
             _ => {
                 self.execute_invitation_exchange_sender(effects.clone(), &invitation)
@@ -681,6 +694,16 @@ impl InvitationHandler {
                     let _ = self
                         .execute_guardian_invitation_guardian(effects.clone(), &invitation)
                         .await;
+                }
+                InvitationType::DeviceEnrollment { .. } => {
+                    // For the two-step exchange flow (when invitee has their own authority),
+                    // run the device enrollment choreography as invitee. For legacy self-addressed
+                    // invitations, acceptance was already sent via direct envelope.
+                    if invitation.receiver_id != invitation.sender_id {
+                        let _ = self
+                            .execute_device_enrollment_invitee(effects.clone(), &invitation)
+                            .await;
+                    }
                 }
                 _ => {
                     let _ = self
@@ -1441,6 +1464,158 @@ impl InvitationHandler {
         let result = guardian_execute_as(GuardianInvitationRole::Guardian, &mut adapter)
             .await
             .map_err(|e| AgentError::internal(format!("guardian invite failed: {e}")));
+
+        let _ = adapter.end_session().await;
+        result
+    }
+
+    /// Execute the DeviceEnrollment choreography as initiator (existing device).
+    ///
+    /// This method runs the 3-message choreography:
+    /// 1. Initiator sends DeviceEnrollmentRequest to Invitee
+    /// 2. Invitee responds with DeviceEnrollmentAccept
+    /// 3. Initiator sends DeviceEnrollmentConfirm
+    async fn execute_device_enrollment_initiator(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.context.authority.authority_id();
+        let mut role_map = HashMap::new();
+        role_map.insert(DeviceEnrollmentRole::Initiator, authority_id);
+        role_map.insert(DeviceEnrollmentRole::Invitee, invitation.receiver_id);
+
+        // Extract enrollment details from the invitation type
+        let (subject_authority, ceremony_id, pending_epoch, device_id) =
+            match &invitation.invitation_type {
+                InvitationType::DeviceEnrollment {
+                    subject_authority,
+                    ceremony_id,
+                    pending_epoch,
+                    device_id,
+                    ..
+                } => (*subject_authority, ceremony_id.clone(), *pending_epoch, *device_id),
+                _ => {
+                    return Err(AgentError::internal(
+                        "Expected DeviceEnrollment invitation type".to_string(),
+                    ))
+                }
+            };
+
+        let request = DeviceEnrollmentRequestWrapper(DeviceEnrollmentRequest {
+            invitation_id: invitation.invitation_id.clone(),
+            subject_authority,
+            ceremony_id: ceremony_id.clone(),
+            pending_epoch,
+            device_id,
+        });
+        let invitation_id = invitation.invitation_id.clone();
+        let ceremony_id_for_confirm = ceremony_id.clone();
+
+        let mut adapter = AuraProtocolAdapter::new(
+            effects.clone(),
+            authority_id,
+            DeviceEnrollmentRole::Initiator,
+            role_map,
+        )
+        .with_message_provider(move |request_ctx, _received| {
+            if Self::type_matches(request_ctx.type_name, "DeviceEnrollmentRequest") {
+                return Some(Box::new(request.clone()));
+            }
+
+            if Self::type_matches(request_ctx.type_name, "DeviceEnrollmentConfirm") {
+                let confirm = DeviceEnrollmentConfirmWrapper(DeviceEnrollmentConfirm {
+                    invitation_id: invitation_id.clone(),
+                    ceremony_id: ceremony_id_for_confirm.clone(),
+                    established: true,
+                    new_epoch: Some(pending_epoch),
+                });
+                return Some(Box::new(confirm));
+            }
+
+            None
+        });
+
+        let session_id = Self::invitation_session_id(&invitation.invitation_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("device enrollment start failed: {e}")))?;
+
+        let result = device_enrollment_execute_as(DeviceEnrollmentRole::Initiator, &mut adapter).await;
+
+        let _ = adapter.end_session().await;
+        match result {
+            Ok(()) => Ok(()),
+            Err(err) if Self::is_transport_no_message(&err) => Ok(()),
+            Err(err) => Err(AgentError::internal(format!(
+                "device enrollment choreography failed: {err}"
+            ))),
+        }
+    }
+
+    /// Execute the DeviceEnrollment choreography as invitee (new device).
+    ///
+    /// This method runs the invitee side of the 3-message choreography:
+    /// 1. Receive DeviceEnrollmentRequest from Initiator
+    /// 2. Send DeviceEnrollmentAccept to Initiator
+    /// 3. Receive DeviceEnrollmentConfirm from Initiator
+    async fn execute_device_enrollment_invitee(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        invitation: &Invitation,
+    ) -> AgentResult<()> {
+        use crate::core::AgentError;
+
+        let authority_id = self.context.authority.authority_id();
+        let mut role_map = HashMap::new();
+        role_map.insert(DeviceEnrollmentRole::Initiator, invitation.sender_id);
+        role_map.insert(DeviceEnrollmentRole::Invitee, authority_id);
+
+        // Extract enrollment details from the invitation type
+        let (ceremony_id, device_id) = match &invitation.invitation_type {
+            InvitationType::DeviceEnrollment {
+                ceremony_id,
+                device_id,
+                ..
+            } => (ceremony_id.clone(), *device_id),
+            _ => {
+                return Err(AgentError::internal(
+                    "Expected DeviceEnrollment invitation type".to_string(),
+                ))
+            }
+        };
+
+        let accept = DeviceEnrollmentAcceptWrapper(DeviceEnrollmentAccept {
+            invitation_id: invitation.invitation_id.clone(),
+            ceremony_id,
+            device_id,
+        });
+
+        let mut adapter = AuraProtocolAdapter::new(
+            effects.clone(),
+            authority_id,
+            DeviceEnrollmentRole::Invitee,
+            role_map,
+        )
+        .with_message_provider(move |request, _received| {
+            if Self::type_matches(request.type_name, "DeviceEnrollmentAccept") {
+                return Some(Box::new(accept.clone()));
+            }
+            None
+        });
+
+        let session_id = Self::invitation_session_id(&invitation.invitation_id);
+        adapter
+            .start_session(session_id)
+            .await
+            .map_err(|e| AgentError::internal(format!("device enrollment start failed: {e}")))?;
+
+        let result = device_enrollment_execute_as(DeviceEnrollmentRole::Invitee, &mut adapter)
+            .await
+            .map_err(|e| AgentError::internal(format!("device enrollment failed: {e}")));
 
         let _ = adapter.end_session().await;
         result

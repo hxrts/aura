@@ -1129,6 +1129,7 @@ async fn test_device_management() {
     let result = ctx
         .dispatch(EffectCommand::AddDevice {
             nickname_suggestion: "My Laptop".to_string(),
+            invitee_authority_id: None, // Legacy bearer token mode
         })
         .await;
 

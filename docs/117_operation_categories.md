@@ -184,6 +184,7 @@ Frontends should start and monitor these ceremonies via the portable workflow la
 | Add contact (new relationship) | Creates cryptographic context | No shared keys possible |
 | Create group | Multi-party key agreement | Inconsistent member views |
 | Add member to group | Changes group keys | Forward secrecy violation |
+| Device enrollment | Key shares distributed atomically | Partial enrollment = unusable keys |
 | Guardian rotation | Key shares distributed atomically | Partial rotation = unusable keys |
 | Recovery execution | Account state replacement | Partial recovery = corruption |
 | OTA hard fork | Breaking protocol change | Partial activation = network split |
@@ -440,6 +441,7 @@ channel.set_effect_policy(RemoveFromChannel, EffectTiming::Immediate);
 | Add contact | C | Blocking | Critical | Creates context |
 | Create group | C | Blocking | Critical | Multi-party keys |
 | Add group member | C | Blocking | Critical | Changes group keys |
+| Device enrollment | C | Blocking | Critical | DeviceEnrollment choreography |
 | Guardian rotation | C | Blocking | Critical | Key shares |
 | Recovery execution | C | Blocking | Critical | Account state |
 | Device revocation | C | Blocking | Critical | Security response |

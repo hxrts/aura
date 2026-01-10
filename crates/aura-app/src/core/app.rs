@@ -961,17 +961,19 @@ impl AppCore {
     /// Initiate a device enrollment ("add device") ceremony.
     ///
     /// # Arguments
-    /// * `nickname_suggestion` - Suggested name for the device (what it wants to be called)
+    /// * `nickname_suggestion` - Suggested name for the device
+    /// * `invitee_authority_id` - The authority ID of the new device (if known)
     pub async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
+        invitee_authority_id: Option<String>,
     ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, IntentError> {
         let runtime = self.runtime.as_ref().ok_or_else(|| {
             IntentError::no_agent("initiate_device_enrollment_ceremony requires a runtime")
         })?;
 
         runtime
-            .initiate_device_enrollment_ceremony(nickname_suggestion)
+            .initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
             .await
     }
 

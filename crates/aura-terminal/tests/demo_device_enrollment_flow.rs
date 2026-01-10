@@ -32,6 +32,7 @@ use uuid::Uuid;
 struct TestEnv {
     ctx_a: Arc<IoContext>,
     app_core_a: Arc<RwLock<AppCore>>,
+    agent_a: Arc<aura_agent::AuraAgent>,
     shared_transport: SharedTransport,
     authority_id: aura_core::AuthorityId,
     context_id: aura_core::ContextId,
@@ -96,6 +97,7 @@ async fn setup_test_env() -> TestEnv {
     TestEnv {
         ctx_a: Arc::new(ctx_a),
         app_core_a,
+        agent_a,
         shared_transport,
         authority_id,
         context_id,
@@ -146,9 +148,10 @@ async fn demo_device_enrollment_flow_commits_and_updates_settings() {
         .expect("refresh_settings_from_runtime should succeed with runtime");
 
     // Start the ceremony via the same path used by Settings → Add device.
+    // Use legacy bearer token mode (None for invitee_authority_id)
     let start = env
         .ctx_a
-        .start_device_enrollment("Laptop")
+        .start_device_enrollment("Laptop", None)
         .await
         .expect("start_device_enrollment should succeed");
 

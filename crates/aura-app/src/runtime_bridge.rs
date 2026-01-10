@@ -691,11 +691,21 @@ pub trait RuntimeBridge: Send + Sync {
     ///
     /// Returns a shareable enrollment code for the invited device to import.
     ///
+    /// For the two-step exchange flow:
+    /// 1. The new device creates its own authority first
+    /// 2. The new device shares its authority_id with the initiator
+    /// 3. The initiator passes the invitee's authority_id to this function
+    /// 4. An addressed enrollment invitation is created
+    ///
     /// # Arguments
-    /// * `nickname_suggestion` - Optional suggested name for the device (what it wants to be called)
+    /// * `nickname_suggestion` - Suggested name for the device
+    /// * `invitee_authority_id` - The authority ID of the new device (if known).
+    ///   When provided, creates an addressed invitation to that authority.
+    ///   When None, falls back to legacy self-addressed behavior.
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
+        invitee_authority_id: Option<String>,
     ) -> Result<DeviceEnrollmentStart, IntentError>;
 
     /// Initiate a device removal ("remove device") ceremony.
@@ -1222,6 +1232,7 @@ impl RuntimeBridge for OfflineRuntimeBridge {
     async fn initiate_device_enrollment_ceremony(
         &self,
         _nickname_suggestion: String,
+        _invitee_authority_id: Option<String>,
     ) -> Result<DeviceEnrollmentStart, IntentError> {
         Err(IntentError::no_agent(
             "Device enrollment not available in offline mode",

@@ -2244,8 +2244,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::UpdateMfaPolicy { policy } => {
                                         (cb.settings.on_update_mfa)(policy);
                                     }
-                                    DispatchCommand::AddDevice { name } => {
-                                        (cb.settings.on_add_device)(name);
+                                    DispatchCommand::AddDevice { name, invitee_authority_id } => {
+                                        (cb.settings.on_add_device)(name, invitee_authority_id);
                                     }
                                     DispatchCommand::RemoveDevice { device_id } => {
                                         (cb.settings.on_remove_device)(device_id);

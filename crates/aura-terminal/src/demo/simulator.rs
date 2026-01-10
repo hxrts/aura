@@ -25,6 +25,7 @@ use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_effects::time::PhysicalTimeHandler;
 use aura_effects::ReactiveEffects;
+use aura_invitation::{DeviceEnrollmentAccept, DeviceEnrollmentRequest};
 use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
 use serde::Serialize;
 use std::str::FromStr;
@@ -175,7 +176,9 @@ impl DemoSimulator {
                         let _ = process_peer_transport_messages("Alice", &alice).await;
                         let _ = process_peer_transport_messages("Carol", &carol).await;
 
-                        // Mobile runs ceremony processing for device enrollment participation.
+                        // Mobile processes transport messages for device enrollment choreography
+                        // and ceremony messages for key package installation.
+                        let _ = process_peer_transport_messages("Mobile", &mobile).await;
                         let _ = mobile.process_ceremony_acceptances().await;
                     }
                 }
@@ -403,9 +406,66 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                                 proposal.ceremony_id
                             );
                         }
+                    } else if let Ok(enrollment_request) =
+                        from_slice::<DeviceEnrollmentRequest>(&envelope.payload)
+                    {
+                        // Handle device enrollment choreography request
+                        tracing::info!(
+                            "{name} received device enrollment request for ceremony {}",
+                            enrollment_request.ceremony_id
+                        );
+
+                        // Create acceptance response
+                        let accept_response = DeviceEnrollmentAccept {
+                            invitation_id: enrollment_request.invitation_id,
+                            ceremony_id: enrollment_request.ceremony_id,
+                            device_id: enrollment_request.device_id,
+                        };
+
+                        // Serialize response
+                        let payload = match to_vec(&accept_response) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "{name} failed to serialize device enrollment acceptance: {e}"
+                                );
+                                continue;
+                            }
+                        };
+
+                        // Include choreography metadata
+                        let mut response_metadata = std::collections::HashMap::new();
+                        response_metadata.insert(
+                            "content-type".to_string(),
+                            "application/aura-choreography".to_string(),
+                        );
+                        if let Some(session_id) = envelope.metadata.get("session-id") {
+                            response_metadata
+                                .insert("session-id".to_string(), session_id.clone());
+                        }
+
+                        let response = aura_core::effects::TransportEnvelope {
+                            destination: envelope.source,
+                            source: agent.authority_id(),
+                            context: envelope.context,
+                            payload,
+                            metadata: response_metadata,
+                            receipt: None,
+                        };
+
+                        if let Err(e) = effects.send_envelope(response).await {
+                            tracing::warn!(
+                                "{name} failed to send device enrollment acceptance: {e}"
+                            );
+                        } else {
+                            tracing::info!(
+                                "{name} sent device enrollment acceptance for ceremony {}",
+                                accept_response.ceremony_id
+                            );
+                        }
                     } else {
                         tracing::debug!(
-                            "{name} received choreography message (not a ceremony proposal)"
+                            "{name} received choreography message (not recognized)"
                         );
                     }
                 }

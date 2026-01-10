@@ -596,6 +596,7 @@ impl RuntimeBridge for MockRuntimeBridge {
     async fn initiate_device_enrollment_ceremony(
         &self,
         nickname_suggestion: String,
+        _invitee_authority_id: Option<String>,
     ) -> Result<DeviceEnrollmentStart, IntentError> {
         Ok(DeviceEnrollmentStart {
             ceremony_id: self.next_string_id(),

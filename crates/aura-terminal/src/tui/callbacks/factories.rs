@@ -810,11 +810,14 @@ impl SettingsCallbacks {
     }
 
     fn make_add_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> AddDeviceCallback {
-        Arc::new(move |nickname_suggestion: String| {
+        Arc::new(move |nickname_suggestion: String, invitee_authority_id: Option<String>| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             spawn_ctx(ctx.clone(), async move {
-                let start = match ctx.start_device_enrollment(&nickname_suggestion).await {
+                let start = match ctx
+                    .start_device_enrollment(&nickname_suggestion, invitee_authority_id.as_deref())
+                    .await
+                {
                     Ok(start) => start,
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by operational layer.

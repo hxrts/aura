@@ -173,9 +173,11 @@ pub use view::{InvitationDelta, InvitationViewReducer};
 
 // Re-export protocol types
 pub use protocol::{
-    GuardianAccept, GuardianConfirm, GuardianDecline, GuardianInvitationState, GuardianRequest,
-    InvitationAck, InvitationExchangeState, InvitationOffer, InvitationResponse,
-    EXCHANGE_PROTOCOL_ID, GUARDIAN_PROTOCOL_ID, PROTOCOL_NAMESPACE, PROTOCOL_VERSION,
+    DeviceEnrollmentAccept, DeviceEnrollmentConfirm, DeviceEnrollmentRequest,
+    DeviceEnrollmentState, GuardianAccept, GuardianConfirm, GuardianDecline,
+    GuardianInvitationState, GuardianRequest, InvitationAck, InvitationExchangeState,
+    InvitationOffer, InvitationResponse, DEVICE_ENROLLMENT_PROTOCOL_ID, EXCHANGE_PROTOCOL_ID,
+    GUARDIAN_PROTOCOL_ID, PROTOCOL_NAMESPACE, PROTOCOL_VERSION,
 };
 
 // Re-export consensus-based ceremony types

@@ -43,14 +43,22 @@ pub async fn start_device_threshold_ceremony(
 
 /// Start a device enrollment ("add device") ceremony.
 ///
+/// For the two-step exchange flow:
+/// 1. The new device creates its own authority first
+/// 2. The new device shares its authority_id with the initiator
+/// 3. The initiator passes the invitee's authority_id here
+/// 4. An addressed enrollment invitation is created
+///
 /// # Arguments
-/// * `nickname_suggestion` - Suggested name for the device (what it wants to be called)
+/// * `nickname_suggestion` - Suggested name for the device
+/// * `invitee_authority_id` - The authority ID of the new device (if known)
 pub async fn start_device_enrollment_ceremony(
     app_core: &Arc<RwLock<AppCore>>,
     nickname_suggestion: String,
+    invitee_authority_id: Option<String>,
 ) -> Result<crate::runtime_bridge::DeviceEnrollmentStart, AuraError> {
     let core = app_core.read().await;
-    core.initiate_device_enrollment_ceremony(nickname_suggestion)
+    core.initiate_device_enrollment_ceremony(nickname_suggestion, invitee_authority_id)
         .await
         .map_err(|e| AuraError::agent(format!("Failed to start device enrollment: {e}")))
 }

@@ -170,9 +170,10 @@ async fn demo_device_removal_flow_removes_device_from_settings() {
         .expect("refresh_settings_from_runtime should succeed with runtime");
 
     // Enroll a second device (reuse the real enrollment ceremony).
+    // Use legacy bearer token mode (None for invitee_authority_id)
     let start = env
         .ctx_a
-        .start_device_enrollment("Laptop")
+        .start_device_enrollment("Laptop", None)
         .await
         .expect("start_device_enrollment should succeed");
 

@@ -125,6 +125,19 @@ pub struct DeviceEnrollmentAccept {
     pub device_id: DeviceId,
 }
 
+/// Device enrollment confirmation (finalizes the enrollment).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceEnrollmentConfirm {
+    /// Invitation identifier
+    pub invitation_id: InvitationId,
+    /// Ceremony identifier
+    pub ceremony_id: CeremonyId,
+    /// Whether enrollment was successfully established
+    pub established: bool,
+    /// Resulting epoch after enrollment (if successful)
+    pub new_epoch: Option<u64>,
+}
+
 // =============================================================================
 // Guard Cost Constants
 // =============================================================================
@@ -163,6 +176,21 @@ pub mod guards {
 
     /// Required capability for accepting guardian role
     pub const CAP_GUARDIAN_ACCEPT: &str = "invitation:guardian:accept";
+
+    /// Flow cost for device enrollment request
+    pub const DEVICE_ENROLL_REQUEST_COST: u32 = 2;
+
+    /// Flow cost for device enrollment response
+    pub const DEVICE_ENROLL_RESPOND_COST: u32 = 2;
+
+    /// Flow cost for device enrollment confirmation
+    pub const DEVICE_ENROLL_CONFIRM_COST: u32 = 1;
+
+    /// Required capability for device enrollment
+    pub const CAP_DEVICE_ENROLL: &str = "invitation:device:enroll";
+
+    /// Required capability for accepting device enrollment
+    pub const CAP_DEVICE_ACCEPT: &str = "invitation:device:accept";
 }
 
 // =============================================================================
@@ -197,6 +225,24 @@ pub mod guardian {
     // 2. Guardian accepts or declines with appropriate response
     // 3. Principal confirms the relationship establishment
     choreography!(include_str!("src/protocol.guardian_invitation.choreo"));
+}
+
+/// Device enrollment protocol module
+pub mod device_enrollment {
+    #![allow(unused_imports)]
+    use super::*;
+    use aura_macros::choreography;
+
+    // Device enrollment choreography for adding devices to an authority
+    //
+    // This choreography implements the device enrollment ceremony:
+    // 1. Initiator (existing device) sends enrollment request with key package
+    // 2. Invitee (new device) accepts and installs their share
+    // 3. Initiator confirms the enrollment completion
+    //
+    // Note: The new device must create its own authority first, making it
+    // addressable before the enrollment choreography can proceed.
+    choreography!(include_str!("src/protocol.device_enrollment.choreo"));
 }
 
 // =============================================================================
@@ -235,6 +281,23 @@ pub enum GuardianInvitationState {
     Failed { reason: String },
 }
 
+/// State of the device enrollment protocol
+#[derive(Debug, Clone)]
+pub enum DeviceEnrollmentState {
+    /// Initial state
+    Initial,
+    /// Enrollment request sent
+    RequestSent,
+    /// Enrollment accepted by invitee
+    Accepted { device_id: String },
+    /// Enrollment declined by invitee
+    Declined { reason: Option<String> },
+    /// Enrollment confirmed and established
+    Confirmed { new_epoch: u64 },
+    /// Protocol failed
+    Failed { reason: String },
+}
+
 // =============================================================================
 // Protocol Metadata
 // =============================================================================
@@ -259,6 +322,14 @@ pub mod guardian_runners {
     };
 }
 
+/// Re-exports for DeviceEnrollment choreography runners
+pub mod device_enrollment_runners {
+    pub use super::device_enrollment::rumpsteak_session_types_invitation_device_enrollment::invitation_device_enrollment::DeviceEnrollmentRole;
+    pub use super::device_enrollment::rumpsteak_session_types_invitation_device_enrollment::invitation_device_enrollment::runners::{
+        execute_as, run_initiator, run_invitee, InitiatorOutput, InviteeOutput,
+    };
+}
+
 // =============================================================================
 // Protocol Metadata
 // =============================================================================
@@ -275,6 +346,9 @@ pub const EXCHANGE_PROTOCOL_ID: &str = "invitation.exchange.v1";
 /// Protocol identifier for guardian invitation
 pub const GUARDIAN_PROTOCOL_ID: &str = "invitation_guardian.guardian.v1";
 
+/// Protocol identifier for device enrollment
+pub const DEVICE_ENROLLMENT_PROTOCOL_ID: &str = "invitation_device_enrollment.device_enrollment.v1";
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -282,7 +356,7 @@ pub const GUARDIAN_PROTOCOL_ID: &str = "invitation_guardian.guardian.v1";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AuthorityId, InvitationId};
+    use aura_core::identifiers::{AuthorityId, CeremonyId, InvitationId};
     use aura_core::util::serialization::{from_slice, to_vec};
 
     fn test_authority() -> AuthorityId {
@@ -465,5 +539,23 @@ mod tests {
         assert_eq!(restored.invitation_id.as_str(), "guard-456");
         assert!(restored.established);
         assert_eq!(restored.relationship_id, Some("rel-789".to_string()));
+    }
+
+    #[test]
+    fn test_device_enrollment_confirm_serialization() {
+        let confirm = DeviceEnrollmentConfirm {
+            invitation_id: InvitationId::new("enroll-123"),
+            ceremony_id: CeremonyId::new("ceremony-456"),
+            established: true,
+            new_epoch: Some(5),
+        };
+
+        let bytes = to_vec(&confirm).unwrap();
+        let restored: DeviceEnrollmentConfirm = from_slice(&bytes).unwrap();
+
+        assert_eq!(restored.invitation_id.as_str(), "enroll-123");
+        assert_eq!(restored.ceremony_id.as_str(), "ceremony-456");
+        assert!(restored.established);
+        assert_eq!(restored.new_epoch, Some(5));
     }
 }

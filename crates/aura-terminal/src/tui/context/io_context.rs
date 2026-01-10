@@ -718,11 +718,13 @@ impl IoContext {
     pub async fn start_device_enrollment(
         &self,
         nickname_suggestion: &str,
+        invitee_authority_id: Option<&str>,
     ) -> Result<DeviceEnrollmentStartInfo, String> {
         match self
             .operational
             .execute(&EffectCommand::AddDevice {
                 nickname_suggestion: nickname_suggestion.to_string(),
+                invitee_authority_id: invitee_authority_id.map(|s| s.to_string()),
             })
             .await
         {

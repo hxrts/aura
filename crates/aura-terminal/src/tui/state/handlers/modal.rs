@@ -20,10 +20,10 @@ use super::super::modal_queue::{
 };
 use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
-    AccountSetupModalState, AddDeviceModalState, ConfirmRemoveModalState, CreateChannelModalState,
-    CreateInvitationField, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
-    GuardianSetupModalState, GuardianSetupStep, ImportInvitationModalState, NicknameModalState,
-    NicknameSuggestionModalState, TopicModalState,
+    AccountSetupModalState, AddDeviceField, AddDeviceModalState, ConfirmRemoveModalState,
+    CreateChannelModalState, CreateInvitationField, CreateInvitationModalState,
+    DeviceEnrollmentCeremonyModalState, GuardianSetupModalState, GuardianSetupStep,
+    ImportInvitationModalState, NicknameModalState, NicknameSuggestionModalState, TopicModalState,
 };
 use super::super::TuiState;
 
@@ -789,8 +789,10 @@ fn handle_device_import_key_queue(
             });
         } else {
             state.settings.pending_mobile_enrollment_autofill = true;
+            // Demo mode: Mobile agent is simulated, use legacy bearer token mode
             commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
                 name: "Mobile".to_string(),
+                invitee_authority_id: None,
             }));
             state.next_toast_id += 1;
             state.toast_queue.enqueue(QueuedToast::new(
@@ -1257,6 +1259,9 @@ fn handle_settings_nickname_suggestion_key_queue(
 }
 
 /// Handle settings add device modal keys (queue-based)
+///
+/// Supports two-step exchange: Tab switches between Name and InviteeAuthority fields.
+/// If invitee_authority_id is provided, uses DeviceEnrollment choreography.
 fn handle_settings_add_device_key_queue(
     state: &mut TuiState,
     commands: &mut Vec<TuiCommand>,
@@ -1267,10 +1272,25 @@ fn handle_settings_add_device_key_queue(
         KeyCode::Esc => {
             state.modal_queue.dismiss();
         }
+        KeyCode::Tab => {
+            // Switch between Name and InviteeAuthority fields
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsAddDevice(ref mut s) = modal {
+                    s.focused_field = match s.focused_field {
+                        AddDeviceField::Name => AddDeviceField::InviteeAuthority,
+                        AddDeviceField::InviteeAuthority => AddDeviceField::Name,
+                    };
+                }
+            });
+        }
         KeyCode::Enter => {
             if modal_state.can_submit() {
+                let invitee_authority_id = modal_state
+                    .invitee_authority()
+                    .map(|s| s.to_string());
                 commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
                     name: modal_state.name,
+                    invitee_authority_id,
                 }));
                 state.modal_queue.dismiss();
             }
@@ -1278,14 +1298,24 @@ fn handle_settings_add_device_key_queue(
         KeyCode::Char(c) => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsAddDevice(ref mut s) = modal {
-                    s.name.push(c);
+                    match s.focused_field {
+                        AddDeviceField::Name => s.name.push(c),
+                        AddDeviceField::InviteeAuthority => s.invitee_authority_id.push(c),
+                    }
                 }
             });
         }
         KeyCode::Backspace => {
             state.modal_queue.update_active(|modal| {
                 if let QueuedModal::SettingsAddDevice(ref mut s) = modal {
-                    s.name.pop();
+                    match s.focused_field {
+                        AddDeviceField::Name => {
+                            s.name.pop();
+                        }
+                        AddDeviceField::InviteeAuthority => {
+                            s.invitee_authority_id.pop();
+                        }
+                    }
                 }
             });
         }

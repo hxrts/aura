@@ -694,7 +694,7 @@ mod settings_screen {
         tui.send_enter();
 
         assert!(tui.has_dispatch(
-            |d| matches!(d, DispatchCommand::AddDevice { name } if name == "My Phone")
+            |d| matches!(d, DispatchCommand::AddDevice { name, .. } if name == "My Phone")
         ));
     }
 
