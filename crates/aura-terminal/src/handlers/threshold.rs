@@ -33,7 +33,7 @@ pub async fn handle_threshold(
     ));
 
     // Validate all config files exist through storage effects
-    let mut valid_configs = Vec::new();
+    let mut valid_configs = Vec::with_capacity(config_paths.len());
     for config_path in &config_paths {
         let path = PathBuf::from(config_path);
         let key = format!("device_config:{}", path.display());

@@ -233,12 +233,12 @@ fn compute_artifact_hash(download_url: &str) -> TerminalResult<Hash32> {
 }
 
 async fn list_saved_proposals(ctx: &HandlerContext<'_>) -> TerminalResult<Vec<UpgradeProposal>> {
-    let mut proposals = Vec::new();
     let keys = ctx
         .effects()
         .list_keys(Some("ota:proposal:"))
         .await
         .unwrap_or_default();
+    let mut proposals = Vec::with_capacity(keys.len());
     for key in keys {
         if let Ok(Some(raw)) = ctx.effects().retrieve(&key).await {
             if let Ok(proposal) = serde_json::from_slice::<UpgradeProposal>(&raw) {

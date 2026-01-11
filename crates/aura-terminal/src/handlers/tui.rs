@@ -563,7 +563,9 @@ async fn handle_tui_launch(
                 let shared_transport = demo_simulator_for_bob
                     .as_ref()
                     .map(|sim| sim.shared_transport())
-                    .expect("Simulator should be created in demo mode");
+                    .ok_or_else(|| {
+                        AuraError::internal("Simulator not available in demo mode")
+                    })?;
 
                 stdio.println(format_args!(
                     "Creating Bob's agent with shared transport..."
@@ -629,7 +631,9 @@ async fn handle_tui_launch(
     let mut simulator: Option<DemoSimulator> = match mode {
         TuiMode::Demo { .. } => {
             stdio.println(format_args!("Starting demo simulator..."));
-            let mut sim = demo_simulator_for_bob.expect("Simulator should exist in demo mode");
+            let mut sim = demo_simulator_for_bob.ok_or_else(|| {
+                AuraError::internal("Simulator not available in demo mode")
+            })?;
             sim.start()
                 .await
                 .map_err(|e| AuraError::internal(format!("Failed to start simulator: {}", e)))?;
@@ -724,11 +728,19 @@ async fn handle_tui_launch(
             let demo_mobile_agent = simulator
                 .as_ref()
                 .map(|sim| sim.mobile_agent())
-                .expect("Simulator should exist in demo mode");
+                .ok_or_else(|| {
+                    crate::error::TerminalError::Operation(
+                        "Simulator not available in demo mode".into(),
+                    )
+                })?;
             let demo_mobile_device_id = simulator
                 .as_ref()
                 .map(|sim| sim.mobile_device_id().to_string())
-                .expect("Simulator should exist in demo mode");
+                .ok_or_else(|| {
+                    crate::error::TerminalError::Operation(
+                        "Simulator not available in demo mode".into(),
+                    )
+                })?;
             let builder = IoContext::builder()
                 .with_app_core(app_core)
                 .with_base_path(base_path.clone())

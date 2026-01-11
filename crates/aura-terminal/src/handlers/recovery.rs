@@ -102,7 +102,7 @@ async fn start_recovery(
     }
 
     // Convert to guardian profiles using authority model
-    let mut guardian_profiles = Vec::new();
+    let mut guardian_profiles = Vec::with_capacity(guardian_strs.len());
     for (i, guardian_str) in guardian_strs.iter().enumerate() {
         let guardian_authority = ids::authority_id(guardian_str);
         guardian_profiles.push(GuardianProfile::with_label(

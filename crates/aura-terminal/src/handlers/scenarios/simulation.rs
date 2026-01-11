@@ -244,7 +244,7 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
     let initiator_service =
         RecoveryServiceApi::new(initiator_effects, AuthorityContext::new(initiator_id))?;
 
-    let mut guardian_services = Vec::new();
+    let mut guardian_services = Vec::with_capacity(guardians.len());
     for (index, guardian_id) in guardians.iter().copied().enumerate() {
         let guardian_effects = Arc::new(
             AuraEffectSystem::simulation_with_shared_transport_for_authority(
@@ -271,7 +271,7 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
         }),
     };
 
-    let mut guardian_tasks = Vec::new();
+    let mut guardian_tasks = Vec::with_capacity(guardian_services.len());
     for service in guardian_services.into_iter() {
         let invite = invitation.clone();
         guardian_tasks.push(tokio::spawn(async move {

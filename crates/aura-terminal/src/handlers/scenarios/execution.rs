@@ -36,7 +36,7 @@ pub async fn execute_scenarios(
         return Ok(Vec::new());
     }
 
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(scenario_files.len());
 
     if parallel {
         let max = max_parallel.unwrap_or(4);

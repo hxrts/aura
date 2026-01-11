@@ -114,23 +114,23 @@ impl IocraftTerminalAdapter {
 
     /// Push an event to the queue (for external injection).
     pub fn push_event(&self, event: TerminalEvent) {
-        let mut queue = self.event_queue.lock().unwrap();
+        let mut queue = self.event_queue.lock().unwrap_or_else(|e| e.into_inner());
         queue.push_back(event);
     }
 
     /// Get captured frames.
     pub fn frames(&self) -> Vec<TerminalFrame> {
-        self.frames.lock().unwrap().clone()
+        self.frames.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Get the last captured frame.
     pub fn last_frame(&self) -> Option<TerminalFrame> {
-        self.frames.lock().unwrap().last().cloned()
+        self.frames.lock().unwrap_or_else(|e| e.into_inner()).last().cloned()
     }
 
     /// Clear captured frames.
     pub fn clear_frames(&self) {
-        self.frames.lock().unwrap().clear();
+        self.frames.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 
@@ -145,7 +145,7 @@ impl TerminalInputEffects for IocraftTerminalAdapter {
     async fn next_event(&self) -> Result<TerminalEvent, TerminalError> {
         // First try the event queue (sync, fast path)
         {
-            let mut queue = self.event_queue.lock().unwrap();
+            let mut queue = self.event_queue.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(event) = queue.pop_front() {
                 return Ok(event);
             }
@@ -167,12 +167,12 @@ impl TerminalInputEffects for IocraftTerminalAdapter {
     }
 
     async fn poll_event(&self, _timeout_ms: u64) -> Result<Option<TerminalEvent>, TerminalError> {
-        let mut queue = self.event_queue.lock().unwrap();
+        let mut queue = self.event_queue.lock().unwrap_or_else(|e| e.into_inner());
         Ok(queue.pop_front())
     }
 
     async fn has_input(&self) -> bool {
-        let queue = self.event_queue.lock().unwrap();
+        let queue = self.event_queue.lock().unwrap_or_else(|e| e.into_inner());
         !queue.is_empty()
     }
 }
@@ -180,7 +180,7 @@ impl TerminalInputEffects for IocraftTerminalAdapter {
 #[async_trait::async_trait]
 impl TerminalOutputEffects for IocraftTerminalAdapter {
     async fn render(&self, frame: TerminalFrame) -> Result<(), TerminalError> {
-        let mut frames = self.frames.lock().unwrap();
+        let mut frames = self.frames.lock().unwrap_or_else(|e| e.into_inner());
         frames.push(frame);
         Ok(())
     }
