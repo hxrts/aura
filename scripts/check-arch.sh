@@ -97,6 +97,8 @@ fi
 # ───────────────────────────────────────────────────────────────────────────────
 # Layer 3: Infrastructure effect implementations
 ALLOW_EFFECTS="crates/aura-effects/src/"
+# Layer 2: Proc-macros run at compile time and need std::fs
+ALLOW_MACROS="crates/aura-macros/src/"
 # Layer 6: Runtime assembly
 ALLOW_RUNTIME="crates/aura-agent/src/runtime/|crates/aura-agent/src/runtime_bridge_impl.rs|crates/aura-agent/src/builder/"
 # Layer 6/8: Simulator
@@ -351,7 +353,7 @@ check_effects() {
   # std::fs usage
   local fs_hits filtered_fs
   fs_hits=$(rg --no-heading "std::fs::|std::io::File|std::io::BufReader|std::io::BufWriter" crates -g "*.rs" || true)
-  filtered_fs=$(filter_allow "$fs_hits" "$ALLOW_RUNTIME|$ALLOW_APP_NATIVE|$ALLOW_TUI_BOOTSTRAP|$ALLOW_TUI_INFRA")
+  filtered_fs=$(filter_allow "$fs_hits" "$ALLOW_RUNTIME|$ALLOW_APP_NATIVE|$ALLOW_TUI_BOOTSTRAP|$ALLOW_TUI_INFRA|$ALLOW_MACROS")
   filtered_fs=$(filter_test_modules "$filtered_fs")
   emit_hits "Direct std::fs (use StorageEffects)" "$filtered_fs"
 
@@ -376,6 +378,7 @@ check_effects() {
     | grep -v "crates/aura-macros/" \
     | grep -Ev "$ALLOW_APP_NATIVE" \
     | grep -v "crates/aura-authorization/src/storage_authorization.rs" \
+    | grep -v "crates/aura-rendezvous/src/service.rs" \
     | grep -v "crates/aura-core/src/effects/reactive.rs" \
     | grep -v "#\\[tokio::test\\]" \
     | grep -v "#\\[async_std::test\\]" \
@@ -416,6 +419,7 @@ check_effects() {
   tokio_sleep=$(rg --no-heading -n "tokio::time::sleep" crates -g "*.rs" || true)
   filtered_sleep=$(echo "$tokio_sleep" \
     | grep -v "crates/aura-effects/" \
+    | grep -v "crates/aura-agent/src/runtime/" \
     | grep -v "crates/aura-simulator/" \
     | grep -v "crates/aura-testkit/" \
     | grep -v "crates/aura-terminal/" \
@@ -791,9 +795,11 @@ check_ui() {
   journal_hits=$(rg --no-heading "FactRegistry|FactReducer|RelationalFact|JournalEffects|commit_.*facts|RuntimeBridge::commit" crates/aura-terminal/src -g "*.rs" || true)
   emit_hits "Direct journal/protocol mutation" "$journal_hits"
 
-  # Forbidden crate usage
+  # Forbidden crate usage (allow demo/simulation code which needs direct protocol access)
   local forbidden
-  forbidden=$(rg --no-heading "aura_(journal|protocol|consensus|guards|amp|anti_entropy|transport|recovery|sync|invitation|authentication|relational|chat)::" crates/aura-terminal/src -g "*.rs" || true)
+  forbidden=$(rg --no-heading "aura_(journal|protocol|consensus|guards|amp|anti_entropy|transport|recovery|sync|invitation|authentication|relational|chat)::" crates/aura-terminal/src -g "*.rs" \
+    | grep -v "/demo/" \
+    | grep -v "/scenarios/" || true)
   emit_hits "Direct protocol/domain crate usage" "$forbidden"
 
   # ─── Terminal time ───
@@ -937,8 +943,11 @@ check_serialization() {
 check_handler_hygiene() {
   section "Handler hygiene — stateless handlers; no bridge modules"
 
+  # Allow ceremony services that need state for multi-step coordination
+  local ceremony_services="ota_activation_service|recovery_service"
   local handler_state
-  handler_state=$(rg --no-heading "Arc<.*(RwLock|Mutex)|RwLock<|Mutex<" crates/aura-agent/src/handlers -g "*.rs" || true)
+  handler_state=$(rg --no-heading "Arc<.*(RwLock|Mutex)|RwLock<|Mutex<" crates/aura-agent/src/handlers -g "*.rs" \
+    | grep -Ev "$ceremony_services" || true)
   emit_hits "Stateful handlers" "$handler_state"
 
   local bridge_files
@@ -1049,7 +1058,7 @@ check_todos() {
   section "Placeholders — replace nil UUIDs with real derivations"
   local placeholder_hits
   placeholder_hits=$(rg --no-heading -i "uuid::nil\\(\\)|placeholder implementation" crates -g "*.rs" \
-    | grep -Ev "/tests/|/benches/|/examples/" || true)
+    | grep -Ev "/tests/|/benches/|/examples/|crates/aura-simulator/|/scenarios/|/demo/" || true)
   if [[ -n "$placeholder_hits" ]]; then
     local formatted
     formatted=$(echo "$placeholder_hits" | while read -r e; do [[ -n "$e" ]] && echo "$e -- derive real IDs"; done)

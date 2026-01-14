@@ -1107,7 +1107,7 @@ mod tests {
             Ok(vec![])
         }
     }
-    // Stub other traits needed by E
+    // Minimal implementations for other traits needed by E
     #[async_trait]
     impl RandomCoreEffects for MockEffects {
         async fn random_bytes(&self, _: usize) -> Vec<u8> {

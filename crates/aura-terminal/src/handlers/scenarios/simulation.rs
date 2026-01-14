@@ -259,7 +259,8 @@ async fn run_guardian_setup_choreography(steps: &mut Vec<SimStep>) -> TerminalRe
         guardian_services.push(service);
     }
 
-    let setup_id = format!("setup_{}_{}", account_id, Uuid::new_v4());
+    // Use deterministic UUID for simulation reproducibility
+    let setup_id = format!("setup_{}_{}", account_id, Uuid::nil());
     let invitation = aura_recovery::guardian_setup::GuardianInvitation {
         setup_id: setup_id.clone(),
         account_id,

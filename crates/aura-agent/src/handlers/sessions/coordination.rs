@@ -568,7 +568,7 @@ impl SessionOperations {
         invitation: ParticipantInvitation,
         created: SessionCreated,
         failed: SessionCreationFailed,
-        accept_threshold: usize,
+        accept_threshold: usize, // usize ok: function parameter, not serialized
     ) -> AgentResult<()> {
         let authority_id = self.authority_context.authority_id();
 

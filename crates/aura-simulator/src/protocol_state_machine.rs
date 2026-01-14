@@ -310,11 +310,10 @@ impl ProtocolStateMachine {
         *self.state.write() = ParticipantState::AtChoice { options };
     }
 
-    /// Process an incoming message (stub for actual protocol logic)
+    /// Process an incoming message (hook for protocol adapter)
     fn process_incoming(&self, from: &str, msg: &[u8]) -> StepResult {
-        // In a real implementation, this would parse the message and
-        // update protocol state accordingly. For the simulation framework,
-        // we provide hooks for the protocol adapter to call.
+        // Protocol adapters call state machine methods to update state.
+        // This default implementation resets to Ready state.
         let _ = (from, msg);
         *self.state.write() = ParticipantState::Ready;
         StepResult::NeedInput {
