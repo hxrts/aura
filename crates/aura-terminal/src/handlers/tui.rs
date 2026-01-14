@@ -839,8 +839,15 @@ impl io::Write for StorageLogWriter {
 
 #[allow(clippy::needless_pass_by_value)] // TuiMode is small and matched on
 fn init_tui_tracing(storage: Arc<dyn StorageCoreEffects>, mode: TuiMode) {
-    // Allow forcing stdio tracing for debugging.
+    // Allow forcing stdio tracing for debugging (writes to stderr).
     if std::env::var("AURA_TUI_ALLOW_STDIO").ok().as_deref() == Some("1") {
+        let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_ansi(false)
+            .with_target(true)
+            .with_writer(std::io::stderr)
+            .try_init();
         return;
     }
 

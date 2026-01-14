@@ -10,6 +10,31 @@ use super::naming::{truncate_id_for_display, EffectiveName};
 pub use aura_relational::ReadReceiptPolicy;
 
 // =============================================================================
+// Contact Error Types
+// =============================================================================
+
+/// Error type for contact operations that require an existing contact.
+///
+/// This type is `#[must_use]` to prevent silent failures when updating contacts.
+/// Callers must explicitly handle the case where a contact doesn't exist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+pub enum ContactError {
+    /// The specified contact was not found in the contacts state.
+    NotFound(AuthorityId),
+}
+
+impl std::fmt::Display for ContactError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContactError::NotFound(id) => write!(f, "contact not found: {id}"),
+        }
+    }
+}
+
+impl std::error::Error for ContactError {}
+
+// =============================================================================
 // Contact Suggestion Types
 // =============================================================================
 
@@ -265,9 +290,23 @@ impl ContactsState {
 
     /// Set guardian status for a contact.
     ///
-    /// Updates the is_guardian flag on the contact if it exists.
-    pub fn set_guardian_status(&mut self, contact_id: &AuthorityId, is_guardian: bool) {
-        self.update_contact(contact_id, |c| c.is_guardian = is_guardian);
+    /// Updates the is_guardian flag on the contact.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ContactError::NotFound` if the contact doesn't exist.
+    /// Callers must handle this case explicitly - the guardian binding should
+    /// not be processed until the contact has been added.
+    pub fn set_guardian_status(
+        &mut self,
+        contact_id: &AuthorityId,
+        is_guardian: bool,
+    ) -> Result<(), ContactError> {
+        if self.update_contact(contact_id, |c| c.is_guardian = is_guardian) {
+            Ok(())
+        } else {
+            Err(ContactError::NotFound(*contact_id))
+        }
     }
 
     /// Set nickname for a contact.

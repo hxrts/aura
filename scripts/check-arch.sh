@@ -31,6 +31,7 @@ Options (run all when none given):
   --crypto         Crypto library usage boundaries
   --concurrency    Concurrency hygiene (block_in_place, unbounded channels)
   --reactive       TUI reactive data model
+  --ceremonies     Ceremony completion must commit facts
   --ui             UI boundary checks
   --workflows      aura-app workflow hygiene
   --serialization  Serialization format enforcement
@@ -48,7 +49,7 @@ EOF
 RUN_ALL=true VERBOSE=false RUN_QUICK=false
 RUN_LAYERS=false RUN_DEPS=false RUN_EFFECTS=false RUN_GUARDS=false
 RUN_INVARIANTS=false RUN_TODOS=false RUN_REG=false RUN_CRYPTO=false
-RUN_CONCURRENCY=false RUN_REACTIVE=false RUN_UI=false RUN_WORKFLOWS=false
+RUN_CONCURRENCY=false RUN_REACTIVE=false RUN_CEREMONIES=false RUN_UI=false RUN_WORKFLOWS=false
 RUN_SERIALIZATION=false RUN_STYLE=false
 LAYER_FILTERS=()
 
@@ -64,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --crypto)        RUN_ALL=false; RUN_CRYPTO=true ;;
     --concurrency)   RUN_ALL=false; RUN_CONCURRENCY=true ;;
     --reactive)      RUN_ALL=false; RUN_REACTIVE=true ;;
+    --ceremonies)    RUN_ALL=false; RUN_CEREMONIES=true ;;
     --ui)            RUN_ALL=false; RUN_UI=true ;;
     --workflows)     RUN_ALL=false; RUN_WORKFLOWS=true ;;
     --serialization) RUN_ALL=false; RUN_SERIALIZATION=true ;;
@@ -86,7 +88,7 @@ if $RUN_QUICK && $RUN_ALL; then
   RUN_ALL=false
   RUN_LAYERS=true RUN_DEPS=true RUN_EFFECTS=true RUN_GUARDS=true
   RUN_INVARIANTS=true RUN_REG=true RUN_CRYPTO=true RUN_CONCURRENCY=true
-  RUN_REACTIVE=true RUN_SERIALIZATION=true RUN_STYLE=true RUN_WORKFLOWS=true
+  RUN_REACTIVE=true RUN_CEREMONIES=true RUN_SERIALIZATION=true RUN_STYLE=true RUN_WORKFLOWS=true
   RUN_TODOS=false  # Skip in quick mode
 fi
 
@@ -695,6 +697,76 @@ check_reactive() {
   else
     info "Fact commit sync: all commits synchronized"
   fi
+
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CHECK: Ceremony Fact Commits
+# ═══════════════════════════════════════════════════════════════════════════════
+check_ceremonies() {
+  section "Ceremony facts — operations that affect UI must commit facts"
+
+  # Pattern: Ceremonies/operations that complete but don't commit corresponding facts.
+  # This catches bugs where ceremonies succeed but UI state isn't updated because
+  # the facts that drive signal views were never committed.
+  #
+  # Key insight: Any operation that:
+  # 1. Logs "ceremony complete" / "operation complete" / success messages
+  # 2. Returns Ok() from a multi-party operation
+  # 3. Affects relational state (guardians, contacts, channels, invitations)
+  # Must also commit the corresponding facts to update signal views.
+  #
+  # Runtime bridge files are the integration points where ceremony results become facts.
+  # These files must commit RelationalFacts to update signal views.
+
+  local ceremony_allow="crates/aura-testkit/|/tests/|_test\\.rs|crates/aura-simulator/"
+  # Exclude read-only views (they read state, don't commit), app core (orchestration),
+  # and state trackers (they track in-memory state, runtime_bridge commits facts)
+  local ceremony_exclude="/views/|/core/app\\.rs|ceremony_tracker\\.rs|ceremony_processor"
+  local ceremony_files missing_facts=""
+
+  # Find files in runtime_bridge that handle ceremony completion
+  # These are the critical integration points where protocol results become facts
+  ceremony_files=$(rg -l "ceremony.*complete|GuardianBinding|invitation.*accept" \
+    crates/aura-agent/src/runtime_bridge -g "*.rs" \
+    | grep -Ev "$ceremony_allow" || true)
+
+  for f in $ceremony_files; do
+    [[ -z "$f" ]] && continue
+    # Check if the file logs ceremony completion
+    if grep -qE "ceremony.*complet|guardian.*accept|Committed.*Binding" "$f" 2>/dev/null; then
+      # Verify there's a corresponding fact commit
+      if ! grep -qE "commit_relational_facts|RelationalFact::" "$f" 2>/dev/null; then
+        missing_facts+="$f -- ceremony completion without fact commit"$'\n'
+      fi
+    fi
+  done
+
+  # Also check handler services that execute ceremonies
+  local handler_files
+  handler_files=$(rg -l "async fn.*ceremony|execute.*ceremony" \
+    crates/aura-agent/src/handlers -g "*.rs" \
+    | grep -Ev "$ceremony_allow" || true)
+
+  for f in $handler_files; do
+    [[ -z "$f" ]] && continue
+    # Handlers that execute ceremonies should either:
+    # 1. Commit facts directly, OR
+    # 2. Delegate to runtime_bridge which commits facts
+    if ! grep -qE "commit_relational_facts|runtime_bridge|RelationalFact::" "$f" 2>/dev/null; then
+      if grep -qE "ceremony.*complet|Ok\\(CeremonyResult" "$f" 2>/dev/null; then
+        missing_facts+="$f -- ceremony handler without fact commit or delegation"$'\n'
+      fi
+    fi
+  done
+
+  if [[ -n "$missing_facts" ]]; then
+    emit_hits "Ceremony without fact commit" "$missing_facts"
+    hint "Commit RelationalFact after ceremony completion to update signal views"
+  else
+    info "Ceremony facts: all ceremony completions commit facts"
+  fi
 }
 
 
@@ -1046,6 +1118,7 @@ check_todos() {
 { $RUN_ALL || $RUN_CRYPTO; }       && check_crypto
 { $RUN_ALL || $RUN_CONCURRENCY; }  && check_concurrency
 { $RUN_ALL || $RUN_REACTIVE; }     && check_reactive
+{ $RUN_ALL || $RUN_CEREMONIES; }   && check_ceremonies
 { $RUN_ALL || $RUN_UI; }           && check_ui
 { $RUN_ALL || $RUN_WORKFLOWS; }    && check_workflows
 { $RUN_ALL || $RUN_SERIALIZATION; } && { check_serialization; check_handler_hygiene; }

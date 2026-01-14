@@ -914,6 +914,16 @@ test-wasm-db: build-wasm-db-test serve-wasm-db-test
 # Utilities
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Run TUI in demo mode with logging to file
+demo-log log="/tmp/aura-demo.log":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just build-dev
+    rm -f {{log}}
+    echo "Starting TUI demo with logging to {{log}}"
+    echo "After exiting, view logs with: grep -i ContactsSignalView {{log}}"
+    RUST_LOG=aura_agent=info,aura_app=info,aura_terminal=info AURA_TUI_ALLOW_STDIO=1 ./bin/aura tui --demo 2>{{log}}
+
 # Execute any aura CLI command
 aura *ARGS='--help':
     @AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command cargo run --bin aura -- {{ARGS}}

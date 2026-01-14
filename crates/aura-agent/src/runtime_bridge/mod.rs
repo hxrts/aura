@@ -41,6 +41,7 @@ use aura_core::Prestate;
 use aura_journal::fact::{
     ChannelBootstrap, ChannelBumpReason, FactOptions, ProposedChannelEpochBump, RelationalFact,
 };
+use aura_journal::ProtocolRelationalFact;
 use aura_journal::DomainFact;
 use aura_protocol::amp::{commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects};
 use aura_protocol::effects::TreeEffects;
@@ -1178,6 +1179,29 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ceremony_id = %ceremony_id,
             "Guardian ceremony completed successfully"
         );
+
+        // Step 7: Commit GuardianBinding facts for each accepted guardian.
+        // This enables the ContactsSignalView to reflect guardian status in the UI.
+        for guardian_id in &accepted_guardians {
+            let binding_fact =
+                RelationalFact::Protocol(ProtocolRelationalFact::GuardianBinding {
+                    account_id: authority_id,
+                    guardian_id: *guardian_id,
+                    binding_hash: Hash32::default(),
+                });
+            if let Err(e) = effects.commit_relational_facts(vec![binding_fact]).await {
+                tracing::warn!(
+                    guardian_id = %guardian_id,
+                    error = %e,
+                    "Failed to commit GuardianBinding fact (UI may not reflect guardian status)"
+                );
+            } else {
+                tracing::info!(
+                    guardian_id = %guardian_id,
+                    "Committed GuardianBinding fact"
+                );
+            }
+        }
 
         Ok(ceremony_id.to_string())
     }

@@ -14,7 +14,7 @@ use aura_app::signal_defs::{
 };
 use aura_app::views::{
     chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
-    contacts::{Contact, ContactsState},
+    contacts::{Contact, ContactError, ContactsState},
     home::{BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
     invitations::{
         Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
@@ -302,7 +302,7 @@ impl ReactiveView for ContactsSignalView {
                             added_at,
                             ..
                         } => {
-                            tracing::debug!(
+                            tracing::info!(
                                 contact_id = %contact_id,
                                 nickname = %nickname,
                                 added_at = added_at.ts_ms,
@@ -326,6 +326,10 @@ impl ReactiveView for ContactsSignalView {
                             } else {
                                 // Contact invitations carry an optional nickname, which we treat as
                                 // a nickname_suggestion. The user's nickname is a separate local label.
+                                tracing::info!(
+                                    contact_id = %contact_id,
+                                    "ContactsSignalView: Creating new contact entry"
+                                );
                                 state.apply_contact(Contact {
                                     id: contact_id,
                                     nickname: String::new(),
@@ -367,8 +371,31 @@ impl ReactiveView for ContactsSignalView {
                     aura_journal::ProtocolRelationalFact::GuardianBinding { guardian_id, .. },
                 )) => {
                     // Reflect guardian status into contacts for details screens.
-                    state.set_guardian_status(guardian_id, true);
-                    changed = true;
+                    // Collect contact IDs first for diagnostic logging.
+                    let contact_ids: Vec<AuthorityId> =
+                        state.contact_ids().cloned().collect();
+                    tracing::info!(
+                        guardian_id = %guardian_id,
+                        existing_contacts = ?contact_ids,
+                        "ContactsSignalView: Processing GuardianBinding"
+                    );
+                    match state.set_guardian_status(guardian_id, true) {
+                        Ok(()) => {
+                            tracing::info!(
+                                guardian_id = %guardian_id,
+                                "ContactsSignalView: Successfully set guardian status"
+                            );
+                            changed = true;
+                        }
+                        Err(ContactError::NotFound(id)) => {
+                            tracing::warn!(
+                                guardian_id = %id,
+                                existing_contacts = ?contact_ids,
+                                "GuardianBinding received but contact not found - \
+                                 contact should be added before guardian ceremony completes"
+                            );
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -380,10 +407,16 @@ impl ReactiveView for ContactsSignalView {
 
         let snapshot = state.clone();
         let contact_count = snapshot.contact_count();
-        let contact_ids: Vec<_> = snapshot.all_contacts().map(|c| c.id).collect();
-        tracing::debug!(
+        let guardian_contacts: Vec<_> = snapshot
+            .all_contacts()
+            .filter(|c| c.is_guardian)
+            .map(|c| c.id)
+            .collect();
+        let all_contact_ids: Vec<_> = snapshot.all_contacts().map(|c| c.id).collect();
+        tracing::info!(
             contact_count,
-            contact_ids = ?contact_ids,
+            all_contacts = ?all_contact_ids,
+            guardians = ?guardian_contacts,
             "ContactsSignalView: Emitting updated contacts"
         );
         drop(state);
