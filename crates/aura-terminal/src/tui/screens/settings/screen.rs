@@ -326,7 +326,7 @@ pub fn SettingsScreen(
                     if let Some(auth) = current_auth {
                         let local_suffix = if auth.is_current { " (Local)" } else { "" };
                         lines.push((
-                            format!("Authority: {}{}", auth.short_id, local_suffix),
+                            format!("Authority: {}{}", auth.id, local_suffix),
                             Theme::SECONDARY,
                         ));
                     } else {
