@@ -324,22 +324,22 @@ pub fn SettingsScreen(
 
                     // Show current authority info
                     if let Some(auth) = current_auth {
+                        let local_suffix = if auth.is_current { " (Local)" } else { "" };
                         lines.push((
-                            format!("Authority: {}", auth.nickname_suggestion),
+                            format!("Authority: {}{}", auth.short_id, local_suffix),
                             Theme::SECONDARY,
                         ));
-                        lines.push((format!("ID: {}", auth.short_id), Theme::TEXT_MUTED));
                     } else {
                         lines.push(("No authority configured".into(), Theme::WARNING));
                     }
 
                     lines.push((String::new(), Theme::TEXT));
                     lines.push((
-                        "Your authority represents your identity".into(),
+                        "Authorities are cryptographic actors that".into(),
                         Theme::TEXT_MUTED,
                     ));
                     lines.push((
-                        "and controls access to your data.".into(),
+                        "can participate in authenticated actions.".into(),
                         Theme::TEXT_MUTED,
                     ));
 
