@@ -29,7 +29,9 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::SettingsViewProps;
 use crate::tui::theme::Theme;
-use crate::tui::types::{AuthoritySubSection, Device, MfaPolicy, RecoveryStatus, SettingsSection};
+use crate::tui::types::{
+    AuthorityInfo, AuthoritySubSection, Device, MfaPolicy, RecoveryStatus, SettingsSection,
+};
 
 // =============================================================================
 // Callback Types (specialized, kept local)
@@ -98,16 +100,18 @@ pub fn SettingsScreen(
     let reactive_threshold = hooks.use_state(|| (0u8, 0u8));
     let reactive_guardian_count = hooks.use_state(|| 0usize);
     let reactive_recovery_status = hooks.use_state(RecoveryStatus::default);
+    let reactive_authorities = hooks.use_state(Vec::<AuthorityInfo>::new);
 
     // Subscribe to settings signal for domain data
     hooks.use_future({
         let mut reactive_nickname_suggestion = reactive_nickname_suggestion.clone();
         let mut reactive_devices = reactive_devices.clone();
         let mut reactive_threshold = reactive_threshold.clone();
+        let mut reactive_authorities = reactive_authorities.clone();
         let app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
-                reactive_nickname_suggestion.set(settings_state.nickname_suggestion);
+                reactive_nickname_suggestion.set(settings_state.nickname_suggestion.clone());
                 let devices: Vec<Device> = settings_state
                     .devices
                     .iter()
@@ -120,6 +124,18 @@ pub fn SettingsScreen(
                     .collect();
                 reactive_devices.set(devices);
                 reactive_threshold.set((settings_state.threshold_k, settings_state.threshold_n));
+
+                // Populate authorities from signal
+                let authorities = if settings_state.authority_id.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![AuthorityInfo::new(
+                        settings_state.authority_id.clone(),
+                        settings_state.authority_nickname.clone(),
+                    )
+                    .current()]
+                };
+                reactive_authorities.set(authorities);
             })
             .await;
         }
@@ -145,6 +161,7 @@ pub fn SettingsScreen(
     let (threshold_k, threshold_n) = *reactive_threshold.read();
     let guardian_count = *reactive_guardian_count.read();
     let recovery_status = reactive_recovery_status.read().clone();
+    let authorities = reactive_authorities.read().clone();
 
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_section = props.view.section;
@@ -248,15 +265,19 @@ pub fn SettingsScreen(
                     .enumerate()
                     .map(|(idx, d)| {
                         let sel = idx == current_device_index;
-                        let ind = if d.is_current { "* " } else { "  " };
                         let c = if sel { Theme::SECONDARY } else { Theme::TEXT };
-                        (format!("{}{}", ind, d.name), c)
+                        let label = if d.is_current {
+                            format!("  {} (Local)", d.name)
+                        } else {
+                            format!("  {}", d.name)
+                        };
+                        (label, c)
                     })
                     .collect();
                 lines.push((String::new(), Theme::TEXT));
                 lines.push(("[a] Add device".into(), Theme::SECONDARY));
                 lines.push(("[i] Import device code".into(), Theme::TEXT_MUTED));
-                lines.push(("[d] Remove selected".into(), Theme::TEXT_MUTED));
+                lines.push(("[r] Remove device".into(), Theme::TEXT_MUTED));
                 lines
             }
         }
@@ -289,12 +310,11 @@ pub fn SettingsScreen(
             ]
         }
         SettingsSection::Authority => {
-            // Get authority state from props
+            // Get authority state - use reactive authorities from signal, UI state from props
             let authority_sub = props.view.authority_sub_section;
-            let authorities = &props.view.authorities;
             let current_auth_idx = props.view.current_authority_index;
 
-            // Get current authority info if available
+            // Get current authority info if available (from reactive state)
             let current_auth = authorities.get(current_auth_idx);
             let has_multiple = authorities.len() > 1;
 

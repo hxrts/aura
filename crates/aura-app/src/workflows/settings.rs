@@ -16,15 +16,19 @@ use std::sync::Arc;
 async fn refresh_settings_signal_from_runtime(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Result<(), AuraError> {
-    let (settings, devices) = {
+    let (settings, devices, authority_id) = {
         let core = app_core.read().await;
+        let authority_id = core
+            .runtime()
+            .map(|r| r.authority_id().to_string())
+            .unwrap_or_default();
         match core.settings_snapshot().await {
-            Some(snapshot) => snapshot,
+            Some(snapshot) => (snapshot.0, snapshot.1, authority_id),
             None => return Ok(()),
         }
     };
     let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
-    state.nickname_suggestion = settings.nickname_suggestion;
+    state.nickname_suggestion = settings.nickname_suggestion.clone();
     state.mfa_policy = settings.mfa_policy;
     state.threshold_k = settings.threshold_k as u8;
     state.threshold_n = settings.threshold_n as u8;
@@ -38,6 +42,8 @@ async fn refresh_settings_signal_from_runtime(
             last_seen: d.last_seen,
         })
         .collect();
+    state.authority_id = authority_id;
+    state.authority_nickname = settings.nickname_suggestion;
 
     emit_signal(app_core, &*SETTINGS_SIGNAL, state, SETTINGS_SIGNAL_NAME).await
 }

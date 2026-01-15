@@ -313,6 +313,10 @@ pub struct SettingsState {
     pub devices: Vec<DeviceInfo>,
     /// Number of contacts
     pub contact_count: usize,
+    /// Current authority ID (hex string)
+    pub authority_id: String,
+    /// Authority nickname suggestion
+    pub authority_nickname: String,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
