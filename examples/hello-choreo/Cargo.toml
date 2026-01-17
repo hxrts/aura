@@ -12,6 +12,6 @@ async-trait = "0.1"
 aura-macros = { path = "../../crates/aura-macros" }
 aura-core = { path = "../../crates/aura-core" }
 aura-mpst = { path = "../../crates/aura-mpst" }
-rumpsteak-aura-choreography = "0.8.1"
-rumpsteak-aura = "0.8.1"
+rumpsteak-aura-choreography = "0.9.1"
+rumpsteak-aura = "0.9.1"
 bincode = "1.3"
