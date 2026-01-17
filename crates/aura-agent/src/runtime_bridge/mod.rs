@@ -41,8 +41,8 @@ use aura_core::Prestate;
 use aura_journal::fact::{
     ChannelBootstrap, ChannelBumpReason, FactOptions, ProposedChannelEpochBump, RelationalFact,
 };
-use aura_journal::ProtocolRelationalFact;
 use aura_journal::DomainFact;
+use aura_journal::ProtocolRelationalFact;
 use aura_protocol::amp::{commit_bump_with_consensus, emit_proposed_bump, AmpJournalEffects};
 use aura_protocol::effects::TreeEffects;
 use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
@@ -957,7 +957,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         guardian_ids: &[String],
     ) -> Result<String, IntentError> {
         use aura_core::hash::hash;
-        use aura_core::threshold::{policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity};
+        use aura_core::threshold::{
+            policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity,
+        };
         use aura_recovery::guardian_ceremony::GuardianState;
         use aura_recovery::{CeremonyId as GuardianCeremonyId, GuardianRotationOp};
 
@@ -1149,10 +1151,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
         // Step 5: Record accepted participants before committing
         for guardian_id in &accepted_guardians {
             runner
-                .record_response(
-                    &ceremony_id,
-                    ParticipantIdentity::guardian(*guardian_id),
-                )
+                .record_response(&ceremony_id, ParticipantIdentity::guardian(*guardian_id))
                 .await
                 .map_err(|e| {
                     IntentError::internal_error(format!(
@@ -1171,9 +1170,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 },
             )
             .await
-            .map_err(|e| {
-                IntentError::internal_error(format!("Failed to commit ceremony: {e}"))
-            })?;
+            .map_err(|e| IntentError::internal_error(format!("Failed to commit ceremony: {e}")))?;
 
         tracing::info!(
             ceremony_id = %ceremony_id,
@@ -1183,12 +1180,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
         // Step 7: Commit GuardianBinding facts for each accepted guardian.
         // This enables the ContactsSignalView to reflect guardian status in the UI.
         for guardian_id in &accepted_guardians {
-            let binding_fact =
-                RelationalFact::Protocol(ProtocolRelationalFact::GuardianBinding {
-                    account_id: authority_id,
-                    guardian_id: *guardian_id,
-                    binding_hash: Hash32::default(),
-                });
+            let binding_fact = RelationalFact::Protocol(ProtocolRelationalFact::GuardianBinding {
+                account_id: authority_id,
+                guardian_id: *guardian_id,
+                binding_hash: Hash32::default(),
+            });
             if let Err(e) = effects.commit_relational_facts(vec![binding_fact]).await {
                 tracing::warn!(
                     guardian_id = %guardian_id,
@@ -1863,20 +1859,21 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .invitations()
             .map_err(|e| service_unavailable_with_detail("invitation_service", e))?;
 
-        let receiver_id = match invitee_authority_id {
-            Some(invitee_auth_str) => invitee_auth_str
-                .parse::<aura_core::AuthorityId>()
-                .map_err(|e| {
-                    IntentError::validation_failed(format!(
-                        "Invalid invitee authority ID '{}': {e}",
-                        invitee_auth_str
-                    ))
-                })?,
-            None => {
-                // Legacy behavior: self-addressed invitation (bearer token)
-                authority_id
-            }
-        };
+        let receiver_id =
+            match invitee_authority_id {
+                Some(invitee_auth_str) => invitee_auth_str
+                    .parse::<aura_core::AuthorityId>()
+                    .map_err(|e| {
+                        IntentError::validation_failed(format!(
+                            "Invalid invitee authority ID '{}': {e}",
+                            invitee_auth_str
+                        ))
+                    })?,
+                None => {
+                    // Legacy behavior: self-addressed invitation (bearer token)
+                    authority_id
+                }
+            };
 
         let invitation = invitation_service
             .invite_device_enrollment(

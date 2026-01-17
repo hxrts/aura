@@ -1071,18 +1071,14 @@ impl RecoveryServiceApi {
             signature: Vec::new(),
         };
 
-        let mut adapter = AuraProtocolAdapter::new(
-            self.effects.clone(),
-            authority_id,
-            guardian_role,
-            role_map,
-        )
-        .with_message_provider(move |request, _received| {
-            if request.type_name == response_type {
-                return Some(Box::new(response_msg.clone()));
-            }
-            None
-        });
+        let mut adapter =
+            AuraProtocolAdapter::new(self.effects.clone(), authority_id, guardian_role, role_map)
+                .with_message_provider(move |request, _received| {
+                    if request.type_name == response_type {
+                        return Some(Box::new(response_msg.clone()));
+                    }
+                    None
+                });
 
         let session_id = Self::ceremony_session_id(ceremony_id);
         adapter

@@ -369,9 +369,7 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                         let payload = match to_vec(&response_msg) {
                             Ok(p) => p,
                             Err(e) => {
-                                tracing::warn!(
-                                    "{name} failed to serialize ceremony response: {e}"
-                                );
+                                tracing::warn!("{name} failed to serialize ceremony response: {e}");
                                 continue;
                             }
                         };
@@ -383,8 +381,7 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                             "application/aura-choreography".to_string(),
                         );
                         if let Some(session_id) = envelope.metadata.get("session-id") {
-                            response_metadata
-                                .insert("session-id".to_string(), session_id.clone());
+                            response_metadata.insert("session-id".to_string(), session_id.clone());
                         }
 
                         let response = aura_core::effects::TransportEnvelope {
@@ -440,8 +437,7 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                             "application/aura-choreography".to_string(),
                         );
                         if let Some(session_id) = envelope.metadata.get("session-id") {
-                            response_metadata
-                                .insert("session-id".to_string(), session_id.clone());
+                            response_metadata.insert("session-id".to_string(), session_id.clone());
                         }
 
                         let response = aura_core::effects::TransportEnvelope {
@@ -464,9 +460,7 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                             );
                         }
                     } else {
-                        tracing::debug!(
-                            "{name} received choreography message (not recognized)"
-                        );
+                        tracing::debug!("{name} received choreography message (not recognized)");
                     }
                 }
                 _ => {}
@@ -561,7 +555,8 @@ pub fn spawn_amp_echo_listener(
                 for peer in &peers {
                     // Skip if peer isn't a member (unless channel has no members listed,
                     // which can happen in demo mode before membership is fully synced)
-                    if !channel_members.is_empty() && !channel_members.contains(&peer.authority_id) {
+                    if !channel_members.is_empty() && !channel_members.contains(&peer.authority_id)
+                    {
                         continue;
                     }
 

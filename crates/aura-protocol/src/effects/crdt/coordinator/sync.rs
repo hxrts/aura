@@ -9,9 +9,7 @@ use super::{
 };
 use crate::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 use aura_core::{
-    semilattice::{
-        Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,
-    },
+    semilattice::{CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top},
     SessionId,
 };
 use aura_journal::CausalContext;

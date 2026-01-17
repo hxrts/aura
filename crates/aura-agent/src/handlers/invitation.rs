@@ -1496,7 +1496,12 @@ impl InvitationHandler {
                     pending_epoch,
                     device_id,
                     ..
-                } => (*subject_authority, ceremony_id.clone(), *pending_epoch, *device_id),
+                } => (
+                    *subject_authority,
+                    ceremony_id.clone(),
+                    *pending_epoch,
+                    *device_id,
+                ),
                 _ => {
                     return Err(AgentError::internal(
                         "Expected DeviceEnrollment invitation type".to_string(),
@@ -1544,7 +1549,8 @@ impl InvitationHandler {
             .await
             .map_err(|e| AgentError::internal(format!("device enrollment start failed: {e}")))?;
 
-        let result = device_enrollment_execute_as(DeviceEnrollmentRole::Initiator, &mut adapter).await;
+        let result =
+            device_enrollment_execute_as(DeviceEnrollmentRole::Initiator, &mut adapter).await;
 
         let _ = adapter.end_session().await;
         match result {
@@ -2752,7 +2758,10 @@ mod tests {
             .await
             .expect("Alice import should succeed");
         assert_eq!(alice_imported.sender_id, alice_sender_id);
-        assert_eq!(alice_imported.invitation_id.as_str(), "inv-demo-alice-sequential");
+        assert_eq!(
+            alice_imported.invitation_id.as_str(),
+            "inv-demo-alice-sequential"
+        );
 
         handler
             .accept_invitation(effects.clone(), &alice_imported.invitation_id)
@@ -2765,7 +2774,10 @@ mod tests {
             .await
             .expect("Carol import should succeed");
         assert_eq!(carol_imported.sender_id, carol_sender_id);
-        assert_eq!(carol_imported.invitation_id.as_str(), "inv-demo-carol-sequential");
+        assert_eq!(
+            carol_imported.invitation_id.as_str(),
+            "inv-demo-carol-sequential"
+        );
 
         // This is the critical assertion - Carol's accept should work after Alice's
         handler

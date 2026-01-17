@@ -563,9 +563,7 @@ async fn handle_tui_launch(
                 let shared_transport = demo_simulator_for_bob
                     .as_ref()
                     .map(|sim| sim.shared_transport())
-                    .ok_or_else(|| {
-                        AuraError::internal("Simulator not available in demo mode")
-                    })?;
+                    .ok_or_else(|| AuraError::internal("Simulator not available in demo mode"))?;
 
                 stdio.println(format_args!(
                     "Creating Bob's agent with shared transport..."
@@ -631,9 +629,8 @@ async fn handle_tui_launch(
     let mut simulator: Option<DemoSimulator> = match mode {
         TuiMode::Demo { .. } => {
             stdio.println(format_args!("Starting demo simulator..."));
-            let mut sim = demo_simulator_for_bob.ok_or_else(|| {
-                AuraError::internal("Simulator not available in demo mode")
-            })?;
+            let mut sim = demo_simulator_for_bob
+                .ok_or_else(|| AuraError::internal("Simulator not available in demo mode"))?;
             sim.start()
                 .await
                 .map_err(|e| AuraError::internal(format!("Failed to start simulator: {}", e)))?;

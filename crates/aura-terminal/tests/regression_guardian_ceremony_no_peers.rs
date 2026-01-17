@@ -204,8 +204,7 @@ async fn regression_guardian_ceremony_fails_without_demo_peers() {
                 // Check for the OLD cryptic error messages (regression)
                 let is_failed_to_start =
                     error_str.contains("internal error") && error_str.contains("failed to start");
-                let is_no_message_provider =
-                    error_str.contains("message provider returned None");
+                let is_no_message_provider = error_str.contains("message provider returned None");
                 let is_protocol_violation = error_str.contains("Protocol violation");
 
                 if is_failed_to_start || is_no_message_provider || is_protocol_violation {
@@ -232,11 +231,11 @@ async fn regression_guardian_ceremony_fails_without_demo_peers() {
 /// to guardian ceremony requests. This is the next issue to fix.
 #[tokio::test]
 async fn control_guardian_ceremony_works_with_demo_peers() {
+    use aura_core::hash;
+    use aura_core::identifiers::ContextId;
     use aura_journal::DomainFact;
     use aura_relational::ContactFact;
     use aura_terminal::demo::DemoSimulator;
-    use aura_core::hash;
-    use aura_core::identifiers::ContextId;
 
     let seed = 2024u64;
     let test_dir = support::unique_test_dir("aura-guardian-with-peers-control");
@@ -244,7 +243,8 @@ async fn control_guardian_ceremony_works_with_demo_peers() {
     // Match the demo-mode authority/context derivation
     let bob_device_id_str = "demo:bob";
     let bob_authority_entropy = hash::hash(format!("authority:{}", bob_device_id_str).as_bytes());
-    let bob_authority = aura_core::identifiers::AuthorityId::new_from_entropy(bob_authority_entropy);
+    let bob_authority =
+        aura_core::identifiers::AuthorityId::new_from_entropy(bob_authority_entropy);
     let bob_context_entropy = hash::hash(format!("context:{}", bob_device_id_str).as_bytes());
     let bob_context = ContextId::new_from_entropy(bob_context_entropy);
 

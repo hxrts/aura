@@ -76,8 +76,7 @@ impl QuintMappable for ConsensusPhase {
             "ConsensusCommitted" => Ok(ConsensusPhase::Committed),
             "ConsensusFailed" => Ok(ConsensusPhase::Failed),
             _ => Err(aura_core::AuraError::invalid(format!(
-                "unknown ConsensusPhase tag: {}",
-                tag
+                "unknown ConsensusPhase tag: {tag}"
             ))),
         }
     }
@@ -105,8 +104,7 @@ impl QuintMappable for PathSelection {
             "FastPath" => Ok(PathSelection::FastPath),
             "SlowPath" => Ok(PathSelection::SlowPath),
             _ => Err(aura_core::AuraError::invalid(format!(
-                "unknown PathSelection tag: {}",
-                tag
+                "unknown PathSelection tag: {tag}"
             ))),
         }
     }
@@ -348,7 +346,7 @@ impl QuintMappable for ConsensusState {
             .iter()
             .filter_map(|v| v.as_str())
             .map(parse_authority_id)
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<std::collections::BTreeSet<_>>>()?;
 
         let initiator = obj
             .get("initiator")

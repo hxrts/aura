@@ -69,7 +69,9 @@ fn channel_id_from_input(channel: &str) -> ChannelId {
 ///
 /// Returns the actual home channel ChannelId from the homes signal.
 /// Falls back to a deterministic default if no home is selected.
-pub async fn current_home_channel_id(app_core: &Arc<RwLock<AppCore>>) -> Result<ChannelId, AuraError> {
+pub async fn current_home_channel_id(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<ChannelId, AuraError> {
     let homes = read_signal(app_core, &*HOMES_SIGNAL, HOMES_SIGNAL_NAME)
         .await
         .ok();
@@ -87,7 +89,9 @@ pub async fn current_home_channel_id(app_core: &Arc<RwLock<AppCore>>) -> Result<
 /// Get current home channel reference string (e.g., "home:<id>") for display.
 ///
 /// Returns a formatted string suitable for display or legacy APIs that take strings.
-pub async fn current_home_channel_ref(app_core: &Arc<RwLock<AppCore>>) -> Result<String, AuraError> {
+pub async fn current_home_channel_ref(
+    app_core: &Arc<RwLock<AppCore>>,
+) -> Result<String, AuraError> {
     let channel_id = current_home_channel_id(app_core).await?;
     Ok(format!("home:{channel_id}"))
 }
@@ -742,7 +746,6 @@ pub async fn send_action_by_name(
 /// * `channel_id` - Channel to invite user to (required - UI manages selection)
 /// * `message` - Optional invitation message
 /// * `ttl_ms` - Optional time-to-live for the invitation
-/// Invite a user to a channel. Returns typed InvitationId.
 pub async fn invite_user_to_channel(
     app_core: &Arc<RwLock<AppCore>>,
     target_user_id: &str,

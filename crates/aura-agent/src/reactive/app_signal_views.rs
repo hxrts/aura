@@ -372,8 +372,7 @@ impl ReactiveView for ContactsSignalView {
                 )) => {
                     // Reflect guardian status into contacts for details screens.
                     // Collect contact IDs first for diagnostic logging.
-                    let contact_ids: Vec<AuthorityId> =
-                        state.contact_ids().cloned().collect();
+                    let contact_ids: Vec<AuthorityId> = state.contact_ids().cloned().collect();
                     tracing::info!(
                         guardian_id = %guardian_id,
                         existing_contacts = ?contact_ids,

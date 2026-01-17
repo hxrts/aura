@@ -810,83 +810,88 @@ impl SettingsCallbacks {
     }
 
     fn make_add_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> AddDeviceCallback {
-        Arc::new(move |nickname_suggestion: String, invitee_authority_id: Option<String>| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            spawn_ctx(ctx.clone(), async move {
-                let start = match ctx
-                    .start_device_enrollment(&nickname_suggestion, invitee_authority_id.as_deref())
-                    .await
-                {
-                    Ok(start) => start,
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by operational layer.
-                        return;
-                    }
-                };
-
-                let _ = tx.try_send(UiUpdate::DeviceEnrollmentStarted {
-                    ceremony_id: start.ceremony_id.clone(),
-                    nickname_suggestion: nickname_suggestion.clone(),
-                    enrollment_code: start.enrollment_code.clone(),
-                    pending_epoch: start.pending_epoch,
-                    device_id: start.device_id.clone(),
-                });
-
-                // Prime status quickly (best-effort) so the modal has counters immediately.
-                if let Ok(status) =
-                    aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
-                        ctx.app_core_raw(),
-                        &start.ceremony_id,
-                    )
-                    .await
-                {
-                    let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                        ceremony_id: status.ceremony_id.clone(),
-                        kind: status.kind,
-                        accepted_count: status.accepted_count,
-                        total_count: status.total_count,
-                        threshold: status.threshold,
-                        is_complete: status.is_complete,
-                        has_failed: status.has_failed,
-                        accepted_participants: status.accepted_participants.clone(),
-                        error_message: status.error_message.clone(),
-                        pending_epoch: status.pending_epoch,
-                        agreement_mode: status.agreement_mode,
-                        reversion_risk: status.reversion_risk,
-                    });
-                }
-
-                let app = ctx.app_core_raw().clone();
-                let tx_monitor = tx.clone();
-                let ceremony_id = start.ceremony_id.clone();
+        Arc::new(
+            move |nickname_suggestion: String, invitee_authority_id: Option<String>| {
+                let ctx = ctx.clone();
+                let tx = tx.clone();
                 spawn_ctx(ctx.clone(), async move {
-                    let _ = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
-                        &app,
-                        ceremony_id,
-                        tokio::time::Duration::from_millis(500),
-                        |status| {
-                            let _ = tx_monitor.try_send(UiUpdate::KeyRotationCeremonyStatus {
-                                ceremony_id: status.ceremony_id.clone(),
-                                kind: status.kind,
-                                accepted_count: status.accepted_count,
-                                total_count: status.total_count,
-                                threshold: status.threshold,
-                                is_complete: status.is_complete,
-                                has_failed: status.has_failed,
-                                accepted_participants: status.accepted_participants.clone(),
-                                error_message: status.error_message.clone(),
-                                pending_epoch: status.pending_epoch,
-                                agreement_mode: status.agreement_mode,
-                                reversion_risk: status.reversion_risk,
-                            });
-                        },
-                        tokio::time::sleep,
-                    )
-                    .await;
+                    let start = match ctx
+                        .start_device_enrollment(
+                            &nickname_suggestion,
+                            invitee_authority_id.as_deref(),
+                        )
+                        .await
+                    {
+                        Ok(start) => start,
+                        Err(_e) => {
+                            // Error already emitted to ERROR_SIGNAL by operational layer.
+                            return;
+                        }
+                    };
+
+                    let _ = tx.try_send(UiUpdate::DeviceEnrollmentStarted {
+                        ceremony_id: start.ceremony_id.clone(),
+                        nickname_suggestion: nickname_suggestion.clone(),
+                        enrollment_code: start.enrollment_code.clone(),
+                        pending_epoch: start.pending_epoch,
+                        device_id: start.device_id.clone(),
+                    });
+
+                    // Prime status quickly (best-effort) so the modal has counters immediately.
+                    if let Ok(status) =
+                        aura_app::ui::workflows::ceremonies::get_key_rotation_ceremony_status(
+                            ctx.app_core_raw(),
+                            &start.ceremony_id,
+                        )
+                        .await
+                    {
+                        let _ = tx.try_send(UiUpdate::KeyRotationCeremonyStatus {
+                            ceremony_id: status.ceremony_id.clone(),
+                            kind: status.kind,
+                            accepted_count: status.accepted_count,
+                            total_count: status.total_count,
+                            threshold: status.threshold,
+                            is_complete: status.is_complete,
+                            has_failed: status.has_failed,
+                            accepted_participants: status.accepted_participants.clone(),
+                            error_message: status.error_message.clone(),
+                            pending_epoch: status.pending_epoch,
+                            agreement_mode: status.agreement_mode,
+                            reversion_risk: status.reversion_risk,
+                        });
+                    }
+
+                    let app = ctx.app_core_raw().clone();
+                    let tx_monitor = tx.clone();
+                    let ceremony_id = start.ceremony_id.clone();
+                    spawn_ctx(ctx.clone(), async move {
+                        let _ = aura_app::ui::workflows::ceremonies::monitor_key_rotation_ceremony(
+                            &app,
+                            ceremony_id,
+                            tokio::time::Duration::from_millis(500),
+                            |status| {
+                                let _ = tx_monitor.try_send(UiUpdate::KeyRotationCeremonyStatus {
+                                    ceremony_id: status.ceremony_id.clone(),
+                                    kind: status.kind,
+                                    accepted_count: status.accepted_count,
+                                    total_count: status.total_count,
+                                    threshold: status.threshold,
+                                    is_complete: status.is_complete,
+                                    has_failed: status.has_failed,
+                                    accepted_participants: status.accepted_participants.clone(),
+                                    error_message: status.error_message.clone(),
+                                    pending_epoch: status.pending_epoch,
+                                    agreement_mode: status.agreement_mode,
+                                    reversion_risk: status.reversion_risk,
+                                });
+                            },
+                            tokio::time::sleep,
+                        )
+                        .await;
+                    });
                 });
-            });
-        })
+            },
+        )
     }
 
     fn make_remove_device(ctx: Arc<IoContext>, tx: UiUpdateSender) -> RemoveDeviceCallback {

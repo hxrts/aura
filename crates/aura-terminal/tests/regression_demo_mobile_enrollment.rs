@@ -73,11 +73,8 @@ async fn setup_demo_env(seed: u64) -> DemoTestEnv {
             .expect("Failed to create account");
 
     let shared_transport = SharedTransport::new();
-    let effect_ctx = EffectContext::new(
-        authority_id,
-        context_id,
-        ExecutionMode::Simulation { seed },
-    );
+    let effect_ctx =
+        EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
     let agent_config = AgentConfig {
         device_id: ids::device_id(&device_id_str),
@@ -170,10 +167,7 @@ async fn regression_demo_mode_mobile_device_enrollment_should_start() {
                 !start.ceremony_id.is_empty(),
                 "Ceremony ID should be generated"
             );
-            assert!(
-                !start.device_id.is_empty(),
-                "Device ID should be generated"
-            );
+            assert!(!start.device_id.is_empty(), "Device ID should be generated");
             println!("Device enrollment started successfully:");
             println!("  ceremony_id: {}", start.ceremony_id);
             println!("  device_id: {}", start.device_id);
@@ -186,10 +180,9 @@ async fn regression_demo_mode_mobile_device_enrollment_should_start() {
             // This is the bug we're trying to catch!
             // The error message contains "Failed to start devi..." (truncated)
             panic!(
-                "BUG REPRODUCED: Device enrollment in demo mode failed with: {}\n\
+                "BUG REPRODUCED: Device enrollment in demo mode failed with: {e}\n\
                  This is the regression we're testing for. The enrollment ceremony \
-                 should start successfully in demo mode.",
-                e
+                 should start successfully in demo mode."
             );
         }
     }
@@ -267,11 +260,8 @@ async fn demo_mode_enrollment_immediately_after_account_creation() {
 
     // Build agent immediately
     let shared_transport = SharedTransport::new();
-    let effect_ctx = EffectContext::new(
-        authority_id,
-        context_id,
-        ExecutionMode::Simulation { seed },
-    );
+    let effect_ctx =
+        EffectContext::new(authority_id, context_id, ExecutionMode::Simulation { seed });
 
     let agent_config = AgentConfig {
         device_id: ids::device_id(&device_id_str),

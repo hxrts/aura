@@ -131,7 +131,7 @@ pub fn SettingsScreen(
                 } else {
                     vec![AuthorityInfo::new(
                         settings_state.authority_id.clone(),
-                        settings_state.authority_nickname.clone(),
+                        settings_state.authority_nickname,
                     )
                     .current()]
                 };

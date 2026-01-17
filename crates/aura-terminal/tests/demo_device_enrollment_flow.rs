@@ -32,7 +32,7 @@ use uuid::Uuid;
 struct TestEnv {
     ctx_a: Arc<IoContext>,
     app_core_a: Arc<RwLock<AppCore>>,
-    agent_a: Arc<aura_agent::AuraAgent>,
+    _agent_a: Arc<aura_agent::AuraAgent>, // Kept alive to maintain agent state
     shared_transport: SharedTransport,
     authority_id: aura_core::AuthorityId,
     context_id: aura_core::ContextId,
@@ -97,7 +97,7 @@ async fn setup_test_env() -> TestEnv {
     TestEnv {
         ctx_a: Arc::new(ctx_a),
         app_core_a,
-        agent_a,
+        _agent_a: agent_a,
         shared_transport,
         authority_id,
         context_id,

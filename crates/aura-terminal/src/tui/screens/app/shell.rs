@@ -15,9 +15,10 @@ use super::modal_overlays::{
     render_chat_create_modal, render_confirm_modal, render_contact_modal,
     render_contacts_code_modal, render_contacts_create_modal, render_contacts_import_modal,
     render_device_enrollment_modal, render_device_import_modal, render_device_select_modal,
-    render_guardian_modal, render_guardian_setup_modal, render_help_modal, render_home_create_modal,
-    render_mfa_setup_modal, render_nickname_modal, render_nickname_suggestion_modal,
-    render_remove_device_modal, render_topic_modal, GlobalModalProps,
+    render_guardian_modal, render_guardian_setup_modal, render_help_modal,
+    render_home_create_modal, render_mfa_setup_modal, render_nickname_modal,
+    render_nickname_suggestion_modal, render_remove_device_modal, render_topic_modal,
+    GlobalModalProps,
 };
 
 use iocraft::prelude::*;

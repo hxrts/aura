@@ -560,13 +560,13 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         ),
     };
 
-    let (device_select_visible, device_select_devices, device_select_selected_index) =
-        match state.modal_queue.current() {
-            Some(QueuedModal::SettingsDeviceSelect(s)) => {
-                (true, s.devices.clone(), s.selected_index)
-            }
-            _ => (false, vec![], 0),
-        };
+    let (device_select_visible, device_select_devices, device_select_selected_index) = match state
+        .modal_queue
+        .current()
+    {
+        Some(QueuedModal::SettingsDeviceSelect(s)) => (true, s.devices.clone(), s.selected_index),
+        _ => (false, vec![], 0),
+    };
 
     let (
         confirm_remove_visible,

@@ -120,17 +120,27 @@ impl IocraftTerminalAdapter {
 
     /// Get captured frames.
     pub fn frames(&self) -> Vec<TerminalFrame> {
-        self.frames.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.frames
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Get the last captured frame.
     pub fn last_frame(&self) -> Option<TerminalFrame> {
-        self.frames.lock().unwrap_or_else(|e| e.into_inner()).last().cloned()
+        self.frames
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .last()
+            .cloned()
     }
 
     /// Clear captured frames.
     pub fn clear_frames(&self) {
-        self.frames.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.frames
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 }
 

@@ -23,8 +23,8 @@ use super::super::views::{
     AccountSetupModalState, AddDeviceField, AddDeviceModalState, ConfirmRemoveModalState,
     CreateChannelModalState, CreateInvitationField, CreateInvitationModalState,
     DeviceEnrollmentCeremonyModalState, DeviceSelectModalState, GuardianSetupModalState,
-    GuardianSetupStep, ImportInvitationModalState, NicknameModalState, NicknameSuggestionModalState,
-    TopicModalState,
+    GuardianSetupStep, ImportInvitationModalState, NicknameModalState,
+    NicknameSuggestionModalState, TopicModalState,
 };
 use super::super::TuiState;
 
@@ -1289,9 +1289,7 @@ fn handle_settings_add_device_key_queue(
         }
         KeyCode::Enter => {
             if modal_state.can_submit() {
-                let invitee_authority_id = modal_state
-                    .invitee_authority()
-                    .map(|s| s.to_string());
+                let invitee_authority_id = modal_state.invitee_authority().map(|s| s.to_string());
                 commands.push(TuiCommand::Dispatch(DispatchCommand::AddDevice {
                     name: modal_state.name,
                     invitee_authority_id,

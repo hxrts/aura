@@ -547,10 +547,7 @@ async fn demo_echo_persists_after_scheduler_update() {
         }
     }
 
-    assert!(
-        found_echo,
-        "Expected echo message with typed ChannelId API"
-    );
+    assert!(found_echo, "Expected echo message with typed ChannelId API");
 }
 
 /// Test that echoes work when channel is created with members directly

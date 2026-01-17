@@ -12,10 +12,10 @@ mod code_display_modal;
 mod command_palette;
 mod contact_multi_select;
 mod contact_select_modal_template;
-mod device_select_modal;
 #[cfg(feature = "development")]
 mod demo_hint;
 mod detail_panel;
+mod device_select_modal;
 mod discovered_peers;
 mod empty_state;
 mod footer;
@@ -49,10 +49,10 @@ pub use contact_multi_select::{
     contact_multi_select, ContactMultiSelectItem, ContactMultiSelectProps,
 };
 pub use contact_select_modal_template::{ContactSelectModal, ContactSelectState};
-pub use device_select_modal::DeviceSelectModal;
 #[cfg(feature = "development")]
 pub use demo_hint::{DemoHintBar, DemoInviteCodes};
 pub use detail_panel::DetailPanel;
+pub use device_select_modal::DeviceSelectModal;
 pub use discovered_peers::{
     DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, InvitePeerCallback,
     PeerInvitationStatus,
