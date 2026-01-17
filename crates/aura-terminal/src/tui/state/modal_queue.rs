@@ -9,8 +9,9 @@ use crate::tui::screens::Screen;
 use super::views::{
     AccountSetupModalState, AddDeviceModalState, ChannelInfoModalState, ConfirmRemoveModalState,
     CreateChannelModalState, CreateInvitationModalState, DeviceEnrollmentCeremonyModalState,
-    GuardianSetupModalState, HomeCreateModalState, ImportInvitationModalState,
-    InvitationCodeModalState, NicknameModalState, NicknameSuggestionModalState, TopicModalState,
+    DeviceSelectModalState, GuardianSetupModalState, HomeCreateModalState,
+    ImportInvitationModalState, InvitationCodeModalState, NicknameModalState,
+    NicknameSuggestionModalState, TopicModalState,
 };
 
 // Re-export portable modal queue constants and types from aura-app
@@ -107,6 +108,9 @@ pub enum QueuedModal {
 
     /// Device enrollment ceremony (code + progress)
     SettingsDeviceEnrollment(DeviceEnrollmentCeremonyModalState),
+
+    /// Select device for removal
+    SettingsDeviceSelect(DeviceSelectModalState),
 
     /// Confirm device removal
     SettingsRemoveDevice(ConfirmRemoveModalState),

@@ -87,6 +87,8 @@ pub enum DispatchCommand {
     RemoveContact {
         contact_id: String,
     },
+    /// Open remove contact confirmation modal (shell populates selected contact)
+    OpenRemoveContactModal,
     /// Contact selection by index (for generic contact select modals)
     SelectContactByIndex {
         index: usize,
@@ -157,6 +159,8 @@ pub enum DispatchCommand {
     RemoveDevice {
         device_id: String,
     },
+    /// Open device selection modal (for device removal)
+    OpenDeviceSelectModal,
     /// Demo-only: import device enrollment code on the Mobile agent.
     ImportDeviceEnrollmentOnMobile {
         code: String,

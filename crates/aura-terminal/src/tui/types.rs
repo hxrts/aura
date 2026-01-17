@@ -731,7 +731,7 @@ impl AuthorityInfo {
 }
 
 /// A registered device
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Device {
     pub id: String,
     pub name: String,

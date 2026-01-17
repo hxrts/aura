@@ -105,6 +105,7 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         HelpCommand::new("c", "c", "Start chat with contact", "Contacts"),
         HelpCommand::new("a", "a", "Accept invitation code", "Contacts"),
         HelpCommand::new("n", "n", "Create invitation code", "Contacts"),
+        HelpCommand::new("r", "r", "Remove contact", "Contacts"),
         // Neighborhood screen
         HelpCommand::new("Enter", "Enter", "Enter selected home", "Neighborhood"),
         HelpCommand::new("Esc", "Esc", "Return to map view", "Neighborhood"),

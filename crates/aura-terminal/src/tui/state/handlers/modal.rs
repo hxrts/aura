@@ -22,8 +22,9 @@ use super::super::toast::{QueuedToast, ToastLevel};
 use super::super::views::{
     AccountSetupModalState, AddDeviceField, AddDeviceModalState, ConfirmRemoveModalState,
     CreateChannelModalState, CreateInvitationField, CreateInvitationModalState,
-    DeviceEnrollmentCeremonyModalState, GuardianSetupModalState, GuardianSetupStep,
-    ImportInvitationModalState, NicknameModalState, NicknameSuggestionModalState, TopicModalState,
+    DeviceEnrollmentCeremonyModalState, DeviceSelectModalState, GuardianSetupModalState,
+    GuardianSetupStep, ImportInvitationModalState, NicknameModalState, NicknameSuggestionModalState,
+    TopicModalState,
 };
 use super::super::TuiState;
 
@@ -126,6 +127,9 @@ pub fn handle_queued_modal_key(
         }
         QueuedModal::SettingsDeviceEnrollment(modal_state) => {
             handle_device_enrollment_key_queue(state, commands, key, modal_state);
+        }
+        QueuedModal::SettingsDeviceSelect(modal_state) => {
+            handle_device_select_key_queue(state, commands, key, modal_state);
         }
         QueuedModal::SettingsRemoveDevice(modal_state) => {
             handle_settings_remove_device_key_queue(state, commands, key, modal_state);
@@ -1400,6 +1404,55 @@ fn handle_authority_picker_key_queue(
                 }
             }
             state.modal_queue.dismiss();
+        }
+        _ => {}
+    }
+}
+
+/// Handle device selection modal keys (for device removal)
+///
+/// - Esc: Cancel
+/// - Up/Down/j/k: Navigate list (skips current device)
+/// - Enter: Select device and show confirmation modal
+fn handle_device_select_key_queue(
+    state: &mut TuiState,
+    _commands: &mut Vec<TuiCommand>,
+    key: KeyEvent,
+    modal_state: DeviceSelectModalState,
+) {
+    match key.code {
+        KeyCode::Esc => {
+            state.modal_queue.dismiss();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsDeviceSelect(ref mut s) = modal {
+                    s.select_prev();
+                }
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.modal_queue.update_active(|modal| {
+                if let QueuedModal::SettingsDeviceSelect(ref mut s) = modal {
+                    s.select_next();
+                }
+            });
+        }
+        KeyCode::Enter => {
+            // Get selected device and show confirmation modal
+            if let Some(device) = modal_state.selected_device() {
+                let device_id = device.id.clone();
+                let display_name = device.name.clone();
+
+                // Dismiss device select modal
+                state.modal_queue.dismiss();
+
+                // Enqueue confirmation modal
+                use super::super::views::ConfirmRemoveModalState;
+                state.modal_queue.enqueue(QueuedModal::SettingsRemoveDevice(
+                    ConfirmRemoveModalState::for_device(&device_id, &display_name),
+                ));
+            }
         }
         _ => {}
     }

@@ -3,7 +3,7 @@
 use super::KeyRotationCeremonyUiState;
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::state::form::{Validatable, ValidationError};
-use crate::tui::types::{AuthoritySubSection, MfaPolicy, SettingsSection};
+use crate::tui::types::{AuthoritySubSection, Device, MfaPolicy, SettingsSection};
 use aura_core::types::Epoch;
 
 /// Settings screen state
@@ -232,6 +232,58 @@ impl ConfirmRemoveModalState {
 
     pub fn toggle_focus(&mut self) {
         self.confirm_focused = !self.confirm_focused;
+    }
+}
+
+/// State for device selection modal (for removal)
+///
+/// Note: Visibility is controlled by ModalQueue, not a `visible` field.
+#[derive(Clone, Debug, Default)]
+pub struct DeviceSelectModalState {
+    /// Available devices to select from
+    pub devices: Vec<Device>,
+    /// Currently selected index (among selectable devices, excludes current device)
+    pub selected_index: usize,
+}
+
+impl DeviceSelectModalState {
+    /// Create initialized state with devices list
+    pub fn with_devices(devices: Vec<Device>) -> Self {
+        Self {
+            devices,
+            selected_index: 0,
+        }
+    }
+
+    /// Get selectable devices (non-current)
+    pub fn selectable_devices(&self) -> Vec<&Device> {
+        self.devices.iter().filter(|d| !d.is_current).collect()
+    }
+
+    /// Get currently selected device (if any)
+    pub fn selected_device(&self) -> Option<&Device> {
+        self.selectable_devices().get(self.selected_index).copied()
+    }
+
+    /// Move selection up (wrapping)
+    pub fn select_prev(&mut self) {
+        let count = self.selectable_devices().len();
+        if count > 0 && self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    /// Move selection down (wrapping)
+    pub fn select_next(&mut self) {
+        let count = self.selectable_devices().len();
+        if count > 0 && self.selected_index + 1 < count {
+            self.selected_index += 1;
+        }
+    }
+
+    /// Check if selection is valid (has selectable devices)
+    pub fn can_select(&self) -> bool {
+        !self.selectable_devices().is_empty()
     }
 }
 

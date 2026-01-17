@@ -23,7 +23,7 @@ use crate::tui::state::{
     ChatFocus, CreateInvitationField, DetailFocus, GuardianCeremonyResponse, GuardianSetupStep,
     NeighborhoodMode, QueuedModal, TuiState,
 };
-use crate::tui::types::TraversalDepth;
+use crate::tui::types::{Device, TraversalDepth};
 use aura_core::threshold::AgreementMode;
 use tracing::warn;
 
@@ -461,6 +461,10 @@ pub struct SettingsViewProps {
     pub device_enrollment_modal_copied: bool,
     pub device_enrollment_modal_agreement_mode: AgreementMode,
     pub device_enrollment_modal_reversion_risk: bool,
+    // Device select modal (for removal)
+    pub device_select_modal_visible: bool,
+    pub device_select_modal_devices: Vec<Device>,
+    pub device_select_modal_selected_index: usize,
     // Confirm remove modal
     pub confirm_remove_modal_visible: bool,
     pub confirm_remove_modal_device_id: String,
@@ -555,6 +559,14 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
             false,
         ),
     };
+
+    let (device_select_visible, device_select_devices, device_select_selected_index) =
+        match state.modal_queue.current() {
+            Some(QueuedModal::SettingsDeviceSelect(s)) => {
+                (true, s.devices.clone(), s.selected_index)
+            }
+            _ => (false, vec![], 0),
+        };
 
     let (
         confirm_remove_visible,
@@ -660,6 +672,10 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         device_enrollment_modal_copied: enrollment_copied,
         device_enrollment_modal_agreement_mode: enrollment_agreement_mode,
         device_enrollment_modal_reversion_risk: enrollment_reversion_risk,
+        // Device select modal (from queue)
+        device_select_modal_visible: device_select_visible,
+        device_select_modal_devices: device_select_devices,
+        device_select_modal_selected_index: device_select_selected_index,
         // Confirm remove modal (from queue)
         confirm_remove_modal_visible: confirm_remove_visible,
         confirm_remove_modal_device_id: confirm_remove_device_id,

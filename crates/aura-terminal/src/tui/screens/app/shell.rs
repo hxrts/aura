@@ -14,8 +14,8 @@ use super::modal_overlays::{
     render_account_setup_modal, render_add_device_modal, render_channel_info_modal,
     render_chat_create_modal, render_confirm_modal, render_contact_modal,
     render_contacts_code_modal, render_contacts_create_modal, render_contacts_import_modal,
-    render_device_enrollment_modal, render_device_import_modal, render_guardian_modal,
-    render_guardian_setup_modal, render_help_modal, render_home_create_modal,
+    render_device_enrollment_modal, render_device_import_modal, render_device_select_modal,
+    render_guardian_modal, render_guardian_setup_modal, render_help_modal, render_home_create_modal,
     render_mfa_setup_modal, render_nickname_modal, render_nickname_suggestion_modal,
     render_remove_device_modal, render_topic_modal, GlobalModalProps,
 };
@@ -1739,6 +1739,41 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::RemoveContact { contact_id } => {
                                         (cb.contacts.on_remove_contact)(contact_id);
                                     }
+                                    DispatchCommand::OpenRemoveContactModal => {
+                                        let idx = new_state.contacts.selected_index;
+                                        if let Ok(guard) = shared_contacts_for_dispatch.read() {
+                                            if let Some(contact) = guard.get(idx) {
+                                                // Get display name for confirmation message
+                                                let display_name = if !contact.nickname.is_empty() {
+                                                    contact.nickname.clone()
+                                                } else if let Some(s) = &contact.nickname_suggestion {
+                                                    s.clone()
+                                                } else {
+                                                    let short = contact.id.chars().take(8).collect::<String>();
+                                                    format!("{short}...")
+                                                };
+
+                                                // Show confirmation modal
+                                                new_state.modal_queue.enqueue(
+                                                    crate::tui::state_machine::QueuedModal::Confirm {
+                                                        title: "Remove Contact".to_string(),
+                                                        message: format!(
+                                                            "Are you sure you want to remove \"{display_name}\"?"
+                                                        ),
+                                                        on_confirm: Some(
+                                                            crate::tui::state_machine::ConfirmAction::RemoveContact {
+                                                                contact_id: contact.id.clone(),
+                                                            },
+                                                        ),
+                                                    },
+                                                );
+                                            } else {
+                                                new_state.toast_error("No contact selected");
+                                            }
+                                        } else {
+                                            new_state.toast_error("Failed to read contacts");
+                                        }
+                                    }
                                     DispatchCommand::SelectContactByIndex { index } => {
                                         // Generic contact selection by index
                                         // This is used by ContactSelect modal - map index to contact_id
@@ -2250,6 +2285,45 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::RemoveDevice { device_id } => {
                                         (cb.settings.on_remove_device)(device_id);
                                     }
+                                    DispatchCommand::OpenDeviceSelectModal => {
+                                        let current_devices = shared_devices_for_dispatch
+                                            .read()
+                                            .map(|guard| guard.clone())
+                                            .unwrap_or_default();
+
+                                        if current_devices.is_empty() {
+                                            new_state.toast_info("No devices to remove");
+                                            continue;
+                                        }
+
+                                        // Check if there are any non-current devices
+                                        let has_removable = current_devices.iter().any(|d| !d.is_current);
+                                        if !has_removable {
+                                            new_state.toast_info("Cannot remove the current device");
+                                            continue;
+                                        }
+
+                                        // Convert to Device type for the modal
+                                        let devices: Vec<crate::tui::types::Device> = current_devices
+                                            .iter()
+                                            .map(|d| crate::tui::types::Device {
+                                                id: d.id.clone(),
+                                                name: if d.name.is_empty() {
+                                                    let short = d.id.chars().take(8).collect::<String>();
+                                                    format!("Device {short}")
+                                                } else {
+                                                    d.name.clone()
+                                                },
+                                                is_current: d.is_current,
+                                                last_seen: d.last_seen,
+                                            })
+                                            .collect();
+
+                                        let modal_state = crate::tui::state_machine::DeviceSelectModalState::with_devices(devices);
+                                        new_state.modal_queue.enqueue(
+                                            crate::tui::state_machine::QueuedModal::SettingsDeviceSelect(modal_state),
+                                        );
+                                    }
                                     DispatchCommand::ImportDeviceEnrollmentOnMobile { code } => {
                                         (cb.settings.on_import_device_enrollment_on_mobile)(code);
                                     }
@@ -2498,6 +2572,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             #(render_add_device_modal(&settings_props))
             #(render_device_import_modal(&settings_props))
             #(render_device_enrollment_modal(&settings_props))
+            #(render_device_select_modal(&settings_props))
             #(render_remove_device_modal(&settings_props))
             #(render_mfa_setup_modal(&settings_props))
 

@@ -914,6 +914,11 @@ test-wasm-db: build-wasm-db-test serve-wasm-db-test
 # Utilities
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Build and run TUI in demo mode
+demo:
+    just build-dev
+    ./bin/aura tui --demo
+
 # Run TUI in demo mode with logging to file
 demo-log log="/tmp/aura-demo.log":
     #!/usr/bin/env bash

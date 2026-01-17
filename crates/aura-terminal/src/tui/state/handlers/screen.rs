@@ -158,6 +158,12 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::OpenCreateInvitationModal,
             ));
         }
+        KeyCode::Char('r') => {
+            // Open remove contact confirmation modal via dispatch (shell populates selected contact)
+            commands.push(TuiCommand::Dispatch(
+                DispatchCommand::OpenRemoveContactModal,
+            ));
+        }
         KeyCode::Enter => {
             commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat));
         }
@@ -442,6 +448,12 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                         ToastLevel::Info,
                     ));
                 }
+            }
+        }
+        KeyCode::Char('r') => {
+            if state.settings.section == SettingsSection::Devices {
+                // Open device selection modal via dispatch (shell populates devices)
+                commands.push(TuiCommand::Dispatch(DispatchCommand::OpenDeviceSelectModal));
             }
         }
         KeyCode::Char('s') => {

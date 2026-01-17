@@ -8,7 +8,8 @@
 use iocraft::prelude::*;
 
 use crate::tui::components::{
-    AccountSetupModal, ConfirmModal, ContactSelectModal, HelpModal, ModalFrame, TextInputModal,
+    AccountSetupModal, ConfirmModal, ContactSelectModal, DeviceSelectModal, HelpModal, ModalFrame,
+    TextInputModal,
 };
 use crate::tui::props::{
     ChatViewProps, ContactsViewProps, NeighborhoodViewProps, SettingsViewProps,
@@ -530,6 +531,26 @@ pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<An
                         agreement_mode: settings.device_enrollment_modal_agreement_mode,
                         reversion_risk: settings.device_enrollment_modal_reversion_risk,
                         copied: settings.device_enrollment_modal_copied,
+                    )
+                }
+            }
+            .into_any(),
+        )
+    } else {
+        None
+    }
+}
+
+pub fn render_device_select_modal(settings: &SettingsViewProps) -> Option<AnyElement<'static>> {
+    if settings.device_select_modal_visible {
+        Some(
+            element! {
+                ModalFrame {
+                    DeviceSelectModal(
+                        visible: true,
+                        title: "Select Device to Remove".to_string(),
+                        devices: settings.device_select_modal_devices.clone(),
+                        selected_index: settings.device_select_modal_selected_index,
                     )
                 }
             }
