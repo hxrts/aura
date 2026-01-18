@@ -295,7 +295,13 @@ impl ConsensusProtocol {
         // For deterministic execution, all honest witnesses get same result: result_id = operation_hash
         let result_id = instance.operation_hash;
 
-        // TODO: No pipelined commitment until interpreter path supports token handoff
+        // Pipelined commitments (fast path nonce caching) are disabled until the interpreter
+        // path supports proper capability token handoff. The choreography includes
+        // leak="pipelined_commitment" annotation, but enforcement requires:
+        // 1. Pure interpreter that returns capability tokens
+        // 2. Explicit flow token handoff between rounds
+        // 3. LeakageTracker integration with interpreter results
+        // Until then, witnesses use slow path (generate nonce per round).
         let next_commitment = None;
 
         // Get evidence delta from tracker (with current timestamp)

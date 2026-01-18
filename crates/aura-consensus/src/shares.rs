@@ -47,6 +47,7 @@ use aura_core::{
     frost::{PartialSignature, ThresholdSignature},
     AuthorityId, Hash32, Result,
 };
+use frost_ed25519::keys;
 use std::collections::BTreeMap;
 
 /// Type alias for ResultId (the hash of a consensus result)
@@ -200,16 +201,31 @@ pub struct ThresholdShareSet {
 }
 
 impl ThresholdShareSet {
-    /// Combine shares into threshold signature.
+    /// Combine shares into threshold signature using FROST aggregation.
     ///
     /// Type-level guarantee: we have >= threshold shares.
     ///
+    /// # Parameters
+    ///
+    /// - `message`: The message that was signed by all witnesses
+    /// - `commitments`: Map of nonce commitments from all signers (signer_id -> commitment)
+    /// - `pubkey_package`: The group's FROST public key package for verification
+    ///
     /// # Errors
-    /// Returns error if FROST signature combination fails (cryptographic error).
-    pub fn combine(self) -> Result<ThresholdSignature> {
+    ///
+    /// Returns error if:
+    /// - Share set is empty (shouldn't happen due to type-level guarantee)
+    /// - FROST signature aggregation fails (cryptographic error)
+    pub fn combine(
+        self,
+        message: &[u8],
+        commitments: &std::collections::BTreeMap<u16, aura_core::frost::NonceCommitment>,
+        pubkey_package: &keys::PublicKeyPackage,
+    ) -> Result<ThresholdSignature> {
+        use aura_core::crypto::tree_signing::frost_aggregate;
+
         // Extract signatures in deterministic order (BTreeMap is sorted)
         let signatures: Vec<_> = self.shares.values().cloned().collect();
-        let signers: Vec<_> = signatures.iter().map(|s| s.signer).collect();
 
         if signatures.is_empty() {
             return Err(aura_core::AuraError::invalid(
@@ -217,12 +233,15 @@ impl ThresholdShareSet {
             ));
         }
 
-        // TODO: Implement proper FROST signature aggregation.
-        // Currently returns the first signature as a placeholder.
-        // Should call frost_ed25519::aggregate via aura-core::crypto::tree_signing.
+        // Use proper FROST aggregation via aura-core
+        let aggregated_sig = frost_aggregate(&signatures, message, commitments, pubkey_package)
+            .map_err(|e| {
+                aura_core::AuraError::crypto(format!("FROST aggregation failed: {e}"))
+            })?;
+
         Ok(ThresholdSignature {
-            signature: signatures[0].signature.clone(),
-            signers,
+            signature: aggregated_sig,
+            signers: signatures.iter().map(|s| s.signer).collect(),
         })
     }
 
@@ -319,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn test_threshold_share_set_can_combine() {
+    fn test_threshold_share_set_properties() {
         let mut collector = ShareCollector::new(2);
         let rid = test_result_id(1);
 
@@ -336,9 +355,14 @@ mod tests {
 
         match result {
             InsertResult::ThresholdReached(threshold_set) => {
-                // Should be able to combine
-                let signature = threshold_set.combine();
-                assert!(signature.is_ok());
+                // Verify threshold set properties
+                assert_eq!(threshold_set.count(), 2);
+                assert_eq!(threshold_set.witnesses().len(), 2);
+                assert!(threshold_set.shares().contains_key(&test_authority(1)));
+                assert!(threshold_set.shares().contains_key(&test_authority(2)));
+                // Note: combine() requires message, commitments, and pubkey_package
+                // which are only available at the protocol level (coordinator).
+                // FROST aggregation is tested in integration tests.
             }
             _ => panic!("Expected ThresholdReached"),
         }
