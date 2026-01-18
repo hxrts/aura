@@ -1328,9 +1328,63 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
         };
 
+        // Validate that public key package is available and valid
+        // Empty or invalid packages indicate the device ceremony hasn't been properly set up
+        let public_key_valid = if public_key_package.is_empty() {
+            false
+        } else {
+            // Try to deserialize to validate it
+            use frost_ed25519::keys::PublicKeyPackage;
+            PublicKeyPackage::deserialize(&public_key_package).is_ok()
+        };
+
+        if !public_key_valid {
+            // Find which devices don't have proper setup
+            let mut unreachable_devices = Vec::new();
+            for device_id in &parsed_devices {
+                if *device_id != current_device_id {
+                    unreachable_devices.push(device_id.to_string());
+                }
+            }
+
+            if unreachable_devices.is_empty() {
+                return Err(IntentError::internal_error(
+                    "Public key package missing for multifactor ceremony setup"
+                ));
+            } else {
+                let device_list = unreachable_devices.join(", ");
+                return Err(IntentError::network_error(format!(
+                    "Device {} is not reachable or not properly set up. \
+                     Ensure the device is online and connected to the network before starting the multifactor ceremony.",
+                    device_list
+                )));
+            }
+        }
+
         let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
             std::collections::HashMap::new();
         for (device_id, key_package) in parsed_devices.iter().copied().zip(key_packages.iter()) {
+            // Validate that the key package is not empty and can be deserialized
+            if key_package.is_empty() {
+                return Err(IntentError::network_error(format!(
+                    "Device {} is not reachable or not properly set up. \
+                     Ensure the device is online and connected to the network before starting the multifactor ceremony.",
+                    device_id
+                )));
+            }
+
+            // Try to deserialize the key package to validate it's properly formatted
+            // This catches issues with devices that don't have valid FROST setup
+            use frost_ed25519::keys::KeyPackage;
+            if let Err(e) = KeyPackage::deserialize(key_package) {
+                return Err(IntentError::network_error(format!(
+                    "Device {} is not reachable or not properly set up. \
+                     Ensure the device is online and connected to the network before starting the multifactor ceremony. \
+                     (Key package validation failed: {})",
+                    device_id, e
+                )));
+            }
+
             key_package_by_device.insert(device_id, key_package.clone());
         }
 
@@ -1365,6 +1419,33 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
+            // Validate that we have proper threshold state before attempting consensus
+            // Check if threshold_state exists - if not, devices aren't properly set up
+            let has_threshold_state = signing_service.threshold_state(&authority_id).await.is_some();
+
+            if !has_threshold_state {
+                // Find which devices don't have proper setup
+                let mut unreachable_devices = Vec::new();
+                for device_id in &parsed_devices {
+                    if *device_id != current_device_id {
+                        unreachable_devices.push(device_id.to_string());
+                    }
+                }
+
+                if unreachable_devices.is_empty() {
+                    return Err(IntentError::internal_error(
+                        "Threshold state not initialized for multifactor ceremony"
+                    ));
+                } else {
+                    let device_list = unreachable_devices.join(", ");
+                    return Err(IntentError::network_error(format!(
+                        "Device {} is not reachable or not properly set up. \
+                         Ensure the device is online and connected to the network before starting the multifactor ceremony.",
+                        device_list
+                    )));
+                }
+            }
+
             // For device registration, use authority's own context
             let device_context =
                 aura_core::ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
@@ -1375,7 +1456,33 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 &signing_service,
             )
             .await
-            .map_err(map_consensus_error)?;
+            .map_err(|e| {
+                let err_str = e.to_string();
+                // Check if this is a deserialization error indicating devices aren't set up
+                if err_str.contains("Failed to parse public key package")
+                    || err_str.contains("Failed to deserialize") {
+                    // Find which devices don't have proper setup
+                    let mut unreachable_devices = Vec::new();
+                    for device_id in &parsed_devices {
+                        if *device_id != current_device_id {
+                            unreachable_devices.push(device_id.to_string());
+                        }
+                    }
+
+                    if unreachable_devices.is_empty() {
+                        map_consensus_error(e)
+                    } else {
+                        let device_list = unreachable_devices.join(", ");
+                        IntentError::network_error(format!(
+                            "Device {} is not reachable or not properly set up. \
+                             Ensure the device is online and connected to the network before starting the multifactor ceremony.",
+                            device_list
+                        ))
+                    }
+                } else {
+                    map_consensus_error(e)
+                }
+            })?;
             let _ = persist_consensus_dkg_transcript(
                 effects.clone(),
                 prestate,
