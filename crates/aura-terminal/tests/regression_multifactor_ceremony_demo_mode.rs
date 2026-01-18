@@ -204,51 +204,28 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
         Err(e) => {
             let error_str = e.to_string();
 
-            // Check for improved error message
+            // Check for improved error message (this is what we want after the fix)
             let has_improved_message = error_str.contains("device is not reachable")
-                || error_str.contains("no running agent for device")
-                || error_str.contains("mobile device not connected");
-
-            // Check for key package deserialization error (early manifestation of same issue)
-            let is_key_package_error = error_str.contains("Failed to parse public key package")
-                || error_str.contains("Failed to deserialize public key package");
+                || error_str.contains("Ensure the device is online and connected");
 
             if has_improved_message {
                 println!(
                     "SUCCESS: Multifactor ceremony failed with clear error message:\n{error_str}"
                 );
                 // Test passes - the improved error message is present
-            } else if is_key_package_error {
-                println!(
-                    "PARTIAL SUCCESS: Multifactor ceremony failed during key package setup.\n\
-                     This is an earlier manifestation of the same issue (device not properly set up).\n\
-                     Error: {error_str}\n\n\
-                     The improved 'device is not reachable' error will appear when the ceremony\n\
-                     progresses further (after key package setup succeeds but transport fails)."
-                );
-                // This is acceptable - the device isn't set up properly, so key packages fail
-                // The improved error message will show up once we get past this stage
             } else {
-                // Check for the OLD cryptic error messages (regression)
-                let is_failed_to_start = error_str.contains("Internal error")
-                    && (error_str.contains("failed to st")
-                        || error_str.contains("failed to send"));
-                let is_send_envelope_error = error_str.contains("Failed to send device threshold")
-                    || error_str.contains("send_envelope");
-                let is_generic_internal_error = error_str.contains("Internal error")
-                    && error_str.contains("Failed to register ceremony");
-
-                if is_failed_to_start || is_send_envelope_error || is_generic_internal_error {
-                    panic!(
-                        "REGRESSION: Multifactor ceremony failed with cryptic error message.\n\n\
-                         Error: {error_str}\n\n\
-                         The error should clearly explain that the mobile device is not reachable.\n\
-                         This matches the TUI bug: 'Multifactor ceremony failed: Internal error: failed to st...'"
-                    );
-                }
-
-                // Other errors might be legitimate - still fail to capture them
-                panic!("Multifactor ceremony failed with unexpected error: {error_str}");
+                // This test should FAIL until we fix the underlying issue
+                panic!(
+                    "REGRESSION: Multifactor ceremony failed with unclear error message.\n\n\
+                     Error: {error_str}\n\n\
+                     Expected: Clear message like 'Device demo:bob-mobile is not reachable. \
+                     Ensure the device is online and connected to the network before starting \
+                     the multifactor ceremony.'\n\n\
+                     This test will pass once the fix is implemented to either:\n\
+                     1. Properly set up mobile devices with shared transport in demo mode, OR\n\
+                     2. Detect unreachable devices early and provide a clear error message\n\n\
+                     User-reported error: 'Multifactor ceremony failed: Internal error: failed to st...'"
+                );
             }
         }
     }
@@ -261,6 +238,9 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
 ///
 /// This test verifies that when the mobile device is properly set up with shared transport
 /// (as it should be in demo mode), the multifactor ceremony completes successfully.
+///
+/// This test currently FAILS because the ceremony processor coordination for mobile devices
+/// hasn't been fully implemented. It will pass once the fix is complete.
 #[tokio::test]
 async fn control_multifactor_ceremony_works_with_shared_transport() {
     use aura_terminal::demo::DemoSimulator;
