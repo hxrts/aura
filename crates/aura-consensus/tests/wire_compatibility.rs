@@ -94,8 +94,7 @@ fn test_sign_share_message_with_evidence_delta() {
     let bytes = to_vec(&msg).expect("Serialization should succeed");
 
     // Deserialize back
-    let restored: ConsensusMessage =
-        from_slice(&bytes).expect("Deserialization should succeed");
+    let restored: ConsensusMessage = from_slice(&bytes).expect("Deserialization should succeed");
 
     // Verify evidence delta was preserved
     match restored {
@@ -115,8 +114,7 @@ fn test_evidence_delta_empty_serialization() {
     let bytes = to_vec(&delta).expect("Serialization should succeed");
 
     // Deserialize
-    let restored: EvidenceDelta =
-        from_slice(&bytes).expect("Deserialization should succeed");
+    let restored: EvidenceDelta = from_slice(&bytes).expect("Deserialization should succeed");
 
     assert_eq!(restored.consensus_id, test_consensus_id());
     assert!(restored.equivocation_proofs.is_empty());
@@ -161,8 +159,7 @@ fn test_equivocation_proof_roundtrip() {
     let bytes = to_vec(&proof).expect("Serialization should succeed");
 
     // Deserialize
-    let restored: EquivocationProof =
-        from_slice(&bytes).expect("Deserialization should succeed");
+    let restored: EquivocationProof = from_slice(&bytes).expect("Deserialization should succeed");
 
     // Verify after deserialization
     assert!(restored.verify().is_ok());
@@ -207,8 +204,7 @@ fn test_consensus_result_message_with_evidence() {
     let bytes = to_vec(&msg).expect("Serialization should succeed");
 
     // Deserialize
-    let restored: ConsensusMessage =
-        from_slice(&bytes).expect("Deserialization should succeed");
+    let restored: ConsensusMessage = from_slice(&bytes).expect("Deserialization should succeed");
 
     // Verify evidence was preserved
     match restored {

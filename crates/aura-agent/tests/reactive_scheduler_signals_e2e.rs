@@ -43,8 +43,9 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
     let own_authority = AuthorityId::new_from_entropy([42u8; 32]);
     let config = AgentConfig::default();
     // Use unique deterministic seed to avoid master key caching issues
-    let effects =
-        Arc::new(AuraEffectSystem::simulation_for_authority(&config, 10007, own_authority).unwrap());
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_authority(&config, 10007, own_authority).unwrap(),
+    );
 
     let pipeline = ReactivePipeline::start(
         SchedulerConfig::default(),
@@ -106,8 +107,9 @@ async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
     let own_authority = AuthorityId::new_from_entropy([43u8; 32]);
     let config = AgentConfig::default();
     // Use unique deterministic seed to avoid master key caching issues
-    let effects =
-        Arc::new(AuraEffectSystem::simulation_for_authority(&config, 10008, own_authority).unwrap());
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_authority(&config, 10008, own_authority).unwrap(),
+    );
 
     let pipeline = ReactivePipeline::start(
         SchedulerConfig::default(),
@@ -171,8 +173,9 @@ async fn malformed_domain_fact_bytes_emit_error_signal() {
     let own_authority = AuthorityId::new_from_entropy([44u8; 32]);
     let config = AgentConfig::default();
     // Use unique deterministic seed to avoid master key caching issues
-    let effects =
-        Arc::new(AuraEffectSystem::simulation_for_authority(&config, 10009, own_authority).unwrap());
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_authority(&config, 10009, own_authority).unwrap(),
+    );
 
     let pipeline = ReactivePipeline::start(
         SchedulerConfig::default(),

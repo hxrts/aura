@@ -235,9 +235,7 @@ impl ThresholdShareSet {
 
         // Use proper FROST aggregation via aura-core
         let aggregated_sig = frost_aggregate(&signatures, message, commitments, pubkey_package)
-            .map_err(|e| {
-                aura_core::AuraError::crypto(format!("FROST aggregation failed: {e}"))
-            })?;
+            .map_err(|e| aura_core::AuraError::crypto(format!("FROST aggregation failed: {e}")))?;
 
         Ok(ThresholdSignature {
             signature: aggregated_sig,
