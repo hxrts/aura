@@ -34,7 +34,7 @@ use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::EffectContext;
 use aura_app::{AppConfig, AppCore};
 use aura_core::effects::ExecutionMode;
-use aura_core::hash;
+use aura_core::hash::{self, hash};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::types::FrostThreshold;
 use aura_journal::DomainFact;
@@ -239,8 +239,11 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
 /// This test verifies that when the mobile device is properly set up with shared transport
 /// (as it should be in demo mode), the multifactor ceremony completes successfully.
 ///
-/// This test currently FAILS because the ceremony processor coordination for mobile devices
-/// hasn't been fully implemented. It will pass once the fix is complete.
+/// The implementation now supports cross-authority device addition:
+/// - Each device has its own authority derived from its device_id
+/// - Key package envelopes are sent to the device's own authority
+/// - The target authority (for threshold signing) is passed via metadata
+/// - After ceremony completion, the device gains access to the target authority
 #[tokio::test]
 async fn control_multifactor_ceremony_works_with_shared_transport() {
     use aura_terminal::demo::DemoSimulator;
@@ -296,17 +299,25 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
         .expect("init signals");
 
     // Create a mobile device agent with shared transport
-    // This simulates what DemoSimulator should do for mobile devices
+    // IMPORTANT: The mobile device starts with its OWN authority (mobile_authority).
+    // It will gain access to bob_authority AFTER the multifactor ceremony completes.
+    // Devices can have multiple authorities - the ceremony adds bob_authority to the mobile device.
     let mobile_device_id_str = "demo:bob-mobile";
-    let mobile_authority_entropy =
-        hash::hash(format!("authority:{}", mobile_device_id_str).as_bytes());
-    let mobile_authority = AuthorityId::new_from_entropy(mobile_authority_entropy);
-    let mobile_context_entropy =
-        hash::hash(format!("context:{}", mobile_device_id_str).as_bytes());
+    let mobile_device_id = ids::device_id(mobile_device_id_str);
+
+    // CRITICAL: The mobile device's authority MUST match what participant_identity_to_authority_id derives
+    // For Device participants, this is: AuthorityId::new_from_entropy(hash(device_id.to_bytes()))
+    let mobile_authority = {
+        let bytes = mobile_device_id.to_bytes().expect("valid device id");
+        AuthorityId::new_from_entropy(hash(&bytes))
+    };
+
+
+    let mobile_context_entropy = hash::hash(format!("context:{}", mobile_device_id_str).as_bytes());
     let mobile_context = ContextId::new_from_entropy(mobile_context_entropy);
 
     let mobile_agent_config = AgentConfig {
-        device_id: ids::device_id(mobile_device_id_str),
+        device_id: mobile_device_id,
         storage: aura_agent::core::config::StorageConfig {
             base_path: test_dir.join("mobile"),
             ..Default::default()
@@ -315,14 +326,14 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
     };
 
     let mobile_effect_ctx = EffectContext::new(
-        mobile_authority,
-        mobile_context,
+        mobile_authority,  // Mobile device has its own authority initially
+        mobile_context,    // Mobile device has its own context
         ExecutionMode::Simulation { seed: seed + 1 },
     );
 
     let mobile_agent = AgentBuilder::new()
         .with_config(mobile_agent_config)
-        .with_authority(mobile_authority)
+        .with_authority(mobile_authority)  // Starts with mobile_authority
         .build_simulation_async_with_shared_transport(
             seed + 1,
             &mobile_effect_ctx,
@@ -332,9 +343,9 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
         .expect("build mobile agent");
     let mobile_agent = Arc::new(mobile_agent);
 
-    // Add mobile device as contact
+    // Add mobile device as a contact so Bob can communicate with it
     let contact_facts = vec![ContactFact::added_with_timestamp_ms(
-        ContextId::new_from_entropy([3u8; 32]),
+        ContextId::new_from_entropy([4u8; 32]),
         bob_authority,
         mobile_authority,
         "Bob's Mobile".to_string(),
@@ -353,7 +364,7 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
 
     // Start multifactor ceremony with both devices
     let bob_device_id = ids::device_id(bob_device_id_str);
-    let mobile_device_id = ids::device_id(mobile_device_id_str);
+    // mobile_device_id already defined above
 
     let ceremony_id = {
         let core = app_core.read().await;

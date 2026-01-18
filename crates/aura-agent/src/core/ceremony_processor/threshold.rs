@@ -47,7 +47,24 @@ impl<'a> ThresholdHandler<'a> {
         use aura_core::effects::TransportEffects;
         use base64::Engine;
 
-        let authority_id = envelope.destination;
+        // The target authority is the authority we're setting up threshold signing for
+        // This may be different from envelope.destination (which is the receiving device's authority)
+        let authority_id = if let Some(target_authority_str) = envelope.metadata.get("target-authority-id") {
+            match target_authority_str.parse::<AuthorityId>() {
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        target_authority = %target_authority_str,
+                        "Invalid target-authority-id in metadata, falling back to envelope destination"
+                    );
+                    envelope.destination
+                }
+            }
+        } else {
+            // Backward compatibility: if no target-authority-id, use envelope destination
+            envelope.destination
+        };
 
         let (Some(ceremony_id), Some(pending_epoch_str), Some(initiator_device_id_str)) = (
             envelope.metadata.get("ceremony-id"),
