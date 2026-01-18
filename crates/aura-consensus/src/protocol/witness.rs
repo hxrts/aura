@@ -42,7 +42,9 @@ impl ConsensusProtocol {
         let evidence_delta = match &message {
             ConsensusMessage::Execute { evidence_delta, .. } => Some(evidence_delta.clone()),
             ConsensusMessage::SignShare { evidence_delta, .. } => Some(evidence_delta.clone()),
-            ConsensusMessage::ConsensusResult { evidence_delta, .. } => Some(evidence_delta.clone()),
+            ConsensusMessage::ConsensusResult { evidence_delta, .. } => {
+                Some(evidence_delta.clone())
+            }
             ConsensusMessage::Conflict { evidence_delta, .. } => Some(evidence_delta.clone()),
             _ => None,
         };
@@ -249,11 +251,7 @@ impl ConsensusProtocol {
         let next_commitment = None;
 
         // Get evidence delta from tracker (with current timestamp)
-        let ts_ms = time
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0);
+        let ts_ms = time.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
         let evidence_delta = self
             .evidence_tracker
             .write()

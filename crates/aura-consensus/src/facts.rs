@@ -157,7 +157,7 @@ mod tests {
             },
         };
 
-        let fact = ConsensusFact::EquivocationProof(proof.clone());
+        let fact = ConsensusFact::EquivocationProof(proof);
         let envelope = fact.to_envelope();
 
         assert_eq!(envelope.type_id.as_str(), CONSENSUS_FACT_TYPE_ID);

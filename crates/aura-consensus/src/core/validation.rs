@@ -659,15 +659,12 @@ mod tests {
             )
             .unwrap();
 
-        if let ConsensusFact::EquivocationProof(proof) = fact {
-            assert_eq!(proof.witness, test_authority(1));
-            assert_eq!(proof.consensus_id, test_consensus_id(1).0);
-            assert_eq!(proof.first_result_id, test_hash(3));
-            assert_eq!(proof.second_result_id, test_hash(4));
-            assert_eq!(proof.timestamp.ts_ms, 2000);
-        } else {
-            panic!("Expected EquivocationProof");
-        }
+        let ConsensusFact::EquivocationProof(proof) = fact;
+        assert_eq!(proof.witness, test_authority(1));
+        assert_eq!(proof.consensus_id, test_consensus_id(1).0);
+        assert_eq!(proof.first_result_id, test_hash(3));
+        assert_eq!(proof.second_result_id, test_hash(4));
+        assert_eq!(proof.timestamp.ts_ms, 2000);
     }
 
     #[test]
@@ -695,12 +692,9 @@ mod tests {
             .expect("Should detect equivocation");
 
         // Verify proof contains both result IDs
-        if let ConsensusFact::EquivocationProof(proof) = fact {
-            assert_eq!(proof.first_result_id, test_hash(10));
-            assert_eq!(proof.second_result_id, test_hash(20));
-        } else {
-            panic!("Expected EquivocationProof");
-        }
+        let ConsensusFact::EquivocationProof(proof) = fact;
+        assert_eq!(proof.first_result_id, test_hash(10));
+        assert_eq!(proof.second_result_id, test_hash(20));
     }
 
     #[test]

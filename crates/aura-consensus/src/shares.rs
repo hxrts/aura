@@ -211,19 +211,17 @@ impl ThresholdShareSet {
         let signatures: Vec<_> = self.shares.values().cloned().collect();
         let signers: Vec<_> = signatures.iter().map(|s| s.signer).collect();
 
-        // Use FROST to combine signatures
-        // Note: This is a simplified version. In production, this would call
-        // the actual FROST combine function from aura-core::crypto::tree_signing
         if signatures.is_empty() {
             return Err(aura_core::AuraError::invalid(
                 "Cannot combine empty signature set",
             ));
         }
 
-        // For now, create a threshold signature from the collected shares
-        // In production, this would use frost_ed25519::aggregate
+        // TODO: Implement proper FROST signature aggregation.
+        // Currently returns the first signature as a placeholder.
+        // Should call frost_ed25519::aggregate via aura-core::crypto::tree_signing.
         Ok(ThresholdSignature {
-            signature: signatures[0].signature.clone(), // Placeholder
+            signature: signatures[0].signature.clone(),
             signers,
         })
     }

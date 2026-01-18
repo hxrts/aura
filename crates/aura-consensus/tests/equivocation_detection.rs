@@ -40,7 +40,7 @@ fn test_witness_tracker_detects_equivocation() {
     tracker.record_signature_with_detection(
         context_id,
         witness,
-        sig1.clone(),
+        sig1,
         consensus_id,
         prestate_hash,
         result_id_1,

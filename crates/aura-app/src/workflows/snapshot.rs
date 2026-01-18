@@ -43,7 +43,7 @@ where
     // Layer 2 facts use to_envelope() instead of to_generic()
     let envelope = proposal
         .to_envelope()
-        .map_err(|e| AuraError::serialization(&format!("Failed to encode maintenance fact: {e}")))?;
+        .map_err(|e| AuraError::serialization(format!("Failed to encode maintenance fact: {e}")))?;
     let context_id = proposal.context_id();
     let fact_content = FactContent::Relational(aura_journal::RelationalFact::Generic {
         context_id,

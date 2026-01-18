@@ -7,8 +7,6 @@ use crate::types::ConsensusId;
 use aura_core::{AuthorityId, Hash32, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Cryptographic proof of equivocation
 ///
@@ -196,54 +194,6 @@ impl Default for EvidenceTracker {
     }
 }
 
-/// Augmented message with evidence delta
-///
-/// This wrapper automatically attaches evidence to messages during send
-/// and extracts it during receive.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AugmentedMessage<M> {
-    /// The actual message payload
-    pub payload: M,
-    /// Evidence delta attached to this message
-    pub evidence_delta: EvidenceDelta,
-}
-
-/// Evidence middleware wrapper for transport
-///
-/// Automatically attaches evidence deltas to outgoing messages and merges
-/// incoming evidence deltas.
-pub struct EvidenceMiddleware<T> {
-    /// Inner transport
-    inner: T,
-    /// Shared evidence tracker
-    evidence: Arc<RwLock<EvidenceTracker>>,
-}
-
-impl<T> EvidenceMiddleware<T> {
-    /// Create a new evidence middleware wrapper
-    pub fn new(inner: T) -> Self {
-        Self {
-            inner,
-            evidence: Arc::new(RwLock::new(EvidenceTracker::new())),
-        }
-    }
-
-    /// Create with existing evidence tracker
-    pub fn with_evidence(inner: T, evidence: Arc<RwLock<EvidenceTracker>>) -> Self {
-        Self { inner, evidence }
-    }
-
-    /// Get reference to evidence tracker
-    pub fn evidence(&self) -> Arc<RwLock<EvidenceTracker>> {
-        Arc::clone(&self.evidence)
-    }
-
-    /// Get inner transport
-    pub fn into_inner(self) -> T {
-        self.inner
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,14 +279,14 @@ mod tests {
             test_timestamp_ms(2000),
         );
 
-        tracker.add_proof(proof1.clone()).unwrap();
+        tracker.add_proof(proof1).unwrap();
 
         // Get delta at t=1500 - should include proof1
         let delta1 = tracker.get_delta(cid, test_timestamp_ms(1500));
         assert_eq!(delta1.equivocation_proofs.len(), 1);
 
         // Add proof2 after first delta
-        tracker.add_proof(proof2.clone()).unwrap();
+        tracker.add_proof(proof2).unwrap();
 
         // Get delta at t=2500 - should only include proof2 (new since last sync)
         let delta2 = tracker.get_delta(cid, test_timestamp_ms(2500));

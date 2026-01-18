@@ -22,6 +22,7 @@ aura-core = { path = "../aura-core" }
 aura-macros = { path = "../aura-macros" }
 aura-journal = { path = "../aura-journal" }
 aura-mpst = { path = "../aura-mpst" }
+aura-guards = { path = "../aura-guards" }
 
 # Cryptography
 frost-ed25519 = { workspace = true }
