@@ -4,9 +4,7 @@
 //! agent runtime) to integrate equivocation detection into their consensus flows.
 
 use aura_consensus::{
-    core::validation::EquivocationDetector,
-    facts::ConsensusFact,
-    types::ConsensusId,
+    core::validation::EquivocationDetector, facts::ConsensusFact, types::ConsensusId,
     witness::WitnessTracker,
 };
 use aura_core::{

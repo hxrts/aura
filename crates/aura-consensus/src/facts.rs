@@ -114,9 +114,7 @@ impl FactReducer for ConsensusFactReducer {
                 key_data.extend_from_slice(proof.second_result_id.as_bytes());
 
                 Some(RelationalBinding {
-                    binding_type: RelationalBindingType::Generic(
-                        "equivocation-proof".to_string(),
-                    ),
+                    binding_type: RelationalBindingType::Generic("equivocation-proof".to_string()),
                     context_id,
                     data: key_data,
                 })
