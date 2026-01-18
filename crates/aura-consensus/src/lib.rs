@@ -54,9 +54,11 @@ pub mod core;
 
 // Core modules
 pub mod dkg;
+pub mod evidence;
 pub mod frost;
 pub mod messages;
 pub mod protocol;
+pub mod shares;
 pub mod types;
 pub mod witness;
 

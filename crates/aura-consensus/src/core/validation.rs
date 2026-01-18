@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use super::state::{
     ConsensusPhase, ConsensusState, ConsensusThreshold, PureCommitFact, ShareData, ShareProposal,
 };
-use crate::types::ConsensusId;
+use crate::{evidence::EquivocationProof, types::ConsensusId};
 use aura_core::{AuthorityId, Hash32};
 
 /// Validation error types for detailed diagnostics.
@@ -321,6 +321,85 @@ pub fn check_all_invariants(state: &ConsensusState) -> bool {
         && check_equivocators_excluded(state)
 }
 
+/// Equivocation detector tracks share history and generates proofs
+///
+/// This detector maintains a history of all shares submitted by witnesses
+/// and generates cryptographic proofs when equivocation is detected.
+#[derive(Debug, Clone, Default)]
+pub struct EquivocationDetector {
+    /// Map from (witness, consensus_id, prestate_hash) to first seen (result_id, timestamp)
+    share_history: HashMap<(AuthorityId, ConsensusId, Hash32), (Hash32, u64)>,
+}
+
+impl EquivocationDetector {
+    /// Create a new equivocation detector
+    pub fn new() -> Self {
+        Self {
+            share_history: HashMap::new(),
+        }
+    }
+
+    /// Check a share and return equivocation proof if detected
+    ///
+    /// # Returns
+    /// - `Some(EquivocationProof)` if the witness has already voted for a different result
+    /// - `None` if this is the first share or matches a previous share
+    pub fn check_share(
+        &mut self,
+        witness: AuthorityId,
+        cid: ConsensusId,
+        prestate_hash: Hash32,
+        rid: Hash32,
+        timestamp_ms: u64,
+    ) -> Option<EquivocationProof> {
+        let key = (witness, cid, prestate_hash);
+
+        match self.share_history.get(&key) {
+            None => {
+                // First share from this witness for this consensus
+                self.share_history.insert(key, (rid, timestamp_ms));
+                None
+            }
+            Some((existing_rid, _existing_ts)) => {
+                if *existing_rid == rid {
+                    // Same result ID - duplicate, not equivocation
+                    None
+                } else {
+                    // Different result ID - equivocation detected!
+                    Some(EquivocationProof::new(
+                        witness,
+                        cid,
+                        prestate_hash,
+                        *existing_rid,
+                        rid,
+                        timestamp_ms,
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Clear history for a specific consensus instance
+    ///
+    /// This should be called after consensus completes to free memory.
+    pub fn clear_consensus(&mut self, cid: ConsensusId) {
+        self.share_history
+            .retain(|(_, stored_cid, _), _| *stored_cid != cid);
+    }
+
+    /// Get the number of tracked shares
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.share_history.len()
+    }
+
+    /// Check if detector is empty
+    #[cfg(test)]
+    pub fn is_empty(&self) -> bool {
+        self.share_history.is_empty()
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -494,5 +573,144 @@ mod tests {
         ];
 
         assert!(!check_agreement(&facts));
+    }
+
+    #[test]
+    fn test_equivocation_detector_first_share_accepted() {
+        let mut detector = EquivocationDetector::new();
+
+        let proof = detector.check_share(
+            test_authority(1),
+            test_consensus_id(1),
+            test_hash(2),
+            test_hash(3),
+            1000,
+        );
+
+        assert!(proof.is_none());
+        assert_eq!(detector.len(), 1);
+    }
+
+    #[test]
+    fn test_equivocation_detector_duplicate_share_ignored() {
+        let mut detector = EquivocationDetector::new();
+
+        // First share
+        detector.check_share(
+            test_authority(1),
+            test_consensus_id(1),
+            test_hash(2),
+            test_hash(3),
+            1000,
+        );
+
+        // Same result ID - should be treated as duplicate
+        let proof = detector.check_share(
+            test_authority(1),
+            test_consensus_id(1),
+            test_hash(2),
+            test_hash(3), // Same RID
+            2000,
+        );
+
+        assert!(proof.is_none());
+        assert_eq!(detector.len(), 1); // Still only one entry
+    }
+
+    #[test]
+    fn test_equivocation_detector_conflicting_share_generates_proof() {
+        let mut detector = EquivocationDetector::new();
+
+        // First share for result ID 3
+        detector.check_share(
+            test_authority(1),
+            test_consensus_id(1),
+            test_hash(2),
+            test_hash(3),
+            1000,
+        );
+
+        // Conflicting share for result ID 4
+        let proof = detector.check_share(
+            test_authority(1),
+            test_consensus_id(1),
+            test_hash(2),
+            test_hash(4), // Different RID!
+            2000,
+        );
+
+        assert!(proof.is_some());
+        let proof = proof.unwrap();
+        assert_eq!(proof.witness, test_authority(1));
+        assert_eq!(proof.consensus_id, test_consensus_id(1));
+        assert_eq!(proof.first_result_id, test_hash(3));
+        assert_eq!(proof.second_result_id, test_hash(4));
+        assert_eq!(proof.timestamp_ms, 2000);
+    }
+
+    #[test]
+    fn test_equivocation_proof_includes_both_result_ids() {
+        let mut detector = EquivocationDetector::new();
+
+        detector.check_share(
+            test_authority(1),
+            test_consensus_id(1),
+            test_hash(2),
+            test_hash(10),
+            1000,
+        );
+
+        let proof = detector
+            .check_share(
+                test_authority(1),
+                test_consensus_id(1),
+                test_hash(2),
+                test_hash(20),
+                2000,
+            )
+            .expect("Should detect equivocation");
+
+        // Verify proof contains both result IDs
+        proof.verify().expect("Proof should be valid");
+        assert_eq!(proof.first_result_id, test_hash(10));
+        assert_eq!(proof.second_result_id, test_hash(20));
+    }
+
+    #[test]
+    fn test_equivocation_detector_clear_consensus() {
+        let mut detector = EquivocationDetector::new();
+
+        detector.check_share(
+            test_authority(1),
+            test_consensus_id(1),
+            test_hash(2),
+            test_hash(3),
+            1000,
+        );
+
+        detector.check_share(
+            test_authority(2),
+            test_consensus_id(2),
+            test_hash(2),
+            test_hash(3),
+            1000,
+        );
+
+        assert_eq!(detector.len(), 2);
+
+        // Clear consensus 1
+        detector.clear_consensus(test_consensus_id(1));
+
+        assert_eq!(detector.len(), 1);
+
+        // Can still track consensus 2
+        let proof = detector.check_share(
+            test_authority(2),
+            test_consensus_id(2),
+            test_hash(2),
+            test_hash(4),
+            2000,
+        );
+        assert!(proof.is_some());
     }
 }
