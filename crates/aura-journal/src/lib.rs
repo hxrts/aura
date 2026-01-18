@@ -84,8 +84,8 @@ pub use effect_api::{CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus
 // New fact-based journal exports
 pub use fact::{
     AckStorage, AttestedOp as FactAttestedOp, Fact, FactContent, FactOptions, GcResult,
-    Journal as FactJournal, JournalNamespace, ProtocolRelationalFact, RelationalFact,
-    SnapshotFact, TreeOpKind,
+    Journal as FactJournal, JournalNamespace, ProtocolRelationalFact, RelationalFact, SnapshotFact,
+    TreeOpKind,
 };
 pub use reduction::{
     reduce_authority, reduce_context, ChannelEpochState, ReductionNamespaceError, RelationalState,

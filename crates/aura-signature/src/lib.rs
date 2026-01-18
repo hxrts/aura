@@ -82,8 +82,8 @@ pub use registry::{AuthorityRegistry, AuthorityStatus, VerificationResult};
 pub use facts::{
     derive_device_naming_context, device_naming_fact_type_id, verify_fact_type_id, Confidence,
     DeviceNamingFact, PublicKeyBytes, RevocationReason, VerificationType, VerifyFact,
-    VerifyFactDelta, VerifyFactReducer, DEVICE_NAMING_FACT_TYPE_ID,
-    DEVICE_NAMING_SCHEMA_VERSION, NICKNAME_SUGGESTION_BYTES_MAX, VERIFY_FACT_TYPE_ID,
+    VerifyFactDelta, VerifyFactReducer, DEVICE_NAMING_FACT_TYPE_ID, DEVICE_NAMING_SCHEMA_VERSION,
+    NICKNAME_SUGGESTION_BYTES_MAX, VERIFY_FACT_TYPE_ID,
 };
 
 // Re-export crypto message types (now consolidated in messages.rs)

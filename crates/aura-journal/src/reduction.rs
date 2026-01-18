@@ -521,9 +521,7 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 context_id: *context_id,
                                 data: protocol.binding_key().data(),
                             },
-                            crate::fact::ProtocolRelationalFact::Consensus {
-                                ..
-                            } => {
+                            crate::fact::ProtocolRelationalFact::Consensus { .. } => {
                                 let key = protocol.binding_key();
                                 RelationalBinding {
                                     binding_type: RelationalBindingType::Generic(
@@ -534,88 +532,93 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 }
                             }
                             crate::fact::ProtocolRelationalFact::AmpChannelCheckpoint(cp) => {
-                            channel_checkpoints
-                                .entry((cp.channel, cp.chan_epoch))
-                                .or_default()
-                                .push(cp.clone());
-                            continue;
+                                channel_checkpoints
+                                    .entry((cp.channel, cp.chan_epoch))
+                                    .or_default()
+                                    .push(cp.clone());
+                                continue;
                             }
-                            crate::fact::ProtocolRelationalFact::AmpProposedChannelEpochBump(bump) => {
-                            proposed_bumps.push(bump.clone());
-                            continue;
+                            crate::fact::ProtocolRelationalFact::AmpProposedChannelEpochBump(
+                                bump,
+                            ) => {
+                                proposed_bumps.push(bump.clone());
+                                continue;
                             }
-                            crate::fact::ProtocolRelationalFact::AmpCommittedChannelEpochBump(bump) => {
-                            committed_bumps.push(bump.clone());
-                            continue;
+                            crate::fact::ProtocolRelationalFact::AmpCommittedChannelEpochBump(
+                                bump,
+                            ) => {
+                                committed_bumps.push(bump.clone());
+                                continue;
                             }
                             crate::fact::ProtocolRelationalFact::AmpChannelPolicy(policy) => {
-                            channel_policies
-                                .entry(policy.channel)
-                                .and_modify(|existing| {
-                                    // Prefer policies that specify a skip window override
-                                    if existing.skip_window.is_none()
-                                        && policy.skip_window.is_some()
-                                    {
-                                        *existing = policy.clone();
-                                    }
-                                })
-                                .or_insert_with(|| policy.clone());
-                            continue;
+                                channel_policies
+                                    .entry(policy.channel)
+                                    .and_modify(|existing| {
+                                        // Prefer policies that specify a skip window override
+                                        if existing.skip_window.is_none()
+                                            && policy.skip_window.is_some()
+                                        {
+                                            *existing = policy.clone();
+                                        }
+                                    })
+                                    .or_insert_with(|| policy.clone());
+                                continue;
                             }
                             crate::fact::ProtocolRelationalFact::AmpChannelBootstrap(bootstrap) => {
-                            channel_bootstraps.insert(bootstrap.channel, bootstrap.clone());
-                            continue;
+                                channel_bootstraps.insert(bootstrap.channel, bootstrap.clone());
+                                continue;
                             }
                             crate::fact::ProtocolRelationalFact::LeakageEvent(event) => {
-                            let observer = aura_core::effects::ObserverClass::from(event.observer);
-                            let current = leakage_budget.for_observer(observer);
-                            let next = current.saturating_add(event.amount);
-                            leakage_budget.set_for_observer(observer, next);
-                            continue;
+                                let observer =
+                                    aura_core::effects::ObserverClass::from(event.observer);
+                                let current = leakage_budget.for_observer(observer);
+                                let next = current.saturating_add(event.amount);
+                                leakage_budget.set_for_observer(observer, next);
+                                continue;
                             }
                             crate::fact::ProtocolRelationalFact::DkgTranscriptCommit(_) => {
-                            let key = protocol.binding_key();
-                            bindings.push(RelationalBinding {
-                                binding_type: RelationalBindingType::Generic(
-                                    key.sub_type().to_string(),
-                                ),
-                                context_id: *context_id,
-                                data: key.data(),
-                            });
-                            continue;
+                                let key = protocol.binding_key();
+                                bindings.push(RelationalBinding {
+                                    binding_type: RelationalBindingType::Generic(
+                                        key.sub_type().to_string(),
+                                    ),
+                                    context_id: *context_id,
+                                    data: key.data(),
+                                });
+                                continue;
                             }
                             crate::fact::ProtocolRelationalFact::ConvergenceCert(_) => {
-                            let key = protocol.binding_key();
-                            bindings.push(RelationalBinding {
-                                binding_type: RelationalBindingType::Generic(
-                                    key.sub_type().to_string(),
-                                ),
-                                context_id: *context_id,
-                                data: key.data(),
-                            });
-                            continue;
+                                let key = protocol.binding_key();
+                                bindings.push(RelationalBinding {
+                                    binding_type: RelationalBindingType::Generic(
+                                        key.sub_type().to_string(),
+                                    ),
+                                    context_id: *context_id,
+                                    data: key.data(),
+                                });
+                                continue;
                             }
                             crate::fact::ProtocolRelationalFact::ReversionFact(_) => {
-                            let key = protocol.binding_key();
-                            bindings.push(RelationalBinding {
-                                binding_type: RelationalBindingType::Generic(
-                                    key.sub_type().to_string(),
-                                ),
-                                context_id: *context_id,
-                                data: key.data(),
-                            });
-                            continue;
+                                let key = protocol.binding_key();
+                                bindings.push(RelationalBinding {
+                                    binding_type: RelationalBindingType::Generic(
+                                        key.sub_type().to_string(),
+                                    ),
+                                    context_id: *context_id,
+                                    data: key.data(),
+                                });
+                                continue;
                             }
                             crate::fact::ProtocolRelationalFact::RotateFact(_) => {
-                            let key = protocol.binding_key();
-                            bindings.push(RelationalBinding {
-                                binding_type: RelationalBindingType::Generic(
-                                    key.sub_type().to_string(),
-                                ),
-                                context_id: *context_id,
-                                data: key.data(),
-                            });
-                            continue;
+                                let key = protocol.binding_key();
+                                bindings.push(RelationalBinding {
+                                    binding_type: RelationalBindingType::Generic(
+                                        key.sub_type().to_string(),
+                                    ),
+                                    context_id: *context_id,
+                                    data: key.data(),
+                                });
+                                continue;
                             }
                         },
                         // Generic bindings handle all domain-specific facts
@@ -1013,9 +1016,7 @@ mod tests {
                 OrderTime([10u8; 32]),
                 TimeStamp::OrderClock(OrderTime([10u8; 32])),
                 FactContent::Relational(RelationalFact::Protocol(
-                    crate::fact::ProtocolRelationalFact::AmpProposedChannelEpochBump(
-                        proposed,
-                    ),
+                    crate::fact::ProtocolRelationalFact::AmpProposedChannelEpochBump(proposed),
                 )),
             ))
             .unwrap();
@@ -1066,9 +1067,7 @@ mod tests {
                 OrderTime([12u8; 32]),
                 TimeStamp::OrderClock(OrderTime([12u8; 32])),
                 FactContent::Relational(RelationalFact::Protocol(
-                    crate::fact::ProtocolRelationalFact::AmpProposedChannelEpochBump(
-                        emergency,
-                    ),
+                    crate::fact::ProtocolRelationalFact::AmpProposedChannelEpochBump(emergency),
                 )),
             ))
             .unwrap();
@@ -1100,17 +1099,15 @@ mod tests {
             OrderTime([1u8; 32]),
             TimeStamp::OrderClock(OrderTime([1u8; 32])),
             FactContent::Relational(RelationalFact::Protocol(
-                crate::fact::ProtocolRelationalFact::AmpChannelCheckpoint(
-                    ChannelCheckpoint {
-                        context: ctx,
-                        channel,
-                        chan_epoch: 0,
-                        base_gen: 10,
-                        window: 16,
-                        ck_commitment: Hash32::new([8u8; 32]),
-                        skip_window_override: Some(16),
-                    },
-                ),
+                crate::fact::ProtocolRelationalFact::AmpChannelCheckpoint(ChannelCheckpoint {
+                    context: ctx,
+                    channel,
+                    chan_epoch: 0,
+                    base_gen: 10,
+                    window: 16,
+                    ck_commitment: Hash32::new([8u8; 32]),
+                    skip_window_override: Some(16),
+                }),
             )),
         );
 

@@ -21,8 +21,8 @@ use aura_core::effects::{
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_core::{AuraError, Hash32, Result};
-use aura_journal::fact::{ChannelBootstrap, CommittedChannelEpochBump, RelationalFact};
 use aura_journal::fact::ProtocolRelationalFact;
+use aura_journal::fact::{ChannelBootstrap, CommittedChannelEpochBump, RelationalFact};
 use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;

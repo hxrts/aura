@@ -297,14 +297,10 @@ impl Journal {
                     FactContent::Relational(rel) => match rel {
                         crate::fact::RelationalFact::Protocol(
                             crate::fact::ProtocolRelationalFact::GuardianBinding { .. },
-                        ) => {
-                            "GuardianBinding".to_string()
-                        }
+                        ) => "GuardianBinding".to_string(),
                         crate::fact::RelationalFact::Protocol(
                             crate::fact::ProtocolRelationalFact::RecoveryGrant { .. },
-                        ) => {
-                            "RecoveryGrant".to_string()
-                        }
+                        ) => "RecoveryGrant".to_string(),
                         crate::fact::RelationalFact::Protocol(
                             crate::fact::ProtocolRelationalFact::Consensus { .. },
                         ) => "Consensus".to_string(),

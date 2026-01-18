@@ -340,12 +340,8 @@ mod tests {
     #[test]
     fn test_context_id_derived_from_authority() {
         let authority = test_authority_id(42);
-        let fact = DeviceNamingFact::suggestion_updated_ms(
-            authority,
-            test_device_id(1),
-            "Device",
-            0,
-        );
+        let fact =
+            DeviceNamingFact::suggestion_updated_ms(authority, test_device_id(1), "Device", 0);
 
         let expected_ctx = derive_device_naming_context(authority);
         assert_eq!(fact.context_id(), expected_ctx);
