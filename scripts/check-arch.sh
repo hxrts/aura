@@ -36,6 +36,7 @@ Options (run all when none given):
   --workflows      aura-app workflow hygiene
   --serialization  Serialization format enforcement
   --style          Rust style guide rules
+  --test-seeds     Test seed uniqueness checks
   --layer N[,M...] Filter to specific layers (1-8)
   --quick          Skip slow checks (todos, placeholders)
   -v, --verbose    Show more detail
@@ -50,7 +51,7 @@ RUN_ALL=true VERBOSE=false RUN_QUICK=false
 RUN_LAYERS=false RUN_DEPS=false RUN_EFFECTS=false RUN_GUARDS=false
 RUN_INVARIANTS=false RUN_TODOS=false RUN_REG=false RUN_CRYPTO=false
 RUN_CONCURRENCY=false RUN_REACTIVE=false RUN_CEREMONIES=false RUN_UI=false RUN_WORKFLOWS=false
-RUN_SERIALIZATION=false RUN_STYLE=false
+RUN_SERIALIZATION=false RUN_STYLE=false RUN_TEST_SEEDS=false
 LAYER_FILTERS=()
 
 while [[ $# -gt 0 ]]; do
@@ -70,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --workflows)     RUN_ALL=false; RUN_WORKFLOWS=true ;;
     --serialization) RUN_ALL=false; RUN_SERIALIZATION=true ;;
     --style)         RUN_ALL=false; RUN_STYLE=true ;;
+    --test-seeds)    RUN_ALL=false; RUN_TEST_SEEDS=true ;;
     --layer)
       [[ -z "${2-}" ]] && { echo "--layer requires N"; exit 1; }
       IFS=',' read -ra layers <<< "$2"
@@ -89,6 +91,7 @@ if $RUN_QUICK && $RUN_ALL; then
   RUN_LAYERS=true RUN_DEPS=true RUN_EFFECTS=true RUN_GUARDS=true
   RUN_INVARIANTS=true RUN_REG=true RUN_CRYPTO=true RUN_CONCURRENCY=true
   RUN_REACTIVE=true RUN_CEREMONIES=true RUN_SERIALIZATION=true RUN_STYLE=true RUN_WORKFLOWS=true
+  RUN_TEST_SEEDS=true
   RUN_TODOS=false  # Skip in quick mode
 fi
 
@@ -1051,6 +1054,20 @@ check_style() {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# CHECK: Test Seed Uniqueness
+# ═══════════════════════════════════════════════════════════════════════════════
+check_test_seeds() {
+  section "Test seed uniqueness — ensure test isolation"
+
+  # Run the dedicated test seed checker script
+  if ! bash scripts/check-test-seeds.sh; then
+    VIOLATIONS=$((VIOLATIONS + 1))
+    VIOLATION_DETAILS+=("Test seed uniqueness violations detected")
+  fi
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # CHECK: TODOs and Incomplete Markers
 # ═══════════════════════════════════════════════════════════════════════════════
 check_todos() {
@@ -1132,6 +1149,7 @@ check_todos() {
 { $RUN_ALL || $RUN_WORKFLOWS; }    && check_workflows
 { $RUN_ALL || $RUN_SERIALIZATION; } && { check_serialization; check_handler_hygiene; }
 { $RUN_ALL || $RUN_STYLE; }        && check_style
+{ $RUN_ALL || $RUN_TEST_SEEDS; }   && check_test_seeds
 { $RUN_ALL || $RUN_TODOS; }        && check_todos
 
 

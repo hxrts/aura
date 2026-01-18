@@ -1006,7 +1006,8 @@ mod tests {
         let authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([71u8; 32]));
         let account_id = AccountId::new_from_entropy([14u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(AuraEffectSystem::testing(&config).unwrap());
+        // Use unique deterministic seed to avoid master key caching issues
+        let effects = Arc::new(AuraEffectSystem::simulation(&config, 10005).unwrap());
         let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
 
         let handle = sessions
