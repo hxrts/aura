@@ -75,7 +75,6 @@ fn protocol_context_id(protocol: &crate::protocol_facts::ProtocolRelationalFact)
         ConvergenceCert(cert) => cert.context,
         ReversionFact(reversion) => reversion.context,
         RotateFact(rotate) => rotate.context,
-        EquivocationProof(proof) => proof.context_id,
     }
 }
 

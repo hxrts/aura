@@ -19,7 +19,10 @@ use std::collections::HashMap;
 use super::state::{
     ConsensusPhase, ConsensusState, ConsensusThreshold, PureCommitFact, ShareData, ShareProposal,
 };
-use crate::{evidence::EquivocationProof, types::ConsensusId};
+use crate::facts::{ConsensusFact, EquivocationProof};
+use crate::types::ConsensusId;
+use aura_core::identifiers::ContextId;
+use aura_core::time::PhysicalTime;
 use aura_core::{AuthorityId, Hash32};
 
 /// Validation error types for detailed diagnostics.
@@ -342,16 +345,17 @@ impl EquivocationDetector {
     /// Check a share and return equivocation proof if detected
     ///
     /// # Returns
-    /// - `Some(EquivocationProof)` if the witness has already voted for a different result
+    /// - `Some(ConsensusFact)` if the witness has already voted for a different result
     /// - `None` if this is the first share or matches a previous share
     pub fn check_share(
         &mut self,
+        context_id: ContextId,
         witness: AuthorityId,
         cid: ConsensusId,
         prestate_hash: Hash32,
         rid: Hash32,
         timestamp_ms: u64,
-    ) -> Option<EquivocationProof> {
+    ) -> Option<ConsensusFact> {
         let key = (witness, cid, prestate_hash);
 
         match self.share_history.get(&key) {
@@ -366,14 +370,19 @@ impl EquivocationDetector {
                     None
                 } else {
                     // Different result ID - equivocation detected!
-                    Some(EquivocationProof::new(
+                    let proof = EquivocationProof {
+                        context_id,
                         witness,
-                        cid,
+                        consensus_id: cid.0,
                         prestate_hash,
-                        *existing_rid,
-                        rid,
-                        timestamp_ms,
-                    ))
+                        first_result_id: *existing_rid,
+                        second_result_id: rid,
+                        timestamp: PhysicalTime {
+                            ts_ms: timestamp_ms,
+                            uncertainty: None,
+                        },
+                    };
+                    Some(ConsensusFact::EquivocationProof(proof))
                 }
             }
         }
@@ -423,6 +432,10 @@ mod tests {
 
     fn test_consensus_id(seed: u8) -> ConsensusId {
         ConsensusId(Hash32::new([seed; 32]))
+    }
+
+    fn test_context(seed: u8) -> ContextId {
+        ContextId::new_from_entropy([seed; 32])
     }
 
     fn test_operation(seed: u8) -> OperationId {
@@ -580,6 +593,7 @@ mod tests {
         let mut detector = EquivocationDetector::new();
 
         let proof = detector.check_share(
+            test_context(1),
             test_authority(1),
             test_consensus_id(1),
             test_hash(2),
@@ -597,6 +611,7 @@ mod tests {
 
         // First share
         detector.check_share(
+            test_context(1),
             test_authority(1),
             test_consensus_id(1),
             test_hash(2),
@@ -606,6 +621,7 @@ mod tests {
 
         // Same result ID - should be treated as duplicate
         let proof = detector.check_share(
+            test_context(1),
             test_authority(1),
             test_consensus_id(1),
             test_hash(2),
@@ -623,6 +639,7 @@ mod tests {
 
         // First share for result ID 3
         detector.check_share(
+            test_context(1),
             test_authority(1),
             test_consensus_id(1),
             test_hash(2),
@@ -631,21 +648,26 @@ mod tests {
         );
 
         // Conflicting share for result ID 4
-        let proof = detector.check_share(
-            test_authority(1),
-            test_consensus_id(1),
-            test_hash(2),
-            test_hash(4), // Different RID!
-            2000,
-        );
+        let fact = detector
+            .check_share(
+                test_context(1),
+                test_authority(1),
+                test_consensus_id(1),
+                test_hash(2),
+                test_hash(4), // Different RID!
+                2000,
+            )
+            .unwrap();
 
-        assert!(proof.is_some());
-        let proof = proof.unwrap();
-        assert_eq!(proof.witness, test_authority(1));
-        assert_eq!(proof.consensus_id, test_consensus_id(1));
-        assert_eq!(proof.first_result_id, test_hash(3));
-        assert_eq!(proof.second_result_id, test_hash(4));
-        assert_eq!(proof.timestamp_ms, 2000);
+        if let ConsensusFact::EquivocationProof(proof) = fact {
+            assert_eq!(proof.witness, test_authority(1));
+            assert_eq!(proof.consensus_id, test_consensus_id(1).0);
+            assert_eq!(proof.first_result_id, test_hash(3));
+            assert_eq!(proof.second_result_id, test_hash(4));
+            assert_eq!(proof.timestamp.ts_ms, 2000);
+        } else {
+            panic!("Expected EquivocationProof");
+        }
     }
 
     #[test]
@@ -653,6 +675,7 @@ mod tests {
         let mut detector = EquivocationDetector::new();
 
         detector.check_share(
+            test_context(1),
             test_authority(1),
             test_consensus_id(1),
             test_hash(2),
@@ -660,8 +683,9 @@ mod tests {
             1000,
         );
 
-        let proof = detector
+        let fact = detector
             .check_share(
+                test_context(1),
                 test_authority(1),
                 test_consensus_id(1),
                 test_hash(2),
@@ -671,9 +695,12 @@ mod tests {
             .expect("Should detect equivocation");
 
         // Verify proof contains both result IDs
-        proof.verify().expect("Proof should be valid");
-        assert_eq!(proof.first_result_id, test_hash(10));
-        assert_eq!(proof.second_result_id, test_hash(20));
+        if let ConsensusFact::EquivocationProof(proof) = fact {
+            assert_eq!(proof.first_result_id, test_hash(10));
+            assert_eq!(proof.second_result_id, test_hash(20));
+        } else {
+            panic!("Expected EquivocationProof");
+        }
     }
 
     #[test]
@@ -681,6 +708,7 @@ mod tests {
         let mut detector = EquivocationDetector::new();
 
         detector.check_share(
+            test_context(1),
             test_authority(1),
             test_consensus_id(1),
             test_hash(2),
@@ -689,6 +717,7 @@ mod tests {
         );
 
         detector.check_share(
+            test_context(2),
             test_authority(2),
             test_consensus_id(2),
             test_hash(2),
@@ -705,6 +734,7 @@ mod tests {
 
         // Can still track consensus 2
         let proof = detector.check_share(
+            test_context(2),
             test_authority(2),
             test_consensus_id(2),
             test_hash(2),

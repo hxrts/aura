@@ -617,19 +617,6 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                             });
                             continue;
                             }
-                            crate::protocol_facts::ProtocolRelationalFact::EquivocationProof(_) => {
-                            // Equivocation proofs are accountability records
-                            // Store as generic binding for audit trail
-                            let key = protocol.binding_key();
-                            bindings.push(RelationalBinding {
-                                binding_type: RelationalBindingType::Generic(
-                                    key.sub_type().to_string(),
-                                ),
-                                context_id: *context_id,
-                                data: key.data(),
-                            });
-                            continue;
-                            }
                         },
                         // Generic bindings handle all domain-specific facts
                         // (ChatFact, InvitationFact, ContactFact, etc.)

@@ -64,8 +64,6 @@ pub enum ProtocolRelationalFact {
     ReversionFact(ReversionFact),
     /// Rotation/upgrade marker for lifecycle transitions
     RotateFact(RotateFact),
-    /// Equivocation proof showing malicious consensus behavior
-    EquivocationProof(crate::fact::EquivocationProof),
 }
 
 impl ProtocolRelationalFact {
@@ -149,14 +147,6 @@ impl ProtocolRelationalFact {
             ProtocolRelationalFact::RotateFact(rotate) => ProtocolFactKey::RotateFact {
                 to_state: rotate.to_state,
             },
-            ProtocolRelationalFact::EquivocationProof(proof) => {
-                ProtocolFactKey::EquivocationProof {
-                    witness: proof.witness,
-                    consensus_id: proof.consensus_id,
-                    first_result_id: proof.first_result_id,
-                    second_result_id: proof.second_result_id,
-                }
-            }
         }
     }
 }
