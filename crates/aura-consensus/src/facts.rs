@@ -42,6 +42,20 @@ pub struct EquivocationProof {
     pub timestamp: PhysicalTime,
 }
 
+impl EquivocationProof {
+    /// Convert to evidence module's EquivocationProof for message propagation
+    pub fn to_evidence_proof(&self) -> crate::evidence::EquivocationProof {
+        crate::evidence::EquivocationProof {
+            witness: self.witness,
+            consensus_id: crate::ConsensusId(self.consensus_id),
+            prestate_hash: self.prestate_hash,
+            first_result_id: self.first_result_id,
+            second_result_id: self.second_result_id,
+            timestamp_ms: self.timestamp.ts_ms,
+        }
+    }
+}
+
 impl DomainFact for ConsensusFact {
     fn type_id(&self) -> &'static str {
         CONSENSUS_FACT_TYPE_ID
