@@ -385,7 +385,7 @@ impl WitnessInstance {
 }
 
 /// Tracks collected witness data during consensus
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct WitnessTracker {
     /// Collected nonce commitments by witness
     pub nonce_commitments: HashMap<AuthorityId, NonceCommitment>,
@@ -395,12 +395,30 @@ pub struct WitnessTracker {
 
     /// Witnesses that reported conflicts
     pub conflict_reporters: HashMap<AuthorityId, Vec<Hash32>>,
+
+    /// Equivocation detector for generating proofs
+    equivocation_detector: crate::core::validation::EquivocationDetector,
+
+    /// Accumulated equivocation proofs detected during this consensus
+    equivocation_proofs: Vec<crate::facts::ConsensusFact>,
+}
+
+impl Default for WitnessTracker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WitnessTracker {
     /// Create a new witness tracker
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            nonce_commitments: HashMap::new(),
+            partial_signatures: HashMap::new(),
+            conflict_reporters: HashMap::new(),
+            equivocation_detector: crate::core::validation::EquivocationDetector::new(),
+            equivocation_proofs: Vec::new(),
+        }
     }
 
     /// Add a nonce commitment
@@ -446,6 +464,56 @@ impl WitnessTracker {
     /// Get participating witnesses
     pub fn get_participants(&self) -> Vec<AuthorityId> {
         self.partial_signatures.keys().cloned().collect()
+    }
+
+    /// Get accumulated equivocation proofs
+    pub fn get_equivocation_proofs(&self) -> &[crate::facts::ConsensusFact] {
+        &self.equivocation_proofs
+    }
+
+    /// Record a signature with equivocation detection
+    ///
+    /// This is an enhanced version of add_signature that checks for equivocation.
+    /// Call this when you have full context available (consensus_id, prestate_hash, etc.)
+    pub fn record_signature_with_detection(
+        &mut self,
+        context_id: aura_core::identifiers::ContextId,
+        witness: AuthorityId,
+        signature: PartialSignature,
+        consensus_id: crate::ConsensusId,
+        prestate_hash: Hash32,
+        result_id: Hash32,
+        timestamp_ms: u64,
+    ) {
+        // Check for equivocation before adding signature
+        if let Some(proof) = self.equivocation_detector.check_share(
+            context_id,
+            witness,
+            consensus_id,
+            prestate_hash,
+            result_id,
+            timestamp_ms,
+        ) {
+            // Store proof for later retrieval
+            self.equivocation_proofs.push(proof);
+            // Don't add the equivocating signature
+            tracing::warn!(
+                witness = %witness,
+                consensus_id = %consensus_id,
+                "Equivocation detected and recorded"
+            );
+            return;
+        }
+
+        // No equivocation - add signature normally
+        self.partial_signatures.insert(witness, signature);
+    }
+
+    /// Clear accumulated equivocation proofs
+    ///
+    /// Call this after extracting proofs to prevent duplicate emission
+    pub fn clear_equivocation_proofs(&mut self) {
+        self.equivocation_proofs.clear();
     }
 }
 
