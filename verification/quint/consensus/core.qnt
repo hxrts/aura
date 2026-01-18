@@ -131,6 +131,25 @@ module protocol_consensus {
         attesters: Set[AuthorityId]
     }
 
+    // Cryptographic proof of equivocation (conflicting votes from same witness)
+    // Rust: crates/aura-consensus/src/evidence.rs::EquivocationProof
+    type EquivocationProof = {
+        witness: AuthorityId,
+        consensusId: ConsensusId,
+        prestateHash: PrestateHash,
+        firstResultId: ResultId,
+        secondResultId: ResultId,
+        timestampMs: int
+    }
+
+    // Evidence delta for incremental propagation of equivocation proofs
+    // Rust: crates/aura-consensus/src/evidence.rs::EvidenceDelta
+    type EvidenceDelta = {
+        consensusId: ConsensusId,
+        equivocationProofs: Set[EquivocationProof],
+        timestampMs: int
+    }
+
     // Consensus instance state
     type ConsensusInstance = {
         cid: ConsensusId,
@@ -143,7 +162,8 @@ module protocol_consensus {
         proposals: Set[ShareProposal],
         commitFact: Option[CommitFact],
         fallbackTimerActive: bool,
-        equivocators: Set[AuthorityId]
+        equivocators: Set[AuthorityId],
+        equivocationProofs: Set[EquivocationProof]  // Track detected equivocation proofs
     }
 
     // ==================== STATE VARIABLES ====================
@@ -151,6 +171,7 @@ module protocol_consensus {
     var instances: ConsensusId -> ConsensusInstance
     var committedFacts: Set[CommitFact]
     var globalWitnesses: Set[AuthorityId]
+    var globalEvidenceTracker: ConsensusId -> EvidenceDelta  // Global evidence tracker by consensus ID
 
     // ==================== NONCE STATE ====================
     // Global epoch and per-witness nonce cache for FROST pipelining.
@@ -255,6 +276,22 @@ module protocol_consensus {
                 | None => true
             }
         }),
+        // Equivocation proofs are valid
+        insts.keys().forall(cid => {
+            val inst = insts.get(cid)
+            inst.equivocationProofs.forall(proof =>
+                proof.firstResultId != proof.secondResultId and
+                proof.consensusId == cid and
+                proof.prestateHash == inst.prestateHash
+            )
+        }),
+        // Equivocators have corresponding proofs
+        insts.keys().forall(cid => {
+            val inst = insts.get(cid)
+            inst.equivocators.forall(w =>
+                inst.equivocationProofs.exists(proof => proof.witness == w)
+            )
+        }),
         // Nonces have valid epochs
         nonces.keys().forall(w => match nonces.get(w) {
             | Some(n) => n.epoch <= epoch
@@ -284,9 +321,44 @@ module protocol_consensus {
     pure def hasProposal(proposals: Set[ShareProposal], witness: AuthorityId): bool =
         proposals.exists(p => p.witness == witness)
 
-    // Check for equivocation: same witness, different rid for same cid
-    pure def detectEquivocation(proposals: Set[ShareProposal], witness: AuthorityId, newRid: ResultId): bool =
-        proposals.exists(p => p.witness == witness and p.resultId != newRid)
+    // Check for equivocation and generate proof if detected
+    // Returns Some(proof) if witness submitted conflicting votes, None otherwise
+    // Rust: crates/aura-consensus/src/core/validation.rs::EquivocationDetector::check_share
+    pure def detectEquivocation(
+        proposals: Set[ShareProposal],
+        witness: AuthorityId,
+        cid: ConsensusId,
+        prestateHash: PrestateHash,
+        newRid: ResultId,
+        timestampMs: int
+    ): Option[EquivocationProof] = {
+        val existingProposal = proposals.filter(p => p.witness == witness)
+        if (existingProposal.size() > 0) {
+            // Get the existing result ID (we know there's exactly one because witness can only vote once)
+            val existingRids = existingProposal.map(p => p.resultId)
+            // Since there's only one proposal from this witness, check if it conflicts
+            val conflictExists = existingProposal.exists(p => p.resultId != newRid)
+            if (conflictExists) {
+                // Extract the first proposal to get its result ID
+                val firstRid = existingProposal.fold(
+                    "",  // Default empty string (won't be used due to size check)
+                    (acc, p) => p.resultId
+                )
+                Some({
+                    witness: witness,
+                    consensusId: cid,
+                    prestateHash: prestateHash,
+                    firstResultId: firstRid,
+                    secondResultId: newRid,
+                    timestampMs: timestampMs
+                })
+            } else {
+                None  // Same result ID - duplicate, not equivocation
+            }
+        } else {
+            None  // First share from this witness
+        }
+    }
 
     // ==================== THRESHOLD SIGNATURE FUNCTIONS ====================
     // FROST share aggregation and verification.
@@ -418,6 +490,7 @@ module protocol_consensus {
         instances' = Map(),
         committedFacts' = Set(),
         globalWitnesses' = Set("w1", "w2", "w3", "w4", "w5"),
+        globalEvidenceTracker' = Map(),
         // Initialize nonce state
         currentEpoch' = 0,
         witnessNonces' = Map()
@@ -454,23 +527,26 @@ module protocol_consensus {
                 proposals: Set(),
                 commitFact: None,
                 fallbackTimerActive: initialPhase == FallbackActive,
-                equivocators: Set()
+                equivocators: Set(),
+                equivocationProofs: Set()
             }),
             committedFacts' = committedFacts,
             globalWitnesses' = globalWitnesses,
+            globalEvidenceTracker' = globalEvidenceTracker,
             currentEpoch' = currentEpoch,
             witnessNonces' = witnessNonces
         }
     }
 
     // Witness submits share (fast path response).
-    // Share binds witness to (resultId, prestateHash). Equivocation detected.
+    // Share binds witness to (resultId, prestateHash). Equivocation detected and proof generated.
     // Consumes witness's cached nonce on fast path.
     action submitWitnessShare(
         cid: ConsensusId,
         witness: AuthorityId,
         rid: ResultId,
-        share: ShareData
+        share: ShareData,
+        timestampMs: int
     ): bool = {
         val instOpt = getOrDefaultInstance(instances, cid)
         val hasInstance = match instOpt { | Some(_) => true | None => false }
@@ -480,7 +556,7 @@ module protocol_consensus {
                 cid: "", operation: "", prestateHash: "", threshold: 0,
                 witnesses: Set(), initiator: "", phase: ConsensusPending,
                 proposals: Set(), commitFact: None, fallbackTimerActive: false,
-                equivocators: Set()
+                equivocators: Set(), equivocationProofs: Set()
             }
         }
         val isWitness = inst.witnesses.contains(witness)
@@ -495,8 +571,14 @@ module protocol_consensus {
         )
         val nonceOk = not(isFastPath) or hasValidNonce  // Fallback doesn't need cached nonce
         val proposal = { witness: witness, resultId: rid, prestateHash: inst.prestateHash, share: share }
-        val isEquivocating = detectEquivocation(inst.proposals, witness, rid)
+        // Check for equivocation and generate proof if detected
+        val equivProofOpt = detectEquivocation(inst.proposals, witness, cid, inst.prestateHash, rid, timestampMs)
+        val isEquivocating = match equivProofOpt { | Some(_) => true | None => false }
         val newEquivocators = if (isEquivocating) inst.equivocators.union(Set(witness)) else inst.equivocators
+        val newEquivocationProofs = match equivProofOpt {
+            | Some(proof) => inst.equivocationProofs.union(Set(proof))
+            | None => inst.equivocationProofs
+        }
         val newProposals = if (not(isEquivocating)) inst.proposals.union(Set(proposal)) else inst.proposals
         val matchingCount = countMatchingProposals(newProposals, rid, inst.prestateHash)
         val reachedThreshold = matchingCount >= inst.threshold
@@ -531,7 +613,8 @@ module protocol_consensus {
                 proposals: newProposals,
                 phase: newPhase,
                 commitFact: newCommitFact,
-                equivocators: newEquivocators
+                equivocators: newEquivocators,
+                equivocationProofs: newEquivocationProofs
             }),
             committedFacts' = if (reachedThreshold)
                 committedFacts.union(Set({
@@ -539,6 +622,7 @@ module protocol_consensus {
                 }))
                 else committedFacts,
             globalWitnesses' = globalWitnesses,
+            globalEvidenceTracker' = globalEvidenceTracker,
             currentEpoch' = currentEpoch,
             witnessNonces' = updatedNonces
         }
@@ -555,7 +639,7 @@ module protocol_consensus {
                 cid: "", operation: "", prestateHash: "", threshold: 0,
                 witnesses: Set(), initiator: "", phase: ConsensusPending,
                 proposals: Set(), commitFact: None, fallbackTimerActive: false,
-                equivocators: Set()
+                equivocators: Set(), equivocationProofs: Set()
             }
         }
         val isFastPath = inst.phase == FastPathActive
@@ -569,6 +653,7 @@ module protocol_consensus {
             }),
             committedFacts' = committedFacts,
             globalWitnesses' = globalWitnesses,
+            globalEvidenceTracker' = globalEvidenceTracker,
             currentEpoch' = currentEpoch,
             witnessNonces' = witnessNonces
         }
@@ -586,7 +671,7 @@ module protocol_consensus {
                 cid: "", operation: "", prestateHash: "", threshold: 0,
                 witnesses: Set(), initiator: "", phase: ConsensusPending,
                 proposals: Set(), commitFact: None, fallbackTimerActive: false,
-                equivocators: Set()
+                equivocators: Set(), equivocationProofs: Set()
             }
         }
         val isFallback = inst.phase == FallbackActive
@@ -614,6 +699,7 @@ module protocol_consensus {
             }),
             committedFacts' = committedFacts,
             globalWitnesses' = globalWitnesses,
+            globalEvidenceTracker' = globalEvidenceTracker,
             currentEpoch' = currentEpoch,
             witnessNonces' = witnessNonces
         }
@@ -630,7 +716,7 @@ module protocol_consensus {
                 cid: "", operation: "", prestateHash: "", threshold: 0,
                 witnesses: Set(), initiator: "", phase: ConsensusPending,
                 proposals: Set(), commitFact: None, fallbackTimerActive: false,
-                equivocators: Set()
+                equivocators: Set(), equivocationProofs: Set()
             }
         }
         val isFallback = inst.phase == FallbackActive
@@ -657,6 +743,7 @@ module protocol_consensus {
                 cid: cid, rid: winningRid, prestateHash: inst.prestateHash, signature: sig, attesters: attesters
             })),
             globalWitnesses' = globalWitnesses,
+            globalEvidenceTracker' = globalEvidenceTracker,
             currentEpoch' = currentEpoch,
             witnessNonces' = witnessNonces
         }
@@ -673,7 +760,7 @@ module protocol_consensus {
                 cid: "", operation: "", prestateHash: "", threshold: 0,
                 witnesses: Set(), initiator: "", phase: ConsensusPending,
                 proposals: Set(), commitFact: None, fallbackTimerActive: false,
-                equivocators: Set()
+                equivocators: Set(), equivocationProofs: Set()
             }
         }
         val notCommitted = inst.phase != ConsensusCommitted
@@ -685,6 +772,7 @@ module protocol_consensus {
             instances' = instances.put(cid, { ...inst, phase: ConsensusFailed }),
             committedFacts' = committedFacts,
             globalWitnesses' = globalWitnesses,
+            globalEvidenceTracker' = globalEvidenceTracker,
             currentEpoch' = currentEpoch,
             witnessNonces' = witnessNonces
         }
@@ -711,6 +799,7 @@ module protocol_consensus {
         instances' = instances,
         committedFacts' = committedFacts,
         globalWitnesses' = globalWitnesses,
+        globalEvidenceTracker' = globalEvidenceTracker,
         currentEpoch' = currentEpoch
     }
 
@@ -721,6 +810,7 @@ module protocol_consensus {
         instances' = instances,
         committedFacts' = committedFacts,
         globalWitnesses' = globalWitnesses,
+        globalEvidenceTracker' = globalEvidenceTracker,
         witnessNonces' = witnessNonces  // Nonces remain but validity checked against new epoch
     }
 
@@ -779,6 +869,28 @@ module protocol_consensus {
                 | Some(cf) => inst.equivocators.intersect(cf.attesters).size() == 0
                 | None => true
             }
+        })
+
+    // Evidence: Equivocation proofs are valid (conflicting result IDs)
+    // All stored equivocation proofs must have different first/second result IDs
+    val InvariantEquivocationProofsValid =
+        instances.keys().forall(cid => {
+            val inst = instances.get(cid)
+            inst.equivocationProofs.forall(proof =>
+                proof.firstResultId != proof.secondResultId and
+                proof.consensusId == cid and
+                proof.prestateHash == inst.prestateHash
+            )
+        })
+
+    // Evidence: Equivocators have corresponding proofs
+    // If a witness is marked as equivocator, there should be a proof
+    val InvariantEquivocatorsHaveProofs =
+        instances.keys().forall(cid => {
+            val inst = instances.get(cid)
+            inst.equivocators.forall(w =>
+                inst.equivocationProofs.exists(proof => proof.witness == w)
+            )
         })
 
     // Safety: Proposals only from configured witnesses.
@@ -910,6 +1022,7 @@ module protocol_consensus {
         nondet threshold = oneOf(Set(2, 3))
         nondet witness = oneOf(Set("w1", "w2", "w3", "w4"))
         nondet rid = oneOf(Set("rid_op1", "rid_op2"))
+        nondet timestampMs = oneOf(Set(1000, 2000, 3000, 4000))
         // ShareData now a structured record with nonce binding and data binding
         nondet shareValue = oneOf(Set("share_a", "share_b", "share_c"))
         nondet nonceBinding = oneOf(Set("nonce_commit_1", "nonce_commit_2", "nonce_commit_3"))
@@ -920,7 +1033,7 @@ module protocol_consensus {
         nondet commitment = oneOf(Set("nonce_commit_1", "nonce_commit_2", "nonce_commit_3"))
         any {
             startConsensus(cid, initiator, op, pHash, witnesses, threshold),
-            submitWitnessShare(cid, witness, rid, share),
+            submitWitnessShare(cid, witness, rid, share, timestampMs),
             triggerFallback(cid),
             completeViaFallback(cid, rid),
             failConsensus(cid),
