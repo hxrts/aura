@@ -144,9 +144,10 @@ impl ConsensusProtocol {
             signers: signatures.iter().map(|s| s.signer).collect(),
         };
 
+        let ts_ms = 0u64; // Would be set by time effects
         let timestamp = ProvenancedTime {
             stamp: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0, // Would be set by time effects
+                ts_ms,
                 uncertainty: None,
             }),
             proofs: vec![],
@@ -166,7 +167,13 @@ impl ConsensusProtocol {
             timestamp,
         );
 
-        Ok(Some(ConsensusMessage::ConsensusResult { commit_fact }))
+        // TODO: Attach actual evidence delta from tracker
+        let evidence_delta = crate::evidence::EvidenceDelta::empty(commit_fact.consensus_id, ts_ms);
+
+        Ok(Some(ConsensusMessage::ConsensusResult {
+            commit_fact,
+            evidence_delta,
+        }))
     }
 
     /// Get protocol statistics

@@ -44,6 +44,7 @@ impl ConsensusProtocol {
                 operation_hash,
                 operation_bytes,
                 cached_commitments: _,
+                ..
             } => {
                 let threshold =
                     crate::core::state::ConsensusThreshold::new(self.config.threshold())
@@ -114,7 +115,7 @@ impl ConsensusProtocol {
                 .await
             }
 
-            ConsensusMessage::ConsensusResult { commit_fact } => {
+            ConsensusMessage::ConsensusResult { commit_fact, .. } => {
                 // Verify and store result
                 commit_fact.verify().map_err(|e| {
                     AuraError::internal(format!("CommitFact verification failed: {e}"))
@@ -227,12 +228,16 @@ impl ConsensusProtocol {
         // TODO: No pipelined commitment until interpreter path supports token handoff
         let next_commitment = None;
 
+        // TODO: Attach actual evidence delta from tracker
+        let evidence_delta = crate::evidence::EvidenceDelta::empty(consensus_id, 0);
+
         Ok(Some(ConsensusMessage::SignShare {
             consensus_id,
             result_id,
             share: signature,
             next_commitment,
             epoch: self.config.epoch,
+            evidence_delta,
         }))
     }
 }

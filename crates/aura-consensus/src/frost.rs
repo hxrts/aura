@@ -538,6 +538,7 @@ impl FrostConsensusOrchestrator {
             share,
             next_commitment: Some(commitment),
             epoch,
+            ..
         } = message
         {
             // Cache next commitment for pipelining
