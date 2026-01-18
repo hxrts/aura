@@ -2,6 +2,9 @@
 //!
 //! These tests verify that message serialization/deserialization works correctly
 //! with evidence_delta fields, ensuring backward compatibility.
+//!
+//! All serialization uses DAG-CBOR (the canonical wire format for Aura) via
+//! aura_core::util::serialization::{to_vec, from_slice}.
 
 #![allow(clippy::expect_used)]
 
@@ -10,7 +13,10 @@ use aura_consensus::{
     messages::ConsensusMessage,
     ConsensusId,
 };
-use aura_core::{AuthorityId, Hash32};
+use aura_core::{
+    util::serialization::{from_slice, to_vec},
+    AuthorityId, Hash32,
+};
 
 fn test_consensus_id() -> ConsensusId {
     ConsensusId(Hash32::new([1u8; 32]))
@@ -84,12 +90,12 @@ fn test_sign_share_message_with_evidence_delta() {
         evidence_delta: non_empty_evidence_delta(),
     };
 
-    // Serialize with bincode
-    let bytes = bincode::serialize(&msg).expect("Serialization should succeed");
+    // Serialize with DAG-CBOR
+    let bytes = to_vec(&msg).expect("Serialization should succeed");
 
     // Deserialize back
     let restored: ConsensusMessage =
-        bincode::deserialize(&bytes).expect("Deserialization should succeed");
+        from_slice(&bytes).expect("Deserialization should succeed");
 
     // Verify evidence delta was preserved
     match restored {
@@ -105,12 +111,12 @@ fn test_sign_share_message_with_evidence_delta() {
 fn test_evidence_delta_empty_serialization() {
     let delta = empty_evidence_delta();
 
-    // Serialize
-    let bytes = bincode::serialize(&delta).expect("Serialization should succeed");
+    // Serialize with DAG-CBOR
+    let bytes = to_vec(&delta).expect("Serialization should succeed");
 
     // Deserialize
     let restored: EvidenceDelta =
-        bincode::deserialize(&bytes).expect("Deserialization should succeed");
+        from_slice(&bytes).expect("Deserialization should succeed");
 
     assert_eq!(restored.consensus_id, test_consensus_id());
     assert!(restored.equivocation_proofs.is_empty());
@@ -151,12 +157,12 @@ fn test_equivocation_proof_roundtrip() {
     // Verify before serialization
     assert!(proof.verify().is_ok());
 
-    // Serialize with bincode
-    let bytes = bincode::serialize(&proof).expect("Serialization should succeed");
+    // Serialize with DAG-CBOR
+    let bytes = to_vec(&proof).expect("Serialization should succeed");
 
     // Deserialize
     let restored: EquivocationProof =
-        bincode::deserialize(&bytes).expect("Deserialization should succeed");
+        from_slice(&bytes).expect("Deserialization should succeed");
 
     // Verify after deserialization
     assert!(restored.verify().is_ok());
@@ -197,12 +203,12 @@ fn test_consensus_result_message_with_evidence() {
         evidence_delta: non_empty_evidence_delta(),
     };
 
-    // Serialize
-    let bytes = bincode::serialize(&msg).expect("Serialization should succeed");
+    // Serialize with DAG-CBOR
+    let bytes = to_vec(&msg).expect("Serialization should succeed");
 
     // Deserialize
     let restored: ConsensusMessage =
-        bincode::deserialize(&bytes).expect("Deserialization should succeed");
+        from_slice(&bytes).expect("Deserialization should succeed");
 
     // Verify evidence was preserved
     match restored {
