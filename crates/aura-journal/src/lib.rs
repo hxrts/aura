@@ -58,9 +58,6 @@ pub mod pure;
 // Extensible fact type infrastructure (Open/Closed Principle)
 pub mod extensibility;
 
-// Domain-specific fact types (device naming, etc.)
-pub mod facts;
-
 // Authority state derivation (Phase 5)
 pub mod authority_state;
 
@@ -121,12 +118,6 @@ pub use types::GuardianMetadata;
 // Extensibility infrastructure re-exports
 pub use extensibility::{
     decode_domain_fact, encode_domain_fact, parse_envelope, DomainFact, FactReducer, FactRegistry,
-};
-
-// Device naming fact re-exports
-pub use facts::{
-    derive_device_naming_context, DeviceNamingFact, DeviceNamingFactKey, DeviceNamingFactReducer,
-    DEVICE_NAMING_FACT_TYPE_ID, DEVICE_NAMING_SCHEMA_VERSION, NICKNAME_SUGGESTION_BYTES_MAX,
 };
 
 // See docs/100_authority_and_identity.md for migration guidance
