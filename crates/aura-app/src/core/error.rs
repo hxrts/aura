@@ -120,6 +120,13 @@ impl IntentError {
             reason: reason.into(),
         }
     }
+
+    /// Create a network error
+    pub fn network_error(reason: impl Into<String>) -> Self {
+        Self::NetworkError {
+            reason: reason.into(),
+        }
+    }
 }
 
 // =============================================================================

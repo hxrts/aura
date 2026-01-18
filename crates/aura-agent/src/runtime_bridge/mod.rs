@@ -1517,10 +1517,23 @@ impl RuntimeBridge for AgentRuntimeBridge {
             };
 
             effects.send_envelope(envelope).await.map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to send device threshold key package to {}: {e}",
-                    device_id
-                ))
+                let error_msg = e.to_string();
+
+                // Provide clearer error messages for common failure cases
+                if error_msg.contains("not connected")
+                    || error_msg.contains("unreachable")
+                    || error_msg.contains("no route")
+                    || error_msg.contains("offline mode") {
+                    IntentError::network_error(format!(
+                        "Device {} is not reachable. Ensure the device is online and connected to the network before starting the multifactor ceremony.",
+                        device_id
+                    ))
+                } else {
+                    IntentError::internal_error(format!(
+                        "Failed to send device threshold key package to {}: {e}",
+                        device_id
+                    ))
+                }
             })?;
         }
 
