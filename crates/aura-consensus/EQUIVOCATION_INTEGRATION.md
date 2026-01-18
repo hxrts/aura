@@ -2,111 +2,98 @@
 
 ## Status
 
-**Foundation Complete ✓**
+**Runtime Integration Complete ✓**
 - Domain fact types created (`aura-consensus/src/facts.rs`)
 - `EquivocationDetector` implemented with proof generation
-- All unit tests passing
+- Detector wired into `WitnessTracker` with accumulator
+- `ConsensusResult` updated with equivocation_proofs field
+- `ConsensusFactReducer` registered in fact registry
+- All unit tests passing (54 consensus + 3 registry tests)
 - Architecture validated (domain fact pattern per docs/102_journal.md §2.2)
 
-## Remaining Integration Steps
+**Commits:**
+1. `0252672b` - Domain fact refactoring
+2. `7de32a70` - Integration guide
+3. `945e4b8f` - Runtime integration
 
-### 1. Wire Detector into WitnessTracker
+## Usage Guide (For Callers)
 
-**File**: `crates/aura-consensus/src/witness.rs`
+### Using Equivocation Detection
 
-Add detector to struct:
+The runtime integration provides two methods for tracking signatures:
+
+**Option 1: With equivocation detection (recommended for production)**
 ```rust
-pub struct WitnessTracker {
-    // ... existing fields
-    equivocation_detector: EquivocationDetector,
-    equivocation_proofs: Vec<ConsensusFact>,
+// When you have full context available
+tracker.record_signature_with_detection(
+    context_id,           // ContextId for this consensus
+    witness,             // AuthorityId of the witness
+    signature,           // PartialSignature from witness
+    consensus_id,        // ConsensusId for this round
+    prestate_hash,       // Hash32 of prestate
+    result_id,           // Hash32 of result being voted for
+    timestamp_ms,        // u64 timestamp
+);
+```
+
+**Option 2: Without detection (existing API, backward compatible)**
+```rust
+// Simple signature tracking without equivocation checks
+tracker.add_signature(witness, signature);
+```
+
+### Retrieving Equivocation Proofs
+
+After consensus completes, retrieve accumulated proofs:
+
+```rust
+let result = run_consensus(...).await?;
+
+// Access proofs from result
+for proof in result.equivocation_proofs() {
+    // Emit to journal
+    let fact = proof.to_generic();
+    journal_effects.add_fact(context_id, fact).await?;
 }
 ```
 
-Modify `add_signature` to check for equivocation:
-```rust
-pub fn add_signature(
-    &mut self,
-    context_id: ContextId,
-    witness: AuthorityId,
-    signature: PartialSignature,
-    consensus_id: ConsensusId,
-    prestate_hash: Hash32,
-    result_id: Hash32,
-    timestamp_ms: u64,
-) {
-    // Check for equivocation
-    if let Some(proof) = self.equivocation_detector.check_share(
-        context_id,
-        witness,
-        consensus_id,
-        prestate_hash,
-        result_id,
-        timestamp_ms,
-    ) {
-        // Store proof for later emission
-        self.equivocation_proofs.push(proof);
-        // Don't add the equivocating signature
-        return;
-    }
-
-    // Add signature normally
-    self.partial_signatures.insert(witness, signature);
-}
-```
-
-### 2. Surface Proofs in ConsensusResult
-
-**File**: `crates/aura-consensus/src/types.rs`
-
-Add evidence field to `ConsensusResult`:
-```rust
-pub enum ConsensusResult {
-    Committed(CommitFact) {
-        equivocation_proofs: Vec<ConsensusFact>,
-    },
-    Conflicted(ConflictFact) {
-        equivocation_proofs: Vec<ConsensusFact>,
-    },
-    Timeout {
-        consensus_id: ConsensusId,
-        elapsed_ms: u64,
-        equivocation_proofs: Vec<ConsensusFact>,
-    },
-}
-```
-
-Or add a separate `evidence()` accessor:
-```rust
-impl ConsensusResult {
-    pub fn equivocation_proofs(&self) -> &[ConsensusFact] {
-        // Extract from instance tracker
-    }
-}
-```
-
-### 3. Register Fact Reducer
-
-**File**: `crates/aura-agent/src/fact_registry.rs`
+Or access directly from tracker:
 
 ```rust
-use aura_consensus::facts::{ConsensusFactReducer, CONSENSUS_FACT_TYPE_ID};
-
-pub fn build_fact_registry() -> FactRegistry {
-    let mut registry = FactRegistry::new();
-
-    // ... existing registrations
-
-    registry.register::<ConsensusFact>(
-        CONSENSUS_FACT_TYPE_ID,
-        Box::new(ConsensusFactReducer),
-    );
-
-    registry
+let proofs = tracker.get_equivocation_proofs();
+for proof in proofs {
+    // Process equivocation proof
 }
+tracker.clear_equivocation_proofs(); // Prevent duplicate emission
 ```
 
-### 4. Emit Facts to Journal
+## Implementation Details
+
+### 1. WitnessTracker Enhancement (✓ COMPLETED)
+
+Implemented in `crates/aura-consensus/src/witness.rs`:
+- Added `EquivocationDetector` field to track share history
+- Added `equivocation_proofs` accumulator
+- Implemented `record_signature_with_detection()` method
+- Implemented `get_equivocation_proofs()` accessor
+- Implemented `clear_equivocation_proofs()` for cleanup
+
+### 2. ConsensusResult Updates (✓ COMPLETED)
+
+Implemented in `crates/aura-consensus/src/types.rs`:
+- Added `equivocation_proofs` field to all result variants
+- Implemented `equivocation_proofs()` accessor method
+- Backward compatible - existing code unaffected
+
+### 3. Fact Registry Integration (✓ COMPLETED)
+
+Implemented in `crates/aura-agent/src/fact_registry.rs` and `fact_types.rs`:
+- Registered `ConsensusFactReducer` in build_fact_registry()
+- Added `CONSENSUS_FACT_TYPE_ID` to central fact types list
+- Added test coverage for consensus fact registration
+- All 3 fact registry tests passing
+
+### 4. Emit Facts to Journal (TODO - Caller Responsibility)
 
 **Caller** (relational consensus or agent):
 ```rust
@@ -119,11 +106,17 @@ for proof in result.equivocation_proofs() {
 }
 ```
 
-### 5. Integration Testing
+### 5. Integration Testing (TODO - Future Work)
 
-**File**: `crates/aura-consensus/tests/equivocation_integration.rs`
+Recommended test coverage:
 
-Test flow:
+**Unit Tests (✓ COMPLETED)**
+- EquivocationDetector proof generation (7 tests in validation.rs)
+- ConsensusFact envelope roundtrip (3 tests in facts.rs)
+- Fact registry registration (3 tests in fact_registry.rs)
+
+**Integration Tests (TODO)**
+Create `crates/aura-consensus/tests/equivocation_integration.rs`:
 1. Run consensus round with simulated equivocating witness
 2. Verify proof is generated and included in result
 3. Verify proof is emitted to journal
