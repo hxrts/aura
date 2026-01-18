@@ -37,6 +37,24 @@ impl ConsensusProtocol {
         if let Ok(now) = time.physical_time().await {
             let _ = self.cleanup_stale_instances(now.ts_ms).await;
         }
+
+        // Merge incoming evidence delta before processing message
+        let evidence_delta = match &message {
+            ConsensusMessage::Execute { evidence_delta, .. } => Some(evidence_delta.clone()),
+            ConsensusMessage::SignShare { evidence_delta, .. } => Some(evidence_delta.clone()),
+            ConsensusMessage::ConsensusResult { evidence_delta, .. } => Some(evidence_delta.clone()),
+            ConsensusMessage::Conflict { evidence_delta, .. } => Some(evidence_delta.clone()),
+            _ => None,
+        };
+
+        if let Some(delta) = evidence_delta {
+            if let Ok(new_proofs) = self.evidence_tracker.write().await.merge(delta) {
+                if new_proofs > 0 {
+                    tracing::debug!("Merged {} new equivocation proofs", new_proofs);
+                }
+            }
+        }
+
         match message {
             ConsensusMessage::Execute {
                 consensus_id,
@@ -111,6 +129,7 @@ impl ConsensusProtocol {
                     aggregated_nonces,
                     &my_share,
                     random,
+                    time,
                 )
                 .await
             }
@@ -180,6 +199,7 @@ impl ConsensusProtocol {
         aggregated_nonces: Vec<NonceCommitment>,
         share: &Share,
         random: &(impl RandomEffects + ?Sized),
+        time: &(impl PhysicalTimeEffects + ?Sized),
     ) -> Result<Option<ConsensusMessage>> {
         // Retrieve cached nonce token (slow path) or generate a fresh one if missing
         let mut instances = self.instances.write().await;
@@ -228,8 +248,17 @@ impl ConsensusProtocol {
         // TODO: No pipelined commitment until interpreter path supports token handoff
         let next_commitment = None;
 
-        // TODO: Attach actual evidence delta from tracker
-        let evidence_delta = crate::evidence::EvidenceDelta::empty(consensus_id, 0);
+        // Get evidence delta from tracker (with current timestamp)
+        let ts_ms = time
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
+        let evidence_delta = self
+            .evidence_tracker
+            .write()
+            .await
+            .get_delta(consensus_id, ts_ms);
 
         Ok(Some(ConsensusMessage::SignShare {
             consensus_id,

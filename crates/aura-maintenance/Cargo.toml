@@ -11,8 +11,6 @@ workspace = true
 
 [dependencies]
 aura-core = { path = "../aura-core" }
-aura-journal = { path = "../aura-journal" }
-aura-macros = { path = "../aura-macros" }
 serde = { workspace = true }
 uuid = { workspace = true }
 

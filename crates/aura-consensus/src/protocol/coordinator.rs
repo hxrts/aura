@@ -167,8 +167,12 @@ impl ConsensusProtocol {
             timestamp,
         );
 
-        // TODO: Attach actual evidence delta from tracker
-        let evidence_delta = crate::evidence::EvidenceDelta::empty(commit_fact.consensus_id, ts_ms);
+        // Get evidence delta from tracker
+        let evidence_delta = self
+            .evidence_tracker
+            .write()
+            .await
+            .get_delta(commit_fact.consensus_id, ts_ms);
 
         Ok(Some(ConsensusMessage::ConsensusResult {
             commit_fact,

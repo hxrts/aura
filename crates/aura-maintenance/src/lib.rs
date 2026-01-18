@@ -8,9 +8,10 @@ pub mod facts;
 pub mod gc;
 
 pub use facts::{
-    AdminReplacement, CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceEpoch,
-    MaintenanceFact, MaintenanceFactDelta, MaintenanceFactKey, MaintenanceFactReducer,
-    SnapshotCompleted, SnapshotProposed, UpgradeActivated, UpgradeProposalMetadata,
+    maintenance_fact_type_id, AdminReplacement, CacheInvalidated, CacheKey,
+    IdentityEpochFence, MaintenanceEpoch, MaintenanceFact, MaintenanceFactDelta,
+    MaintenanceFactKey, MaintenanceFactReducer, SnapshotCompleted, SnapshotProposed,
+    UpgradeActivated, UpgradeProposalMetadata, MAINTENANCE_FACT_SCHEMA_VERSION,
     MAINTENANCE_FACT_TYPE_ID,
 };
 pub use gc::{plan_dkg_transcript_gc, TranscriptGcPlan};

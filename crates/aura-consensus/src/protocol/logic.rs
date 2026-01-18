@@ -33,6 +33,9 @@ pub struct ConsensusProtocol {
 
     /// Active protocol instances
     pub(crate) instances: Arc<RwLock<HashMap<ConsensusId, ProtocolInstance>>>,
+
+    /// Evidence tracker for equivocation proofs
+    pub(crate) evidence_tracker: Arc<RwLock<crate::evidence::EvidenceTracker>>,
 }
 
 impl ConsensusProtocol {
@@ -70,6 +73,7 @@ impl ConsensusProtocol {
             frost_orchestrator,
             group_public_key,
             instances: Arc::new(RwLock::new(HashMap::new())),
+            evidence_tracker: Arc::new(RwLock::new(crate::evidence::EvidenceTracker::new())),
         })
     }
 
