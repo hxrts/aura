@@ -52,30 +52,43 @@ impl ConsensusProtocol {
             }
 
             ConsensusMessage::SignShare {
+                result_id,
                 share,
                 next_commitment,
                 epoch,
                 ..
             } => {
-                instance.tracker.add_signature(sender, share);
+                // Add signature with result_id tracking via ShareCollector
+                match instance.tracker.add_signature(sender, share, result_id) {
+                    Ok(Some(_threshold_set)) => {
+                        // This result_id reached threshold - finalize consensus
+                        debug!(sender = %sender, result_id = %result_id, "Threshold reached");
 
-                // Sync core state after adding share
-                // Quint: applyShare action / Lean: Consensus.Agreement
-                instance.sync_core_state();
-                instance.assert_invariants();
+                        // Sync core state after adding share
+                        // Quint: applyShare action / Lean: Consensus.Agreement
+                        instance.sync_core_state();
+                        instance.assert_invariants();
+
+                        return self.finalize_consensus(consensus_id).await;
+                    }
+                    Ok(None) => {
+                        // Share added, but threshold not yet reached
+                        debug!(sender = %sender, result_id = %result_id, "Share added");
+
+                        // Sync core state after adding share
+                        instance.sync_core_state();
+                        instance.assert_invariants();
+                    }
+                    Err(e) => {
+                        // Duplicate or other error
+                        warn!(sender = %sender, error = %e, "Failed to add signature");
+                    }
+                }
 
                 // Cache next commitment if provided
                 if let (Some(commitment), _) = (next_commitment, epoch == self.config.epoch) {
                     debug!(sender = %sender, "Cached pipelined commitment for next round");
                     // Would be handled by witness state manager
-                }
-
-                // Check if we have threshold
-                if instance
-                    .tracker
-                    .has_signature_threshold(self.config.threshold())
-                {
-                    return self.finalize_consensus(consensus_id).await;
                 }
             }
 

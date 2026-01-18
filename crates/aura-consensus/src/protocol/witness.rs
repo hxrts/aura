@@ -219,11 +219,17 @@ impl ConsensusProtocol {
             &aggregated_nonces,
         )?;
 
-        // No pipelined commitment until interpreter path supports token handoff
+        // Compute result_id from operation
+        // In current implementation, operation_bytes are signed directly (no execution step)
+        // For deterministic execution, all honest witnesses get same result: result_id = operation_hash
+        let result_id = instance.operation_hash;
+
+        // TODO: No pipelined commitment until interpreter path supports token handoff
         let next_commitment = None;
 
         Ok(Some(ConsensusMessage::SignShare {
             consensus_id,
+            result_id,
             share: signature,
             next_commitment,
             epoch: self.config.epoch,

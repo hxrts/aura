@@ -39,6 +39,8 @@ pub enum ConsensusMessage {
     /// Phase 3: Partial signature from witness
     SignShare {
         consensus_id: ConsensusId,
+        /// The result_id (hash of execution result) this witness computed
+        result_id: Hash32,
         share: PartialSignature,
         /// Optional commitment for the next consensus round (pipelining optimization)
         next_commitment: Option<NonceCommitment>,
@@ -219,6 +221,7 @@ mod tests {
         // Fast path sign share with next commitment
         let fast_sign = ConsensusMessage::SignShare {
             consensus_id: id,
+            result_id: Hash32::default(),
             share: PartialSignature {
                 signer: 1,
                 signature: vec![],

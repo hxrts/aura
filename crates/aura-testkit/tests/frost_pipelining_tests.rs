@@ -269,8 +269,11 @@ async fn test_witness_state_lifecycle() {
 /// Test WitnessTracker threshold checking
 #[tokio::test]
 async fn test_witness_tracker_threshold() {
-    let mut tracker = WitnessTracker::new();
+    use aura_core::Hash32;
+
+    let mut tracker = WitnessTracker::with_threshold(2);
     let threshold = 2u16;
+    let result_id = Hash32::new([0u8; 32]);
 
     // Initially below threshold
     assert!(!tracker.has_nonce_threshold(threshold));
@@ -297,21 +300,23 @@ async fn test_witness_tracker_threshold() {
     assert!(tracker.has_nonce_threshold(threshold));
 
     // Add signatures
-    tracker.add_signature(
+    let _ = tracker.add_signature(
         authority(1),
         aura_core::frost::PartialSignature {
             signer: 1,
             signature: vec![1u8; 64],
         },
+        result_id,
     );
     assert!(!tracker.has_signature_threshold(threshold));
 
-    tracker.add_signature(
+    let _ = tracker.add_signature(
         authority(2),
         aura_core::frost::PartialSignature {
             signer: 2,
             signature: vec![2u8; 64],
         },
+        result_id,
     );
     assert!(tracker.has_signature_threshold(threshold));
 

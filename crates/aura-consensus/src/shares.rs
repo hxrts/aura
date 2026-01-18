@@ -3,6 +3,45 @@
 //! This module provides compile-time guarantees that threshold signatures can
 //! only be combined after collecting sufficient shares. Uses a sealed/unsealed
 //! type pattern to prevent calling combine() before threshold is met.
+//!
+//! ## Status
+//!
+//! **Implemented but not yet integrated into the consensus protocol.**
+//!
+//! This module was designed for a more complex consensus model where witnesses
+//! might vote for different result IDs (requiring conflict resolution). The
+//! current consensus protocol uses a simpler model where all witnesses vote on
+//! the same operation hash.
+//!
+//! ## Integration Path
+//!
+//! Two options for future integration:
+//!
+//! 1. **Adapt to single-result-ID model**: Simplify ShareCollector to work with
+//!    the current protocol's assumption of a single agreed-upon result ID.
+//!
+//! 2. **Refactor protocol for multi-result-ID handling**: Extend the protocol to
+//!    explicitly handle cases where witnesses vote for different results, using
+//!    ShareCollector's multi-result tracking.
+//!
+//! Until integration, the current HashMap-based signature collection in
+//! WitnessTracker works correctly but lacks compile-time threshold guarantees.
+//!
+//! ## Design
+//!
+//! The sealed/unsealed type pattern provides type-level proof of threshold:
+//!
+//! ```text
+//! LinearShareSet (unsealed)
+//!   └─ accepts shares via try_insert()
+//!   └─ when threshold reached → seals into ThresholdShareSet
+//!
+//! ThresholdShareSet (sealed)
+//!   └─ ONLY this type has combine() method
+//!   └─ type system proves >= threshold shares exist
+//! ```
+//!
+//! See `EQUIVOCATION_ARCHITECTURE.md` for full architectural context.
 
 use aura_core::{
     frost::{PartialSignature, ThresholdSignature},
@@ -77,6 +116,22 @@ impl ShareCollector {
     /// Get all result IDs being tracked
     pub fn result_ids(&self) -> Vec<ResultId> {
         self.shares_by_rid.keys().copied().collect()
+    }
+
+    /// Get all signatures for a specific result_id
+    pub fn get_signatures_for_result(&self, rid: &ResultId) -> Vec<PartialSignature> {
+        self.shares_by_rid
+            .get(rid)
+            .map(|set| set.shares.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Get all witnesses (participants) for a specific result_id
+    pub fn get_participants_for_result(&self, rid: &ResultId) -> Vec<AuthorityId> {
+        self.shares_by_rid
+            .get(rid)
+            .map(|set| set.shares.keys().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
