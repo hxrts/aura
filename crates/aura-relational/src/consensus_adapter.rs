@@ -194,7 +194,15 @@ mod tests {
         let epoch = Epoch::from(1);
 
         // The adapter should handle the consensus failure gracefully
-        let result = run_consensus(context_id, &prestate, &op, key_packages, group_public_key, epoch).await;
+        let result = run_consensus(
+            context_id,
+            &prestate,
+            &op,
+            key_packages,
+            group_public_key,
+            epoch,
+        )
+        .await;
 
         // We expect this to fail due to insufficient nonce commitments, which tests the error handling
         assert!(

@@ -115,10 +115,7 @@ async fn amp_consensus_success_path() {
     .await;
 
     // Expect failure due to missing key packages (same as smoke test)
-    assert!(
-        result.is_err(),
-        "Should fail with empty key packages"
-    );
+    assert!(result.is_err(), "Should fail with empty key packages");
 }
 
 #[tokio::test]

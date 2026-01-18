@@ -6,7 +6,10 @@
 use aura_consensus::protocol::{
     ConsensusResultGuard, ExecuteGuard, NonceCommitGuard, SignRequestGuard, SignShareGuard,
 };
-use aura_core::{identifiers::{AuthorityId, ContextId}, FlowCost};
+use aura_core::{
+    identifiers::{AuthorityId, ContextId},
+    FlowCost,
+};
 
 #[test]
 fn test_execute_guard_configuration() {
@@ -44,7 +47,10 @@ fn test_sign_request_guard_configuration() {
     let guard = SignRequestGuard::new(context, witness);
     let chain = guard.create_guard_chain();
 
-    assert_eq!(chain.authorization_requirement(), "consensus:aggregate_nonces");
+    assert_eq!(
+        chain.authorization_requirement(),
+        "consensus:aggregate_nonces"
+    );
     assert_eq!(chain.cost(), FlowCost::from(75u32));
     assert_eq!(chain.context(), context);
     assert_eq!(chain.peer(), witness);
@@ -109,7 +115,6 @@ fn test_all_guards_have_correct_flow_costs() {
     let chain = result.create_guard_chain();
     assert_eq!(chain.cost(), FlowCost::from(100u32));
 }
-
 
 /// Test that guard chains are properly configured with context and peer
 #[test]

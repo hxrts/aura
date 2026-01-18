@@ -3,8 +3,8 @@
 //! This module contains methods for the witness role in consensus.
 
 use super::{
-    instance::{ProtocolInstance, ProtocolRole},
     guards::{NonceCommitGuard, SignShareGuard},
+    instance::{ProtocolInstance, ProtocolRole},
     ConsensusProtocol,
 };
 use crate::{
@@ -118,8 +118,14 @@ impl ConsensusProtocol {
                 self.instances.write().await.insert(consensus_id, instance);
 
                 // Generate nonce commitment (always slow path for correctness)
-                self.generate_nonce_commitment(consensus_id, coordinator, &my_share, random, effects)
-                    .await
+                self.generate_nonce_commitment(
+                    consensus_id,
+                    coordinator,
+                    &my_share,
+                    random,
+                    effects,
+                )
+                .await
             }
 
             ConsensusMessage::SignRequest {
