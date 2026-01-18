@@ -4,6 +4,7 @@
 
 use super::{
     instance::{ProtocolInstance, ProtocolRole},
+    guards::{NonceCommitGuard, SignShareGuard},
     ConsensusProtocol,
 };
 use crate::{
@@ -18,21 +19,27 @@ use aura_core::{
     frost::{NonceCommitment, Share},
     AuraError, AuthorityId, OperationId, Result,
 };
+use aura_guards::guards::traits::GuardContextProvider;
+use aura_guards::GuardEffects;
 use frost_ed25519;
 use rand::SeedableRng;
 use std::collections::BTreeSet;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 impl ConsensusProtocol {
     /// Participate as witness in consensus
-    pub async fn participate_as_witness(
+    pub async fn participate_as_witness<E>(
         &self,
         message: ConsensusMessage,
         coordinator: AuthorityId,
         my_share: Share,
         random: &(impl RandomEffects + ?Sized),
         time: &(impl PhysicalTimeEffects + ?Sized),
-    ) -> Result<Option<ConsensusMessage>> {
+        effects: &E,
+    ) -> Result<Option<ConsensusMessage>>
+    where
+        E: GuardEffects + GuardContextProvider + PhysicalTimeEffects,
+    {
         // Best-effort cleanup of stale instances before handling messages.
         if let Ok(now) = time.physical_time().await {
             let _ = self.cleanup_stale_instances(now.ts_ms).await;
@@ -111,7 +118,7 @@ impl ConsensusProtocol {
                 self.instances.write().await.insert(consensus_id, instance);
 
                 // Generate nonce commitment (always slow path for correctness)
-                self.generate_nonce_commitment(consensus_id, &my_share, random)
+                self.generate_nonce_commitment(consensus_id, coordinator, &my_share, random, effects)
                     .await
             }
 
@@ -127,11 +134,13 @@ impl ConsensusProtocol {
 
                 self.generate_signature_response(
                     consensus_id,
+                    coordinator,
                     &instance.operation_bytes,
                     aggregated_nonces,
                     &my_share,
                     random,
                     time,
+                    effects,
                 )
                 .await
             }
@@ -154,12 +163,17 @@ impl ConsensusProtocol {
     }
 
     /// Generate nonce commitment (witness role)
-    pub(super) async fn generate_nonce_commitment(
+    pub(super) async fn generate_nonce_commitment<E>(
         &self,
         consensus_id: ConsensusId,
+        coordinator: AuthorityId,
         share: &Share,
         random: &(impl RandomEffects + ?Sized),
-    ) -> Result<Option<ConsensusMessage>> {
+        effects: &E,
+    ) -> Result<Option<ConsensusMessage>>
+    where
+        E: GuardEffects + GuardContextProvider + PhysicalTimeEffects,
+    {
         // Generate FROST nonces and commitment for this witness
         let seed = random.random_bytes_32().await;
         let mut rng = rand::rngs::StdRng::from_seed(seed);
@@ -187,6 +201,29 @@ impl ConsensusProtocol {
             instance.nonce_token = Some(NonceToken::from(nonces));
         }
 
+        // Evaluate guards before sending NonceCommit to coordinator
+        let guard = NonceCommitGuard::new(self.context_id, coordinator);
+        let guard_result = guard.evaluate(effects).await?;
+
+        if !guard_result.authorized {
+            warn!(
+                consensus_id = %consensus_id,
+                reason = ?guard_result.denial_reason,
+                "NonceCommit guard denied"
+            );
+            return Err(AuraError::permission_denied(
+                guard_result
+                    .denial_reason
+                    .unwrap_or_else(|| "Guard denied NonceCommit".to_string()),
+            ));
+        }
+
+        debug!(
+            consensus_id = %consensus_id,
+            receipt = ?guard_result.receipt.as_ref().map(|r| r.nonce),
+            "NonceCommit guard authorized"
+        );
+
         Ok(Some(ConsensusMessage::NonceCommit {
             consensus_id,
             commitment,
@@ -194,15 +231,20 @@ impl ConsensusProtocol {
     }
 
     /// Generate signature response (witness role)
-    pub(super) async fn generate_signature_response(
+    pub(super) async fn generate_signature_response<E>(
         &self,
         consensus_id: ConsensusId,
+        coordinator: AuthorityId,
         message: &[u8],
         aggregated_nonces: Vec<NonceCommitment>,
         share: &Share,
         random: &(impl RandomEffects + ?Sized),
         time: &(impl PhysicalTimeEffects + ?Sized),
-    ) -> Result<Option<ConsensusMessage>> {
+        effects: &E,
+    ) -> Result<Option<ConsensusMessage>>
+    where
+        E: GuardEffects + GuardContextProvider + PhysicalTimeEffects,
+    {
         // Retrieve cached nonce token (slow path) or generate a fresh one if missing
         let mut instances = self.instances.write().await;
         let instance = instances
@@ -257,6 +299,29 @@ impl ConsensusProtocol {
             .write()
             .await
             .get_delta(consensus_id, ts_ms);
+
+        // Evaluate guards before sending SignShare to coordinator
+        let guard = SignShareGuard::new(self.context_id, coordinator);
+        let guard_result = guard.evaluate(effects).await?;
+
+        if !guard_result.authorized {
+            warn!(
+                consensus_id = %consensus_id,
+                reason = ?guard_result.denial_reason,
+                "SignShare guard denied"
+            );
+            return Err(AuraError::permission_denied(
+                guard_result
+                    .denial_reason
+                    .unwrap_or_else(|| "Guard denied SignShare".to_string()),
+            ));
+        }
+
+        debug!(
+            consensus_id = %consensus_id,
+            receipt = ?guard_result.receipt.as_ref().map(|r| r.nonce),
+            "SignShare guard authorized"
+        );
 
         Ok(Some(ConsensusMessage::SignShare {
             consensus_id,

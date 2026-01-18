@@ -164,7 +164,15 @@ impl RecoveryProtocol {
         );
         let epoch = Epoch::from(1); // Recovery uses a default epoch
 
-        run_consensus_with_commit(&prestate, operation, key_packages, group_public_key, epoch).await
+        run_consensus_with_commit(
+            self.recovery_context.context_id,
+            &prestate,
+            operation,
+            key_packages,
+            group_public_key,
+            epoch,
+        )
+        .await
     }
 
     /// Initiate recovery ceremony

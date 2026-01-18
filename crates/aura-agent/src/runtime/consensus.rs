@@ -12,7 +12,7 @@ use aura_core::hash::hash;
 use aura_core::threshold::ParticipantIdentity;
 use aura_core::threshold::ThresholdState;
 use aura_core::types::Epoch;
-use aura_core::{AuraError, AuthorityId, Hash32};
+use aura_core::{AuraError, AuthorityId, ContextId, Hash32};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -105,6 +105,7 @@ pub(crate) async fn load_consensus_key_material(
 }
 
 pub(crate) async fn build_consensus_params(
+    context_id: ContextId,
     effects: &crate::runtime::AuraEffectSystem,
     authority_id: AuthorityId,
     signing_service: &impl ThresholdSigningEffects,
@@ -130,6 +131,7 @@ pub(crate) async fn build_consensus_params(
     }
 
     Ok(ConsensusParams {
+        context_id,
         witnesses,
         threshold: state.threshold,
         key_packages,

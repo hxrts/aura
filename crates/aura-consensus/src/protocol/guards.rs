@@ -170,9 +170,22 @@ impl ConsensusResultGuard {
 
     /// Create guard chain for ConsensusResult message
     /// Annotations: guard_capability="finalize_consensus", flow_cost=100, journal_facts="consensus_complete"
+    ///
+    /// # Journal Coupling Pattern
+    ///
+    /// The journal_facts annotation indicates that consensus completion should be recorded
+    /// in the journal. This is enforced at the runtime bridge layer (aura-agent), not in
+    /// the protocol layer:
+    ///
+    /// 1. Protocol (`coordinator::finalize_consensus`) creates CommitFact
+    /// 2. Runtime bridge commits CommitFact via `commit_relational_facts()`
+    /// 3. Runtime bridge broadcasts ConsensusResult message
+    ///
+    /// This pattern enforces charge-before-send at the correct architectural layer where
+    /// both journal and transport effects are available.
+    ///
+    /// See: `aura-agent/src/runtime_bridge/consensus.rs` for the implementation.
     pub fn create_guard_chain(&self) -> SendGuardChain {
-        // TODO: Add journal coupler for "consensus_complete" fact
-        // This would require the consensus completion fact to be passed in
         SendGuardChain::new(
             CapabilityId::from("consensus:finalize"),
             self.context,

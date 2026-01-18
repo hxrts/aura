@@ -13,7 +13,7 @@ use aura_core::{
     epochs::Epoch,
     frost::{PublicKeyPackage, Share},
     relational::ConsensusProof,
-    AuthorityId, Prestate, Result,
+    AuthorityId, ContextId, Prestate, Result,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -23,6 +23,7 @@ use std::collections::HashMap;
 /// Uses all authorities from the prestate as witnesses with a simple
 /// majority threshold. This is suitable for most relational operations.
 pub async fn run_consensus<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     key_packages: HashMap<AuthorityId, Share>,
@@ -40,6 +41,7 @@ pub async fn run_consensus<T: Serialize>(
     let config = ConsensusConfig::new(threshold, witnesses, epoch)?;
 
     run_consensus_with_config(
+        context_id,
         prestate,
         operation,
         config,
@@ -56,6 +58,7 @@ pub async fn run_consensus<T: Serialize>(
 /// Uses all authorities from the prestate as witnesses with a simple
 /// majority threshold. This is suitable for most relational operations.
 pub async fn run_consensus_with_commit<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     key_packages: HashMap<AuthorityId, Share>,
@@ -70,6 +73,7 @@ pub async fn run_consensus_with_commit<T: Serialize>(
     let config = ConsensusConfig::new(threshold, witnesses, epoch)?;
 
     run_consensus_with_config_and_commit(
+        context_id,
         prestate,
         operation,
         config,
@@ -86,6 +90,7 @@ pub async fn run_consensus_with_commit<T: Serialize>(
 /// Provides fine-grained control over witness selection and thresholds
 /// for specialized relational operations.
 pub async fn run_consensus_with_config<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     config: ConsensusConfig,
@@ -95,6 +100,7 @@ pub async fn run_consensus_with_config<T: Serialize>(
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<ConsensusProof> {
     run_consensus_with_effects(
+        context_id,
         prestate,
         operation,
         config,
@@ -108,6 +114,7 @@ pub async fn run_consensus_with_config<T: Serialize>(
 
 /// Run consensus with explicit configuration and return proof + commit fact.
 pub async fn run_consensus_with_config_and_commit<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     config: ConsensusConfig,
@@ -117,6 +124,7 @@ pub async fn run_consensus_with_config_and_commit<T: Serialize>(
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(ConsensusProof, CommitFact)> {
     run_consensus_with_effects_and_commit(
+        context_id,
         prestate,
         operation,
         config,
@@ -130,6 +138,7 @@ pub async fn run_consensus_with_config_and_commit<T: Serialize>(
 
 /// Run consensus with custom effects (for testing)
 pub async fn run_consensus_with_effects<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     config: ConsensusConfig,
@@ -140,6 +149,7 @@ pub async fn run_consensus_with_effects<T: Serialize>(
 ) -> Result<ConsensusProof> {
     // Run the unified consensus protocol
     let params = crate::protocol::ConsensusParams {
+        context_id,
         witnesses: config.witness_set.witnesses().to_vec(),
         threshold: config.threshold(),
         key_packages,
@@ -154,6 +164,7 @@ pub async fn run_consensus_with_effects<T: Serialize>(
 
 /// Run consensus with custom effects and return proof + commit fact.
 pub async fn run_consensus_with_effects_and_commit<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     config: ConsensusConfig,
@@ -163,6 +174,7 @@ pub async fn run_consensus_with_effects_and_commit<T: Serialize>(
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<(ConsensusProof, CommitFact)> {
     let params = crate::protocol::ConsensusParams {
+        context_id,
         witnesses: config.witness_set.witnesses().to_vec(),
         threshold: config.threshold(),
         key_packages,

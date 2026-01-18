@@ -567,7 +567,7 @@ async fn execute_journal_append(
             context_commitment,
         )
         .map_err(|e| AgentError::effects(format!("Invalid rendezvous prestate: {e}")))?;
-        let params = build_consensus_params(effects, authority.authority_id(), effects)
+        let params = build_consensus_params(context_id, effects, authority.authority_id(), effects)
             .await
             .map_err(|e| {
                 AgentError::effects(format!("Failed to build rendezvous consensus params: {e}"))

@@ -85,6 +85,7 @@ impl GuardianEffects for GuardianService {
 
         // Run consensus for GuardianBinding
         let consensus_proof = run_consensus_with_config(
+            ctx.context_id,
             &prestate,
             &input.parameters,
             self.consensus_config.clone(),

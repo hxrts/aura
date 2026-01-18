@@ -329,7 +329,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             )
             .map_err(|e| IntentError::internal_error(format!("Invalid AMP prestate: {e}")))?;
 
-            let params = build_consensus_params(effects.as_ref(), authority_id, effects.as_ref())
+            let params = build_consensus_params(context, effects.as_ref(), authority_id, effects.as_ref())
                 .await
                 .map_err(map_consensus_error)?;
 
@@ -1047,7 +1047,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .unwrap_or(true);
 
         if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg && consensus_required {
-            let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
+            // For guardian rotation, use authority's own context
+            let guardian_context = aura_core::ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+            let params = build_consensus_params(guardian_context, effects.as_ref(), authority_id, &signing_service)
                 .await
                 .map_err(map_consensus_error)?;
             let _ = persist_consensus_dkg_transcript(
@@ -1356,7 +1358,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
-            let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
+            // For device registration, use authority's own context
+            let device_context = aura_core::ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+            let params = build_consensus_params(device_context, effects.as_ref(), authority_id, &signing_service)
                 .await
                 .map_err(map_consensus_error)?;
             let _ = persist_consensus_dkg_transcript(
@@ -2089,7 +2093,9 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
-            let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
+            // For guardian addition, use authority's own context
+            let guardian_add_context = aura_core::ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+            let params = build_consensus_params(guardian_add_context, effects.as_ref(), authority_id, &signing_service)
                 .await
                 .map_err(map_consensus_error)?;
             let _ = persist_consensus_dkg_transcript(
