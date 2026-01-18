@@ -338,6 +338,9 @@ impl Journal {
                         crate::fact::RelationalFact::Protocol(
                             crate::protocol_facts::ProtocolRelationalFact::AmpChannelBootstrap(..),
                         ) => "AmpChannelBootstrap".to_string(),
+                        crate::fact::RelationalFact::Protocol(
+                            crate::protocol_facts::ProtocolRelationalFact::EquivocationProof(..),
+                        ) => "EquivocationProof".to_string(),
                         crate::fact::RelationalFact::Generic { envelope, .. } => {
                             format!("Generic:{}", envelope.type_id.as_str())
                         }

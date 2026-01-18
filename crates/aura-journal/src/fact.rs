@@ -919,6 +919,29 @@ pub struct LeakageFact {
     pub timestamp: aura_core::time::PhysicalTime,
 }
 
+/// Cryptographic proof of consensus equivocation.
+///
+/// Records when a witness signs two different result IDs for the same
+/// consensus instance and prestate. This is a safety violation that
+/// proves malicious behavior.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct EquivocationProof {
+    /// Relational context where the consensus occurred
+    pub context_id: ContextId,
+    /// The witness that equivocated
+    pub witness: AuthorityId,
+    /// Consensus instance ID (as Hash32 to avoid circular dependency)
+    pub consensus_id: Hash32,
+    /// Prestate hash (for binding verification)
+    pub prestate_hash: Hash32,
+    /// First result ID voted for
+    pub first_result_id: Hash32,
+    /// Second (conflicting) result ID voted for
+    pub second_result_id: Hash32,
+    /// Timestamp when equivocation was detected
+    pub timestamp: aura_core::time::PhysicalTime,
+}
+
 /// Relational fact for cross-authority relationships
 ///
 /// # Protocol-Level vs Domain-Level Facts
@@ -1115,6 +1138,17 @@ pub enum ProtocolFactKey {
         /// Hash of the target state.
         to_state: Hash32,
     },
+    /// Equivocation proof showing malicious consensus behavior.
+    EquivocationProof {
+        /// The witness that equivocated.
+        witness: AuthorityId,
+        /// Consensus instance ID.
+        consensus_id: Hash32,
+        /// First result ID voted for.
+        first_result_id: Hash32,
+        /// Second (conflicting) result ID voted for.
+        second_result_id: Hash32,
+    },
 }
 
 impl ProtocolFactKey {
@@ -1134,6 +1168,7 @@ impl ProtocolFactKey {
             ProtocolFactKey::ConvergenceCert { .. } => "convergence-cert",
             ProtocolFactKey::ReversionFact { .. } => "reversion-fact",
             ProtocolFactKey::RotateFact { .. } => "rotate-fact",
+            ProtocolFactKey::EquivocationProof { .. } => "equivocation-proof",
         }
     }
 
@@ -1201,6 +1236,18 @@ impl ProtocolFactKey {
             ProtocolFactKey::ConvergenceCert { op_id } => op_id.as_bytes().to_vec(),
             ProtocolFactKey::ReversionFact { op_id } => op_id.as_bytes().to_vec(),
             ProtocolFactKey::RotateFact { to_state } => to_state.as_bytes().to_vec(),
+            ProtocolFactKey::EquivocationProof {
+                consensus_id,
+                first_result_id,
+                second_result_id,
+                ..
+            } => {
+                let mut data = Vec::new();
+                data.extend_from_slice(consensus_id.as_bytes());
+                data.extend_from_slice(first_result_id.as_bytes());
+                data.extend_from_slice(second_result_id.as_bytes());
+                data
+            }
         }
     }
 }
