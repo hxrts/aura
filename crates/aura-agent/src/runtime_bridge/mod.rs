@@ -1211,6 +1211,57 @@ impl RuntimeBridge for AgentRuntimeBridge {
         Ok(ceremony_id.to_string())
     }
 
+    /// Initiate a device threshold (multifactor) ceremony with cross-authority envelope routing.
+    ///
+    /// This implementation handles the technical details of distributing FROST key packages
+    /// to devices that may have different authorities than the target authority being configured.
+    ///
+    /// # Cross-Authority Envelope Routing
+    ///
+    /// Each participating device has its own authority derived from its device_id:
+    /// ```text
+    /// device_authority = AuthorityId::new_from_entropy(hash(device_id.to_bytes()))
+    /// ```
+    ///
+    /// Key package envelopes are routed as follows:
+    /// - **destination**: Device's own authority (computed from device_id)
+    /// - **source**: Initiator's authority (current authority_id)
+    /// - **metadata["target-authority-id"]**: Authority being configured for threshold signing
+    ///
+    /// This allows devices to receive and process envelopes addressed to their own authority
+    /// while knowing which authority's threshold they are joining.
+    ///
+    /// # Fresh DKG vs Existing State
+    ///
+    /// This ceremony performs fresh distributed key generation (DKG):
+    /// - Calls `rotate_keys()` to generate new FROST key material at pending epoch
+    /// - Does NOT load existing threshold state (which may not exist yet)
+    /// - Does NOT call `build_consensus_params()` (consensus happens after distribution)
+    ///
+    /// The threshold state is only established in storage AFTER devices respond with acceptances.
+    ///
+    /// # Envelope Distribution
+    ///
+    /// For each device in `device_ids`:
+    /// 1. Compute device authority from device_id
+    /// 2. Create TransportEnvelope with:
+    ///    - destination = device_authority
+    ///    - metadata["target-authority-id"] = initiator's authority_id
+    ///    - metadata["participant-device-id"] = device_id (for recipient validation)
+    ///    - payload = FROST key package for this participant
+    /// 3. Send envelope via TransportEffects
+    /// 4. If send fails, return NetworkError indicating unreachable device
+    ///
+    /// # Error Cases
+    ///
+    /// - **No transport available**: Device has no running agent with SharedTransport
+    /// - **Device unreachable**: Transport cannot deliver envelope to device's authority
+    /// - **Validation failure**: Invalid threshold, missing current device, duplicate devices
+    ///
+    /// # See Also
+    ///
+    /// - `crates/aura-agent/src/core/ceremony_processor/threshold.rs` - Recipient handling
+    /// - `docs/100_authority_and_identity.md` - Multi-authority device model
     async fn initiate_device_threshold_ceremony(
         &self,
         threshold_k: FrostThreshold,
