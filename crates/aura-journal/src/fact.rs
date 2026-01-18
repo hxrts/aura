@@ -1086,7 +1086,7 @@ impl ProtocolRelationalFact {
 /// - `Protocol(ReversionFact)` - Soft-safe explicit reversion
 /// - `Protocol(RotateFact)` - Lifecycle rotation/upgrade marker
 ///
-/// New protocol facts must be added to `protocol_facts.rs` and documented
+/// New protocol facts must be added to the `ProtocolRelationalFact` enum and documented
 /// in `docs/102_journal.md` (criteria + reduction rules).
 ///
 /// ## Domain-Level Facts (via Generic + FactRegistry)
