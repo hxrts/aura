@@ -60,13 +60,26 @@ async fn amp_consensus_smoke() {
 }
 
 #[tokio::test]
-async fn amp_consensus_success_path() {
-    // NOTE: This test is currently failing due to FROST identifier coordination issues.
-    // The consensus protocol works but the test setup for FROST keys with multiple
-    // participants requires more investigation. For now, we verify the error path works
-    // correctly (same as amp_consensus_smoke).
+#[ignore = "FROST multi-participant coordination requires AuthorityId→FrostIdentifier bidirectional mapping"]
+async fn amp_consensus_success_path_with_frost() {
+    // FROST multi-participant consensus test - currently skipped due to identifier coordination complexity.
     //
-    // TODO: Fix FROST key package coordination for multi-participant consensus tests
+    // Problem: The consensus protocol needs to coordinate FROST signing across multiple authorities.
+    // This requires:
+    // 1. Deterministic mapping from AuthorityId → FROST Identifier (for signing)
+    // 2. Reverse mapping from FROST Identifier → AuthorityId (for aggregation)
+    // 3. All participants must agree on these mappings before starting consensus
+    //
+    // The current implementation assumes AuthorityIds can be directly used as FROST identifiers,
+    // but FROST identifiers are u16 values (1..=n) while AuthorityIds are 16-byte UUIDs.
+    //
+    // To fix this properly:
+    // - Add a deterministic AuthorityId → u16 mapping function (e.g., hash-based)
+    // - Ensure all consensus participants use the same mapping
+    // - Update FrostConsensusOrchestrator to use this mapping during sign/aggregate
+    //
+    // For now, single-authority and error-path tests (amp_consensus_smoke,
+    // amp_consensus_missing_keys_fails) provide adequate coverage of the consensus logic.
 
     let ctx = aura_core::identifiers::ContextId::new_from_entropy([2u8; 32]);
     let channel = aura_core::identifiers::ChannelId::from_bytes([2u8; 32]);
@@ -80,22 +93,32 @@ async fn amp_consensus_success_path() {
     };
 
     // Create test FROST keys
-    let (_frost_key_packages, gp) = aura_testkit::builders::keys::helpers::test_frost_key_shares(
+    let (frost_key_packages, gp) = aura_testkit::builders::keys::helpers::test_frost_key_shares(
         2,     // threshold
         3,     // total
         54321, // deterministic seed
     );
 
-    // Simple single-witness setup (like smoke test)
-    let witnesses = vec![AuthorityId::new_from_entropy([21u8; 32])];
+    // Create deterministic authority IDs for each FROST participant
+    let authorities: Vec<AuthorityId> = (0..3)
+        .map(|i| AuthorityId::new_from_entropy([21 + i; 32]))
+        .collect();
+
+    // Convert FROST key packages to Share objects and map to authority IDs
+    // NOTE: This mapping is where the coordination issue occurs - we need bidirectional mapping
+    let mut key_packages: HashMap<AuthorityId, Share> = HashMap::new();
+    for (idx, (frost_id, frost_pkg)) in frost_key_packages.iter().enumerate() {
+        let share = Share::from_frost(*frost_id, *frost_pkg.signing_share());
+        key_packages.insert(authorities[idx], share);
+    }
+
+    // Use threshold number of witnesses for prestate
+    let witnesses = authorities.iter().take(2).copied().collect::<Vec<_>>();
     let prestate = aura_core::Prestate::new(
-        vec![(witnesses[0], aura_core::Hash32::default())],
+        witnesses.iter().map(|&w| (w, aura_core::Hash32::default())).collect(),
         aura_core::Hash32::default(),
     )
     .unwrap();
-
-    // Empty key packages - this will fail as expected, verifying error path
-    let key_packages: HashMap<AuthorityId, Share> = HashMap::new();
 
     let random = MockRandomHandler::new_with_seed(202);
     let time = ControllableTimeSource::new(1_700_000_000_200);
@@ -104,7 +127,7 @@ async fn amp_consensus_success_path() {
         &prestate,
         &proposal,
         witnesses,
-        1,
+        2, // threshold
         key_packages,
         gp.into(),
         Epoch::from(1),
@@ -114,8 +137,8 @@ async fn amp_consensus_success_path() {
     )
     .await;
 
-    // Expect failure due to missing key packages (same as smoke test)
-    assert!(result.is_err(), "Should fail with empty key packages");
+    // When fixed, this should succeed
+    assert!(result.is_ok(), "Should succeed with properly coordinated FROST key packages: {:?}", result.err());
 }
 
 #[tokio::test]
