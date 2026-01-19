@@ -1112,11 +1112,13 @@ check_todos() {
   section "TODO/FIXME markers"
   local platform_allow="crates/aura-agent/src/builder/android.rs|crates/aura-agent/src/builder/ios.rs|crates/aura-agent/src/builder/web.rs"
   local tui_allow="Implement channel deletion callback|Implement contact removal callback|Implement invitation revocation callback|Pass actual channel"
+  local chaos_allow="tree_chaos.rs.*Re-enable when chaos testing infrastructure is ready"
   local todo_hits
   todo_hits=$(rg --no-heading "TODO|FIXME" crates -g "*.rs" \
-    | grep -Ev "/tests/|/benches/|/examples/" \
+    | grep -Ev "/benches/" \
     | grep -Ev "$platform_allow" \
-    | grep -Ev "$tui_allow" || true)
+    | grep -Ev "$tui_allow" \
+    | grep -Ev "$chaos_allow" || true)
   emit_hits "TODO/FIXME" "$todo_hits"
 
   # Incomplete markers
