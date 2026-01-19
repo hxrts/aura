@@ -1175,7 +1175,7 @@ async fn test_command_coverage_documentation() {
         ("CreateChannel", "CHAT_SIGNAL", true),
         ("SendMessage", "CHAT_SIGNAL", true),
         ("StartDirectChat", "CHAT_SIGNAL", true),
-        ("SendDirectMessage", "CHAT_SIGNAL", false), // TODO: Similar to SendMessage
+        ("SendDirectMessage", "CHAT_SIGNAL", false), // Similar to SendMessage
         ("AcceptInvitation", "INVITATIONS_SIGNAL", true),
         ("DeclineInvitation", "INVITATIONS_SIGNAL", true),
         ("UpdateContactNickname", "CONTACTS_SIGNAL", true),
@@ -1187,7 +1187,7 @@ async fn test_command_coverage_documentation() {
     println!("| Command              | Signal             | Has Test |");
     println!("|---------------------|-------------------|----------|");
     for (cmd, signal, has_test) in state_modifying_commands {
-        let check = if has_test { "✓" } else { "TODO" };
+        let check = if has_test { "✓" } else { "MISSING" };
         println!("| {:20} | {:17} | {:8} |", cmd, signal, check);
     }
 
