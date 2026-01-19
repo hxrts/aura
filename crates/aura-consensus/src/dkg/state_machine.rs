@@ -31,7 +31,7 @@ pub enum DkgAggregationMode {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DkgCollectionUpdate {
     pub accepted: bool,
-    pub total_packages: usize,
+    pub total_packages: u32,
     pub threshold_met: bool,
 }
 
@@ -40,7 +40,7 @@ pub struct DkgCollectionUpdate {
 pub struct DkgAggregationResult {
     pub transcript: DkgTranscript,
     pub mode: DkgAggregationMode,
-    pub package_count: usize,
+    pub package_count: u32,
 }
 
 /// State machine for collecting and aggregating DKG dealer packages.
@@ -90,8 +90,8 @@ impl DkgCollectionState {
         }
 
         let accepted = self.packages.insert(package.dealer, package).is_none();
-        let total_packages = self.packages.len();
-        let threshold_met = total_packages >= self.config.threshold as usize;
+        let total_packages = self.packages.len() as u32;
+        let threshold_met = total_packages >= self.config.threshold as u32;
 
         Ok(DkgCollectionUpdate {
             accepted,
@@ -135,7 +135,7 @@ impl DkgCollectionState {
         Ok(DkgAggregationResult {
             transcript,
             mode,
-            package_count: packages.len(),
+            package_count: packages.len() as u32,
         })
     }
 }

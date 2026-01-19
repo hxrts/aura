@@ -60,13 +60,13 @@ pub type ResultId = Hash32;
 /// the threshold is reached for a particular result.
 #[derive(Debug, Clone)]
 pub struct ShareCollector {
-    threshold: usize,
+    threshold: u32,
     shares_by_rid: BTreeMap<ResultId, LinearShareSet>,
 }
 
 impl ShareCollector {
     /// Create a new share collector with the given threshold
-    pub fn new(threshold: usize) -> Self {
+    pub fn new(threshold: u32) -> Self {
         Self {
             threshold,
             shares_by_rid: BTreeMap::new(),
@@ -171,8 +171,8 @@ impl LinearShareSet {
         Ok(())
     }
 
-    fn seal_if_threshold_reached(&mut self, threshold: usize) -> Option<ThresholdShareSet> {
-        if self.shares.len() >= threshold && !self.sealed {
+    fn seal_if_threshold_reached(&mut self, threshold: u32) -> Option<ThresholdShareSet> {
+        if self.shares.len() >= threshold as usize && !self.sealed {
             self.sealed = true;
             Some(ThresholdShareSet {
                 shares: self.shares.clone(),

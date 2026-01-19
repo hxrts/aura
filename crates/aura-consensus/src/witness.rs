@@ -394,7 +394,7 @@ pub struct WitnessTracker {
     share_collector: crate::shares::ShareCollector,
 
     /// Threshold for this consensus
-    threshold: usize,
+    threshold: u32,
 
     /// Primary result_id (first one seen) for backward compatibility
     primary_result_id: Option<Hash32>,
@@ -422,7 +422,7 @@ impl WitnessTracker {
     }
 
     /// Create a new witness tracker with specified threshold
-    pub fn with_threshold(threshold: usize) -> Self {
+    pub fn with_threshold(threshold: u32) -> Self {
         Self {
             nonce_commitments: HashMap::new(),
             share_collector: crate::shares::ShareCollector::new(threshold),
