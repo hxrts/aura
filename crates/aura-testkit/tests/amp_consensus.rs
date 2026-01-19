@@ -115,7 +115,10 @@ async fn amp_consensus_success_path_with_frost() {
     // Use threshold number of witnesses for prestate
     let witnesses = authorities.iter().take(2).copied().collect::<Vec<_>>();
     let prestate = aura_core::Prestate::new(
-        witnesses.iter().map(|&w| (w, aura_core::Hash32::default())).collect(),
+        witnesses
+            .iter()
+            .map(|&w| (w, aura_core::Hash32::default()))
+            .collect(),
         aura_core::Hash32::default(),
     )
     .unwrap();
@@ -138,7 +141,11 @@ async fn amp_consensus_success_path_with_frost() {
     .await;
 
     // When fixed, this should succeed
-    assert!(result.is_ok(), "Should succeed with properly coordinated FROST key packages: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should succeed with properly coordinated FROST key packages: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]

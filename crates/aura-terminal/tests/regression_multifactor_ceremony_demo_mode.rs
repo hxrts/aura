@@ -85,9 +85,11 @@ async fn regression_multifactor_ceremony_fails_with_mobile_device_no_transport()
         ..Default::default()
     };
 
-    let effect_ctx = EffectContext::new(bob_authority, bob_context, ExecutionMode::Simulation {
-        seed,
-    });
+    let effect_ctx = EffectContext::new(
+        bob_authority,
+        bob_context,
+        ExecutionMode::Simulation { seed },
+    );
 
     // CRITICAL: Using build_simulation_async WITHOUT shared_transport
     // This means the mobile device authority won't have a running agent
@@ -273,9 +275,11 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
         ..Default::default()
     };
 
-    let effect_ctx = EffectContext::new(bob_authority, bob_context, ExecutionMode::Simulation {
-        seed,
-    });
+    let effect_ctx = EffectContext::new(
+        bob_authority,
+        bob_context,
+        ExecutionMode::Simulation { seed },
+    );
 
     // Build WITH shared transport
     let agent = AgentBuilder::new()
@@ -312,7 +316,6 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
         AuthorityId::new_from_entropy(hash(&bytes))
     };
 
-
     let mobile_context_entropy = hash::hash(format!("context:{}", mobile_device_id_str).as_bytes());
     let mobile_context = ContextId::new_from_entropy(mobile_context_entropy);
 
@@ -326,14 +329,14 @@ async fn control_multifactor_ceremony_works_with_shared_transport() {
     };
 
     let mobile_effect_ctx = EffectContext::new(
-        mobile_authority,  // Mobile device has its own authority initially
-        mobile_context,    // Mobile device has its own context
+        mobile_authority, // Mobile device has its own authority initially
+        mobile_context,   // Mobile device has its own context
         ExecutionMode::Simulation { seed: seed + 1 },
     );
 
     let mobile_agent = AgentBuilder::new()
         .with_config(mobile_agent_config)
-        .with_authority(mobile_authority)  // Starts with mobile_authority
+        .with_authority(mobile_authority) // Starts with mobile_authority
         .build_simulation_async_with_shared_transport(
             seed + 1,
             &mobile_effect_ctx,

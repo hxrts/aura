@@ -558,7 +558,9 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
 
     println!("\n=== Guardian Recovery Test PASSED ===");
     println!("Bob's cryptographic identity was preserved across catastrophic device loss.");
-    println!("\nNOTE: This test uses restore_recovered_account() with a manually provided authority.");
+    println!(
+        "\nNOTE: This test uses restore_recovered_account() with a manually provided authority."
+    );
     println!(
         "Full RecoveryProtocol integration (guardian FROST coordination) is not yet tested here."
     );

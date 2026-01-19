@@ -59,6 +59,8 @@ module protocol_consensus_liveness {
     // Gossip graph: adjacency list representation
     var gossipGraph: core::AuthorityId -> Set[core::AuthorityId]
 
+    // Note: globalEvidenceTracker is owned by core module, not liveness
+
     // ════════════════════════════════════════════════════════════════════════
     // INITIALIZATION
     // ════════════════════════════════════════════════════════════════════════
@@ -112,7 +114,8 @@ module protocol_consensus_liveness {
             core::committedFacts' = core::committedFacts,
             core::globalWitnesses' = core::globalWitnesses,
             core::currentEpoch' = core::currentEpoch,
-            core::witnessNonces' = core::witnessNonces
+            core::witnessNonces' = core::witnessNonces,
+            core::globalEvidenceTracker' = core::globalEvidenceTracker
         }
     }
 
@@ -131,7 +134,8 @@ module protocol_consensus_liveness {
         core::committedFacts' = core::committedFacts,
         core::globalWitnesses' = core::globalWitnesses,
         core::currentEpoch' = core::currentEpoch,
-        core::witnessNonces' = core::witnessNonces
+        core::witnessNonces' = core::witnessNonces,
+        core::globalEvidenceTracker' = core::globalEvidenceTracker
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -158,7 +162,8 @@ module protocol_consensus_liveness {
         core::committedFacts' = core::committedFacts,
         core::globalWitnesses' = core::globalWitnesses,
         core::currentEpoch' = core::currentEpoch,
-        core::witnessNonces' = core::witnessNonces
+        core::witnessNonces' = core::witnessNonces,
+        core::globalEvidenceTracker' = core::globalEvidenceTracker
     }
 
     // Witness comes back online
@@ -181,7 +186,8 @@ module protocol_consensus_liveness {
         core::committedFacts' = core::committedFacts,
         core::globalWitnesses' = core::globalWitnesses,
         core::currentEpoch' = core::currentEpoch,
-        core::witnessNonces' = core::witnessNonces
+        core::witnessNonces' = core::witnessNonces,
+        core::globalEvidenceTracker' = core::globalEvidenceTracker
     }
 
     // Witness becomes Byzantine (bounded by < threshold)
@@ -208,7 +214,8 @@ module protocol_consensus_liveness {
             core::committedFacts' = core::committedFacts,
             core::globalWitnesses' = core::globalWitnesses,
             core::currentEpoch' = core::currentEpoch,
-            core::witnessNonces' = core::witnessNonces
+            core::witnessNonces' = core::witnessNonces,
+            core::globalEvidenceTracker' = core::globalEvidenceTracker
         }
     }
 
@@ -249,7 +256,7 @@ module protocol_consensus_liveness {
         rid: core::ResultId,
         share: core::ShareData
     ): bool = all {
-        core::submitWitnessShare(cid, witness, rid, share),
+        core::submitWitnessShare(cid, witness, rid, share, globalTime),
         cid.in(instanceTiming.keys()),
         instanceTiming' = instanceTiming.put(cid, {
             ...instanceTiming.get(cid),
@@ -294,7 +301,7 @@ module protocol_consensus_liveness {
                    else { cid: "", operation: "", prestateHash: "", threshold: 0,
                           witnesses: Set(), initiator: "", phase: core::ConsensusPending,
                           proposals: Set(), commitFact: core::None, fallbackTimerActive: false,
-                          equivocators: Set() }
+                          equivocators: Set(), equivocationProofs: Set() }
         val timingState = if (cid.in(instanceTiming.keys())) instanceTiming.get(cid)
                      else { startTime: 0, lastActivity: 0, fallbackStartTime: core::None,
                             retryCount: 0, messagesInFlight: 0 }
@@ -362,7 +369,8 @@ module protocol_consensus_liveness {
         core::committedFacts' = core::committedFacts,
         core::globalWitnesses' = core::globalWitnesses,
         core::currentEpoch' = core::currentEpoch,
-        core::witnessNonces' = core::witnessNonces
+        core::witnessNonces' = core::witnessNonces,
+        core::globalEvidenceTracker' = core::globalEvidenceTracker
     }
 
     // Restore a link between two nodes
@@ -382,7 +390,8 @@ module protocol_consensus_liveness {
         core::committedFacts' = core::committedFacts,
         core::globalWitnesses' = core::globalWitnesses,
         core::currentEpoch' = core::currentEpoch,
-        core::witnessNonces' = core::witnessNonces
+        core::witnessNonces' = core::witnessNonces,
+        core::globalEvidenceTracker' = core::globalEvidenceTracker
     }
 
     // Create a network partition
@@ -421,7 +430,8 @@ module protocol_consensus_liveness {
         core::committedFacts' = core::committedFacts,
         core::globalWitnesses' = core::globalWitnesses,
         core::currentEpoch' = core::currentEpoch,
-        core::witnessNonces' = core::witnessNonces
+        core::witnessNonces' = core::witnessNonces,
+        core::globalEvidenceTracker' = core::globalEvidenceTracker
     }
 
     // ════════════════════════════════════════════════════════════════════════

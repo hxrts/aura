@@ -170,7 +170,7 @@ module protocol_consensus_adversary {
                 cid: "", operation: "", prestateHash: "", threshold: 0,
                 witnesses: Set(), initiator: "", phase: core::ConsensusPending,
                 proposals: Set(), commitFact: None, fallbackTimerActive: false,
-                equivocators: Set()
+                equivocators: Set(), equivocationProofs: Set()
             }
         }
         all {
@@ -212,7 +212,7 @@ module protocol_consensus_adversary {
                 cid: "", operation: "", prestateHash: "", threshold: 0,
                 witnesses: Set(), initiator: "", phase: core::ConsensusPending,
                 proposals: Set(), commitFact: None, fallbackTimerActive: false,
-                equivocators: Set()
+                equivocators: Set(), equivocationProofs: Set()
             }
         }
         all {
@@ -276,7 +276,7 @@ module protocol_consensus_adversary {
                 cid: "", operation: "", prestateHash: "", threshold: 0,
                 witnesses: Set(), initiator: "", phase: core::ConsensusPending,
                 proposals: Set(), commitFact: None, fallbackTimerActive: false,
-                equivocators: Set()
+                equivocators: Set(), equivocationProofs: Set()
             }
         }
         all {
@@ -339,7 +339,7 @@ module protocol_consensus_adversary {
                 cid: "", operation: "", prestateHash: "", threshold: 0,
                 witnesses: Set(), initiator: "", phase: core::ConsensusPending,
                 proposals: Set(), commitFact: None, fallbackTimerActive: false,
-                equivocators: Set()
+                equivocators: Set(), equivocationProofs: Set()
             }
         }
         val isFastPath = inst.phase == core::FastPathActive

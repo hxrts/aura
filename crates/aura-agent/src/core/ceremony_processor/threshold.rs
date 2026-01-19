@@ -49,7 +49,9 @@ impl<'a> ThresholdHandler<'a> {
 
         // The target authority is the authority we're setting up threshold signing for
         // This may be different from envelope.destination (which is the receiving device's authority)
-        let authority_id = if let Some(target_authority_str) = envelope.metadata.get("target-authority-id") {
+        let authority_id = if let Some(target_authority_str) =
+            envelope.metadata.get("target-authority-id")
+        {
             match target_authority_str.parse::<AuthorityId>() {
                 Ok(id) => id,
                 Err(e) => {

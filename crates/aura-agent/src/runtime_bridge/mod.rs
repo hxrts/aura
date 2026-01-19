@@ -1523,10 +1523,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 device_id.to_string(),
             );
             // Include the target authority in metadata for ceremony coordination
-            metadata.insert(
-                "target-authority-id".to_string(),
-                authority_id.to_string(),
-            );
+            metadata.insert("target-authority-id".to_string(), authority_id.to_string());
             if let Some(config_b64) = config_b64.as_ref() {
                 metadata.insert("threshold-config".to_string(), config_b64.clone());
             }
@@ -1535,8 +1532,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
 
             let envelope = aura_core::effects::TransportEnvelope {
-                destination: device_authority,  // Send to the device's own authority
-                source: authority_id,            // From the ceremony initiator's authority
+                destination: device_authority, // Send to the device's own authority
+                source: authority_id,          // From the ceremony initiator's authority
                 context: ceremony_context,
                 payload: key_package,
                 metadata,
