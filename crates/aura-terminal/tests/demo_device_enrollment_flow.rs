@@ -129,7 +129,7 @@ async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
     }
 }
 
-/// TODO: This test requires full ceremony commit flow to be implemented.
+/// This test requires full ceremony commit flow to be implemented.
 /// Currently, after the invited device accepts:
 /// 1. The acceptance message is processed and threshold is reached
 /// 2. BUT: The initiator needs to send a commit message to finalize

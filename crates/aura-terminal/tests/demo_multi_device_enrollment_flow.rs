@@ -133,7 +133,7 @@ async fn wait_for_device(app_core: &Arc<RwLock<AppCore>>, device_id: &str) {
     }
 }
 
-/// TODO: This test requires full ceremony commit flow. See demo_device_enrollment_flow.rs.
+/// This test requires full ceremony commit flow. See demo_device_enrollment_flow.rs.
 /// The enrollment ceremony threshold is reached but commit message isn't sent.
 #[tokio::test]
 #[ignore = "requires full ceremony commit flow - threshold reached but commit message not sent"]
