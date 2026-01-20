@@ -609,7 +609,7 @@ async fn test_guardian_recovery_flow() {
 
 /// Test home creation and management
 ///
-/// TODO: HOMES_SIGNAL not populated in test environment.
+/// HOMES_SIGNAL not populated in test environment.
 #[tokio::test]
 #[ignore = "requires full signal propagation - HOMES_SIGNAL has no current home"]
 async fn test_home_lifecycle_flow() {
@@ -678,7 +678,7 @@ async fn test_neighborhood_formation_flow() {
 /// Test complete Social Graph flow: contacts → homes → nicknames → contact-home relationships
 /// This covers Flow 6: Social Graph (Contacts + Homes) from the verification plan
 ///
-/// TODO: HOMES_SIGNAL not populated in test environment.
+/// HOMES_SIGNAL not populated in test environment.
 #[tokio::test]
 #[ignore = "requires full signal propagation - HOMES_SIGNAL has no current home"]
 async fn test_social_graph_flow() {
@@ -879,7 +879,7 @@ async fn test_social_graph_flow() {
 
 /// Test contact filtering by home membership
 ///
-/// TODO: HOMES_SIGNAL not populated in test environment.
+/// HOMES_SIGNAL not populated in test environment.
 #[tokio::test]
 #[ignore = "requires full signal propagation - HOMES_SIGNAL has no current home"]
 async fn test_social_graph_contact_home_view() {

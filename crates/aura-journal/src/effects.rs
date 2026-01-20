@@ -34,8 +34,8 @@ fn derive_context_id(label: &[u8], parts: &[&[u8]]) -> ContextId {
     ContextId::new_from_entropy(hash(&input))
 }
 
-fn protocol_context_id(protocol: &crate::protocol_facts::ProtocolRelationalFact) -> ContextId {
-    use crate::protocol_facts::ProtocolRelationalFact::*;
+fn protocol_context_id(protocol: &crate::fact::ProtocolRelationalFact) -> ContextId {
+    use crate::fact::ProtocolRelationalFact::*;
     match protocol {
         GuardianBinding {
             account_id,

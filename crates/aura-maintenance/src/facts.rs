@@ -1,13 +1,15 @@
 //! Maintenance fact types and reducers.
+//!
+//! # Architecture
+//!
+//! Layer 2 domain facts following the `aura-core` pattern.
+//! Uses `FactTypeId` and `try_encode`/`try_decode` APIs.
 
 use aura_core::hash::hash;
 use aura_core::time::ProvenancedTime;
-use aura_core::types::facts::{FactDelta, FactDeltaReducer, FactTypeId};
+use aura_core::types::facts::{FactDelta, FactDeltaReducer, FactError, FactTypeId};
 use aura_core::types::Epoch;
 use aura_core::{AccountId, AuthorityId, ContextId, Hash32, SemanticVersion};
-use aura_journal::reduction::{RelationalBinding, RelationalBindingType};
-use aura_journal::{DomainFact, FactReducer};
-use aura_macros::DomainFact;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -232,9 +234,8 @@ impl AdminReplacement {
 }
 
 /// Maintenance facts stored in authority journals.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-#[domain_fact(type_id = "maintenance", schema_version = 1, context_fn = "context_id")]
 pub enum MaintenanceFact {
     /// Snapshot proposal fact.
     SnapshotProposed(SnapshotProposed),
@@ -321,6 +322,91 @@ impl MaintenanceFact {
         };
         MaintenanceFactKey { sub_type, data }
     }
+
+    /// Encode this fact with a canonical envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn try_encode(&self) -> Result<Vec<u8>, FactError> {
+        aura_core::types::facts::try_encode_fact(
+            maintenance_fact_type_id(),
+            MAINTENANCE_FACT_SCHEMA_VERSION,
+            self,
+        )
+    }
+
+    /// Decode a fact from a canonical envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn try_decode(bytes: &[u8]) -> Result<Self, FactError> {
+        aura_core::types::facts::try_decode_fact(
+            maintenance_fact_type_id(),
+            MAINTENANCE_FACT_SCHEMA_VERSION,
+            bytes,
+        )
+    }
+
+    /// Encode this fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, FactError> {
+        self.try_encode()
+    }
+
+    /// Decode from raw bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or type/version mismatches.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FactError> {
+        Self::try_decode(bytes)
+    }
+
+    /// Create a FactEnvelope for this fact.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn to_envelope(&self) -> Result<aura_core::types::facts::FactEnvelope, FactError> {
+        let payload = aura_core::util::serialization::to_vec(self)?;
+        Ok(aura_core::types::facts::FactEnvelope {
+            type_id: maintenance_fact_type_id().clone(),
+            schema_version: MAINTENANCE_FACT_SCHEMA_VERSION,
+            encoding: aura_core::types::facts::FactEncoding::DagCbor,
+            payload,
+        })
+    }
+
+    /// Produce a human-readable summary for logs.
+    pub fn summary(&self) -> String {
+        match self {
+            MaintenanceFact::SnapshotProposed(fact) => format!(
+                "snapshot_proposed:{}:{}",
+                fact.authority_id, fact.target_epoch
+            ),
+            MaintenanceFact::SnapshotCompleted(fact) => format!(
+                "snapshot_completed:{}:{}",
+                fact.authority_id, fact.snapshot.epoch
+            ),
+            MaintenanceFact::CacheInvalidated(fact) => format!(
+                "cache_invalidated:{}:{}",
+                fact.authority_id, fact.epoch_floor
+            ),
+            MaintenanceFact::UpgradeActivated(fact) => format!(
+                "upgrade_activated:{}:{}",
+                fact.authority_id, fact.activation_fence.epoch
+            ),
+            MaintenanceFact::AdminReplacement(fact) => format!(
+                "admin_replacement:{}:{}",
+                fact.old_admin, fact.activation_epoch
+            ),
+        }
+    }
 }
 
 /// Key for indexing maintenance facts in the journal.
@@ -381,59 +467,6 @@ impl FactDeltaReducer<MaintenanceFact, MaintenanceFactDelta> for MaintenanceFact
     }
 }
 
-impl FactReducer for MaintenanceFactReducer {
-    fn handles_type(&self) -> &'static str {
-        MAINTENANCE_FACT_TYPE_ID.as_str()
-    }
-
-    fn reduce_envelope(
-        &self,
-        context_id: ContextId,
-        envelope: &aura_core::types::facts::FactEnvelope,
-    ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != MAINTENANCE_FACT_TYPE_ID.as_str() {
-            return None;
-        }
-
-        let fact = MaintenanceFact::from_envelope(envelope)?;
-        let key = fact.binding_key();
-
-        Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
-            context_id,
-            data: key.data,
-        })
-    }
-}
-
-impl MaintenanceFact {
-    /// Produce a human-readable summary for logs.
-    pub fn summary(&self) -> String {
-        match self {
-            MaintenanceFact::SnapshotProposed(fact) => format!(
-                "snapshot_proposed:{}:{}",
-                fact.authority_id, fact.target_epoch
-            ),
-            MaintenanceFact::SnapshotCompleted(fact) => format!(
-                "snapshot_completed:{}:{}",
-                fact.authority_id, fact.snapshot.epoch
-            ),
-            MaintenanceFact::CacheInvalidated(fact) => format!(
-                "cache_invalidated:{}:{}",
-                fact.authority_id, fact.epoch_floor
-            ),
-            MaintenanceFact::UpgradeActivated(fact) => format!(
-                "upgrade_activated:{}:{}",
-                fact.authority_id, fact.activation_fence.epoch
-            ),
-            MaintenanceFact::AdminReplacement(fact) => format!(
-                "admin_replacement:{}:{}",
-                fact.old_admin, fact.activation_epoch
-            ),
-        }
-    }
-}
-
 /// Snapshot completion receipt used by maintenance workflows.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -445,6 +478,7 @@ pub struct SnapshotReceipt {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -459,11 +493,8 @@ mod tests {
             vec![CacheKey("key".to_string())],
             Epoch::new(2),
         ));
-        let bytes = fact.to_bytes();
-        let restored = match MaintenanceFact::from_bytes(&bytes) {
-            Some(restored) => restored,
-            None => panic!("decode"),
-        };
+        let bytes = fact.to_bytes().expect("encoding should succeed");
+        let restored = MaintenanceFact::from_bytes(&bytes).expect("decoding should succeed");
         assert_eq!(fact, restored);
     }
 

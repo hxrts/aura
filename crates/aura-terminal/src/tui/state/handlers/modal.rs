@@ -1050,13 +1050,8 @@ fn handle_guardian_setup_key_queue(
                             },
                         ));
 
-                        // Keep the modal queued and transition into the in-progress step.
-                        // `ceremony_id` is filled asynchronously by the shell.
-                        state.modal_queue.update_active(|modal| {
-                            if let QueuedModal::GuardianSetup(ref mut s) = modal {
-                                s.begin_ceremony();
-                            }
-                        });
+                        // Dismiss modal after sending invitation (mirrors contact invitation flow)
+                        state.modal_queue.dismiss();
                     }
                 }
                 _ => {}
@@ -1191,11 +1186,8 @@ fn handle_mfa_setup_key_queue(
                         threshold_k: modal_state.threshold_k(),
                     }));
 
-                    state.modal_queue.update_active(|modal| {
-                        if let QueuedModal::MfaSetup(ref mut s) = modal {
-                            s.begin_ceremony();
-                        }
-                    });
+                    // Dismiss modal after sending invitation (mirrors guardian invitation flow)
+                    state.modal_queue.dismiss();
                 }
             }
             _ => {}

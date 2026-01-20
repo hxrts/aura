@@ -14,19 +14,13 @@
 //! # Architecture
 //!
 //! Device naming facts are authority-scoped (devices belong to an authority, not a
-//! cross-authority context). However, to fit the `DomainFact` trait's context-based
-//! model, these facts use a derived context computed from the authority ID.
+//! cross-authority context). However, to fit the context-based model, these facts
+//! use a derived context computed from the authority ID.
 //!
 //! The derived context ensures:
 //! - Facts are isolated to a single authority
-//! - Standard `DomainFact` trait can be implemented
+//! - Standard fact infrastructure can be used
 //! - Reduction and registry integration work uniformly
-//!
-//! # Note on DomainFact Implementation
-//!
-//! This module manually implements `DomainFact` instead of using the derive macro
-//! because the macro generates `impl aura_journal::DomainFact` which doesn't work
-//! inside the `aura-journal` crate itself (where `crate::` must be used instead).
 //!
 //! # Safety
 //!
@@ -36,14 +30,11 @@
 
 use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
 use aura_core::time::PhysicalTime;
-use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
+use aura_core::types::facts::{FactError, FactTypeId};
 use serde::{Deserialize, Serialize};
 
-use crate::extensibility::{DomainFact, FactReducer};
-use crate::reduction::{RelationalBinding, RelationalBindingType};
-
 /// Type identifier for device naming facts.
-pub const DEVICE_NAMING_FACT_TYPE_ID: &str = "device_naming";
+pub static DEVICE_NAMING_FACT_TYPE_ID: FactTypeId = FactTypeId::new("device_naming/v1");
 
 /// Schema version for device naming facts.
 pub const DEVICE_NAMING_SCHEMA_VERSION: u16 = 1;
@@ -53,10 +44,15 @@ pub const DEVICE_NAMING_SCHEMA_VERSION: u16 = 1;
 /// Matches `NICKNAME_SUGGESTION_BYTES_MAX` in `DeviceLeafMetadata` for consistency.
 pub const NICKNAME_SUGGESTION_BYTES_MAX: usize = 64;
 
+/// Get the typed fact ID for device naming facts
+pub fn device_naming_fact_type_id() -> &'static FactTypeId {
+    &DEVICE_NAMING_FACT_TYPE_ID
+}
+
 /// Derive a context ID from an authority ID for device naming facts.
 ///
 /// This provides a deterministic, authority-scoped "virtual context" for device
-/// naming facts to fit the `DomainFact` trait model.
+/// naming facts to fit the context-based model.
 ///
 /// # Implementation
 ///
@@ -74,15 +70,6 @@ pub fn derive_device_naming_context(authority_id: AuthorityId) -> ContextId {
     uuid_bytes.copy_from_slice(&hash_bytes[..16]);
 
     ContextId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes))
-}
-
-/// Key type for device naming facts.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeviceNamingFactKey {
-    /// Stable subtype identifier.
-    pub sub_type: &'static str,
-    /// Opaque key data (device ID bytes).
-    pub data: Vec<u8>,
 }
 
 /// Device naming facts for post-enrollment nickname updates.
@@ -128,51 +115,6 @@ pub enum DeviceNamingFact {
         /// behavior but this is acceptable for casual name updates.
         updated_at: PhysicalTime,
     },
-}
-
-// Manual implementation of DomainFact because the derive macro generates
-// `impl aura_journal::DomainFact` which doesn't work inside the aura-journal crate.
-impl DomainFact for DeviceNamingFact {
-    fn type_id(&self) -> &'static str {
-        DEVICE_NAMING_FACT_TYPE_ID
-    }
-
-    fn schema_version(&self) -> u16 {
-        DEVICE_NAMING_SCHEMA_VERSION
-    }
-
-    fn context_id(&self) -> ContextId {
-        match self {
-            Self::SuggestionUpdated { context_id, .. } => *context_id,
-        }
-    }
-
-    fn to_envelope(&self) -> FactEnvelope {
-        // SAFETY: DeviceNamingFact serialization is deterministic and should never fail.
-        // This is a fact serialization context where panic is acceptable.
-        #[allow(clippy::expect_used)]
-        let payload = aura_core::util::serialization::to_vec(self)
-            .expect("DeviceNamingFact serialization should not fail");
-        FactEnvelope {
-            type_id: FactTypeId::from(self.type_id()),
-            schema_version: self.schema_version(),
-            encoding: FactEncoding::DagCbor,
-            payload,
-        }
-    }
-
-    fn from_envelope(envelope: &FactEnvelope) -> Option<Self>
-    where
-        Self: Sized,
-    {
-        if envelope.type_id.as_str() != DEVICE_NAMING_FACT_TYPE_ID {
-            return None;
-        }
-        if envelope.schema_version != DEVICE_NAMING_SCHEMA_VERSION {
-            return None;
-        }
-        aura_core::util::serialization::from_slice(&envelope.payload).ok()
-    }
 }
 
 impl DeviceNamingFact {
@@ -242,6 +184,14 @@ impl DeviceNamingFact {
         }
     }
 
+    /// Get the context ID for this fact.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        match self {
+            Self::SuggestionUpdated { context_id, .. } => *context_id,
+        }
+    }
+
     /// Get the timestamp of this fact.
     #[must_use]
     pub fn timestamp(&self) -> PhysicalTime {
@@ -273,60 +223,53 @@ impl DeviceNamingFact {
         self.nickname_suggestion().is_empty()
     }
 
-    /// Validate this fact for reduction in the given context.
-    pub fn validate_for_reduction(&self, context_id: ContextId) -> bool {
-        self.context_id() == context_id
+    /// Encode this fact with a canonical envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn try_encode(&self) -> Result<Vec<u8>, FactError> {
+        aura_core::types::facts::try_encode_fact(
+            device_naming_fact_type_id(),
+            DEVICE_NAMING_SCHEMA_VERSION,
+            self,
+        )
     }
 
-    /// Get the binding key for this fact.
-    #[allow(clippy::expect_used)] // DeviceId::to_bytes() is infallible for valid IDs
-    pub fn binding_key(&self) -> DeviceNamingFactKey {
-        match self {
-            Self::SuggestionUpdated { device_id, .. } => DeviceNamingFactKey {
-                sub_type: "device-suggestion-updated",
-                // DeviceId::to_bytes() returns Result, unwrap is safe for valid IDs
-                data: device_id.to_bytes().expect("valid device_id").to_vec(),
-            },
-        }
-    }
-}
-
-/// Reducer for device naming facts.
-///
-/// Converts device naming facts to relational bindings during journal reduction.
-/// Uses LWW semantics based on the `updated_at` timestamp.
-pub struct DeviceNamingFactReducer;
-
-impl FactReducer for DeviceNamingFactReducer {
-    fn handles_type(&self) -> &'static str {
-        DEVICE_NAMING_FACT_TYPE_ID
+    /// Decode a fact from a canonical envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or version/type mismatches.
+    pub fn try_decode(bytes: &[u8]) -> Result<Self, FactError> {
+        aura_core::types::facts::try_decode_fact(
+            device_naming_fact_type_id(),
+            DEVICE_NAMING_SCHEMA_VERSION,
+            bytes,
+        )
     }
 
-    fn reduce_envelope(
-        &self,
-        context_id: ContextId,
-        envelope: &FactEnvelope,
-    ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != DEVICE_NAMING_FACT_TYPE_ID {
-            return None;
-        }
+    /// Encode this fact with proper error handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if serialization fails.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, FactError> {
+        self.try_encode()
+    }
 
-        let fact = DeviceNamingFact::from_envelope(envelope)?;
-        if !fact.validate_for_reduction(context_id) {
-            return None;
-        }
-
-        let key = fact.binding_key();
-
-        Some(RelationalBinding {
-            binding_type: RelationalBindingType::Generic(key.sub_type.to_string()),
-            context_id,
-            data: key.data,
-        })
+    /// Decode from raw bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `FactError` if deserialization fails or type/version mismatches.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, FactError> {
+        Self::try_decode(bytes)
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -356,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fact_envelope_roundtrip() {
+    fn test_fact_encoding_roundtrip() {
         let fact = DeviceNamingFact::suggestion_updated_ms(
             test_authority_id(1),
             test_device_id(10),
@@ -364,30 +307,9 @@ mod tests {
             1234567890,
         );
 
-        let envelope = fact.to_envelope();
-        let restored = DeviceNamingFact::from_envelope(&envelope);
-        assert!(restored.is_some());
-        assert_eq!(restored.unwrap(), fact);
-    }
-
-    #[test]
-    fn test_fact_to_generic() {
-        let fact = DeviceNamingFact::suggestion_updated_ms(
-            test_authority_id(1),
-            test_device_id(10),
-            "Test Device",
-            0,
-        );
-
-        let generic = fact.to_generic();
-
-        if let crate::fact::RelationalFact::Generic { envelope, .. } = generic {
-            assert_eq!(envelope.type_id.as_str(), DEVICE_NAMING_FACT_TYPE_ID);
-            let restored = DeviceNamingFact::from_envelope(&envelope);
-            assert!(restored.is_some());
-        } else {
-            panic!("Expected Generic variant");
-        }
+        let bytes = fact.try_encode().expect("encoding should succeed");
+        let restored = DeviceNamingFact::try_decode(&bytes).expect("decoding should succeed");
+        assert_eq!(restored, fact);
     }
 
     #[test]
@@ -417,76 +339,12 @@ mod tests {
     }
 
     #[test]
-    fn test_reducer_handles_correct_type() {
-        let reducer = DeviceNamingFactReducer;
-        assert_eq!(reducer.handles_type(), DEVICE_NAMING_FACT_TYPE_ID);
-    }
+    fn test_context_id_derived_from_authority() {
+        let authority = test_authority_id(42);
+        let fact =
+            DeviceNamingFact::suggestion_updated_ms(authority, test_device_id(1), "Device", 0);
 
-    #[test]
-    fn test_reducer_reduction() {
-        let reducer = DeviceNamingFactReducer;
-        let authority = test_authority_id(1);
-        let fact = DeviceNamingFact::suggestion_updated_ms(
-            authority,
-            test_device_id(10),
-            "Test Device",
-            0,
-        );
-
-        let context_id = derive_device_naming_context(authority);
-        let envelope = fact.to_envelope();
-        let binding = reducer.reduce_envelope(context_id, &envelope);
-
-        assert!(binding.is_some());
-        let binding = binding.unwrap();
-        assert!(matches!(
-            binding.binding_type,
-            RelationalBindingType::Generic(ref s) if s == "device-suggestion-updated"
-        ));
-    }
-
-    #[test]
-    fn test_reducer_rejects_wrong_context() {
-        let reducer = DeviceNamingFactReducer;
-        let fact = DeviceNamingFact::suggestion_updated_ms(
-            test_authority_id(1),
-            test_device_id(10),
-            "Test",
-            0,
-        );
-
-        // Use a different authority's context
-        let wrong_context = derive_device_naming_context(test_authority_id(99));
-        let envelope = fact.to_envelope();
-        let binding = reducer.reduce_envelope(wrong_context, &envelope);
-
-        assert!(binding.is_none());
-    }
-
-    #[test]
-    fn test_reducer_idempotence() {
-        let reducer = DeviceNamingFactReducer;
-        let authority = test_authority_id(1);
-        let fact = DeviceNamingFact::suggestion_updated_ms(
-            authority,
-            test_device_id(10),
-            "Test Device",
-            0,
-        );
-
-        let context_id = derive_device_naming_context(authority);
-        let envelope = fact.to_envelope();
-
-        let binding1 = reducer.reduce_envelope(context_id, &envelope);
-        let binding2 = reducer.reduce_envelope(context_id, &envelope);
-
-        assert!(binding1.is_some());
-        assert!(binding2.is_some());
-
-        let b1 = binding1.unwrap();
-        let b2 = binding2.unwrap();
-        assert_eq!(b1.binding_type, b2.binding_type);
-        assert_eq!(b1.context_id, b2.context_id);
-        assert_eq!(b1.data, b2.data);
+        let expected_ctx = derive_device_naming_context(authority);
+        assert_eq!(fact.context_id(), expected_ctx);
     }
 }

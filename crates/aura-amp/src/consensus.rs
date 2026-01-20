@@ -45,6 +45,7 @@ pub async fn run_amp_channel_epoch_bump(
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
     // Consensus over the proposal itself; serialization is handled by `run_consensus`.
     let params = aura_consensus::protocol::ConsensusParams {
+        context_id: proposal.context,
         witnesses,
         threshold,
         key_packages,

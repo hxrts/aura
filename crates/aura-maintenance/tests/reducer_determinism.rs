@@ -5,8 +5,7 @@
 use aura_core::types::facts::FactDelta;
 use aura_core::types::Epoch;
 use aura_core::types::FactDeltaReducer;
-use aura_core::{AuthorityId, ContextId, Hash32, SemanticVersion};
-use aura_journal::{DomainFact, FactReducer};
+use aura_core::{AuthorityId, Hash32, SemanticVersion};
 use aura_maintenance::{
     CacheInvalidated, CacheKey, IdentityEpochFence, MaintenanceFact, MaintenanceFactDelta,
     MaintenanceFactReducer, SnapshotProposed, UpgradeActivated, UpgradeProposalMetadata,
@@ -62,9 +61,7 @@ fn reducer_apply_is_deterministic_and_order_independent() {
 }
 
 #[test]
-fn reducer_binding_is_idempotent() {
-    let reducer = MaintenanceFactReducer;
-    let context_id = ContextId::new_from_entropy([9u8; 32]);
+fn fact_envelope_roundtrip() {
     let metadata = UpgradeProposalMetadata {
         package_id: Uuid::from_bytes(7u128.to_be_bytes()),
         version: SemanticVersion::new(1, 2, 3),
@@ -78,15 +75,19 @@ fn reducer_binding_is_idempotent() {
         metadata,
     ));
 
-    let envelope = fact.to_envelope();
-    let first = reducer
-        .reduce_envelope(context_id, &envelope)
-        .expect("binding");
-    let second = reducer
-        .reduce_envelope(context_id, &envelope)
-        .expect("binding");
+    // Test encoding/decoding
+    let envelope = fact.to_envelope().expect("envelope creation");
+    assert_eq!(
+        envelope.type_id.as_str(),
+        aura_maintenance::maintenance_fact_type_id().as_str()
+    );
+    assert_eq!(
+        envelope.schema_version,
+        aura_maintenance::MAINTENANCE_FACT_SCHEMA_VERSION
+    );
 
-    assert_eq!(first.binding_type, second.binding_type);
-    assert_eq!(first.context_id, second.context_id);
-    assert_eq!(first.data, second.data);
+    // Test bytes roundtrip
+    let bytes = fact.to_bytes().expect("encoding");
+    let restored = MaintenanceFact::from_bytes(&bytes).expect("decoding");
+    assert_eq!(fact, restored);
 }

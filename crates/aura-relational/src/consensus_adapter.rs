@@ -14,7 +14,7 @@ use aura_core::{
     epochs::Epoch,
     frost::{PublicKeyPackage, Share},
 };
-use aura_core::{relational::ConsensusProof, AuraError, AuthorityId, Prestate, Result};
+use aura_core::{relational::ConsensusProof, AuraError, AuthorityId, ContextId, Prestate, Result};
 use aura_effects::random::RealRandomHandler;
 use aura_effects::time::PhysicalTimeHandler;
 use serde::Serialize;
@@ -31,6 +31,7 @@ pub use aura_consensus::types::{CommitFact, ConsensusConfig};
 /// providing a stable API for relational context operations while the
 /// actual consensus logic lives in the orchestration layer.
 pub async fn run_consensus<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     key_packages: HashMap<AuthorityId, Share>,
@@ -40,6 +41,7 @@ pub async fn run_consensus<T: Serialize>(
     let random = RealRandomHandler;
     let time = PhysicalTimeHandler;
     run_relational_consensus(
+        context_id,
         prestate,
         operation,
         key_packages,
@@ -53,6 +55,7 @@ pub async fn run_consensus<T: Serialize>(
 
 /// Run consensus and return both consensus proof and commit fact.
 pub async fn run_consensus_with_commit<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     key_packages: HashMap<AuthorityId, Share>,
@@ -62,6 +65,7 @@ pub async fn run_consensus_with_commit<T: Serialize>(
     let random = RealRandomHandler;
     let time = PhysicalTimeHandler;
     run_relational_consensus_with_commit(
+        context_id,
         prestate,
         operation,
         key_packages,
@@ -78,6 +82,7 @@ pub async fn run_consensus_with_commit<T: Serialize>(
 /// This provides fine-grained control over consensus parameters while
 /// delegating to the aura-consensus implementation.
 pub async fn run_consensus_with_config<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     config: ConsensusConfig,
@@ -87,6 +92,7 @@ pub async fn run_consensus_with_config<T: Serialize>(
     let random = RealRandomHandler;
     let time = PhysicalTimeHandler;
     run_relational_consensus_with_config(
+        context_id,
         prestate,
         operation,
         config,
@@ -100,6 +106,7 @@ pub async fn run_consensus_with_config<T: Serialize>(
 
 /// Run consensus with explicit configuration and return proof + commit fact.
 pub async fn run_consensus_with_config_and_commit<T: Serialize>(
+    context_id: ContextId,
     prestate: &Prestate,
     operation: &T,
     config: ConsensusConfig,
@@ -109,6 +116,7 @@ pub async fn run_consensus_with_config_and_commit<T: Serialize>(
     let random = RealRandomHandler;
     let time = PhysicalTimeHandler;
     run_relational_consensus_with_config_and_commit(
+        context_id,
         prestate,
         operation,
         config,
@@ -161,6 +169,7 @@ mod tests {
     #[tokio::test]
     async fn test_consensus_adapter_delegation() {
         let auth = AuthorityId::new_from_entropy([54u8; 32]);
+        let context_id = ContextId::new_from_entropy([55u8; 32]);
         let prestate = Prestate::new(vec![(auth, Hash32::default())], Hash32::default()).unwrap();
 
         #[derive(serde::Serialize)]
@@ -185,7 +194,15 @@ mod tests {
         let epoch = Epoch::from(1);
 
         // The adapter should handle the consensus failure gracefully
-        let result = run_consensus(&prestate, &op, key_packages, group_public_key, epoch).await;
+        let result = run_consensus(
+            context_id,
+            &prestate,
+            &op,
+            key_packages,
+            group_public_key,
+            epoch,
+        )
+        .await;
 
         // We expect this to fail due to insufficient nonce commitments, which tests the error handling
         assert!(

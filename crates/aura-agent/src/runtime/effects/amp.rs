@@ -101,10 +101,14 @@ impl AmpChannelEffects for AuraEffectSystem {
                 context_commitment,
             )
             .map_err(|e| map_amp_err(AuraError::invalid(format!("Invalid AMP prestate: {e}"))))?;
-            let consensus_params =
-                crate::runtime::consensus::build_consensus_params(self, self.authority_id, self)
-                    .await
-                    .map_err(map_amp_err)?;
+            let consensus_params = crate::runtime::consensus::build_consensus_params(
+                params.context,
+                self,
+                self.authority_id,
+                self,
+            )
+            .await
+            .map_err(map_amp_err)?;
             let transcript_ref = self
                 .latest_dkg_transcript_commit(self.authority_id, params.context)
                 .await

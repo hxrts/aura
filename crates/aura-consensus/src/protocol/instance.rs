@@ -43,10 +43,12 @@ impl ProtocolInstance {
     pub fn sync_core_state(&mut self) {
         self.core_state.phase = self.to_core_phase();
         // Sync proposals from tracker
-        self.core_state.proposals = self
-            .tracker
-            .partial_signatures
+        let participants = self.tracker.get_participants();
+        let signatures = self.tracker.get_signatures();
+
+        self.core_state.proposals = participants
             .iter()
+            .zip(signatures.iter())
             .map(|(witness, sig)| core::ShareProposal {
                 witness: *witness,
                 result_id: self.operation_hash,

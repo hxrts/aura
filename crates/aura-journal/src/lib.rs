@@ -50,7 +50,6 @@ pub mod journal_api;
 // New fact-based journal implementation (Phase 2)
 pub mod commitment_integration;
 pub mod fact;
-pub mod protocol_facts;
 pub mod reduction;
 
 // Pure functions for Aeneas translation (formal verification)
@@ -58,9 +57,6 @@ pub mod pure;
 
 // Extensible fact type infrastructure (Open/Closed Principle)
 pub mod extensibility;
-
-// Domain-specific fact types (device naming, etc.)
-pub mod facts;
 
 // Authority state derivation (Phase 5)
 pub mod authority_state;
@@ -88,9 +84,9 @@ pub use effect_api::{CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus
 // New fact-based journal exports
 pub use fact::{
     AckStorage, AttestedOp as FactAttestedOp, Fact, FactContent, FactOptions, GcResult,
-    Journal as FactJournal, JournalNamespace, RelationalFact, SnapshotFact, TreeOpKind,
+    Journal as FactJournal, JournalNamespace, ProtocolRelationalFact, RelationalFact, SnapshotFact,
+    TreeOpKind,
 };
-pub use protocol_facts::ProtocolRelationalFact;
 pub use reduction::{
     reduce_authority, reduce_context, ChannelEpochState, ReductionNamespaceError, RelationalState,
 };
@@ -122,12 +118,6 @@ pub use types::GuardianMetadata;
 // Extensibility infrastructure re-exports
 pub use extensibility::{
     decode_domain_fact, encode_domain_fact, parse_envelope, DomainFact, FactReducer, FactRegistry,
-};
-
-// Device naming fact re-exports
-pub use facts::{
-    derive_device_naming_context, DeviceNamingFact, DeviceNamingFactKey, DeviceNamingFactReducer,
-    DEVICE_NAMING_FACT_TYPE_ID, DEVICE_NAMING_SCHEMA_VERSION, NICKNAME_SUGGESTION_BYTES_MAX,
 };
 
 // See docs/100_authority_and_identity.md for migration guidance

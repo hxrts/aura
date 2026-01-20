@@ -36,7 +36,7 @@ pub use transitions::{
 };
 pub use validation::{
     check_invariants, is_equivocator, shares_consistent, validate_commit, validate_share,
-    ValidationError,
+    EquivocationDetector, ValidationError,
 };
 
 // Verification infrastructure organization:

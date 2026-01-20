@@ -31,9 +31,9 @@
 
 use aura_authentication::{AuthFact, AuthFactReducer, AUTH_FACT_TYPE_ID};
 use aura_chat::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
+use aura_consensus::facts::{ConsensusFact, ConsensusFactReducer, CONSENSUS_FACT_TYPE_ID};
 use aura_invitation::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
 use aura_journal::FactRegistry;
-use aura_maintenance::{MaintenanceFact, MaintenanceFactReducer, MAINTENANCE_FACT_TYPE_ID};
 use aura_recovery::{RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{
     ContactFact, ContactFactReducer, GuardianBindingDetailsFact, GuardianBindingDetailsFactReducer,
@@ -55,6 +55,7 @@ pub fn build_fact_registry() -> FactRegistry {
     // Domain-level facts: application-specific, reduced via registered FactReducer
     registry.register::<ChatFact>(CHAT_FACT_TYPE_ID, Box::new(ChatFactReducer));
     registry.register::<AuthFact>(AUTH_FACT_TYPE_ID, Box::new(AuthFactReducer));
+    registry.register::<ConsensusFact>(CONSENSUS_FACT_TYPE_ID, Box::new(ConsensusFactReducer));
     registry.register::<InvitationFact>(INVITATION_FACT_TYPE_ID, Box::new(InvitationFactReducer));
     registry.register::<ContactFact>(CONTACT_FACT_TYPE_ID, Box::new(ContactFactReducer));
     registry.register::<GuardianRequestFact>(
@@ -71,10 +72,6 @@ pub fn build_fact_registry() -> FactRegistry {
     );
     registry.register::<RendezvousFact>(RENDEZVOUS_FACT_TYPE_ID, Box::new(RendezvousFactReducer));
     registry.register::<RecoveryFact>(RECOVERY_FACT_TYPE_ID, Box::new(RecoveryFactReducer));
-    registry.register::<MaintenanceFact>(
-        MAINTENANCE_FACT_TYPE_ID.as_str(),
-        Box::new(MaintenanceFactReducer),
-    );
     register_moderation_facts(&mut registry);
 
     registry
@@ -91,6 +88,7 @@ mod tests {
         let registry = build_fact_registry();
         assert!(registry.is_registered(CHAT_FACT_TYPE_ID));
         assert!(registry.is_registered(AUTH_FACT_TYPE_ID));
+        assert!(registry.is_registered(CONSENSUS_FACT_TYPE_ID));
         assert!(registry.is_registered(INVITATION_FACT_TYPE_ID));
         assert!(registry.is_registered(CONTACT_FACT_TYPE_ID));
         assert!(registry.is_registered(GUARDIAN_REQUEST_FACT_TYPE_ID));

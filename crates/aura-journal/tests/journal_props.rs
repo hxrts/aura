@@ -8,8 +8,7 @@ use aura_core::{
     Hash32, JoinSemilattice,
 };
 use aura_journal::{
-    fact::{Fact, FactContent, Journal, JournalNamespace, RelationalFact},
-    protocol_facts::ProtocolRelationalFact,
+    fact::{Fact, FactContent, Journal, JournalNamespace, ProtocolRelationalFact, RelationalFact},
     reduction::{reduce_context, RelationalBinding, RelationalState},
 };
 use proptest::prelude::*;

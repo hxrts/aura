@@ -5,7 +5,6 @@ use aura_core::effects::JournalEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::AuraError;
 use aura_journal::fact::FactContent;
-use aura_journal::DomainFact;
 use aura_maintenance::{MaintenanceFact, SnapshotProposed};
 use aura_protocol::effects::TreeEffects;
 use uuid::Uuid;
@@ -41,7 +40,15 @@ where
         state_digest,
     ));
 
-    let fact_content = FactContent::Relational(proposal.to_generic());
+    // Layer 2 facts use to_envelope() instead of to_generic()
+    let envelope = proposal
+        .to_envelope()
+        .map_err(|e| AuraError::serialization(format!("Failed to encode maintenance fact: {e}")))?;
+    let context_id = proposal.context_id();
+    let fact_content = FactContent::Relational(aura_journal::RelationalFact::Generic {
+        context_id,
+        envelope,
+    });
 
     let fact_value = encode_fact_content(fact_content)?;
     let fact_key = format!("snapshot_proposed:{proposal_id}");

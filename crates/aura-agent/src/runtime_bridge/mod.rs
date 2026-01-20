@@ -329,9 +329,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             )
             .map_err(|e| IntentError::internal_error(format!("Invalid AMP prestate: {e}")))?;
 
-            let params = build_consensus_params(effects.as_ref(), authority_id, effects.as_ref())
-                .await
-                .map_err(map_consensus_error)?;
+            let params =
+                build_consensus_params(context, effects.as_ref(), authority_id, effects.as_ref())
+                    .await
+                    .map_err(map_consensus_error)?;
 
             let transcript_ref = effects
                 .latest_dkg_transcript_commit(authority_id, context)
@@ -1047,9 +1048,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .unwrap_or(true);
 
         if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg && consensus_required {
-            let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
-                .await
-                .map_err(map_consensus_error)?;
+            // For guardian rotation, use authority's own context
+            let guardian_context =
+                aura_core::ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+            let params = build_consensus_params(
+                guardian_context,
+                effects.as_ref(),
+                authority_id,
+                &signing_service,
+            )
+            .await
+            .map_err(map_consensus_error)?;
             let _ = persist_consensus_dkg_transcript(
                 effects.clone(),
                 prestate,
@@ -1202,6 +1211,57 @@ impl RuntimeBridge for AgentRuntimeBridge {
         Ok(ceremony_id.to_string())
     }
 
+    /// Initiate a device threshold (multifactor) ceremony with cross-authority envelope routing.
+    ///
+    /// This implementation handles the technical details of distributing FROST key packages
+    /// to devices that may have different authorities than the target authority being configured.
+    ///
+    /// # Cross-Authority Envelope Routing
+    ///
+    /// Each participating device has its own authority derived from its device_id:
+    /// ```text
+    /// device_authority = AuthorityId::new_from_entropy(hash(device_id.to_bytes()))
+    /// ```
+    ///
+    /// Key package envelopes are routed as follows:
+    /// - **destination**: Device's own authority (computed from device_id)
+    /// - **source**: Initiator's authority (current authority_id)
+    /// - **metadata["target-authority-id"]**: Authority being configured for threshold signing
+    ///
+    /// This allows devices to receive and process envelopes addressed to their own authority
+    /// while knowing which authority's threshold they are joining.
+    ///
+    /// # Fresh DKG vs Existing State
+    ///
+    /// This ceremony performs fresh distributed key generation (DKG):
+    /// - Calls `rotate_keys()` to generate new FROST key material at pending epoch
+    /// - Does NOT load existing threshold state (which may not exist yet)
+    /// - Does NOT call `build_consensus_params()` (consensus happens after distribution)
+    ///
+    /// The threshold state is only established in storage AFTER devices respond with acceptances.
+    ///
+    /// # Envelope Distribution
+    ///
+    /// For each device in `device_ids`:
+    /// 1. Compute device authority from device_id
+    /// 2. Create TransportEnvelope with:
+    ///    - destination = device_authority
+    ///    - metadata["target-authority-id"] = initiator's authority_id
+    ///    - metadata["participant-device-id"] = device_id (for recipient validation)
+    ///    - payload = FROST key package for this participant
+    /// 3. Send envelope via TransportEffects
+    /// 4. If send fails, return NetworkError indicating unreachable device
+    ///
+    /// # Error Cases
+    ///
+    /// - **No transport available**: Device has no running agent with SharedTransport
+    /// - **Device unreachable**: Transport cannot deliver envelope to device's authority
+    /// - **Validation failure**: Invalid threshold, missing current device, duplicate devices
+    ///
+    /// # See Also
+    ///
+    /// - `crates/aura-agent/src/core/ceremony_processor/threshold.rs` - Recipient handling
+    /// - `docs/100_authority_and_identity.md` - Multi-authority device model
     async fn initiate_device_threshold_ceremony(
         &self,
         threshold_k: FrostThreshold,
@@ -1213,13 +1273,10 @@ impl RuntimeBridge for AgentRuntimeBridge {
             ThresholdSigningEffects,
         };
         use aura_core::hash::hash;
-        use aura_core::threshold::{
-            policy_for, CeremonyFlow, KeyGenerationPolicy, ParticipantIdentity,
-        };
+        use aura_core::threshold::{policy_for, CeremonyFlow, ParticipantIdentity};
 
         let authority_id = self.agent.authority_id();
         let effects = self.agent.runtime().effects();
-        let signing_service = self.agent.threshold_signing();
         let current_device_id = self.agent.context().device_id();
 
         let mut parsed_devices: Vec<aura_core::DeviceId> = Vec::with_capacity(device_ids.len());
@@ -1258,7 +1315,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             )));
         }
 
-        let policy = policy_for(CeremonyFlow::DeviceMfaRotation);
+        let _policy = policy_for(CeremonyFlow::DeviceMfaRotation);
 
         let participants: Vec<ParticipantIdentity> = parsed_devices
             .iter()
@@ -1266,7 +1323,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map(ParticipantIdentity::device)
             .collect();
 
-        let (pending_epoch, key_packages, _public_key) = effects
+        let (pending_epoch, key_packages, public_key_package) = effects
             .rotate_keys(&authority_id, threshold_value, total_n, &participants)
             .await
             .map_err(|e| {
@@ -1274,33 +1331,11 @@ impl RuntimeBridge for AgentRuntimeBridge {
             })?;
         let pending_epoch = Epoch::new(pending_epoch);
 
-        let pubkey_location = SecureStorageLocation::with_sub_key(
-            "threshold_pubkey",
-            format!("{}", authority_id),
-            format!("{}", pending_epoch.value()),
-        );
         let config_location = SecureStorageLocation::with_sub_key(
             "threshold_config",
             format!("{}", authority_id),
             format!("{}", pending_epoch.value()),
         );
-
-        let public_key_package = match effects
-            .secure_retrieve(
-                &pubkey_location,
-                &[
-                    SecureStorageCapability::Read,
-                    SecureStorageCapability::Write,
-                ],
-            )
-            .await
-        {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                tracing::warn!(error = %e, "Missing MFA public key package");
-                Vec::new()
-            }
-        };
 
         let threshold_config = match effects
             .secure_retrieve(
@@ -1319,6 +1354,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
         };
 
+        // Use the freshly generated public_key_package from rotate_keys
+        // Map key packages to devices for ceremony distribution
         let mut key_package_by_device: std::collections::HashMap<aura_core::DeviceId, Vec<u8>> =
             std::collections::HashMap::new();
         for (device_id, key_package) in parsed_devices.iter().copied().zip(key_packages.iter()) {
@@ -1355,23 +1392,13 @@ impl RuntimeBridge for AgentRuntimeBridge {
         .map_err(|e| IntentError::internal_error(format!("Serialize operation: {e}")))?;
         let op_hash = aura_core::Hash32(hash(&op_input));
 
-        if policy.keygen == KeyGenerationPolicy::K3ConsensusDkg {
-            let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
-                .await
-                .map_err(map_consensus_error)?;
-            let _ = persist_consensus_dkg_transcript(
-                effects.clone(),
-                prestate,
-                params,
-                authority_id,
-                pending_epoch.value(),
-                threshold_value,
-                total_n,
-                &participants,
-                op_hash,
-            )
-            .await?;
-        }
+        // For K3ConsensusDkg ceremonies, we would normally run consensus to finalize the DKG.
+        // However, for device threshold ceremonies, we're doing FRESH DKG (we just called rotate_keys),
+        // so we don't have threshold state in storage yet. We skip the consensus step here and just
+        // distribute key packages. The consensus will happen later when devices respond.
+        //
+        // Note: For guardian ceremonies or subsequent rotations, this path would need to be updated
+        // to handle consensus properly. For now, device threshold ceremonies are key package distribution only.
 
         let nonce_bytes = effects.random_bytes(8).await;
         let nonce = u64::from_le_bytes(nonce_bytes[..8].try_into().unwrap_or_default());
@@ -1464,6 +1491,18 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 )));
             };
 
+            // Each device has its own authority derived from its device_id
+            // We need to send the envelope to that device's authority, not the initiator's authority
+            let device_authority = {
+                let bytes = device_id.to_bytes().map_err(|_| {
+                    IntentError::internal_error(format!(
+                        "Failed to convert device id {} to bytes",
+                        device_id
+                    ))
+                })?;
+                AuthorityId::new_from_entropy(hash(&bytes))
+            };
+
             let mut metadata = std::collections::HashMap::new();
             metadata.insert(
                 "content-type".to_string(),
@@ -1483,6 +1522,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
                 "aura-destination-device-id".to_string(),
                 device_id.to_string(),
             );
+            // Include the target authority in metadata for ceremony coordination
+            metadata.insert("target-authority-id".to_string(), authority_id.to_string());
             if let Some(config_b64) = config_b64.as_ref() {
                 metadata.insert("threshold-config".to_string(), config_b64.clone());
             }
@@ -1491,8 +1532,8 @@ impl RuntimeBridge for AgentRuntimeBridge {
             }
 
             let envelope = aura_core::effects::TransportEnvelope {
-                destination: authority_id,
-                source: authority_id,
+                destination: device_authority, // Send to the device's own authority
+                source: authority_id,          // From the ceremony initiator's authority
                 context: ceremony_context,
                 payload: key_package,
                 metadata,
@@ -1500,10 +1541,23 @@ impl RuntimeBridge for AgentRuntimeBridge {
             };
 
             effects.send_envelope(envelope).await.map_err(|e| {
-                IntentError::internal_error(format!(
-                    "Failed to send device threshold key package to {}: {e}",
-                    device_id
-                ))
+                let error_msg = e.to_string();
+
+                // Provide clearer error messages for common failure cases
+                if error_msg.contains("not connected")
+                    || error_msg.contains("unreachable")
+                    || error_msg.contains("no route")
+                    || error_msg.contains("offline mode") {
+                    IntentError::network_error(format!(
+                        "Device {} is not reachable. Ensure the device is online and connected to the network before starting the multifactor ceremony.",
+                        device_id
+                    ))
+                } else {
+                    IntentError::internal_error(format!(
+                        "Failed to send device threshold key package to {}: {e}",
+                        device_id
+                    ))
+                }
             })?;
         }
 
@@ -2089,9 +2143,17 @@ impl RuntimeBridge for AgentRuntimeBridge {
         let op_hash = aura_core::Hash32(hash(&op_input));
 
         if policy.keygen == aura_core::threshold::KeyGenerationPolicy::K3ConsensusDkg {
-            let params = build_consensus_params(effects.as_ref(), authority_id, &signing_service)
-                .await
-                .map_err(map_consensus_error)?;
+            // For guardian addition, use authority's own context
+            let guardian_add_context =
+                aura_core::ContextId::new_from_entropy(hash(&authority_id.to_bytes()));
+            let params = build_consensus_params(
+                guardian_add_context,
+                effects.as_ref(),
+                authority_id,
+                &signing_service,
+            )
+            .await
+            .map_err(map_consensus_error)?;
             let _ = persist_consensus_dkg_transcript(
                 effects.clone(),
                 prestate,

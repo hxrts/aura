@@ -943,6 +943,56 @@ impl AppCore {
     }
 
     /// Initiate a device threshold (multifactor) ceremony.
+    ///
+    /// This ceremony sets up FROST threshold signing across multiple devices for the
+    /// current authority. It is a cross-authority operation: participating devices may
+    /// have different authorities than the target authority being configured.
+    ///
+    /// # Cross-Authority Operation Model
+    ///
+    /// - **Target Authority**: The authority being configured for threshold signing (this device's authority)
+    /// - **Participant Authorities**: Each device has its own authority derived from its device_id
+    /// - **Envelope Routing**: Key packages are sent to each device's own authority (not the target authority)
+    /// - **Authority Grant**: Devices gain signing capability for the target authority AFTER ceremony completes
+    ///
+    /// # Process
+    ///
+    /// 1. Initiator generates FROST key packages for all participants
+    /// 2. Key packages are distributed via envelopes routed to each device's authority
+    /// 3. Devices receive packages, store shares, and send acceptance acknowledgments
+    /// 4. Once threshold acceptances are received, ceremony commits
+    /// 5. All devices gain signing capability for the target authority
+    ///
+    /// # Arguments
+    ///
+    /// * `threshold_k` - Minimum signatures required (must be 2 ≤ k ≤ n)
+    /// * `total_n` - Total number of participating devices
+    /// * `device_ids` - Device identifiers for all participants (must include current device)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(String)` - Ceremony ID for tracking progress
+    /// * `Err(IntentError::ValidationFailed)` - Invalid parameters
+    /// * `Err(IntentError::NetworkError)` - Device unreachable or no transport available
+    /// * `Err(IntentError::NoAgent)` - Runtime not configured
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Set up 2-of-3 multifactor with laptop + mobile + backup device
+    /// let threshold = FrostThreshold::new(2)?;
+    /// let device_ids = vec![
+    ///     "demo:alice-laptop".to_string(),
+    ///     "demo:alice-mobile".to_string(),
+    ///     "demo:alice-backup".to_string(),
+    /// ];
+    /// let ceremony_id = app_core.initiate_device_threshold_ceremony(threshold, 3, &device_ids).await?;
+    /// ```
+    ///
+    /// # See Also
+    ///
+    /// - `docs/100_authority_and_identity.md` - Authority model and multi-authority devices
+    /// - `docs/118_key_rotation_ceremonies.md` - Ceremony lifecycle and requirements
     pub async fn initiate_device_threshold_ceremony(
         &self,
         threshold_k: FrostThreshold,

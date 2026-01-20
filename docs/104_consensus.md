@@ -284,27 +284,34 @@ Witnesses accept valid commit facts from any source.
 
 ## 7. Evidence Propagation
 
-Evidence is a CRDT keyed by `cid`. It monotonically accumulates attestations and signatures.
+Evidence tracks equivocation and accountability information for consensus instances. The system uses CRDT-based incremental propagation. Evidence deltas attach to all protocol messages. Witnesses merge incoming evidence automatically.
 
-Evidence properties:
+Equivocation occurs when a witness signs conflicting result IDs for the same prestate. The protocol detects this pattern and generates cryptographic proofs. Each proof records both conflicting signatures with witness identity and timestamp.
 
-* Monotonicity: threshold signatures for `(cid, rid)` never conflict
-* Idempotence: merging the same evidence multiple times is safe
-* Convergence: all peers exchanging deltas converge to the same evidence
-
-Abstract interface:
-
-```
-EvidenceDelta(cid):
-    // Return a delta for the evidence CRDT for this cid
-    return CRDT_Delta_for(cid)
-
-MergeEvidence(cid, evidΔ):
-    // Merge a delta into local evidence
-    CRDT_Merge(cid, evidΔ)
+```rust
+pub struct EquivocationProof {
+    pub witness: AuthorityId,
+    pub consensus_id: ConsensusId,
+    pub prestate_hash: Hash32,
+    pub first_result_id: Hash32,
+    pub second_result_id: Hash32,
+    pub timestamp_ms: u64,
+}
 ```
 
-Every protocol message carries `evidΔ`. This ensures evidence spreads with the protocol. Late-joining peers catch up by merging CRDT state.
+The proof structure preserves both conflicting votes. This enables accountability and slashing logic in higher layers.
+
+Evidence deltas propagate via incremental synchronization. Each delta contains only new proofs since the last exchange. Timestamps provide watermark-based deduplication. The delta structure is lightweight and merges idempotently.
+
+```rust
+pub struct EvidenceDelta {
+    pub consensus_id: ConsensusId,
+    pub equivocation_proofs: Vec<EquivocationProof>,
+    pub timestamp_ms: u64,
+}
+```
+
+Every consensus message includes an evidence delta field. Coordinators attach deltas when broadcasting execute and commit messages. Witnesses attach deltas when sending shares. Receivers merge incoming deltas into local evidence trackers. This piggybacking ensures evidence propagates without extra round trips.
 
 ## 8. Fallback Protocol
 
@@ -383,6 +390,27 @@ Reduction remains deterministic. Commit facts simply appear as additional facts 
 
 A commit fact is monotone even when the event it represents is non-monotone. This supports convergence.
 
+### 9.1 Context Isolation and Guard Integration
+
+Every consensus instance binds to a context identifier. The context provides isolation for capability checking and flow budget enforcement. Authority-scoped ceremonies derive context from authority identity. Relational ceremonies use explicit context identifiers from the relational binding.
+
+The protocol integrates with the guard chain at message send boundaries. Guards evaluate before constructing messages. The guard chain sequences capability checks, flow budget charges, leakage tracking, and journal coupling. Journal facts commit at the runtime bridge layer after guard evaluation completes.
+
+```rust
+// Protocol evaluates guards before sending
+let guard = SignShareGuard::new(context_id, coordinator);
+let guard_result = guard.evaluate(effects).await?;
+
+if !guard_result.authorized {
+    return Err(AuraError::permission_denied("Guard denied SignShare"));
+}
+
+// Construct and send message after guard approval
+let message = ConsensusMessage::SignShare { ... };
+```
+
+The dependency injection pattern passes effect systems as parameters. Protocol methods accept generic effect trait bounds. This enables testing with mock effects and production use with real implementations. The pattern avoids storing effects in protocol state.
+
 ## 10. Integration Points
 
 Consensus is used for account tree operations that require strong agreement. Examples include membership changes and policy changes when local signing is insufficient.
@@ -431,6 +459,27 @@ let signing_key = state.get_signing_key(target_node)?;
 // Verify against stored key and policy-derived threshold
 verify_attested_op(&attested_op, signing_key, threshold, current_epoch)?;
 ```
+
+The verification step ensures signature authenticity. The check step validates state consistency. Both steps must pass before applying tree operations.
+
+### 11.2 Type-Safe Share Collection
+
+The implementation provides type-level guarantees for threshold signature aggregation. Share collection uses sealed and unsealed types to prevent combining signatures before reaching threshold. The type system enforces this invariant at compile time.
+
+```rust
+pub struct LinearShareSet {
+    shares: BTreeMap<AuthorityId, PartialSignature>,
+    sealed: bool,
+}
+
+pub struct ThresholdShareSet {
+    shares: BTreeMap<AuthorityId, PartialSignature>,
+}
+```
+
+The unsealed type accepts new shares via insertion. When threshold is reached the set seals into the threshold type. Only the threshold type provides the combine method. This prevents calling aggregation before sufficient shares exist.
+
+The current protocol uses hash map based tracking for signature collection. The type-safe approach exists but awaits integration. Future work will replace runtime threshold checks with compile-time proofs. The sealed type pattern eliminates an entire class of bugs.
 
 ## 12. FROST Commitment Pipeline Optimization
 

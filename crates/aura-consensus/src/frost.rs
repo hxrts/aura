@@ -228,7 +228,8 @@ impl FrostConsensusOrchestrator {
                         &aggregated_nonces,
                     )?;
 
-                    tracker.add_signature(*witness_id, signature);
+                    // Use operation_hash as result_id (deterministic execution assumption)
+                    let _ = tracker.add_signature(*witness_id, signature, request.operation_hash);
 
                     // Generate and cache next round commitment for pipelining
                     let (next_commitment, next_token) = self.generate_nonce(share, random).await?;
@@ -294,7 +295,8 @@ impl FrostConsensusOrchestrator {
                     &aggregated_nonces,
                 )?;
 
-                tracker.add_signature(witness_id, signature);
+                // Use operation_hash as result_id (deterministic execution assumption)
+                let _ = tracker.add_signature(witness_id, signature, request.operation_hash);
 
                 // Generate and cache next round commitment for future pipelining
                 let (next_commitment, next_token) = self.generate_nonce(share, random).await?;
@@ -532,9 +534,11 @@ impl FrostConsensusOrchestrator {
     ) -> Result<Option<ConsensusMessage>> {
         if let ConsensusMessage::SignShare {
             consensus_id,
+            result_id: _,
             share,
             next_commitment: Some(commitment),
             epoch,
+            ..
         } = message
         {
             // Cache next commitment for pipelining

@@ -342,8 +342,8 @@ async fn test_device_id_determinism() {
 /// 5. Instead, guardians reconstruct authority_id_original via FROST
 /// 6. Bob's account.json on device_2 contains authority_id_original (CORRECT!)
 ///
-/// **CURRENT STATUS**: This test documents the gap - the recovery completion flow
-/// does not yet write account.json with the recovered authority. See TODO below.
+/// **CURRENT STATUS**: This test uses the real restore_recovered_account() code path
+/// but manually provides the recovered authority instead of running full RecoveryProtocol.
 #[tokio::test]
 async fn test_guardian_recovery_preserves_cryptographic_identity() {
     use async_lock::RwLock;
@@ -472,7 +472,7 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
     println!("  ✗ This is WRONG - Bob would lose access to his data!");
 
     // =========================================================================
-    // Phase 4: Guardian Recovery (TODO - not yet integrated)
+    // Phase 4: Guardian Recovery (uses restore_recovered_account code path)
     // =========================================================================
     println!("\nPhase 4: Guardian Recovery");
     println!("  In production, guardians would:");
@@ -558,9 +558,11 @@ async fn test_guardian_recovery_preserves_cryptographic_identity() {
 
     println!("\n=== Guardian Recovery Test PASSED ===");
     println!("Bob's cryptographic identity was preserved across catastrophic device loss.");
-    println!("\nNOTE: This test currently SIMULATES the recovery outcome.");
     println!(
-        "TODO: Integrate actual RecoveryProtocol to write account.json with recovered authority."
+        "\nNOTE: This test uses restore_recovered_account() with a manually provided authority."
+    );
+    println!(
+        "Full RecoveryProtocol integration (guardian FROST coordination) is not yet tested here."
     );
 }
 

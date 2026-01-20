@@ -8,7 +8,7 @@ use aura_core::{
     effects::{PhysicalTimeEffects, RandomEffects},
     epochs::Epoch,
     frost::{PublicKeyPackage, Share},
-    AuraError, AuthorityId, Prestate, Result,
+    AuraError, AuthorityId, ContextId, Prestate, Result,
 };
 use std::collections::HashMap;
 
@@ -23,6 +23,7 @@ pub struct ProtocolStats {
 
 /// Parameters for consensus execution
 pub struct ConsensusParams {
+    pub context_id: ContextId,
     pub witnesses: Vec<AuthorityId>,
     pub threshold: u16,
     pub key_packages: HashMap<AuthorityId, Share>,
@@ -47,6 +48,7 @@ pub async fn run_consensus<T: serde::Serialize>(
 
     let protocol = ConsensusProtocol::new(
         authority_id,
+        params.context_id,
         config,
         params.key_packages,
         params.group_public_key,

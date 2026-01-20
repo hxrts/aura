@@ -37,10 +37,10 @@ use aura_effects::{
     time::{OrderClockHandler, PhysicalTimeHandler},
 };
 use aura_journal::extensibility::FactRegistry;
+use aura_journal::fact::ProtocolRelationalFact;
 use aura_journal::fact::{
     DkgTranscriptCommit, Fact as TypedFact, FactContent, FactOptions, RelationalFact,
 };
-use aura_journal::protocol_facts::ProtocolRelationalFact;
 use aura_protocol::handlers::{PersistentSyncHandler, PersistentTreeHandler};
 use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
 use parking_lot::RwLock;

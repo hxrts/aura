@@ -409,7 +409,7 @@ async fn test_import_invitation_command_with_demo_codes() {
 /// NOTE: Messaging is currently UI-local (signal-backed) in the terminal runtime; this test
 /// verifies the user-visible behavior (signals) rather than network delivery.
 ///
-/// TODO: This test requires full signal propagation for channel creation and messaging.
+/// This test requires full signal propagation for channel creation and messaging.
 /// Currently, CreateChannel and SendMessage succeed but don't properly update CHAT_SIGNAL
 /// in the simulation environment. Needs investigation into signal emission paths.
 #[tokio::test]

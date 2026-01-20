@@ -232,16 +232,48 @@ pub struct ConflictFact {
 #[derive(Debug, Clone)]
 pub enum ConsensusResult {
     /// Consensus succeeded with commit fact
-    Committed(CommitFact),
+    Committed {
+        /// The commit fact proving consensus agreement
+        commit: CommitFact,
+        /// Equivocation proofs detected during this consensus round
+        equivocation_proofs: Vec<crate::facts::ConsensusFact>,
+    },
 
     /// Consensus failed due to conflicts
-    Conflicted(ConflictFact),
+    Conflicted {
+        /// The conflict fact showing disagreement
+        conflict: ConflictFact,
+        /// Equivocation proofs detected during this consensus round
+        equivocation_proofs: Vec<crate::facts::ConsensusFact>,
+    },
 
     /// Consensus timed out
     Timeout {
         consensus_id: ConsensusId,
         elapsed_ms: u64,
+        /// Equivocation proofs detected before timeout
+        equivocation_proofs: Vec<crate::facts::ConsensusFact>,
     },
+}
+
+impl ConsensusResult {
+    /// Get equivocation proofs from any result variant
+    pub fn equivocation_proofs(&self) -> &[crate::facts::ConsensusFact] {
+        match self {
+            ConsensusResult::Committed {
+                equivocation_proofs,
+                ..
+            } => equivocation_proofs,
+            ConsensusResult::Conflicted {
+                equivocation_proofs,
+                ..
+            } => equivocation_proofs,
+            ConsensusResult::Timeout {
+                equivocation_proofs,
+                ..
+            } => equivocation_proofs,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@
 use aura_authentication::AUTH_FACT_TYPE_ID;
 use aura_authorization::WOT_FACT_TYPE_ID;
 use aura_chat::CHAT_FACT_TYPE_ID;
+use aura_consensus::facts::CONSENSUS_FACT_TYPE_ID;
 use aura_invitation::INVITATION_FACT_TYPE_ID;
 use aura_maintenance::MAINTENANCE_FACT_TYPE_ID;
 use aura_recovery::RECOVERY_FACT_TYPE_ID;
@@ -29,6 +30,7 @@ pub static FACT_TYPE_IDS: Lazy<Vec<&'static str>> = Lazy::new(|| {
     vec![
         AUTH_FACT_TYPE_ID,
         CHAT_FACT_TYPE_ID,
+        CONSENSUS_FACT_TYPE_ID,
         INVITATION_FACT_TYPE_ID,
         CONTACT_FACT_TYPE_ID,
         GUARDIAN_REQUEST_FACT_TYPE_ID,

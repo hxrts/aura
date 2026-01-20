@@ -2277,8 +2277,10 @@ mod tests {
     async fn importing_and_accepting_contact_invitation_commits_contact_fact() {
         let own_authority = AuthorityId::new_from_entropy([120u8; 32]);
         let config = AgentConfig::default();
-        let effects =
-            Arc::new(AuraEffectSystem::testing_for_authority(&config, own_authority).unwrap());
+        // Use unique deterministic seed to avoid master key caching issues
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_authority(&config, 10006, own_authority).unwrap(),
+        );
 
         let authority_context = AuthorityContext::new(own_authority);
 

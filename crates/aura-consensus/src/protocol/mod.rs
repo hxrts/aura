@@ -16,12 +16,14 @@
 
 mod choreography;
 mod coordinator;
+mod guards;
 mod instance;
 mod logic;
 mod types;
 mod witness;
 
 pub use choreography::*;
+pub use guards::*;
 pub use logic::ConsensusProtocol;
 pub use types::{run_consensus, ConsensusParams, ProtocolStats};
 

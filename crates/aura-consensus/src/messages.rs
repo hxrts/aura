@@ -3,6 +3,7 @@
 //! This module defines the messages exchanged during the consensus protocol.
 
 use super::types::{CommitFact, ConsensusId};
+use crate::evidence::EvidenceDelta;
 use aura_core::{
     epochs::Epoch,
     frost::{NonceCommitment, PartialSignature},
@@ -22,6 +23,8 @@ pub enum ConsensusMessage {
         operation_bytes: Vec<u8>,
         /// Optional cached commitments for fast path (1 RTT)
         cached_commitments: Option<Vec<NonceCommitment>>,
+        /// Evidence delta (equivocation proofs)
+        evidence_delta: EvidenceDelta,
     },
 
     /// Phase 2a: Nonce commitment from witness (slow path only)
@@ -39,20 +42,30 @@ pub enum ConsensusMessage {
     /// Phase 3: Partial signature from witness
     SignShare {
         consensus_id: ConsensusId,
+        /// The result_id (hash of execution result) this witness computed
+        result_id: Hash32,
         share: PartialSignature,
         /// Optional commitment for the next consensus round (pipelining optimization)
         next_commitment: Option<NonceCommitment>,
         /// Epoch for commitment validation
         epoch: Epoch,
+        /// Evidence delta (equivocation proofs)
+        evidence_delta: EvidenceDelta,
     },
 
     /// Phase 4: Final consensus result broadcast
-    ConsensusResult { commit_fact: CommitFact },
+    ConsensusResult {
+        commit_fact: CommitFact,
+        /// Evidence delta (equivocation proofs)
+        evidence_delta: EvidenceDelta,
+    },
 
     /// Conflict detected during consensus
     Conflict {
         consensus_id: ConsensusId,
         conflicts: Vec<Hash32>,
+        /// Evidence delta (equivocation proofs)
+        evidence_delta: EvidenceDelta,
     },
 
     /// Acknowledgment message (for reliable delivery)
@@ -83,7 +96,7 @@ impl ConsensusMessage {
             ConsensusMessage::NonceCommit { consensus_id, .. } => *consensus_id,
             ConsensusMessage::SignRequest { consensus_id, .. } => *consensus_id,
             ConsensusMessage::SignShare { consensus_id, .. } => *consensus_id,
-            ConsensusMessage::ConsensusResult { commit_fact } => commit_fact.consensus_id,
+            ConsensusMessage::ConsensusResult { commit_fact, .. } => commit_fact.consensus_id,
             ConsensusMessage::Conflict { consensus_id, .. } => *consensus_id,
             ConsensusMessage::Ack { consensus_id, .. } => *consensus_id,
         }
@@ -195,6 +208,7 @@ mod tests {
             operation_hash: Hash32([1u8; 32]),
             operation_bytes: vec![],
             cached_commitments: None,
+            evidence_delta: EvidenceDelta::empty(id, 0),
         };
 
         assert_eq!(msg.consensus_id(), id);
@@ -213,12 +227,14 @@ mod tests {
             operation_hash: Hash32([1u8; 32]),
             operation_bytes: vec![],
             cached_commitments: Some(vec![]),
+            evidence_delta: EvidenceDelta::empty(id, 0),
         };
         assert!(fast_execute.is_fast_path());
 
         // Fast path sign share with next commitment
         let fast_sign = ConsensusMessage::SignShare {
             consensus_id: id,
+            result_id: Hash32::default(),
             share: PartialSignature {
                 signer: 1,
                 signature: vec![],
@@ -228,6 +244,7 @@ mod tests {
                 commitment: vec![],
             }),
             epoch: Epoch::from(1),
+            evidence_delta: EvidenceDelta::empty(id, 0),
         };
         assert!(fast_sign.is_fast_path());
     }

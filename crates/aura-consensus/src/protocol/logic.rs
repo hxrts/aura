@@ -22,6 +22,9 @@ pub struct ConsensusProtocol {
     /// Our authority ID
     pub(crate) authority_id: AuthorityId,
 
+    /// Context ID for guard evaluation
+    pub(crate) context_id: ContextId,
+
     /// Consensus configuration
     pub(crate) config: ConsensusConfig,
 
@@ -33,6 +36,9 @@ pub struct ConsensusProtocol {
 
     /// Active protocol instances
     pub(crate) instances: Arc<RwLock<HashMap<ConsensusId, ProtocolInstance>>>,
+
+    /// Evidence tracker for equivocation proofs
+    pub(crate) evidence_tracker: Arc<RwLock<crate::evidence::EvidenceTracker>>,
 }
 
 impl ConsensusProtocol {
@@ -54,6 +60,7 @@ impl ConsensusProtocol {
     /// Create a new consensus protocol instance
     pub fn new(
         authority_id: AuthorityId,
+        context_id: ContextId,
         config: ConsensusConfig,
         key_packages: HashMap<AuthorityId, Share>,
         group_public_key: PublicKeyPackage,
@@ -66,10 +73,12 @@ impl ConsensusProtocol {
 
         Ok(Self {
             authority_id,
+            context_id,
             config,
             frost_orchestrator,
             group_public_key,
             instances: Arc::new(RwLock::new(HashMap::new())),
+            evidence_tracker: Arc::new(RwLock::new(crate::evidence::EvidenceTracker::new())),
         })
     }
 
@@ -136,9 +145,11 @@ mod tests {
         ];
         let config = ConsensusConfig::new(2, witnesses, Epoch::from(1)).unwrap();
         let authority_id = AuthorityId::new_from_entropy([3u8; 32]);
+        let context_id = ContextId::new_from_entropy([4u8; 32]);
 
         let protocol = ConsensusProtocol::new(
             authority_id,
+            context_id,
             config,
             HashMap::new(),
             PublicKeyPackage::new(vec![0u8; 32], std::collections::BTreeMap::new(), 1, 1),

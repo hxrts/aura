@@ -219,6 +219,78 @@ Only facts fundamental to journal operation remain as direct enum variants:
 - `RendezvousReceipt`: Cross-authority coordination receipts
 - Protocol-level `RelationalFact` variants listed above
 
+#### Fact Implementation Patterns by Layer
+
+Aura uses **two distinct fact patterns** based on architectural layer to prevent circular dependencies:
+
+**Layer 2 Pattern** (Domain Crates: `aura-maintenance`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`):
+
+These crates use the `aura-core::types::facts` pattern with **NO dependency on `aura-journal`**:
+
+```rust
+use aura_core::types::facts::{FactTypeId, FactError, FactEnvelope, FactDeltaReducer};
+
+pub static MY_FACT_TYPE_ID: FactTypeId = FactTypeId::new("my_domain");
+pub const MY_FACT_SCHEMA_VERSION: u16 = 1;
+
+impl MyFact {
+    pub fn try_encode(&self) -> Result<Vec<u8>, FactError> {
+        aura_core::types::facts::try_encode_fact(
+            &MY_FACT_TYPE_ID,
+            MY_FACT_SCHEMA_VERSION,
+            self,
+        )
+    }
+
+    pub fn to_envelope(&self) -> Result<FactEnvelope, FactError> {
+        // Create envelope manually for Generic wrapping
+    }
+}
+
+impl FactDeltaReducer<MyFact, MyFactDelta> for MyFactReducer {
+    fn apply(&self, fact: &MyFact) -> MyFactDelta { /* ... */ }
+}
+```
+
+**Layer 4/5 Pattern** (Feature Crates: `aura-chat`, `aura-invitation`, `aura-relational`, `aura-recovery`, `aura-social`):
+
+These crates use the `aura-journal::extensibility::DomainFact` pattern and **register with `FactRegistry`**:
+
+```rust
+use aura_journal::extensibility::{DomainFact, FactReducer};
+use aura_macros::DomainFact;
+
+#[derive(DomainFact)]
+#[domain_fact(type_id = "my_domain", schema_version = 1, context_fn = "context_id")]
+pub enum MyFact { /* ... */ }
+
+impl FactReducer for MyFactReducer {
+    fn handles_type(&self) -> &'static str { /* ... */ }
+    fn reduce_envelope(...) -> Option<RelationalBinding> { /* ... */ }
+}
+```
+
+**Why Two Patterns?**
+
+- **Layer 2 → Layer 2 dependencies create circular risk**: `aura-journal` is itself a Layer 2 crate. If other Layer 2 crates depend on `aura-journal` for the `DomainFact` trait, we risk circular dependencies.
+- **Layer 4/5 can safely depend on Layer 2**: Higher layers depend on lower layers by design, so feature crates can use the `DomainFact` trait from `aura-journal`.
+- **Registration location differs**: Layer 2 facts are wrapped manually in `RelationalFact::Generic`. Layer 4/5 facts register with `FactRegistry` in `aura-agent/src/fact_registry.rs`.
+
+**Pattern Selection Decision Tree**:
+
+```
+Is this a Layer 2 domain crate?
+├─ Yes → Use aura-core pattern (FactTypeId, try_encode, FactDeltaReducer)
+│         Do NOT depend on aura-journal
+│         Do NOT register in FactRegistry
+│         Create RelationalFact::Generic manually at usage sites
+│
+└─ No (Layer 4/5) → Use DomainFact trait pattern
+                    Depend on aura-journal
+                    Register in FactRegistry
+                    Use #[derive(DomainFact)] macro
+```
+
 ### Choreography Specification
 
 **`aura-mpst`**: Runtime library providing semantic abstractions for choreographic features including `CapabilityGuard`, `JournalCoupling`, `LeakageBudget`, and `ContextIsolation` traits. Integrates with the guard chain and works with both macro-generated and hand-written protocols.

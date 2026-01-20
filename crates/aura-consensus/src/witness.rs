@@ -385,22 +385,53 @@ impl WitnessInstance {
 }
 
 /// Tracks collected witness data during consensus
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct WitnessTracker {
     /// Collected nonce commitments by witness
     pub nonce_commitments: HashMap<AuthorityId, NonceCommitment>,
 
-    /// Collected partial signatures by witness
-    pub partial_signatures: HashMap<AuthorityId, PartialSignature>,
+    /// Share collector with type-safe threshold tracking
+    share_collector: crate::shares::ShareCollector,
+
+    /// Threshold for this consensus
+    threshold: u32,
+
+    /// Primary result_id (first one seen) for backward compatibility
+    primary_result_id: Option<Hash32>,
 
     /// Witnesses that reported conflicts
     pub conflict_reporters: HashMap<AuthorityId, Vec<Hash32>>,
+
+    /// Equivocation detector for generating proofs
+    equivocation_detector: crate::core::validation::EquivocationDetector,
+
+    /// Accumulated equivocation proofs detected during this consensus
+    equivocation_proofs: Vec<crate::facts::ConsensusFact>,
+}
+
+impl Default for WitnessTracker {
+    fn default() -> Self {
+        Self::with_threshold(1)
+    }
 }
 
 impl WitnessTracker {
-    /// Create a new witness tracker
+    /// Create a new witness tracker with default threshold of 1
     pub fn new() -> Self {
-        Self::default()
+        Self::with_threshold(1)
+    }
+
+    /// Create a new witness tracker with specified threshold
+    pub fn with_threshold(threshold: u32) -> Self {
+        Self {
+            nonce_commitments: HashMap::new(),
+            share_collector: crate::shares::ShareCollector::new(threshold),
+            threshold,
+            primary_result_id: None,
+            conflict_reporters: HashMap::new(),
+            equivocation_detector: crate::core::validation::EquivocationDetector::new(),
+            equivocation_proofs: Vec::new(),
+        }
     }
 
     /// Add a nonce commitment
@@ -408,9 +439,28 @@ impl WitnessTracker {
         self.nonce_commitments.insert(witness, commitment);
     }
 
-    /// Add a partial signature
-    pub fn add_signature(&mut self, witness: AuthorityId, signature: PartialSignature) {
-        self.partial_signatures.insert(witness, signature);
+    /// Add a partial signature for a given result_id
+    ///
+    /// This method integrates with ShareCollector to track which result_id each witness voted for.
+    /// Returns Ok(Some(threshold_set)) if this signature caused threshold to be reached for its result_id.
+    pub fn add_signature(
+        &mut self,
+        witness: AuthorityId,
+        signature: PartialSignature,
+        result_id: Hash32,
+    ) -> Result<Option<crate::shares::ThresholdShareSet>> {
+        // Track primary result_id (first one seen)
+        if self.primary_result_id.is_none() {
+            self.primary_result_id = Some(result_id);
+        }
+
+        match self
+            .share_collector
+            .try_insert(result_id, witness, signature)?
+        {
+            crate::shares::InsertResult::Inserted { .. } => Ok(None),
+            crate::shares::InsertResult::ThresholdReached(threshold_set) => Ok(Some(threshold_set)),
+        }
     }
 
     /// Add a conflict report
@@ -423,9 +473,31 @@ impl WitnessTracker {
         self.nonce_commitments.len() >= threshold as usize
     }
 
-    /// Check if we have enough signatures for threshold
-    pub fn has_signature_threshold(&self, threshold: u16) -> bool {
-        self.partial_signatures.len() >= threshold as usize
+    /// Check if any result_id has reached threshold
+    pub fn has_signature_threshold(&self, _threshold: u16) -> bool {
+        // Check if any result_id has reached threshold
+        self.share_collector
+            .result_ids()
+            .iter()
+            .any(|rid| self.share_collector.has_threshold(rid))
+    }
+
+    /// Check if a specific result_id has reached threshold
+    pub fn has_threshold_for_result(&self, result_id: &Hash32) -> bool {
+        self.share_collector.has_threshold(result_id)
+    }
+
+    /// Get the result_id that reached threshold, if any
+    pub fn get_threshold_result(&self) -> Option<Hash32> {
+        self.share_collector
+            .result_ids()
+            .into_iter()
+            .find(|rid| self.share_collector.has_threshold(rid))
+    }
+
+    /// Get all result_ids being tracked
+    pub fn get_result_ids(&self) -> Vec<Hash32> {
+        self.share_collector.result_ids()
     }
 
     /// Check if we have conflicts
@@ -438,14 +510,82 @@ impl WitnessTracker {
         self.nonce_commitments.values().cloned().collect()
     }
 
-    /// Get all collected signatures as a vector
+    /// Get all collected signatures across all result_ids
     pub fn get_signatures(&self) -> Vec<PartialSignature> {
-        self.partial_signatures.values().cloned().collect()
+        self.share_collector
+            .result_ids()
+            .iter()
+            .flat_map(|rid| self.share_collector.get_signatures_for_result(rid))
+            .collect()
     }
 
-    /// Get participating witnesses
+    /// Get all signatures for a specific result_id
+    pub fn get_signatures_for_result(&self, result_id: &Hash32) -> Vec<PartialSignature> {
+        self.share_collector.get_signatures_for_result(result_id)
+    }
+
+    /// Get all participating witnesses across all result_ids
     pub fn get_participants(&self) -> Vec<AuthorityId> {
-        self.partial_signatures.keys().cloned().collect()
+        self.share_collector
+            .result_ids()
+            .iter()
+            .flat_map(|rid| self.share_collector.get_participants_for_result(rid))
+            .collect()
+    }
+
+    /// Get participating witnesses for a specific result_id
+    pub fn get_participants_for_result(&self, result_id: &Hash32) -> Vec<AuthorityId> {
+        self.share_collector.get_participants_for_result(result_id)
+    }
+
+    /// Get accumulated equivocation proofs
+    pub fn get_equivocation_proofs(&self) -> &[crate::facts::ConsensusFact] {
+        &self.equivocation_proofs
+    }
+
+    /// Record a signature with equivocation detection
+    ///
+    /// This is an enhanced version of add_signature that checks for equivocation.
+    /// Call this when you have full context available (consensus_id, prestate_hash, etc.)
+    pub fn record_signature_with_detection(
+        &mut self,
+        context_id: aura_core::identifiers::ContextId,
+        witness: AuthorityId,
+        signature: PartialSignature,
+        consensus_id: crate::ConsensusId,
+        prestate_hash: Hash32,
+        result_id: Hash32,
+        timestamp_ms: u64,
+    ) {
+        // Check for equivocation before adding signature
+        if let Some(proof) = self.equivocation_detector.check_share(
+            context_id,
+            witness,
+            consensus_id,
+            prestate_hash,
+            result_id,
+            timestamp_ms,
+        ) {
+            // Store proof for later retrieval
+            self.equivocation_proofs.push(proof);
+            // Don't add the equivocating signature
+            tracing::warn!(
+                witness = %witness,
+                consensus_id = %consensus_id,
+                "Equivocation detected and recorded"
+            );
+            return;
+        }
+
+        // No equivocation - add signature normally via ShareCollector
+        let _ = self.add_signature(witness, signature, result_id);
+    }
+
+    /// Clear accumulated equivocation proofs
+    ///
+    /// Call this after extracting proofs to prevent duplicate emission
+    pub fn clear_equivocation_proofs(&mut self) {
+        self.equivocation_proofs.clear();
     }
 }
 
@@ -489,9 +629,10 @@ mod tests {
 
     #[test]
     fn test_witness_tracker() {
-        let mut tracker = WitnessTracker::new();
+        let mut tracker = WitnessTracker::with_threshold(2);
         let witness1 = AuthorityId::new_from_entropy([1u8; 32]);
         let witness2 = AuthorityId::new_from_entropy([2u8; 32]);
+        let result_id = Hash32::new([0u8; 32]);
 
         // Add nonces
         tracker.add_nonce(
@@ -513,19 +654,21 @@ mod tests {
         assert!(!tracker.has_signature_threshold(2));
 
         // Add signatures
-        tracker.add_signature(
+        let _ = tracker.add_signature(
             witness1,
             PartialSignature {
                 signer: 1,
                 signature: vec![1u8; 64],
             },
+            result_id,
         );
-        tracker.add_signature(
+        let _ = tracker.add_signature(
             witness2,
             PartialSignature {
                 signer: 2,
                 signature: vec![2u8; 64],
             },
+            result_id,
         );
 
         assert!(tracker.has_signature_threshold(2));

@@ -296,47 +296,43 @@ impl Journal {
                     FactContent::AttestedOp(_) => "AttestedOp".to_string(),
                     FactContent::Relational(rel) => match rel {
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::GuardianBinding { .. },
-                        ) => {
-                            "GuardianBinding".to_string()
-                        }
+                            crate::fact::ProtocolRelationalFact::GuardianBinding { .. },
+                        ) => "GuardianBinding".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::RecoveryGrant { .. },
-                        ) => {
-                            "RecoveryGrant".to_string()
-                        }
+                            crate::fact::ProtocolRelationalFact::RecoveryGrant { .. },
+                        ) => "RecoveryGrant".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::Consensus { .. },
+                            crate::fact::ProtocolRelationalFact::Consensus { .. },
                         ) => "Consensus".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::AmpChannelCheckpoint(..),
+                            crate::fact::ProtocolRelationalFact::AmpChannelCheckpoint(..),
                         ) => "AmpChannelCheckpoint".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::AmpProposedChannelEpochBump(..),
+                            crate::fact::ProtocolRelationalFact::AmpProposedChannelEpochBump(..),
                         ) => "AmpProposedChannelEpochBump".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::AmpCommittedChannelEpochBump(..),
+                            crate::fact::ProtocolRelationalFact::AmpCommittedChannelEpochBump(..),
                         ) => "AmpCommittedChannelEpochBump".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::AmpChannelPolicy(..),
+                            crate::fact::ProtocolRelationalFact::AmpChannelPolicy(..),
                         ) => "AmpChannelPolicy".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::LeakageEvent(..),
+                            crate::fact::ProtocolRelationalFact::LeakageEvent(..),
                         ) => "LeakageEvent".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::DkgTranscriptCommit(..),
+                            crate::fact::ProtocolRelationalFact::DkgTranscriptCommit(..),
                         ) => "DkgTranscriptCommit".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::ConvergenceCert(..),
+                            crate::fact::ProtocolRelationalFact::ConvergenceCert(..),
                         ) => "ConvergenceCert".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::ReversionFact(..),
+                            crate::fact::ProtocolRelationalFact::ReversionFact(..),
                         ) => "ReversionFact".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::RotateFact(..),
+                            crate::fact::ProtocolRelationalFact::RotateFact(..),
                         ) => "RotateFact".to_string(),
                         crate::fact::RelationalFact::Protocol(
-                            crate::protocol_facts::ProtocolRelationalFact::AmpChannelBootstrap(..),
+                            crate::fact::ProtocolRelationalFact::AmpChannelBootstrap(..),
                         ) => "AmpChannelBootstrap".to_string(),
                         crate::fact::RelationalFact::Generic { envelope, .. } => {
                             format!("Generic:{}", envelope.type_id.as_str())
