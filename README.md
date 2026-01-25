@@ -24,9 +24,14 @@ For more details see [System Architecture](docs/001_system_architecture.md) and 
 # Enter dev shell
 nix develop
 
-# Build terminal interface with development features (TUI + simulator + testkit)
-cargo build -p aura-terminal --bin aura --features development --release
+# Build binary with development features and start TUI in demo mode
+just demo
 
-# Demo
-./target/release/aura demo human-agent
+# Build production binary
+just build
+
+# Start the production release with TUI
+./bin/aura tui
 ```
+
+*Note: This is alpha software that is subject to frequent breaking changes. When stabilized, this notice will be removed.*
