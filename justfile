@@ -145,9 +145,8 @@ check-arch-concurrency:
 
 # Build documentation book
 ci-book: summary
-    echo '.chapter-item a strong { display: none; }' > custom.css
     AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c \
-        'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js custom.css'
+        'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js'
 
 # Format check
 ci-format:
@@ -344,7 +343,7 @@ clean:
     echo "Cleaning Nix outputs..."
     rm -rf result result-*
     echo "Cleaning documentation builds..."
-    rm -rf docs/book/ mermaid.min.js mermaid-init.js custom.css
+    rm -rf docs/book/ mermaid.min.js mermaid-init.js
     echo "Cleaning logs..."
     rm -rf logs/ *.log
     echo "Cleaning demo/test data..."
@@ -430,17 +429,15 @@ summary:
 
 # Build the book after regenerating the summary
 book: summary
-    echo '.chapter-item a strong { display: none; }' > custom.css
     AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c \
-        'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js custom.css'
+        'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js'
 
 # Serve locally with live reload
 serve-book: summary
     #!/usr/bin/env bash
     set -euo pipefail
     pgrep -x mdbook > /dev/null && { echo "Stopping existing mdbook server..."; pkill mdbook; sleep 1; }
-    echo '.chapter-item a strong { display: none; }' > custom.css
-    trap 'rm -f mermaid-init.js mermaid.min.js custom.css' EXIT
+    trap 'rm -f mermaid-init.js mermaid.min.js' EXIT
     AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c \
         'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook serve --open'
 

@@ -9,9 +9,7 @@ build-dir = "docs/book"
 
 [output.html]
 preferred-theme = "rust"
-additional-css = ["custom.css"]  # Created transiently during build (see justfile)
 additional-js = ["mermaid.min.js", "mermaid-init.js"]
-#additional-js = ["mermaid.min.js", "mermaid-init.js"]
 
 [output.html.search]
 enable = true
