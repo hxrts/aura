@@ -216,8 +216,10 @@ fn derive_storage_base_path(
 ) -> Option<PathBuf> {
     match command {
         Commands::Init(init) => Some(init.output.clone()),
-        Commands::Status(status) => resolve_config_path_simple(status.config.as_ref(), global_config)
-            .and_then(base_from_config_path),
+        Commands::Status(status) => {
+            resolve_config_path_simple(status.config.as_ref(), global_config)
+                .and_then(base_from_config_path)
+        }
         Commands::Node(node) => resolve_config_path_simple(node.config.as_ref(), global_config)
             .and_then(base_from_config_path),
         Commands::Threshold(ThresholdArgs { configs, .. }) => {

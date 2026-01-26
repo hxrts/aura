@@ -1972,7 +1972,10 @@ async fn execute_notify_peer(
     let (code, invitation_context) = if let Some(invitation) =
         InvitationHandler::load_created_invitation(effects, authority_id, &invitation_id).await
     {
-        (InvitationServiceApi::export_invitation(&invitation), invitation.context_id)
+        (
+            InvitationServiceApi::export_invitation(&invitation),
+            invitation.context_id,
+        )
     } else {
         let facts = effects
             .load_committed_facts(authority_id)

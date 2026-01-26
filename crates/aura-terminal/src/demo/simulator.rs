@@ -26,11 +26,13 @@ use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_effects::time::PhysicalTimeHandler;
-use aura_journal::fact::{ChannelBootstrap, ChannelCheckpoint, ProtocolRelationalFact, RelationalFact};
-use aura_journal::DomainFact;
 use aura_invitation::{DeviceEnrollmentAccept, DeviceEnrollmentRequest};
-use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
+use aura_journal::fact::{
+    ChannelBootstrap, ChannelCheckpoint, ProtocolRelationalFact, RelationalFact,
+};
+use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
+use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
 use serde::Serialize;
 use std::str::FromStr;
 
@@ -327,9 +329,7 @@ async fn process_peer_transport_messages(
                     };
 
                     if let InvitationType::Channel {
-                        home_id,
-                        bootstrap,
-                        ..
+                        home_id, bootstrap, ..
                     } = invitation.invitation_type.clone()
                     {
                         if let Err(err) = invitation_service.accept(&invitation.invitation_id).await
@@ -346,13 +346,10 @@ async fn process_peer_transport_messages(
 
                         // Ensure AMP channel state exists locally for decryption.
                         if let Some(package) = bootstrap {
-                            let now = effects
-                                .physical_time()
-                                .await
-                                .unwrap_or(PhysicalTime {
-                                    ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
-                                    uncertainty: None,
-                                });
+                            let now = effects.physical_time().await.unwrap_or(PhysicalTime {
+                                ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
+                                uncertainty: None,
+                            });
                             let window = aura_protocol::amp::config::AmpRuntimeConfig::default()
                                 .default_skip_window
                                 .get();
