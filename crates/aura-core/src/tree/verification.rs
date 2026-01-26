@@ -16,7 +16,7 @@
 //! ## References
 //!
 //! - `docs/101_accounts_and_commitment_tree.md` - Tree structure
-//! - `docs/104_consensus.md` - Threshold signing
+//! - `docs/106_consensus.md` - Threshold signing
 
 use super::{AttestedOp, BranchSigningKey, Epoch, NodeIndex, Policy, PolicyError, TreeHash32};
 use crate::crypto::{hash, tree_signing};

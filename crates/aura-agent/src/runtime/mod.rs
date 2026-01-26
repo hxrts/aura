@@ -2,7 +2,7 @@
 //!
 //! Effect system assembly and lifecycle management for authority-based runtime.
 //! Coordinates effect registry, builder infrastructure, context management, and
-//! handler composition for production/testing/simulation modes (per docs/106_effect_system_and_runtime.md).
+//! handler composition for production/testing/simulation modes (per docs/105_effect_system_and_runtime.md).
 //!
 //! **Key Components**:
 //! - **EffectSystemBuilder**: Compose handlers via builder pattern
@@ -10,7 +10,7 @@
 //! - **EffectContext**: Per-execution context (authority, epoch, budgets)
 //! - **LifecycleManager**: Service startup/shutdown coordination
 //!
-//! **Execution Modes** (per docs/106_effect_system_and_runtime.md):
+//! **Execution Modes** (per docs/105_effect_system_and_runtime.md):
 //! - **Production**: Real handlers (crypto, storage, network)
 //! - **Testing**: Mock handlers with deterministic behavior
 //! - **Simulation**: Deterministic handlers with scenario injection, time control

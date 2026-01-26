@@ -504,7 +504,7 @@ Database operations use two orthogonal dimensions:
 - **Consensus + Single**: Remove device from account (`consensus_single_shot()`)
 - **Consensus + Cross-Authority**: Recovery grant with guardian approval (`federated_consensus()`)
 
-Aura Consensus is not linearizable by default. Each consensus instance independently agrees on a single operation and prestate. To sequence operations, use session types (see [MPST and Choreography](107_mpst_and_choreography.md)).
+Aura Consensus is not linearizable by default. Each consensus instance independently agrees on a single operation and prestate. To sequence operations, use session types (see [MPST and Choreography](108_mpst_and_choreography.md)).
 
 Agreement modes are orthogonal to the coordination matrix: A1 (provisional) and A2 (soft-safe) may provide immediate usability, but any durable shared database state must be A3 (consensus-finalized) with prestate binding. Soft-safe windows should be bounded with convergence certificates and explicit reversion facts.
 
@@ -766,7 +766,7 @@ Each `Consistency` entry tracks three orthogonal dimensions:
 | Propagation | `Propagation` | Gossip/sync status to peers |
 | Acknowledgment | `Acknowledgment` | Per-peer delivery confirmation |
 
-See [Consistency Metadata](121_consistency_metadata.md) for full details on these types and their usage.
+See [Operation Categories](107_operation_categories.md) for full details on these types and their usage.
 
 ## 10. Implementation Location
 
@@ -792,8 +792,7 @@ See [Consistency Metadata](121_consistency_metadata.md) for full details on thes
 
 ## See Also
 
-- [Journal System](102_journal.md) - Fact storage and reduction
-- [Consistency Metadata](121_consistency_metadata.md) - Agreement, propagation, acknowledgment
-- [State Reduction](120_state_reduction.md) - Reduction pipeline details
-- [Authorization](109_authorization.md) - Biscuit token evaluation
-- [Effect System](106_effect_system_and_runtime.md) - Effect implementation patterns
+- [Journal System](103_journal.md) - Fact storage, reduction, and flow budgets
+- [Operation Categories](107_operation_categories.md) - Agreement, propagation, acknowledgment, and ceremony contract
+- [Authorization](104_authorization.md) - Biscuit token evaluation
+- [Effect System](105_effect_system_and_runtime.md) - Effect implementation patterns

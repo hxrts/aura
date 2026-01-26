@@ -20,7 +20,7 @@
 //!
 //! The actual runtime integration is in `aura-agent/src/handlers/chat_service.rs`.
 //!
-//! ## Operation Categories (per docs/117_operation_categories.md)
+//! ## Operation Categories (per docs/107_operation_categories.md)
 //!
 //! Chat operations follow the three-tier classification:
 //!
@@ -37,7 +37,7 @@
 //!
 //! **Key insight**: Adding to a **channel** within existing context = Category A.
 //! Adding to a **group** (new context relationship) = Category C ceremony
-//! (see `docs/118_key_rotation_ceremonies.md`).
+//! (see `docs/107_operation_categories.md`).
 //!
 //! ## Effect system compliance
 //!

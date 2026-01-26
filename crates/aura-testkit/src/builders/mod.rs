@@ -3,7 +3,7 @@
 //! Factories for creating test entities with consistent configuration:
 //! **AccountBuilder**, **DeviceSetBuilder**, **KeySetBuilder**, **TestScenarioFactory**.
 //!
-//! **Purpose** (per docs/106_effect_system_and_runtime.md):
+//! **Purpose** (per docs/105_effect_system_and_runtime.md):
 //! Enable rapid test setup without duplicating entity creation logic. Builders compose
 //! to create complete multi-device scenarios for integration testing.
 

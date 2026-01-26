@@ -236,7 +236,7 @@ impl BiscuitStorageEvaluator {
     ) -> Result<bool, BiscuitStorageError> {
         // Token signature verification happens when Biscuit is constructed from bytes.
         // Here we enforce scope, capability, and authority binding using Datalog rules
-        // that mirror the authority-centric model in docs/109_authorization.md.
+        // that mirror the authority-centric model in docs/104_authorization.md.
         let mut authorizer = Authorizer::new();
         authorizer.add_token(token).map_err(|e| {
             BiscuitStorageError::TokenVerification(format!("Failed to add token: {}", e))

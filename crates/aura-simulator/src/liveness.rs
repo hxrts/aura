@@ -17,7 +17,7 @@
 //! - `crates/aura-simulator/src/quint/properties.rs` - Property extraction
 //! - `crates/aura-simulator/src/quint/generative_simulator.rs` - Step-based simulation
 //!
-//! See: docs/004_distributed_systems_contract.md §4, docs/104_consensus.md §15
+//! See: docs/004_distributed_systems_contract.md §4, docs/106_consensus.md §15
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -3,7 +3,7 @@
 //! Peer discovery and management with privacy preservation: **PeerInfo** (anonymized peer metadata),
 //! **BlindedPeerCapabilities** (privacy-preserving capability revelation), **PrivacyAwareSelectionCriteria**.
 //!
-//! **Design** (per docs/108_transport_and_information_flow.md):
+//! **Design** (per docs/109_transport_and_information_flow.md):
 //! - Context-scoped peer discovery: Peers visible only within specific relational contexts
 //! - Capability blinding: Hide sensitive peer capabilities from observers
 //! - Metadata minimization: Expose only protocol-necessary information

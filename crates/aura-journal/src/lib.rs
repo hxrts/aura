@@ -120,4 +120,4 @@ pub use extensibility::{
     decode_domain_fact, encode_domain_fact, parse_envelope, DomainFact, FactReducer, FactRegistry,
 };
 
-// See docs/100_authority_and_identity.md for migration guidance
+// See docs/102_authority_and_identity.md for migration guidance

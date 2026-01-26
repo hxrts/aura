@@ -1261,7 +1261,7 @@ impl RuntimeBridge for AgentRuntimeBridge {
     /// # See Also
     ///
     /// - `crates/aura-agent/src/core/ceremony_processor/threshold.rs` - Recipient handling
-    /// - `docs/100_authority_and_identity.md` - Multi-authority device model
+    /// - `docs/102_authority_and_identity.md` - Multi-authority device model
     async fn initiate_device_threshold_ceremony(
         &self,
         threshold_k: FrostThreshold,

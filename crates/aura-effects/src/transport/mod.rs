@@ -10,7 +10,7 @@
 //! - **FramingHandler**: Message delimiting (length-prefix framing for streams)
 //! - **Utils**: Address validation, connection metrics, timeout management
 //!
-//! **Layer Constraint** (per docs/106_effect_system_and_runtime.md):
+//! **Layer Constraint** (per docs/105_effect_system_and_runtime.md):
 //! NO choreography or multi-party coordination here. Multi-party transport logic
 //! (routing, retry, connection management) belongs in aura-agent/transport (Layer 6).
 //! These implement pure infrastructure effects only.

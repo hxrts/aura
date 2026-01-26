@@ -3,7 +3,7 @@
 //! CRDT-based implementation: **OpLog** (fact-based operation log) → **deterministic reduction** → **TreeState**.
 //! Enables threshold key management, device membership, and authority state coordination.
 //!
-//! **Key Invariants** (per docs/102_journal.md):
+//! **Key Invariants** (per docs/103_journal.md):
 //! - **OpLog is authoritative**: Only persisted data; immutable facts (AttestedOp)
 //! - **Deterministic reduction**: Same OpLog always produces identical TreeState across all replicas
 //! - **Monotonic growth**: OpLog append-only; facts never retracted

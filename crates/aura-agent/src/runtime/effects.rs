@@ -356,6 +356,11 @@ impl AuraEffectSystem {
         self.execution_mode.is_deterministic()
     }
 
+    /// Check if the effect system is in explicit test mode (not simulation).
+    pub fn is_test_mode(&self) -> bool {
+        matches!(self.execution_mode, ExecutionMode::Testing)
+    }
+
     fn ensure_mock_network(&self) -> Result<(), NetworkError> {
         if self.execution_mode.is_deterministic() {
             Ok(())
@@ -437,7 +442,7 @@ impl AuraEffectSystem {
         }
     }
 
-    pub(crate) fn requeue_envelope(&self, envelope: TransportEnvelope) {
+    pub fn requeue_envelope(&self, envelope: TransportEnvelope) {
         self.transport.queue_envelope(envelope);
     }
 

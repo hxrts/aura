@@ -9,7 +9,7 @@
 //! - **ConnectionInfo**: Connection metadata with authority identifiers
 //! - **PrivacyLevel**: Configuration for metadata leakage control
 //!
-//! **Design** (per docs/108_transport_and_information_flow.md):
+//! **Design** (per docs/109_transport_and_information_flow.md):
 //! - All types designed with privacy-first approach
 //! - Context scoping: Content encrypted per (source authority, destination authority, context)
 //! - Metadata minimization: Frame headers contain only protocol essentials

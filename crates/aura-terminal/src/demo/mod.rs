@@ -30,7 +30,7 @@ pub mod simulator;
 
 pub use hints::DemoHints;
 pub use signal_coordinator::DemoSignalCoordinator;
-pub use simulator::spawn_amp_echo_listener;
+pub use simulator::spawn_amp_inbox_listener;
 pub use simulator::DemoSimulator;
 pub use simulator::EchoPeer;
 

@@ -48,7 +48,7 @@ This eliminates circular dependencies and improves architectural clarity.
 
 ### See Also
 
-- [`docs/109_authorization.md`](../../docs/109_authorization.md) - Complete authorization guide
+- [`docs/104_authorization.md`](../../docs/104_authorization.md) - Complete authorization guide
 - [`aura-authorization` crate](../aura-authorization/) - Authorization implementation
 
 ## Core Concepts
@@ -155,7 +155,7 @@ let capability = StorageCapability {
 
 ## Documentation
 
-- [Authorization](../../docs/109_authorization.md) - Biscuit token system (in aura-authorization)
+- [Authorization](../../docs/104_authorization.md) - Biscuit token system (in aura-authorization)
 - [Architecture](../../docs/001_system_architecture.md) - Layer 2 domain patterns
 
 ## Testing

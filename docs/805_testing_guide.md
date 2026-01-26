@@ -7,11 +7,11 @@ This guide covers Aura's testing infrastructure built on the stateless effect sy
 Aura's testing approach is built on four key principles:
 
 1. **Async-Native Testing** - The `#[aura_test]` macro provides automatic tracing setup and timeout handling
-2. **Effect System Compliance** - Tests MUST use [effect traits](106_effect_system_and_runtime.md), never direct impure function access
+2. **Effect System Compliance** - Tests MUST use [effect traits](105_effect_system_and_runtime.md), never direct impure function access
 3. **Protocol Fidelity** - Tests run actual protocol logic through real effect implementations
 4. **Deterministic Execution** - Controlled effects enable reproducible test environments
 
-**Critical**: Tests must follow the same [effect system](106_effect_system_and_runtime.md) guidelines as production code. Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, `Uuid::new_v4()`, or other impure functions is forbidden. All impure operations must flow through effect traits to ensure deterministic simulation and WASM compatibility.
+**Critical**: Tests must follow the same [effect system](105_effect_system_and_runtime.md) guidelines as production code. Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, `Uuid::new_v4()`, or other impure functions is forbidden. All impure operations must flow through effect traits to ensure deterministic simulation and WASM compatibility.
 
 This approach eliminates boilerplate while providing testing capabilities through automatic tracing, timeout protection, and reusable test fixtures.
 
@@ -151,7 +151,7 @@ let auth3 = AuthorityId::from_entropy([3u8; 32]);
 
 ### Effect System Compliance in Tests
 
-**Tests must use [effect traits](106_effect_system_and_runtime.md) for all impure operations**:
+**Tests must use [effect traits](105_effect_system_and_runtime.md) for all impure operations**:
 
 ```rust
 use aura_agent::runtime::AuraEffectSystem;
@@ -915,4 +915,4 @@ Aura's testing infrastructure provides:
 
 The testing approach emphasizes simplicity and fidelity to production code. Tests use the same stateless effect handlers as production, ensuring high confidence in test results.
 
-For simulation capabilities that enable fault injection and network modeling, see [Simulation Guide](806_simulation_guide.md). Learn about the effect system in [Effect System Guide](106_effect_system_and_runtime.md).
+For simulation capabilities that enable fault injection and network modeling, see [Simulation Guide](806_simulation_guide.md). Learn about the effect system in [Effect System Guide](105_effect_system_and_runtime.md).

@@ -14,7 +14,7 @@ Social Recovery: Users must be able to store secrets in the network and survive 
 
 Version Compatibility: Older clients must interact with newer ones within semantic version compatibility bounds.
 
-In order to achieve these goals, Aura combines [threshold cryptography](101_accounts_and_commitment_tree.md), [choreographic programs that project to session typed protocols](107_mpst_and_choreography.md), [fact-based semilattices](102_journal.md), [session types](107_mpst_and_choreography.md), and [authorized effects](109_authorization.md).
+In order to achieve these goals, Aura combines [threshold cryptography](102_authority_and_identity.md), [choreographic programs that project to session typed protocols](108_mpst_and_choreography.md), [fact-based semilattices](103_journal.md), [session types](108_mpst_and_choreography.md), and [authorized effects](104_authorization.md).
 
 ## Implementation
 
@@ -58,43 +58,43 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 **Core Systems**
 
-[Authority and Identity](100_authority_and_identity.md) describes the authority-centric identity model with opaque authorities and relational contexts.
+[Authority and Identity](102_authority_and_identity.md) describes the authority-centric identity model with opaque authorities and relational contexts.
 
-[Identifiers and Boundaries](105_identifiers_and_boundaries.md) documents the identifier system and context isolation.
+[Identifiers and Boundaries](101_identifiers_and_boundaries.md) documents the identifier system and context isolation.
 
-[Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) covers the commitment tree structure for threshold identity management.
+[Authority and Identity](102_authority_and_identity.md) covers the commitment tree structure for threshold identity management.
 
-[Key Rotation Ceremonies](118_key_rotation_ceremonies.md) describes the shared Category C contract for key rotations and membership changes (devices, guardians, groups, home authorities, etc.).
+[Operation Categories](107_operation_categories.md) defines the A/B/C operation classification, ceremony contract for key rotations and membership changes (devices, guardians, groups, home authorities, etc.), and consistency metadata.
 
-[Journal System](102_journal.md) documents the fact-based journal, validation rules, and deterministic reduction flows.
+[Journal System](103_journal.md) documents the fact-based journal, validation rules, and deterministic reduction flows.
 
-[Relational Contexts](103_relational_contexts.md) covers guardian bindings, recovery grants, and context-scoped journals.
+[Relational Contexts](112_relational_contexts.md) covers guardian bindings, recovery grants, and context-scoped journals.
 
-[Consensus](104_consensus.md) describes the Aura Consensus protocol for strong agreement.
+[Consensus](106_consensus.md) describes the Aura Consensus protocol for strong agreement.
 
-[Operation Categories](117_operation_categories.md) defines the A/B/C operation classification used throughout the system and how ceremonies relate to optimistic CRDT operations.
+[Operation Categories](107_operation_categories.md) defines the A/B/C operation classification used throughout the system and how ceremonies relate to optimistic CRDT operations.
 
-[Effect System and Runtime](106_effect_system_and_runtime.md) covers effect system architecture and runtime composition.
+[Effect System and Runtime](105_effect_system_and_runtime.md) covers effect system architecture and runtime composition.
 
-[MPST and Choreography](107_mpst_and_choreography.md) documents multi-party session types and choreographic programming.
+[MPST and Choreography](108_mpst_and_choreography.md) documents multi-party session types and choreographic programming.
 
-[Transport and Information Flow](108_transport_and_information_flow.md) covers guard chain enforcement, secure channel lifecycle, and FlowBudget receipts.
+[Transport and Information Flow](109_transport_and_information_flow.md) covers guard chain enforcement, secure channel lifecycle, and FlowBudget receipts.
 
-[Authorization](109_authorization.md) describes the authorization flow from capabilities to Biscuit tokens.
+[Authorization](104_authorization.md) describes the authorization flow from capabilities to Biscuit tokens.
 
-[Rendezvous Architecture](110_rendezvous.md) covers context-scoped rendezvous envelopes and channel establishment.
+[Rendezvous Architecture](111_rendezvous.md) covers context-scoped rendezvous envelopes and channel establishment.
 
-[State Reduction](120_state_reduction.md) describes deterministic state reduction from fact journals to canonical state.
+[Journal System](103_journal.md) describes fact-based journals, validation rules, deterministic reduction, and flow budgets.
 
-[Maintenance](111_maintenance.md) covers the distributed maintenance stack including snapshots and garbage collection.
+[Maintenance](115_maintenance.md) covers the distributed maintenance stack including snapshots and garbage collection.
 
-[Asynchronous Message Patterns](112_amp.md) documents patterns for reliable asynchronous message coordination.
+[Asynchronous Message Patterns](110_amp.md) documents patterns for reliable asynchronous message coordination.
 
 [Database Architecture](113_database.md) specifies the distributed database layer using journals, Biscuit queries, and CRDTs.
 
 [Social Architecture](114_social_architecture.md) defines the social organization model using messages, homes, and neighborhoods.
 
-[CLI and Terminal User Interface](115_cli_tui.md) specifies the CLI and iocraft-based TUI for Aura.
+[CLI and Terminal User Interface](116_cli_tui.md) specifies the CLI and iocraft-based TUI for Aura.
 
 **Developer Guides**
 

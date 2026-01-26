@@ -8,7 +8,7 @@
 //! - **CapabilityRef**: Fine-grained, revocable authorization tokens with expiry/scope
 //! - **IntentBatch**: Atomic group of intents for transactional tree updates
 //!
-//! **Design Principle** (per docs/109_authorization.md):
+//! **Design Principle** (per docs/104_authorization.md):
 //! All security-critical mutations recorded as AttestedOp (threshold signatures) in fact journal.
 //! Capabilities provide layered authorization via Biscuit tokens (aura-authorization/biscuit) evaluated at
 //! message entry point (aura-protocol/guards/CapGuard).

@@ -10,7 +10,7 @@
 //! - aura-consensus (Layer 4): Multi-party agreement
 //!
 //! **Design Principle**: Relational facts enable facts to reference cross-authority context
-//! (per docs/103_relational_contexts.md), enabling distributed accountability.
+//! (per docs/112_relational_contexts.md), enabling distributed accountability.
 
 pub mod consensus;
 pub mod fact;

@@ -1,7 +1,7 @@
 //! Category-Specific Status Types
 //!
 //! This module provides purpose-built status types for each operation category
-//! from `docs/117_operation_categories.md`:
+//! from `docs/107_operation_categories.md`:
 //!
 //! - **Category A (Optimistic)**: `OptimisticStatus` - immediate effect, background tracking
 //! - **Category B (Deferred)**: `DeferredStatus` - requires approval before effect

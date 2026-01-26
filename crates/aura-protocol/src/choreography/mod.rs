@@ -19,9 +19,9 @@
 //!
 //! Distributed protocols using choreographic global specifications that automatically
 //! project to per-role local session types. Ensures deadlock freedom by construction
-//! and compile-time verification of message matching (per docs/107_mpst_and_choreography.md).
+//! and compile-time verification of message matching (per docs/108_mpst_and_choreography.md).
 //!
-//! **Choreography Model** (per docs/107_mpst_and_choreography.md):
+//! **Choreography Model** (per docs/108_mpst_and_choreography.md):
 //! 1. Define protocol once globally (all roles visible)
 //! 2. Compiler projects to per-role local types (session types for each role)
 //! 3. Execute using aura-mpst runtime with effect traits

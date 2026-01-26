@@ -3,7 +3,7 @@
 //! In-memory handler implementations for testing, simulation, and non-persistent coordination.
 //! Implement same interfaces as persistent handlers with in-memory storage for fast access.
 //!
-//! **Handler Types** (per docs/106_effect_system_and_runtime.md):
+//! **Handler Types** (per docs/105_effect_system_and_runtime.md):
 //! - **MemoryChoreographicHandler**: In-memory choreographic protocol coordination
 //!   - Session state management without persistence (perfect for aura-simulator)
 //!   - Protocol coordination for test scenarios
@@ -14,7 +14,7 @@
 //!   - Device authorization tracking
 //!   - Audit trail for test scenarios and replay
 //!
-//! **Design Principle** (per docs/106_effect_system_and_runtime.md):
+//! **Design Principle** (per docs/105_effect_system_and_runtime.md):
 //! Memory handlers provide same handler contracts as persistent implementations, enabling
 //! handler swapping for testing. Implement full effect trait semantics while avoiding
 //! external dependencies and I/O overhead. Enable deterministic simulation (ExecutionMode::Simulation)

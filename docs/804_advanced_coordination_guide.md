@@ -222,7 +222,7 @@ Role-controlled loops allow participants to decide when to continue or exit. The
 
 ## Aura-Specific Extensions
 
-Aura extends rumpsteak-aura with domain-specific annotations for security, performance, and state management. These extensions integrate with [aura-mpst](107_mpst_and_choreography.md) for runtime enforcement and verification.
+Aura extends rumpsteak-aura with domain-specific annotations for security, performance, and state management. These extensions integrate with [aura-mpst](108_mpst_and_choreography.md) for runtime enforcement and verification.
 
 ### Guard Capabilities
 

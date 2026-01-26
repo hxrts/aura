@@ -133,4 +133,4 @@ If you discover an invariant violation:
 - [System Architecture](001_system_architecture.md) - Architectural context for invariants
 - [Distributed Systems Contract](004_distributed_systems_contract.md) - Distributed system guarantees
 - [Information Flow Contract](003_information_flow_contract.md) - Privacy and flow invariants
-- [Effect System and Runtime](106_effect_system_and_runtime.md) - Effect system design
+- [Effect System and Runtime](105_effect_system_and_runtime.md) - Effect system design

@@ -333,7 +333,7 @@ impl AuraAgent {
 - **Consistent**: Same pattern across all domain crates
 - **Safe**: RwLock managed automatically at agent layer
 
-See `docs/106_effect_system_and_runtime.md` section 13 for more details.
+See `docs/105_effect_system_and_runtime.md` section 13 for more details.
 
 ## Implementing Aura in a New Environment
 

@@ -333,4 +333,4 @@ Candidates are returned in priority order: home peers first, then neighborhood p
 
 ## See Also
 
-[Database Architecture](113_database.md) describes fact storage and queries. [Transport and Information Flow](108_transport_and_information_flow.md) covers AMP messaging. [Authorization](109_authorization.md) describes capability evaluation. [Rendezvous Architecture](110_rendezvous.md) details the four-layer discovery model integration.
+[Database Architecture](113_database.md) describes fact storage and queries. [Transport and Information Flow](109_transport_and_information_flow.md) covers AMP messaging. [Authorization](104_authorization.md) describes capability evaluation. [Rendezvous Architecture](111_rendezvous.md) details the four-layer discovery model integration.

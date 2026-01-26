@@ -17,7 +17,7 @@ Rendezvous descriptor exchange can run in provisional (A1) or soft-safe (A2) mod
 - **A3**: `ChannelEstablished` is finalized by consensus and accompanied by a `CommitFact`.
 
 Rendezvous must treat A1/A2 outputs as provisional until A3 evidence is merged.
-See `docs/104_consensus.md` for commit evidence binding.
+See `docs/106_consensus.md` for commit evidence binding.
 
 ## 2. Architecture
 

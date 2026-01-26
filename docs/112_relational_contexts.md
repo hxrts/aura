@@ -1,10 +1,10 @@
 # Relational Contexts
 
-This document describes the architecture of relational contexts in Aura. It explains how cross-authority relationships are represented using dedicated context namespaces. It defines the structure of relational facts and the role of [Aura Consensus](104_consensus.md) in producing agreed relational state. It also describes privacy boundaries and the interpretation of relational data by participating authorities.
+This document describes the architecture of relational contexts in Aura. It explains how cross-authority relationships are represented using dedicated context namespaces. It defines the structure of relational facts and the role of [Aura Consensus](106_consensus.md) in producing agreed relational state. It also describes privacy boundaries and the interpretation of relational data by participating authorities.
 
 ## 1. RelationalContext Abstraction
 
-A relational context is shared state linking two or more authorities. A relational context has its own [journal](102_journal.md) namespace. A relational context does not expose internal authority structure. A relational context contains only the facts that the participating authorities choose to share.
+A relational context is shared state linking two or more authorities. A relational context has its own [journal](103_journal.md) namespace. A relational context does not expose internal authority structure. A relational context contains only the facts that the participating authorities choose to share.
 
 A relational context is identified by a `ContextId`. Authorities publish relational facts inside the context journal. The context journal is a join semilattice under set union. Reduction produces a deterministic relational state.
 
@@ -139,7 +139,7 @@ This structure represents the reduced relational state. It contains relational b
 
 ## 6. Aura Consensus in Relational Contexts
 
-Some relational operations require strong agreement. [Aura Consensus](104_consensus.md) produces these operations. Aura Consensus uses a witness set drawn from participating authorities. Witnesses compute shares after verifying the prestate hash.
+Some relational operations require strong agreement. [Aura Consensus](106_consensus.md) produces these operations. Aura Consensus uses a witness set drawn from participating authorities. Witnesses compute shares after verifying the prestate hash.
 
 Commit facts contain threshold signatures. Each commit fact is inserted into the relational context journal. Reduction interprets the commit fact as a confirmed relational operation.
 
@@ -513,7 +513,7 @@ Group membership changes are Category C because they affect encryption:
 3. **Consistency**: All members must agree on who's in the group
    - Solution: Ceremony ensures atomic membership view
 
-See [Consensus - Operation Categories](104_consensus.md#17-operation-categories) for the full decision tree.
+See [Consensus - Operation Categories](106_consensus.md#17-operation-categories) for the full decision tree.
 
 ## 11. Summary
 
@@ -535,6 +535,5 @@ The implementation provides concrete types (`RelationalContext`, `GuardianBindin
 
 ## See Also
 
-- [Key Rotation Ceremonies](118_key_rotation_ceremonies.md) - Guardian rotation and device enrollment ceremonies
-- [Consensus](104_consensus.md) - Aura Consensus protocol for strong agreement
-- [Operation Categories](117_operation_categories.md) - Category B and C operations for relational contexts
+- [Operation Categories](107_operation_categories.md) - Ceremony contract, guardian rotation, device enrollment, and Category B/C operations
+- [Consensus](106_consensus.md) - Aura Consensus protocol for strong agreement

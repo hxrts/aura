@@ -21,7 +21,7 @@
 //! implementations (Layer 3/4 semantics). Handlers implement effect traits and compose
 //! via guard chains to enforce authorization, privacy, and budget invariants.
 //!
-//! **Core Design Pattern** (per docs/001_system_architecture.md, docs/106_effect_system_and_runtime.md):
+//! **Core Design Pattern** (per docs/001_system_architecture.md, docs/105_effect_system_and_runtime.md):
 //! - **Effects** (Layer 1): Abstract trait interfaces; specify **what** operations are available
 //! - **Handlers** (Layer 3/4): Concrete implementations; define **how** operations execute
 //! - **Composition** (Layer 4): Guards and middleware wrap handlers for enforcement

@@ -92,7 +92,7 @@ Define fact-based journal semantics using join-semilattice CRDTs, enabling deter
 - `compaction.rs`: `compact()` - snapshot and GC
 - `authority_state.rs`: Authority-internal device and guardian views
 
-**Key Invariants** (docs/102_journal.md):
+**Key Invariants** (docs/103_journal.md):
 - OpLog is authoritative (immutable facts)
 - Deterministic reduction (same OpLog → identical TreeState)
 - Monotonic growth (append-only)
@@ -127,7 +127,7 @@ Define fact-based journal semantics using join-semilattice CRDTs, enabling deter
 - `IntentPool`: Capability intent management
 - Meet-lattice constraints: `DeviceCapability`, `ResourceQuota`, `SecurityPolicy`, `TimeWindow`
 
-**Convergence Invariant** (docs/120_state_reduction.md):
+**Convergence Invariant** (docs/103_journal.md):
 All synchronization operations are idempotent and commutative.
 
 ### Journal API (`journal_api.rs`)
@@ -235,8 +235,7 @@ This prevents Layer 2 → Layer 2 circular dependencies.
 
 ## Documentation
 
-- `docs/102_journal.md`: Fact-based journal specification
-- `docs/101_accounts_and_commitment_tree.md`: Commitment tree semantics
-- `docs/103_relational_contexts.md`: Context-scoped journals
-- `docs/120_state_reduction.md`: Reduction and convergence
+- `docs/103_journal.md`: Fact-based journal specification, reduction, and flow budgets
+- `docs/102_authority_and_identity.md`: Authority model and commitment tree semantics
+- `docs/112_relational_contexts.md`: Context-scoped journals
 - `docs/999_project_structure.md`: Layer 2 architecture and fact patterns

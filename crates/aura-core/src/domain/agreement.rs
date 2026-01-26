@@ -1,6 +1,6 @@
 //! Agreement Types for the A1/A2/A3 Taxonomy
 //!
-//! This module implements the agreement level taxonomy from `docs/117_operation_categories.md`.
+//! This module implements the agreement level taxonomy from `docs/107_operation_categories.md`.
 //! Agreement indicates how durable/finalized a fact is:
 //!
 //! - **A1 (Provisional)**: Usable immediately, may be superseded

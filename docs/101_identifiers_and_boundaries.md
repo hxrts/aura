@@ -242,7 +242,7 @@ This identifier enables operation correlation and causal ordering.
 pub struct ConsensusId(Hash32);
 ```
 
-This identifier binds operations to prestates through hash commitment. See [Consensus](104_consensus.md) for protocol details.
+This identifier binds operations to prestates through hash commitment. See [Consensus](106_consensus.md) for protocol details.
 
 ### 6.2 FrostParticipantId
 
@@ -286,7 +286,7 @@ This identifier enables neighborhood governance and traversal policies.
 pub struct LeafId(u32);
 ```
 
-This identifier enables stable references to tree leaves. See [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) for tree structure.
+This identifier enables stable references to tree leaves. See [Authority and Identity](102_authority_and_identity.md) for tree structure.
 
 ### 8.2 ProposalId
 
@@ -318,7 +318,7 @@ pub struct Receipt {
 }
 ```
 
-Receipts prove that upstream participants charged their budget before forwarding. No receipt includes device identifiers or user handles. See [Transport and Information Flow](108_transport_and_information_flow.md) for receipt propagation.
+Receipts prove that upstream participants charged their budget before forwarding. No receipt includes device identifiers or user handles. See [Transport and Information Flow](109_transport_and_information_flow.md) for receipt propagation.
 
 ## 10. Derived Keys
 
@@ -328,4 +328,4 @@ The derivation inputs never include device identifiers. Derived keys inherit the
 
 ## See Also
 
-[Authority and Identity](100_authority_and_identity.md) describes the authority model in detail. [Relational Contexts](103_relational_contexts.md) covers cross-authority relationships. [Transport and Information Flow](108_transport_and_information_flow.md) documents receipt chains and flow budgets. [Social Architecture](114_social_architecture.md) defines homes and neighborhoods.
+[Authority and Identity](102_authority_and_identity.md) describes the authority model in detail. [Relational Contexts](112_relational_contexts.md) covers cross-authority relationships. [Transport and Information Flow](109_transport_and_information_flow.md) documents receipt chains and flow budgets. [Social Architecture](114_social_architecture.md) defines homes and neighborhoods.

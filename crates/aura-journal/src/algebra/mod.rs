@@ -11,7 +11,7 @@
 //! - **GuardianRegistry**: Guardian set membership tracking
 //! - **Capability Constraints (Meet-Lattice)**: Meet-semilattice (⊓) policies for resource access
 //!
-//! **Convergence Invariant** (per docs/120_state_reduction.md):
+//! **Convergence Invariant** (per docs/103_journal.md):
 //! All synchronization operations are idempotent and commutative,
 //! enabling deterministic reduction across all replicas.
 

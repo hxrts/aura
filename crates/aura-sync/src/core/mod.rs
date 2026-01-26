@@ -4,7 +4,7 @@
 //! **SyncConfig** (protocol configuration), **SyncResult** (unified error handling via `AuraError`),
 //! **SyncMetrics** (performance instrumentation), **SessionManager** (session lifecycle).
 //!
-//! **Integration** (per docs/110_rendezvous.md):
+//! **Integration** (per docs/111_rendezvous.md):
 //! All sync protocols (anti-entropy, journal sync, OTA, snapshots) are built atop
 //! these foundation types. SessionManager coordinates multi-peer synchronization sessions.
 

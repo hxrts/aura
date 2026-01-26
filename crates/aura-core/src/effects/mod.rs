@@ -2,7 +2,7 @@
 //!
 //! Pure trait definitions for all side-effect operations in Aura.
 //! This module defines **what** effects can be performed; handlers define **how**.
-//! (per docs/106_effect_system_and_runtime.md)
+//! (per docs/105_effect_system_and_runtime.md)
 //!
 //! # Effect Classification
 //!
@@ -38,7 +38,7 @@
 //! - **Simulation**: Deterministic with controllable effects (seed-driven)
 //!
 //! All effect-using code is parameterized by effect traits, enabling:
-//! Deterministic testing, flexible handler composition, runtime mode switching (per docs/106_effect_system_and_runtime.md)
+//! Deterministic testing, flexible handler composition, runtime mode switching (per docs/105_effect_system_and_runtime.md)
 
 // Core effect trait definitions
 pub mod agent;

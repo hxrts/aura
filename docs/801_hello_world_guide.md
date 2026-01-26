@@ -128,7 +128,7 @@ choreography! {
 }
 ```
 
-The choreography defines a global protocol. Alice sends a ping to Bob. Bob responds with a pong. [Guard capabilities](109_authorization.md) control access and flow costs manage rate limiting.
+The choreography defines a global protocol. Alice sends a ping to Bob. Bob responds with a pong. [Guard capabilities](104_authorization.md) control access and flow costs manage rate limiting.
 
 Implement the Alice session:
 
@@ -153,7 +153,7 @@ pub async fn execute_alice_session<E: PingPongEffects>(
 }
 ```
 
-Alice serializes the ping message and sends it to Bob. She then waits for Bob's response and deserializes the pong message. See [Effect System and Runtime](106_effect_system_and_runtime.md) for details on effect-based execution.
+Alice serializes the ping message and sends it to Bob. She then waits for Bob's response and deserializes the pong message. See [Effect System and Runtime](105_effect_system_and_runtime.md) for details on effect-based execution.
 
 ## Local Deployment
 
@@ -275,6 +275,6 @@ See [System Invariants](005_system_invariants.md) for details. When developing, 
 
 You now have a working Aura development environment. The hello world protocol demonstrates basic choreographic programming concepts.
 
-Continue with [Core Systems Guide](802_core_systems_guide.md) to learn about effect systems, authentication, and capabilities. Learn advanced coordination patterns in [Coordination Systems Guide](803_coordination_guide.md). For detailed protocol development, see [MPST and Choreography](107_mpst_and_choreography.md).
+Continue with [Core Systems Guide](802_core_systems_guide.md) to learn about effect systems, authentication, and capabilities. Learn advanced coordination patterns in [Coordination Systems Guide](803_coordination_guide.md). For detailed protocol development, see [MPST and Choreography](108_mpst_and_choreography.md).
 
 Explore the simulation system in [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md) for comprehensive protocol testing approaches.

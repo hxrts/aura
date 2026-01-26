@@ -1,10 +1,10 @@
 # Consensus
 
-This document describes the architecture of Aura Consensus. It defines the problem model, protocol phases, data structures, and integration with [journals](102_journal.md). It explains how consensus provides single-shot agreement for non-monotone operations such as account updates or relational context operations.
+This document describes the architecture of Aura Consensus. It defines the problem model, protocol phases, data structures, and integration with [journals](103_journal.md). It explains how consensus provides single-shot agreement for non-monotone operations such as account updates or relational context operations.
 
 ## 1. Problem Model
 
-Aura uses consensus only for operations that cannot be expressed as monotone growth. Consensus produces a commit fact. The commit fact is inserted into one or more [journals](102_journal.md) and drives deterministic reduction. Aura does not maintain a global log. Consensus operates in the scope of an authority or a relational context.
+Aura uses consensus only for operations that cannot be expressed as monotone growth. Consensus produces a commit fact. The commit fact is inserted into one or more [journals](103_journal.md) and drives deterministic reduction. Aura does not maintain a global log. Consensus operates in the scope of an authority or a relational context.
 
 Consensus is single-shot. It agrees on a single operation and a single prestate. Commit facts are immutable and merge by join in journal namespaces.
 
@@ -26,7 +26,7 @@ Each consensus instance independently agrees on:
 - Sequential linearization across instances
 - Automatic operation dependencies
 
-**To sequence operations, use session types** (`docs/107_mpst_and_choreography.md`):
+**To sequence operations, use session types** (`docs/108_mpst_and_choreography.md`):
 
 ```rust
 use aura_mpst::{choreography, Role};
@@ -384,7 +384,7 @@ Any witness reaching threshold broadcasts the commit fact. The first valid thres
 
 Consensus emits commit facts. Journals merge commit facts using set union. Reduction interprets commit facts as confirmed non-monotone events.
 
-Account journals integrate commit facts that represent tree operations. [Relational context](103_relational_contexts.md) journals integrate commit facts that represent guardian bindings or recovery grants.
+Account journals integrate commit facts that represent tree operations. [Relational context](112_relational_contexts.md) journals integrate commit facts that represent guardian bindings or recovery grants.
 
 Reduction remains deterministic. Commit facts simply appear as additional facts in the semilattice.
 
@@ -419,7 +419,7 @@ Consensus is also used for relational context operations. Guardian bindings use 
 
 ## 11. FROST Threshold Signatures
 
-Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key stored in the commitment tree. See [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) for details on the `TreeState` structure.
+Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key stored in the commitment tree. See [Authority and Identity](102_authority_and_identity.md) for details on the `TreeState` structure.
 
 ```rust
 /// From crates/aura-consensus/src/messages.rs
@@ -447,7 +447,7 @@ When consensus produces a commit fact for a tree operation, the resulting `Attes
 1. **Verification** (`verify_attested_op`): Cryptographic check against the `BranchSigningKey` stored in TreeState
 2. **Check** (`check_attested_op`): Full verification plus state consistency validation
 
-The binding message includes the group public key to prevent signature reuse attacks. This ensures an attacker cannot substitute a different signing key and replay a captured signature. See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-operation-verification) for details.
+The binding message includes the group public key to prevent signature reuse attacks. This ensures an attacker cannot substitute a different signing key and replay a captured signature. See [Tree Operation Verification](102_authority_and_identity.md#8-tree-operation-verification) for details.
 
 ```rust
 // Threshold derived from policy at target node
@@ -1048,6 +1048,5 @@ The helper `HasEquivocatedInSet` excludes conflict batches that contain conflict
 
 ## See Also
 
-- [Operation Categories](117_operation_categories.md) - When consensus is required (Category C operations)
-- [Key Rotation Ceremonies](118_key_rotation_ceremonies.md) - Category C ceremony lifecycle and prestate binding
-- [Relational Contexts](103_relational_contexts.md) - Consensus integration for relational operations
+- [Operation Categories](107_operation_categories.md) - When consensus is required and ceremony lifecycle
+- [Relational Contexts](112_relational_contexts.md) - Consensus integration for relational operations

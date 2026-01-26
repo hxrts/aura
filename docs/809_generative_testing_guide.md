@@ -180,4 +180,4 @@ The `aura-quint` runner classifies properties by keyword:
 
 - [Simulation Guide](806_simulation_guide.md) - Deterministic simulation and generative infrastructure
 - [Testing Guide](805_testing_guide.md) - Unit, integration, and property testing
-- [Effect System Guide](106_effect_system_and_runtime.md) - Effect trait architecture
+- [Effect System Guide](105_effect_system_and_runtime.md) - Effect trait architecture

@@ -1,8 +1,8 @@
 # Aura Crate Structure and Dependency Graph
 
 This document provides an overview of the Aura project's crate organization and dependencies.
-The **primary specifications** live in `docs/` (e.g., consensus in `docs/104_consensus.md`,
-ceremony lifecycles in `docs/118_key_rotation_ceremonies.md`). The `work/` directory is
+The **primary specifications** live in `docs/` (e.g., consensus in `docs/106_consensus.md`,
+ceremony lifecycles in `docs/107_operation_categories.md`). The `work/` directory is
 non-authoritative scratch and may be removed.
 
 ## 8-Layer Architecture
@@ -1362,39 +1362,39 @@ The `just check-arch --serialization` command validates:
 - **Effect handler** → `aura-effects` (infrastructure) or domain crate (application logic)
 
 ### "I need to understand..."
-- **How authorities work** → `docs/100_authority_and_identity.md`
-- **How consensus works** → `docs/104_consensus.md`
-- **How effects compose** → `docs/106_effect_system_and_runtime.md`
-- **How protocols are designed** → `docs/107_mpst_and_choreography.md`
+- **How authorities work** → `docs/102_authority_and_identity.md`
+- **How consensus works** → `docs/106_consensus.md`
+- **How effects compose** → `docs/105_effect_system_and_runtime.md`
+- **How protocols are designed** → `docs/108_mpst_and_choreography.md`
 - **How the guard chain works** → `docs/001_system_architecture.md` (sections 2.1-2.3)
-- **How journals work** → `docs/102_journal.md`
+- **How journals work** → `docs/103_journal.md`
 - **How testing works** → `docs/805_testing_guide.md` + `docs/806_simulation_guide.md`
 - **How to write tests** → `docs/805_testing_guide.md`
 - **How privacy and flow budgets work** → `docs/003_information_flow_contract.md`
 - **How distributed system guarantees work** → `docs/004_distributed_systems_contract.md`
-- **How commitment trees work** → `docs/101_accounts_and_commitment_tree.md`
-- **How relational contexts work** → `docs/103_relational_contexts.md`
-- **How transport and receipts work** → `docs/108_transport_and_information_flow.md`
-- **How rendezvous and peer discovery work** → `docs/110_rendezvous.md`
-- **How state reduction works** → `docs/120_state_reduction.md`
+- **How commitment trees work** → `docs/102_authority_and_identity.md`
+- **How relational contexts work** → `docs/112_relational_contexts.md`
+- **How transport and receipts work** → `docs/109_transport_and_information_flow.md`
+- **How rendezvous and peer discovery work** → `docs/111_rendezvous.md`
+- **How state reduction works** → `docs/103_journal.md`
 - **How the mathematical model works** → `docs/002_theoretical_model.md`
-- **How identifiers and boundaries work** → `docs/105_identifiers_and_boundaries.md`
-- **How authorization and capabilities work** → `docs/109_authorization.md`
-- **How Biscuit tokens work** → `docs/109_authorization.md` + `aura-authorization/src/biscuit/`
+- **How identifiers and boundaries work** → `docs/101_identifiers_and_boundaries.md`
+- **How authorization and capabilities work** → `docs/104_authorization.md`
+- **How Biscuit tokens work** → `docs/104_authorization.md` + `aura-authorization/src/biscuit/`
 - **How to get started as a new developer** → `docs/801_hello_world_guide.md`
 - **How core systems work together** → `docs/802_core_systems_guide.md`
 - **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`
 - **How simulation works** → `docs/806_simulation_guide.md`
-- **How maintenance and OTA updates work** → `docs/808_maintenance_guide.md` + `docs/111_maintenance.md`
+- **How maintenance and OTA updates work** → `docs/808_maintenance_guide.md` + `docs/115_maintenance.md`
 - **How development patterns work** → `docs/805_development_patterns.md`
 - **The project's goals and constraints** → `docs/000_project_overview.md`
 - **How to debug architecture** → `just check-arch` + this document
 
 ### Layer-Based Development Workflow
-**Working on Layer 1 (Foundation)?** Read: `docs/106_effect_system_and_runtime.md`  
+**Working on Layer 1 (Foundation)?** Read: `docs/105_effect_system_and_runtime.md`  
 **Working on Layer 2 (Domains)?** Read: Domain-specific docs (`docs/100-112`)  
 **Working on Layer 3 (Effects)?** Read: `docs/805_development_patterns.md`  
-**Working on Layer 4 (Protocols)?** Read: `docs/107_mpst_and_choreography.md`  
+**Working on Layer 4 (Protocols)?** Read: `docs/108_mpst_and_choreography.md`  
 **Working on Layer 5 (Features)?** Read: `docs/803_coordination_guide.md`  
 **Working on Layer 6 (Runtime)?** Read: `aura-agent/` and `aura-simulator/`  
 **Working on Layer 7 (Terminal)?** Read: `aura-terminal/` + `aura-app/` + scenario docs  
@@ -1530,5 +1530,5 @@ Formal verification bridge to Quint model checker and property evaluator.
 
 - [System Architecture](001_system_architecture.md) - References the 8-layer architecture defined here
 - [Development Patterns and Workflows](805_development_patterns.md) - Uses crate organization patterns from this guide
-- [Effect System and Runtime](106_effect_system_and_runtime.md) - Implements the effect system architecture described here
+- [Effect System and Runtime](105_effect_system_and_runtime.md) - Implements the effect system architecture described here
 - [Testing Guide](805_testing_guide.md) - Uses the testing infrastructure organization from this guide

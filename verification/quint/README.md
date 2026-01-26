@@ -90,26 +90,26 @@ Core protocol state machines modeling Aura's distributed protocols:
 | Directory | Specification | Description | Documentation |
 |-----------|---------------|-------------|---------------|
 | `.` | `core.qnt` | Shared runtime utilities, protocol lifecycle, effects, timers | [System Architecture](../../docs/001_system_architecture.md) |
-| `consensus/` | `core.qnt` | Fast-path/fallback consensus with threshold signatures | [Consensus](../../docs/104_consensus.md) |
-| `consensus/` | `frost.qnt` | FROST threshold signature protocol model | [Crypto Guide](../../docs/116_crypto.md) |
+| `consensus/` | `core.qnt` | Fast-path/fallback consensus with threshold signatures | [Consensus](../../docs/106_consensus.md) |
+| `consensus/` | `frost.qnt` | FROST threshold signature protocol model | [Crypto Guide](../../docs/100_crypto.md) |
 | `consensus/` | `adversary.qnt` | Byzantine adversary models for consensus | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
 | `consensus/` | `liveness.qnt` | Liveness and termination properties | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
-| `journal/` | `core.qnt` | CRDT journal operations | [Journal Guide](../../docs/102_journal.md) |
-| `journal/` | `anti_entropy.qnt` | CRDT delta sync and eventual convergence | [Maintenance](../../docs/111_maintenance.md) |
+| `journal/` | `core.qnt` | CRDT journal operations | [Journal Guide](../../docs/103_journal.md) |
+| `journal/` | `anti_entropy.qnt` | CRDT delta sync and eventual convergence | [Maintenance](../../docs/115_maintenance.md) |
 | `journal/` | `counter.qnt` | Lamport clock counter coordination | - |
-| `keys/` | `dkg.qnt` | FROST Distributed Key Generation ceremony | [Crypto Guide](../../docs/116_crypto.md) |
-| `keys/` | `dkd.qnt` | Deterministic Key Derivation for context keys | [Crypto Guide](../../docs/116_crypto.md) |
-| `keys/` | `resharing.qnt` | Threshold key resharing protocol | [Crypto Guide](../../docs/116_crypto.md) |
-| `sessions/` | `core.qnt` | Session lifecycle and presence | [MPST Guide](../../docs/107_mpst_and_choreography.md) |
+| `keys/` | `dkg.qnt` | FROST Distributed Key Generation ceremony | [Crypto Guide](../../docs/100_crypto.md) |
+| `keys/` | `dkd.qnt` | Deterministic Key Derivation for context keys | [Crypto Guide](../../docs/100_crypto.md) |
+| `keys/` | `resharing.qnt` | Threshold key resharing protocol | [Crypto Guide](../../docs/100_crypto.md) |
+| `sessions/` | `core.qnt` | Session lifecycle and presence | [MPST Guide](../../docs/108_mpst_and_choreography.md) |
 | `sessions/` | `groups.qnt` | Group membership management | [Social Architecture](../../docs/114_social_architecture.md) |
 | `sessions/` | `locking.qnt` | Distributed locking protocol | - |
-| `amp/` | `channel.qnt` | AMP channel lifecycle (invite/join/send/leave/rotate) | [AMP](../../docs/112_amp.md) |
-| `.` | `recovery.qnt` | Guardian-based recovery flows | [Relational Contexts](../../docs/103_relational_contexts.md) |
+| `amp/` | `channel.qnt` | AMP channel lifecycle (invite/join/send/leave/rotate) | [AMP](../../docs/110_amp.md) |
+| `.` | `recovery.qnt` | Guardian-based recovery flows | [Relational Contexts](../../docs/112_relational_contexts.md) |
 | `.` | `authorization.qnt` | Guard chain authorization, budget verification | [Information Flow](../../docs/003_information_flow_contract.md) |
-| `.` | `epochs.qnt` | Epoch transitions and receipt validity windows | [Transport](../../docs/108_transport_and_information_flow.md) |
-| `.` | `transport.qnt` | Transport layer: connections, sessions, guard chain, message ordering | [Transport](../../docs/108_transport_and_information_flow.md) |
-| `.` | `invitation.qnt` | Invitation lifecycle, ceremonies, authorization invariants | [Relational Contexts](../../docs/103_relational_contexts.md) |
-| `.` | `sbb.qnt` | Social Bulletin Board gossip | [Rendezvous](../../docs/110_rendezvous.md) |
+| `.` | `epochs.qnt` | Epoch transitions and receipt validity windows | [Transport](../../docs/109_transport_and_information_flow.md) |
+| `.` | `transport.qnt` | Transport layer: connections, sessions, guard chain, message ordering | [Transport](../../docs/109_transport_and_information_flow.md) |
+| `.` | `invitation.qnt` | Invitation lifecycle, ceremonies, authorization invariants | [Relational Contexts](../../docs/112_relational_contexts.md) |
+| `.` | `sbb.qnt` | Social Bulletin Board gossip | [Rendezvous](../../docs/111_rendezvous.md) |
 | `.` | `interaction.qnt` | Recovery∥Consensus concurrent execution safety | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
 
 ### Harness Modules

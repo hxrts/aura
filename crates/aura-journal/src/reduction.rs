@@ -796,7 +796,7 @@ pub fn compute_snapshot(
 // ==== AMP Garbage Collection Helpers ====
 //
 // These functions implement safe pruning boundaries for AMP facts according to the
-// GC policy documented in docs/112_amp.md section 9.2.
+// GC policy documented in docs/110_amp.md section 9.2.
 
 /// Compute the safe pruning boundary for AMP checkpoints.
 ///

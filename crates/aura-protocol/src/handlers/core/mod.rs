@@ -7,7 +7,7 @@
 //! - **Erased**: Type-erased handler traits for dynamic dispatch; enables runtime polymorphism
 //! - **Factory**: Handler construction with configuration, builder patterns, and platform detection
 //!
-//! **Design Pattern** (per docs/106_effect_system_and_runtime.md):
+//! **Design Pattern** (per docs/105_effect_system_and_runtime.md):
 //! - Handlers implement effect traits (Layer 1 interfaces)
 //! - aura-composition provides registry and composition (Layer 3)
 //! - This module provides protocol integration (Layer 4)

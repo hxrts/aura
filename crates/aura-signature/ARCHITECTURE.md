@@ -265,7 +265,7 @@ Threshold signatures use FROST protocol but are compatible with standard Ed25519
 
 ## Documentation
 
-- `docs/100_authority_and_identity.md`: Authority model and identity semantics
-- `docs/102_journal.md`: Fact-based journal and lifecycle facts
-- `docs/116_crypto.md`: Cryptographic architecture and FROST
+- `docs/102_authority_and_identity.md`: Authority model and identity semantics
+- `docs/103_journal.md`: Fact-based journal and lifecycle facts
+- `docs/100_crypto.md`: Cryptographic architecture and FROST
 - `docs/999_project_structure.md`: Layer 2 architecture and fact patterns

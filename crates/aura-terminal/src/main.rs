@@ -6,6 +6,7 @@ use aura_core::AuraError;
 use aura_app::ui::prelude::*;
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
+use aura_agent::core::AgentConfig;
 use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::effects::ExecutionMode;
 use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ThresholdArgs};
@@ -79,7 +80,12 @@ async fn main() -> Result<(), AuraError> {
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
 
     // Initialize agent using CLI preset (unified backend)
+    let mut agent_config = AgentConfig::default();
+    if let Some(base_path) = derive_storage_base_path(&command, args.config.as_ref()) {
+        agent_config.storage.base_path = base_path;
+    }
     let agent = AgentBuilder::cli()
+        .with_config(agent_config)
         .authority(authority_id)
         .context(context_id)
         .testing_mode()
@@ -202,6 +208,50 @@ async fn main() -> Result<(), AuraError> {
     }
 
     Ok(())
+}
+
+fn derive_storage_base_path(
+    command: &Commands,
+    global_config: Option<&PathBuf>,
+) -> Option<PathBuf> {
+    match command {
+        Commands::Init(init) => Some(init.output.clone()),
+        Commands::Status(status) => resolve_config_path_simple(status.config.as_ref(), global_config)
+            .and_then(base_from_config_path),
+        Commands::Node(node) => resolve_config_path_simple(node.config.as_ref(), global_config)
+            .and_then(base_from_config_path),
+        Commands::Threshold(ThresholdArgs { configs, .. }) => {
+            first_config_path(configs).and_then(base_from_config_path)
+        }
+        _ => None,
+    }
+}
+
+fn resolve_config_path_simple(
+    cmd_config: Option<&PathBuf>,
+    global_config: Option<&PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(config) = cmd_config {
+        return Some(config.clone());
+    }
+    global_config.cloned()
+}
+
+fn first_config_path(configs: &str) -> Option<PathBuf> {
+    configs
+        .split(',')
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
+fn base_from_config_path(config_path: PathBuf) -> Option<PathBuf> {
+    let parent = config_path.parent()?;
+    if parent.file_name().is_some_and(|name| name == "configs") {
+        return parent.parent().map(|p| p.to_path_buf());
+    }
+    Some(parent.to_path_buf())
 }
 
 /// Resolve the configuration file path from command line arguments

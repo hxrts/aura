@@ -18,7 +18,7 @@
 //! Layer 4: CRDT State Types - Semilattice Coordination
 //!
 //! Distributed state management using CRDT semilattices (⊔, ⊓) for conflict-free replication
-//! and eventual consistency (per docs/002_theoretical_model.md, docs/120_state_reduction.md).
+//! and eventual consistency (per docs/002_theoretical_model.md, docs/103_journal.md).
 //!
 //! **Mathematical Foundation** (per docs/002_theoretical_model.md §3):
 //! All types satisfy required semilattice properties for convergence:
@@ -33,7 +33,7 @@
 //! - **PeerView (G-Set)**: Peer discovery (grow-only set, ⊔ = union)
 //! - **IntentState (LWW)**: Operation proposals (last-write-wins with timestamp resolution)
 //!
-//! **Critical Invariant: Idempotency** (per docs/120_state_reduction.md):
+//! **Critical Invariant: Idempotency** (per docs/103_journal.md):
 //! Applying same state update twice must have identical effects. Idempotency violation
 //! introduces inconsistency across replicas and violates eventual consistency guarantee.
 //! All CRDT types satisfy the mathematical requirements for convergence:

@@ -77,7 +77,7 @@ Key components:
 - Lifecycle traits in `aura-core/src/threshold/lifecycle.rs` – Provisional/Coordinator/Consensus/Rotation modes (fast paths + finalization)
 - `AppCore.sign_tree_op()` – High-level signing API returning `AttestedOp`
 
-See [Cryptography](116_crypto.md) for the detailed threshold signature architecture.
+See [Cryptography](100_crypto.md) for the detailed threshold signature architecture.
 
 #### Application-Specific Effect Traits
 
@@ -482,7 +482,7 @@ The effect system spans several crates. Each crate defines a specific role in th
 
 `aura-effects` contains stateless and single-party effect handlers. It provides default implementations for cryptography, storage, networking, and randomness.
 
-`aura-protocol` contains orchestrated and multi-party behavior. It bridges session types to effect calls. It implements the [guard chain](109_authorization.md), journal coupling, and consensus integrations.
+`aura-protocol` contains orchestrated and multi-party behavior. It bridges session types to effect calls. It implements the [guard chain](104_authorization.md), journal coupling, and consensus integrations.
 
 `aura-agent` assembles handlers into runnable systems. It configures effect pipelines for production environments.
 
@@ -519,7 +519,7 @@ This snippet shows parallel initialization of handlers. Parallel initialization 
 
 ## 10. Guard Chain and Leakage Integration
 
-The effect runtime enforces the guard-chain sequencing defined in [Authorization](109_authorization.md) and the leakage contract from [Privacy and Information Flow](003_information_flow_contract.md) using pure guard evaluation plus asynchronous interpretation. Each projected choreography message expands to:
+The effect runtime enforces the guard-chain sequencing defined in [Authorization](104_authorization.md) and the leakage contract from [Privacy and Information Flow](003_information_flow_contract.md) using pure guard evaluation plus asynchronous interpretation. Each projected choreography message expands to:
 
 1. **Snapshot preparation (async)** – gather capability frontier, budget headroom, leakage metadata, and randomness into a `GuardSnapshot` via `AuthorizationEffects`, `FlowBudgetEffects`, and cache state.
 2. **Pure guard evaluation (sync)** – `CapGuard → FlowGuard → JournalCoupler` runs over the snapshot and request, producing a `GuardOutcome` that describes the authorization decision plus the `Vec<EffectCommand>` commands that need to execute next.
@@ -844,7 +844,7 @@ This pattern keeps:
 - **GC configurable**: Different domains can have vastly different retention needs
 - **Testing isolated**: Policies can be mocked independently of journal storage
 
-See [Consistency Metadata](121_consistency_metadata.md) for the underlying ack tracking types and [Journal](102_journal.md) for the ack storage schema.
+See [Operation Categories](107_operation_categories.md) for the underlying consistency metadata types and [Journal](103_journal.md) for the ack storage schema.
 
 ## 15. AppCore: Unified Frontend Interface
 

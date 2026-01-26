@@ -1,6 +1,6 @@
 # Journal
 
-This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes integration with the effect system and defines the invariants that ensure correctness. See [Maintenance](111_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
+This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes the reduction pipeline, flow budget semantics, and integration with the effect system. It defines the invariants that ensure correctness. See [Maintenance](115_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
 
 ## Hybrid Journal Model (Facts + Capabilities)
 
@@ -13,7 +13,7 @@ The fact journal is stored and merged as a semilattice. Capabilities are refined
 
 ## 1. Journal Namespaces
 
-Aura maintains a separate journal namespace for each authority and each [relational context](103_relational_contexts.md). A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` (see [Authority and Identity](100_authority_and_identity.md)) or a `ContextId` and no namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](105_identifiers_and_boundaries.md).
+Aura maintains a separate journal namespace for each authority and each [relational context](112_relational_contexts.md). A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` (see [Authority and Identity](102_authority_and_identity.md)) or a `ContextId` and no namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](101_identifiers_and_boundaries.md).
 
 A journal namespace evolves through fact insertion. Facts accumulate monotonically. No fact is removed except through garbage collection rules that preserve logical meaning.
 
@@ -111,7 +111,37 @@ impl JoinSemilattice for Journal {
 
 This merge function demonstrates set union across two fact sets. The namespace assertion ensures only compatible journals merge. The result is monotonic and convergent.
 
-## 4. Account Journal Reduction
+## 4. Reduction Pipeline
+
+Aura maintains two replicated state machines. Account journals describe commitment trees for authorities. Relational context journals describe cross-authority coordination. Both use the same fact-only semilattice and deterministic reducers.
+
+```mermaid
+flowchart TD
+    A[Ledger append] --> B[Journal merge];
+    B --> C[Group by parent];
+    C --> D[Resolve conflicts via max hash];
+    D --> E[Apply operations in topological order];
+    E --> F[Recompute commitments bottom-up];
+```
+
+Ledger append writes facts durably. Journal merge unions the fact set. Reducers group operations by parent commitment, resolve conflicts deterministically using max hash tie-breaking, and then apply winners in topological order. The final step recomputes commitments bottom-up which downstream components treat as the canonical state.
+
+### 4.1 Fact Production
+
+Account operations originate from local threshold signing or Aura Consensus. Relational context operations always run through Aura Consensus because multiple authorities must agree on the prestate. Each successful operation produces an `AttestedOp` fact. Receipts that must be retained for accountability are stored as `RendezvousReceipt` facts scoped to the context that emitted them. Implementations must only emit facts after verifying signatures and parent commitments.
+
+### 4.2 Determinism Invariants
+
+The reduction pipeline maintains strict determinism:
+
+1. **No HashMap iteration**: All maps use BTreeMap for consistent ordering
+2. **No system time**: OrderTime tokens provide opaque ordering
+3. **No floating point**: All arithmetic uses exact integer/fixed-point
+4. **Pure functions only**: Reducers have no side effects
+
+These properties are verified by `test_reduction_determinism()` which confirms all fact permutations produce identical state.
+
+## 5. Account Journal Reduction
 
 Account journals store attested operations for commitment tree updates. Reduction computes a `TreeStateSummary` from the fact set. Reduction applies only valid operations and resolves conflicts deterministically.
 
@@ -152,7 +182,7 @@ pub fn reduce_authority(journal: &Journal) -> Result<AuthorityState, ReductionEr
 }
 ```
 
-## 5. RelationalContext Journal Reduction
+## 6. RelationalContext Journal Reduction
 
 Relational contexts store relational facts. These facts reference authority commitments. Reduction produces a `RelationalState` that captures the current relationship between authorities.
 
@@ -196,7 +226,48 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionErr
 
 Reduction verifies that relational facts reference valid authority commitments and applies them in dependency order.
 
-## 6. Snapshots and Garbage Collection
+## 7. Flow Budgets
+
+Flow budgets track message sending allowances between authorities. The `FlowBudget` structure uses semilattice semantics for distributed convergence:
+
+```rust
+pub struct FlowBudget {
+    pub limit: u64,
+    pub spent: u64,
+    pub epoch: Epoch,
+}
+
+impl FlowBudget {
+    pub fn merge(&self, other: &Self) -> Self {
+        Self {
+            limit: self.limit.min(other.limit),
+            spent: self.spent.max(other.spent),
+            epoch: self.epoch.max(other.epoch),
+        }
+    }
+}
+```
+
+The `spent` field uses join-semilattice (max) because charges only increase. The `limit` field uses meet-semilattice (min) because the most restrictive limit wins. The `epoch` field advances monotonically. Spent resets on epoch rotation.
+
+Flow budget tracking operates at the runtime layer via `FlowBudgetManager`. The `RelationalState` includes a `flow_budgets` map for CRDT-based replication of budget state across replicas.
+
+## 8. Receipts and Accountability
+
+Receipts reference the current epoch commitment so reducers can reject stale receipts automatically. The `RendezvousReceipt` fact type stores accountability proofs:
+
+```rust
+RendezvousReceipt {
+    envelope_id: [u8; 32],
+    authority_id: AuthorityId,
+    timestamp: TimeStamp,
+    signature: Vec<u8>,
+}
+```
+
+Receipts are stored as relational facts scoped to the emitting context. This coupling ensures that receipt validity follows commitment tree epochs.
+
+## 9. Snapshots and Garbage Collection
 
 Snapshots summarize all prior facts. A snapshot fact contains a state hash, the list of superseded facts, and a sequence number. A snapshot establishes a high water mark. Facts older than the snapshot can be pruned.
 
@@ -222,7 +293,7 @@ pub fn can_prune_checkpoint(checkpoint: &AmpCheckpoint, boundary: u64) -> bool;
 pub fn can_prune_proposed_bump(bump: &ProposedBump, committed_gen: u64) -> bool;
 ```
 
-## 7. Journal Effects Integration
+## 10. Journal Effects Integration
 
 The effect system provides journal operations through `JournalEffects`. This trait handles persistence, merging, and flow budget tracking:
 
@@ -241,7 +312,7 @@ pub trait JournalEffects: Send + Sync {
 
 The effect layer writes facts to persistent storage. Replica synchronization loads facts through effect handlers into journal memory. The effect layer guarantees durability but does not affect CRDT merge semantics.
 
-## 8. AttestedOp Structure
+## 11. AttestedOp Structure
 
 AttestedOp exists in two layers with different levels of detail:
 
@@ -276,7 +347,7 @@ pub struct AttestedOp {
 
 The aura-core version includes epoch and version for full verification. The aura-journal version includes computed commitments for efficient reduction.
 
-## 9. Invariants
+## 12. Invariants
 
 The journal and reduction architecture satisfy several invariants:
 
@@ -289,11 +360,11 @@ The journal and reduction architecture satisfy several invariants:
 
 These invariants guarantee correct distributed behavior. They also support offline operation with eventual consistency. They form the foundation for Aura's account and relational context state machines.
 
-## 10. Fact Validation Pipeline
+## 13. Fact Validation Pipeline
 
 Every fact inserted into a journal must be validated before merge. The following steps outline the required checks and the effect traits responsible for each fact type:
 
-### 10.1 AttestedOp Facts
+### 13.1 AttestedOp Facts
 
 **Checks**
 - Verify the threshold signature (`agg_sig`) using the two-phase verification model from `aura-core::tree::verification`:
@@ -302,14 +373,14 @@ Every fact inserted into a journal must be validated before merge. The following
 - Ensure the referenced parent state exists locally; otherwise request missing facts.
 - Confirm the operation is well-formed (e.g., `AddLeaf` indexes a valid parent node).
 
-See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-operation-verification) for details on the verify/check model and binding message security.
+See [Tree Operation Verification](102_authority_and_identity.md#8-tree-operation-verification) for details on the verify/check model and binding message security.
 
 **Responsible Effects**
 - `CryptoEffects` for FROST signature verification via `verify_attested_op()`.
 - `JournalEffects` for parent lookup, state consistency via `check_attested_op()`, and conflict detection.
 - `StorageEffects` to persist the fact once validated.
 
-### 10.2 Relational Facts
+### 13.2 Relational Facts
 
 **Checks**
 - Validate that each authority commitment referenced in the fact matches the current reduced state (`AuthorityState::root_commitment`).
@@ -321,18 +392,18 @@ See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-op
 - `CryptoEffects` for consensus proof verification.
 - `JournalEffects` for context-specific merge.
 
-### 10.3 FlowBudget Facts
+### 13.3 FlowBudget Facts
 
 **Checks**
 - Ensure `spent` deltas are non-negative and reference the active epoch for the `(ContextId, peer)` pair.
 - Reject facts that would decrease the recorded `spent` (monotone requirement).
-- Validate receipt signatures associated with the charge (see `108_transport_and_information_flow.md`).
+- Validate receipt signatures associated with the charge (see `109_transport_and_information_flow.md`).
 
 **Responsible Effects**
 - `FlowBudgetEffects` (or FlowGuard) produce the fact and enforce monotonicity before inserting.
 - `JournalEffects` gate insertion to prevent stale epochs from updating headroom.
 
-### 10.4 Snapshot Facts
+### 13.4 Snapshot Facts
 
 **Checks**
 - Confirm the snapshot `state_hash` matches the hash of all facts below the snapshot.
@@ -345,11 +416,11 @@ See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-op
 
 By clearly separating validation responsibilities, runtime authors know which effect handlers must participate before a fact mutation is committed. This structure keeps fact semantics consistent across authorities and contexts.
 
-## 11. Consistency Metadata Schema
+## 14. Consistency Metadata Schema
 
-Facts carry consistency metadata for tracking agreement level, propagation status, and acknowledgments. See [Consistency Metadata](121_consistency_metadata.md) for the full type definitions.
+Facts carry consistency metadata for tracking agreement level, propagation status, and acknowledgments. See [Operation Categories](107_operation_categories.md) for the full consistency metadata type definitions.
 
-### 11.1 Fact Schema Fields
+### 14.1 Fact Schema Fields
 
 ```rust
 pub struct Fact {
@@ -371,7 +442,7 @@ pub struct Fact {
 - `propagation`: Tracks anti-entropy sync status
 - `ack_tracked`: Opt-in flag for per-peer acknowledgment tracking
 
-### 11.2 Ack Storage Table
+### 14.2 Ack Storage Table
 
 For facts with `ack_tracked = true`, acknowledgments are stored in a separate table:
 
@@ -386,7 +457,7 @@ For facts with `ack_tracked = true`, acknowledgments are stored in a separate ta
 └─────────────┴─────────────────────────┴─────────────────────────────────┘
 ```
 
-### 11.3 Journal API for Consistency
+### 14.3 Journal API for Consistency
 
 ```rust
 impl Journal {
@@ -403,8 +474,8 @@ impl Journal {
 
 ## See Also
 
-- [Database Architecture](113_database.md) - Query system for reading journal facts via Datalog
-- [Consistency Metadata](121_consistency_metadata.md) - Agreement, propagation, and acknowledgment tracking
-- [State Reduction](120_state_reduction.md) - Reduction pipeline details
-- [Maintenance](111_maintenance.md) - Snapshot and garbage collection pipeline
-- [Relational Contexts](103_relational_contexts.md) - Context journal structure
+- [Database Architecture](113_database.md) for query system and Datalog integration
+- [Operation Categories](107_operation_categories.md) for consistency metadata types
+- [Maintenance](115_maintenance.md) for snapshot and garbage collection pipeline
+- [Relational Contexts](112_relational_contexts.md) for context journal structure
+- [Authority and Identity](102_authority_and_identity.md) for commitment tree operations

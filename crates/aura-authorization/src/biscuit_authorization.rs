@@ -3,7 +3,7 @@
 //! Cryptographic authorization infrastructure for Aura's Web of Trust system using Biscuit tokens.
 //! Biscuit provides attenuated, cryptographically-verifiable capabilities with Datalog policy evaluation.
 //!
-//! **Key Components** (per docs/109_authorization.md):
+//! **Key Components** (per docs/104_authorization.md):
 //! - **BiscuitAuthorizationBridge**: Token generation, attenuation, verification
 //! - **Datalog Policy Evaluation**: Logic programming for fine-grained authorization
 //! - **Capability Attenuation**: Restrict tokens to specific scope/time/resources

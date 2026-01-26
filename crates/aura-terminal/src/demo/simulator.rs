@@ -9,7 +9,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_lock::RwLock;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
@@ -17,16 +16,21 @@ use tokio::time::{interval, Duration};
 use aura_agent::core::{AgentBuilder, AgentConfig};
 use aura_agent::handlers::InvitationType;
 use aura_agent::{AuraAgent, AuraEffectSystem, EffectContext, SharedTransport};
-use aura_app::AppCore;
-use aura_core::effects::{AmpChannelEffects, ChannelJoinParams, ExecutionMode, TransportEffects};
+use aura_chat::ChatFact;
+use aura_core::effects::{
+    AmpChannelEffects, ChannelJoinParams, ChannelSendParams, ExecutionMode, PhysicalTimeEffects,
+    TimeEffects, TransportEffects,
+};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_effects::time::PhysicalTimeHandler;
-use aura_effects::ReactiveEffects;
+use aura_journal::fact::{ChannelBootstrap, ChannelCheckpoint, ProtocolRelationalFact, RelationalFact};
+use aura_journal::DomainFact;
 use aura_invitation::{DeviceEnrollmentAccept, DeviceEnrollmentRequest};
 use aura_recovery::guardian_ceremony::{CeremonyProposal, CeremonyResponse, CeremonyResponseMsg};
+use aura_protocol::amp::AmpJournalEffects;
 use serde::Serialize;
 use std::str::FromStr;
 
@@ -46,6 +50,7 @@ struct GuardianAcceptance {
 pub struct DemoSimulator {
     seed: u64,
     shared_transport: SharedTransport,
+    bob_authority: AuthorityId,
     alice: Arc<AuraAgent>,
     carol: Arc<AuraAgent>,
     mobile: Arc<AuraAgent>,
@@ -58,7 +63,7 @@ impl DemoSimulator {
     pub async fn new(
         seed: u64,
         base_path: PathBuf,
-        _bob_authority: AuthorityId,
+        bob_authority: AuthorityId,
         _bob_context: ContextId,
     ) -> TerminalResult<Self> {
         let shared_transport = SharedTransport::new();
@@ -113,6 +118,7 @@ impl DemoSimulator {
         Ok(Self {
             seed,
             shared_transport,
+            bob_authority,
             alice,
             carol,
             mobile,
@@ -167,18 +173,19 @@ impl DemoSimulator {
         let alice = self.alice.clone();
         let carol = self.carol.clone();
         let mobile = self.mobile.clone();
+        let bob_authority = self.bob_authority;
         self.event_loop_handle = Some(tokio::spawn(async move {
             let mut tick = interval(Duration::from_millis(100));
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => break,
                     _ = tick.tick() => {
-                        let _ = process_peer_transport_messages("Alice", &alice).await;
-                        let _ = process_peer_transport_messages("Carol", &carol).await;
+                        let _ = process_peer_transport_messages("Alice", &alice, bob_authority).await;
+                        let _ = process_peer_transport_messages("Carol", &carol, bob_authority).await;
 
                         // Mobile processes transport messages for device enrollment choreography
                         // and ceremony messages for key package installation.
-                        let _ = process_peer_transport_messages("Mobile", &mobile).await;
+                        let _ = process_peer_transport_messages("Mobile", &mobile, bob_authority).await;
                         let _ = mobile.process_ceremony_acceptances().await;
                     }
                 }
@@ -227,7 +234,11 @@ async fn build_demo_peer_agent(
 }
 
 /// Peer-side automation: currently only guardian setup auto-acceptance.
-async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> TerminalResult<()> {
+async fn process_peer_transport_messages(
+    name: &str,
+    agent: &AuraAgent,
+    bob_authority: AuthorityId,
+) -> TerminalResult<()> {
     let effects = agent.runtime().effects();
 
     loop {
@@ -315,7 +326,12 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                         }
                     };
 
-                    if let InvitationType::Channel { home_id, .. } = invitation.invitation_type {
+                    if let InvitationType::Channel {
+                        home_id,
+                        bootstrap,
+                        ..
+                    } = invitation.invitation_type.clone()
+                    {
                         if let Err(err) = invitation_service.accept(&invitation.invitation_id).await
                         {
                             tracing::warn!(
@@ -327,6 +343,58 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
 
                         let channel_id = ChannelId::from_str(&home_id)
                             .unwrap_or_else(|_| ChannelId::from_bytes(hash(home_id.as_bytes())));
+
+                        // Ensure AMP channel state exists locally for decryption.
+                        if let Some(package) = bootstrap {
+                            let now = effects
+                                .physical_time()
+                                .await
+                                .unwrap_or(PhysicalTime {
+                                    ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
+                                    uncertainty: None,
+                                });
+                            let window = aura_protocol::amp::config::AmpRuntimeConfig::default()
+                                .default_skip_window
+                                .get();
+
+                            let checkpoint = ChannelCheckpoint {
+                                context: envelope.context,
+                                channel: channel_id,
+                                chan_epoch: 0,
+                                base_gen: 0,
+                                window,
+                                ck_commitment: aura_core::Hash32::default(),
+                                skip_window_override: Some(window),
+                            };
+
+                            let bootstrap_fact = ChannelBootstrap {
+                                context: envelope.context,
+                                channel: channel_id,
+                                bootstrap_id: package.bootstrap_id,
+                                dealer: invitation.sender_id,
+                                recipients: vec![invitation.sender_id, agent.authority_id()],
+                                created_at: now,
+                                expires_at: None,
+                            };
+
+                            if let Err(err) = effects
+                                .insert_relational_fact(RelationalFact::Protocol(
+                                    ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
+                                ))
+                                .await
+                            {
+                                tracing::warn!("{name} failed to seed AMP checkpoint: {err}");
+                            }
+
+                            if let Err(err) = effects
+                                .insert_relational_fact(RelationalFact::Protocol(
+                                    ProtocolRelationalFact::AmpChannelBootstrap(bootstrap_fact),
+                                ))
+                                .await
+                            {
+                                tracing::warn!("{name} failed to seed AMP bootstrap: {err}");
+                            }
+                        }
 
                         let params = ChannelJoinParams {
                             context: envelope.context,
@@ -340,6 +408,46 @@ async fn process_peer_transport_messages(name: &str, agent: &AuraAgent) -> Termi
                                 home_id
                             );
                         }
+                    }
+                }
+                "application/aura-amp" => {
+                    // Only respond to Bob's messages in demo mode.
+                    if envelope.source != bob_authority {
+                        continue;
+                    }
+
+                    let payload = envelope.payload.clone();
+                    let context = envelope.context;
+
+                    let message = match aura_protocol::amp::amp_recv(
+                        effects.as_ref(),
+                        context,
+                        payload,
+                    )
+                    .await
+                    {
+                        Ok(msg) => msg,
+                        Err(err) => {
+                            tracing::warn!(
+                                "{name} failed to decrypt AMP message from {}: {err}",
+                                envelope.source
+                            );
+                            continue;
+                        }
+                    };
+
+                    let params = ChannelSendParams {
+                        context,
+                        channel: message.header.channel,
+                        sender: agent.authority_id(),
+                        plaintext: message.payload,
+                        reply_to: None,
+                    };
+
+                    if let Err(err) = effects.send_message(params).await {
+                        tracing::warn!("{name} failed to echo AMP message: {err}");
+                    } else {
+                        tracing::debug!("{name} echoed AMP message back to Bob");
                     }
                 }
                 "application/aura-choreography" => {
@@ -500,100 +608,99 @@ pub struct EchoPeer {
     pub name: String,
 }
 
-/// Spawn a background listener that echoes messages from Bob back through demo peers.
+/// Spawn a background listener that processes AMP inbox traffic for Bob.
 ///
-/// This listens to chat state changes and when Bob sends a message, Alice and Carol
-/// will respond with an echo message. The peers must be members of the channel
-/// for their messages to appear.
-pub fn spawn_amp_echo_listener(
-    _shared_transport: SharedTransport,
+/// This reads AMP envelopes from Bob's transport inbox, validates/decrypts them,
+/// and commits a `ChatFact::MessageSentSealed` into Bob's journal so the UI
+/// updates through the normal reactive pipeline.
+pub fn spawn_amp_inbox_listener(
+    effects: Arc<AuraEffectSystem>,
     bob_authority: AuthorityId,
-    _bob_device_id: String,
-    app_core: Arc<RwLock<AppCore>>,
-    _effects: Arc<AuraEffectSystem>,
     peers: Vec<EchoPeer>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        use aura_app::ui::signals::CHAT_SIGNAL;
-        use aura_app::ui::types::chat::Message as ChatMessage;
+        let mut seen_payloads: HashSet<aura_core::Hash32> = HashSet::new();
+        let mut tick = interval(Duration::from_millis(50));
 
-        let mut chat_stream = {
-            let core = app_core.read().await;
-            core.subscribe(&*CHAT_SIGNAL)
-        };
-
-        let mut seen_messages: HashSet<String> = HashSet::new();
-
-        tracing::debug!("Demo echo: listener started, waiting for chat updates");
+        tracing::debug!("Demo AMP inbox: listener started");
 
         loop {
-            let chat_state = match chat_stream.recv().await {
-                Ok(state) => state,
-                Err(_) => break,
-            };
+            tick.tick().await;
 
-            for msg in chat_state.all_messages() {
-                // Only echo Bob's messages
-                if msg.sender_id != bob_authority {
+            loop {
+                let envelope = match effects.receive_envelope().await {
+                    Ok(env) => env,
+                    Err(aura_core::effects::TransportError::NoMessage) => break,
+                    Err(e) => {
+                        tracing::warn!("Demo AMP inbox receive error: {e}");
+                        break;
+                    }
+                };
+
+                let Some(content_type) = envelope.metadata.get("content-type").cloned() else {
+                    effects.requeue_envelope(envelope);
+                    break;
+                };
+
+                if content_type.as_str() != "application/aura-amp" {
+                    effects.requeue_envelope(envelope);
+                    break;
+                }
+
+                // Ignore messages sent by Bob (self)
+                if envelope.source == bob_authority {
                     continue;
                 }
-                // Don't echo the same message twice
-                if !seen_messages.insert(msg.id.clone()) {
+
+                let payload_hash = aura_core::Hash32::from_bytes(&envelope.payload);
+                if !seen_payloads.insert(payload_hash) {
                     continue;
                 }
-                tracing::debug!("Demo echo: will echo message '{}' from Bob", msg.content);
 
-                // Check if any of our peers are members of this channel
-                let channel_members: HashSet<AuthorityId> = chat_state
-                    .channel(&msg.channel_id)
-                    .map(|ch| ch.member_ids.iter().cloned().collect())
-                    .unwrap_or_default();
+                // Validate/decrypt to ensure the channel state is correct.
+                if let Err(err) = aura_protocol::amp::amp_recv(
+                    effects.as_ref(),
+                    envelope.context,
+                    envelope.payload.clone(),
+                )
+                .await
+                {
+                    tracing::warn!("Demo AMP inbox decrypt failed: {err}");
+                    continue;
+                }
 
-                // Collect echo messages first, then emit them sequentially
-                let mut echo_messages = Vec::new();
-
-                for peer in &peers {
-                    // Skip if peer isn't a member (unless channel has no members listed,
-                    // which can happen in demo mode before membership is fully synced)
-                    if !channel_members.is_empty() && !channel_members.contains(&peer.authority_id)
-                    {
+                let wire = match aura_protocol::amp::deserialize_amp_message(&envelope.payload) {
+                    Ok(wire) => wire,
+                    Err(err) => {
+                        tracing::warn!("Demo AMP inbox decode failed: {err}");
                         continue;
                     }
+                };
 
-                    let reply = format!("{}", msg.content);
-                    let now = PhysicalTimeHandler::new().physical_time_now_ms();
+                let sender_name = peers
+                    .iter()
+                    .find(|peer| peer.authority_id == envelope.source)
+                    .map(|peer| peer.name.clone())
+                    .unwrap_or_else(|| envelope.source.to_string());
 
-                    let echo_msg = ChatMessage {
-                        id: format!("echo-{}-{}-{}", peer.name.to_lowercase(), msg.id, now),
-                        channel_id: msg.channel_id,
-                        sender_id: peer.authority_id,
-                        sender_name: peer.name.clone(),
-                        content: reply,
-                        timestamp: now,
-                        is_own: false,
-                        reply_to: None,
-                        is_read: false,
-                        delivery_status: Default::default(),
-                        epoch_hint: None,
-                        is_finalized: false,
-                    };
+                let timestamp_ms = effects.current_timestamp_ms().await;
+                let message_id = format!("amp-{}-{}", payload_hash.to_hex(), envelope.source);
 
-                    echo_messages.push((peer.name.clone(), echo_msg));
-                }
+                let fact = ChatFact::message_sent_sealed_ms(
+                    envelope.context,
+                    wire.header.channel,
+                    message_id,
+                    envelope.source,
+                    sender_name,
+                    envelope.payload.clone(),
+                    timestamp_ms,
+                    None,
+                    Some(wire.header.chan_epoch as u32),
+                )
+                .to_generic();
 
-                // Emit all echo messages in a single atomic update
-                if !echo_messages.is_empty() {
-                    let core = app_core.read().await;
-                    let mut updated_state = core.read(&*CHAT_SIGNAL).await.unwrap_or_default();
-
-                    for (peer_name, echo_msg) in echo_messages {
-                        tracing::debug!("Demo echo: adding {} echo to signal", peer_name);
-                        updated_state.apply_message(msg.channel_id, echo_msg);
-                    }
-
-                    if let Err(e) = core.emit(&*CHAT_SIGNAL, updated_state).await {
-                        tracing::warn!("Demo echo: failed to emit: {}", e);
-                    }
+                if let Err(err) = effects.commit_relational_facts(vec![fact]).await {
+                    tracing::warn!("Demo AMP inbox failed to commit chat fact: {err}");
                 }
             }
         }

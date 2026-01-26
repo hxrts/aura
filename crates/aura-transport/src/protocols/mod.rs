@@ -3,7 +3,7 @@
 //! Protocol message types for network coordination: STUN (NAT traversal),
 //! hole punching (peer-to-peer connection), WebSocket framing.
 //!
-//! **Design** (per docs/108_transport_and_information_flow.md):
+//! **Design** (per docs/109_transport_and_information_flow.md):
 //! - Protocol-agnostic message definitions for choreography composition
 //! - Enables future choreographic implementations with multiple transport backends
 //! - Messages flow through guard chain (aura-protocol/guards) for authorization/flow control

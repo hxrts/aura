@@ -16,7 +16,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_terminal::demo::{spawn_amp_echo_listener, DemoSimulator, EchoPeer};
+use aura_terminal::demo::{spawn_amp_inbox_listener, DemoSimulator, EchoPeer};
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
@@ -90,14 +90,7 @@ async fn demo_amp_channel_echoes_peer_message() {
             name: "Carol".to_string(),
         },
     ];
-    let _listener = spawn_amp_echo_listener(
-        shared_transport.clone(),
-        bob_authority,
-        bob_device_id.to_string(),
-        app_core.clone(),
-        agent.runtime().effects(),
-        peers,
-    );
+    let _listener = spawn_amp_inbox_listener(agent.runtime().effects(), bob_authority, peers);
 
     // Create a channel with Alice + Carol as members.
     let members = vec![

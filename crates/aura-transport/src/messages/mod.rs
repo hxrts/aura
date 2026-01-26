@@ -3,7 +3,7 @@
 //! Message types for transport layer protocols: rendezvous (NAT traversal and peer location)
 //! and peer discovery.
 //!
-//! **Integration** (per docs/110_rendezvous.md):
+//! **Integration** (per docs/111_rendezvous.md):
 //! Messages are encoded in aura-core WireEnvelope, flow through guard chain for
 //! authorization and flow budgets, then transmitted via protocol-specific handlers
 //! (Layer 3 effects in aura-effects/transport).

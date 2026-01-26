@@ -27,7 +27,7 @@ pub async fn handle_status(
         config_path.display()
     ));
 
-    let config_key = config_path.display().to_string();
+    let config_key = format!("device_config:{}", config_path.display());
 
     // Read and parse config through storage effects
     match read_config_through_effects(ctx, &config_key, &mut output).await {

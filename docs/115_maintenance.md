@@ -108,11 +108,11 @@ Backups use existing storage and verification effects. No separate protocol exis
 
 ## 8. Automatic Synchronization
 
-Automatic synchronization implements periodic journal replication between devices. The synchronization service coordinates peer discovery, session management, and fact exchange. All synchronization uses the journal primitives described in [Journal](102_journal.md).
+Automatic synchronization implements periodic journal replication between devices. The synchronization service coordinates peer discovery, session management, and fact exchange. All synchronization uses the journal primitives described in [Journal](103_journal.md).
 
 ### 8.1 Peer Discovery and Selection
 
-Devices discover sync peers through the rendezvous system described in [Rendezvous](110_rendezvous.md). The peer manager maintains metadata for each discovered peer. This metadata includes connection state, trust level, sync success rate, and active session count.
+Devices discover sync peers through the rendezvous system described in [Rendezvous](111_rendezvous.md). The peer manager maintains metadata for each discovered peer. This metadata includes connection state, trust level, sync success rate, and active session count.
 
 ```rust
 pub struct PeerMetadata {
@@ -154,12 +154,44 @@ Automatic synchronization uses `JournalEffects` to read and write facts. The ser
 
 All fact validation rules apply during automatic sync. Devices reject invalid facts. Devices do not rollback valid facts already merged. This maintains journal monotonicity.
 
-## 9. Evolution
+## 9. Migration Infrastructure
+
+The `MigrationCoordinator` in `aura-agent/src/runtime/migration.rs` orchestrates data migrations between protocol versions.
+
+### 9.1 Migration Trait
+
+```rust
+#[async_trait]
+pub trait Migration: Send + Sync {
+    fn source_version(&self) -> SemanticVersion;
+    fn target_version(&self) -> SemanticVersion;
+    fn name(&self) -> &str;
+    async fn validate(&self, ctx: &MigrationContext) -> Result<(), MigrationError>;
+    async fn execute(&self, ctx: &MigrationContext) -> Result<(), MigrationError>;
+}
+```
+
+Each migration specifies source and target versions, a name for logging, and validate/execute methods.
+
+### 9.2 Coordinator API
+
+| Method | Purpose |
+|--------|---------|
+| `needs_migration(from)` | Check if upgrade is needed |
+| `get_migration_path(from, to)` | Find ordered migration sequence |
+| `migrate(from, to)` | Execute migrations with validation |
+| `validate_migration(from, to)` | Dry-run validation only |
+
+### 9.3 Migration Guarantees
+
+Migrations are ordered by target version. Each migration runs at most once (idempotent via version tracking). Failed migrations leave the system in a consistent state. Progress is recorded in the journal for auditability.
+
+## 10. Evolution
 
 Maintenance evolves in phases. Phase one includes snapshots, GC, cache invalidation, and OTA activation. Phase two includes replicated cache CRDTs, staged OTA rollouts, and automatic synchronization. Phase three includes proxy re-encryption for historical blobs and automated snapshot triggers.
 
 Future phases build on the same journal schema. Maintenance semantics remain compatible with older releases.
 
-## 10. Summary
+## 11. Summary
 
 Distributed maintenance uses journal facts to coordinate snapshots, cache invalidation, upgrades, and admin replacement. All operations use join-semilattice semantics. All reductions are deterministic. Devices prune storage only after observing snapshot completion. Epoch rules provide safety during upgrades and recovery. The system remains consistent across offline and online operation.

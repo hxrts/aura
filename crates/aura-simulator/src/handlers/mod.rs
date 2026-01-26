@@ -1,9 +1,9 @@
 //! Layer 6: Simulation Handler Implementations - Deterministic Testing
 //!
 //! Effect handlers enabling deterministic simulation and property testing
-//! (per docs/106_effect_system_and_runtime.md, ExecutionMode::Simulation).
+//! (per docs/105_effect_system_and_runtime.md, ExecutionMode::Simulation).
 //!
-//! **Handler Types** (per docs/106_effect_system_and_runtime.md):
+//! **Handler Types** (per docs/105_effect_system_and_runtime.md):
 //! - **TimeControl**: Deterministic time stepping (no real delays)
 //! - **FaultInjection**: Byzantine faults, chaos injection, corruption
 //! - **ScenarioInjection**: Dynamic scenario modification and state setup

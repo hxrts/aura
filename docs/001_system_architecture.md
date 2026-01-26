@@ -1,6 +1,6 @@
 # Aura System Architecture
 
-This document describes the current architecture and implementation patterns for Aura. It focuses on the effect system, authority model, guard chain enforcement, choreographic protocols, consensus integration, and crate layering. Formal definitions live in [Theoretical Model](002_theoretical_model.md) and domain specifications such as [Authority and Identity](100_authority_and_identity.md), [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md), [Journal](102_journal.md), and [Consensus](104_consensus.md).
+This document describes the current architecture and implementation patterns for Aura. It focuses on the effect system, authority model, guard chain enforcement, choreographic protocols, consensus integration, and crate layering. Formal definitions live in [Theoretical Model](002_theoretical_model.md) and domain specifications such as [Authority and Identity](102_authority_and_identity.md), [Journal](103_journal.md), and [Consensus](106_consensus.md).
 
 ## Overview
 
@@ -24,7 +24,7 @@ pub struct AuthorityId(Uuid);
 
 ### 1.2 Account authority structure
 
-Account authorities maintain device membership using the commitment tree described in [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md). The journal stores signed tree operations as facts. Reduction reconstructs the canonical tree state from these facts.
+Account authorities maintain device membership using the commitment tree described in [Authority and Identity](102_authority_and_identity.md). The journal stores signed tree operations as facts. Reduction reconstructs the canonical tree state from these facts.
 
 Account state uses `Policy` and `LeafNode` types from `aura-core`. Deterministic key derivation utilities provide context scoped keys without exposing the internal device set.
 
@@ -198,7 +198,7 @@ The fast path completes in one round trip when witnesses agree on prestate. The 
 
 ### 5.3 Prestate binding
 
-`ConsensusId` is derived from prestate hash, operation hash, and a nonce. This binding prevents reusing signatures across unrelated operations. See [Consensus](104_consensus.md) for protocol details.
+`ConsensusId` is derived from prestate hash, operation hash, and a nonce. This binding prevents reusing signatures across unrelated operations. See [Consensus](106_consensus.md) for protocol details.
 
 ## 6. 8 Layer Crate Architecture
 
@@ -287,27 +287,25 @@ The TUI uses bridge modules in `aura-app` to forward state to UI observers. Demo
 
 ## 11. Operation Categories
 
-Aura classifies operations into categories A, B, and C to decide when consensus is required. Category A uses CRDTs with immediate local effect, Category B shows pending state until agreement, and Category C blocks until consensus completes. Agreement modes are orthogonal to these categories and are defined in [Operation Categories](117_operation_categories.md).
+Aura classifies operations into categories A, B, and C to decide when consensus is required. Category A uses CRDTs with immediate local effect, Category B shows pending state until agreement, and Category C blocks until consensus completes. Agreement modes are orthogonal to these categories and are defined in [Operation Categories](107_operation_categories.md).
 
 ## Related Documents
 
 - [Project Overview](000_project_overview.md)
 - [Theoretical Model](002_theoretical_model.md)
-- [Authority and Identity](100_authority_and_identity.md)
-- [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md)
-- [Journal](102_journal.md)
-- [Relational Contexts](103_relational_contexts.md)
+- [Authority and Identity](102_authority_and_identity.md)
+- [Journal](103_journal.md)
+- [Relational Contexts](112_relational_contexts.md)
 - [Privacy and Information Flow](003_information_flow_contract.md)
-- [Transport and Information Flow](108_transport_and_information_flow.md)
-- [Authorization](109_authorization.md)
-- [Multi-party Session Types and Choreography](107_mpst_and_choreography.md)
-- [Effect System and Runtime](106_effect_system_and_runtime.md)
-- [Consensus](104_consensus.md)
+- [Transport and Information Flow](109_transport_and_information_flow.md)
+- [Authorization](104_authorization.md)
+- [Multi-party Session Types and Choreography](108_mpst_and_choreography.md)
+- [Effect System and Runtime](105_effect_system_and_runtime.md)
+- [Consensus](106_consensus.md)
 - [Database Architecture](113_database.md)
 - [Social Architecture](114_social_architecture.md)
-- [CLI and Terminal User Interface](115_cli_tui.md)
-- [Operation Categories](117_operation_categories.md)
-- [Key Rotation Ceremonies (Category C)](118_key_rotation_ceremonies.md)
+- [CLI and Terminal User Interface](116_cli_tui.md)
+- [Operation Categories](107_operation_categories.md)
 - [Aura Crate Structure and Dependency Graph](999_project_structure.md)
 - [Coordination Systems Guide](803_coordination_guide.md)
 - [Development Patterns and Workflows](805_development_patterns.md)

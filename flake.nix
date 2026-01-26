@@ -216,6 +216,7 @@
           ];
 
           shellHook = ''
+            export AURA_SUPPRESS_NIX_WELCOME=1
             if [ -z "$AURA_SUPPRESS_NIX_WELCOME" ]; then
               echo "Aura Development Environment"
               echo "============================"
@@ -253,6 +254,13 @@
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0
+
+            # Custom PS1 prompt matching user's style: user@host path (branch) [nix] >
+            # Colors: darkgrey=user@host, purple=path, greenish-yellow=branch, orange=[nix] >
+            __git_branch() {
+              git branch 2>/dev/null | grep '^*' | colrm 1 2
+            }
+            PS1='\[\033[90m\]\u@\h\[\033[0m\] \[\033[35m\]\w\[\033[0m\]$(__git_branch | sed -e "s/\(.*\)/ \x1b[38;5;148m(\1)\x1b[0m/") \[\033[38;5;208m\][nix] >\[\033[0m\] '
 
             # Set AURA_PATH to the project directory for development.
             # This ensures TUI data files (.aura/, .aura-demo/) are created in the
@@ -315,6 +323,13 @@
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0
+
+            # Custom PS1 prompt (nightly variant)
+            # Colors: darkgrey=user@host, purple=path, greenish-yellow=branch, orange=[nix-nightly] >
+            __git_branch() {
+              git branch 2>/dev/null | grep '^*' | colrm 1 2
+            }
+            PS1='\[\033[90m\]\u@\h\[\033[0m\] \[\033[35m\]\w\[\033[0m\]$(__git_branch | sed -e "s/\(.*\)/ \x1b[38;5;148m(\1)\x1b[0m/") \[\033[38;5;208m\][nix-nightly] >\[\033[0m\] '
 
             # Set AURA_PATH to the project directory for development.
             # See default devShell for full explanation.

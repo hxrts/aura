@@ -74,7 +74,7 @@ verification/quint/*.qnt → ITF traces → ActionRegistry → domain_handlers.r
 
 These systems are **not redundant** - TOML scenarios provide high-level integration tests while Quint actions enable formal verification-driven testing.
 
-**Critical**: Simulation determinism depends on [effect system](106_effect_system_and_runtime.md) compliance. Protocol code must use effect traits (`TimeEffects`, `RandomEffects`, etc.) instead of direct system calls (`SystemTime::now()`, `thread_rng()`, etc.). This enables controlled time, seeded randomness, and predictable I/O for reliable simulation results.
+**Critical**: Simulation determinism depends on [effect system](105_effect_system_and_runtime.md) compliance. Protocol code must use effect traits (`TimeEffects`, `RandomEffects`, etc.) instead of direct system calls (`SystemTime::now()`, `thread_rng()`, etc.). This enables controlled time, seeded randomness, and predictable I/O for reliable simulation results.
 
 The simulation system leverages Aura's stateless effect architecture, providing simulation capabilities through specialized handlers rather than a separate simulation runtime.
 
@@ -946,4 +946,4 @@ Aura's simulation infrastructure provides:
 
 The simulation emphasizes composition and explicit control rather than implicit coordination. This aligns with Aura's stateless effect architecture and provides flexibility for different testing scenarios.
 
-For testing infrastructure that complements simulation, see [Testing Guide](805_testing_guide.md). Learn about the [effect system](106_effect_system_and_runtime.md) and [architectural patterns](001_system_architecture.md).
+For testing infrastructure that complements simulation, see [Testing Guide](805_testing_guide.md). Learn about the [effect system](105_effect_system_and_runtime.md) and [architectural patterns](001_system_architecture.md).

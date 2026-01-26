@@ -20,7 +20,7 @@
 //! # Aura Consensus (Layer 4) - Strong Agreement
 //!
 //! Strong-agreement consensus protocol for distributed multi-authority coordination.
-//! Sole mechanism for distributed agreement in Aura (per docs/104_consensus.md).
+//! Sole mechanism for distributed agreement in Aura (per docs/106_consensus.md).
 //!
 //! ## Architecture
 //!
@@ -33,7 +33,7 @@
 //!
 //! Note: AMP consensus adapter is consolidated under `aura-amp`.
 //!
-//! ## Protocol Design (per docs/104_consensus.md)
+//! ## Protocol Design (per docs/106_consensus.md)
 //!
 //! - **Single-shot consensus**: Agrees on one operation bound to a prestate
 //! - **Authority-based witnesses**: Uses AuthorityId for agreement

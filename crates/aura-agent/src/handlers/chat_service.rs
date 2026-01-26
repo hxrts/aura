@@ -640,7 +640,7 @@ impl ChatServiceApi {
     }
 
     // =========================================================================
-    // Operations requiring ceremony infrastructure (per docs/117_operation_categories.md):
+    // Operations requiring ceremony infrastructure (per docs/107_operation_categories.md):
     // - add_member: Category C (ceremony required for group key rotation)
     // - remove_member: Category B/C depending on context
     // - edit_message: Category A (emit EditFact)
@@ -649,7 +649,7 @@ impl ChatServiceApi {
 
     /// Add a member to a chat group (Category C operation)
     ///
-    /// Per docs/117_operation_categories.md, membership changes are Category C:
+    /// Per docs/107_operation_categories.md, membership changes are Category C:
     /// they require AMP channel membership updates.
     ///
     /// Key distribution is implicit: When a new member syncs their journal with
@@ -694,7 +694,7 @@ impl ChatServiceApi {
 
     /// Remove a member from a chat group (Category C operation)
     ///
-    /// Per docs/117_operation_categories.md, membership changes are Category C.
+    /// Per docs/107_operation_categories.md, membership changes are Category C.
     /// Member removal triggers key rotation via epoch bump so the removed member
     /// cannot decrypt future messages.
     ///
@@ -751,7 +751,7 @@ impl ChatServiceApi {
 
     /// Edit a message (Category A operation - optimistic)
     ///
-    /// Per docs/117_operation_categories.md, message edits are Category A:
+    /// Per docs/107_operation_categories.md, message edits are Category A:
     /// just emit a MessageEdited fact. The original message remains in the journal;
     /// clients display the latest edit for each message_id.
     pub async fn edit_message(
@@ -804,7 +804,7 @@ impl ChatServiceApi {
 
     /// Delete a message (Category B operation - may require deferred approval)
     ///
-    /// Per docs/117_operation_categories.md, message deletion is Category B:
+    /// Per docs/107_operation_categories.md, message deletion is Category B:
     /// emit a MessageDeleted fact. Depending on channel policy, this may
     /// require approval from channel moderators.
     pub async fn delete_message(
@@ -852,7 +852,7 @@ impl ChatServiceApi {
 
     /// Update group details (Category A operation - optimistic)
     ///
-    /// Per docs/117_operation_categories.md, topic/name updates are Category A:
+    /// Per docs/107_operation_categories.md, topic/name updates are Category A:
     /// CRDT semantics with last-write-wins resolution.
     pub async fn update_group_details(
         &self,

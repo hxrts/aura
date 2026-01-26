@@ -65,7 +65,7 @@
 //! - Authorization decisions use `AuthorityId` via Biscuit tokens
 //! - State merges resolve conflicts using authority-attributed timestamps
 //!
-//! See `docs/100_authority_and_identity.md` for the complete authority model.
+//! See `docs/102_authority_and_identity.md` for the complete authority model.
 //!
 //! ## Time System
 //!
@@ -76,7 +76,7 @@
 //! - All time access goes through `PhysicalTimeEffects` trait, never direct `SystemTime` calls
 //! - Time is passed explicitly to methods, enabling deterministic testing
 //!
-//! See `docs/106_effect_system_and_runtime.md` for the unified time architecture.
+//! See `docs/105_effect_system_and_runtime.md` for the unified time architecture.
 
 // Allow disallowed methods/types in protocol implementations that coordinate effects
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]

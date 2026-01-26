@@ -88,7 +88,7 @@ Protocols consume and return coordinators with updated state. This enables immut
 
 ## Commitment Tree Operations
 
-[Commitment trees](101_accounts_and_commitment_tree.md) provide forward secrecy for group communication. The tree structure enables efficient key updates when group membership changes.
+[Commitment trees](102_authority_and_identity.md) provide forward secrecy for group communication. The tree structure enables efficient key updates when group membership changes.
 
 ### Tree Structure
 
@@ -314,7 +314,7 @@ Authorization evaluation computes trust paths between devices. Requests require 
 
 ## Flow Budget Management
 
-Flow budgets control communication rates and privacy leakage. Budgets prevent spam attacks and limit metadata disclosure through traffic analysis. See [Transport and Information Flow](108_transport_and_information_flow.md) for detailed implementation.
+Flow budgets control communication rates and privacy leakage. Budgets prevent spam attacks and limit metadata disclosure through traffic analysis. See [Transport and Information Flow](109_transport_and_information_flow.md) for detailed implementation.
 
 ### Budget Structure
 
@@ -415,7 +415,7 @@ Privacy costs depend on message content, timing patterns, and recipient relation
 
 ## Session Types and Choreographic Programming
 
-[Choreographic programming](107_mpst_and_choreography.md) enables writing distributed protocols from a global perspective. Automatic projection generates local session types for each participant. For theoretical foundations, see [Theoretical Model](002_theoretical_model.md). This ensures protocol compliance and prevents communication errors.
+[Choreographic programming](108_mpst_and_choreography.md) enables writing distributed protocols from a global perspective. Automatic projection generates local session types for each participant. For theoretical foundations, see [Theoretical Model](002_theoretical_model.md). This ensures protocol compliance and prevents communication errors.
 
 ### Rumpsteak-Aura Integration
 
@@ -650,6 +650,6 @@ Is this operation establishing new cryptographic relationships?
 | Blocking on message send | Eventual consistency is fine | Category A - optimistic |
 | Immediate permission change | Affects others' access | Category B - deferred |
 
-See [Operation Categories](117_operation_categories.md) for comprehensive documentation.
+See [Operation Categories](107_operation_categories.md) for comprehensive documentation.
 
 Continue with [Advanced Choreography Guide](804_advanced_coordination_guide.md) for sophisticated protocol development. Learn comprehensive testing in [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md).

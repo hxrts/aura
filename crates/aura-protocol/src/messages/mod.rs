@@ -25,7 +25,7 @@
 //! - **types**: Rendezvous coordination (peer discovery, rendezvous)
 //! - **common_envelope**: Message envelope infrastructure (versioning, wire format)
 //!
-//! **Design Principles** (per docs/001_system_architecture.md, docs/107_mpst_and_choreography.md):
+//! **Design Principles** (per docs/001_system_architecture.md, docs/108_mpst_and_choreography.md):
 //! - **Domain separation**: Each protocol namespace isolated (prevents message confusion)
 //! - **Type safety**: Strong typing enables compile-time message validation
 //! - **Versioning**: WIRE_FORMAT_VERSION for forward/backward compatibility

@@ -50,7 +50,7 @@
 //!
 //! - `aura-effects/src/transport/` - Effect handlers for transport operations
 //! - `aura-agent/src/transport/` - Choreographic transport coordination
-//! - `docs/108_transport_and_information_flow.md` - Transport architecture and privacy
+//! - `docs/109_transport_and_information_flow.md` - Transport architecture and privacy
 
 // Internal module implementations
 

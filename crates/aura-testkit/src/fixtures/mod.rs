@@ -4,7 +4,7 @@
 //! **BiscuitFixture** (authorization tokens), **ProtocolFixture** (operation patterns),
 //! **CommonFixture** (reusable patterns), **CleanupFixture** (resource management).
 //!
-//! **Design** (per docs/106_effect_system_and_runtime.md):
+//! **Design** (per docs/105_effect_system_and_runtime.md):
 //! Fixtures provide domain-specific patterns (e.g., "create authorized peer" without
 //! manual token generation). Enable fluent test writing with minimal boilerplate.
 

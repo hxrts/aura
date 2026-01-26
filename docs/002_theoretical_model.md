@@ -43,7 +43,7 @@ $$
 \kappa \in \text{Ctx} = \{ \text{ContextId} \}
 $$
 
-Contexts are opaque UUIDs representing authority journals or RelationalContexts. Keys for transport sessions and DKD outputs are scoped to these identifiers. The identifier itself never leaks participants. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for canonical definitions.
+Contexts are opaque UUIDs representing authority journals or RelationalContexts. Keys for transport sessions and DKD outputs are scoped to these identifiers. The identifier itself never leaks participants. See [Identifiers and Boundaries](101_identifiers_and_boundaries.md) for canonical definitions.
 
 Messages:
 
@@ -178,7 +178,7 @@ The type `Fact` represents facts as join-semilattice elements. Accumulation oper
 
 Journals replicate only facts. Capability evaluations run locally by interpreting Biscuit tokens plus policy. This keeps authorization independent of the replicated CRDT while preserving the same meet monotonicity at runtime.
 
-Contexts (`ContextId`) define privacy partitions. Messages never cross partition boundaries without explicit protocol support. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for precise identifier semantics and [Relational Contexts](103_relational_contexts.md) for implementation patterns.
+Contexts (`ContextId`) define privacy partitions. Messages never cross partition boundaries without explicit protocol support. See [Identifiers and Boundaries](101_identifiers_and_boundaries.md) for precise identifier semantics and [Relational Contexts](112_relational_contexts.md) for implementation patterns.
 
 ### 2.2 Content Addressing Contract
 
@@ -188,7 +188,7 @@ Structures are serialized using canonical CBOR with sorted maps and deterministi
 
 Once a digest is published, the bytes for that artifact cannot change. New content requires a new digest and a new fact in the journal.
 
-Snapshots and upgrade bundles stored outside the journal are referenced solely by their digest. Downloaders verify the digest before accepting the payload. Journal merges compare digests and reject mismatches before updating state. See [Maintenance](111_maintenance.md) for the complete fact-to-state pipeline.
+Snapshots and upgrade bundles stored outside the journal are referenced solely by their digest. Downloaders verify the digest before accepting the payload. Journal merges compare digests and reject mismatches before updating state. See [Maintenance](115_maintenance.md) for the complete fact-to-state pipeline.
 
 ### 2.3 Effect Signatures
 
@@ -223,7 +223,7 @@ These effect signatures define the interface between protocols and the runtime. 
 
 ### 2.4 Guards and Observability Invariants
 
-Every observable side effect is mediated by a guard chain fully described in [Authorization](109_authorization.md):
+Every observable side effect is mediated by a guard chain fully described in [Authorization](104_authorization.md):
 
 1. CapGuard: $`\text{need}(\sigma) \leq \text{Caps}(\text{ctx})`$
 2. FlowGuard: $`\text{headroom}(\text{ctx}, \text{cost})`$ where $`\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})`$ succeeds and yields a $`\text{Receipt}`$
@@ -719,7 +719,7 @@ Under this calculus, we can make the following interpretation:
 
 The join-semilattice (Facts) captures evidence and observations (trust and information flow). Examples: delegations/attestations, quorum proofs, ceremony transcripts, flow receipts, and monotone $`\text{spent}`$ counters.
 
-The meet-semilattice (Capabilities) captures enforcement limits and constraints (trust and information flow). Examples: the sovereign policy lattice, Biscuit token caveats, leak bounds, and consent gates. See [Authorization](109_authorization.md) for implementation details. Flow budget limits are derived from capability evaluation, not stored as facts. This lattice is evaluated locally rather than stored in the journal, but it obeys the same algebra.
+The meet-semilattice (Capabilities) captures enforcement limits and constraints (trust and information flow). Examples: the sovereign policy lattice, Biscuit token caveats, leak bounds, and consent gates. See [Authorization](104_authorization.md) for implementation details. Flow budget limits are derived from capability evaluation, not stored as facts. This lattice is evaluated locally rather than stored in the journal, but it obeys the same algebra.
 
 Effective authority and headroom are computed from both lattices:
 
@@ -753,7 +753,7 @@ Together, these form a *privacy-preserving, capability-checked distributed λ-ca
 ## See Also
 
 - [System Architecture](001_system_architecture.md) - Implementation patterns and runtime layering
-- [Journal](102_journal.md) - Fact storage and CRDT semantics
-- [Authorization](109_authorization.md) - Biscuit evaluation and guard chaining
-- [Identifiers and Boundaries](105_identifiers_and_boundaries.md) - Canonical identifier definitions
-- [Maintenance](111_maintenance.md) - Reducer pipelines for authorities and contexts
+- [Journal](103_journal.md) - Fact storage and CRDT semantics
+- [Authorization](104_authorization.md) - Biscuit evaluation and guard chaining
+- [Identifiers and Boundaries](101_identifiers_and_boundaries.md) - Canonical identifier definitions
+- [Maintenance](115_maintenance.md) - Reducer pipelines for authorities and contexts

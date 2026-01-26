@@ -46,7 +46,7 @@
 //!
 //! ## Guard Chain
 //!
-//! Protocol messages expand through effects in order (per docs/109_authorization.md):
+//! Protocol messages expand through effects in order (per docs/104_authorization.md):
 //! Authorization → FlowBudget → Leakage → Journal → Transport.
 //!
 //! ## Example

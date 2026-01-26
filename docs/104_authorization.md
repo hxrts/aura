@@ -2,7 +2,7 @@
 
 ## Overview
 
-Aura authorizes every observable action through Biscuit capability evaluation combined with sovereign policy and [flow budgets](108_transport_and_information_flow.md). The authorization pipeline spans `AuthorizationEffects`, the guard chain, and receipt accounting. This document describes the data flow and integration points so that all crates implement the same procedure.
+Aura authorizes every observable action through Biscuit capability evaluation combined with sovereign policy and [flow budgets](109_transport_and_information_flow.md). The authorization pipeline spans `AuthorizationEffects`, the guard chain, and receipt accounting. This document describes the data flow and integration points so that all crates implement the same procedure.
 
 ## Biscuit Capability Model
 

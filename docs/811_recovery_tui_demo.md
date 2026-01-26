@@ -28,7 +28,7 @@ This uses the CLI scenario runner plus the simulator to execute the guardian set
 
 Once Bob adds Alice and Carol as guardians and configures the threshold to 2-of-3, subsequent signing operations that require guardian approval use the full FROST threshold protocol.
 
-See [Crypto Architecture](116_crypto.md#7-signing-modes-single-signer-vs-threshold) for details on signing modes.
+See [Crypto Architecture](100_crypto.md#7-signing-modes-single-signer-vs-threshold) for details on signing modes.
 
 ## What Happens in Each Phase
 

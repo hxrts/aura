@@ -3,7 +3,7 @@
 //! Foundation for test execution: effect system setup, context creation, harness utilities,
 //! and controllable time management for deterministic testing (ExecutionMode::Testing/Simulation).
 //!
-//! **Key Components** (per docs/106_effect_system_and_runtime.md):
+//! **Key Components** (per docs/105_effect_system_and_runtime.md):
 //! - **EffectSetup**: Compose test effect handlers for specific test scenarios
 //! - **ContextCreation**: Set up authority/flow/receipt contexts for test operations
 //! - **Harness**: Test execution framework with setup/teardown coordination

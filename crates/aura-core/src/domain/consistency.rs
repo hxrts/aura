@@ -67,7 +67,7 @@ impl From<&str> for ProposalId {
     }
 }
 
-/// Operation category from docs/117_operation_categories.md
+/// Operation category from docs/107_operation_categories.md
 ///
 /// Aura classifies operations into three categories based on their
 /// coordination requirements:

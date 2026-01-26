@@ -20,7 +20,7 @@ This structure identifies a single secure channel. One channel exists per `(Cont
 
 ## 2. Guard Chain
 
-All transport sends pass through the guard chain defined in [Authorization](109_authorization.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes. Guard evaluation runs synchronously over a prepared `GuardSnapshot` and returns `EffectCommand` data. An async interpreter executes those commands so guards never perform I/O directly.
+All transport sends pass through the guard chain defined in [Authorization](104_authorization.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes. Guard evaluation runs synchronously over a prepared `GuardSnapshot` and returns `EffectCommand` data. An async interpreter executes those commands so guards never perform I/O directly.
 
 ## 3. Flow Budget and Receipts
 
@@ -95,23 +95,23 @@ The network layer does not reveal authority structure. Context identifiers do no
 Secure channels follow a lifecycle aligned with rendezvous and epoch semantics:
 
 1. **Establishment**:
-   - Ranch rendezvous per [Rendezvous Architecture](110_rendezvous.md) to exchange descriptors inside the [relational context](103_relational_contexts.md) journal.
+   - Ranch rendezvous per [Rendezvous Architecture](111_rendezvous.md) to exchange descriptors inside the [relational context](112_relational_contexts.md) journal.
    - Each descriptor contains transport hints, a handshake PSK derived from the context key, and a `punch_nonce`.
    - Once both parties receive offer/answer envelopes, they perform Noise IKpsk2 using the context-derived keys and establish a QUIC or relay-backed channel bound to `(ContextId, peer)`.
 
 2. **Steady state**:
    - Guard chain enforces CapGuard → FlowGuard → JournalCoupler for every send.
-   - FlowBudget receipts created on each hop are inserted into the [relational context](103_relational_contexts.md) journal so downstream peers can audit path compliance.
+   - FlowBudget receipts created on each hop are inserted into the [relational context](112_relational_contexts.md) journal so downstream peers can audit path compliance.
 
 3. **Re-keying on epoch change**:
-   - When the account or context epoch changes (as recorded in `101_accounts_and_commitment_tree.md` / `103_relational_contexts.md`), the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys.
+   - When the account or context epoch changes (as recorded in [Authority and Identity](102_authority_and_identity.md) / [Relational Contexts](112_relational_contexts.md)), the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys.
    - Existing receipts are marked invalid for the new epoch, preventing replay.
 
 4. **Teardown**:
    - Channels close explicitly when contexts end or when FlowGuard hits the configured budget limit.
    - Receipts emitted during teardown propagate through the relational context journal so guardians or auditors can verify all hops charged their budgets up to the final packet.
 
-By tying establishment and teardown to relational context journals, receipts become part of the same fact set tracked in `111_maintenance.md`, ensuring long-term accountability.
+By tying establishment and teardown to relational context journals, receipts become part of the same fact set tracked in `115_maintenance.md`, ensuring long-term accountability.
 
 ## 8. Privacy-by-Design Patterns
 
@@ -225,7 +225,7 @@ The combination ensures that:
 
 ## 9. Sync Status and Delivery Tracking
 
-Category A (optimistic) operations require UI feedback for sync and delivery status. Anti-entropy provides the underlying sync mechanism, but users need visibility into progress. See [Consistency Metadata](121_consistency_metadata.md) for the full type definitions.
+Category A (optimistic) operations require UI feedback for sync and delivery status. Anti-entropy provides the underlying sync mechanism, but users need visibility into progress. See [Operation Categories](107_operation_categories.md) for the full consistency metadata type definitions.
 
 ### 9.1 Propagation Status
 
@@ -338,10 +338,99 @@ Category B and C operations have different confirmation models:
 
 Lifecycle modes (A1/A2/A3) apply within these categories: A1/A2 updates are usable immediately but must be treated as provisional until A3 consensus finalization. Soft-safe A2 should publish convergence certificates and reversion facts so UI and transport can surface any reversion risk during the soft window.
 
-See [Consensus - Operation Categories](104_consensus.md#17-operation-categories) for categorization details.
+See [Consensus - Operation Categories](106_consensus.md#17-operation-categories) for categorization details.
 
-## 10. Summary
+## 10. Anti-Entropy Sync Protocol
+
+Anti-entropy implements journal synchronization between peers. The protocol exchanges digests, plans reconciliation, and transfers operations.
+
+### 10.1 Sync Phases
+
+1. **Load Local State**: Read local `Journal` (facts + caps) and the local operation log.
+2. **Compute Digest**: Compute `JournalDigest` for local state.
+3. **Digest Exchange**: Send local digest to peer and receive peer digest.
+4. **Reconciliation Planning**: Compare digests and choose action (equal, LocalBehind, RemoteBehind, or Diverged).
+5. **Operation Transfer**: Pull or push operations in batches.
+6. **Merge + Persist**: Convert applied ops to journal delta, merge with local journal, persist once per round.
+
+### 10.2 Digest Format
+
+```rust
+pub struct JournalDigest {
+    pub operation_count: u64,
+    pub last_epoch: Epoch,
+    pub operation_hash: Hash32,
+    pub fact_hash: Hash32,
+    pub caps_hash: Hash32,
+}
+```
+
+The `operation_count` is the number of operations in the local op log. The `last_epoch` is the max parent_epoch observed. The `operation_hash` is computed by streaming op fingerprints in deterministic order. The `fact_hash` and `caps_hash` use canonical serialization (DAG-CBOR) then hash.
+
+### 10.3 Reconciliation Actions
+
+| Digest Comparison | Action |
+|-------------------|--------|
+| Equal | No-op |
+| LocalBehind | Request missing ops |
+| RemoteBehind | Push ops |
+| Diverged | Push + pull |
+
+### 10.4 Retry Behavior
+
+Anti-entropy can be retried according to `AntiEntropyConfig.retry_policy`. The default policy is exponential backoff with a bounded max attempt count.
+
+### 10.5 Failure Semantics
+
+Failures are reported with structured phase context:
+
+- `SyncPhase::LoadLocalState`
+- `SyncPhase::ComputeDigest`
+- `SyncPhase::DigestExchange`
+- `SyncPhase::PlanRequest`
+- `SyncPhase::ReceiveOperations`
+- `SyncPhase::MergeJournal`
+- `SyncPhase::PersistJournal`
+
+This makes failures attributable to a specific phase and peer.
+
+## 11. Protocol Version Negotiation
+
+All choreographic protocols participate in version negotiation during connection establishment.
+
+### 11.1 Version Handshake Flow
+
+```
+Initiator                    Responder
+   |                            |
+   |-- VersionHandshakeRequest -->
+   |     (version, min_version, capabilities, nonce)
+   |                            |
+   |<-- VersionHandshakeResponse -|
+   |     (Accepted/Rejected)
+   |                            |
+[Use negotiated version or disconnect]
+```
+
+The handler is located at `aura-protocol/src/handlers/version_handshake.rs`.
+
+### 11.2 Handshake Outcomes
+
+| Outcome | Response Contents |
+|---------|-------------------|
+| Compatible | `negotiated_version` (min of both peers), shared `capabilities` |
+| Incompatible | `reason`, peer version, optional `upgrade_url` |
+
+### 11.3 Protocol Capabilities
+
+| Capability | Min Version | Description |
+|------------|-------------|-------------|
+| `ceremony_supersession` | 1.0.0 | Ceremony replacement tracking |
+| `version_handshake` | 1.0.0 | Protocol version negotiation |
+| `fact_journal` | 1.0.0 | Fact-based journal sync |
+
+## 12. Summary
 
 The transport, guard chain, and information flow architecture enforces strict control over message transmission. Secure channels bind communication to contexts. Guard chains enforce authorization, budget, and journal updates. Flow budgets and receipts regulate data usage. Leakage budgets reduce metadata exposure. Privacy-by-design patterns ensure minimal metadata exposure and context isolation. All operations remain private to the context and reveal no structural information.
 
-Sync status and delivery tracking provide user visibility into Category A operation propagation. Anti-entropy callbacks enable real-time progress updates. Delivery receipts enable message read status for enhanced UX.
+Sync status and delivery tracking provide user visibility into Category A operation propagation. Anti-entropy provides the underlying sync mechanism with digest-based reconciliation. Version negotiation ensures protocol compatibility across peers. Delivery receipts enable message read status for enhanced UX.

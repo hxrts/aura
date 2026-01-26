@@ -1,6 +1,6 @@
 # Multi-party Session Types and Choreography
 
-This document describes the architecture of choreographic protocols in Aura. It explains how global protocols are defined, projected, and executed. It defines the structure of local session types, the integration with the [effect system](106_effect_system_and_runtime.md), and the use of [guard chains](109_authorization.md) and journal coupling.
+This document describes the architecture of choreographic protocols in Aura. It explains how global protocols are defined, projected, and executed. It defines the structure of local session types, the integration with the [effect system](105_effect_system_and_runtime.md), and the use of [guard chains](104_authorization.md) and journal coupling.
 
 ## 1. DSL and Projection
 
@@ -55,8 +55,7 @@ Generated runners also call:
 - `provide_message` for outbound payloads
 - `select_branch` for choice decisions
 
-These are sourced from runtime state (params, journal facts, UI inputs) as documented in
-`docs/119_choreography_runtime_audit.md`.
+These are sourced from runtime state (params, journal facts, UI inputs).
 
 ## 4. Choreography Annotations and Effect Commands
 
@@ -125,11 +124,6 @@ may change without notice.
 - Additional helper functions may be added, but existing signatures will not change without a
   schema/version bump in the macro output.
 - Generated role enums and protocol-specific modules are **not** part of the stable API surface.
-
-### Runtime Wiring Audit
-
-See `docs/119_choreography_runtime_audit.md` for the status of each `choreography!` usage
-(wired vs spec-only) and the migration tickets required to make them executable.
 
 ### Integration with Effect Interpreters
 
@@ -307,9 +301,94 @@ Is this operation establishing or modifying cryptographic relationships?
                No coordination needed
 ```
 
-See [Consensus - Operation Categories](104_consensus.md#17-operation-categories) for detailed categorization.
+See [Consensus - Operation Categories](106_consensus.md#17-operation-categories) for detailed categorization.
 
-## 9. Summary
+## 9. Choreography Inventory
+
+This section lists all choreographies in the codebase with their locations and purposes.
+
+### 9.1 Core Protocols
+
+| Protocol | Location | Purpose |
+|----------|----------|---------|
+| AuraConsensus | `aura-consensus/src/protocol/choreography.choreo` | Fast path and fallback consensus |
+| AmpTransport | `aura-amp/src/choreography.choreo` | Asynchronous message transport |
+
+### 9.2 Rendezvous Protocols
+
+| Protocol | Location | Purpose |
+|----------|----------|---------|
+| RendezvousExchange | `aura-rendezvous/src/protocol.rendezvous_exchange.choreo` | Direct peer discovery |
+| RelayedRendezvous | `aura-rendezvous/src/protocol.relayed_rendezvous.choreo` | Relay-assisted connection |
+
+### 9.3 Authentication Protocols
+
+| Protocol | Location | Purpose |
+|----------|----------|---------|
+| GuardianAuthRelational | `aura-authentication/src/guardian_auth_relational.choreo` | Guardian authentication |
+| DkdChoreography | `aura-authentication/src/dkd.choreo` | Distributed key derivation |
+
+### 9.4 Recovery Protocols
+
+| Protocol | Location | Purpose |
+|----------|----------|---------|
+| RecoveryProtocol | `aura-recovery/src/recovery_protocol.choreo` | Account recovery flow |
+| GuardianMembershipChange | `aura-recovery/src/guardian_membership.choreo` | Guardian add/remove |
+| GuardianCeremony | `aura-recovery/src/guardian_ceremony.choreo` | Guardian key ceremony |
+| GuardianSetup | `aura-recovery/src/guardian_setup.choreo` | Initial guardian setup |
+
+### 9.5 Invitation Protocols
+
+| Protocol | Location | Purpose |
+|----------|----------|---------|
+| InvitationExchange | `aura-invitation/src/protocol.invitation_exchange.choreo` | Contact/channel/device invitation |
+| GuardianInvitation | `aura-invitation/src/protocol.guardian_invitation.choreo` | Guardian invitation |
+
+### 9.6 Sync Protocols
+
+| Protocol | Location | Purpose |
+|----------|----------|---------|
+| EpochRotationProtocol | `aura-sync/src/protocols/epochs.choreo` | Epoch rotation sync |
+
+## 10. Runtime Infrastructure
+
+The runtime provides choreographic execution through the `ChoreographicEffects` trait and `AuraProtocolAdapter`.
+
+### 10.1 ChoreographicEffects Trait
+
+| Method | Purpose |
+|--------|---------|
+| `send_to_role_bytes` | Send message to specific role |
+| `receive_from_role_bytes` | Receive message from specific role |
+| `broadcast_bytes` | Broadcast to all roles |
+| `start_session` | Initialize choreography session |
+| `end_session` | Terminate choreography session |
+
+The runtime adapter is located at `crates/aura-agent/src/runtime/choreography_adapter.rs`. It bridges `ChoreographicEffects` to the generated runners.
+
+### 10.2 Wiring a Choreography
+
+1. Store the protocol in a `.choreo` file next to the Rust module that loads it.
+2. Use `choreography!(include_str!("..."))` to generate the protocol module and runners.
+3. Build an `AuraProtocolAdapter` and call `Protocol::execute_as(role, &mut adapter, params)` from the runtime bridge/service.
+4. Provide decision sources for `provide_message` and `select_branch` callbacks.
+
+### 10.3 Decision Sourcing
+
+Generated runners call `provide_message` for outbound payloads and `select_branch` for choice decisions. These are sourced from runtime state:
+
+| Source Type | Examples |
+|-------------|----------|
+| Params | Consensus parameters, invitation payloads |
+| Journal facts | Local state, authority commitments |
+| Service state | Ceremony proposals, channel state |
+| UI/Policy | Accept/reject decisions, commit/abort choices |
+
+### 10.4 Integration Features
+
+The runtime provides guard chain integration (CapGuard → FlowGuard → JournalCoupler), transport effects for message passing, and session lifecycle management with metrics.
+
+## 11. Summary
 
 Aura uses choreographic programming to define global protocols. Projection produces local session types. Session types enforce structured communication. Handlers execute protocol steps using effect traits. Extension effects provide authorization, budgeting, and journal updates. Execution modes support testing, simulation, and production. Choreographies define distributed coordination for CRDT sync, FROST signing, and consensus.
 

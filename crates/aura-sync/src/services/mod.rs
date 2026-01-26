@@ -7,7 +7,7 @@
 //! - **SyncService**: Main service orchestrating anti-entropy, journal sync, OTA, snapshots
 //! - **MaintenanceService**: Garbage collection, cache invalidation, snapshot proposals
 //!
-//! **Service Trait** (per docs/106_effect_system_and_runtime.md):
+//! **Service Trait** (per docs/105_effect_system_and_runtime.md):
 //! All services implement `Service` trait with: `start()`, `stop()`, `health_check()`, `is_running()`
 //! enabling uniform lifecycle management and health monitoring across aura-agent services.
 //!

@@ -473,26 +473,31 @@ smoke-test:
     rm -rf .aura-test
 
     echo "1. Initializing 2-of-3 threshold account..."
-    cargo run --bin aura -- init -n 3 -t 2 -o .aura-test
+    init_log="$(mktemp)"
+    cargo run --bin aura -- init -n 3 -t 2 -o .aura-test | tee "$init_log"
     echo "OK Account initialized"
 
-    echo "2. Verifying effect_api and config files..."
-    [ -f ".aura-test/effect_api.cbor" ] && echo "OK Effect API file created" || { echo "ERROR: Ledger file not found"; exit 1; }
-    [ -f ".aura-test/configs/device_1.toml" ] && echo "OK Config file created" || { echo "ERROR: Config file not found"; exit 1; }
+    echo "2. Verifying effect_api and config entries..."
+    grep -q "Created effect API metadata" "$init_log" && echo "OK Effect API metadata created" || { echo "ERROR: Effect API metadata missing"; exit 1; }
+    grep -q "Created device_1.toml" "$init_log" && echo "OK Config entry created" || { echo "ERROR: Config entry missing"; exit 1; }
+    rm -f "$init_log"
 
     echo "3. Checking account status..."
-    cargo run --bin aura -- status -c .aura-test/configs/device_1.toml
+    status_out="$(cargo run --bin aura -- status -c .aura-test/configs/device_1.toml)"
+    echo "$status_out"
+    echo "$status_out" | grep -q "Configuration loaded successfully" || { echo "ERROR: Config not found in storage"; exit 1; }
     echo "OK Status retrieved"
 
     echo "4. Testing multi-device configs..."
     for i in 1 2 3; do
-        [ -f ".aura-test/configs/device_${i}.toml" ] && echo "   [OK] Device ${i} config found" || { echo "ERROR"; exit 1; }
+        device_out="$(cargo run --bin aura -- status -c .aura-test/configs/device_${i}.toml)"
+        echo "$device_out" | grep -q "Configuration loaded successfully" && echo "   [OK] Device ${i} config found" || { echo "ERROR"; exit 1; }
     done
 
     echo "5. Testing threshold signature operation..."
     cargo run --bin aura -- threshold \
         --configs .aura-test/configs/device_1.toml,.aura-test/configs/device_2.toml \
-        --threshold 2 --mode local > /dev/null 2>&1 && echo "OK Threshold signature passed" || { echo "FAIL"; exit 1; }
+        --threshold 2 --mode sign > /dev/null 2>&1 && echo "OK Threshold signature passed" || { echo "FAIL"; exit 1; }
 
     echo ""
     echo "Phase 0 smoke tests passed!"

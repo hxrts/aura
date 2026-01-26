@@ -867,7 +867,7 @@ impl Default for Fact {
 /// - Same token bytes: returns the token unchanged (idempotent)
 ///
 /// This follows the meet-semilattice laws where adding blocks strictly reduces authority.
-/// See docs/109_authorization.md for the formal specification.
+/// See docs/104_authorization.md for the formal specification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cap {
     /// Serialized Biscuit token (empty if no capabilities)

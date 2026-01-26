@@ -41,7 +41,7 @@
 //! - [`guardian_auth_relational`]: Relational context-based guardian authentication
 //! - [`dkd`]: Distributed Key Derivation protocol
 //!
-//! See `docs/100_authority_and_identity.md` for the authority model documentation.
+//! See `docs/102_authority_and_identity.md` for the authority model documentation.
 
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
@@ -81,7 +81,7 @@ pub mod dkd;
 
 /// Operation category map (A/B/C) for protocol gating and review.
 ///
-/// Note: Categories should be reviewed against `docs/117_operation_categories.md`.
+/// Note: Categories should be reviewed against `docs/107_operation_categories.md`.
 pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
     ("auth:challenge", "A"),
     ("auth:proof", "A"),

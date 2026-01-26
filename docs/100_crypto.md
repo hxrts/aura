@@ -447,6 +447,6 @@ Hardware Security Module support would require a new `HsmCryptoHandler` implemen
 
 ## See Also
 
-- [Effect System and Runtime](106_effect_system_and_runtime.md) for effect trait patterns
+- [Effect System and Runtime](105_effect_system_and_runtime.md) for effect trait patterns
 - [Project Structure](999_project_structure.md) for 8-layer architecture
 - [Development Patterns and Workflows](805_development_patterns.md) for code location guidance

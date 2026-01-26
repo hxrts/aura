@@ -2,7 +2,7 @@
 //!
 //! Maintenance facts model snapshot coordination, cache invalidation, OTA upgrades,
 //! and admin replacement. Facts are stored in authority journals and reduced
-//! deterministically. See docs/111_maintenance.md for behavior.
+//! deterministically. See docs/115_maintenance.md for behavior.
 
 pub mod facts;
 pub mod gc;

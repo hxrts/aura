@@ -1964,21 +1964,75 @@ async fn execute_notify_peer(
     receipt: Option<Receipt>,
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
-    if effects.is_testing() {
+    if effects.is_test_mode() {
         return Ok(());
     }
 
-    let invitation = InvitationHandler::load_created_invitation(
-        effects,
-        authority.authority_id(),
-        &invitation_id,
-    )
-    .await
-    .ok_or_else(|| {
-        AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
-    })?;
+    let authority_id = authority.authority_id();
+    let (code, invitation_context) = if let Some(invitation) =
+        InvitationHandler::load_created_invitation(effects, authority_id, &invitation_id).await
+    {
+        (InvitationServiceApi::export_invitation(&invitation), invitation.context_id)
+    } else {
+        let facts = effects
+            .load_committed_facts(authority_id)
+            .await
+            .map_err(|_| {
+                AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
+            })?;
 
-    let code = InvitationServiceApi::export_invitation(&invitation);
+        let mut shareable: Option<(ShareableInvitation, ContextId)> = None;
+        for fact in facts.iter().rev() {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = &fact.content
+            else {
+                continue;
+            };
+
+            if envelope.type_id.as_str() != INVITATION_FACT_TYPE_ID {
+                continue;
+            }
+
+            let Some(inv_fact) = InvitationFact::from_envelope(envelope) else {
+                continue;
+            };
+
+            let InvitationFact::Sent {
+                invitation_id: seen_id,
+                sender_id,
+                context_id,
+                invitation_type,
+                expires_at,
+                message,
+                ..
+            } = inv_fact
+            else {
+                continue;
+            };
+
+            if seen_id != invitation_id {
+                continue;
+            }
+
+            shareable = Some((
+                ShareableInvitation {
+                    version: ShareableInvitation::CURRENT_VERSION,
+                    invitation_id: invitation_id.clone(),
+                    sender_id,
+                    invitation_type,
+                    expires_at: expires_at.map(|time| time.ts_ms),
+                    message,
+                },
+                context_id,
+            ));
+            break;
+        }
+
+        let (shareable, context_id) = shareable.ok_or_else(|| {
+            AgentError::context(format!("Invitation not found for notify: {invitation_id}"))
+        })?;
+
+        (shareable.to_code(), context_id)
+    };
     let mut metadata = HashMap::new();
     metadata.insert(
         "content-type".to_string(),
@@ -1987,13 +2041,13 @@ async fn execute_notify_peer(
     metadata.insert("invitation-id".to_string(), invitation_id.to_string());
     metadata.insert(
         "invitation-context".to_string(),
-        invitation.context_id.to_string(),
+        invitation_context.to_string(),
     );
 
     let envelope = TransportEnvelope {
         destination: peer,
         source: authority.authority_id(),
-        context: invitation.context_id,
+        context: invitation_context,
         payload: code.into_bytes(),
         metadata,
         receipt: receipt.map(transport_receipt_from_flow),

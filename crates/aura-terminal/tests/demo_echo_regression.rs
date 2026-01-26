@@ -25,7 +25,7 @@ use aura_core::effects::reactive::ReactiveEffects;
 use aura_core::effects::ExecutionMode;
 use aura_core::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_terminal::demo::{spawn_amp_echo_listener, DemoHints, DemoSimulator, EchoPeer};
+use aura_terminal::demo::{spawn_amp_inbox_listener, DemoHints, DemoSimulator, EchoPeer};
 use aura_terminal::ids;
 use aura_terminal::tui::context::InitializedAppCore;
 
@@ -119,14 +119,7 @@ async fn demo_echo_after_importing_contacts_via_invitation() {
             name: "Carol".to_string(),
         },
     ];
-    let _listener = spawn_amp_echo_listener(
-        shared_transport.clone(),
-        bob_authority,
-        bob_device_id.to_string(),
-        app_core.clone(),
-        agent.runtime().effects(),
-        peers,
-    );
+    let _listener = spawn_amp_inbox_listener(agent.runtime().effects(), bob_authority, peers);
 
     // ========================================================================
     // KEY DIFFERENCE: Import contacts via invitation codes (like TUI does)
@@ -345,14 +338,7 @@ async fn demo_echo_with_empty_channel_members() {
             name: "Carol".to_string(),
         },
     ];
-    let _listener = spawn_amp_echo_listener(
-        shared_transport.clone(),
-        bob_authority,
-        bob_device_id.to_string(),
-        app_core.clone(),
-        agent.runtime().effects(),
-        peers,
-    );
+    let _listener = spawn_amp_inbox_listener(agent.runtime().effects(), bob_authority, peers);
 
     // Create channel with NO members (empty list) - this tests the fallback behavior
     // The echo listener should still work because it falls back when member_ids is empty
@@ -488,14 +474,7 @@ async fn demo_echo_persists_after_scheduler_update() {
             name: "Carol".to_string(),
         },
     ];
-    let _listener = spawn_amp_echo_listener(
-        shared_transport.clone(),
-        bob_authority,
-        bob_device_id.to_string(),
-        app_core.clone(),
-        agent.runtime().effects(),
-        peers,
-    );
+    let _listener = spawn_amp_inbox_listener(agent.runtime().effects(), bob_authority, peers);
 
     let members = vec![
         simulator.alice_authority().to_string(),
@@ -616,14 +595,7 @@ async fn demo_echo_with_direct_member_ids_control() {
             name: "Carol".to_string(),
         },
     ];
-    let _listener = spawn_amp_echo_listener(
-        shared_transport.clone(),
-        bob_authority,
-        bob_device_id.to_string(),
-        app_core.clone(),
-        agent.runtime().effects(),
-        peers,
-    );
+    let _listener = spawn_amp_inbox_listener(agent.runtime().effects(), bob_authority, peers);
 
     // Create channel with members DIRECTLY (no invitation import)
     let members = vec![
