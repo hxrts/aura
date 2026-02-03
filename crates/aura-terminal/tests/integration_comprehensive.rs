@@ -325,11 +325,14 @@ mod chat_screen {
         assert_eq!(tui.state.chat.focus, ChatFocus::Messages);
 
         // Scroll messages with j/k
+        // scroll_offset: 0 = at bottom (newest), higher = scrolled up (older)
+        // k = scroll up (toward older = increase offset)
+        // j = scroll down (toward newer = decrease offset)
         let initial = tui.state.chat.message_scroll;
-        tui.send_char('j');
+        tui.send_char('k');
         assert_eq!(tui.state.chat.message_scroll, initial + 1);
 
-        tui.send_char('k');
+        tui.send_char('j');
         assert_eq!(tui.state.chat.message_scroll, initial);
     }
 

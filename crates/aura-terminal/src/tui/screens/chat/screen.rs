@@ -101,6 +101,9 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
     }
 }
 
+/// Shared selected channel index for cross-component communication
+pub type SharedSelectedChannel = std::sync::Arc<std::sync::RwLock<usize>>;
+
 /// Props for ChatScreen
 ///
 /// ## Compile-Time Safety
@@ -119,6 +122,10 @@ pub struct ChatScreenProps {
     /// All view state extracted from TuiState via `extract_chat_view_props()`.
     /// This is a single struct field so forgetting any view state is a compile error.
     pub view: ChatViewProps,
+
+    // === Shared state for per-channel message tracking ===
+    /// Shared selected channel index - allows signal callback to compute per-channel message count
+    pub selected_channel: Option<SharedSelectedChannel>,
 
     // === Callbacks (still needed for effect dispatch) ===
     /// Callback when sending a message (channel_id, content)
@@ -180,20 +187,29 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         let mut reactive_chat_state = reactive_chat_state.clone();
         let app_core = app_ctx.app_core.clone();
         let update_tx = props.update_tx.clone();
+        let shared_selected = props.selected_channel.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 // Sync navigation state via UiUpdate channel before consuming chat_state
                 // This ensures channel_count is updated when channels change
                 // Selection is managed by TUI state, not app state
                 if let Some(ref tx) = update_tx {
-                    let total_messages: usize = chat_state
-                        .all_channels()
-                        .map(|c| chat_state.messages_for_channel(&c.id).len())
-                        .sum();
+                    // Get the selected channel index from shared state
+                    let selected_idx = shared_selected
+                        .as_ref()
+                        .and_then(|s| s.read().ok().map(|g| *g))
+                        .unwrap_or(0);
+
+                    // Get the channel at the selected index
+                    let channels: Vec<_> = chat_state.all_channels().collect();
+                    let selected_channel_message_count = channels
+                        .get(selected_idx)
+                        .map(|ch| chat_state.messages_for_channel(&ch.id).len())
+                        .unwrap_or(0);
 
                     let _ = tx.try_send(UiUpdate::ChatStateUpdated {
                         channel_count: chat_state.channel_count(),
-                        message_count: total_messages,
+                        message_count: selected_channel_message_count,
                         selected_index: None, // TUI manages selection
                     });
                 }
@@ -276,6 +292,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         empty_message: Some(empty_message),
                         scroll_offset: props.view.message_scroll,
                         message_count: messages.len(),
+                        visible_rows: Some(dim::VISIBLE_MESSAGE_ROWS as usize),
                     )
                 }
             }

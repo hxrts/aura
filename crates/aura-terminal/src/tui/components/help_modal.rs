@@ -1,7 +1,7 @@
 //! # Help Modal
 //!
-//! Modal overlay showing keyboard shortcuts and screen navigation hints.
-//! Context-sensitive: shows relevant commands for the current screen first.
+//! Modal overlay showing keyboard shortcuts.
+//! Context-sensitive: shows global hotkeys plus only the current screen's hotkeys.
 
 use iocraft::prelude::*;
 
@@ -39,7 +39,7 @@ fn group_commands_by_category(commands: &[HelpCommand]) -> Vec<(String, Vec<&Hel
 }
 
 /// Help modal showing keyboard shortcuts
-/// Context-sensitive: prioritizes commands for the current screen
+/// Context-sensitive: shows global hotkeys + current screen's hotkeys only
 #[component]
 pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
     if !props.visible {
@@ -71,7 +71,6 @@ pub fn HelpModal(props: &HelpModalProps) -> impl Into<AnyElement<'static>> {
     // Build grouped command elements with 2-column grid layout
     let category_elements: Vec<AnyElement<'static>> = groups
         .into_iter()
-        .take(4)
         .map(|(category, cmds)| {
             let cat_name = category;
 

@@ -167,13 +167,14 @@ fn test_chat_keyboard_shortcuts_deterministic() {
     tui.send_char('l');
     assert_eq!(tui.state().chat.focus, ChatFocus::Messages);
 
-    // Test 'j' for scroll down in messages
+    // Test 'k' for scroll up in messages (toward older = increase offset)
+    // scroll_offset: 0 = at bottom (newest), higher = scrolled up (older)
     let initial_scroll = tui.state().chat.message_scroll;
-    tui.send_char('j');
+    tui.send_char('k');
     assert_eq!(tui.state().chat.message_scroll, initial_scroll + 1);
 
-    // Test 'k' for scroll up in messages
-    tui.send_char('k');
+    // Test 'j' for scroll down in messages (toward newer = decrease offset)
+    tui.send_char('j');
     assert_eq!(tui.state().chat.message_scroll, initial_scroll);
 
     // Test 'i' for insert mode

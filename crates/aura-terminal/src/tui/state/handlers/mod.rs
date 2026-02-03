@@ -11,10 +11,12 @@ mod screen;
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent};
 
+use crate::tui::components::copy_to_clipboard;
 use crate::tui::screens::Screen;
 
 use super::commands::{DispatchCommand, TuiCommand};
 use super::modal_queue::QueuedModal;
+use super::toast::ToastLevel;
 use super::TuiState;
 
 // Re-export handler functions for use by transition.rs
@@ -37,6 +39,20 @@ pub fn handle_key_event(state: &mut TuiState, commands: &mut Vec<TuiCommand>, ke
     if key.code == KeyCode::Esc && state.toast_queue.is_active() {
         state.toast_queue.dismiss();
         return;
+    }
+
+    // 'y' to copy error toast message to clipboard
+    if key.code == KeyCode::Char('y') {
+        if let Some(toast) = state.toast_queue.current() {
+            if toast.level == ToastLevel::Error {
+                let message = toast.message.clone();
+                state.toast_queue.dismiss();
+                if copy_to_clipboard(&message).is_ok() {
+                    state.toast_success("Error copied to clipboard");
+                }
+                return;
+            }
+        }
     }
 
     // Queued modal gets priority (all modals are now queue-based)

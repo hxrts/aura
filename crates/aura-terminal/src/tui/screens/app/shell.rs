@@ -116,6 +116,9 @@ pub struct IoAppProps {
     /// Mobile device id (for demo MFA shortcuts)
     #[cfg(feature = "development")]
     pub demo_mobile_device_id: String,
+    /// Mobile authority id (for demo device enrollment)
+    #[cfg(feature = "development")]
+    pub demo_mobile_authority_id: String,
     // Reactive update channel - receiver wrapped in Arc<Mutex<Option>> for take-once semantics
     /// UI update receiver for reactive updates from callbacks
     pub update_rx: Option<Arc<Mutex<Option<UiUpdateReceiver>>>>,
@@ -249,6 +252,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let demo_carol = props.demo_carol_code.clone();
     #[cfg(feature = "development")]
     let demo_mobile_device_id = props.demo_mobile_device_id.clone();
+    #[cfg(feature = "development")]
+    let demo_mobile_authority_id = props.demo_mobile_authority_id.clone();
     let tui_state = hooks.use_ref(move || {
         #[cfg(feature = "development")]
         {
@@ -261,6 +266,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             state.contacts.demo_alice_code = demo_alice.clone();
             state.contacts.demo_carol_code = demo_carol.clone();
             state.settings.demo_mobile_device_id = demo_mobile_device_id.clone();
+            state.settings.demo_mobile_authority_id = demo_mobile_authority_id.clone();
             state
         }
 
@@ -344,6 +350,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         shared_channels.clone(),
         tui_selected.clone(),
     );
+
+    // Clone for ChatScreen to compute per-channel message counts
+    let tui_selected_for_chat_screen = tui_selected.clone();
 
     // =========================================================================
     // Devices subscription: SharedDevices for dispatch handlers to read
@@ -886,6 +895,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         } => {
                             tui.with_mut(|state| {
                                 let prev_channel_count = state.chat.channel_count;
+                                let prev_message_count = state.chat.message_count;
+                                let was_at_bottom = state.chat.message_scroll == 0;
+
                                 state.chat.channel_count = channel_count;
                                 state.chat.message_count = message_count;
 
@@ -910,6 +922,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         idx = channel_count.saturating_sub(1);
                                     }
                                     state.chat.selected_channel = idx;
+                                    // Reset scroll when switching channels
+                                    state.chat.message_scroll = 0;
                                 }
 
                                 // Sync the shared selection state so message subscription
@@ -918,8 +932,17 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     *guard = state.chat.selected_channel;
                                 }
 
-                                if state.chat.message_scroll >= message_count {
-                                    state.chat.message_scroll = message_count.saturating_sub(1);
+                                // Auto-scroll to bottom when new messages arrive, but only if
+                                // user was already at the bottom (hasn't scrolled up to read history)
+                                let new_messages_arrived = message_count > prev_message_count;
+                                if new_messages_arrived && was_at_bottom {
+                                    state.chat.message_scroll = 0;
+                                }
+
+                                // Clamp scroll to valid range
+                                let max_scroll = message_count.saturating_sub(18);
+                                if state.chat.message_scroll > max_scroll {
+                                    state.chat.message_scroll = max_scroll;
                                 }
                             });
                         }
@@ -928,6 +951,27 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             topic: _,
                         } => {
                             // CHAT_SIGNAL should reflect updated topic; no extra work.
+                        }
+                        UiUpdate::NeighborhoodStateUpdated { message_count } => {
+                            tui.with_mut(|state| {
+                                let prev_message_count = state.neighborhood.message_count;
+                                let was_at_bottom = state.neighborhood.message_scroll == 0;
+
+                                state.neighborhood.message_count = message_count;
+
+                                // Auto-scroll to bottom when new messages arrive, but only if
+                                // user was already at the bottom (hasn't scrolled up to read history)
+                                let new_messages_arrived = message_count > prev_message_count;
+                                if new_messages_arrived && was_at_bottom {
+                                    state.neighborhood.message_scroll = 0;
+                                }
+
+                                // Clamp scroll to valid range
+                                let max_scroll = message_count.saturating_sub(18);
+                                if state.neighborhood.message_scroll > max_scroll {
+                                    state.neighborhood.message_scroll = max_scroll;
+                                }
+                            });
                         }
                         UiUpdate::ChannelInfoParticipants {
                             channel_id,
@@ -1464,6 +1508,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let shared_messages_for_dispatch = shared_messages;
         // Used to map device selection for MFA wizard
         let shared_devices_for_dispatch = shared_devices;
+        // Clone shared selection state for immediate sync on channel navigation
+        let tui_selected_for_events = tui_selected_for_chat_screen.clone();
         // Used for recovery eligibility checks (from threshold subscription)
         move |event| {
             // Convert iocraft event to aura-core event and run through state machine
@@ -1484,6 +1530,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                 if let Some(ref cb) = callbacks {
                     if new_state.chat.selected_channel != current.chat.selected_channel {
                         let idx = new_state.chat.selected_channel;
+                        // Sync shared selection state IMMEDIATELY so ChatScreen's signal
+                        // callback reads the correct channel for message count computation
+                        if let Ok(mut guard) = tui_selected_for_events.write() {
+                            *guard = idx;
+                        }
                         if let Ok(guard) = shared_channels_for_dispatch.read() {
                             if let Some(channel) = guard.get(idx) {
                                 (cb.chat.on_channel_select)(channel.id.clone());
@@ -2485,6 +2536,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         View(width: 100pct, height: 100pct) {
                             ChatScreen(
                                 view: chat_props.clone(),
+                                selected_channel: Some(tui_selected_for_chat_screen.clone()),
                                 on_send: on_send.clone(),
                                 on_retry_message: on_retry_message.clone(),
                                 on_channel_select: on_channel_select.clone(),
@@ -2509,6 +2561,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         View(width: 100pct, height: 100pct) {
                             NeighborhoodScreen(
                                 view: neighborhood_props.clone(),
+                                update_tx: update_tx_holder.clone(),
                             )
                         }
                     }],
@@ -2713,6 +2766,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         demo_alice_code: ctx_arc.demo_alice_code(),
                         demo_carol_code: ctx_arc.demo_carol_code(),
                         demo_mobile_device_id: ctx_arc.demo_mobile_device_id(),
+                        demo_mobile_authority_id: ctx_arc.demo_mobile_authority_id(),
                         // Reactive update channel
                         update_rx: Some(update_rx_holder),
                         update_tx: Some(update_tx.clone()),

@@ -118,20 +118,20 @@ async fn demo_amp_channel_echoes_peer_message() {
         .await
         .expect("send message");
 
-    // Wait for signal updates and check each one for the echo
-    let mut found_echo = false;
+    // Wait for signal updates and check each one for the echoes from both peers
+    let mut echoes = std::collections::HashSet::new();
     let timeout = Duration::from_secs(5);
     let deadline = tokio::time::Instant::now() + timeout;
 
     while tokio::time::Instant::now() < deadline {
         tokio::select! {
             Ok(chat_state) = chat_stream.recv() => {
-                if chat_state
-                    .all_messages()
-                    .iter()
-                    .any(|msg| msg.content == content && msg.sender_id != bob_authority)
-                {
-                    found_echo = true;
+                for msg in chat_state.all_messages() {
+                    if msg.content == content && msg.sender_id != bob_authority {
+                        echoes.insert(msg.sender_id);
+                    }
+                }
+                if echoes.len() >= 2 {
                     break;
                 }
             }
@@ -141,9 +141,18 @@ async fn demo_amp_channel_echoes_peer_message() {
         }
     }
 
+    let mut missing = Vec::new();
+    if !echoes.contains(&simulator.alice_authority()) {
+        missing.push("Alice");
+    }
+    if !echoes.contains(&simulator.carol_authority()) {
+        missing.push("Carol");
+    }
+
     assert!(
-        found_echo,
-        "Expected an echo message from Alice or Carol, but none was found within {:?}",
+        missing.is_empty(),
+        "Expected echo messages from both Alice and Carol, missing: {:?} within {:?}",
+        missing,
         timeout
     );
 }

@@ -531,6 +531,7 @@ pub fn render_device_enrollment_modal(settings: &SettingsViewProps) -> Option<An
                         agreement_mode: settings.device_enrollment_modal_agreement_mode,
                         reversion_risk: settings.device_enrollment_modal_reversion_risk,
                         copied: settings.device_enrollment_modal_copied,
+                        is_demo_mode: settings.device_enrollment_modal_is_demo_mode,
                     )
                 }
             }

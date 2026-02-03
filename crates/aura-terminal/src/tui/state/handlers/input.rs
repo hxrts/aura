@@ -7,6 +7,7 @@
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
+use crate::tui::layout::dim;
 use crate::tui::screens::Screen;
 
 use super::super::commands::{DispatchCommand, TuiCommand};
@@ -25,16 +26,17 @@ pub fn handle_mouse_event(
     match mouse.kind {
         MouseEventKind::ScrollUp => {
             // Scroll up in the current list/view
+            // For message-oriented screens, mouse scroll always scrolls messages
+            // (unlike keyboard which respects focus for panel navigation)
             match state.screen() {
                 Screen::Chat => {
                     // Scroll messages up (show older messages)
                     // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
-                    if state.chat.focus == ChatFocus::Messages {
-                        let max_scroll = state.chat.message_count.saturating_sub(18);
-                        if state.chat.message_scroll < max_scroll {
-                            state.chat.message_scroll =
-                                state.chat.message_scroll.saturating_add(3).min(max_scroll);
-                        }
+                    // Mouse scroll always affects messages regardless of keyboard focus
+                    let max_scroll = state.chat.message_count.saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
+                    if state.chat.message_scroll < max_scroll {
+                        state.chat.message_scroll =
+                            state.chat.message_scroll.saturating_add(3).min(max_scroll);
                     }
                 }
                 Screen::Contacts => {
@@ -45,11 +47,10 @@ pub fn handle_mouse_event(
                     }
                 }
                 Screen::Neighborhood => {
-                    // Scroll messages up (show older messages)
-                    if state.neighborhood.mode == NeighborhoodMode::Detail
-                        && state.neighborhood.detail_focus == DetailFocus::Messages
-                    {
-                        let max_scroll = state.neighborhood.message_count.saturating_sub(18);
+                    // Scroll messages up (show older messages) when in detail view
+                    // Mouse scroll always affects messages regardless of keyboard focus
+                    if state.neighborhood.mode == NeighborhoodMode::Detail {
+                        let max_scroll = state.neighborhood.message_count.saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
                         if state.neighborhood.message_scroll < max_scroll {
                             state.neighborhood.message_scroll = state
                                 .neighborhood
@@ -71,11 +72,13 @@ pub fn handle_mouse_event(
         }
         MouseEventKind::ScrollDown => {
             // Scroll down in the current list/view
+            // For message-oriented screens, mouse scroll always scrolls messages
             match state.screen() {
                 Screen::Chat => {
                     // Scroll messages down (show newer messages, toward bottom)
                     // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
-                    if state.chat.focus == ChatFocus::Messages && state.chat.message_scroll > 0 {
+                    // Mouse scroll always affects messages regardless of keyboard focus
+                    if state.chat.message_scroll > 0 {
                         state.chat.message_scroll = state.chat.message_scroll.saturating_sub(3);
                     }
                 }
@@ -84,9 +87,9 @@ pub fn handle_mouse_event(
                     state.contacts.selected_index = state.contacts.selected_index.saturating_add(1);
                 }
                 Screen::Neighborhood => {
-                    // Scroll messages down (show newer messages, toward bottom)
+                    // Scroll messages down (show newer messages, toward bottom) when in detail view
+                    // Mouse scroll always affects messages regardless of keyboard focus
                     if state.neighborhood.mode == NeighborhoodMode::Detail
-                        && state.neighborhood.detail_focus == DetailFocus::Messages
                         && state.neighborhood.message_scroll > 0
                     {
                         state.neighborhood.message_scroll =

@@ -217,8 +217,9 @@ mod chat_screen {
         harness.send(events::arrow_right());
         assert_eq!(harness.state.chat.focus, StateChatFocus::Messages);
 
-        // Scroll down in messages
-        harness.send(events::arrow_down());
+        // Scroll up in messages (toward older = increase offset)
+        // scroll_offset: 0 = at bottom (newest), higher = scrolled up (older)
+        harness.send(events::arrow_up());
 
         let props = extract_chat_view_props(&harness.state);
         assert_eq!(

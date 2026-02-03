@@ -3,6 +3,8 @@
 //! Keyboard shortcuts and command data for the help modal.
 //! The actual modal UI is in `components/help_modal.rs`.
 
+use crate::tui::commands::{all_command_help, CommandCategory};
+
 /// A command help item
 #[derive(Clone, Debug)]
 pub struct HelpCommand {
@@ -31,9 +33,11 @@ impl HelpCommand {
 /// Get help commands filtered for a specific screen context
 ///
 /// When a current_screen is provided, returns commands in this order:
-/// 1. Navigation (always first - applies to all screens)
-/// 2. Current screen commands (most relevant)
-/// 3. Other screen commands (excluded for Neighborhood to reduce clutter)
+/// 1. Navigation (global hotkeys - applies to all screens)
+/// 2. Current screen commands (screen-specific hotkeys)
+/// 3. For Chat screen: slash commands organized by category
+///
+/// Commands from other screens are NOT included to keep help focused and relevant.
 #[must_use]
 pub fn get_help_commands_for_screen(current_screen: Option<&str>) -> Vec<HelpCommand> {
     let all_commands = get_help_commands();
@@ -42,7 +46,7 @@ pub fn get_help_commands_for_screen(current_screen: Option<&str>) -> Vec<HelpCom
         Some(screen) => {
             let mut result = Vec::new();
 
-            // Always include navigation first
+            // Always include navigation first (global hotkeys)
             result.extend(
                 all_commands
                     .iter()
@@ -50,7 +54,7 @@ pub fn get_help_commands_for_screen(current_screen: Option<&str>) -> Vec<HelpCom
                     .cloned(),
             );
 
-            // Then commands for the current screen
+            // Then commands for the current screen only
             result.extend(
                 all_commands
                     .iter()
@@ -58,16 +62,9 @@ pub fn get_help_commands_for_screen(current_screen: Option<&str>) -> Vec<HelpCom
                     .cloned(),
             );
 
-            // For Neighborhood, only show Navigation + Neighborhood commands
-            // (other screen hotkeys are not relevant when navigating blocks)
-            if screen != "Neighborhood" {
-                // For other screens, include remaining commands
-                result.extend(
-                    all_commands
-                        .iter()
-                        .filter(|c| c.category != "Navigation" && c.category != screen)
-                        .cloned(),
-                );
+            // For Chat screen, add slash commands
+            if screen == "Chat" {
+                result.extend(get_slash_commands());
             }
 
             result
@@ -76,15 +73,45 @@ pub fn get_help_commands_for_screen(current_screen: Option<&str>) -> Vec<HelpCom
     }
 }
 
+/// Get slash commands for the Chat screen, organized by category
+fn get_slash_commands() -> Vec<HelpCommand> {
+    let mut commands = Vec::new();
+
+    // Add commands by category: User, Moderator, Admin
+    for category in CommandCategory::all() {
+        let category_name = match category {
+            CommandCategory::User => "Slash Commands",
+            CommandCategory::Moderator => "Moderator Commands",
+            CommandCategory::Admin => "Admin Commands",
+        };
+
+        for cmd in all_command_help() {
+            if cmd.category == *category {
+                commands.push(HelpCommand::new(
+                    format!("/{}", cmd.name),
+                    cmd.syntax,
+                    cmd.description,
+                    category_name,
+                ));
+            }
+        }
+    }
+
+    commands
+}
+
 /// Get all keyboard shortcuts organized by category
 #[must_use]
 pub fn get_help_commands() -> Vec<HelpCommand> {
     vec![
         // Global navigation
         HelpCommand::new("1-5", "1, 2, 3, 4, 5", "Switch screens", "Navigation"),
+        HelpCommand::new("Tab", "Tab", "Next screen", "Navigation"),
+        HelpCommand::new("S-Tab", "Shift+Tab", "Previous screen", "Navigation"),
         HelpCommand::new("?", "?", "Show/hide help", "Navigation"),
         HelpCommand::new("q", "q", "Quit", "Navigation"),
-        HelpCommand::new("Esc", "Esc", "Cancel/close modal", "Navigation"),
+        HelpCommand::new("Esc", "Esc", "Cancel/close modal/toast", "Navigation"),
+        HelpCommand::new("y", "y", "Copy error to clipboard", "Navigation"),
         HelpCommand::new("j/k", "j, k", "Move down/up in lists", "Navigation"),
         HelpCommand::new("h/l", "h, l", "Switch panels (left/right)", "Navigation"),
         // Chat screen

@@ -171,6 +171,12 @@ pub enum UiUpdate {
         topic: String,
     },
 
+    /// Neighborhood state changed (message count for current home/channel)
+    NeighborhoodStateUpdated {
+        /// Number of messages in the current home's selected channel
+        message_count: usize,
+    },
+
     /// Channel info participants were updated
     ChannelInfoParticipants {
         /// Channel ID for the modal

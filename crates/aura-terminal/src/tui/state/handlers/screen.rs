@@ -7,6 +7,7 @@
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent};
 
+use crate::tui::layout::dim;
 use crate::tui::navigation::{navigate_list, NavKey};
 use crate::tui::types::SettingsSection;
 
@@ -51,9 +52,12 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
                 );
             }
             ChatFocus::Messages => {
-                // Scroll toward newer messages (reduce offset toward bottom).
-                if state.chat.message_scroll > 0 {
-                    state.chat.message_scroll = state.chat.message_scroll.saturating_sub(1);
+                // Scroll up = increase offset (show older messages)
+                // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
+                let max_scroll = state.chat.message_count.saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
+                if state.chat.message_scroll < max_scroll {
+                    state.chat.message_scroll =
+                        state.chat.message_scroll.saturating_add(1).min(max_scroll);
                 }
             }
             _ => {}
@@ -67,11 +71,10 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
                 );
             }
             ChatFocus::Messages => {
-                // Scroll toward older messages (increase offset away from bottom).
-                let max_scroll = state.chat.message_count.saturating_sub(18);
-                if state.chat.message_scroll < max_scroll {
-                    state.chat.message_scroll =
-                        state.chat.message_scroll.saturating_add(1).min(max_scroll);
+                // Scroll down = decrease offset (show newer messages, toward bottom)
+                // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
+                if state.chat.message_scroll > 0 {
+                    state.chat.message_scroll = state.chat.message_scroll.saturating_sub(1);
                 }
             }
             _ => {}
@@ -274,7 +277,7 @@ pub fn handle_neighborhood_key(
                 DetailFocus::Messages => {
                     // Scroll up = increase offset (show older messages)
                     // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
-                    let max_scroll = state.neighborhood.message_count.saturating_sub(18);
+                    let max_scroll = state.neighborhood.message_count.saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
                     if state.neighborhood.message_scroll < max_scroll {
                         state.neighborhood.message_scroll = state
                             .neighborhood
@@ -430,9 +433,15 @@ pub fn handle_settings_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
         KeyCode::Char('a') => {
             if state.settings.section == SettingsSection::Devices {
                 // Open add device modal via queue
-                state.modal_queue.enqueue(QueuedModal::SettingsAddDevice(
-                    AddDeviceModalState::default(),
-                ));
+                let mut modal_state = AddDeviceModalState::default();
+                // In demo mode, pre-fill Mobile's authority ID for device enrollment
+                if !state.settings.demo_mobile_authority_id.is_empty() {
+                    modal_state.invitee_authority_id =
+                        state.settings.demo_mobile_authority_id.clone();
+                }
+                state
+                    .modal_queue
+                    .enqueue(QueuedModal::SettingsAddDevice(modal_state));
             }
         }
         KeyCode::Char('i') => {

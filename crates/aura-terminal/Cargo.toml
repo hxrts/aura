@@ -84,7 +84,7 @@ aura-testkit = { path = "../aura-testkit", optional = true, features = ["full-ef
 async-trait = { workspace = true }
 
 # Terminal UI (iocraft declarative framework)
-iocraft = "0.7"
+iocraft = "0.7.16"
 
 # Reactive signals for TUI state management
 futures-signals = "0.3"

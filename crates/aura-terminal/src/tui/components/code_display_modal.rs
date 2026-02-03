@@ -79,6 +79,8 @@ pub struct CodeDisplayModalProps {
     pub error_message: String,
     /// Whether code was copied to clipboard (shows feedback)
     pub copied: bool,
+    /// Demo mode: show hint for 'm' key to simulate mobile import
+    pub show_mobile_hint: bool,
 }
 
 /// Modal for displaying shareable codes with status tracking
@@ -119,11 +121,13 @@ pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'
         "Close"
     };
 
-    // Footer props
-    let footer_props = ModalFooterProps::new(vec![
-        KeyHint::new("c", "Copy"),
-        KeyHint::new("Esc", footer_close_text),
-    ]);
+    // Footer props - include mobile hint in demo mode
+    let mut hints = vec![KeyHint::new("c", "Copy")];
+    if props.show_mobile_hint && props.status == CodeDisplayStatus::Pending {
+        hints.push(KeyHint::new("^m", "Mobile"));
+    }
+    hints.push(KeyHint::new("Esc", footer_close_text));
+    let footer_props = ModalFooterProps::new(hints);
 
     // Error status for display
     let error_status = if has_error {

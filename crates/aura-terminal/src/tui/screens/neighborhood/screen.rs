@@ -25,9 +25,13 @@ pub async fn run_neighborhood_screen() -> std::io::Result<()> {
     .await
 }
 
+use crate::tui::updates::{UiUpdate, UiUpdateSender};
+
 #[derive(Default, Props)]
 pub struct NeighborhoodScreenProps {
     pub view: NeighborhoodViewProps,
+    /// UI update sender for syncing message count state
+    pub update_tx: Option<UiUpdateSender>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -422,6 +426,7 @@ pub fn NeighborhoodScreen(
         let mut reactive_channel_name = reactive_channel_name.clone();
         let mut reactive_channels = reactive_channels.clone();
         let reactive_contacts = reactive_contacts.clone();
+        let update_tx = props.update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let contacts = reactive_contacts.read().clone();
@@ -455,6 +460,13 @@ pub fn NeighborhoodScreen(
                             .own(m.is_own)
                     })
                     .collect();
+
+                // Send message count update for scroll handling
+                if let Some(ref tx) = update_tx {
+                    let _ = tx.try_send(UiUpdate::NeighborhoodStateUpdated {
+                        message_count: messages.len(),
+                    });
+                }
 
                 reactive_messages.set(messages);
             })
@@ -566,6 +578,7 @@ pub fn NeighborhoodScreen(
                     empty_message: Some("No messages yet".to_string()),
                     scroll_offset: props.view.message_scroll,
                     message_count: messages.len(),
+                    visible_rows: Some(dim::VISIBLE_MESSAGE_ROWS as usize),
                 )
             }
             View(height: 3, width: dim::TOTAL_WIDTH) {

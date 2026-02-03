@@ -243,6 +243,95 @@ async fn process_peer_transport_messages(
 ) -> TerminalResult<()> {
     let effects = agent.runtime().effects();
 
+    async fn accept_channel_invitation(
+        name: &str,
+        agent: &AuraAgent,
+        effects: &Arc<AuraEffectSystem>,
+        invitation_service: &aura_agent::InvitationServiceApi,
+        invitation: &aura_agent::Invitation,
+        context: ContextId,
+    ) {
+        if let Err(err) = invitation_service.accept(&invitation.invitation_id).await {
+            tracing::warn!(
+                "{name} failed to accept channel invitation {}: {err}",
+                invitation.invitation_id
+            );
+            return;
+        }
+
+        let InvitationType::Channel {
+            home_id, bootstrap, ..
+        } = invitation.invitation_type.clone()
+        else {
+            return;
+        };
+
+        let channel_id = ChannelId::from_str(&home_id)
+            .unwrap_or_else(|_| ChannelId::from_bytes(hash(home_id.as_bytes())));
+
+        // Ensure AMP channel state exists locally for decryption.
+        if let Some(package) = bootstrap {
+            let now = effects.physical_time().await.unwrap_or(PhysicalTime {
+                ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
+                uncertainty: None,
+            });
+            let window = aura_protocol::amp::config::AmpRuntimeConfig::default()
+                .default_skip_window
+                .get();
+
+            let checkpoint = ChannelCheckpoint {
+                context,
+                channel: channel_id,
+                chan_epoch: 0,
+                base_gen: 0,
+                window,
+                ck_commitment: aura_core::Hash32::default(),
+                skip_window_override: Some(window),
+            };
+
+            let bootstrap_fact = ChannelBootstrap {
+                context,
+                channel: channel_id,
+                bootstrap_id: package.bootstrap_id,
+                dealer: invitation.sender_id,
+                recipients: vec![invitation.sender_id, agent.authority_id()],
+                created_at: now,
+                expires_at: None,
+            };
+
+            if let Err(err) = effects
+                .insert_relational_fact(RelationalFact::Protocol(
+                    ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
+                ))
+                .await
+            {
+                tracing::warn!("{name} failed to seed AMP checkpoint: {err}");
+            }
+
+            if let Err(err) = effects
+                .insert_relational_fact(RelationalFact::Protocol(
+                    ProtocolRelationalFact::AmpChannelBootstrap(bootstrap_fact),
+                ))
+                .await
+            {
+                tracing::warn!("{name} failed to seed AMP bootstrap: {err}");
+            }
+        }
+
+        let params = ChannelJoinParams {
+            context,
+            channel: channel_id,
+            participant: agent.authority_id(),
+        };
+
+        if let Err(err) = effects.join_channel(params).await {
+            tracing::warn!(
+                "{name} failed to join channel {} after accepting invite: {err}",
+                home_id
+            );
+        }
+    }
+
     loop {
         let envelope = match effects.receive_envelope().await {
             Ok(env) => env,
@@ -328,83 +417,16 @@ async fn process_peer_transport_messages(
                         }
                     };
 
-                    if let InvitationType::Channel {
-                        home_id, bootstrap, ..
-                    } = invitation.invitation_type.clone()
-                    {
-                        if let Err(err) = invitation_service.accept(&invitation.invitation_id).await
-                        {
-                            tracing::warn!(
-                                "{name} failed to accept channel invitation {}: {err}",
-                                invitation.invitation_id
-                            );
-                            continue;
-                        }
-
-                        let channel_id = ChannelId::from_str(&home_id)
-                            .unwrap_or_else(|_| ChannelId::from_bytes(hash(home_id.as_bytes())));
-
-                        // Ensure AMP channel state exists locally for decryption.
-                        if let Some(package) = bootstrap {
-                            let now = effects.physical_time().await.unwrap_or(PhysicalTime {
-                                ts_ms: PhysicalTimeHandler::new().physical_time_now_ms(),
-                                uncertainty: None,
-                            });
-                            let window = aura_protocol::amp::config::AmpRuntimeConfig::default()
-                                .default_skip_window
-                                .get();
-
-                            let checkpoint = ChannelCheckpoint {
-                                context: envelope.context,
-                                channel: channel_id,
-                                chan_epoch: 0,
-                                base_gen: 0,
-                                window,
-                                ck_commitment: aura_core::Hash32::default(),
-                                skip_window_override: Some(window),
-                            };
-
-                            let bootstrap_fact = ChannelBootstrap {
-                                context: envelope.context,
-                                channel: channel_id,
-                                bootstrap_id: package.bootstrap_id,
-                                dealer: invitation.sender_id,
-                                recipients: vec![invitation.sender_id, agent.authority_id()],
-                                created_at: now,
-                                expires_at: None,
-                            };
-
-                            if let Err(err) = effects
-                                .insert_relational_fact(RelationalFact::Protocol(
-                                    ProtocolRelationalFact::AmpChannelCheckpoint(checkpoint),
-                                ))
-                                .await
-                            {
-                                tracing::warn!("{name} failed to seed AMP checkpoint: {err}");
-                            }
-
-                            if let Err(err) = effects
-                                .insert_relational_fact(RelationalFact::Protocol(
-                                    ProtocolRelationalFact::AmpChannelBootstrap(bootstrap_fact),
-                                ))
-                                .await
-                            {
-                                tracing::warn!("{name} failed to seed AMP bootstrap: {err}");
-                            }
-                        }
-
-                        let params = ChannelJoinParams {
-                            context: envelope.context,
-                            channel: channel_id,
-                            participant: agent.authority_id(),
-                        };
-
-                        if let Err(err) = effects.join_channel(params).await {
-                            tracing::warn!(
-                                "{name} failed to join channel {} after accepting invite: {err}",
-                                home_id
-                            );
-                        }
+                    if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
+                        accept_channel_invitation(
+                            name,
+                            agent,
+                            &effects,
+                            &invitation_service,
+                            &invitation,
+                            envelope.context,
+                        )
+                        .await;
                     }
                 }
                 "application/aura-amp" => {
@@ -425,6 +447,15 @@ async fn process_peer_transport_messages(
                     {
                         Ok(msg) => msg,
                         Err(err) => {
+                            let err_str = err.to_string();
+                            if err_str.contains("channel state not found") {
+                                tracing::debug!(
+                                    "{name} AMP message arrived before channel state; requeuing"
+                                );
+                                effects.requeue_envelope(envelope);
+                                break;
+                            }
+
                             tracing::warn!(
                                 "{name} failed to decrypt AMP message from {}: {err}",
                                 envelope.source
@@ -565,7 +596,11 @@ async fn process_peer_transport_messages(
                             );
                         }
                     } else {
-                        tracing::debug!("{name} received choreography message (not recognized)");
+                        tracing::debug!(
+                            "{name} received choreography message (not recognized), requeuing"
+                        );
+                        effects.requeue_envelope(envelope);
+                        break;
                     }
                 }
                 _ => {}
@@ -578,17 +613,16 @@ async fn process_peer_transport_messages(
         let pending = invitation_service.list_pending().await;
         for invitation in pending {
             if matches!(invitation.invitation_type, InvitationType::Channel { .. }) {
-                if let Err(e) = invitation_service.accept(&invitation.invitation_id).await {
-                    tracing::warn!(
-                        "{name} failed to auto-accept channel invitation {}: {e}",
-                        invitation.invitation_id
-                    );
-                } else {
-                    tracing::info!(
-                        "{name} auto-accepted channel invitation {}",
-                        invitation.invitation_id
-                    );
-                }
+                let context = invitation.context_id;
+                accept_channel_invitation(
+                    name,
+                    agent,
+                    &effects,
+                    &invitation_service,
+                    &invitation,
+                    context,
+                )
+                .await;
             }
         }
     }
@@ -616,7 +650,7 @@ pub fn spawn_amp_inbox_listener(
     peers: Vec<EchoPeer>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut seen_payloads: HashSet<aura_core::Hash32> = HashSet::new();
+        let mut seen_payloads: HashSet<(aura_core::Hash32, AuthorityId)> = HashSet::new();
         let mut tick = interval(Duration::from_millis(50));
 
         tracing::debug!("Demo AMP inbox: listener started");
@@ -650,7 +684,7 @@ pub fn spawn_amp_inbox_listener(
                 }
 
                 let payload_hash = aura_core::Hash32::from_bytes(&envelope.payload);
-                if !seen_payloads.insert(payload_hash) {
+                if !seen_payloads.insert((payload_hash, envelope.source)) {
                     continue;
                 }
 

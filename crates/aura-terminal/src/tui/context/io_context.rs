@@ -102,6 +102,8 @@ pub struct IoContextBuilder {
     demo_mobile_agent: Option<Arc<AuraAgent>>,
     #[cfg(feature = "development")]
     demo_mobile_device_id: Option<String>,
+    #[cfg(feature = "development")]
+    demo_mobile_authority_id: Option<String>,
 }
 
 impl IoContextBuilder {
@@ -171,6 +173,11 @@ impl IoContextBuilder {
                 self.demo_mobile_device_id = Some(device_id);
                 self
             }
+
+            pub fn with_demo_mobile_authority_id(mut self, authority_id: String) -> Self {
+                self.demo_mobile_authority_id = Some(authority_id);
+                self
+            }
         }
     }
 
@@ -229,6 +236,8 @@ impl IoContextBuilder {
             demo_mobile_agent: self.demo_mobile_agent,
             #[cfg(feature = "development")]
             demo_mobile_device_id: self.demo_mobile_device_id,
+            #[cfg(feature = "development")]
+            demo_mobile_authority_id: self.demo_mobile_authority_id,
             invited_lan_peers,
             current_context,
             channel_modes,
@@ -262,6 +271,8 @@ pub struct IoContext {
     demo_mobile_agent: Option<Arc<AuraAgent>>,
     #[cfg(feature = "development")]
     demo_mobile_device_id: Option<String>,
+    #[cfg(feature = "development")]
+    demo_mobile_authority_id: Option<String>,
     invited_lan_peers: Arc<RwLock<HashSet<String>>>,
     current_context: Arc<RwLock<Option<String>>>,
     channel_modes: Arc<RwLock<HashMap<String, ChannelMode>>>,
@@ -492,6 +503,10 @@ impl IoContext {
                 self.demo_mobile_device_id.clone().unwrap_or_default()
             }
 
+            pub fn demo_mobile_authority_id(&self) -> String {
+                self.demo_mobile_authority_id.clone().unwrap_or_default()
+            }
+
             /// Set the demo bridge for routing commands to simulated agents.
             ///
             /// When set, commands dispatched through this context will also be routed
@@ -543,6 +558,10 @@ impl IoContext {
 
             #[must_use]
             pub fn demo_mobile_device_id(&self) -> String {
+                String::new()
+            }
+
+            pub fn demo_mobile_authority_id(&self) -> String {
                 String::new()
             }
         }

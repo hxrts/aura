@@ -240,6 +240,7 @@ impl TerminalOutputEffects for IocraftTerminalAdapter {
 #[must_use]
 pub fn convert_iocraft_event(event: iocraft::prelude::TerminalEvent) -> Option<TerminalEvent> {
     use aura_core::effects::terminal::KeyEvent as AuraKeyEvent;
+    use aura_core::effects::terminal::MouseEvent as AuraMouseEvent;
 
     match event {
         iocraft::prelude::TerminalEvent::Key(key_event) => {
@@ -257,10 +258,42 @@ pub fn convert_iocraft_event(event: iocraft::prelude::TerminalEvent) -> Option<T
                 kind: aura_core::effects::terminal::KeyEventKind::Press,
             }))
         }
+        iocraft::prelude::TerminalEvent::FullscreenMouse(mouse_event) => {
+            let kind = convert_mouse_event_kind(mouse_event.kind)?;
+            let modifiers = convert_modifiers(mouse_event.modifiers);
+            Some(TerminalEvent::Mouse(AuraMouseEvent {
+                kind,
+                column: mouse_event.column,
+                row: mouse_event.row,
+                modifiers,
+            }))
+        }
         iocraft::prelude::TerminalEvent::Resize(width, height) => {
             Some(TerminalEvent::Resize { width, height })
         }
-        _ => None, // Mouse events, paste events, etc. not needed for TUI
+        // TerminalEvent is marked #[non_exhaustive], handle future variants
+        _ => None,
+    }
+}
+
+/// Convert iocraft/crossterm MouseEventKind to our MouseEventKind
+fn convert_mouse_event_kind(
+    kind: iocraft::prelude::MouseEventKind,
+) -> Option<aura_core::effects::terminal::MouseEventKind> {
+    use aura_core::effects::terminal::MouseEventKind as AuraKind;
+    use iocraft::prelude::MouseEventKind;
+
+    match kind {
+        MouseEventKind::ScrollUp => Some(AuraKind::ScrollUp),
+        MouseEventKind::ScrollDown => Some(AuraKind::ScrollDown),
+        MouseEventKind::ScrollLeft => Some(AuraKind::ScrollLeft),
+        MouseEventKind::ScrollRight => Some(AuraKind::ScrollRight),
+        // For click/drag events, we only care about scroll for TUI navigation
+        // Map button clicks to our types but filter most out in the handler
+        MouseEventKind::Down(_)
+        | MouseEventKind::Up(_)
+        | MouseEventKind::Drag(_)
+        | MouseEventKind::Moved => None,
     }
 }
 
@@ -273,6 +306,7 @@ fn convert_key_code(code: KeyCode) -> aura_core::effects::terminal::KeyCode {
         KeyCode::Enter => AuraKeyCode::Enter,
         KeyCode::Esc => AuraKeyCode::Esc,
         KeyCode::Tab => AuraKeyCode::Tab,
+        KeyCode::BackTab => AuraKeyCode::BackTab,
         KeyCode::Backspace => AuraKeyCode::Backspace,
         KeyCode::Delete => AuraKeyCode::Delete,
         KeyCode::Up => AuraKeyCode::Up,

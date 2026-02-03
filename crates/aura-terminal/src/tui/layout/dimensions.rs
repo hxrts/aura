@@ -38,6 +38,25 @@ pub mod dim {
     /// Computed as: TOTAL_WIDTH - LEFT_WIDTH - GAP = 80 - 28 - 1 = 51
     pub const TWO_PANEL_RIGHT_WIDTH: u16 = TOTAL_WIDTH - TWO_PANEL_LEFT_WIDTH - TWO_PANEL_GAP;
 
+    // === Message Panel Layout ===
+
+    /// Message panel height (includes borders, title, etc.)
+    pub const MESSAGE_PANEL_HEIGHT: u16 = 22;
+
+    /// Message panel border overhead (top + bottom)
+    pub const MESSAGE_PANEL_BORDER: u16 = 2;
+
+    /// Message panel title row (includes padding)
+    pub const MESSAGE_PANEL_TITLE: u16 = 2;
+
+    /// Message panel internal padding (bottom only, top is covered by title)
+    pub const MESSAGE_PANEL_PADDING: u16 = 1;
+
+    /// Visible message rows in the message panel
+    /// Computed: panel height - borders - title - padding = 22 - 2 - 2 - 1 = 17
+    pub const VISIBLE_MESSAGE_ROWS: u16 =
+        MESSAGE_PANEL_HEIGHT - MESSAGE_PANEL_BORDER - MESSAGE_PANEL_TITLE - MESSAGE_PANEL_PADDING;
+
     // Compile-time validation
     const _: () = assert!(NAV_HEIGHT + MIDDLE_HEIGHT + FOOTER_HEIGHT == TOTAL_HEIGHT);
     const _: () = assert!(MIDDLE_HEIGHT > 0);
@@ -47,6 +66,7 @@ pub mod dim {
     const _: () =
         assert!(TWO_PANEL_LEFT_WIDTH + TWO_PANEL_GAP + TWO_PANEL_RIGHT_WIDTH == TOTAL_WIDTH);
     const _: () = assert!(TWO_PANEL_RIGHT_WIDTH == 51); // Explicit check
+    const _: () = assert!(VISIBLE_MESSAGE_ROWS == 17); // Explicit check for message rows
 }
 
 pub use dim::*;

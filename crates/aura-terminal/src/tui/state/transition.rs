@@ -294,4 +294,94 @@ mod tests {
     // Note: test_threshold_modal_arrow_keys was removed because threshold adjustments
     // now use the GuardianSetup flow (OpenGuardianSetup dispatch) instead of the
     // standalone threshold modal
+
+    #[test]
+    fn test_chat_message_scroll() {
+        use crate::tui::state::views::ChatFocus;
+
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Messages;
+        state.chat.message_count = 30; // More than VISIBLE_MESSAGE_ROWS (17)
+        state.chat.message_scroll = 0; // Start at bottom
+
+        // Press 'k' (or Up) to scroll up - should increase scroll offset
+        let (new_state, _) = transition(&state, events::char('k'));
+        assert_eq!(
+            new_state.chat.message_scroll, 1,
+            "Scroll up should increase scroll_offset from 0 to 1"
+        );
+
+        // Press 'j' (or Down) to scroll down - should decrease scroll offset
+        let (new_state, _) = transition(&new_state, events::char('j'));
+        assert_eq!(
+            new_state.chat.message_scroll, 0,
+            "Scroll down should decrease scroll_offset from 1 to 0"
+        );
+
+        // Test scroll limits - can't scroll past max
+        // With VISIBLE_MESSAGE_ROWS = 17, max_scroll = 20 - 17 = 3
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Messages;
+        state.chat.message_count = 20;
+        state.chat.message_scroll = 3; // Already at max
+
+        let (new_state, _) = transition(&state, events::char('k'));
+        assert_eq!(
+            new_state.chat.message_scroll, 3,
+            "Should not scroll past max_scroll"
+        );
+
+        // Test scroll limits - can't scroll below 0
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Messages;
+        state.chat.message_count = 20;
+        state.chat.message_scroll = 0;
+
+        let (new_state, _) = transition(&state, events::char('j'));
+        assert_eq!(
+            new_state.chat.message_scroll, 0,
+            "Should not scroll below 0"
+        );
+    }
+
+    #[test]
+    fn test_mouse_scroll_chat() {
+        use aura_core::effects::terminal::{MouseEvent, MouseEventKind, Modifiers};
+
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.message_count = 30; // More than VISIBLE_MESSAGE_ROWS (17)
+        state.chat.message_scroll = 0;
+
+        // Mouse scroll up should work regardless of focus
+        let mouse_up = TerminalEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 50,
+            row: 10,
+            modifiers: Modifiers::NONE,
+        });
+
+        let (new_state, _) = transition(&state, mouse_up);
+        assert_eq!(
+            new_state.chat.message_scroll, 3,
+            "Mouse scroll up should increase scroll_offset by 3"
+        );
+
+        // Mouse scroll down
+        let mouse_down = TerminalEvent::Mouse(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 50,
+            row: 10,
+            modifiers: Modifiers::NONE,
+        });
+
+        let (new_state, _) = transition(&new_state, mouse_down);
+        assert_eq!(
+            new_state.chat.message_scroll, 0,
+            "Mouse scroll down should decrease scroll_offset by 3"
+        );
+    }
 }

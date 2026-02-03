@@ -24,6 +24,8 @@ pub struct SettingsViewState {
     pub last_device_enrollment_code: String,
     /// Demo Mobile device id (for MFA shortcuts)
     pub demo_mobile_device_id: String,
+    /// Demo Mobile authority id (for device enrollment)
+    pub demo_mobile_authority_id: String,
     /// Whether to auto-fill the next device enrollment code into the import modal
     pub pending_mobile_enrollment_autofill: bool,
 

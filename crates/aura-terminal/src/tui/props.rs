@@ -461,6 +461,7 @@ pub struct SettingsViewProps {
     pub device_enrollment_modal_copied: bool,
     pub device_enrollment_modal_agreement_mode: AgreementMode,
     pub device_enrollment_modal_reversion_risk: bool,
+    pub device_enrollment_modal_is_demo_mode: bool,
     // Device select modal (for removal)
     pub device_select_modal_visible: bool,
     pub device_select_modal_devices: Vec<Device>,
@@ -672,6 +673,7 @@ pub fn extract_settings_view_props(state: &TuiState) -> SettingsViewProps {
         device_enrollment_modal_copied: enrollment_copied,
         device_enrollment_modal_agreement_mode: enrollment_agreement_mode,
         device_enrollment_modal_reversion_risk: enrollment_reversion_risk,
+        device_enrollment_modal_is_demo_mode: !state.settings.demo_mobile_device_id.is_empty(),
         // Device select modal (from queue)
         device_select_modal_visible: device_select_visible,
         device_select_modal_devices: device_select_devices,

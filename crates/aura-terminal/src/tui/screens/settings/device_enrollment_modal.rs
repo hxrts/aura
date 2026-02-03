@@ -23,6 +23,8 @@ pub struct DeviceEnrollmentModalProps {
     pub reversion_risk: bool,
     /// Whether code was copied to clipboard
     pub copied: bool,
+    /// Demo mode: show hint for 'm' key to simulate mobile import
+    pub is_demo_mode: bool,
 }
 
 #[component]
@@ -54,9 +56,9 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
     };
 
     let step_title = if props.is_complete {
-        "Add Device — Step 3 of 3"
+        format!("Add Device — Step 3 of 3: {}", props.nickname_suggestion)
     } else {
-        "Add Device — Step 2 of 3"
+        "Import this code on the new device".to_string()
     };
 
     let progress_text = format!(
@@ -67,14 +69,15 @@ pub fn DeviceEnrollmentModal(props: &DeviceEnrollmentModalProps) -> impl Into<An
     element! {
         CodeDisplayModal(
             visible: props.visible,
-            title: format!("{step_title}: {}", props.nickname_suggestion),
+            title: step_title,
             status: status,
             status_text: status_text,
             progress_text: progress_text,
-            instruction: "Import this code on the new device:".to_string(),
+            instruction: String::new(),
             code: props.enrollment_code.clone(),
             error_message: props.error_message.clone(),
             copied: props.copied,
+            show_mobile_hint: props.is_demo_mode,
         )
     }
 }

@@ -728,6 +728,14 @@ async fn handle_tui_launch(
                         "Simulator not available in demo mode".into(),
                     )
                 })?;
+            let demo_mobile_authority_id = simulator
+                .as_ref()
+                .map(|sim| sim.mobile_authority().to_string())
+                .ok_or_else(|| {
+                    crate::error::TerminalError::Operation(
+                        "Simulator not available in demo mode".into(),
+                    )
+                })?;
             let builder = IoContext::builder()
                 .with_app_core(app_core)
                 .with_base_path(base_path.clone())
@@ -736,7 +744,8 @@ async fn handle_tui_launch(
                 .with_existing_account(has_existing_account)
                 .with_demo_hints(hints)
                 .with_demo_mobile_agent(demo_mobile_agent)
-                .with_demo_mobile_device_id(demo_mobile_device_id);
+                .with_demo_mobile_device_id(demo_mobile_device_id)
+                .with_demo_mobile_authority_id(demo_mobile_authority_id);
 
             builder.build().map_err(|e| {
                 crate::error::TerminalError::Config(format!("IoContext build failed: {e}"))

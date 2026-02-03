@@ -22,7 +22,7 @@ use aura_core::identifiers::{AuthorityId, RecoveryId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::from_slice;
 use aura_core::TimeEffects;
-use aura_protocol::effects::TreeEffects;
+use aura_protocol::effects::{ChoreographyError, TreeEffects};
 use aura_recovery::ceremony_runners::{
     execute_as as guardian_execute_as, AbortCeremony, CommitCeremony, GuardianCeremonyRole,
     ProposeRotation,
@@ -49,7 +49,11 @@ use aura_recovery::setup_runners::{execute_as as setup_execute_as, GuardianSetup
 use aura_recovery::types::{GuardianProfile, GuardianSet};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use tokio::time::{sleep, Duration};
 use uuid::Uuid;
+
+const CHOREO_START_RETRY_DELAY_MS: u64 = 50;
+const CHOREO_START_RETRY_LIMIT: usize = 40;
 
 /// Recovery service API
 ///
@@ -997,15 +1001,43 @@ impl RecoveryServiceApi {
 
         let session_id = Self::ceremony_session_id(ceremony_id);
         eprintln!("[DEBUG] starting session with session_id={}", session_id);
-        adapter
-            .start_session(session_id)
-            .await
-            .map_err(|e| AgentError::internal(format!("guardian ceremony start failed: {e}")))?;
+        let mut attempt = 0usize;
+        loop {
+            match adapter.start_session(session_id).await {
+                Ok(()) => break,
+                Err(ChoreographyError::SessionAlreadyExists { .. }) => {
+                    if attempt >= CHOREO_START_RETRY_LIMIT {
+                        return Err(AgentError::internal(
+                            "guardian ceremony start failed: another session is still active"
+                                .to_string(),
+                        ));
+                    }
+                    attempt += 1;
+                    sleep(Duration::from_millis(CHOREO_START_RETRY_DELAY_MS)).await;
+                }
+                Err(e) => {
+                    return Err(AgentError::internal(format!(
+                        "guardian ceremony start failed: {e}"
+                    )))
+                }
+            }
+        }
         eprintln!("[DEBUG] session started, executing guardian_execute_as...");
 
-        guardian_execute_as(GuardianCeremonyRole::Initiator, &mut adapter)
-            .await
-            .map_err(|e| {
+        let execute_result =
+            guardian_execute_as(GuardianCeremonyRole::Initiator, &mut adapter).await;
+
+        if let Err(err) = adapter.end_session().await {
+            tracing::warn!("guardian ceremony end_session failed: {err}");
+        }
+
+        match execute_result {
+            Ok(()) => {
+                // Return the captured accepted guardians
+                let accepted = accepted_guardians.read().await.clone();
+                Ok(accepted)
+            }
+            Err(e) => {
                 let error_str = e.to_string();
                 eprintln!("[DEBUG] guardian_execute_as failed with: {}", error_str);
                 // Detect peer connectivity issues and provide actionable error message
@@ -1014,21 +1046,18 @@ impl RecoveryServiceApi {
                     || error_str.contains("Transport error")
                     || error_str.contains("No message available")
                 {
-                    AgentError::internal(
+                    Err(AgentError::internal(
                         "guardian ceremony failed: no responses received from guardians. \
                          Ensure guardian peers are online and connected."
                             .to_string(),
-                    )
+                    ))
                 } else {
-                    AgentError::internal(format!("guardian ceremony failed: {e}"))
+                    Err(AgentError::internal(format!(
+                        "guardian ceremony failed: {e}"
+                    )))
                 }
-            })?;
-
-        let _ = adapter.end_session().await;
-
-        // Return the captured accepted guardians
-        let accepted = accepted_guardians.read().await.clone();
-        Ok(accepted)
+            }
+        }
     }
 
     /// Execute guardian ceremony as a guardian (accept/decline).
@@ -1081,10 +1110,27 @@ impl RecoveryServiceApi {
                 });
 
         let session_id = Self::ceremony_session_id(ceremony_id);
-        adapter
-            .start_session(session_id)
-            .await
-            .map_err(|e| AgentError::internal(format!("guardian ceremony start failed: {e}")))?;
+        let mut attempt = 0usize;
+        loop {
+            match adapter.start_session(session_id).await {
+                Ok(()) => break,
+                Err(ChoreographyError::SessionAlreadyExists { .. }) => {
+                    if attempt >= CHOREO_START_RETRY_LIMIT {
+                        return Err(AgentError::internal(
+                            "guardian ceremony start failed: another session is still active"
+                                .to_string(),
+                        ));
+                    }
+                    attempt += 1;
+                    sleep(Duration::from_millis(CHOREO_START_RETRY_DELAY_MS)).await;
+                }
+                Err(e) => {
+                    return Err(AgentError::internal(format!(
+                        "guardian ceremony start failed: {e}"
+                    )))
+                }
+            }
+        }
 
         let result = guardian_execute_as(guardian_role, &mut adapter)
             .await
