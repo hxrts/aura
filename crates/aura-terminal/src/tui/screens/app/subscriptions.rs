@@ -19,6 +19,49 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
+/// Shared authority id state for UI dispatch handlers.
+#[derive(Clone, Default)]
+pub struct SharedAuthorityId(Arc<RwLock<String>>);
+
+impl SharedAuthorityId {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Arc::new(RwLock::new(String::new())))
+    }
+
+    pub fn read(&self) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, String>> {
+        self.0.read()
+    }
+
+    pub fn write(&self) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, String>> {
+        self.0.write()
+    }
+}
+
+/// Create a shared authority id holder and subscribe it to SETTINGS_SIGNAL.
+pub fn use_authority_id_subscription(
+    hooks: &mut Hooks,
+    app_ctx: &AppCoreContext,
+) -> SharedAuthorityId {
+    let shared_ref = hooks.use_ref(SharedAuthorityId::new);
+    let shared: SharedAuthorityId = shared_ref.read().clone();
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let authority_id = shared.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
+                if let Ok(mut guard) = authority_id.write() {
+                    *guard = settings_state.authority_id.clone();
+                }
+            })
+            .await;
+        }
+    });
+
+    shared
+}
+
 pub struct NavStatusSignals {
     pub network_status: State<NetworkStatus>,
     /// Online contacts (people you know who are currently online)

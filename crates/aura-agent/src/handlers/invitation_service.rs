@@ -475,6 +475,17 @@ mod tests {
         Arc::new(AuraEffectSystem::testing(&config).unwrap())
     }
 
+    fn effects_for_simulation(authority: &AuthorityContext, seed: u64) -> Arc<AuraEffectSystem> {
+        let config = AgentConfig {
+            device_id: authority.device_id(),
+            ..Default::default()
+        };
+        Arc::new(
+            AuraEffectSystem::simulation_for_authority(&config, seed, authority.authority_id())
+                .unwrap(),
+        )
+    }
+
     #[tokio::test]
     async fn test_invitation_service_creation() {
         let authority_context = create_test_authority(110);
@@ -504,6 +515,23 @@ mod tests {
         assert!(invitation.invitation_id.as_str().starts_with("inv-"));
         assert_eq!(invitation.receiver_id, receiver_id);
         assert_eq!(invitation.status, InvitationStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn test_invite_as_contact_self_out_of_band_does_not_require_peer() {
+        let authority_context = create_test_authority(141);
+        let effects = effects_for_simulation(&authority_context, 141);
+        let service = InvitationServiceApi::new(effects, authority_context.clone()).unwrap();
+
+        let receiver_id = authority_context.authority_id();
+        let result = service
+            .invite_as_contact(receiver_id, None, Some("Out-of-band invite".to_string()), None)
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "contact invite to self should succeed for out-of-band sharing, got: {result:?}"
+        );
     }
 
     #[tokio::test]

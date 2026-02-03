@@ -426,8 +426,10 @@ impl InvitationHandler {
                 }
             }
             _ => {
-                self.execute_invitation_exchange_sender(effects.clone(), &invitation)
-                    .await?;
+                if invitation.receiver_id != invitation.sender_id {
+                    self.execute_invitation_exchange_sender(effects.clone(), &invitation)
+                        .await?;
+                }
             }
         }
 
@@ -1965,6 +1967,12 @@ async fn execute_notify_peer(
     effects: &AuraEffectSystem,
 ) -> AgentResult<()> {
     if effects.is_test_mode() {
+        return Ok(());
+    }
+
+    if peer == authority.authority_id() {
+        // Self-addressed invitations are intended for out-of-band sharing.
+        // Skip network notify when inviting ourselves.
         return Ok(());
     }
 

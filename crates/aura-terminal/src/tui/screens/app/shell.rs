@@ -46,9 +46,10 @@ use crate::tui::context::IoContext;
 use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
 use crate::tui::screens::app::subscriptions::{
-    use_channels_subscription, use_contacts_subscription, use_devices_subscription,
-    use_messages_subscription, use_nav_status_signals, use_neighborhood_homes_subscription,
-    use_notifications_subscription, use_pending_requests_subscription, use_threshold_subscription,
+    use_authority_id_subscription, use_channels_subscription, use_contacts_subscription,
+    use_devices_subscription, use_messages_subscription, use_nav_status_signals,
+    use_neighborhood_homes_subscription, use_notifications_subscription,
+    use_pending_requests_subscription, use_threshold_subscription,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
@@ -324,6 +325,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // not the data, so they always read current contacts.
     // Also sends ContactCountChanged updates to keep TuiState in sync for navigation.
     let shared_contacts = use_contacts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+
+    // =========================================================================
+    // Authority subscription: current authority id for dispatch handlers
+    // =========================================================================
+    let shared_authority_id = use_authority_id_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
     // Channels subscription: SharedChannels for dispatch handlers to read
@@ -1503,6 +1509,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         // This Arc is updated by a reactive subscription, so reading from it
         // always gets current contacts (not stale props)
         let shared_contacts_for_dispatch = shared_contacts;
+        let shared_authority_id_for_dispatch = shared_authority_id;
         // Clone shared messages Arc for message retry dispatch
         // Used to look up failed messages by ID to get channel and content for retry
         let shared_messages_for_dispatch = shared_messages;
@@ -1742,10 +1749,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         }
                                     }
                                     DispatchCommand::OpenCreateInvitationModal => {
-                                        let self_authority_id = new_state
-                                            .authorities
-                                            .get(new_state.current_authority_index)
-                                            .map(|authority| authority.id.clone())
+                                        let self_authority_id = shared_authority_id_for_dispatch
+                                            .read()
+                                            .map(|guard| guard.clone())
                                             .unwrap_or_default();
                                         let idx = new_state.contacts.selected_index;
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
@@ -1778,7 +1784,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             } else {
                                                 if self_authority_id.is_empty() {
                                                     new_state.toast_error("No active authority");
-                                                    return;
+                                                    continue;
                                                 }
                                                 let mut modal_state =
                                                     crate::tui::state_machine::CreateInvitationModalState::for_receiver(
