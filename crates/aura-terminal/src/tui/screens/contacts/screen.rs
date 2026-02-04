@@ -25,7 +25,9 @@
 
 use iocraft::prelude::*;
 
-use aura_app::ui::signals::{CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL};
+use aura_app::ui::signals::{
+    CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL, SETTINGS_SIGNAL,
+};
 
 use crate::tui::callbacks::{ImportInvitationCallback, StartChatCallback, UpdateNicknameCallback};
 use crate::tui::components::{
@@ -36,7 +38,13 @@ use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::ContactsViewProps;
 use crate::tui::theme::{Spacing, Theme};
-use crate::tui::types::{Contact, ContactStatus};
+use crate::tui::types::{
+    short_id, Contact, ContactStatus, Invitation, InvitationDirection, InvitationStatus,
+    InvitationType,
+};
+use std::collections::HashSet;
+use aura_app::ui::signals::DiscoveredPeerMethod;
+use aura_app::ui::types::format_relative_time_from;
 
 /// Props for ContactItem
 #[derive(Default, Props)]
@@ -214,8 +222,8 @@ pub struct ContactsScreenProps {
     /// This is a single struct field so forgetting any view state is a compile error.
     pub view: ContactsViewProps,
 
-    /// LAN peers selection index (local UI state, not from TuiState)
-    pub lan_peers_selection: usize,
+    /// Best-effort current time for expiring pending invitations
+    pub now_ms: Option<u64>,
 
     // === Callbacks ===
     /// Callback when updating a contact's nickname
@@ -253,6 +261,8 @@ pub fn ContactsScreen(
 
     // Initialize reactive state with defaults - will be populated by signal subscriptions
     let reactive_contacts = hooks.use_state(Vec::new);
+    let reactive_invitations = hooks.use_state(Vec::new);
+    let own_authority_id = hooks.use_state(String::new);
 
     // Subscribe to contacts signal updates
     // Uses the unified ReactiveEffects system from aura-core
@@ -269,8 +279,39 @@ pub fn ContactsScreen(
         }
     });
 
+    hooks.use_future({
+        let mut own_authority_id = own_authority_id.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
+                own_authority_id.set(settings_state.authority_id);
+            })
+            .await;
+        }
+    });
+
+    hooks.use_future({
+        let mut reactive_invitations = reactive_invitations.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |inv_state| {
+                let invitations: Vec<Invitation> = inv_state
+                    .all_pending()
+                    .iter()
+                    .chain(inv_state.all_sent().iter())
+                    .chain(inv_state.all_history().iter())
+                    .map(Invitation::from)
+                    .collect();
+                reactive_invitations.set(invitations);
+            })
+            .await;
+        }
+    });
+
     // Use reactive state for rendering (populated by signal subscription)
     let contacts = reactive_contacts.read().clone();
+    let invitations = reactive_invitations.read().clone();
+    let own_authority_id = own_authority_id.read().clone();
 
     // LAN discovered peers state (reactive via signal subscription)
     let lan_peers_state = hooks.use_state(DiscoveredPeersState::new);
@@ -281,9 +322,11 @@ pub fn ContactsScreen(
         let app_core = app_ctx.app_core.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
+                let last_updated_ms = peers_state.last_updated_ms;
                 let discovered_peers: Vec<DiscoveredPeerInfo> = peers_state
                     .peers
                     .iter()
+                    .filter(|p| p.method == DiscoveredPeerMethod::Lan)
                     .map(|p| {
                         let authority_id = p.authority_id.to_string();
                         DiscoveredPeerInfo::new(&authority_id, &p.address)
@@ -298,19 +341,72 @@ pub fn ContactsScreen(
 
                 let mut state = DiscoveredPeersState::new();
                 state.set_peers(discovered_peers);
+                state.set_last_updated_ms(last_updated_ms);
                 lan_peers_state.set(state);
             })
             .await;
         }
     });
 
+    let mut display_contacts = contacts;
+    if !invitations.is_empty() {
+        let mut existing_ids: HashSet<String> =
+            display_contacts.iter().map(|c| c.id.clone()).collect();
+
+        for invitation in invitations.iter() {
+            if invitation.direction != InvitationDirection::Outbound {
+                continue;
+            }
+            if invitation.status != InvitationStatus::Pending {
+                continue;
+            }
+            if invitation.invitation_type != InvitationType::Contact {
+                continue;
+            }
+
+            if let (Some(expires_at), Some(now_ms)) = (invitation.expires_at, props.now_ms) {
+                if now_ms >= expires_at {
+                    continue;
+                }
+            }
+
+            let is_self_addressed = !own_authority_id.is_empty()
+                && invitation.other_party_id == own_authority_id;
+
+            let (id, name) = if !invitation.other_party_id.is_empty() && !is_self_addressed {
+                let id = invitation.other_party_id.clone();
+                let name = if !invitation.other_party_name.is_empty() {
+                    invitation.other_party_name.clone()
+                } else {
+                    short_id(&id, 8)
+                };
+                (id, name)
+            } else {
+                let id = invitation.id.clone();
+                let name = format!("Pending invite {}", short_id(&invitation.id, 6));
+                (id, name)
+            };
+
+            if existing_ids.contains(&id) {
+                continue;
+            }
+            existing_ids.insert(id.clone());
+
+            display_contacts.push(Contact::new(id, name).with_status(ContactStatus::Pending));
+        }
+    }
+
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_selected = props.view.selected_index;
-    let selected_contact = contacts.get(current_selected).cloned();
+    let selected_contact = display_contacts.get(current_selected).cloned();
 
     // === Pure view: No use_terminal_events ===
     // All event handling is done by IoApp (the shell) via the state machine.
     // This component is purely presentational.
+
+    let list_focused = props.view.focus.is_list();
+    let lan_focused = list_focused && props.view.list_focus.is_lan();
+    let contacts_focused = list_focused && props.view.list_focus.is_contacts();
 
     // Layout: Full 25 rows for content (no input bar on this screen)
     element! {
@@ -334,32 +430,56 @@ pub fn ContactsScreen(
                     overflow: Overflow::Hidden,
                     gap: 0,
                 ) {
-                    // Discovered LAN peers panel (only show if there are peers)
+                    // Discovered LAN peers panel
                     #({
                         let state = lan_peers_state.read();
-                        if state.has_peers() {
-                            Some(element! {
-                                DiscoveredPeersPanel(
-                                    peers: state.peers.clone(),
-                                    selected_index: props.lan_peers_selection,
-                                    focused: false,
+                        let now_ms = props.now_ms;
+                        let last_updated_ms = state.last_updated_ms;
+                        let status = if let Some(now) = now_ms {
+                            if last_updated_ms > 0 {
+                                format!(
+                                    "Last scan: {}",
+                                    format_relative_time_from(now, last_updated_ms)
                                 )
-                            })
+                            } else {
+                                "Discovery idle".to_string()
+                            }
                         } else {
-                            None
-                        }
+                            "Discovery idle".to_string()
+                        };
+
+                        let age_secs = if let Some(now) = now_ms {
+                            now.saturating_sub(last_updated_ms) / 1000
+                        } else {
+                            0
+                        };
+                        let peers_with_age: Vec<DiscoveredPeerInfo> = state
+                            .peers
+                            .iter()
+                            .cloned()
+                            .map(|peer| peer.with_age(age_secs))
+                            .collect();
+
+                        Some(element! {
+                            DiscoveredPeersPanel(
+                                peers: peers_with_age,
+                                selected_index: props.view.lan_selected_index,
+                                focused: lan_focused,
+                                status_line: status,
+                            )
+                        })
                     })
                     // Contacts list
                     ContactList(
-                        contacts: contacts.clone(),
+                        contacts: display_contacts.clone(),
                         selected_index: current_selected,
-                        focused: false,
+                        focused: contacts_focused,
                     )
                 }
                 // Detail (matches settings screen width)
                 ContactDetail(
                     contact: selected_contact,
-                    focused: false,
+                    focused: props.view.focus.is_detail(),
                 )
             }
         }
@@ -373,6 +493,7 @@ pub async fn run_contacts_screen() -> std::io::Result<()> {
     element! {
         ContactsScreen(
             view: ContactsViewProps::default(),
+            now_ms: None,
         )
     }
     .fullscreen()

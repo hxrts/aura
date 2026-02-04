@@ -334,6 +334,7 @@ pub struct ContactsCallbacks {
     pub on_start_chat: StartChatCallback,
     pub on_import_invitation: ImportInvitationCallback,
     pub on_invite_lan_peer: Arc<dyn Fn(String, String) + Send + Sync>,
+    pub on_refresh_lan_peers: NoArgCallback,
     pub on_remove_contact: IdCallback,
 }
 
@@ -345,6 +346,7 @@ impl ContactsCallbacks {
             on_start_chat: Self::make_start_chat(ctx.clone(), tx.clone()),
             on_import_invitation: Self::make_import_invitation(ctx.clone(), tx.clone()),
             on_invite_lan_peer: Self::make_invite_lan_peer(ctx.clone(), tx.clone()),
+            on_refresh_lan_peers: Self::make_refresh_lan_peers(ctx.clone(), tx.clone()),
             on_remove_contact: Self::make_remove_contact(ctx, tx),
         }
     }
@@ -452,6 +454,16 @@ impl ContactsCallbacks {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
                     }
                 }
+            });
+        })
+    }
+
+    fn make_refresh_lan_peers(ctx: Arc<IoContext>, _tx: UiUpdateSender) -> NoArgCallback {
+        Arc::new(move || {
+            let ctx = ctx.clone();
+            let cmd = EffectCommand::ListLanPeers;
+            spawn_ctx(ctx.clone(), async move {
+                let _ = ctx.dispatch(cmd).await;
             });
         })
     }

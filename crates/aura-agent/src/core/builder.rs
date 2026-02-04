@@ -2,7 +2,7 @@
 
 use super::{AgentConfig, AgentError, AgentResult};
 use crate::core::agent::AuraAgent;
-use crate::runtime::services::SyncManagerConfig;
+use crate::runtime::services::{RendezvousManagerConfig, SyncManagerConfig};
 use crate::runtime::{EffectContext, EffectSystemBuilder};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -12,6 +12,7 @@ pub struct AgentBuilder {
     config: AgentConfig,
     authority_id: Option<AuthorityId>,
     sync_config: Option<SyncManagerConfig>,
+    rendezvous_config: Option<RendezvousManagerConfig>,
 }
 
 impl AgentBuilder {
@@ -21,6 +22,7 @@ impl AgentBuilder {
             config: AgentConfig::default(),
             authority_id: None,
             sync_config: None,
+            rendezvous_config: None,
         }
     }
 
@@ -42,6 +44,18 @@ impl AgentBuilder {
         self
     }
 
+    /// Enable the rendezvous service with default configuration.
+    pub fn with_rendezvous(mut self) -> Self {
+        self.rendezvous_config = Some(RendezvousManagerConfig::default());
+        self
+    }
+
+    /// Enable the rendezvous service with a custom configuration.
+    pub fn with_rendezvous_config(mut self, config: RendezvousManagerConfig) -> Self {
+        self.rendezvous_config = Some(config);
+        self
+    }
+
     /// Set the configuration
     pub fn with_config(mut self, config: AgentConfig) -> Self {
         self.config = config;
@@ -50,7 +64,14 @@ impl AgentBuilder {
 
     /// Build a production agent
     pub async fn build_production(self, _ctx: &EffectContext) -> AgentResult<AuraAgent> {
-        let sync_config = self.sync_config.clone();
+        let sync_config = self
+            .sync_config
+            .clone()
+            .unwrap_or_default();
+        let rendezvous_config = self
+            .rendezvous_config
+            .clone()
+            .unwrap_or_default();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -66,9 +87,9 @@ impl AgentBuilder {
         let mut builder = EffectSystemBuilder::production()
             .with_config(self.config)
             .with_authority(authority_id);
-        if let Some(sync_config) = sync_config {
-            builder = builder.with_sync_config(sync_config);
-        }
+        builder = builder
+            .with_sync_config(sync_config)
+            .with_rendezvous_config(rendezvous_config);
         let runtime = builder
             .build(&temp_context)
             .await
@@ -80,6 +101,7 @@ impl AgentBuilder {
     /// Build a testing agent
     pub fn build_testing(self) -> AgentResult<AuraAgent> {
         let sync_config = self.sync_config.clone();
+        let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -89,6 +111,9 @@ impl AgentBuilder {
             .with_authority(authority_id);
         if let Some(sync_config) = sync_config {
             builder = builder.with_sync_config(sync_config);
+        }
+        if let Some(rendezvous_config) = rendezvous_config {
+            builder = builder.with_rendezvous_config(rendezvous_config);
         }
         let runtime = builder.build_sync().map_err(AgentError::runtime)?;
 
@@ -98,6 +123,7 @@ impl AgentBuilder {
     /// Build a testing agent using an existing async runtime
     pub async fn build_testing_async(self, ctx: &EffectContext) -> AgentResult<AuraAgent> {
         let sync_config = self.sync_config.clone();
+        let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -108,6 +134,9 @@ impl AgentBuilder {
         if let Some(sync_config) = sync_config {
             builder = builder.with_sync_config(sync_config);
         }
+        if let Some(rendezvous_config) = rendezvous_config {
+            builder = builder.with_rendezvous_config(rendezvous_config);
+        }
         let runtime = builder.build(ctx).await.map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))
@@ -116,6 +145,7 @@ impl AgentBuilder {
     /// Build a simulation agent
     pub fn build_simulation(self, seed: u64) -> AgentResult<AuraAgent> {
         let sync_config = self.sync_config.clone();
+        let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -125,6 +155,9 @@ impl AgentBuilder {
             .with_authority(authority_id);
         if let Some(sync_config) = sync_config {
             builder = builder.with_sync_config(sync_config);
+        }
+        if let Some(rendezvous_config) = rendezvous_config {
+            builder = builder.with_rendezvous_config(rendezvous_config);
         }
         let runtime = builder.build_sync().map_err(AgentError::runtime)?;
 
@@ -138,6 +171,7 @@ impl AgentBuilder {
         ctx: &EffectContext,
     ) -> AgentResult<AuraAgent> {
         let sync_config = self.sync_config.clone();
+        let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -147,6 +181,9 @@ impl AgentBuilder {
             .with_authority(authority_id);
         if let Some(sync_config) = sync_config {
             builder = builder.with_sync_config(sync_config);
+        }
+        if let Some(rendezvous_config) = rendezvous_config {
+            builder = builder.with_rendezvous_config(rendezvous_config);
         }
         let runtime = builder.build(ctx).await.map_err(AgentError::runtime)?;
 
@@ -164,6 +201,7 @@ impl AgentBuilder {
         shared_transport: crate::SharedTransport,
     ) -> AgentResult<AuraAgent> {
         let sync_config = self.sync_config.clone();
+        let rendezvous_config = self.rendezvous_config.clone();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
@@ -174,6 +212,9 @@ impl AgentBuilder {
             .with_shared_transport(shared_transport);
         if let Some(sync_config) = sync_config {
             builder = builder.with_sync_config(sync_config);
+        }
+        if let Some(rendezvous_config) = rendezvous_config {
+            builder = builder.with_rendezvous_config(rendezvous_config);
         }
         let runtime = builder.build(ctx).await.map_err(AgentError::runtime)?;
 

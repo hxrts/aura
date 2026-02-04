@@ -132,6 +132,8 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         HelpCommand::new("c", "c", "Start chat with contact", "Contacts"),
         HelpCommand::new("a", "a", "Accept invitation code", "Contacts"),
         HelpCommand::new("n", "n", "Create invitation code", "Contacts"),
+        HelpCommand::new("p", "p", "Toggle LAN peers list", "Contacts"),
+        HelpCommand::new("d", "d", "Rescan LAN peers", "Contacts"),
         HelpCommand::new("r", "r", "Remove contact", "Contacts"),
         // Neighborhood screen
         HelpCommand::new("Enter", "Enter", "Enter selected home", "Neighborhood"),

@@ -315,6 +315,8 @@ pub enum UiUpdate {
         /// The peer ID or address
         peer_id: String,
     },
+    /// LAN peer count changed (for keyboard navigation)
+    LanPeersCountChanged(usize),
 
     // =========================================================================
     // Notifications

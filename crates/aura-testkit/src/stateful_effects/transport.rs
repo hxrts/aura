@@ -115,7 +115,7 @@ impl InMemoryTransportHandler {
     /// Register a new peer with message channel
     ///
     /// Note: Callers should generate UUIDs via `RandomEffects::random_uuid()`
-    /// and pass them to this method to avoid direct `Uuid::new_v4()` calls.
+    /// and pass them to this method to avoid direct entropy-consuming UUID calls.
     pub async fn register_peer(
         &self,
         peer_id: &str,

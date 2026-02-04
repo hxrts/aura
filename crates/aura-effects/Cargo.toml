@@ -67,6 +67,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 fastrand = "2.1"
 hex = { workspace = true }
+socket2 = { workspace = true }
 
 [dev-dependencies]
 # tokio-test = { workspace = true } # removed - unused

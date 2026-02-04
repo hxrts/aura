@@ -11,8 +11,8 @@ use iocraft::prelude::*;
 
 use aura_app::ui::signals::{
     ConnectionStatus, NetworkStatus, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
-    INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL,
-    SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+    DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
+    RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
 
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -52,7 +52,7 @@ pub fn use_authority_id_subscription(
         async move {
             subscribe_signal_with_retry(app_core, &*SETTINGS_SIGNAL, move |settings_state| {
                 if let Ok(mut guard) = authority_id.write() {
-                    *guard = settings_state.authority_id.clone();
+                    *guard = settings_state.authority_id;
                 }
             })
             .await;
@@ -171,6 +171,74 @@ impl SharedContacts {
     pub fn write(&self) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<Contact>>> {
         self.0.write()
     }
+}
+
+/// Shared discovered peers state that can be read by closures without re-rendering.
+#[derive(Clone, Default)]
+pub struct SharedDiscoveredPeers(Arc<RwLock<Vec<aura_app::signal_defs::DiscoveredPeer>>>);
+
+impl SharedDiscoveredPeers {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Arc::new(RwLock::new(Vec::new())))
+    }
+
+    pub fn read(
+        &self,
+    ) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<aura_app::signal_defs::DiscoveredPeer>>>
+    {
+        self.0.read()
+    }
+
+    pub fn write(
+        &self,
+    ) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<aura_app::signal_defs::DiscoveredPeer>>>
+    {
+        self.0.write()
+    }
+}
+
+/// Create a shared discovered peers holder and subscribe it to DISCOVERED_PEERS_SIGNAL.
+///
+/// Returns an Arc that closures can capture. The subscription updates the Arc's
+/// contents whenever discovery changes, so readers always get current data.
+///
+/// If `update_tx` is provided, sends `LanPeersCountChanged` whenever the LAN peer count changes.
+pub fn use_discovered_peers_subscription(
+    hooks: &mut Hooks,
+    app_ctx: &AppCoreContext,
+    update_tx: Option<UiUpdateSender>,
+) -> SharedDiscoveredPeers {
+    let shared_ref = hooks.use_ref(SharedDiscoveredPeers::new);
+    let shared: SharedDiscoveredPeers = shared_ref.read().clone();
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let peers = shared.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
+                let lan_peers: Vec<_> = peers_state
+                    .peers
+                    .iter()
+                    .filter(|p| p.method == aura_app::signal_defs::DiscoveredPeerMethod::Lan)
+                    .cloned()
+                    .collect();
+
+                let new_count = lan_peers.len();
+
+                if let Ok(mut guard) = peers.write() {
+                    *guard = lan_peers;
+                }
+
+                if let Some(ref tx) = update_tx {
+                    let _ = tx.try_send(UiUpdate::LanPeersCountChanged(new_count));
+                }
+            })
+            .await;
+        }
+    });
+
+    shared
 }
 
 /// Create a shared contacts holder and subscribe it to CONTACTS_SIGNAL.

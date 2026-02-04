@@ -112,7 +112,7 @@ pub struct NetworkConfig {
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
-            bind_address: "127.0.0.1:0".to_string(),
+            bind_address: "0.0.0.0:0".to_string(),
             max_connections: 64,
             connection_timeout: 10,
         }

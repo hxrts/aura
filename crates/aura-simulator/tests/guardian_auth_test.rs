@@ -18,9 +18,9 @@ use uuid::Uuid;
 #[tokio::test]
 async fn guardian_auth_harness_builds() {
     // Test that protocol harness can be built
-    let account_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian_device = DeviceId::from_uuid(Uuid::new_v4());
-    let coordinator_device = DeviceId::from_uuid(Uuid::new_v4());
+    let account_device = DeviceId::from_uuid(Uuid::from_bytes([1; 16]));
+    let guardian_device = DeviceId::from_uuid(Uuid::from_bytes([2; 16]));
+    let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([3; 16]));
 
     let test = ProtocolTest::new("GuardianAuthRelational")
         .bind_role("Account", account_device)
@@ -34,9 +34,9 @@ async fn guardian_auth_harness_builds() {
 #[tokio::test]
 async fn guardian_auth_adapter_setup() {
     // Test that protocol adapters can be created and sessions started
-    let account_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian_device = DeviceId::from_uuid(Uuid::new_v4());
-    let coordinator_device = DeviceId::from_uuid(Uuid::new_v4());
+    let account_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
+    let guardian_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
+    let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
     let account_auth = AuthorityId::from_uuid(account_device.uuid());
     let guardian_auth = AuthorityId::from_uuid(guardian_device.uuid());
@@ -48,7 +48,7 @@ async fn guardian_auth_adapter_setup() {
     role_map.insert(GuardianAuthRelationalRole::Coordinator, coordinator_auth);
 
     let bus = Arc::new(SimulatedMessageBus::new());
-    let session_id = Uuid::new_v4();
+    let session_id = Uuid::from_bytes([14; 16]);
 
     let account_effects = TestEffectSystem::new(
         bus.clone(),

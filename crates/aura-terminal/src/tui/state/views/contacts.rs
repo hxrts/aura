@@ -3,15 +3,52 @@
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::state::form::{Validatable, ValidationError};
 
+/// Focus within the contacts list column.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ContactsListFocus {
+    /// Focus on LAN-discovered peers list.
+    LanPeers,
+    /// Focus on saved contacts list.
+    #[default]
+    Contacts,
+}
+
+impl ContactsListFocus {
+    /// Toggle between LAN peers and contacts.
+    #[must_use]
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::LanPeers => Self::Contacts,
+            Self::Contacts => Self::LanPeers,
+        }
+    }
+
+    #[must_use]
+    pub fn is_lan(self) -> bool {
+        matches!(self, Self::LanPeers)
+    }
+
+    #[must_use]
+    pub fn is_contacts(self) -> bool {
+        matches!(self, Self::Contacts)
+    }
+}
+
 /// Contacts screen state
 #[derive(Clone, Debug, Default)]
 pub struct ContactsViewState {
     /// Panel focus (list or detail)
     pub focus: TwoPanelFocus,
+    /// Focus within the list column (LAN peers vs contacts)
+    pub list_focus: ContactsListFocus,
     /// Selected contact index
     pub selected_index: usize,
     /// Total contact count (for wrap-around navigation)
     pub contact_count: usize,
+    /// Selected LAN peer index
+    pub lan_selected_index: usize,
+    /// Total LAN peer count (for wrap-around navigation)
+    pub lan_peer_count: usize,
     /// Filter text
     pub filter: String,
     /// Demo mode: Alice's invitation code (for Ctrl+a shortcut)

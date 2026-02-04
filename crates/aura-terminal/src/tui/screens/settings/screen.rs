@@ -17,8 +17,14 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+use std::time::Duration;
 
-use aura_app::ui::signals::{RECOVERY_SIGNAL, SETTINGS_SIGNAL};
+use aura_app::ui::signals::{
+    DiscoveredPeerMethod, NetworkStatus, SyncStatus, DISCOVERED_PEERS_SIGNAL,
+    NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL, SYNC_STATUS_SIGNAL,
+    TRANSPORT_PEERS_SIGNAL,
+};
+use aura_app::ui::types::format_relative_time_from;
 
 use crate::tui::callbacks::{
     AddDeviceCallback, RemoveDeviceCallback, UpdateNicknameSuggestionCallback,
@@ -101,6 +107,11 @@ pub fn SettingsScreen(
     let reactive_guardian_count = hooks.use_state(|| 0usize);
     let reactive_recovery_status = hooks.use_state(RecoveryStatus::default);
     let reactive_authorities = hooks.use_state(Vec::<AuthorityInfo>::new);
+    let reactive_network_status = hooks.use_state(NetworkStatus::default);
+    let reactive_sync_status = hooks.use_state(SyncStatus::default);
+    let reactive_transport_peers = hooks.use_state(|| 0usize);
+    let reactive_discovery_counts = hooks.use_state(|| (0usize, 0usize, 0usize, 0u64));
+    let reactive_now_ms = hooks.use_state(|| None::<u64>);
 
     // Subscribe to settings signal for domain data
     hooks.use_future({
@@ -155,6 +166,84 @@ pub fn SettingsScreen(
         }
     });
 
+    // Subscribe to network status signal for observability
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut reactive_network_status = reactive_network_status.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*NETWORK_STATUS_SIGNAL, move |status| {
+                reactive_network_status.set(status);
+            })
+            .await;
+        }
+    });
+
+    // Subscribe to sync status signal for observability
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut reactive_sync_status = reactive_sync_status.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*SYNC_STATUS_SIGNAL, move |status| {
+                reactive_sync_status.set(status);
+            })
+            .await;
+        }
+    });
+
+    // Subscribe to transport peers signal for observability
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut reactive_transport_peers = reactive_transport_peers.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
+                reactive_transport_peers.set(count);
+            })
+            .await;
+        }
+    });
+
+    // Subscribe to discovered peers for observability
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut reactive_discovery_counts = reactive_discovery_counts.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |state| {
+                let mut lan_count = 0usize;
+                let mut rendezvous_count = 0usize;
+                for peer in &state.peers {
+                    match peer.method {
+                        DiscoveredPeerMethod::Lan => lan_count += 1,
+                        DiscoveredPeerMethod::Rendezvous => rendezvous_count += 1,
+                    }
+                }
+                reactive_discovery_counts.set((
+                    state.peers.len(),
+                    lan_count,
+                    rendezvous_count,
+                    state.last_updated_ms,
+                ));
+            })
+            .await;
+        }
+    });
+
+    // Keep a best-effort physical clock for relative-time UI formatting.
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let mut reactive_now_ms = reactive_now_ms.clone();
+        async move {
+            loop {
+                let runtime = app_core.raw().read().await.runtime().cloned();
+                if let Some(runtime) = runtime {
+                    if let Ok(ts) = runtime.current_time_ms().await {
+                        reactive_now_ms.set(Some(ts));
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+            }
+        }
+    });
+
     // Use reactive state for rendering
     let nickname_suggestion = reactive_nickname_suggestion.read().clone();
     let devices = reactive_devices.read().clone();
@@ -162,6 +251,12 @@ pub fn SettingsScreen(
     let guardian_count = *reactive_guardian_count.read();
     let recovery_status = reactive_recovery_status.read().clone();
     let authorities = reactive_authorities.read().clone();
+    let network_status = *reactive_network_status.read();
+    let sync_status = reactive_sync_status.read().clone();
+    let transport_peers = *reactive_transport_peers.read();
+    let (discovered_total, discovered_lan, discovered_rendezvous, discovered_last_ms) =
+        *reactive_discovery_counts.read();
+    let now_ms = *reactive_now_ms.read();
 
     // === Pure view: Use props.view from TuiState instead of local state ===
     let current_section = props.view.section;
@@ -377,6 +472,69 @@ pub fn SettingsScreen(
                 }
             }
         }
+        SettingsSection::Observability => {
+            let (network_label, network_color, last_sync_ms) = match network_status {
+                NetworkStatus::Disconnected => ("Disconnected".to_string(), Theme::WARNING, 0),
+                NetworkStatus::NoPeers => ("Connected (no peers)".to_string(), Theme::TEXT, 0),
+                NetworkStatus::Syncing => ("Connected (syncing)".to_string(), Theme::SECONDARY, 0),
+                NetworkStatus::Synced { last_sync_ms } => {
+                    ("Connected (synced)".to_string(), Theme::SECONDARY, last_sync_ms)
+                }
+            };
+
+            let (sync_label, sync_color) = match sync_status {
+                SyncStatus::Idle => ("Idle".to_string(), Theme::TEXT),
+                SyncStatus::Syncing { progress } => {
+                    (format!("Syncing ({progress}%)"), Theme::SECONDARY)
+                }
+                SyncStatus::Synced => ("Synced".to_string(), Theme::SECONDARY),
+                SyncStatus::Failed { message } => {
+                    (format!("Failed: {message}"), Theme::WARNING)
+                }
+            };
+
+            let last_sync_display = if last_sync_ms > 0 {
+                if let Some(now) = now_ms {
+                    format_relative_time_from(now, last_sync_ms)
+                } else {
+                    "Unknown".to_string()
+                }
+            } else {
+                "Never".to_string()
+            };
+
+            let discovery_display = if discovered_last_ms > 0 {
+                if let Some(now) = now_ms {
+                    format_relative_time_from(now, discovered_last_ms)
+                } else {
+                    "Unknown".to_string()
+                }
+            } else {
+                "Never".to_string()
+            };
+
+            vec![
+                ("Network".into(), Theme::SECONDARY),
+                (format!("Status: {network_label}"), network_color),
+                (
+                    format!("Transport peers: {transport_peers}"),
+                    Theme::TEXT,
+                ),
+                (String::new(), Theme::TEXT),
+                ("Sync".into(), Theme::SECONDARY),
+                (format!("Status: {sync_label}"), sync_color),
+                (format!("Last sync: {last_sync_display}"), Theme::TEXT),
+                (String::new(), Theme::TEXT),
+                ("Discovery".into(), Theme::SECONDARY),
+                (
+                    format!(
+                        "Peers: {discovered_total} (LAN {discovered_lan}, Rendezvous {discovered_rendezvous})"
+                    ),
+                    Theme::TEXT,
+                ),
+                (format!("Last update: {discovery_display}"), Theme::TEXT),
+            ]
+        }
     };
 
     // Layout: Full 25 rows for content (no input bar on this screen)
@@ -401,6 +559,7 @@ pub fn SettingsScreen(
                         SimpleSelectableItem(label: "Request Recovery".to_string(), selected: current_section == SettingsSection::Recovery)
                         SimpleSelectableItem(label: "Devices".to_string(), selected: current_section == SettingsSection::Devices)
                         SimpleSelectableItem(label: "Authority".to_string(), selected: current_section == SettingsSection::Authority)
+                        SimpleSelectableItem(label: "Observability".to_string(), selected: current_section == SettingsSection::Observability)
                     }
                 }
 

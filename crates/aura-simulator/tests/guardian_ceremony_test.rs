@@ -18,9 +18,9 @@ use uuid::Uuid;
 #[tokio::test]
 async fn guardian_ceremony_harness_builds() {
     // Test that protocol harness can be built with explicit Guardian1/Guardian2 roles
-    let initiator_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian1_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian2_device = DeviceId::from_uuid(Uuid::new_v4());
+    let initiator_device = DeviceId::from_uuid(Uuid::from_bytes([1; 16]));
+    let guardian1_device = DeviceId::from_uuid(Uuid::from_bytes([2; 16]));
+    let guardian2_device = DeviceId::from_uuid(Uuid::from_bytes([3; 16]));
 
     let test = ProtocolTest::new("GuardianCeremony")
         .bind_role("Initiator", initiator_device)
@@ -34,9 +34,9 @@ async fn guardian_ceremony_harness_builds() {
 #[tokio::test]
 async fn guardian_ceremony_adapter_setup() {
     // Test that protocol adapters can be created and sessions started
-    let initiator_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian1_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian2_device = DeviceId::from_uuid(Uuid::new_v4());
+    let initiator_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
+    let guardian1_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
+    let guardian2_device = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
     let initiator_auth = AuthorityId::from_uuid(initiator_device.uuid());
     let guardian1_auth = AuthorityId::from_uuid(guardian1_device.uuid());
@@ -48,7 +48,7 @@ async fn guardian_ceremony_adapter_setup() {
     role_map.insert(GuardianCeremonyRole::Guardian2, guardian2_auth);
 
     let bus = Arc::new(SimulatedMessageBus::new());
-    let session_id = Uuid::new_v4();
+    let session_id = Uuid::from_bytes([14; 16]);
 
     let initiator_effects = TestEffectSystem::new(
         bus.clone(),

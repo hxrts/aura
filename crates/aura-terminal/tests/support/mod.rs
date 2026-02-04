@@ -71,7 +71,7 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Create a unique, empty directory under the OS temp directory.
 ///
-/// Avoids disallowed randomness (`Uuid::new_v4`) while still remaining safe for
+/// Avoids disallowed entropy-consuming randomness while still remaining safe for
 /// parallel test execution by using `create_dir` collision avoidance.
 pub fn unique_test_dir(prefix: &str) -> PathBuf {
     let root = std::env::temp_dir();

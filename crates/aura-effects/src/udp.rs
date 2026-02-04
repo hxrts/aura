@@ -4,7 +4,8 @@
 
 use async_trait::async_trait;
 use aura_core::effects::network::{NetworkError, UdpEffects, UdpEndpoint, UdpEndpointEffects};
-use std::net::SocketAddr;
+use socket2::{Domain, Protocol, Socket, Type};
+use std::net::{SocketAddr, UdpSocket as StdUdpSocket};
 use std::sync::Arc;
 use tokio::net::UdpSocket;
 
@@ -67,9 +68,38 @@ impl UdpEffects for RealUdpEffectsHandler {
         let addr: SocketAddr = addr.as_str().parse().map_err(|e| {
             NetworkError::ConnectionFailed(format!("Invalid UDP bind address '{addr}': {e}"))
         })?;
-        let socket = UdpSocket::bind(addr).await.map_err(|e| {
+        let domain = match addr {
+            SocketAddr::V4(_) => Domain::IPV4,
+            SocketAddr::V6(_) => Domain::IPV6,
+        };
+
+        let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP)).map_err(|e| {
+            NetworkError::ConnectionFailed(format!("UDP socket create failed: {e}"))
+        })?;
+        socket
+            .set_reuse_address(true)
+            .map_err(|e| NetworkError::ConnectionFailed(format!("set_reuse_address failed: {e}")))?;
+        #[cfg(all(
+            unix,
+            not(any(target_os = "solaris", target_os = "illumos", target_os = "cygwin"))
+        ))]
+        {
+            if let Err(err) = socket.set_reuse_port(true) {
+                tracing::debug!(error = %err, "set_reuse_port failed");
+            }
+        }
+        socket.bind(&addr.into()).map_err(|e| {
             NetworkError::ConnectionFailed(format!("UDP bind failed ({addr}): {e}"))
         })?;
+        socket
+            .set_nonblocking(true)
+            .map_err(|e| NetworkError::ConnectionFailed(format!("UDP nonblocking failed: {e}")))?;
+
+        let std_socket: StdUdpSocket = socket.into();
+        let socket = UdpSocket::from_std(std_socket).map_err(|e| {
+            NetworkError::ConnectionFailed(format!("UDP socket init failed: {e}"))
+        })?;
+
         Ok(Arc::new(RealUdpSocket { socket }))
     }
 }

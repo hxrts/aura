@@ -72,6 +72,15 @@ use uuid::Uuid;
 // Re-export types from aura_invitation for public API
 pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
 
+const CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE: &str =
+    "application/aura-contact-invitation-acceptance";
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ContactInvitationAcceptance {
+    invitation_id: InvitationId,
+    acceptor_id: AuthorityId,
+}
+
 /// Result of an invitation action
 ///
 /// This type is specific to the agent handler layer, providing a simplified
@@ -523,6 +532,17 @@ impl InvitationHandler {
             );
         }
 
+        if let Err(e) = self
+            .notify_contact_invitation_acceptance(effects.as_ref(), invitation_id)
+            .await
+        {
+            tracing::debug!(
+                invitation_id = %invitation_id,
+                error = %e,
+                "Failed to notify contact invitation acceptance"
+            );
+        }
+
         if let Some(channel_invite) = self
             .resolve_channel_invitation(effects.as_ref(), invitation_id)
             .await?
@@ -721,6 +741,176 @@ impl InvitationHandler {
             new_status: Some(InvitationStatus::Accepted),
             error: None,
         })
+    }
+
+    async fn notify_contact_invitation_acceptance(
+        &self,
+        effects: &AuraEffectSystem,
+        invitation_id: &InvitationId,
+    ) -> AgentResult<()> {
+        if effects.is_test_mode() {
+            return Ok(());
+        }
+
+        let Some(invitation) = self
+            .load_invitation_for_choreography(effects, invitation_id)
+            .await
+        else {
+            return Ok(());
+        };
+
+        if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+            return Ok(());
+        }
+
+        let acceptor_id = self.context.authority.authority_id();
+        if invitation.sender_id == acceptor_id {
+            return Ok(());
+        }
+
+        let acceptance = ContactInvitationAcceptance {
+            invitation_id: invitation.invitation_id.clone(),
+            acceptor_id,
+        };
+        let payload = serde_json::to_vec(&acceptance).map_err(|e| {
+            AgentError::internal(format!("serialize contact invitation acceptance: {e}"))
+        })?;
+
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
+        );
+        metadata.insert("invitation-id".to_string(), invitation.invitation_id.to_string());
+        metadata.insert("acceptor-id".to_string(), acceptor_id.to_string());
+
+        let envelope = TransportEnvelope {
+            destination: invitation.sender_id,
+            source: acceptor_id,
+            context: default_context_id_for_authority(invitation.sender_id),
+            payload,
+            metadata,
+            receipt: None,
+        };
+
+        effects.send_envelope(envelope).await.map_err(|e| {
+            AgentError::effects(format!(
+                "send contact invitation acceptance to {}: {e}",
+                invitation.sender_id
+            ))
+        })?;
+
+        Ok(())
+    }
+
+    /// Process incoming contact invitation acceptance envelopes.
+    pub async fn process_contact_invitation_acceptances(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+    ) -> AgentResult<usize> {
+        let mut processed = 0usize;
+
+        loop {
+            let envelope = match effects.receive_envelope().await {
+                Ok(env) => env,
+                Err(TransportError::NoMessage) => break,
+                Err(e) => {
+                    tracing::warn!("Error receiving contact invitation acceptance: {}", e);
+                    break;
+                }
+            };
+
+            let Some(content_type) = envelope.metadata.get("content-type") else {
+                effects.requeue_envelope(envelope);
+                break;
+            };
+
+            if content_type != CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE {
+                effects.requeue_envelope(envelope);
+                break;
+            }
+
+            let acceptance: ContactInvitationAcceptance =
+                match serde_json::from_slice(&envelope.payload) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "Invalid contact invitation acceptance payload"
+                        );
+                        continue;
+                    }
+                };
+
+            if acceptance.acceptor_id == self.context.authority.authority_id() {
+                continue;
+            }
+
+            let Some(invitation) = Self::load_created_invitation(
+                effects.as_ref(),
+                self.context.authority.authority_id(),
+                &acceptance.invitation_id,
+            )
+            .await
+            else {
+                tracing::debug!(
+                    invitation_id = %acceptance.invitation_id,
+                    "Ignoring acceptance for unknown invitation"
+                );
+                continue;
+            };
+
+            if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+                continue;
+            }
+
+            if invitation.status == InvitationStatus::Accepted {
+                continue;
+            }
+
+            let now_ms = effects.current_timestamp().await.unwrap_or(0);
+            let context_id = self.context.authority.default_context_id();
+
+            let fact = InvitationFact::accepted_ms(
+                acceptance.invitation_id.clone(),
+                acceptance.acceptor_id,
+                now_ms,
+            );
+            execute_journal_append(fact, &self.context.authority, context_id, effects.as_ref())
+                .await?;
+
+            let contact_fact = ContactFact::Added {
+                context_id,
+                owner_id: self.context.authority.authority_id(),
+                contact_id: acceptance.acceptor_id,
+                nickname: acceptance.acceptor_id.to_string(),
+                added_at: PhysicalTime {
+                    ts_ms: now_ms,
+                    uncertainty: None,
+                },
+            };
+
+            effects
+                .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID, contact_fact.to_bytes())
+                .await
+                .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
+
+            effects.await_next_view_update().await;
+
+            let mut updated = invitation.clone();
+            updated.status = InvitationStatus::Accepted;
+            Self::persist_created_invitation(
+                effects.as_ref(),
+                self.context.authority.authority_id(),
+                &updated,
+            )
+            .await?;
+            self.invitation_cache.cache_invitation(updated).await;
+
+            processed = processed.saturating_add(1);
+        }
+
+        Ok(processed)
     }
 
     async fn resolve_contact_invitation(
@@ -2411,6 +2601,96 @@ mod tests {
                 assert_eq!(owner_id, own_authority);
                 assert_eq!(contact_id, sender_id);
                 assert_eq!(nickname, "Alice");
+            }
+            other => panic!("Expected ContactFact::Added, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn accepting_contact_invitation_notifies_sender_and_adds_contact() {
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let config = AgentConfig::default();
+
+        let sender_id = AuthorityId::new_from_entropy([124u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([125u8; 32]);
+
+        let sender_effects = Arc::new(
+            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+                &config,
+                20011,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let receiver_effects = Arc::new(
+            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+                &config,
+                20012,
+                receiver_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+
+        let sender_handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
+        let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+
+        let invitation = sender_handler
+            .create_invitation(
+                sender_effects.clone(),
+                sender_id,
+                InvitationType::Contact { nickname: None },
+                Some("Contact invitation from sender".to_string()),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let code = InvitationServiceApi::export_invitation(&invitation);
+        let imported = receiver_handler
+            .import_invitation_code(&receiver_effects, &code)
+            .await
+            .unwrap();
+
+        receiver_handler
+            .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let processed = sender_handler
+            .process_contact_invitation_acceptances(sender_effects.clone())
+            .await
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        let committed = sender_effects.load_committed_facts(sender_id).await.unwrap();
+
+        let mut found = None::<ContactFact>;
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+
+            if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
+                continue;
+            }
+
+            found = ContactFact::from_envelope(&envelope);
+        }
+
+        let fact = found.expect("Expected ContactFact from acceptance processing");
+        match fact {
+            ContactFact::Added {
+                owner_id,
+                contact_id,
+                nickname,
+                ..
+            } => {
+                assert_eq!(owner_id, sender_id);
+                assert_eq!(contact_id, receiver_id);
+                assert_eq!(nickname, receiver_id.to_string());
             }
             other => panic!("Expected ContactFact::Added, got {:?}", other),
         }

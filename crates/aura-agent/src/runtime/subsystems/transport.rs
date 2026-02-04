@@ -87,6 +87,7 @@ impl TransportStatsCounters {
 /// - Transport statistics
 pub struct TransportSubsystem {
     /// Core transport handler
+    #[allow(dead_code)]
     handler: aura_effects::transport::RealTransportHandler,
 
     /// Incoming message inbox
@@ -146,6 +147,7 @@ impl TransportSubsystem {
     }
 
     /// Get reference to the transport handler
+    #[allow(dead_code)]
     pub fn handler(&self) -> &aura_effects::transport::RealTransportHandler {
         &self.handler
     }

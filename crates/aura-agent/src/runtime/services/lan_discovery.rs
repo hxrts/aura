@@ -22,6 +22,7 @@ pub struct LanDiscoveryService {
     time: Arc<dyn PhysicalTimeEffects>,
     socket: Arc<dyn UdpEndpointEffects>,
     state: Arc<RwLock<LanDiscoveryState>>,
+    metrics: Arc<RwLock<LanDiscoveryMetrics>>,
     shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
 }
@@ -29,6 +30,21 @@ pub struct LanDiscoveryService {
 #[derive(Debug, Default)]
 struct LanDiscoveryState {
     descriptor: Option<RendezvousDescriptor>,
+}
+
+/// Runtime metrics for LAN discovery.
+#[derive(Debug, Default, Clone)]
+pub struct LanDiscoveryMetrics {
+    pub announcements_sent: u64,
+    pub announcement_errors: u64,
+    pub packets_received: u64,
+    pub packets_invalid: u64,
+    pub peers_discovered: u64,
+    pub receive_errors: u64,
+    pub last_announce_ms: u64,
+    pub last_packet_ms: u64,
+    pub last_discovered_ms: u64,
+    pub last_error_ms: u64,
 }
 
 impl LanDiscoveryState {
@@ -76,6 +92,7 @@ impl LanDiscoveryService {
             time,
             socket,
             state: Arc::new(RwLock::new(LanDiscoveryState::default())),
+            metrics: Arc::new(RwLock::new(LanDiscoveryMetrics::default())),
             shutdown_tx,
             shutdown_rx,
         })
@@ -134,10 +151,16 @@ impl LanDiscoveryService {
         &self.socket
     }
 
+    /// Get a snapshot of LAN discovery metrics.
+    pub async fn metrics(&self) -> LanDiscoveryMetrics {
+        self.metrics.read().await.clone()
+    }
+
     fn start_announcer(&self) -> tokio::task::JoinHandle<()> {
         let socket = self.socket.clone();
         let authority_id = self.authority_id;
         let state = self.state.clone();
+        let metrics = self.metrics.clone();
         let interval_ms = self.config.announce_interval_ms;
         let time = self.time.clone();
         let broadcast_ip: Ipv4Addr = self
@@ -154,7 +177,7 @@ impl LanDiscoveryService {
                 tokio::select! {
                     _ = shutdown_rx.changed() => {
                         if *shutdown_rx.borrow() {
-                            info!("LAN announcer shutting down");
+                            info!(component = "lan_discovery", "LAN announcer shutting down");
                             break;
                         }
                     }
@@ -173,6 +196,8 @@ impl LanDiscoveryService {
                             Ok(t) => t.ts_ms,
                             Err(err) => {
                                 warn!(error = %err, "LAN announcer: failed to read physical time");
+                                let mut metrics = metrics.write().await;
+                                metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
                                 continue;
                             }
                         };
@@ -180,16 +205,32 @@ impl LanDiscoveryService {
                         let packet = LanDiscoveryPacket::new(authority_id, desc.clone(), timestamp_ms);
                         let Some(bytes) = packet.to_bytes() else {
                             warn!("LAN announcer: failed to serialize packet");
+                            let mut metrics = metrics.write().await;
+                            metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
+                            metrics.last_error_ms = timestamp_ms;
                             continue;
                         };
                         if bytes.len() > aura_rendezvous::MAX_PACKET_SIZE {
                             warn!(size = bytes.len(), "LAN announcer: packet too large");
+                            let mut metrics = metrics.write().await;
+                            metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
+                            metrics.last_error_ms = timestamp_ms;
                             continue;
                         }
 
                         match socket.send_to(&bytes, &broadcast_addr).await {
-                            Ok(n) => trace!(authority = %authority_id, bytes = n, "LAN announcement sent"),
-                            Err(e) => warn!(error = %e, "Failed to send LAN announcement"),
+                            Ok(n) => {
+                                trace!(authority = %authority_id, bytes = n, "LAN announcement sent");
+                                let mut metrics = metrics.write().await;
+                                metrics.announcements_sent = metrics.announcements_sent.saturating_add(1);
+                                metrics.last_announce_ms = timestamp_ms;
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Failed to send LAN announcement");
+                                let mut metrics = metrics.write().await;
+                                metrics.announcement_errors = metrics.announcement_errors.saturating_add(1);
+                                metrics.last_error_ms = timestamp_ms;
+                            }
                         }
                     }
                 }
@@ -204,6 +245,7 @@ impl LanDiscoveryService {
         let socket = self.socket.clone();
         let local_authority = self.authority_id;
         let time = self.time.clone();
+        let metrics = self.metrics.clone();
         let mut shutdown_rx = self.shutdown_rx.clone();
         let on_discovered = Arc::new(on_discovered);
 
@@ -214,15 +256,35 @@ impl LanDiscoveryService {
                 tokio::select! {
                     _ = shutdown_rx.changed() => {
                         if *shutdown_rx.borrow() {
-                            info!("LAN listener shutting down");
+                            info!(component = "lan_discovery", "LAN listener shutting down");
                             break;
                         }
                     }
                     result = socket.recv_from(&mut buf) => {
                         match result {
                             Ok((len, src_addr)) => {
+                                let received_at_ms = match time.physical_time().await {
+                                    Ok(t) => t.ts_ms,
+                                    Err(err) => {
+                                        debug!(error = %err, "LAN listener: failed to read physical time");
+                                        0
+                                    }
+                                };
+                                {
+                                    let mut metrics = metrics.write().await;
+                                    metrics.packets_received = metrics.packets_received.saturating_add(1);
+                                    if received_at_ms > 0 {
+                                        metrics.last_packet_ms = received_at_ms;
+                                    }
+                                }
+
                                 let Some(packet) = LanDiscoveryPacket::from_bytes(&buf[..len]) else {
                                     trace!(addr = %src_addr, len = len, "Received non-Aura LAN packet");
+                                    let mut metrics = metrics.write().await;
+                                    metrics.packets_invalid = metrics.packets_invalid.saturating_add(1);
+                                    if received_at_ms > 0 {
+                                        metrics.last_error_ms = received_at_ms;
+                                    }
                                     continue;
                                 };
 
@@ -230,13 +292,7 @@ impl LanDiscoveryService {
                                     continue;
                                 }
 
-                                let discovered_at_ms = match time.physical_time().await {
-                                    Ok(t) => t.ts_ms,
-                                    Err(err) => {
-                                        debug!(error = %err, "LAN listener: failed to read physical time");
-                                        0
-                                    }
-                                };
+                                let discovered_at_ms = received_at_ms;
 
                                 let peer = DiscoveredPeer::new(
                                     packet.authority_id,
@@ -246,10 +302,26 @@ impl LanDiscoveryService {
                                 );
 
                                 info!(authority = %peer.authority_id, addr = %peer.source_addr, discovered_at_ms = discovered_at_ms, "LAN peer discovered");
+                                {
+                                    let mut metrics = metrics.write().await;
+                                    metrics.peers_discovered = metrics.peers_discovered.saturating_add(1);
+                                    if discovered_at_ms > 0 {
+                                        metrics.last_discovered_ms = discovered_at_ms;
+                                    }
+                                }
                                 on_discovered(peer);
                             }
                             Err(e) => {
                                 error!(error = %e, "Error receiving LAN packet");
+                                let now_ms = match time.physical_time().await {
+                                    Ok(t) => t.ts_ms,
+                                    Err(_) => 0,
+                                };
+                                let mut metrics = metrics.write().await;
+                                metrics.receive_errors = metrics.receive_errors.saturating_add(1);
+                                if now_ms > 0 {
+                                    metrics.last_error_ms = now_ms;
+                                }
                             }
                         }
                     }

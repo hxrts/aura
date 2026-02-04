@@ -88,7 +88,7 @@ fn generate_demo_invite_code(name: &str, seed: u64) -> String {
 
 /// Create a test environment with IoContext and AppCore
 async fn setup_test_env(name: &str) -> TestEnv {
-    let unique = Uuid::new_v4();
+    let unique = Uuid::from_bytes([3; 16]);
     let test_dir = std::env::temp_dir().join(format!("aura-demo-test-{name}-{unique}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");

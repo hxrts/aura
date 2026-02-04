@@ -7,15 +7,21 @@
 #![allow(clippy::disallowed_methods)]
 
 use aura_core::{AccountId, DeviceId};
+use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
+
+/// Monotonic counter for deterministic-but-unique test IDs.
+static DEVICE_COUNTER: AtomicU64 = AtomicU64::new(1);
+static ACCOUNT_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Clean test fixtures that don't violate architectural boundaries
 pub struct TestFixtures;
 
 impl TestFixtures {
-    /// Generate a random device ID for tests
+    /// Generate a unique device ID for tests (deterministic via counter)
     pub fn device_id() -> DeviceId {
-        DeviceId(Uuid::new_v4())
+        let n = DEVICE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        Self::device_id_from_seed(n)
     }
 
     /// Generate device ID from seed for reproducible tests
@@ -25,9 +31,10 @@ impl TestFixtures {
         DeviceId(Uuid::from_bytes(bytes))
     }
 
-    /// Generate a random account ID for tests
+    /// Generate a unique account ID for tests (deterministic via counter)
     pub fn account_id() -> AccountId {
-        AccountId(Uuid::new_v4())
+        let n = ACCOUNT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        Self::account_id_from_seed(n)
     }
 
     /// Generate account ID from seed for reproducible tests

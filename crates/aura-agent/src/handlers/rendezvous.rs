@@ -6,17 +6,17 @@
 use super::shared::{context_commitment_from_journal, HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::consensus::build_consensus_params;
-use crate::runtime::services::RendezvousCacheManager;
+use crate::runtime::services::{RendezvousCacheManager, RendezvousManager};
 use crate::runtime::AuraEffectSystem;
 use aura_consensus::protocol::run_consensus;
 use aura_core::crypto::single_signer::SingleSignerKeyPackage;
 use aura_core::effects::secure::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
 };
-use aura_core::effects::RandomExtendedEffects;
 use aura_core::effects::{
-    FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportReceipt,
+    FlowBudgetEffects, TransportEffects, TransportEnvelope, TransportError, TransportReceipt,
 };
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow};
 use aura_core::{FlowCost, Hash32, Prestate, Receipt};
@@ -32,6 +32,7 @@ use aura_rendezvous::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Result of a rendezvous operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +43,8 @@ pub struct RendezvousResult {
     pub context_id: ContextId,
     /// Peer involved (if applicable)
     pub peer: Option<AuthorityId>,
+    /// Descriptor produced or updated by this operation
+    pub descriptor: Option<RendezvousDescriptor>,
     /// Error message if operation failed
     pub error: Option<String>,
 }
@@ -64,12 +67,15 @@ pub struct ChannelResult {
 }
 
 /// Rendezvous handler
+#[derive(Clone)]
 pub struct RendezvousHandler {
     context: HandlerContext,
     /// Inner rendezvous service for guard chain operations
-    service: RendezvousService,
+    service: Arc<RendezvousService>,
     /// Rendezvous cache manager (descriptors + pending channels)
     cache_manager: RendezvousCacheManager,
+    /// Optional rendezvous manager for shared descriptor cache
+    rendezvous_manager: Option<RendezvousManager>,
 }
 
 impl RendezvousHandler {
@@ -78,13 +84,35 @@ impl RendezvousHandler {
         HandlerUtilities::validate_authority_context(&authority)?;
 
         let config = RendezvousConfig::default();
-        let service = RendezvousService::new(authority.authority_id(), config);
+        let service = Arc::new(RendezvousService::new(authority.authority_id(), config));
 
         Ok(Self {
             context: HandlerContext::new(authority),
             service,
             cache_manager: RendezvousCacheManager::new(),
+            rendezvous_manager: None,
         })
+    }
+
+    /// Create a rendezvous handler from a shared service instance.
+    pub fn new_with_service(
+        authority: AuthorityContext,
+        service: Arc<RendezvousService>,
+    ) -> AgentResult<Self> {
+        HandlerUtilities::validate_authority_context(&authority)?;
+
+        Ok(Self {
+            context: HandlerContext::new(authority),
+            service,
+            cache_manager: RendezvousCacheManager::new(),
+            rendezvous_manager: None,
+        })
+    }
+
+    /// Attach a rendezvous manager for shared descriptor cache access.
+    pub fn with_rendezvous_manager(mut self, manager: RendezvousManager) -> Self {
+        self.rendezvous_manager = Some(manager);
+        self
     }
 
     /// Get the authority context
@@ -150,10 +178,12 @@ impl RendezvousHandler {
                 success: false,
                 context_id,
                 peer: None,
+                descriptor: None,
                 error: Some("Guard chain denied descriptor publication".to_string()),
             });
         }
 
+        let mut published_descriptor: Option<RendezvousDescriptor> = None;
         // Cache descriptor before executing effects (for local access)
         for effect in &outcome.effects {
             if let EffectCommand::JournalAppend {
@@ -161,6 +191,15 @@ impl RendezvousHandler {
             } = effect
             {
                 self.cache_manager.cache_descriptor(desc.clone()).await;
+                if let Some(manager) = self.rendezvous_manager.as_ref() {
+                    if let Err(err) = manager.cache_descriptor(desc.clone()).await {
+                        tracing::debug!(
+                            error = %err,
+                            "Failed to cache published descriptor in rendezvous manager"
+                        );
+                    }
+                }
+                published_descriptor = Some(desc.clone());
             }
         }
 
@@ -171,13 +210,19 @@ impl RendezvousHandler {
             success: true,
             context_id,
             peer: None,
+            descriptor: published_descriptor,
             error: None,
         })
     }
 
     /// Cache a peer's descriptor received via journal sync
     pub async fn cache_peer_descriptor(&self, descriptor: RendezvousDescriptor) {
-        self.cache_manager.cache_descriptor(descriptor).await;
+        self.cache_manager.cache_descriptor(descriptor.clone()).await;
+        if let Some(manager) = self.rendezvous_manager.as_ref() {
+            if let Err(err) = manager.cache_descriptor(descriptor).await {
+                tracing::debug!(error = %err, "Failed to cache descriptor in rendezvous manager");
+            }
+        }
     }
 
     /// Get a peer's cached descriptor
@@ -186,7 +231,13 @@ impl RendezvousHandler {
         context_id: ContextId,
         peer: AuthorityId,
     ) -> Option<RendezvousDescriptor> {
-        self.cache_manager.get_descriptor(context_id, peer).await
+        match self.cache_manager.get_descriptor(context_id, peer).await {
+            Some(descriptor) => Some(descriptor),
+            None => match self.rendezvous_manager.as_ref() {
+                Some(manager) => manager.get_descriptor(context_id, peer).await,
+                None => None,
+            },
+        }
     }
 
     /// Check if our descriptor needs refresh
@@ -244,16 +295,23 @@ impl RendezvousHandler {
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
         // Generate PSK for the channel
-        let psk_uuid = effects.random_uuid().await;
-        let mut psk = [0u8; 32];
-        psk[..16].copy_from_slice(psk_uuid.as_bytes());
+        let psk = derive_channel_psk(context_id, self.context.authority.authority_id(), peer);
 
         // Prepare channel establishment
-        let peer_descriptor = self
-            .cache_manager
-            .get_descriptor(context_id, peer)
-            .await
-            .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?;
+        let peer_descriptor = match self.cache_manager.get_descriptor(context_id, peer).await {
+            Some(descriptor) => descriptor,
+            None => match self.rendezvous_manager.as_ref() {
+                Some(manager) => manager
+                    .get_descriptor(context_id, peer)
+                    .await
+                    .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?,
+                None => {
+                    return Err(AgentError::invalid(
+                        "Peer descriptor not found in cache",
+                    ))
+                }
+            },
+        };
 
         // Retrieve identity keys
         let keys = retrieve_identity_keys(effects, &self.context.authority.authority_id()).await;
@@ -397,6 +455,7 @@ impl RendezvousHandler {
                 success: false,
                 context_id,
                 peer: Some(relay),
+                descriptor: None,
                 error: Some("Guard chain denied relay request".to_string()),
             });
         }
@@ -405,6 +464,7 @@ impl RendezvousHandler {
             success: true,
             context_id,
             peer: Some(relay),
+            descriptor: None,
             error: None,
         })
     }
@@ -454,6 +514,167 @@ impl RendezvousHandler {
             );
         }
     }
+
+    // ========================================================================
+    // Handshake Processing
+    // ========================================================================
+
+    /// Process incoming rendezvous handshake envelopes.
+    pub async fn process_handshake_envelopes(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+    ) -> AgentResult<usize> {
+        let mut processed = 0usize;
+
+        loop {
+            let envelope = match effects.receive_envelope().await {
+                Ok(env) => env,
+                Err(TransportError::NoMessage) => break,
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to receive rendezvous handshake envelope");
+                    break;
+                }
+            };
+
+            let Some(content_type) = envelope.metadata.get("content-type") else {
+                effects.requeue_envelope(envelope);
+                break;
+            };
+
+            if content_type == HANDSHAKE_INIT_CONTENT_TYPE {
+                if let Err(e) =
+                    self.handle_handshake_init(effects.clone(), envelope).await
+                {
+                    tracing::debug!(error = %e, "Failed to handle rendezvous handshake init");
+                }
+                processed += 1;
+                continue;
+            }
+
+            if content_type == HANDSHAKE_COMPLETE_CONTENT_TYPE {
+                if let Err(e) =
+                    self.handle_handshake_complete(effects.clone(), envelope).await
+                {
+                    tracing::debug!(error = %e, "Failed to handle rendezvous handshake complete");
+                }
+                processed += 1;
+                continue;
+            }
+
+            effects.requeue_envelope(envelope);
+            break;
+        }
+
+        Ok(processed)
+    }
+
+    async fn handle_handshake_init(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        envelope: TransportEnvelope,
+    ) -> AgentResult<()> {
+        if envelope.source == self.context.authority.authority_id() {
+            return Ok(());
+        }
+
+        let init: aura_rendezvous::protocol::HandshakeInit =
+            serde_json::from_slice(&envelope.payload).map_err(|e| {
+                AgentError::internal(format!(
+                    "Failed to decode rendezvous handshake init: {e}"
+                ))
+            })?;
+
+        let context_id = envelope.context;
+        let initiator = envelope.source;
+
+        let snapshot = self.create_snapshot(&effects, context_id).await?;
+
+        let psk = derive_channel_psk(context_id, initiator, self.context.authority.authority_id());
+
+        let keys = retrieve_identity_keys(&*effects, &self.context.authority.authority_id()).await;
+        let (local_private_key, _) = keys.unwrap_or(([0u8; 32], [0u8; 32]));
+
+        let (outcome, _channel) = self
+            .service
+            .prepare_handle_handshake(
+                &snapshot,
+                context_id,
+                initiator,
+                init.handshake,
+                &psk,
+                &local_private_key,
+                &*effects,
+            )
+            .await
+            .map_err(|e| AgentError::effects(format!("prepare handle handshake failed: {e}")))?;
+
+        if !outcome.decision.is_allowed() {
+            return Err(AgentError::effects(
+                "Guard chain denied handshake init".to_string(),
+            ));
+        }
+
+        execute_guard_outcome(outcome, &self.context.authority, context_id, &effects).await
+    }
+
+    async fn handle_handshake_complete(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        envelope: TransportEnvelope,
+    ) -> AgentResult<()> {
+        if envelope.source == self.context.authority.authority_id() {
+            return Ok(());
+        }
+
+        let completion: aura_rendezvous::protocol::HandshakeComplete =
+            serde_json::from_slice(&envelope.payload).map_err(|e| {
+                AgentError::internal(format!(
+                    "Failed to decode rendezvous handshake completion: {e}"
+                ))
+            })?;
+
+        let context_id = envelope.context;
+        let peer = envelope.source;
+
+        let snapshot = self.create_snapshot(&effects, context_id).await?;
+
+        let _channel = self
+            .service
+            .prepare_handle_completion(&snapshot, context_id, peer, completion, &*effects)
+            .await
+            .map_err(|e| AgentError::effects(format!("handle completion failed: {e}")))?;
+
+        self.cache_manager
+            .remove_pending_channel(context_id, peer)
+            .await;
+
+        Ok(())
+    }
+}
+
+const HANDSHAKE_INIT_CONTENT_TYPE: &str =
+    "application/aura-rendezvous-handshake-init";
+const HANDSHAKE_COMPLETE_CONTENT_TYPE: &str =
+    "application/aura-rendezvous-handshake-complete";
+
+fn derive_channel_psk(
+    context_id: ContextId,
+    initiator: AuthorityId,
+    responder: AuthorityId,
+) -> [u8; 32] {
+    let mut a = initiator.to_bytes();
+    let mut b = responder.to_bytes();
+    if a > b {
+        std::mem::swap(&mut a, &mut b);
+    }
+
+    let mut material = Vec::with_capacity(32 + 16 + 16 + 24);
+    material.extend_from_slice(b"AURA_RENDEZVOUS_PSK_V1");
+    material.extend_from_slice(context_id.as_bytes());
+    material.extend_from_slice(&a);
+    material.extend_from_slice(&b);
+
+    hash(&material)
 }
 
 // =============================================================================

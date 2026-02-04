@@ -38,7 +38,7 @@ struct TestEnv {
 }
 
 async fn setup_test_env() -> TestEnv {
-    let unique = Uuid::new_v4();
+    let unique = Uuid::from_bytes([2; 16]);
     let test_dir = std::env::temp_dir().join(format!("aura-device-remove-test-{unique}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");

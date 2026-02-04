@@ -18,8 +18,8 @@ use uuid::Uuid;
 #[tokio::test]
 async fn dkd_choreography_harness_builds() {
     // Test that protocol harness can be built
-    let initiator_device = DeviceId::from_uuid(Uuid::new_v4());
-    let participant_device = DeviceId::from_uuid(Uuid::new_v4());
+    let initiator_device = DeviceId::from_uuid(Uuid::from_bytes([1; 16]));
+    let participant_device = DeviceId::from_uuid(Uuid::from_bytes([2; 16]));
 
     let test = ProtocolTest::new("DkdChoreography")
         .bind_role("Initiator", initiator_device)
@@ -32,8 +32,8 @@ async fn dkd_choreography_harness_builds() {
 #[tokio::test]
 async fn dkd_choreography_adapter_setup() {
     // Test that protocol adapters can be created and sessions started
-    let initiator_device = DeviceId::from_uuid(Uuid::new_v4());
-    let participant_device = DeviceId::from_uuid(Uuid::new_v4());
+    let initiator_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
+    let participant_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
 
     let initiator_auth = AuthorityId::from_uuid(initiator_device.uuid());
     let participant_auth = AuthorityId::from_uuid(participant_device.uuid());
@@ -43,7 +43,7 @@ async fn dkd_choreography_adapter_setup() {
     role_map.insert(DkdChoreographyRole::Participant, participant_auth);
 
     let bus = Arc::new(SimulatedMessageBus::new());
-    let session_id = Uuid::new_v4();
+    let session_id = Uuid::from_bytes([13; 16]);
 
     let initiator_effects = TestEffectSystem::new(
         bus.clone(),

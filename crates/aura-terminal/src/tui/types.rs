@@ -610,6 +610,7 @@ pub enum SettingsSection {
     Recovery,
     Devices,
     Authority,
+    Observability,
 }
 
 impl SettingsSection {
@@ -620,6 +621,7 @@ impl SettingsSection {
             Self::Recovery,
             Self::Devices,
             Self::Authority,
+            Self::Observability,
         ]
     }
 
@@ -630,6 +632,7 @@ impl SettingsSection {
             Self::Recovery => "Request Recovery",
             Self::Devices => "Devices",
             Self::Authority => "Authority",
+            Self::Observability => "Observability",
         }
     }
 
@@ -640,6 +643,7 @@ impl SettingsSection {
             Self::Recovery => "Request account recovery from guardians",
             Self::Devices => "Manage devices linked to your account",
             Self::Authority => "Manage your authority and multifactor settings",
+            Self::Observability => "Network, sync, and discovery metrics",
         }
     }
 
@@ -649,17 +653,19 @@ impl SettingsSection {
             Self::Threshold => Self::Recovery,
             Self::Recovery => Self::Devices,
             Self::Devices => Self::Authority,
-            Self::Authority => Self::Profile,
+            Self::Authority => Self::Observability,
+            Self::Observability => Self::Profile,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Profile => Self::Authority,
+            Self::Profile => Self::Observability,
             Self::Threshold => Self::Profile,
             Self::Recovery => Self::Threshold,
             Self::Devices => Self::Recovery,
             Self::Authority => Self::Devices,
+            Self::Observability => Self::Authority,
         }
     }
 }

@@ -16,7 +16,7 @@ use crate::core::config::default_storage_path;
 use crate::core::AgentConfig;
 use crate::database::IndexedJournalHandler;
 use crate::fact_registry::build_fact_registry;
-use crate::runtime::services::LogicalClockManager;
+use crate::runtime::services::{LanTransportService, LogicalClockManager, RendezvousManager};
 use crate::runtime::subsystems::{
     crypto::CryptoRng, ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem,
 };
@@ -134,6 +134,12 @@ pub struct AuraEffectSystem {
     // === Choreography State ===
     /// In-memory choreography session state for runtime coordination.
     choreography_state: parking_lot::RwLock<ChoreographyState>,
+
+    /// LAN transport service (optional, for TCP envelope delivery)
+    lan_transport: parking_lot::RwLock<Option<Arc<LanTransportService>>>,
+
+    /// Rendezvous manager (optional, for address resolution)
+    rendezvous_manager: parking_lot::RwLock<Option<RendezvousManager>>,
 }
 
 #[derive(Clone, Default)]
@@ -348,6 +354,8 @@ impl AuraEffectSystem {
             leakage_handler,
             reactive_handler: ReactiveHandler::new(),
             choreography_state: parking_lot::RwLock::new(ChoreographyState::default()),
+            lan_transport: parking_lot::RwLock::new(None),
+            rendezvous_manager: parking_lot::RwLock::new(None),
         }
     }
 
@@ -444,6 +452,22 @@ impl AuraEffectSystem {
 
     pub fn requeue_envelope(&self, envelope: TransportEnvelope) {
         self.transport.queue_envelope(envelope);
+    }
+
+    pub fn attach_lan_transport(&self, service: Arc<LanTransportService>) {
+        *self.lan_transport.write() = Some(service);
+    }
+
+    pub fn lan_transport(&self) -> Option<Arc<LanTransportService>> {
+        self.lan_transport.read().clone()
+    }
+
+    pub fn attach_rendezvous_manager(&self, manager: RendezvousManager) {
+        *self.rendezvous_manager.write() = Some(manager);
+    }
+
+    pub fn rendezvous_manager(&self) -> Option<RendezvousManager> {
+        self.rendezvous_manager.read().clone()
     }
 
     async fn publish_typed_facts(&self, facts: Vec<TypedFact>) -> Result<(), AuraError> {

@@ -18,9 +18,9 @@ use uuid::Uuid;
 #[tokio::test]
 async fn consensus_harness_builds() {
     // Test that protocol harness can be built
-    let coordinator_device = DeviceId::from_uuid(Uuid::new_v4());
-    let witness_a = DeviceId::from_uuid(Uuid::new_v4());
-    let witness_b = DeviceId::from_uuid(Uuid::new_v4());
+    let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([1; 16]));
+    let witness_a = DeviceId::from_uuid(Uuid::from_bytes([2; 16]));
+    let witness_b = DeviceId::from_uuid(Uuid::from_bytes([3; 16]));
 
     let test = ProtocolTest::new("AuraConsensus")
         .bind_role("Coordinator", coordinator_device)
@@ -33,9 +33,9 @@ async fn consensus_harness_builds() {
 #[tokio::test]
 async fn consensus_adapter_setup() {
     // Test that protocol adapters can be created and sessions started
-    let coordinator_device = DeviceId::from_uuid(Uuid::new_v4());
-    let witness_a = DeviceId::from_uuid(Uuid::new_v4());
-    let witness_b = DeviceId::from_uuid(Uuid::new_v4());
+    let coordinator_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
+    let witness_a = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
+    let witness_b = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
 
     let coordinator_auth = AuthorityId::from_uuid(coordinator_device.uuid());
     let witness_auths = vec![
@@ -51,7 +51,7 @@ async fn consensus_adapter_setup() {
     let witness_roles = vec![AuraConsensusRole::Witness(0), AuraConsensusRole::Witness(1)];
 
     let bus = Arc::new(SimulatedMessageBus::new());
-    let session_id = Uuid::new_v4();
+    let session_id = Uuid::from_bytes([14; 16]);
 
     let coordinator_effects = TestEffectSystem::new(
         bus.clone(),

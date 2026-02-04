@@ -26,7 +26,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::sync::RwLock;
 
-use super::lan_discovery::LanDiscoveryService;
+use super::lan_discovery::{LanDiscoveryMetrics, LanDiscoveryService};
 use super::state::{with_state_mut, with_state_mut_validated};
 
 /// Configuration for the rendezvous service manager
@@ -194,6 +194,7 @@ type LanTaskHandles = Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHand
 /// - Broadcast presence on the local network periodically
 /// - Listen for other Aura nodes on the LAN
 /// - Cache discovered peer descriptors for connection
+#[derive(Clone)]
 pub struct RendezvousManager {
     /// Configuration
     config: RendezvousManagerConfig,
@@ -705,8 +706,9 @@ impl RendezvousManager {
         .await;
 
         tracing::info!(
-            "LAN discovery started on port {}",
-            self.config.lan_discovery.port
+            component = "rendezvous_manager",
+            port = self.config.lan_discovery.port,
+            "LAN discovery started"
         );
         Ok(())
     }
@@ -736,7 +738,11 @@ impl RendezvousManager {
             |state| state.validate(),
         )
         .await;
-        tracing::info!("LAN discovery stopped");
+        tracing::info!(
+            component = "rendezvous_manager",
+            port = self.config.lan_discovery.port,
+            "LAN discovery stopped"
+        );
     }
 
     /// Set the descriptor to announce on LAN
@@ -746,6 +752,15 @@ impl RendezvousManager {
         let service = self.state.read().await.lan_discovery.clone();
         if let Some(service) = service.as_ref() {
             service.set_descriptor(descriptor).await;
+        }
+    }
+
+    /// Get LAN discovery metrics, if LAN discovery is enabled and running.
+    pub async fn lan_metrics(&self) -> Option<LanDiscoveryMetrics> {
+        let service = self.state.read().await.lan_discovery.clone();
+        match service {
+            Some(service) => Some(service.metrics().await),
+            None => None,
         }
     }
 
@@ -901,20 +916,30 @@ impl RuntimeService for RendezvousManager {
 impl RendezvousManager {
     /// Get the service health status asynchronously
     pub async fn health_async(&self) -> ServiceHealth {
-        let state = self.state().await;
-        match state {
+        let state = self.state.read().await;
+        match state.status {
             RendezvousManagerState::Stopped => ServiceHealth::Stopped,
             RendezvousManagerState::Starting => ServiceHealth::Starting,
             RendezvousManagerState::Stopping => ServiceHealth::Stopping,
             RendezvousManagerState::Running => {
-                // Check if underlying service is available
-                if self.state.read().await.service.is_some() {
-                    ServiceHealth::Healthy
-                } else {
-                    ServiceHealth::Unhealthy {
+                if state.service.is_none() {
+                    return ServiceHealth::Unhealthy {
                         reason: "underlying service not available".to_string(),
+                    };
+                }
+                if self.config.lan_discovery.enabled {
+                    if state.lan_discovery.is_none() {
+                        return ServiceHealth::Unhealthy {
+                            reason: "lan discovery enabled but service missing".to_string(),
+                        };
+                    }
+                    if state.lan_tasks.is_none() {
+                        return ServiceHealth::Degraded {
+                            reason: "lan discovery tasks not running".to_string(),
+                        };
                     }
                 }
+                ServiceHealth::Healthy
             }
         }
     }

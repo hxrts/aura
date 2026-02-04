@@ -20,7 +20,8 @@ use super::services::{
 use super::shared_transport::SharedTransport;
 use super::system::RuntimeSystem;
 use super::{ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager};
-use crate::core::AgentConfig;
+use crate::core::{AgentConfig, AuthorityContext};
+use crate::handlers::RendezvousHandler;
 use aura_core::identifiers::AuthorityId;
 
 // Re-export ExecutionMode from aura_core for convenience
@@ -211,7 +212,8 @@ impl EffectSystemBuilder {
         });
 
         // Create optional rendezvous manager
-        let rendezvous_manager = self.rendezvous_config.map(|rendezvous_config| {
+        let rendezvous_enabled = self.rendezvous_config.is_some();
+        let rendezvous_manager = self.rendezvous_config.clone().map(|rendezvous_config| {
             super::services::RendezvousManager::new(
                 authority_id,
                 rendezvous_config,
@@ -225,8 +227,46 @@ impl EffectSystemBuilder {
             .social_config
             .map(|social_config| super::services::SocialManager::new(authority_id, social_config));
 
+        // Create optional LAN transport service (used for LAN advertising + future TCP ingress)
+        let lan_transport = if rendezvous_enabled {
+            match super::services::LanTransportService::bind(
+                config.network.bind_address.as_str(),
+            )
+            .await
+            {
+                Ok(service) => Some(Arc::new(service)),
+                Err(err) => {
+                    tracing::warn!(error = %err, "Failed to start LAN transport listener");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let rendezvous_handler = if rendezvous_enabled {
+            let authority_context = AuthorityContext::new_with_device(authority_id, config.device_id);
+            let handler = RendezvousHandler::new(authority_context)
+                .map_err(|e| e.to_string())?;
+            let handler = if let Some(manager) = rendezvous_manager.as_ref() {
+                handler.with_rendezvous_manager(manager.clone())
+            } else {
+                handler
+            };
+            Some(handler)
+        } else {
+            None
+        };
+
         // Wrap effect system in Arc for shared ownership
         let effect_system = Arc::new(effect_system);
+
+        if let Some(rendezvous_manager) = rendezvous_manager.as_ref() {
+            effect_system.attach_rendezvous_manager(rendezvous_manager.clone());
+        }
+        if let Some(lan_transport) = lan_transport.as_ref() {
+            effect_system.attach_lan_transport(lan_transport.clone());
+        }
 
         // Build runtime system with configured services
         let mut system = RuntimeSystem::new_with_services(
@@ -240,6 +280,8 @@ impl EffectSystemBuilder {
             lifecycle_manager,
             sync_manager,
             rendezvous_manager,
+            rendezvous_handler,
+            lan_transport,
             social_manager,
             config,
             authority_id,

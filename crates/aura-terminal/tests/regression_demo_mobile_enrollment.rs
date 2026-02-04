@@ -60,7 +60,7 @@ impl Drop for DemoTestEnv {
 /// - Shared transport for demo peer communication
 /// - IoContext configured for demo mode
 async fn setup_demo_env(seed: u64) -> DemoTestEnv {
-    let unique = Uuid::new_v4();
+    let unique = Uuid::from_bytes([6; 16]);
     let test_dir = std::env::temp_dir().join(format!("aura-demo-mobile-test-{unique}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
@@ -245,7 +245,7 @@ async fn demo_mode_sequential_device_enrollments() {
 #[tokio::test]
 async fn demo_mode_enrollment_immediately_after_account_creation() {
     let seed = 2026u64;
-    let unique = Uuid::new_v4();
+    let unique = Uuid::from_bytes([7; 16]);
     let test_dir = std::env::temp_dir().join(format!("aura-demo-immediate-test-{unique}"));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");

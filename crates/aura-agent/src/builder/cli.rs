@@ -155,6 +155,8 @@ impl CliPresetBuilder {
             ExecutionMode::Production => EffectSystemBuilder::production()
                 .with_config(self.config)
                 .with_authority(authority_id)
+                .with_sync()
+                .with_rendezvous()
                 .build(&effect_context)
                 .await
                 .map_err(BuildError::RuntimeConstruction)?,

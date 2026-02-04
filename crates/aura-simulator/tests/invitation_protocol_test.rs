@@ -18,8 +18,8 @@ use uuid::Uuid;
 #[tokio::test]
 async fn invitation_exchange_harness_builds() {
     // Test that protocol harness can be built
-    let sender_device = DeviceId::from_uuid(Uuid::new_v4());
-    let receiver_device = DeviceId::from_uuid(Uuid::new_v4());
+    let sender_device = DeviceId::from_uuid(Uuid::from_bytes([1; 16]));
+    let receiver_device = DeviceId::from_uuid(Uuid::from_bytes([2; 16]));
 
     let test = ProtocolTest::new("InvitationExchange")
         .bind_role("Sender", sender_device)
@@ -32,8 +32,8 @@ async fn invitation_exchange_harness_builds() {
 #[tokio::test]
 async fn invitation_exchange_adapter_setup() {
     // Test that protocol adapters can be created and sessions started
-    let sender_device = DeviceId::from_uuid(Uuid::new_v4());
-    let receiver_device = DeviceId::from_uuid(Uuid::new_v4());
+    let sender_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
+    let receiver_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
 
     let sender_auth = AuthorityId::from_uuid(sender_device.uuid());
     let receiver_auth = AuthorityId::from_uuid(receiver_device.uuid());
@@ -43,7 +43,7 @@ async fn invitation_exchange_adapter_setup() {
     role_map.insert(InvitationExchangeRole::Receiver, receiver_auth);
 
     let bus = Arc::new(SimulatedMessageBus::new());
-    let session_id = Uuid::new_v4();
+    let session_id = Uuid::from_bytes([13; 16]);
 
     let sender_effects = TestEffectSystem::new(
         bus.clone(),

@@ -20,8 +20,8 @@
 use crate::tui::navigation::TwoPanelFocus;
 use crate::tui::screens::ChatFocus as ScreenChatFocus;
 use crate::tui::state::{
-    ChatFocus, CreateInvitationField, DetailFocus, GuardianCeremonyResponse, GuardianSetupStep,
-    NeighborhoodMode, QueuedModal, TuiState,
+    ChatFocus, ContactsListFocus, CreateInvitationField, DetailFocus, GuardianCeremonyResponse,
+    GuardianSetupStep, NeighborhoodMode, QueuedModal, TuiState,
 };
 use crate::tui::types::{Device, TraversalDepth};
 use aura_core::threshold::AgreementMode;
@@ -180,8 +180,11 @@ pub fn extract_chat_view_props(state: &TuiState) -> ChatViewProps {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ContactsViewProps {
     pub focus: TwoPanelFocus,
+    pub list_focus: ContactsListFocus,
     pub selected_index: usize,
     pub filter: String,
+    pub lan_selected_index: usize,
+    pub lan_peer_count: usize,
     // Nickname modal
     pub nickname_modal_visible: bool,
     pub nickname_modal_contact_id: String,
@@ -237,6 +240,7 @@ pub struct GuardianCandidateViewProps {
 /// Extract ContactsScreen view props from TuiState
 pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
     let focus = state.contacts.focus;
+    let list_focus = state.contacts.list_focus;
 
     // Extract modal state from queue (all modals now use queue system)
     let (nickname_visible, nickname_contact_id, nickname_value, nickname_suggested) =
@@ -351,8 +355,11 @@ pub fn extract_contacts_view_props(state: &TuiState) -> ContactsViewProps {
 
     ContactsViewProps {
         focus,
+        list_focus,
         selected_index: state.contacts.selected_index,
         filter: state.contacts.filter.clone(),
+        lan_selected_index: state.contacts.lan_selected_index,
+        lan_peer_count: state.contacts.lan_peer_count,
         // Nickname modal (from queue)
         nickname_modal_visible: nickname_visible,
         nickname_modal_contact_id: nickname_contact_id,

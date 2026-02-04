@@ -169,6 +169,8 @@ pub struct DiscoveredPeersPanelProps {
     pub selected_index: usize,
     /// Whether this panel is focused
     pub focused: bool,
+    /// Status line (e.g., last scan time)
+    pub status_line: String,
     /// Callback when a peer is invited
     pub on_invite: Option<InvitePeerCallback>,
 }
@@ -210,6 +212,9 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                     )
                 }
             }
+            View(padding_left: 2, padding_right: 2, padding_top: 1) {
+                Text(content: props.status_line.clone(), color: Theme::TEXT_MUTED)
+            }
 
             // Peer list
             View(
@@ -221,7 +226,7 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                     vec![element! {
                         View(padding: 1) {
                             Text(
-                                content: "No peers discovered on local network",
+                                content: "No peers discovered. Press d to rescan",
                                 color: Theme::TEXT_MUTED,
                             )
                         }
@@ -273,7 +278,8 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
             }
 
             // Footer with key hint (only when focused and peers exist)
-            #(if focused && !peers.is_empty() {
+            #(if focused {
+                let has_peers = !peers.is_empty();
                 Some(element! {
                     View(
                         padding_left: 2,
@@ -283,8 +289,18 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                         border_color: Theme::BORDER,
                     ) {
                         View(flex_direction: FlexDirection::Row, gap: 2) {
-                            Text(content: "Enter", color: Theme::SECONDARY)
-                            Text(content: "Invite", color: Theme::TEXT_MUTED)
+                            #(if has_peers {
+                                Some(element! {
+                                    View(flex_direction: FlexDirection::Row, gap: 2) {
+                                        Text(content: "Enter", color: Theme::SECONDARY)
+                                        Text(content: "Invite", color: Theme::TEXT_MUTED)
+                                    }
+                                })
+                            } else {
+                                None
+                            })
+                            Text(content: "d", color: Theme::SECONDARY)
+                            Text(content: "Rescan", color: Theme::TEXT_MUTED)
                         }
                     }
                 })
@@ -304,6 +320,8 @@ pub struct DiscoveredPeersState {
     pub selected_index: usize,
     /// Whether the panel is focused
     pub focused: bool,
+    /// Last updated timestamp (ms since epoch)
+    pub last_updated_ms: u64,
 }
 
 impl DiscoveredPeersState {
@@ -320,6 +338,11 @@ impl DiscoveredPeersState {
         if self.selected_index >= self.peers.len() && !self.peers.is_empty() {
             self.selected_index = self.peers.len() - 1;
         }
+    }
+
+    /// Update last updated timestamp
+    pub fn set_last_updated_ms(&mut self, last_updated_ms: u64) {
+        self.last_updated_ms = last_updated_ms;
     }
 
     /// Move selection up

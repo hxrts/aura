@@ -51,7 +51,6 @@ rumpsteak-aura-choreography = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-bincode = { workspace = true }
 biscuit-auth = { workspace = true }
 
 # Async
@@ -71,6 +70,7 @@ hex = { workspace = true }
 base64 = { workspace = true }
 cfg-if = "1"
 dirs = { workspace = true }
+get_if_addrs = "0.5"
 
 # Optional dependencies for features
 tokio-tungstenite = { workspace = true, optional = true }

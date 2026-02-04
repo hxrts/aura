@@ -10,6 +10,7 @@ use aura_core::effects::terminal::{KeyCode, KeyEvent};
 use crate::tui::layout::dim;
 use crate::tui::navigation::{navigate_list, NavKey};
 use crate::tui::types::SettingsSection;
+use crate::tui::state::ContactsListFocus;
 
 use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::QueuedModal;
@@ -113,20 +114,50 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
         // List navigation (j/k or arrows) - only when list is focused
         KeyCode::Up | KeyCode::Char('k') => {
             if state.contacts.focus.is_list() {
-                state.contacts.selected_index = navigate_list(
-                    state.contacts.selected_index,
-                    state.contacts.contact_count,
-                    NavKey::Up,
-                );
+                match state.contacts.list_focus {
+                    ContactsListFocus::LanPeers => {
+                        if state.contacts.lan_peer_count > 0 {
+                            state.contacts.lan_selected_index = navigate_list(
+                                state.contacts.lan_selected_index,
+                                state.contacts.lan_peer_count,
+                                NavKey::Up,
+                            );
+                        } else {
+                            state.contacts.list_focus = ContactsListFocus::Contacts;
+                        }
+                    }
+                    ContactsListFocus::Contacts => {
+                        state.contacts.selected_index = navigate_list(
+                            state.contacts.selected_index,
+                            state.contacts.contact_count,
+                            NavKey::Up,
+                        );
+                    }
+                }
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
             if state.contacts.focus.is_list() {
-                state.contacts.selected_index = navigate_list(
-                    state.contacts.selected_index,
-                    state.contacts.contact_count,
-                    NavKey::Down,
-                );
+                match state.contacts.list_focus {
+                    ContactsListFocus::LanPeers => {
+                        if state.contacts.lan_peer_count > 0 {
+                            state.contacts.lan_selected_index = navigate_list(
+                                state.contacts.lan_selected_index,
+                                state.contacts.lan_peer_count,
+                                NavKey::Down,
+                            );
+                        } else {
+                            state.contacts.list_focus = ContactsListFocus::Contacts;
+                        }
+                    }
+                    ContactsListFocus::Contacts => {
+                        state.contacts.selected_index = navigate_list(
+                            state.contacts.selected_index,
+                            state.contacts.contact_count,
+                            NavKey::Down,
+                        );
+                    }
+                }
             }
         }
         KeyCode::Char('e') => {
@@ -161,6 +192,19 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::OpenCreateInvitationModal,
             ));
         }
+        KeyCode::Char('p') => {
+            if state.contacts.focus.is_list() {
+                if state.contacts.lan_peer_count > 0 {
+                    state.contacts.list_focus = state.contacts.list_focus.toggle();
+                } else {
+                    state.toast_info("No LAN peers yet. Press d to rescan.");
+                }
+            }
+        }
+        KeyCode::Char('d') => {
+            // Refresh LAN discovery list
+            commands.push(TuiCommand::Dispatch(DispatchCommand::RefreshLanPeers));
+        }
         KeyCode::Char('r') => {
             // Open remove contact confirmation modal via dispatch (shell populates selected contact)
             commands.push(TuiCommand::Dispatch(
@@ -168,7 +212,14 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
             ));
         }
         KeyCode::Enter => {
-            commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat));
+            if state.contacts.focus.is_list()
+                && state.contacts.list_focus.is_lan()
+                && state.contacts.lan_peer_count > 0
+            {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::InviteLanPeer));
+            } else {
+                commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat));
+            }
         }
         _ => {}
     }

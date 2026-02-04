@@ -83,6 +83,10 @@ pub enum DispatchCommand {
     /// The shell populates the modal with the selected receiver (contact/peer)
     /// from reactive subscriptions.
     OpenCreateInvitationModal,
+    /// Invite the currently selected LAN peer.
+    InviteLanPeer,
+    /// Refresh LAN discovery list.
+    RefreshLanPeers,
     StartChat,
     RemoveContact {
         contact_id: String,

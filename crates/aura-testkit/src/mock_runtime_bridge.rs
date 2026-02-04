@@ -966,7 +966,8 @@ impl RuntimeBridge for MockRuntimeBridge {
             .and_then(|v| v.as_str())
             .unwrap_or("00000000-0000-0000-0000-000000000000");
 
-        let sender_uuid = Uuid::parse_str(sender_uuid_str).unwrap_or_else(|_| Uuid::new_v4());
+        let sender_uuid =
+            Uuid::parse_str(sender_uuid_str).unwrap_or(Uuid::from_bytes([0; 16]));
         let sender_id = AuthorityId::from_uuid(sender_uuid);
 
         let expires_at_ms = data.get("expires_at").and_then(|v| v.as_u64());
@@ -990,7 +991,8 @@ impl RuntimeBridge for MockRuntimeBridge {
                     .and_then(|g| g.get("subject_authority"))
                     .and_then(|s| s.as_str())
                     .unwrap_or("00000000-0000-0000-0000-000000000000");
-                let subject_uuid = Uuid::parse_str(subject_str).unwrap_or_else(|_| Uuid::new_v4());
+                let subject_uuid =
+                    Uuid::parse_str(subject_str).unwrap_or(Uuid::from_bytes([0; 16]));
                 InvitationBridgeType::Guardian {
                     subject_authority: AuthorityId::from_uuid(subject_uuid),
                 }

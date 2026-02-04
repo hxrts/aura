@@ -47,8 +47,8 @@ use crate::tui::hooks::{AppCoreContext, CallbackContext};
 use crate::tui::layout::dim;
 use crate::tui::screens::app::subscriptions::{
     use_authority_id_subscription, use_channels_subscription, use_contacts_subscription,
-    use_devices_subscription, use_messages_subscription, use_nav_status_signals,
-    use_neighborhood_homes_subscription, use_notifications_subscription,
+    use_devices_subscription, use_discovered_peers_subscription, use_messages_subscription,
+    use_nav_status_signals, use_neighborhood_homes_subscription, use_notifications_subscription,
     use_pending_requests_subscription, use_threshold_subscription,
 };
 use crate::tui::screens::router::Screen;
@@ -325,6 +325,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // not the data, so they always read current contacts.
     // Also sends ContactCountChanged updates to keep TuiState in sync for navigation.
     let shared_contacts = use_contacts_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
+    let shared_discovered_peers =
+        use_discovered_peers_subscription(&mut hooks, &app_ctx, update_tx_holder.clone());
 
     // =========================================================================
     // Authority subscription: current authority id for dispatch handlers
@@ -1217,6 +1219,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 crate::tui::state_machine::ToastLevel::Success
                             );
                         }
+                        UiUpdate::LanPeersCountChanged(count) => {
+                            tui.with_mut(|state| {
+                                state.contacts.lan_peer_count = count;
+                                if count == 0 {
+                                    state.contacts.lan_selected_index = 0;
+                                    state.contacts.list_focus =
+                                        crate::tui::state_machine::ContactsListFocus::Contacts;
+                                } else if state.contacts.lan_selected_index >= count {
+                                    state.contacts.lan_selected_index = count.saturating_sub(1);
+                                }
+                            });
+                        }
 
                         // =========================================================================
                         // Home operations
@@ -1472,10 +1486,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         ],
         Screen::Contacts => vec![
             KeyHint::new("e", "Edit"),
-            KeyHint::new("g", "Guardian"),
             KeyHint::new("c", "Chat"),
             KeyHint::new("a", "Accept"),
             KeyHint::new("n", "Invite"),
+            KeyHint::new("d", "Rescan"),
         ],
         Screen::Neighborhood => vec![
             KeyHint::new("Enter", "Enter"),
@@ -1509,6 +1523,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         // This Arc is updated by a reactive subscription, so reading from it
         // always gets current contacts (not stale props)
         let shared_contacts_for_dispatch = shared_contacts;
+        let shared_discovered_peers_for_dispatch = shared_discovered_peers;
         let shared_authority_id_for_dispatch = shared_authority_id;
         // Clone shared messages Arc for message retry dispatch
         // Used to look up failed messages by ID to get channel and content for retry
@@ -1801,6 +1816,33 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         } else {
                                             new_state.toast_error("Failed to read contacts");
                                         }
+                                    }
+                                    DispatchCommand::InviteLanPeer => {
+                                        let idx = new_state.contacts.lan_selected_index;
+                                        if let Ok(guard) = shared_discovered_peers_for_dispatch.read()
+                                        {
+                                            if let Some(peer) = guard.get(idx) {
+                                                let authority_id = peer.authority_id.to_string();
+                                                let address = peer.address.clone();
+                                                if address.is_empty() {
+                                                    new_state.toast_error(
+                                                        "Selected peer has no LAN address",
+                                                    );
+                                                } else {
+                                                    (cb.contacts.on_invite_lan_peer)(
+                                                        authority_id,
+                                                        address,
+                                                    );
+                                                }
+                                            } else {
+                                                new_state.toast_error("No LAN peer selected");
+                                            }
+                                        } else {
+                                            new_state.toast_error("Failed to read LAN peers");
+                                        }
+                                    }
+                                    DispatchCommand::RefreshLanPeers => {
+                                        (cb.contacts.on_refresh_lan_peers)();
                                     }
                                     DispatchCommand::StartChat => {
                                         let idx = new_state.contacts.selected_index;
@@ -2562,7 +2604,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         View(width: 100pct, height: 100pct) {
                             ChatScreen(
                                 view: chat_props.clone(),
-                                selected_channel: Some(tui_selected_for_chat_screen.clone()),
+                                selected_channel: Some(tui_selected_for_chat_screen),
                                 on_send: on_send.clone(),
                                 on_retry_message: on_retry_message.clone(),
                                 on_channel_select: on_channel_select.clone(),
@@ -2576,6 +2618,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         View(width: 100pct, height: 100pct) {
                             ContactsScreen(
                                 view: contacts_props.clone(),
+                                now_ms: now_ms,
                                 on_update_nickname: on_update_nickname.clone(),
                                 on_start_chat: on_start_chat.clone(),
                                 on_invite_lan_peer: on_invite_lan_peer.clone(),

@@ -18,10 +18,10 @@ use uuid::Uuid;
 #[tokio::test]
 async fn guardian_membership_harness_builds() {
     // Test that protocol harness can be built
-    let initiator_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian1_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian2_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian3_device = DeviceId::from_uuid(Uuid::new_v4());
+    let initiator_device = DeviceId::from_uuid(Uuid::from_bytes([1; 16]));
+    let guardian1_device = DeviceId::from_uuid(Uuid::from_bytes([2; 16]));
+    let guardian2_device = DeviceId::from_uuid(Uuid::from_bytes([3; 16]));
+    let guardian3_device = DeviceId::from_uuid(Uuid::from_bytes([4; 16]));
 
     let test = ProtocolTest::new("GuardianMembershipChange")
         .bind_role("ChangeInitiator", initiator_device)
@@ -36,10 +36,10 @@ async fn guardian_membership_harness_builds() {
 #[tokio::test]
 async fn guardian_membership_adapter_setup() {
     // Test that protocol adapters can be created and sessions started
-    let initiator_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian1_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian2_device = DeviceId::from_uuid(Uuid::new_v4());
-    let guardian3_device = DeviceId::from_uuid(Uuid::new_v4());
+    let initiator_device = DeviceId::from_uuid(Uuid::from_bytes([11; 16]));
+    let guardian1_device = DeviceId::from_uuid(Uuid::from_bytes([12; 16]));
+    let guardian2_device = DeviceId::from_uuid(Uuid::from_bytes([13; 16]));
+    let guardian3_device = DeviceId::from_uuid(Uuid::from_bytes([14; 16]));
 
     let initiator_auth = AuthorityId::from_uuid(initiator_device.uuid());
     let guardian1_auth = AuthorityId::from_uuid(guardian1_device.uuid());
@@ -62,7 +62,7 @@ async fn guardian_membership_adapter_setup() {
     ];
 
     let bus = Arc::new(SimulatedMessageBus::new());
-    let session_id = Uuid::new_v4();
+    let session_id = Uuid::from_bytes([15; 16]);
 
     let initiator_effects = TestEffectSystem::new(
         bus.clone(),
