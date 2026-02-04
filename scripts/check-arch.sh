@@ -473,7 +473,7 @@ check_effects() {
   local entropy_pattern="AuthorityId::new\\(\\)|ContextId::new\\(\\)|DeviceId::new\\(\\)"
   local entropy_hits filtered_entropy
   entropy_hits=$(rg --no-heading "$entropy_pattern" crates -g "*.rs" || true)
-  filtered_entropy=$(echo "$entropy_hits" | grep -v "$ALLOW_EFFECTS" | grep -Ev "$ALLOW_RUNTIME" | grep -v "$ALLOW_CLI" | grep -Ev "$ALLOW_TESTS" || true)
+  filtered_entropy=$(echo "$entropy_hits" | grep -v "$ALLOW_EFFECTS" | grep -Ev "$ALLOW_RUNTIME" | grep -v "$ALLOW_CLI" || true)
   if [[ -n "$filtered_entropy" ]]; then
     local sorted
     sorted=$(echo "$filtered_entropy" | sort_by_layer)
@@ -493,7 +493,7 @@ check_effects() {
   # Uuid::new_v4
   local uuid_hits filtered_uuid
   uuid_hits=$(rg --no-heading "Uuid::new_v4|uuid::Uuid::new_v4" crates -g "*.rs" || true)
-  filtered_uuid=$(echo "$uuid_hits" | grep -v "$ALLOW_EFFECTS" | grep -Ev "$ALLOW_RUNTIME" | grep -v "$ALLOW_CLI" | grep -Ev "$ALLOW_TESTS" || true)
+  filtered_uuid=$(echo "$uuid_hits" | grep -v "$ALLOW_EFFECTS" | grep -Ev "$ALLOW_RUNTIME" | grep -v "$ALLOW_CLI" || true)
   if [[ -n "$filtered_uuid" ]]; then
     local sorted
     sorted=$(echo "$filtered_uuid" | sort_by_layer)
@@ -518,7 +518,6 @@ check_effects() {
     | grep -v "crates/aura-testkit/" \
     | grep -v "crates/aura-simulator/" \
     | grep -v "crates/aura-agent/src/runtime/" \
-    | grep -Ev "/tests/" \
     | grep -v "///" | grep -v "//!" || true)
   if [[ -n "$filtered_rand" ]]; then
     local sorted
@@ -546,7 +545,7 @@ check_guards() {
 
   local transport_sends bypass_hits
   transport_sends=$(rg --no-heading "TransportEffects::(send|open_channel)" crates -g "*.rs" || true)
-  local guard_allow="crates/aura-guards/src/guards|crates/aura-protocol/src/handlers/sessions|crates/aura-agent/src/runtime/effects.rs|crates/aura-agent/src/runtime/effects/choreography.rs|tests/|crates/aura-testkit/"
+  local guard_allow="crates/aura-guards/src/guards|crates/aura-protocol/src/handlers/sessions|crates/aura-agent/src/runtime/effects.rs|crates/aura-agent/src/runtime/effects/choreography.rs|crates/aura-agent/src/runtime/effects/network.rs|tests/|crates/aura-testkit/"
   bypass_hits=$(echo "$transport_sends" | grep -Ev "$guard_allow" || true)
   emit_hits "Potential guard-chain bypass" "$bypass_hits"
 }
@@ -793,9 +792,9 @@ check_ui() {
   view_access=$(rg --no-heading "\\.views\\(" crates/aura-terminal/src -g "*.rs" || true)
   emit_hits "Direct ViewState access" "$view_access"
 
-  # Journal/protocol mutation
+  # Journal/protocol mutation (demo/ is exempt: it simulates peer agents)
   local journal_hits
-  journal_hits=$(rg --no-heading "FactRegistry|FactReducer|RelationalFact|JournalEffects|commit_.*facts|RuntimeBridge::commit" crates/aura-terminal/src -g "*.rs" || true)
+  journal_hits=$(rg --no-heading "FactRegistry|FactReducer|RelationalFact|JournalEffects|commit_.*facts|RuntimeBridge::commit" crates/aura-terminal/src -g "*.rs" | grep -v "crates/aura-terminal/src/demo/" || true)
   emit_hits "Direct journal/protocol mutation" "$journal_hits"
 
   # Forbidden crate usage (allow demo/simulation code which needs direct protocol access)

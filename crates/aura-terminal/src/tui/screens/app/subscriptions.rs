@@ -10,9 +10,10 @@ use std::time::Duration;
 use iocraft::prelude::*;
 
 use aura_app::ui::signals::{
-    ConnectionStatus, NetworkStatus, CHAT_SIGNAL, CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL,
-    DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL,
-    RECOVERY_SIGNAL, SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
+    ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL,
+    CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL,
+    NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
+    TRANSPORT_PEERS_SIGNAL,
 };
 
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -175,7 +176,7 @@ impl SharedContacts {
 
 /// Shared discovered peers state that can be read by closures without re-rendering.
 #[derive(Clone, Default)]
-pub struct SharedDiscoveredPeers(Arc<RwLock<Vec<aura_app::signal_defs::DiscoveredPeer>>>);
+pub struct SharedDiscoveredPeers(Arc<RwLock<Vec<DiscoveredPeer>>>);
 
 impl SharedDiscoveredPeers {
     #[must_use]
@@ -185,14 +186,14 @@ impl SharedDiscoveredPeers {
 
     pub fn read(
         &self,
-    ) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<aura_app::signal_defs::DiscoveredPeer>>>
+    ) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<DiscoveredPeer>>>
     {
         self.0.read()
     }
 
     pub fn write(
         &self,
-    ) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<aura_app::signal_defs::DiscoveredPeer>>>
+    ) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<DiscoveredPeer>>>
     {
         self.0.write()
     }
@@ -220,7 +221,7 @@ pub fn use_discovered_peers_subscription(
                 let lan_peers: Vec<_> = peers_state
                     .peers
                     .iter()
-                    .filter(|p| p.method == aura_app::signal_defs::DiscoveredPeerMethod::Lan)
+                    .filter(|p| p.method == DiscoveredPeerMethod::Lan)
                     .cloned()
                     .collect();
 
