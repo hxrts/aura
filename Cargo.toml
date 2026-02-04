@@ -108,6 +108,7 @@ subtle = "2.6"
 getrandom = "0.2"
 futures-util = { version = "0.3", features = ["alloc"] }
 futures-signals = "0.3"
+socket2 = { version = "0.5", features = ["all"] }
 
 # Session types & choreographic programming
 rumpsteak-aura = "0.9.1"
