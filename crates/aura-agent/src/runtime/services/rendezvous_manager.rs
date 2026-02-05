@@ -666,6 +666,7 @@ impl RendezvousManager {
 
         // Set up callback to cache discovered peers
         let state = self.state.clone();
+        let local_authority_id = self.authority_id;
 
         let (announcer_handle, listener_handle) = lan_service.start(move |peer: DiscoveredPeer| {
             let state = state.clone();
@@ -676,11 +677,22 @@ impl RendezvousManager {
                     state
                         .lan_discovered_peers
                         .insert(peer_clone.authority_id, peer_clone.clone());
+                    // Cache under the peer's own context_id (original behavior)
                     state.descriptor_cache.insert(
                         (
                             peer_clone.descriptor.context_id,
                             peer_clone.descriptor.authority_id,
                         ),
+                        peer_clone.descriptor.clone(),
+                    );
+                    // Also cache under the local user's default context_id so that
+                    // is_peer_online() and resolve_peer_addr() (which look up by
+                    // local context) can find the descriptor.
+                    let local_context =
+                        aura_core::context::EffectContext::with_authority(local_authority_id)
+                            .context_id();
+                    state.descriptor_cache.insert(
+                        (local_context, peer_clone.descriptor.authority_id),
                         peer_clone.descriptor,
                     );
                 })

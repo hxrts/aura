@@ -521,6 +521,20 @@ impl InvitationHandler {
             // the scheduler has processed the new ContactFact.
             effects.await_next_view_update().await;
 
+            // Promote LAN-discovered descriptor into the local context so that
+            // is_peer_online() / resolve_peer_addr() can find it immediately.
+            if let Some(rendezvous) = effects.rendezvous_manager() {
+                if let Some(lan_peer) = rendezvous.get_lan_discovered_peer(contact_id).await {
+                    let mut desc = lan_peer.descriptor.clone();
+                    desc.context_id = context_id;
+                    let _ = rendezvous.cache_descriptor(desc).await;
+                    tracing::debug!(
+                        contact_id = %contact_id,
+                        "Promoted LAN descriptor to local context after contact acceptance"
+                    );
+                }
+            }
+
             tracing::debug!(
                 contact_id = %contact_id,
                 "ContactFact committed successfully"

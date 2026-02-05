@@ -712,7 +712,20 @@ impl RuntimeBridge for AgentRuntimeBridge {
 
         let effects = self.agent.runtime().effects();
         let context = EffectContext::with_authority(self.agent.authority_id()).context_id();
-        effects.is_channel_established(context, peer).await
+
+        if effects.is_channel_established(context, peer).await {
+            return true;
+        }
+
+        // Fallback: check if peer is discovered on LAN (handles descriptor cache
+        // eviction or timing races where the descriptor hasn't been dual-cached yet)
+        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+            if rendezvous.get_lan_discovered_peer(peer).await.is_some() {
+                return true;
+            }
+        }
+
+        false
     }
     async fn get_sync_peers(&self) -> Vec<DeviceId> {
         if let Some(sync) = self.agent.runtime().sync() {
