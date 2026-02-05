@@ -82,70 +82,123 @@ impl OperationalHandler {
     /// Returns `Some(result)` if the command was handled, `None` if it should
     /// be handled elsewhere (e.g., by intent dispatch).
     pub async fn execute(&self, command: &EffectCommand) -> Option<OpResult> {
-        // Try each handler in sequence until one handles the command
+        // Exhaustive match ensures every EffectCommand variant is routed to a handler.
+        // Adding a new variant without a routing arm is a compile error.
+        match command {
+            // System
+            EffectCommand::Ping
+            | EffectCommand::Shutdown
+            | EffectCommand::RefreshAccount
+            | EffectCommand::CreateAccount { .. } => {
+                system::handle_system(command, &self.app_core).await
+            }
 
-        // System commands
-        if let Some(result) = system::handle_system(command, &self.app_core).await {
-            return Some(result);
+            // Sync
+            EffectCommand::ForceSync | EffectCommand::RequestState { .. } => {
+                sync::handle_sync(command, &self.app_core).await
+            }
+
+            // Network
+            EffectCommand::AddPeer { .. }
+            | EffectCommand::RemovePeer { .. }
+            | EffectCommand::ListPeers
+            | EffectCommand::DiscoverPeers
+            | EffectCommand::ListLanPeers
+            | EffectCommand::InviteLanPeer { .. } => {
+                network::handle_network(command, &self.app_core).await
+            }
+
+            // Query
+            EffectCommand::ListParticipants { .. } | EffectCommand::GetUserInfo { .. } => {
+                query::handle_query(command, &self.app_core).await
+            }
+
+            // Context + Home
+            EffectCommand::SetContext { .. }
+            | EffectCommand::MovePosition { .. }
+            | EffectCommand::AcceptPendingHomeInvitation
+            | EffectCommand::CreateHome { .. } => {
+                context::handle_context(command, &self.app_core).await
+            }
+
+            // Contacts
+            EffectCommand::UpdateContactNickname { .. }
+            | EffectCommand::RemoveContact { .. }
+            | EffectCommand::ToggleContactGuardian { .. } => {
+                contacts::handle_contacts(command, &self.app_core).await
+            }
+
+            // Settings
+            EffectCommand::AddDevice { .. }
+            | EffectCommand::RemoveDevice { .. }
+            | EffectCommand::UpdateMfaPolicy { .. }
+            | EffectCommand::UpdateNickname { .. }
+            | EffectCommand::UpdateThreshold { .. }
+            | EffectCommand::SetChannelMode { .. } => {
+                settings::handle_settings(command, &self.app_core).await
+            }
+
+            // Invitations
+            EffectCommand::CreateInvitation { .. }
+            | EffectCommand::SendHomeInvitation { .. }
+            | EffectCommand::ExportInvitation { .. }
+            | EffectCommand::ImportInvitation { .. }
+            | EffectCommand::AcceptInvitation { .. }
+            | EffectCommand::DeclineInvitation { .. }
+            | EffectCommand::CancelInvitation { .. } => {
+                invitations::handle_invitations(command, &self.app_core).await
+            }
+
+            // Recovery
+            // InviteGuardian routes here: recovery.rs handles both contact_id=None
+            // and contact_id=Some cases.
+            EffectCommand::StartRecovery
+            | EffectCommand::SubmitGuardianApproval { .. }
+            | EffectCommand::CompleteRecovery
+            | EffectCommand::CancelRecovery
+            | EffectCommand::InviteGuardian { .. } => {
+                recovery::handle_recovery(command, &self.app_core).await
+            }
+
+            // Messaging
+            EffectCommand::SendMessage { .. }
+            | EffectCommand::CreateChannel { .. }
+            | EffectCommand::CloseChannel { .. }
+            | EffectCommand::SendDirectMessage { .. }
+            | EffectCommand::StartDirectChat { .. }
+            | EffectCommand::SendAction { .. }
+            | EffectCommand::JoinChannel { .. }
+            | EffectCommand::LeaveChannel { .. }
+            | EffectCommand::RetryMessage { .. }
+            | EffectCommand::SetTopic { .. }
+            | EffectCommand::InviteUser { .. } => {
+                messaging::handle_messaging(command, &self.app_core).await
+            }
+
+            // Moderation
+            EffectCommand::KickUser { .. }
+            | EffectCommand::BanUser { .. }
+            | EffectCommand::UnbanUser { .. }
+            | EffectCommand::MuteUser { .. }
+            | EffectCommand::UnmuteUser { .. }
+            | EffectCommand::PinMessage { .. }
+            | EffectCommand::UnpinMessage { .. } => {
+                moderation::handle_moderation(command, &self.app_core).await
+            }
+
+            // Steward
+            EffectCommand::GrantSteward { .. } | EffectCommand::RevokeSteward { .. } => {
+                steward::handle_steward(command, &self.app_core).await
+            }
+
+            // Backup commands — handled by DispatchHelper before reaching here.
+            // Return None so the dispatch layer handles them directly.
+            EffectCommand::ExportAccountBackup | EffectCommand::ImportAccountBackup { .. } => None,
+
+            // Test-only: intentionally unhandled to exercise "unknown command" error path.
+            #[cfg(test)]
+            EffectCommand::UnknownCommandForTest => None,
         }
-
-        // Sync commands
-        if let Some(result) = sync::handle_sync(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Network/Peer commands
-        if let Some(result) = network::handle_network(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Query commands
-        if let Some(result) = query::handle_query(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Context commands
-        if let Some(result) = context::handle_context(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Contacts commands
-        if let Some(result) = contacts::handle_contacts(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Settings commands
-        if let Some(result) = settings::handle_settings(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Invitation commands
-        if let Some(result) = invitations::handle_invitations(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Recovery commands
-        if let Some(result) = recovery::handle_recovery(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Messaging commands
-        if let Some(result) = messaging::handle_messaging(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Moderation commands
-        if let Some(result) = moderation::handle_moderation(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Steward commands
-        if let Some(result) = steward::handle_steward(command, &self.app_core).await {
-            return Some(result);
-        }
-
-        // Command not handled - return None to indicate intent dispatch should handle it
-        None
     }
 
     /// Execute and map failures to TerminalError while emitting ERROR_SIGNAL.
@@ -354,6 +407,30 @@ mod tests {
             }
             _ => panic!("Expected InvalidArgument error without RuntimeBridge, got: {result:?}"),
         }
+    }
+
+    /// Regression test: CreateAccount must be handled by the operational handler.
+    ///
+    /// Previously, `EffectCommand::CreateAccount` was not matched by any operational
+    /// sub-handler, so `execute()` returned `None` and the dispatch layer emitted:
+    ///   INTERNAL: operation: Unknown command: CreateAccount { nickname_suggestion: "..." }
+    #[tokio::test]
+    async fn test_create_account_is_handled() {
+        let app_core = test_app_core().await;
+        let handler = OperationalHandler::new(app_core);
+
+        let result = handler
+            .execute(&EffectCommand::CreateAccount {
+                nickname_suggestion: "Sam2".to_string(),
+            })
+            .await;
+
+        // Must return Some(_) — i.e. the command is recognized.
+        // None would mean "Unknown command" in the dispatch layer.
+        assert!(
+            result.is_some(),
+            "CreateAccount must be handled by OperationalHandler, got None (Unknown command)"
+        );
     }
 
     #[tokio::test]

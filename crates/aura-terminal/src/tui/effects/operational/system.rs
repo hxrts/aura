@@ -1,6 +1,6 @@
 //! System command handlers
 //!
-//! Handlers for Ping, Shutdown, RefreshAccount.
+//! Handlers for Ping, Shutdown, RefreshAccount, CreateAccount.
 //!
 //! This module delegates to portable workflows in aura_app::ui::workflows::system
 //! and adds terminal-specific response formatting.
@@ -37,6 +37,16 @@ pub async fn handle_system(
 
         EffectCommand::RefreshAccount => {
             // Delegate to workflow
+            match refresh_account(app_core).await {
+                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
+            }
+        }
+
+        EffectCommand::CreateAccount { .. } => {
+            // Account file and nickname are already persisted by the callback
+            // before this command is dispatched. Refresh signals so the UI
+            // reflects the newly created account.
             match refresh_account(app_core).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),

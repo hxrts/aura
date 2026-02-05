@@ -41,6 +41,12 @@ pub async fn handle_contacts(
                 )))),
             }
         }
+        EffectCommand::ToggleContactGuardian { .. } => {
+            // TODO: wire to runtime once guardian toggle workflow is implemented
+            Some(Err(OpError::Failed(
+                "Toggle guardian not yet implemented".to_string(),
+            )))
+        }
         _ => None,
     }
 }

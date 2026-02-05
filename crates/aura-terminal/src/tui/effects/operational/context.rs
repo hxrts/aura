@@ -63,6 +63,13 @@ pub async fn handle_context(
             }
         }
 
+        EffectCommand::CreateHome { .. } => {
+            // TODO: wire to runtime once home creation ceremony is implemented
+            Some(Err(super::types::OpError::Failed(
+                "Home creation not yet implemented via runtime".to_string(),
+            )))
+        }
+
         _ => None,
     }
 }

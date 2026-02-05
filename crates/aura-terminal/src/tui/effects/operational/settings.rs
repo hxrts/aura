@@ -82,6 +82,13 @@ pub async fn handle_settings(
             }
         }
 
+        EffectCommand::UpdateThreshold { .. } => {
+            // TODO: wire to runtime once threshold update ceremony is implemented
+            Some(Err(super::types::OpError::Failed(
+                "Threshold update not yet implemented".to_string(),
+            )))
+        }
+
         _ => None,
     }
 }

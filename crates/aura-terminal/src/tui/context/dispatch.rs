@@ -392,4 +392,43 @@ mod tests {
         assert_eq!(err.code(), "INTERNAL");
         assert!(err.to_string().contains("Unknown command"));
     }
+
+    /// Regression test: CreateAccount dispatch must not produce "Unknown command".
+    ///
+    /// Previously, `EffectCommand::CreateAccount` was not handled by any operational
+    /// sub-handler, so the dispatch layer emitted:
+    ///   INTERNAL: operation: Unknown command: CreateAccount { nickname_suggestion: "..." }
+    #[tokio::test]
+    async fn create_account_dispatch_does_not_emit_unknown_command() {
+        let app_core = AppCore::new(AppConfig::default()).expect("Failed to create test AppCore");
+        let app_core = Arc::new(RwLock::new(app_core));
+        let app_core = InitializedAppCore::new(app_core)
+            .await
+            .expect("Failed to init signals");
+
+        let dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let ctx = IoContext::builder()
+            .with_app_core(app_core.clone())
+            .with_base_path(dir.path().to_path_buf())
+            .with_device_id("test-device".to_string())
+            .with_mode(TuiMode::Production)
+            .with_existing_account(false)
+            .build()
+            .expect("Failed to build IoContext");
+
+        let result = ctx
+            .dispatch(EffectCommand::CreateAccount {
+                nickname_suggestion: "Sam2".to_string(),
+            })
+            .await;
+
+        // The command may succeed or fail for domain reasons, but it must NOT
+        // fail with "Unknown command" — that means no handler recognized it.
+        if let Err(ref msg) = result {
+            assert!(
+                !msg.contains("Unknown command"),
+                "CreateAccount must be handled, not rejected as unknown. Got: {msg}"
+            );
+        }
+    }
 }
