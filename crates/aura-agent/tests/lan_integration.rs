@@ -145,6 +145,79 @@ async fn test_lan_discovery_and_tcp_envelope() -> TestResult {
     Ok(())
 }
 
+/// Create a LAN agent in **Production** execution mode.
+///
+/// Unlike `create_lan_agent` (Testing mode), this exercises the real guard
+/// chain path. Before the `publish_descriptor_local()` fix, this would fail
+/// because the handler-level Biscuit guard denied descriptor publication
+/// when Biscuit tokens weren't bootstrapped.
+async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>> {
+    let authority_id = AuthorityId::new_from_entropy([seed; 32]);
+    let context_entropy = hash(&authority_id.to_bytes());
+    let ctx = EffectContext::new(
+        authority_id,
+        ContextId::new_from_entropy(context_entropy),
+        ExecutionMode::Production,
+    );
+
+    let temp_dir =
+        std::env::temp_dir().join(format!("aura-prod-lan-test-{}-{}", seed, lan_port));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    let _ = std::fs::create_dir_all(&temp_dir);
+
+    let mut config = AgentConfig::default();
+    config.device_id = DeviceId::from_uuid(authority_id.uuid());
+    config.network.bind_address = "0.0.0.0:0".to_string();
+    config.storage.base_path = temp_dir;
+    config.lan_discovery = LanDiscoveryConfig {
+        port: lan_port,
+        announce_interval_ms: 200,
+        enabled: true,
+        bind_addr: "0.0.0.0".to_string(),
+        broadcast_addr: "255.255.255.255".to_string(),
+    };
+
+    let rendezvous_config =
+        RendezvousManagerConfig::default().with_lan_discovery(config.lan_discovery.clone());
+    let sync_config = SyncManagerConfig::manual_only();
+
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .with_config(config)
+        .with_rendezvous_config(rendezvous_config)
+        .with_sync_config(sync_config)
+        .build_production(&ctx)
+        .await?;
+
+    bootstrap_agent(&agent, authority_id).await?;
+    // Re-publish LAN descriptor now that keys are bootstrapped
+    agent.runtime().start_services().await?;
+
+    Ok(Arc::new(agent))
+}
+
+/// Regression test: LAN discovery must work in Production execution mode.
+///
+/// Before the `publish_descriptor_local()` fix, the handler-level Biscuit
+/// guard in `publish_descriptor()` always denied authorization for fresh
+/// production accounts (no Biscuit tokens configured). This meant the LAN
+/// announcer never received a descriptor and never broadcast, so peer
+/// discovery was completely broken in production.
+#[tokio::test]
+async fn test_production_lan_discovery() -> TestResult {
+    let port = next_lan_port();
+    let agent_a = create_production_lan_agent(20, port).await?;
+    let agent_b = create_production_lan_agent(21, port).await?;
+
+    // Both agents must discover each other. This would fail without the
+    // publish_descriptor_local() bypass because the announcer had no
+    // descriptor to broadcast in production mode.
+    wait_for_lan_peer(&agent_a, agent_b.authority_id()).await?;
+    wait_for_lan_peer(&agent_b, agent_a.authority_id()).await?;
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_lan_sync_roundtrip() -> TestResult {
     let port = next_lan_port();
