@@ -148,9 +148,9 @@ async fn test_lan_discovery_and_tcp_envelope() -> TestResult {
 /// Create a LAN agent in **Production** execution mode.
 ///
 /// Unlike `create_lan_agent` (Testing mode), this exercises the real guard
-/// chain path. Before the `publish_descriptor_local()` fix, this would fail
-/// because the handler-level Biscuit guard denied descriptor publication
-/// when Biscuit tokens weren't bootstrapped.
+/// chain path. Biscuit tokens are created during `bootstrap_authority()` and
+/// cached in `AuraEffectSystem`, so `publish_descriptor()` passes the guard
+/// chain in production mode.
 async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>> {
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
     let context_entropy = hash(&authority_id.to_bytes());
@@ -190,7 +190,7 @@ async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<
         .await?;
 
     bootstrap_agent(&agent, authority_id).await?;
-    // Re-publish LAN descriptor now that keys are bootstrapped
+    // Re-publish LAN descriptor now that signing keys and Biscuit tokens are bootstrapped
     agent.runtime().start_services().await?;
 
     Ok(Arc::new(agent))
@@ -198,20 +198,19 @@ async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<
 
 /// Regression test: LAN discovery must work in Production execution mode.
 ///
-/// Before the `publish_descriptor_local()` fix, the handler-level Biscuit
-/// guard in `publish_descriptor()` always denied authorization for fresh
-/// production accounts (no Biscuit tokens configured). This meant the LAN
-/// announcer never received a descriptor and never broadcast, so peer
-/// discovery was completely broken in production.
+/// Verifies that Biscuit tokens bootstrapped during account creation enable
+/// the guard chain to authorize `publish_descriptor()` in production mode.
+/// Without proper Biscuit bootstrap, the guard chain denies authorization
+/// and the LAN announcer never receives a descriptor to broadcast.
 #[tokio::test]
 async fn test_production_lan_discovery() -> TestResult {
     let port = next_lan_port();
     let agent_a = create_production_lan_agent(20, port).await?;
     let agent_b = create_production_lan_agent(21, port).await?;
 
-    // Both agents must discover each other. This would fail without the
-    // publish_descriptor_local() bypass because the announcer had no
-    // descriptor to broadcast in production mode.
+    // Both agents must discover each other. This would fail without
+    // Biscuit token bootstrap because the guard chain denies authorization
+    // for publish_descriptor() when no tokens are available.
     wait_for_lan_peer(&agent_a, agent_b.authority_id()).await?;
     wait_for_lan_peer(&agent_b, agent_a.authority_id()).await?;
 

@@ -346,6 +346,9 @@ impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
         )
         .await?;
 
+        // Bootstrap Biscuit authorization tokens
+        self.bootstrap_biscuit_tokens(authority).await?;
+
         Ok(signing_keys.public_key_package)
     }
 

@@ -268,6 +268,11 @@ impl EffectSystemBuilder {
             effect_system.attach_lan_transport(lan_transport.clone());
         }
 
+        // Load persisted Biscuit tokens into the in-memory cache.
+        // For returning users this restores guard chain authorization.
+        // For new users the cache stays empty until bootstrap_authority() creates tokens.
+        effect_system.initialize_biscuit_cache().await;
+
         // Build runtime system with configured services
         let mut system = RuntimeSystem::new_with_services(
             effect_executor,

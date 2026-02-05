@@ -22,6 +22,8 @@ impl GuardContextProvider for AuraEffectSystem {
             "authority_id" => Some(self.authority_id.to_string()),
             "execution_mode" => Some(format!("{:?}", AuraEffects::execution_mode(self))),
             "device_id" => Some(self.config.device_id().to_string()),
+            "biscuit_token" => self.biscuit_cache.read().as_ref().map(|c| c.token_b64.clone()),
+            "biscuit_root_pk" => self.biscuit_cache.read().as_ref().map(|c| c.root_pk_b64.clone()),
             _ => None,
         }
     }

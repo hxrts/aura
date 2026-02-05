@@ -350,6 +350,16 @@ impl SecureStorageLocation {
         Self::new("device_attestation", device_id)
     }
 
+    /// Create a location for storing Biscuit token authority data.
+    ///
+    /// Stores the serialized Biscuit token and root public key for an authority:
+    /// - namespace: "biscuit"
+    /// - key: authority ID
+    /// - sub_key: "token_authority"
+    pub fn biscuit_authority(authority_id: &crate::AuthorityId) -> Self {
+        Self::with_sub_key("biscuit", authority_id.to_string(), "token_authority")
+    }
+
     /// Create a location for AMP channel bootstrap keys.
     pub fn amp_bootstrap_key(
         context: &ContextId,

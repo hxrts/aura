@@ -135,43 +135,23 @@ impl RendezvousHandler {
     ) -> AgentResult<RendezvousResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        // Enforce guard (unless testing)
-        if !effects.is_testing() {
-            let guard = create_send_guard(
-                CapabilityId::from("rendezvous:publish_descriptor"),
-                context_id,
-                self.context.authority.authority_id(),
-                FlowCost::new(1), // Low cost for descriptor publication
-            );
-            let result = guard
-                .evaluate(effects)
-                .await
-                .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
-            if !result.authorized {
-                return Err(AgentError::effects(result.denial_reason.unwrap_or_else(
-                    || "descriptor publish not authorized".to_string(),
-                )));
-            }
+        // Enforce guard chain
+        let guard = create_send_guard(
+            CapabilityId::from("rendezvous:publish_descriptor"),
+            context_id,
+            self.context.authority.authority_id(),
+            FlowCost::new(1), // Low cost for descriptor publication
+        );
+        let result = guard
+            .evaluate(effects)
+            .await
+            .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
+        if !result.authorized {
+            return Err(AgentError::effects(result.denial_reason.unwrap_or_else(
+                || "descriptor publish not authorized".to_string(),
+            )));
         }
 
-        self.publish_descriptor_inner(effects, context_id, transport_hints)
-            .await
-    }
-
-    /// Publish a transport descriptor for LAN bootstrap.
-    ///
-    /// Skips the handler-level Biscuit guard (which requires tokens that aren't
-    /// available for fresh accounts) while still enforcing the service-level
-    /// guard via the hardcoded snapshot. This is appropriate because LAN
-    /// descriptor publication is a local operation — we're announcing our own
-    /// presence on the local network, not interacting with a remote peer.
-    pub async fn publish_descriptor_local(
-        &self,
-        effects: &AuraEffectSystem,
-        context_id: ContextId,
-        transport_hints: Vec<TransportHint>,
-    ) -> AgentResult<RendezvousResult> {
-        HandlerUtilities::validate_authority_context(&self.context.authority)?;
         self.publish_descriptor_inner(effects, context_id, transport_hints)
             .await
     }
@@ -299,23 +279,21 @@ impl RendezvousHandler {
     ) -> AgentResult<ChannelResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        // Enforce guard (unless testing)
-        if !effects.is_testing() {
-            let guard = create_send_guard(
-                CapabilityId::from("rendezvous:initiate_channel"),
-                context_id,
-                self.context.authority.authority_id(),
-                FlowCost::new(2), // Handshake cost
-            );
-            let result = guard
-                .evaluate(effects)
-                .await
-                .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
-            if !result.authorized {
-                return Err(AgentError::effects(result.denial_reason.unwrap_or_else(
-                    || "channel initiation not authorized".to_string(),
-                )));
-            }
+        // Enforce guard chain
+        let guard = create_send_guard(
+            CapabilityId::from("rendezvous:initiate_channel"),
+            context_id,
+            self.context.authority.authority_id(),
+            FlowCost::new(2), // Handshake cost
+        );
+        let result = guard
+            .evaluate(effects)
+            .await
+            .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
+        if !result.authorized {
+            return Err(AgentError::effects(result.denial_reason.unwrap_or_else(
+                || "channel initiation not authorized".to_string(),
+            )));
         }
 
         let current_time = effects.current_timestamp().await.unwrap_or(0);
@@ -450,25 +428,23 @@ impl RendezvousHandler {
     ) -> AgentResult<RendezvousResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        // Enforce guard (unless testing)
-        if !effects.is_testing() {
-            let guard = create_send_guard(
-                CapabilityId::from("rendezvous:relay_request"),
-                context_id,
-                self.context.authority.authority_id(),
-                FlowCost::new(2), // Relay request cost
-            );
-            let result = guard
-                .evaluate(effects)
-                .await
-                .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
-            if !result.authorized {
-                return Err(AgentError::effects(
-                    result
-                        .denial_reason
-                        .unwrap_or_else(|| "relay request not authorized".to_string()),
-                ));
-            }
+        // Enforce guard chain
+        let guard = create_send_guard(
+            CapabilityId::from("rendezvous:relay_request"),
+            context_id,
+            self.context.authority.authority_id(),
+            FlowCost::new(2), // Relay request cost
+        );
+        let result = guard
+            .evaluate(effects)
+            .await
+            .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
+        if !result.authorized {
+            return Err(AgentError::effects(
+                result
+                    .denial_reason
+                    .unwrap_or_else(|| "relay request not authorized".to_string()),
+            ));
         }
 
         // Create snapshot for guard evaluation

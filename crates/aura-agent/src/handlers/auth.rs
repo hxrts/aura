@@ -434,11 +434,7 @@ impl AuthHandler {
     pub async fn authenticate(&self, effects: &AuraEffectSystem) -> AgentResult<()> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        // Skip guard in test mode
-        if effects.is_testing() {
-            return Ok(());
-        }
-
+        // Enforce guard chain
         let guard = create_send_guard(
             CapabilityId::from("auth:authenticate"),
             self.context.effect_context.context_id(),

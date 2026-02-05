@@ -598,6 +598,9 @@ mod settings_screen {
         tui.send_char('j');
         assert_eq!(tui.state.settings.section, SettingsSection::Authority);
 
+        tui.send_char('j');
+        assert_eq!(tui.state.settings.section, SettingsSection::Observability);
+
         // Wraps around
         tui.send_char('j');
         assert_eq!(tui.state.settings.section, SettingsSection::Profile);
@@ -609,6 +612,9 @@ mod settings_screen {
         tui.go_to_screen(Screen::Settings);
 
         // Navigate up with 'k' - should wrap
+        tui.send_char('k');
+        assert_eq!(tui.state.settings.section, SettingsSection::Observability);
+
         tui.send_char('k');
         assert_eq!(tui.state.settings.section, SettingsSection::Authority);
 

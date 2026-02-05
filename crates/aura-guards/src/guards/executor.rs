@@ -186,15 +186,23 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
         let now = TimeStamp::PhysicalClock(effect_system.physical_time().await?);
 
         // Get flow budgets
+        // When no budget is explicitly configured (limit=0, the default), use a
+        // generous default so operations aren't blocked.  Flow budget limits are
+        // derived at runtime from Biscuit + policy; a zero-limit default simply
+        // means "not yet configured", not "zero quota".
         let mut budgets = HashMap::new();
-        if let Ok(budget) = effect_system
+        let budget = effect_system
             .get_flow_budget(&request.context, &request.peer)
             .await
-        {
-            let remaining = aura_core::FlowCost::try_from(budget.remaining())
-                .map_err(|e| AuraError::invalid(e.to_string()))?;
-            budgets.insert((request.context, request.peer), remaining);
-        }
+            .unwrap_or_default();
+        let remaining = if budget.limit == 0 && budget.spent == 0 {
+            // Unconfigured — allow with a generous default
+            FlowCost::new(u32::MAX)
+        } else {
+            aura_core::FlowCost::try_from(budget.remaining())
+                .map_err(|e| AuraError::invalid(e.to_string()))?
+        };
+        budgets.insert((request.context, request.peer), remaining);
         let budget_view = FlowBudgetView::new(budgets);
 
         // Capability container (capability enforcement handled by AuthorizationEffects)
@@ -259,18 +267,10 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
         let (token_b64, root_pk_b64) = match require_biscuit_metadata(effect_system) {
             Ok(values) => values,
             Err(err) => {
-                if !effect_system.execution_mode().is_production() {
-                    debug!(
-                        operation = %request.operation,
-                        error = %err,
-                        "Missing Biscuit metadata in non-production mode; allowing"
-                    );
-                    return true;
-                }
                 warn!(
                     operation = %request.operation,
                     error = %err,
-                    "Missing Biscuit metadata in production; denying"
+                    "Missing Biscuit metadata; denying authorization"
                 );
                 return false;
             }
@@ -300,7 +300,20 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
             }
         };
 
-        let token = match Biscuit::from_base64(&token_b64, |_| Ok(root_pk)) {
+        // Decode standard base64 to raw bytes, then parse the Biscuit token.
+        // (BiscuitCache stores standard base64; Biscuit::from_base64 expects URL-safe.)
+        let token_bytes = match BASE64.decode(&token_b64) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                warn!(
+                    operation = %request.operation,
+                    error = %err,
+                    "Failed to decode Biscuit token bytes"
+                );
+                return false;
+            }
+        };
+        let token = match Biscuit::from(&token_bytes, |_| Ok(root_pk)) {
             Ok(token) => token,
             Err(err) => {
                 warn!(
@@ -735,11 +748,17 @@ where
     let now = TimeStamp::PhysicalClock(effect_system.physical_time().await?);
 
     let mut budgets = HashMap::new();
-    if let Ok(budget) = effect_system.get_flow_budget(context, authority).await {
-        let remaining = FlowCost::try_from(budget.remaining())
-            .map_err(|e| AuraError::invalid(e.to_string()))?;
-        budgets.insert((*context, *authority), remaining);
-    }
+    let budget = effect_system
+        .get_flow_budget(context, authority)
+        .await
+        .unwrap_or_default();
+    let remaining = if budget.limit == 0 && budget.spent == 0 {
+        FlowCost::new(u32::MAX)
+    } else {
+        FlowCost::try_from(budget.remaining())
+            .map_err(|e| AuraError::invalid(e.to_string()))?
+    };
+    budgets.insert((*context, *authority), remaining);
 
     let mut metadata = HashMap::new();
     metadata.insert("authority_id".to_string(), authority.to_string());

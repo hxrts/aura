@@ -55,6 +55,18 @@ use tokio::sync::mpsc;
 
 use super::shared_transport::SharedTransport;
 
+/// Cached Biscuit token and root public key for guard chain authorization.
+///
+/// Populated during `bootstrap_authority()` and loaded from secure storage
+/// on subsequent startups via `initialize_biscuit_cache()`.
+#[derive(Clone, Debug)]
+pub struct BiscuitCache {
+    /// Base64-encoded Biscuit token bytes
+    pub token_b64: String,
+    /// Base64-encoded root public key bytes
+    pub root_pk_b64: String,
+}
+
 mod amp;
 mod aura;
 mod choreography;
@@ -140,6 +152,9 @@ pub struct AuraEffectSystem {
 
     /// Rendezvous manager (optional, for address resolution)
     rendezvous_manager: parking_lot::RwLock<Option<RendezvousManager>>,
+
+    /// Cached Biscuit token for guard chain authorization.
+    biscuit_cache: parking_lot::RwLock<Option<BiscuitCache>>,
 }
 
 #[derive(Clone, Default)]
@@ -336,6 +351,28 @@ impl AuraEffectSystem {
             journal_verifying_key,
         );
 
+        // Pre-populate Biscuit cache so the guard chain works immediately.
+        // For production, initialize_biscuit_cache() or bootstrap_biscuit_tokens()
+        // will overwrite this with the persisted/real token later.
+        let initial_biscuit_cache = {
+            use base64::Engine;
+            let engine = base64::engine::general_purpose::STANDARD;
+            let token_authority = aura_authorization::TokenAuthority::new(authority);
+            match token_authority.create_token(authority) {
+                Ok(biscuit) => match biscuit.to_vec() {
+                    Ok(token_bytes) => {
+                        let root_pk_bytes = token_authority.root_public_key().to_bytes();
+                        Some(BiscuitCache {
+                            token_b64: engine.encode(&token_bytes),
+                            root_pk_b64: engine.encode(root_pk_bytes),
+                        })
+                    }
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            }
+        };
+
         Self {
             config,
             authority_id: authority,
@@ -356,6 +393,7 @@ impl AuraEffectSystem {
             choreography_state: parking_lot::RwLock::new(ChoreographyState::default()),
             lan_transport: parking_lot::RwLock::new(None),
             rendezvous_manager: parking_lot::RwLock::new(None),
+            biscuit_cache: parking_lot::RwLock::new(initial_biscuit_cache),
         }
     }
 
@@ -468,6 +506,97 @@ impl AuraEffectSystem {
 
     pub fn rendezvous_manager(&self) -> Option<RendezvousManager> {
         self.rendezvous_manager.read().clone()
+    }
+
+    /// Load persisted Biscuit tokens from secure storage into the in-memory cache.
+    ///
+    /// Called during startup (builder) to restore tokens for returning users.
+    /// For new users the cache remains empty until `bootstrap_authority()` creates tokens.
+    ///
+    /// Storage format: `[32 bytes root public key][N bytes biscuit token]`
+    pub async fn initialize_biscuit_cache(&self) {
+        use aura_core::effects::secure::{SecureStorageCapability, SecureStorageLocation};
+        use aura_core::effects::SecureStorageEffects;
+        use base64::Engine;
+
+        let location = SecureStorageLocation::biscuit_authority(&self.authority_id);
+        let caps = [SecureStorageCapability::Read];
+
+        match self.secure_retrieve(&location, &caps).await {
+            Ok(bytes) if bytes.len() > 32 => {
+                let engine = base64::engine::general_purpose::STANDARD;
+                let root_pk_b64 = engine.encode(&bytes[..32]);
+                let token_b64 = engine.encode(&bytes[32..]);
+
+                *self.biscuit_cache.write() = Some(BiscuitCache {
+                    token_b64,
+                    root_pk_b64,
+                });
+                tracing::info!("Biscuit cache initialized from secure storage");
+            }
+            Ok(bytes) => {
+                tracing::warn!(
+                    len = bytes.len(),
+                    "Biscuit data in secure storage too short (need >32 bytes)"
+                );
+            }
+            Err(_) => {
+                tracing::debug!("No biscuit found in secure storage (new account)");
+            }
+        }
+    }
+
+    /// Set the biscuit cache directly (used during bootstrap_authority).
+    pub fn set_biscuit_cache(&self, cache: BiscuitCache) {
+        *self.biscuit_cache.write() = Some(cache);
+    }
+
+    /// Get the current biscuit cache (for guard chain metadata).
+    pub fn biscuit_cache(&self) -> Option<BiscuitCache> {
+        self.biscuit_cache.read().clone()
+    }
+
+    /// Create and persist Biscuit authorization tokens during account bootstrap.
+    ///
+    /// Creates a `TokenAuthority`, mints a self-token with full capabilities,
+    /// persists `[32 bytes root PK][N bytes token]` to secure storage, and
+    /// populates the in-memory `BiscuitCache` so the guard chain works immediately.
+    pub async fn bootstrap_biscuit_tokens(
+        &self,
+        authority: &AuthorityId,
+    ) -> Result<(), AuraError> {
+        use aura_core::effects::secure::{SecureStorageCapability, SecureStorageLocation};
+        use aura_core::effects::SecureStorageEffects;
+        use base64::Engine;
+
+        let token_authority = aura_authorization::TokenAuthority::new(*authority);
+        let biscuit = token_authority
+            .create_token(*authority)
+            .map_err(|e| AuraError::internal(format!("Failed to create Biscuit token: {e}")))?;
+
+        let token_bytes = biscuit
+            .to_vec()
+            .map_err(|e| AuraError::internal(format!("Failed to serialize Biscuit: {e}")))?;
+        let root_pk_bytes = token_authority.root_public_key().to_bytes();
+
+        // Persist as [32 bytes root PK][N bytes token]
+        let mut storage_bytes = Vec::with_capacity(32 + token_bytes.len());
+        storage_bytes.extend_from_slice(&root_pk_bytes);
+        storage_bytes.extend_from_slice(&token_bytes);
+
+        let location = SecureStorageLocation::biscuit_authority(authority);
+        let caps = vec![SecureStorageCapability::Write];
+        self.secure_store(&location, &storage_bytes, &caps).await?;
+
+        // Populate in-memory cache immediately
+        let engine = base64::engine::general_purpose::STANDARD;
+        self.set_biscuit_cache(BiscuitCache {
+            token_b64: engine.encode(&token_bytes),
+            root_pk_b64: engine.encode(root_pk_bytes),
+        });
+
+        tracing::info!(%authority, "Biscuit authorization tokens bootstrapped");
+        Ok(())
     }
 
     async fn publish_typed_facts(&self, facts: Vec<TypedFact>) -> Result<(), AuraError> {

@@ -10,7 +10,7 @@ use crate::runtime::services::SessionManager;
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
-    RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects,
+    RandomExtendedEffects, SessionType, StorageCoreEffects, TransportEffects, TransportError,
 };
 use aura_core::hash;
 use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId, SessionId};
@@ -218,10 +218,7 @@ impl SessionOperations {
         operation: &str,
         cost: FlowCost,
     ) -> AgentResult<()> {
-        // Skip guard enforcement in test mode
-        if effects.is_testing() {
-            return Ok(());
-        }
+        // Enforce guard chain
         let guard = aura_guards::chain::create_send_guard(
             aura_guards::types::CapabilityId::from(operation),
             self.guard_context(),
@@ -426,10 +423,21 @@ impl SessionOperations {
                 receipt: None,
             };
 
-            self.effects
-                .send_envelope(envelope)
-                .await
-                .map_err(|e| AgentError::effects(format!("send invitation failed: {e}")))?;
+            match self.effects.send_envelope(envelope).await {
+                Ok(()) => {}
+                Err(TransportError::DestinationUnreachable { destination }) => {
+                    tracing::warn!(
+                        %destination,
+                        session_id = %request.session_id,
+                        "Participant unreachable; invitation will be retried on reconnect"
+                    );
+                }
+                Err(e) => {
+                    return Err(AgentError::effects(format!(
+                        "send invitation failed: {e}"
+                    )));
+                }
+            }
 
             HandlerUtilities::append_relational_fact(
                 &self.authority_context,

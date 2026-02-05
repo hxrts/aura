@@ -145,7 +145,11 @@ impl BiscuitAuthorizationBridge {
             }
         }
 
-        // Phase 3: Add authorization policies for specific operations
+        // Phase 3: Add authorization checks for specific operations
+        //
+        // Checks gate access: if any check fails, authorization is denied.
+        // The blanket allow policy (added in Phase 4) permits the request
+        // only if all checks pass.
         match operation {
             "read" => {
                 authorizer
@@ -176,16 +180,22 @@ impl BiscuitAuthorizationBridge {
                     .map_err(BiscuitError::BiscuitLib)?;
             }
             _ => {
-                // For unknown operations, require explicit capability
+                // Domain-specific operations (e.g., "rendezvous:publish_descriptor")
+                // require execute capability. The token carries generic capabilities
+                // (read/write/execute/admin/delegate), not per-operation names.
                 authorizer
-                    .add_check(check!("check if capability({operation})"))
+                    .add_check(check!("check if capability(\"execute\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
         }
 
-        // Phase 4: Run Datalog evaluation
-        // Note: biscuit-auth 5.0.0 set_time() uses system clock; we add time as a fact instead
-        // Time fact already added above at line 67-70
+        // Phase 4: Allow policy + Datalog evaluation
+        //
+        // Authorization requires at least one allow policy to match.
+        // Checks (above) gate access; this policy permits if all pass.
+        authorizer
+            .add_policy(policy!("allow if true"))
+            .map_err(BiscuitError::BiscuitLib)?;
         let authorization_result = authorizer.authorize();
 
         let authorized = match authorization_result {
@@ -238,6 +248,11 @@ impl BiscuitAuthorizationBridge {
         // Add a check to see if the token contains the requested capability
         authorizer
             .add_check(check!("check if capability({capability})"))
+            .map_err(BiscuitError::BiscuitLib)?;
+
+        // Allow policy required for authorize() to succeed
+        authorizer
+            .add_policy(policy!("allow if true"))
             .map_err(BiscuitError::BiscuitLib)?;
 
         // Run Datalog evaluation

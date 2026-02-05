@@ -1622,11 +1622,21 @@ impl InvitationHandler {
         }
     }
 
+    /// Check if a choreography error is a recoverable transport condition.
+    ///
+    /// `NoMessage` (no pending inbound envelope) and `DestinationUnreachable`
+    /// (peer not routable) are both expected when the remote party hasn't
+    /// joined the choreography yet or when transport is unavailable.
     fn is_transport_no_message(err: &ChoreographyError) -> bool {
         match err {
             ChoreographyError::Transport { source } => source
                 .downcast_ref::<TransportError>()
-                .is_some_and(|inner| matches!(inner, TransportError::NoMessage)),
+                .is_some_and(|inner| {
+                    matches!(
+                        inner,
+                        TransportError::NoMessage | TransportError::DestinationUnreachable { .. }
+                    )
+                }),
             _ => false,
         }
     }
