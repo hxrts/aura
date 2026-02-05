@@ -857,7 +857,7 @@ async fn publish_lan_descriptor_with(
     }
 
     let result = handler
-        .publish_descriptor(&effects, context_id, hints, [0u8; 32], 0)
+        .publish_descriptor_local(&effects, context_id, hints)
         .await
         .map_err(|e| ServiceError::startup_failed("rendezvous_publish", e.to_string()))?;
 

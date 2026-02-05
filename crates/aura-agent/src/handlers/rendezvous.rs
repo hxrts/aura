@@ -154,6 +154,35 @@ impl RendezvousHandler {
             }
         }
 
+        self.publish_descriptor_inner(effects, context_id, transport_hints)
+            .await
+    }
+
+    /// Publish a transport descriptor for LAN bootstrap.
+    ///
+    /// Skips the handler-level Biscuit guard (which requires tokens that aren't
+    /// available for fresh accounts) while still enforcing the service-level
+    /// guard via the hardcoded snapshot. This is appropriate because LAN
+    /// descriptor publication is a local operation — we're announcing our own
+    /// presence on the local network, not interacting with a remote peer.
+    pub async fn publish_descriptor_local(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        transport_hints: Vec<TransportHint>,
+    ) -> AgentResult<RendezvousResult> {
+        HandlerUtilities::validate_authority_context(&self.context.authority)?;
+        self.publish_descriptor_inner(effects, context_id, transport_hints)
+            .await
+    }
+
+    /// Shared implementation for descriptor publication (after guard checks).
+    async fn publish_descriptor_inner(
+        &self,
+        effects: &AuraEffectSystem,
+        context_id: ContextId,
+        transport_hints: Vec<TransportHint>,
+    ) -> AgentResult<RendezvousResult> {
         let current_time = effects.current_timestamp().await.unwrap_or(0);
 
         // Retrieve identity keys to get public key

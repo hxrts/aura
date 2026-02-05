@@ -208,8 +208,8 @@ pub async fn refresh_account(app_core: &Arc<RwLock<AppCore>>) -> Result<(), Aura
         let _ = super::recovery::get_recovery_status(app_core).await;
     }
 
-    // Refresh discovered peers
-    let _ = super::network::get_discovered_peers(app_core).await;
+    // Refresh discovered peers (re-query runtime, not just read stale signal)
+    let _ = super::network::refresh_discovered_peers(app_core).await;
 
     // Refresh connection and network status derived from contacts.
     let _ = refresh_connection_status_from_contacts(app_core).await;

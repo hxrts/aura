@@ -228,6 +228,18 @@ pub async fn get_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> Discovered
     read_signal_or_default(app_core, &*DISCOVERED_PEERS_SIGNAL).await
 }
 
+/// Re-query discovered peers from runtime and emit the signal.
+///
+/// **What it does**: Queries rendezvous + LAN peers and emits DISCOVERED_PEERS_SIGNAL
+/// **Signal pattern**: Emits DISCOVERED_PEERS_SIGNAL
+///
+/// Use this instead of `get_discovered_peers()` when you need to refresh from
+/// the runtime (e.g. after contact acceptance changes the invited set).
+pub async fn refresh_discovered_peers(app_core: &Arc<RwLock<AppCore>>) -> Result<(), AuraError> {
+    let timestamp_ms = super::time::current_time_ms(app_core).await.unwrap_or(0);
+    emit_discovered_peers_signal(app_core, timestamp_ms).await
+}
+
 /// Emit discovered peers signal with current state
 ///
 /// **What it does**: Queries peers and emits DISCOVERED_PEERS_SIGNAL
