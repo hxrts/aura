@@ -8,7 +8,7 @@
 use aura_core::effects::terminal::{KeyCode, KeyEvent};
 
 use crate::tui::layout::dim;
-use crate::tui::navigation::{navigate_list, NavKey};
+use crate::tui::navigation::{navigate_list, NavKey, TwoPanelFocus};
 use crate::tui::types::SettingsSection;
 use crate::tui::state::ContactsListFocus;
 
@@ -211,14 +211,19 @@ pub fn handle_contacts_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>,
                 DispatchCommand::OpenRemoveContactModal,
             ));
         }
+        KeyCode::Esc => {
+            if state.contacts.focus.is_detail() {
+                state.contacts.focus = TwoPanelFocus::List;
+            }
+        }
         KeyCode::Enter => {
-            if state.contacts.focus.is_list()
-                && state.contacts.list_focus.is_lan()
-                && state.contacts.lan_peer_count > 0
-            {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::InviteLanPeer));
-            } else {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::StartChat));
+            if state.contacts.focus.is_list() {
+                if state.contacts.list_focus.is_lan() && state.contacts.lan_peer_count > 0 {
+                    commands.push(TuiCommand::Dispatch(DispatchCommand::InviteLanPeer));
+                } else {
+                    // Show detail panel for selected contact
+                    state.contacts.focus = TwoPanelFocus::Detail;
+                }
             }
         }
         _ => {}

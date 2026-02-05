@@ -204,7 +204,6 @@ pub fn DiscoveredPeersPanel(props: &DiscoveredPeersPanelProps) -> impl Into<AnyE
                 border_color: Theme::BORDER,
             ) {
                 View(flex_direction: FlexDirection::Row, gap: 2) {
-                    Text(content: "📡", color: Theme::PRIMARY)
                     Text(content: "Nearby Peers", weight: Weight::Bold, color: Theme::TEXT)
                     Text(
                         content: format!("({})", peers.len()),
