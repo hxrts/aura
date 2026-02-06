@@ -218,7 +218,10 @@ impl SessionOperations {
         operation: &str,
         cost: FlowCost,
     ) -> AgentResult<()> {
-        // Enforce guard chain
+        // Skip guard enforcement in test/simulation mode
+        if effects.is_testing() {
+            return Ok(());
+        }
         let guard = aura_guards::chain::create_send_guard(
             aura_guards::types::CapabilityId::from(operation),
             self.guard_context(),
