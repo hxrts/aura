@@ -358,7 +358,7 @@ fn test_settings_sections_deterministic() {
     // Default section is Profile
     assert_eq!(tui.state().settings.section, SettingsSection::Profile);
 
-    // 'j' moves to next section: Profile -> Threshold -> Recovery -> Devices -> Authority -> Profile
+    // 'j' moves to next section: Profile -> Threshold -> Recovery -> Devices -> Authority -> Observability -> Profile
     tui.send_char('j');
     assert_eq!(tui.state().settings.section, SettingsSection::Threshold);
 
@@ -370,6 +370,9 @@ fn test_settings_sections_deterministic() {
 
     tui.send_char('j');
     assert_eq!(tui.state().settings.section, SettingsSection::Authority);
+
+    tui.send_char('j');
+    assert_eq!(tui.state().settings.section, SettingsSection::Observability);
 
     tui.send_char('j');
     assert_eq!(tui.state().settings.section, SettingsSection::Profile); // Wraps

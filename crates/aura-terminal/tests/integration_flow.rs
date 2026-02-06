@@ -79,8 +79,8 @@ struct TestAgent {
 impl TestAgent {
     /// Create a new test agent with initialized context
     async fn new(name: &str) -> Self {
-        // Use deterministic UUID to ensure unique directories while maintaining reproducibility
-        let unique_id = uuid::Uuid::from_bytes([5; 16]);
+        // Use random UUID to ensure unique directories across parallel test runs
+        let unique_id = uuid::Uuid::new_v4();
         let test_dir = std::env::temp_dir().join(format!("aura-flow-test-{name}-{unique_id}"));
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
