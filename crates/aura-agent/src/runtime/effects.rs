@@ -561,10 +561,7 @@ impl AuraEffectSystem {
     /// Creates a `TokenAuthority`, mints a self-token with full capabilities,
     /// persists `[32 bytes root PK][N bytes token]` to secure storage, and
     /// populates the in-memory `BiscuitCache` so the guard chain works immediately.
-    pub async fn bootstrap_biscuit_tokens(
-        &self,
-        authority: &AuthorityId,
-    ) -> Result<(), AuraError> {
+    pub async fn bootstrap_biscuit_tokens(&self, authority: &AuthorityId) -> Result<(), AuraError> {
         use aura_core::effects::secure::{SecureStorageCapability, SecureStorageLocation};
         use aura_core::effects::SecureStorageEffects;
         use base64::Engine;

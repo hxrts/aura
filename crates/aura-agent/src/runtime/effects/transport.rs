@@ -173,20 +173,25 @@ async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(
     })?;
 
     let config = TransportConfig::default();
-    let mut stream = timeout(config.connect_timeout.get(), TcpStream::connect(socket_addr))
-        .await
-        .map_err(|_| TransportError::SendFailed {
-            destination: envelope.destination,
-            reason: "TCP connect timeout".to_string(),
-        })?
-        .map_err(|e| TransportError::SendFailed {
-            destination: envelope.destination,
-            reason: format!("TCP connect failed: {e}"),
-        })?;
-
-    let payload = aura_core::util::serialization::to_vec(envelope).map_err(|e| TransportError::SendFailed {
+    let mut stream = timeout(
+        config.connect_timeout.get(),
+        TcpStream::connect(socket_addr),
+    )
+    .await
+    .map_err(|_| TransportError::SendFailed {
         destination: envelope.destination,
-        reason: format!("Envelope serialization failed: {e}"),
+        reason: "TCP connect timeout".to_string(),
+    })?
+    .map_err(|e| TransportError::SendFailed {
+        destination: envelope.destination,
+        reason: format!("TCP connect failed: {e}"),
+    })?;
+
+    let payload = aura_core::util::serialization::to_vec(envelope).map_err(|e| {
+        TransportError::SendFailed {
+            destination: envelope.destination,
+            reason: format!("Envelope serialization failed: {e}"),
+        }
     })?;
 
     let len = (payload.len() as u32).to_be_bytes();

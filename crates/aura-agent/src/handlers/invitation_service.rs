@@ -525,7 +525,12 @@ mod tests {
 
         let receiver_id = authority_context.authority_id();
         let result = service
-            .invite_as_contact(receiver_id, None, Some("Out-of-band invite".to_string()), None)
+            .invite_as_contact(
+                receiver_id,
+                None,
+                Some("Out-of-band invite".to_string()),
+                None,
+            )
             .await;
 
         assert!(

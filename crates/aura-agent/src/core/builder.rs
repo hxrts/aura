@@ -64,14 +64,8 @@ impl AgentBuilder {
 
     /// Build a production agent
     pub async fn build_production(self, _ctx: &EffectContext) -> AgentResult<AuraAgent> {
-        let sync_config = self
-            .sync_config
-            .clone()
-            .unwrap_or_default();
-        let rendezvous_config = self
-            .rendezvous_config
-            .clone()
-            .unwrap_or_default();
+        let sync_config = self.sync_config.clone().unwrap_or_default();
+        let rendezvous_config = self.rendezvous_config.clone().unwrap_or_default();
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;

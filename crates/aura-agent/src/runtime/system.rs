@@ -20,9 +20,9 @@ use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
 use aura_rendezvous::TransportHint;
-use tokio::io::AsyncReadExt;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
 
 /// Main runtime system for the agent
 pub struct RuntimeSystem {
@@ -305,12 +305,10 @@ impl RuntimeSystem {
             sync_manager.start_maintenance_task(tasks.clone(), time_effects.clone());
         }
 
-        if let Ok(invitation_handler) =
-            InvitationHandler::new(AuthorityContext::new_with_device(
-                self.authority_id,
-                self.device_id(),
-            ))
-        {
+        if let Ok(invitation_handler) = InvitationHandler::new(AuthorityContext::new_with_device(
+            self.authority_id,
+            self.device_id(),
+        )) {
             let effects = self.effect_system.clone();
             let handler = invitation_handler.clone();
             let interval = Duration::from_secs(2);
@@ -340,10 +338,7 @@ impl RuntimeSystem {
                 let effects = effects.clone();
                 let handler = handler.clone();
                 async move {
-                    if let Err(e) = handler
-                        .process_handshake_envelopes(effects.clone())
-                        .await
-                    {
+                    if let Err(e) = handler.process_handshake_envelopes(effects.clone()).await {
                         tracing::debug!(
                             error = %e,
                             "Failed to process rendezvous handshake envelopes"
@@ -395,8 +390,7 @@ impl RuntimeSystem {
             }
         });
 
-        if let (Some(rendezvous_manager), Some(lan_transport)) =
-            (rendezvous_manager, lan_transport)
+        if let (Some(rendezvous_manager), Some(lan_transport)) = (rendezvous_manager, lan_transport)
         {
             let interval = Duration::from_secs(60);
             tasks.spawn_interval_until(time_effects.clone(), interval, move || {

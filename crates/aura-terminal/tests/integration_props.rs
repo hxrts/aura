@@ -101,33 +101,33 @@ mod neighborhood_screen {
     use super::*;
 
     #[test]
-    fn test_insert_mode_reaches_neighborhood_props() {
+    fn test_neighborhood_does_not_enter_insert_mode() {
         let mut harness = PropsTestHarness::new();
         harness.go_to_screen(Screen::Neighborhood);
 
-        // Enter detail mode then insert mode
+        // Enter detail mode and try insert key
         harness.send(events::enter());
         harness.send_char('i');
 
-        // Verify props reflect the change
+        // Neighborhood remains non-insert and keeps list focus.
         let props = extract_neighborhood_view_props(&harness.state);
         assert!(
-            props.insert_mode,
-            "Insert mode must reach NeighborhoodScreen props"
+            !props.insert_mode,
+            "Neighborhood should not enter insert mode"
         );
         assert_eq!(
             props.detail_focus,
-            DetailFocus::Input,
-            "Focus must change to Input"
+            DetailFocus::Channels,
+            "Focus should remain in list navigation"
         );
     }
 
     #[test]
-    fn test_input_buffer_reaches_neighborhood_props() {
+    fn test_input_buffer_ignored_on_neighborhood() {
         let mut harness = PropsTestHarness::new();
         harness.go_to_screen(Screen::Neighborhood);
 
-        // Enter detail mode then insert mode
+        // Enter detail mode and attempt input.
         harness.send(events::enter());
         harness.send_char('i');
 
@@ -137,8 +137,8 @@ mod neighborhood_screen {
 
         let props = extract_neighborhood_view_props(&harness.state);
         assert_eq!(
-            props.input_buffer, "hi",
-            "Input buffer must reach NeighborhoodScreen props"
+            props.input_buffer, "",
+            "Neighborhood input buffer should stay empty"
         );
     }
 
@@ -356,28 +356,10 @@ mod cross_screen {
     /// This test would have caught the original bug where ChatScreen
     /// wasn't receiving insert_mode from TuiState
     #[test]
-    fn test_insert_mode_works_on_all_screens_with_input() {
+    fn test_insert_mode_works_on_chat_screen() {
         let mut harness = PropsTestHarness::new();
 
-        // Test Neighborhood screen insert mode
-        harness.go_to_screen(Screen::Neighborhood);
-        harness.send(events::enter());
-        harness.send_char('i');
-        let neighborhood_props = extract_neighborhood_view_props(&harness.state);
-        assert!(
-            neighborhood_props.insert_mode,
-            "Neighborhood: insert_mode must reach props"
-        );
-
-        // Exit insert mode
-        harness.send(events::escape());
-        let neighborhood_props = extract_neighborhood_view_props(&harness.state);
-        assert!(
-            !neighborhood_props.insert_mode,
-            "Neighborhood: must exit insert mode"
-        );
-
-        // Navigate to Chat and test insert mode
+        // Navigate to Chat and test insert mode.
         harness.go_to_screen(Screen::Chat);
         harness.send_char('i');
         let chat_props = extract_chat_view_props(&harness.state);

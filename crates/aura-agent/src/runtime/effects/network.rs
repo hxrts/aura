@@ -1,16 +1,18 @@
 use super::AuraEffectSystem;
+use crate::core::default_context_id_for_authority;
 use async_trait::async_trait;
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::transport::TransportEnvelope;
-use aura_core::effects::{NetworkCoreEffects, NetworkError, NetworkExtendedEffects, TransportEffects, TransportError};
+use aura_core::effects::{
+    NetworkCoreEffects, NetworkError, NetworkExtendedEffects, TransportEffects, TransportError,
+};
+use aura_core::identifiers::AuthorityId;
 use aura_protocol::amp::deserialize_amp_message;
 use std::collections::HashMap;
-use crate::core::default_context_id_for_authority;
-use aura_core::identifiers::AuthorityId;
 use std::collections::HashSet;
-use tokio::io::AsyncWriteExt;
 use std::net::SocketAddr;
 use std::str::FromStr;
+use tokio::io::AsyncWriteExt;
 
 const NETWORK_CONTENT_TYPE: &str = "application/aura-network";
 
@@ -72,10 +74,11 @@ impl NetworkCoreEffects for AuraEffectSystem {
                 });
             };
 
-            let wire =
-                deserialize_amp_message(&message).map_err(|e| NetworkError::SerializationFailed {
+            let wire = deserialize_amp_message(&message).map_err(|e| {
+                NetworkError::SerializationFailed {
                     error: e.to_string(),
-                })?;
+                }
+            })?;
 
             let mut metadata = HashMap::new();
             metadata.insert(
@@ -167,7 +170,11 @@ impl NetworkExtendedEffects for AuraEffectSystem {
 
     async fn connected_peers(&self) -> Vec<uuid::Uuid> {
         if let Some(shared) = self.transport.shared_transport() {
-            return shared.online_peers().into_iter().map(|peer| peer.uuid()).collect();
+            return shared
+                .online_peers()
+                .into_iter()
+                .map(|peer| peer.uuid())
+                .collect();
         }
 
         if let Some(manager) = self.rendezvous_manager() {
@@ -223,20 +230,23 @@ impl NetworkExtendedEffects for AuraEffectSystem {
             return Err(NetworkError::NotImplemented);
         }
 
-        let socket_addr = SocketAddr::from_str(_connection_id)
-            .map_err(|e| NetworkError::SendFailed {
+        let socket_addr =
+            SocketAddr::from_str(_connection_id).map_err(|e| NetworkError::SendFailed {
                 peer_id: None,
                 reason: format!("Invalid connection address: {e}"),
             })?;
 
         let config = aura_effects::transport::TransportConfig::default();
-        let mut stream = tokio::time::timeout(config.connect_timeout.get(), tokio::net::TcpStream::connect(socket_addr))
-            .await
-            .map_err(|_| NetworkError::OperationTimeout {
-                operation: "network_send_connect".to_string(),
-                timeout_ms: config.connect_timeout.get().as_millis() as u64,
-            })?
-            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+        let mut stream = tokio::time::timeout(
+            config.connect_timeout.get(),
+            tokio::net::TcpStream::connect(socket_addr),
+        )
+        .await
+        .map_err(|_| NetworkError::OperationTimeout {
+            operation: "network_send_connect".to_string(),
+            timeout_ms: config.connect_timeout.get().as_millis() as u64,
+        })?
+        .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
 
         let len = (_data.len() as u32).to_be_bytes();
         tokio::time::timeout(config.write_timeout.get(), stream.write_all(&len))

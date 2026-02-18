@@ -178,54 +178,36 @@ mod neighborhood_screen_map {
         let mut tui = TestTui::new();
         tui.assert_screen(Screen::Neighborhood);
 
-        // Enter detail mode then insert mode with 'i'
-        assert!(!tui.is_insert_mode());
+        // Enter detail mode; neighborhood no longer supports insert mode.
         tui.send_enter();
         tui.send_char('i');
-        assert!(tui.is_insert_mode());
-        assert_eq!(tui.state.neighborhood.detail_focus, DetailFocus::Input);
+        assert!(!tui.is_insert_mode());
+        assert_eq!(tui.state.neighborhood.detail_focus, DetailFocus::Channels);
     }
 
     #[test]
-    fn test_neighborhood_send_message() {
+    fn test_neighborhood_enter_does_not_send_message() {
         let mut tui = TestTui::new();
 
-        // Enter detail mode, then insert mode and type message
+        // Enter detail mode and press Enter - no home message dispatch should occur.
         tui.send_enter();
-        tui.send_char('i');
-        tui.type_text("Hello, Home!");
-
-        assert_eq!(tui.state.neighborhood.input_buffer, "Hello, Home!");
-
-        // Send message with Enter
         tui.clear_commands();
         tui.send_enter();
 
-        // Verify dispatch command
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::SendHomeMessage { content } if content == "Hello, Home!")));
-
-        // Buffer should be cleared
-        assert!(tui.state.neighborhood.input_buffer.is_empty());
-
-        // Should exit insert mode after sending
-        assert!(!tui.is_insert_mode());
+        assert!(!tui.has_dispatch(|_| true));
     }
 
     #[test]
     fn test_neighborhood_empty_message_not_sent() {
         let mut tui = TestTui::new();
 
-        // Enter detail mode then insert mode with empty buffer
+        // Enter detail mode; home messaging is disabled on Neighborhood.
         tui.send_enter();
-        tui.send_char('i');
-        assert!(tui.state.neighborhood.input_buffer.is_empty());
-
-        // Try to send with Enter
         tui.clear_commands();
         tui.send_enter();
 
         // No dispatch should occur for empty message
-        assert!(!tui.has_dispatch(|d| matches!(d, DispatchCommand::SendHomeMessage { .. })));
+        assert!(!tui.has_dispatch(|_| true));
     }
 
     #[test]
@@ -249,20 +231,14 @@ mod neighborhood_screen_map {
     }
 
     #[test]
-    fn test_neighborhood_backspace_in_insert_mode() {
+    fn test_neighborhood_backspace_in_detail_mode() {
         let mut tui = TestTui::new();
 
         tui.send_enter();
-        tui.send_char('i');
-        tui.type_text("test");
-        assert_eq!(tui.state.neighborhood.input_buffer, "test");
-
-        // Backspace removes last character
+        tui.clear_commands();
         tui.send_backspace();
-        assert_eq!(tui.state.neighborhood.input_buffer, "tes");
-
         tui.send_backspace();
-        assert_eq!(tui.state.neighborhood.input_buffer, "te");
+        assert!(!tui.has_dispatch(|d| matches!(d, DispatchCommand::SendChatMessage { .. })));
     }
 }
 
@@ -1024,15 +1000,15 @@ mod global_behavior {
     fn test_quit_homeed_in_insert_mode() {
         let mut tui = TestTui::new();
 
-        // Enter detail mode then insert mode on Neighborhood screen
-        tui.send_enter();
+        // Enter insert mode on Chat screen
+        tui.go_to_screen(Screen::Chat);
         tui.send_char('i');
         assert!(tui.is_insert_mode());
 
         // 'q' should type 'q', not quit
         tui.send_char('q');
         assert!(!tui.state.should_exit);
-        assert_eq!(tui.state.neighborhood.input_buffer, "q");
+        assert_eq!(tui.state.chat.input_buffer, "q");
     }
 
     #[test]
@@ -1126,9 +1102,9 @@ mod stress {
     #[test]
     fn test_rapid_insert_mode_toggle() {
         let mut tui = TestTui::new();
+        tui.go_to_screen(Screen::Chat);
 
         for _ in 0..10000 {
-            tui.send_enter();
             tui.send_char('i');
             tui.send_escape();
         }
@@ -1140,7 +1116,7 @@ mod stress {
     fn test_very_long_input() {
         let mut tui = TestTui::new();
 
-        tui.send_enter();
+        tui.go_to_screen(Screen::Chat);
         tui.send_char('i');
 
         // Type 100KB of text
@@ -1149,7 +1125,7 @@ mod stress {
             tui.send_char(c);
         }
 
-        assert_eq!(tui.state.neighborhood.input_buffer.len(), 100_000);
+        assert_eq!(tui.state.chat.input_buffer.len(), 100_000);
     }
 
     #[test]
@@ -1351,17 +1327,14 @@ proptest! {
         // All indices are always >= 0 since they're usize - no need to check
     }
 
-    /// Insert mode only on Home and Chat
+    /// Insert mode only on Chat
     #[test]
     fn prop_insert_mode_screens(screen in screen_key_strategy()) {
         let mut tui = TestTui::new();
         tui.send_char(screen);
-        if tui.screen() == Screen::Neighborhood {
-            tui.send_enter();
-        }
         tui.send_char('i');
 
-        let should_be_insert = matches!(tui.screen(), Screen::Neighborhood | Screen::Chat);
+        let should_be_insert = matches!(tui.screen(), Screen::Chat);
         prop_assert_eq!(tui.is_insert_mode(), should_be_insert);
     }
 

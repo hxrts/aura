@@ -38,11 +38,6 @@ pub enum DispatchCommand {
     // Navigation
     NavigateTo(Screen),
 
-    // Home messaging
-    SendHomeMessage {
-        content: String,
-    },
-
     // Chat screen
     SelectChannel {
         channel_id: String,

@@ -6,7 +6,9 @@
 
 #![allow(clippy::expect_used, clippy::disallowed_methods)]
 
-use aura_agent::{AgentBuilder, AgentConfig, AuraAgent, EffectContext, ExecutionMode, SharedTransport};
+use aura_agent::{
+    AgentBuilder, AgentConfig, AuraAgent, EffectContext, ExecutionMode, SharedTransport,
+};
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{ThresholdSigningEffects, TransportEffects};
 use aura_core::hash::hash;
@@ -44,7 +46,10 @@ async fn create_simulation_agent(
     shared_transport: SharedTransport,
 ) -> TestResult<Arc<AuraAgent>> {
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
-    let ctx = test_context(authority_id, ExecutionMode::Simulation { seed: seed as u64 });
+    let ctx = test_context(
+        authority_id,
+        ExecutionMode::Simulation { seed: seed as u64 },
+    );
 
     let config = AgentConfig {
         device_id: DeviceId::from_uuid(authority_id.uuid()),
@@ -230,15 +235,24 @@ async fn test_shared_transport_peer_awareness() -> TestResult {
     let agent_a = create_simulation_agent(70, shared_transport.clone()).await?;
 
     // After A is created, it should see 0 other peers (only itself is registered)
-    assert_eq!(shared_transport.connected_peer_count(agent_a.authority_id()), 0);
+    assert_eq!(
+        shared_transport.connected_peer_count(agent_a.authority_id()),
+        0
+    );
     assert!(shared_transport.is_peer_online(agent_a.authority_id()));
 
     // Create agent B - it also auto-registers during construction
     let agent_b = create_simulation_agent(80, shared_transport.clone()).await?;
 
     // Now both agents see each other as peers
-    assert_eq!(shared_transport.connected_peer_count(agent_a.authority_id()), 1);
-    assert_eq!(shared_transport.connected_peer_count(agent_b.authority_id()), 1);
+    assert_eq!(
+        shared_transport.connected_peer_count(agent_a.authority_id()),
+        1
+    );
+    assert_eq!(
+        shared_transport.connected_peer_count(agent_b.authority_id()),
+        1
+    );
 
     // Verify peer visibility
     assert!(shared_transport.is_peer_online(agent_a.authority_id()));
@@ -315,9 +329,18 @@ async fn test_three_agent_mesh_communication() -> TestResult {
     assert_eq!(recv_a.payload, b"C to A");
 
     // Verify 2 peers visible to each agent
-    assert_eq!(shared_transport.connected_peer_count(agent_a.authority_id()), 2);
-    assert_eq!(shared_transport.connected_peer_count(agent_b.authority_id()), 2);
-    assert_eq!(shared_transport.connected_peer_count(agent_c.authority_id()), 2);
+    assert_eq!(
+        shared_transport.connected_peer_count(agent_a.authority_id()),
+        2
+    );
+    assert_eq!(
+        shared_transport.connected_peer_count(agent_b.authority_id()),
+        2
+    );
+    assert_eq!(
+        shared_transport.connected_peer_count(agent_c.authority_id()),
+        2
+    );
 
     Ok(())
 }

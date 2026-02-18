@@ -274,7 +274,6 @@ impl TuiState {
     pub fn is_insert_mode(&self) -> bool {
         match self.screen() {
             Screen::Chat => self.chat.insert_mode,
-            Screen::Neighborhood => self.neighborhood.insert_mode,
             _ => false,
         }
     }

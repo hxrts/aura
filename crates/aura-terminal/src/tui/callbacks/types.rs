@@ -75,9 +75,6 @@ pub type CreateInvitationCallback = CreateInvitationCallbackType;
 pub type ExportInvitationCallback = IdCallback;
 pub type ImportInvitationCallback = IdCallback;
 
-// --- Home Messaging ---
-pub type HomeSendCallback = IdCallback;
-
 // --- Neighborhood Screen ---
 pub type GoHomeCallback = NoArgCallback;
 

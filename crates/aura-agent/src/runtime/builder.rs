@@ -229,10 +229,8 @@ impl EffectSystemBuilder {
 
         // Create optional LAN transport service (used for LAN advertising + future TCP ingress)
         let lan_transport = if rendezvous_enabled {
-            match super::services::LanTransportService::bind(
-                config.network.bind_address.as_str(),
-            )
-            .await
+            match super::services::LanTransportService::bind(config.network.bind_address.as_str())
+                .await
             {
                 Ok(service) => Some(Arc::new(service)),
                 Err(err) => {
@@ -245,9 +243,9 @@ impl EffectSystemBuilder {
         };
 
         let rendezvous_handler = if rendezvous_enabled {
-            let authority_context = AuthorityContext::new_with_device(authority_id, config.device_id);
-            let handler = RendezvousHandler::new(authority_context)
-                .map_err(|e| e.to_string())?;
+            let authority_context =
+                AuthorityContext::new_with_device(authority_id, config.device_id);
+            let handler = RendezvousHandler::new(authority_context).map_err(|e| e.to_string())?;
             let handler = if let Some(manager) = rendezvous_manager.as_ref() {
                 handler.with_rendezvous_manager(manager.clone())
             } else {

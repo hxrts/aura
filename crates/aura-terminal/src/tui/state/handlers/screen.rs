@@ -9,8 +9,8 @@ use aura_core::effects::terminal::{KeyCode, KeyEvent};
 
 use crate::tui::layout::dim;
 use crate::tui::navigation::{navigate_list, NavKey, TwoPanelFocus};
-use crate::tui::types::SettingsSection;
 use crate::tui::state::ContactsListFocus;
+use crate::tui::types::SettingsSection;
 
 use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::QueuedModal;
@@ -55,7 +55,10 @@ pub fn handle_chat_key(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key
             ChatFocus::Messages => {
                 // Scroll up = increase offset (show older messages)
                 // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
-                let max_scroll = state.chat.message_count.saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
+                let max_scroll = state
+                    .chat
+                    .message_count
+                    .saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
                 if state.chat.message_scroll < max_scroll {
                     state.chat.message_scroll =
                         state.chat.message_scroll.saturating_add(1).min(max_scroll);
@@ -271,16 +274,6 @@ pub fn handle_neighborhood_key(
                     ImportInvitationModalState::default(),
                 ));
             }
-            KeyCode::Char('i') => {
-                // Enter home in insert mode (like chat screen)
-                state.neighborhood.mode = NeighborhoodMode::Detail;
-                state.neighborhood.entered_home_id =
-                    Some(state.neighborhood.selected_home.to_string());
-                state.neighborhood.insert_mode = true;
-                state.neighborhood.insert_mode_entry_char = Some('i');
-                state.neighborhood.detail_focus = DetailFocus::Input;
-                commands.push(TuiCommand::Dispatch(DispatchCommand::EnterHome));
-            }
             KeyCode::Char('n') => {
                 // Create a new home
                 commands.push(TuiCommand::Dispatch(DispatchCommand::OpenHomeCreate));
@@ -303,7 +296,7 @@ pub fn handle_neighborhood_key(
             }
             KeyCode::Left | KeyCode::Char('h') => {
                 state.neighborhood.detail_focus = match state.neighborhood.detail_focus {
-                    DetailFocus::Input | DetailFocus::Messages => DetailFocus::Residents,
+                    DetailFocus::Messages | DetailFocus::Input => DetailFocus::Residents,
                     DetailFocus::Residents => DetailFocus::Channels,
                     DetailFocus::Channels => DetailFocus::Channels,
                 };
@@ -311,8 +304,8 @@ pub fn handle_neighborhood_key(
             KeyCode::Right | KeyCode::Char('l') => {
                 state.neighborhood.detail_focus = match state.neighborhood.detail_focus {
                     DetailFocus::Channels => DetailFocus::Residents,
-                    DetailFocus::Residents => DetailFocus::Messages,
-                    DetailFocus::Messages | DetailFocus::Input => DetailFocus::Messages,
+                    DetailFocus::Residents => DetailFocus::Residents,
+                    DetailFocus::Messages | DetailFocus::Input => DetailFocus::Residents,
                 };
             }
             KeyCode::Up | KeyCode::Char('k') => match state.neighborhood.detail_focus {
@@ -330,19 +323,7 @@ pub fn handle_neighborhood_key(
                         NavKey::Up,
                     );
                 }
-                DetailFocus::Messages => {
-                    // Scroll up = increase offset (show older messages)
-                    // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
-                    let max_scroll = state.neighborhood.message_count.saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
-                    if state.neighborhood.message_scroll < max_scroll {
-                        state.neighborhood.message_scroll = state
-                            .neighborhood
-                            .message_scroll
-                            .saturating_add(1)
-                            .min(max_scroll);
-                    }
-                }
-                DetailFocus::Input => {}
+                DetailFocus::Messages | DetailFocus::Input => {}
             },
             KeyCode::Down | KeyCode::Char('j') => match state.neighborhood.detail_focus {
                 DetailFocus::Channels => {
@@ -359,21 +340,8 @@ pub fn handle_neighborhood_key(
                         NavKey::Down,
                     );
                 }
-                DetailFocus::Messages => {
-                    // Scroll down = decrease offset (show newer messages, toward bottom)
-                    // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
-                    if state.neighborhood.message_scroll > 0 {
-                        state.neighborhood.message_scroll =
-                            state.neighborhood.message_scroll.saturating_sub(1);
-                    }
-                }
-                DetailFocus::Input => {}
+                DetailFocus::Messages | DetailFocus::Input => {}
             },
-            KeyCode::Char('i') => {
-                state.neighborhood.insert_mode = true;
-                state.neighborhood.insert_mode_entry_char = Some('i');
-                state.neighborhood.detail_focus = DetailFocus::Input;
-            }
             _ => {}
         },
     }

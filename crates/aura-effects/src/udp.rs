@@ -76,9 +76,9 @@ impl UdpEffects for RealUdpEffectsHandler {
         let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP)).map_err(|e| {
             NetworkError::ConnectionFailed(format!("UDP socket create failed: {e}"))
         })?;
-        socket
-            .set_reuse_address(true)
-            .map_err(|e| NetworkError::ConnectionFailed(format!("set_reuse_address failed: {e}")))?;
+        socket.set_reuse_address(true).map_err(|e| {
+            NetworkError::ConnectionFailed(format!("set_reuse_address failed: {e}"))
+        })?;
         #[cfg(all(
             unix,
             not(any(target_os = "solaris", target_os = "illumos", target_os = "cygwin"))
@@ -96,9 +96,8 @@ impl UdpEffects for RealUdpEffectsHandler {
             .map_err(|e| NetworkError::ConnectionFailed(format!("UDP nonblocking failed: {e}")))?;
 
         let std_socket: StdUdpSocket = socket.into();
-        let socket = UdpSocket::from_std(std_socket).map_err(|e| {
-            NetworkError::ConnectionFailed(format!("UDP socket init failed: {e}"))
-        })?;
+        let socket = UdpSocket::from_std(std_socket)
+            .map_err(|e| NetworkError::ConnectionFailed(format!("UDP socket init failed: {e}")))?;
 
         Ok(Arc::new(RealUdpSocket { socket }))
     }

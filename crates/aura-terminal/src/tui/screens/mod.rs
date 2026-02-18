@@ -21,10 +21,9 @@ mod settings;
 pub use crate::tui::callbacks::{
     AddDeviceCallback, ApprovalCallback, ChannelSelectCallback, CreateAccountCallback,
     CreateChannelCallback, CreateInvitationCallback, ExportInvitationCallback, GoHomeCallback,
-    GuardianSelectCallback, HomeSendCallback, ImportInvitationCallback, InvitationCallback,
-    RecoveryCallback, RemoveDeviceCallback, RetryMessageCallback, SendCallback, SetTopicCallback,
-    StartChatCallback, UpdateNicknameCallback, UpdateNicknameSuggestionCallback,
-    UpdateThresholdCallback,
+    GuardianSelectCallback, ImportInvitationCallback, InvitationCallback, RecoveryCallback,
+    RemoveDeviceCallback, RetryMessageCallback, SendCallback, SetTopicCallback, StartChatCallback,
+    UpdateNicknameCallback, UpdateNicknameSuggestionCallback, UpdateThresholdCallback,
 };
 
 // Screen-specific callback types (use specialized types not in callbacks module)

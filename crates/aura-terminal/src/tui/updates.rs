@@ -327,14 +327,6 @@ pub enum UiUpdate {
     // =========================================================================
     // Home Operations
     // =========================================================================
-    /// A message was sent in a home
-    HomeMessageSent {
-        /// The home ID
-        home_id: String,
-        /// The message content
-        content: String,
-    },
-
     /// An invite was sent from a home
     HomeInviteSent {
         /// The contact ID that was invited

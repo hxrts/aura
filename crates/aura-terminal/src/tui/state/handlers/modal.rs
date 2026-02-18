@@ -1483,8 +1483,7 @@ fn handle_device_enrollment_key_queue(
         KeyCode::Char('m' | 'M') if key.modifiers.ctrl() => {
             // Demo mode only: simulate mobile device importing this enrollment code
             let is_demo = !state.settings.demo_mobile_device_id.is_empty();
-            let is_pending =
-                !modal_state.ceremony.is_complete && !modal_state.ceremony.has_failed;
+            let is_pending = !modal_state.ceremony.is_complete && !modal_state.ceremony.has_failed;
             if is_demo && is_pending && !modal_state.enrollment_code.is_empty() {
                 commands.push(TuiCommand::Dispatch(
                     DispatchCommand::ImportDeviceEnrollmentOnMobile {

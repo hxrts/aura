@@ -318,9 +318,8 @@ impl ITFTraceReplayer {
 
     /// Validate state invariants (mirrors Quint spec)
     fn validate_state_invariants(state: &TuiITFState) -> bool {
-        // Insert mode only valid on Neighborhood or Chat screens
+        // Insert mode only valid on Chat screen
         let insert_mode_valid = (!state.neighborhood_insert_mode && !state.chat_insert_mode)
-            || (state.current_screen == Screen::Neighborhood && state.neighborhood_insert_mode)
             || (state.current_screen == Screen::Chat && state.chat_insert_mode);
 
         // Terminal size is reasonable

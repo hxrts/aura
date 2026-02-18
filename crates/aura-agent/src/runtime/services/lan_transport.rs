@@ -117,10 +117,7 @@ impl LanTransportService {
 fn is_advertisable_ip(addr: IpAddr) -> bool {
     match addr {
         IpAddr::V4(v4) => {
-            !v4.is_loopback()
-                && !v4.is_multicast()
-                && !v4.is_unspecified()
-                && !v4.is_link_local()
+            !v4.is_loopback() && !v4.is_multicast() && !v4.is_unspecified() && !v4.is_link_local()
         }
         IpAddr::V6(v6) => {
             !v6.is_loopback()

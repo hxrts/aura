@@ -62,8 +62,8 @@ mod tests {
     use super::*;
     use crate::tui::screens::Screen;
     use crate::tui::state::commands::DispatchCommand;
+    use crate::tui::state::views::ChatFocus;
     use crate::tui::state::ModalType;
-    use crate::tui::state::{DetailFocus, NeighborhoodMode};
     use aura_core::effects::terminal::events;
 
     #[test]
@@ -100,21 +100,21 @@ mod tests {
     #[test]
     fn test_insert_mode() {
         let mut state = TuiState::new();
-        state.neighborhood.mode = crate::tui::state_machine::NeighborhoodMode::Detail;
+        state.router.go_to(Screen::Chat);
 
         // Press 'i' to enter insert mode
         let (new_state, _) = transition(&state, events::char('i'));
-        assert!(new_state.neighborhood.insert_mode);
+        assert!(new_state.chat.insert_mode);
         assert!(new_state.is_insert_mode());
 
         // Type some text
         let (new_state, _) = transition(&new_state, events::char('h'));
         let (new_state, _) = transition(&new_state, events::char('i'));
-        assert_eq!(new_state.neighborhood.input_buffer, "hi");
+        assert_eq!(new_state.chat.input_buffer, "hi");
 
         // Press Escape to exit insert mode
         let (new_state, _) = transition(&new_state, events::escape());
-        assert!(!new_state.neighborhood.insert_mode);
+        assert!(!new_state.chat.insert_mode);
         assert!(!new_state.is_insert_mode());
     }
 
@@ -135,17 +135,17 @@ mod tests {
     #[test]
     fn test_send_message_command() {
         let mut state = TuiState::new();
-        state.neighborhood.mode = NeighborhoodMode::Detail;
-        state.neighborhood.detail_focus = DetailFocus::Input;
-        state.neighborhood.insert_mode = true;
-        state.neighborhood.input_buffer = "hello".to_string();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Input;
+        state.chat.insert_mode = true;
+        state.chat.input_buffer = "hello".to_string();
 
         // Press Enter to send
         let (new_state, commands) = transition(&state, events::enter());
-        assert!(new_state.neighborhood.input_buffer.is_empty());
+        assert!(new_state.chat.input_buffer.is_empty());
         assert!(commands.iter().any(|c| matches!(
             c,
-            TuiCommand::Dispatch(DispatchCommand::SendHomeMessage { content })
+            TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content })
             if content == "hello"
         )));
     }
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn test_mouse_scroll_chat() {
-        use aura_core::effects::terminal::{MouseEvent, MouseEventKind, Modifiers};
+        use aura_core::effects::terminal::{Modifiers, MouseEvent, MouseEventKind};
 
         let mut state = TuiState::new();
         state.router.go_to(Screen::Chat);

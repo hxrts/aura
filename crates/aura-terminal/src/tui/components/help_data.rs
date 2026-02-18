@@ -139,12 +139,6 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         HelpCommand::new("Enter", "Enter", "Enter selected home", "Neighborhood"),
         HelpCommand::new("Esc", "Esc", "Return to map view", "Neighborhood"),
         HelpCommand::new("a", "a", "Accept invitation code", "Neighborhood"),
-        HelpCommand::new(
-            "i",
-            "i",
-            "Enter insert mode (Interior only)",
-            "Neighborhood",
-        ),
         HelpCommand::new("d", "d", "Cycle traversal depth", "Neighborhood"),
         HelpCommand::new("g", "g", "Go to primary home", "Neighborhood"),
         // Traversal depth descriptions
@@ -158,7 +152,7 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         HelpCommand::new(
             "Interior",
             "",
-            "Full access, can send messages",
+            "Full access to resident/channel views",
             "Neighborhood",
         ),
         // Settings screen

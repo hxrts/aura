@@ -42,9 +42,9 @@ use crate::tui::types::{
     short_id, Contact, ContactStatus, Invitation, InvitationDirection, InvitationStatus,
     InvitationType,
 };
-use std::collections::HashSet;
 use aura_app::ui::signals::DiscoveredPeerMethod;
 use aura_app::ui::types::format_relative_time_from;
+use std::collections::HashSet;
 
 /// Props for ContactItem
 #[derive(Default, Props)]
@@ -370,8 +370,8 @@ pub fn ContactsScreen(
                 }
             }
 
-            let is_self_addressed = !own_authority_id.is_empty()
-                && invitation.other_party_id == own_authority_id;
+            let is_self_addressed =
+                !own_authority_id.is_empty() && invitation.other_party_id == own_authority_id;
 
             let (id, name) = if !invitation.other_party_id.is_empty() && !is_self_addressed {
                 let id = invitation.other_party_id.clone();

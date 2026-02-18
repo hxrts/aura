@@ -251,8 +251,8 @@ fn test_insert_mode_text_entry_deterministic() {
 fn test_escape_exits_insert_mode_deterministic() {
     let mut tui = TestTui::new();
 
-    // Enter home detail mode then insert mode on Neighborhood screen
-    tui.send_enter();
+    // Enter insert mode on Chat screen
+    tui.send_char('2');
     tui.send_char('i');
     assert!(tui.is_insert_mode());
 
@@ -261,14 +261,14 @@ fn test_escape_exits_insert_mode_deterministic() {
     tui.send_char('e');
     tui.send_char('s');
     tui.send_char('t');
-    assert_eq!(tui.state().neighborhood.input_buffer, "test");
+    assert_eq!(tui.state().chat.input_buffer, "test");
 
     // Escape should exit insert mode
     tui.send_escape();
     assert!(!tui.is_insert_mode());
 
     // Buffer is preserved (not cleared) - vim-style behavior
-    assert_eq!(tui.state().neighborhood.input_buffer, "test");
+    assert_eq!(tui.state().chat.input_buffer, "test");
 }
 
 // ============================================================================
@@ -405,15 +405,15 @@ fn test_quit_deterministic() {
 fn test_quit_blocked_in_insert_mode_deterministic() {
     let mut tui = TestTui::new();
 
-    // Enter detail mode then insert mode
-    tui.send_enter();
+    // Enter chat insert mode
+    tui.send_char('2');
     tui.send_char('i');
     assert!(tui.is_insert_mode());
 
     // Press 'q' - should type 'q', not quit
     tui.send_char('q');
     assert!(!tui.state().should_exit);
-    assert_eq!(tui.state().neighborhood.input_buffer, "q");
+    assert_eq!(tui.state().chat.input_buffer, "q");
 }
 
 // ============================================================================
@@ -491,9 +491,9 @@ fn test_rapid_screen_switching_deterministic() {
 fn test_rapid_insert_mode_toggling_deterministic() {
     let mut tui = TestTui::new();
 
-    // Toggle insert mode 1000 times (enter detail mode each time)
+    // Toggle insert mode 1000 times on Chat
+    tui.send_char('2');
     for _ in 0..1000 {
-        tui.send_enter();
         tui.send_char('i');
         tui.send_escape();
     }
@@ -507,8 +507,8 @@ fn test_rapid_insert_mode_toggling_deterministic() {
 fn test_long_text_input_deterministic() {
     let mut tui = TestTui::new();
 
-    // Enter detail mode then insert mode
-    tui.send_enter();
+    // Enter chat insert mode
+    tui.send_char('2');
     tui.send_char('i');
 
     // Type a very long message
@@ -518,7 +518,7 @@ fn test_long_text_input_deterministic() {
     }
 
     // Verify buffer length
-    assert_eq!(tui.state().neighborhood.input_buffer.len(), 10000);
+    assert_eq!(tui.state().chat.input_buffer.len(), 10000);
 }
 
 // ============================================================================
@@ -672,8 +672,8 @@ proptest! {
     fn prop_escape_exits_insert_mode(text_length in 0usize..100) {
         let mut tui = TestTui::new();
 
-        // Enter detail mode then insert mode
-        tui.send_enter();
+        // Enter chat insert mode
+        tui.send_char('2');
         tui.send_char('i');
         prop_assert!(tui.is_insert_mode());
 
@@ -740,20 +740,17 @@ proptest! {
         prop_assert_eq!(tui.state().terminal_size, (width, height));
     }
 
-    /// Property: Insert mode only available on Neighborhood and Chat screens
+    /// Property: Insert mode only available on Chat screen
     #[test]
     fn prop_insert_mode_only_on_valid_screens(screen_key in screen_key_strategy()) {
         let mut tui = TestTui::new();
 
         tui.send_char(screen_key);
-        if tui.screen() == Screen::Neighborhood {
-            tui.send_enter();
-        }
         tui.send_char('i'); // Try to enter insert mode
 
-        let should_have_insert_mode = matches!(tui.screen(), Screen::Neighborhood | Screen::Chat);
+        let should_have_insert_mode = matches!(tui.screen(), Screen::Chat);
         prop_assert_eq!(tui.is_insert_mode(), should_have_insert_mode,
-            "Insert mode should only be available on Neighborhood/Chat, got {:?}", tui.screen());
+            "Insert mode should only be available on Chat, got {:?}", tui.screen());
     }
 
     /// Property: Navigation index never goes negative (saturating_sub)

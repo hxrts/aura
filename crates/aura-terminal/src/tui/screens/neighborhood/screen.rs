@@ -4,16 +4,12 @@ use iocraft::prelude::*;
 
 use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL};
 
-use crate::tui::components::{MessageInput, MessagePanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::NeighborhoodViewProps;
-use crate::tui::state_machine::{DetailFocus, NeighborhoodMode};
+use crate::tui::state_machine::NeighborhoodMode;
 use crate::tui::theme::Theme;
-use crate::tui::types::{
-    format_contact_name, format_timestamp, short_id, Contact, HomeBudget, HomeSummary, Message,
-    Resident, TraversalDepth,
-};
+use crate::tui::types::{short_id, Contact, HomeBudget, HomeSummary, Resident, TraversalDepth};
 
 pub async fn run_neighborhood_screen() -> std::io::Result<()> {
     element! {
@@ -25,12 +21,12 @@ pub async fn run_neighborhood_screen() -> std::io::Result<()> {
     .await
 }
 
-use crate::tui::updates::{UiUpdate, UiUpdateSender};
+use crate::tui::updates::UiUpdateSender;
 
 #[derive(Default, Props)]
 pub struct NeighborhoodScreenProps {
     pub view: NeighborhoodViewProps,
-    /// UI update sender for syncing message count state
+    /// UI update sender (reserved for future neighborhood-side reactive updates)
     pub update_tx: Option<UiUpdateSender>,
 }
 
@@ -273,6 +269,56 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
     }
 }
 
+#[derive(Default, Props)]
+struct SocialStatusProps {
+    neighborhood_name: String,
+    selected_home_name: String,
+    enter_depth: TraversalDepth,
+    entered_home: bool,
+    homes_count: usize,
+    channel_count: usize,
+    selected_channel_name: String,
+    resident_count: usize,
+    steward_actions_enabled: bool,
+}
+
+#[component]
+fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>> {
+    let entered_text = if props.entered_home {
+        "Entered"
+    } else {
+        "Browsing"
+    };
+    let steward_text = if props.steward_actions_enabled {
+        "Enabled"
+    } else {
+        "Disabled"
+    };
+
+    element! {
+        View(
+            flex_direction: FlexDirection::Column,
+            border_style: BorderStyle::Round,
+            border_color: Theme::BORDER,
+            padding_left: 1,
+            padding_right: 1,
+            flex_grow: 1.0,
+            gap: 1,
+        ) {
+            Text(content: "Social View", weight: Weight::Bold, color: Theme::PRIMARY)
+            Text(content: format!("Neighborhood: {}", props.neighborhood_name), color: Theme::TEXT)
+            Text(content: format!("Selected block: {}", props.selected_home_name), color: Theme::TEXT)
+            Text(content: format!("Traversal: {} • {}", props.enter_depth.label(), entered_text), color: Theme::TEXT_MUTED)
+            Text(content: format!("Known homes: {}", props.homes_count), color: Theme::TEXT_MUTED)
+            Text(content: format!("Channels: {} • Focus: #{}", props.channel_count, props.selected_channel_name), color: Theme::TEXT_MUTED)
+            Text(content: format!("Residents in view: {}", props.resident_count), color: Theme::TEXT_MUTED)
+            Text(content: format!("Steward actions: {}", steward_text), color: Theme::TEXT_MUTED)
+            View(height: 1)
+            Text(content: "Messaging is available on Chat.", color: Theme::SECONDARY)
+        }
+    }
+}
+
 fn is_steward_role(role: aura_app::ui::types::home::ResidentRole) -> bool {
     matches!(
         role,
@@ -338,8 +384,6 @@ pub fn NeighborhoodScreen(
 
     let reactive_residents = hooks.use_state(Vec::new);
     let reactive_budget = hooks.use_state(HomeBudget::default);
-    let reactive_messages = hooks.use_state(Vec::new);
-    let reactive_channel_name = hooks.use_state(|| "general".to_string());
     let reactive_channels = hooks.use_state(Vec::new);
     let reactive_contacts = hooks.use_state(Vec::new);
 
@@ -422,20 +466,9 @@ pub fn NeighborhoodScreen(
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let mut reactive_messages = reactive_messages.clone();
-        let mut reactive_channel_name = reactive_channel_name.clone();
         let mut reactive_channels = reactive_channels.clone();
-        let reactive_contacts = reactive_contacts.clone();
-        let update_tx = props.update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let contacts = reactive_contacts.read().clone();
-
-                // Use first channel as default (selection is managed by TUI state)
-                if let Some(channel) = chat_state.all_channels().next() {
-                    reactive_channel_name.set(channel.name.clone());
-                }
-
                 let channel_list: Vec<ChannelSummary> = chat_state
                     .all_channels()
                     .map(|c| ChannelSummary {
@@ -444,31 +477,6 @@ pub fn NeighborhoodScreen(
                     })
                     .collect();
                 reactive_channels.set(channel_list);
-
-                // Get messages for first channel as default
-                let first_channel_id = chat_state.all_channels().next().map(|c| &c.id);
-                let app_messages = first_channel_id
-                    .map(|id| chat_state.messages_for_channel(id))
-                    .unwrap_or(&[]);
-
-                let messages: Vec<Message> = app_messages
-                    .iter()
-                    .map(|m| {
-                        let sender_name = format_contact_name(&m.sender_id.to_string(), &contacts);
-                        Message::new(&m.id, &sender_name, &m.content)
-                            .with_timestamp(format_timestamp(m.timestamp))
-                            .own(m.is_own)
-                    })
-                    .collect();
-
-                // Send message count update for scroll handling
-                if let Some(ref tx) = update_tx {
-                    let _ = tx.try_send(UiUpdate::NeighborhoodStateUpdated {
-                        message_count: messages.len(),
-                    });
-                }
-
-                reactive_messages.set(messages);
             })
             .await;
         }
@@ -478,19 +486,22 @@ pub fn NeighborhoodScreen(
     let homes = reactive_homes.read().clone();
     let residents = reactive_residents.read().clone();
     let budget = reactive_budget.read().clone();
-    let messages = reactive_messages.read().clone();
-    let channel_name = reactive_channel_name.read().clone();
     let channels = reactive_channels.read().clone();
 
     let is_detail = props.view.mode == NeighborhoodMode::Detail;
-    let input_focused = props.view.insert_mode || props.view.detail_focus == DetailFocus::Input;
     let is_entered = props.view.entered_home_id.is_some();
-    let read_only = !is_entered || props.view.enter_depth != TraversalDepth::Interior;
 
     let current_home_name = homes
         .get(props.view.selected_home)
         .and_then(|b| b.name.clone())
         .unwrap_or_else(|| neighborhood_name.clone());
+    let selected_channel_name = channels
+        .get(props.view.selected_channel)
+        .map(|c| c.name.clone())
+        .unwrap_or_else(|| "none".to_string());
+    let homes_count = homes.len();
+    let channel_count = channels.len();
+    let resident_count = residents.len();
 
     let storage_text = format!(
         "Storage: {}/{}MB",
@@ -504,35 +515,6 @@ pub fn NeighborhoodScreen(
         "Steward: No".to_string()
     };
 
-    // Build breadcrumb with only non-empty segments
-    let context_bar = {
-        let mut parts = Vec::new();
-
-        // Add neighborhood name if available
-        if !neighborhood_name.is_empty() {
-            parts.push(neighborhood_name.clone());
-        }
-
-        // Add home name if different from neighborhood
-        if !current_home_name.is_empty() && current_home_name != neighborhood_name {
-            parts.push(current_home_name.clone());
-        }
-
-        // Always show traversal depth
-        parts.push(props.view.enter_depth.label().to_string());
-
-        // Always show channel name
-        parts.push(format!("# {channel_name}"));
-
-        parts.join(" › ")
-    };
-
-    let input_placeholder = if read_only {
-        "Enter home to chat (Frontage/Interior)".to_string()
-    } else {
-        "Type a message...".to_string()
-    };
-
     element! {
         View(
             flex_direction: FlexDirection::Column,
@@ -542,23 +524,23 @@ pub fn NeighborhoodScreen(
         ) {
             View(
                 flex_direction: FlexDirection::Row,
-                height: 22,
+                height: dim::MIDDLE_HEIGHT,
                 overflow: Overflow::Hidden,
                 gap: dim::TWO_PANEL_GAP,
             ) {
-                View(width: dim::TWO_PANEL_LEFT_WIDTH, height: 22) {
+                View(width: dim::TWO_PANEL_LEFT_WIDTH, height: dim::MIDDLE_HEIGHT) {
                     #(if is_detail {
                         vec![element! {
                             View(flex_direction: FlexDirection::Column, gap: 0) {
                                 HomeHeader(
-                                    home_name: current_home_name,
-                                    resident_count: residents.len(),
+                                    home_name: current_home_name.clone(),
+                                    resident_count: resident_count,
                                     storage_text: storage_text,
                                     steward_label: steward_label,
                                 )
-                                ChannelList(channels: channels, selected_index: props.view.selected_channel)
+                                ChannelList(channels: channels.clone(), selected_index: props.view.selected_channel)
                                 ResidentList(
-                                    residents: residents,
+                                    residents: residents.clone(),
                                     selected_index: props.view.selected_resident,
                                     steward_actions_enabled: props.view.steward_actions_enabled,
                                 )
@@ -567,28 +549,24 @@ pub fn NeighborhoodScreen(
                     } else {
                         vec![element! {
                             View {
-                                HomeMap(homes: homes, selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
+                                HomeMap(homes: homes.clone(), selected_index: props.view.selected_home, enter_depth: props.view.enter_depth)
                             }
                         }]
                     })
                 }
-                MessagePanel(
-                    messages: messages.clone(),
-                    title: Some(context_bar),
-                    empty_message: Some("No messages yet".to_string()),
-                    scroll_offset: props.view.message_scroll,
-                    message_count: messages.len(),
-                    visible_rows: Some(dim::VISIBLE_MESSAGE_ROWS as usize),
-                )
-            }
-            View(height: 3, width: dim::TOTAL_WIDTH) {
-                MessageInput(
-                    value: props.view.input_buffer.clone(),
-                    placeholder: input_placeholder,
-                    focused: input_focused,
-                    reply_to: None,
-                    sending: false,
-                )
+                View(width: dim::TWO_PANEL_RIGHT_WIDTH, height: dim::MIDDLE_HEIGHT) {
+                    SocialStatusPanel(
+                        neighborhood_name: neighborhood_name,
+                        selected_home_name: current_home_name,
+                        enter_depth: props.view.enter_depth,
+                        entered_home: is_entered,
+                        homes_count: homes_count,
+                        channel_count: channel_count,
+                        selected_channel_name: selected_channel_name,
+                        resident_count: resident_count,
+                        steward_actions_enabled: props.view.steward_actions_enabled,
+                    )
+                }
             }
         }
     }

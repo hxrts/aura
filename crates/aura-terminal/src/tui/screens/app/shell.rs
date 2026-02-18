@@ -1235,12 +1235,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // =========================================================================
                         // Home operations
                         // =========================================================================
-                        UiUpdate::HomeMessageSent { .. } => {
-                            // Auto-scroll to bottom (show latest messages including the one just sent)
-                            tui.with_mut(|state| {
-                                state.neighborhood.message_scroll = 0;
-                            });
-                        }
                         UiUpdate::HomeInviteSent { contact_id: _ } => {
                             enqueue_toast!(
                                 "Invite sent".to_string(),
@@ -1495,7 +1489,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("Enter", "Enter"),
             KeyHint::new("Esc", "Map"),
             KeyHint::new("a", "Accept"),
-            KeyHint::new("i", "Insert"),
+            KeyHint::new("d", "Depth"),
             KeyHint::new("n", "New"),
         ],
         Screen::Notifications => vec![KeyHint::new("j/k", "Move"), KeyHint::new("h/l", "Focus")],
@@ -1576,11 +1570,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     }
                                     DispatchCommand::AddGuardian { contact_id } => {
                                         (cb.recovery.on_select_guardian)(contact_id);
-                                    }
-
-                                    // === Home Messaging Commands ===
-                                    DispatchCommand::SendHomeMessage { content } => {
-                                        (cb.home.on_send)(content);
                                     }
 
                                     // === Chat Screen Commands ===

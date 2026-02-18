@@ -1002,163 +1002,6 @@ impl SettingsCallbacks {
 }
 
 // =============================================================================
-// Home Messaging Callbacks
-// =============================================================================
-
-/// All callbacks for home messaging
-#[derive(Clone)]
-pub struct HomeCallbacks {
-    pub on_send: HomeSendCallback,
-}
-
-impl HomeCallbacks {
-    #[must_use]
-    pub fn new(ctx: Arc<IoContext>, tx: UiUpdateSender) -> Self {
-        Self {
-            on_send: Self::make_send(ctx, tx),
-        }
-    }
-    fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> HomeSendCallback {
-        Arc::new(move |content: String| {
-            let ctx = ctx.clone();
-            let tx = tx.clone();
-            let content_clone = content;
-            spawn_ctx(ctx.clone(), async move {
-                // Use the current home channel for home messaging
-                // Use current_home_channel_ref for display/legacy string format
-                let channel = match aura_app::ui::workflows::messaging::current_home_channel_ref(
-                    ctx.app_core_raw(),
-                )
-                .await
-                {
-                    Ok(channel_ref) => channel_ref,
-                    Err(e) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                            "send",
-                            format!("Failed to get channel: {e}"),
-                        )));
-                        return;
-                    }
-                };
-                let home_id_clone = channel.clone();
-
-                let trimmed = content_clone.trim_start();
-                if trimmed.starts_with("/") {
-                    match parse_command(trimmed) {
-                        Ok(IrcCommand::Help { .. }) => {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
-                                "help",
-                                "Use ? for TUI help. Supported slash commands: /msg /me /nick /who /whois /join /leave /topic /invite /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode",
-                            )));
-                            return;
-                        }
-                        Ok(irc) => {
-                            let mut dispatcher =
-                                CommandDispatcher::with_policy(CapabilityPolicy::AllowAll);
-                            dispatcher.set_current_channel(channel.clone());
-
-                            let effect = match dispatcher.dispatch(irc) {
-                                Ok(cmd) => cmd,
-                                Err(e) => {
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                        "command",
-                                        e.to_string(),
-                                    )));
-                                    return;
-                                }
-                            };
-
-                            match effect {
-                                EffectCommand::ListParticipants { channel } => {
-                                    match aura_app::ui::workflows::query::list_participants(
-                                        ctx.app_core_raw(),
-                                        &channel,
-                                    )
-                                    .await
-                                    {
-                                        Ok(list) => {
-                                            let msg = if list.is_empty() {
-                                                "No participants".to_string()
-                                            } else {
-                                                list.join(", ")
-                                            };
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(
-                                                ToastMessage::info("participants", msg),
-                                            ));
-                                        }
-                                        Err(e) => {
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(
-                                                ToastMessage::error("participants", e.to_string()),
-                                            ));
-                                        }
-                                    }
-                                }
-                                EffectCommand::GetUserInfo { target } => {
-                                    match aura_app::ui::workflows::query::get_user_info(
-                                        ctx.app_core_raw(),
-                                        &target,
-                                    )
-                                    .await
-                                    {
-                                        Ok(contact) => {
-                                            let id = contact.id.to_string();
-                                            let name = if !contact.nickname.is_empty() {
-                                                contact.nickname
-                                            } else if let Some(s) = &contact.nickname_suggestion {
-                                                s.clone()
-                                            } else {
-                                                id.chars().take(8).collect::<String>() + "..."
-                                            };
-                                            let msg = format!("User: {name} ({id})");
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(
-                                                ToastMessage::info("whois", msg),
-                                            ));
-                                        }
-                                        Err(e) => {
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(
-                                                ToastMessage::error("whois", e.to_string()),
-                                            ));
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    let _ = ctx.dispatch(effect).await;
-                                }
-                            }
-                            return;
-                        }
-                        Err(e) => {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                "command",
-                                e.to_string(),
-                            )));
-                            return;
-                        }
-                    }
-                }
-
-                let cmd = EffectCommand::SendMessage {
-                    channel,
-                    content: content_clone.clone(),
-                };
-
-                match ctx.dispatch(cmd).await {
-                    Ok(_) => {
-                        let _ = tx.try_send(UiUpdate::HomeMessageSent {
-                            home_id: home_id_clone,
-                            content: content_clone,
-                        });
-                    }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
-                    }
-                }
-            });
-        })
-    }
-}
-
-// =============================================================================
 // Neighborhood Callbacks
 // =============================================================================
 
@@ -1337,7 +1180,6 @@ pub struct CallbackRegistry {
     pub invitations: InvitationsCallbacks,
     pub recovery: RecoveryCallbacks,
     pub settings: SettingsCallbacks,
-    pub home: HomeCallbacks,
     pub neighborhood: NeighborhoodCallbacks,
     pub app: AppCallbacks,
 }
@@ -1355,7 +1197,6 @@ impl CallbackRegistry {
             invitations: InvitationsCallbacks::new(ctx.clone(), tx.clone()),
             recovery: RecoveryCallbacks::new(ctx.clone(), tx.clone()),
             settings: SettingsCallbacks::new(ctx.clone(), tx.clone()),
-            home: HomeCallbacks::new(ctx.clone(), tx.clone()),
             neighborhood: NeighborhoodCallbacks::new(ctx.clone(), tx.clone()),
             app: AppCallbacks::new(ctx, tx),
         }

@@ -186,15 +186,13 @@ impl SharedDiscoveredPeers {
 
     pub fn read(
         &self,
-    ) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<DiscoveredPeer>>>
-    {
+    ) -> std::sync::LockResult<std::sync::RwLockReadGuard<'_, Vec<DiscoveredPeer>>> {
         self.0.read()
     }
 
     pub fn write(
         &self,
-    ) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<DiscoveredPeer>>>
-    {
+    ) -> std::sync::LockResult<std::sync::RwLockWriteGuard<'_, Vec<DiscoveredPeer>>> {
         self.0.write()
     }
 }

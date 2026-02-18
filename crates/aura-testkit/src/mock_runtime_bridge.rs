@@ -966,8 +966,7 @@ impl RuntimeBridge for MockRuntimeBridge {
             .and_then(|v| v.as_str())
             .unwrap_or("00000000-0000-0000-0000-000000000000");
 
-        let sender_uuid =
-            Uuid::parse_str(sender_uuid_str).unwrap_or(Uuid::from_bytes([0; 16]));
+        let sender_uuid = Uuid::parse_str(sender_uuid_str).unwrap_or(Uuid::from_bytes([0; 16]));
         let sender_id = AuthorityId::from_uuid(sender_uuid);
 
         let expires_at_ms = data.get("expires_at").and_then(|v| v.as_u64());

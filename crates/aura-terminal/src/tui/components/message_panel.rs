@@ -74,8 +74,8 @@ fn build_scrollbar(
         0.0
     };
     // Invert: 0 at bottom, 1 at top
-    let thumb_top = ((1.0 - scroll_ratio) * (track_height.saturating_sub(thumb_size)) as f64)
-        .round() as usize;
+    let thumb_top =
+        ((1.0 - scroll_ratio) * (track_height.saturating_sub(thumb_size)) as f64).round() as usize;
 
     // Build scrollbar string
     let mut scrollbar = String::with_capacity(track_height);
@@ -133,8 +133,12 @@ pub fn MessagePanel(props: &MessagePanelProps) -> impl Into<AnyElement<'static>>
 
     // Build scrollbar content (one character per row, displayed vertically)
     let scrollbar_track_height = visible_rows.min(actual_message_count);
-    let scrollbar_chars =
-        build_scrollbar(visible_rows, actual_message_count, scroll_offset, scrollbar_track_height);
+    let scrollbar_chars = build_scrollbar(
+        visible_rows,
+        actual_message_count,
+        scroll_offset,
+        scrollbar_track_height,
+    );
 
     element! {
         View(

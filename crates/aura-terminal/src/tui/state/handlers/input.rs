@@ -12,7 +12,7 @@ use crate::tui::screens::Screen;
 
 use super::super::commands::{DispatchCommand, TuiCommand};
 use super::super::modal_queue::QueuedModal;
-use super::super::views::{ChatFocus, DetailFocus, NeighborhoodMode};
+use super::super::views::{ChatFocus, DetailFocus};
 use super::super::TuiState;
 
 /// Handle a mouse event
@@ -33,7 +33,10 @@ pub fn handle_mouse_event(
                     // Scroll messages up (show older messages)
                     // scroll_offset: 0 = at bottom (latest), higher = scrolled up (older)
                     // Mouse scroll always affects messages regardless of keyboard focus
-                    let max_scroll = state.chat.message_count.saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
+                    let max_scroll = state
+                        .chat
+                        .message_count
+                        .saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
                     if state.chat.message_scroll < max_scroll {
                         state.chat.message_scroll =
                             state.chat.message_scroll.saturating_add(3).min(max_scroll);
@@ -47,18 +50,7 @@ pub fn handle_mouse_event(
                     }
                 }
                 Screen::Neighborhood => {
-                    // Scroll messages up (show older messages) when in detail view
-                    // Mouse scroll always affects messages regardless of keyboard focus
-                    if state.neighborhood.mode == NeighborhoodMode::Detail {
-                        let max_scroll = state.neighborhood.message_count.saturating_sub(dim::VISIBLE_MESSAGE_ROWS as usize);
-                        if state.neighborhood.message_scroll < max_scroll {
-                            state.neighborhood.message_scroll = state
-                                .neighborhood
-                                .message_scroll
-                                .saturating_add(3)
-                                .min(max_scroll);
-                        }
-                    }
+                    // No dedicated scroll region on Neighborhood; keep mouse wheel a no-op here.
                 }
                 Screen::Settings => {
                     // Navigate up in settings list
@@ -87,14 +79,7 @@ pub fn handle_mouse_event(
                     state.contacts.selected_index = state.contacts.selected_index.saturating_add(1);
                 }
                 Screen::Neighborhood => {
-                    // Scroll messages down (show newer messages, toward bottom) when in detail view
-                    // Mouse scroll always affects messages regardless of keyboard focus
-                    if state.neighborhood.mode == NeighborhoodMode::Detail
-                        && state.neighborhood.message_scroll > 0
-                    {
-                        state.neighborhood.message_scroll =
-                            state.neighborhood.message_scroll.saturating_sub(3);
-                    }
+                    // No dedicated scroll region on Neighborhood; keep mouse wheel a no-op here.
                 }
                 Screen::Settings => {
                     // Navigate down in settings list
@@ -191,11 +176,7 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             }
         }
         Screen::Neighborhood => {
-            if state.neighborhood.mode == NeighborhoodMode::Detail
-                && state.neighborhood.detail_focus == DetailFocus::Input
-            {
-                state.neighborhood.input_buffer.push_str(text);
-            }
+            let _ = text;
         }
         _ => {}
     }
@@ -220,8 +201,6 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                 state.neighborhood.insert_mode = false;
                 state.neighborhood.insert_mode_entry_char = None;
                 state.neighborhood.detail_focus = DetailFocus::Channels;
-                // Auto-scroll to bottom (show latest messages)
-                state.neighborhood.message_scroll = 0;
             }
             _ => {}
         }
@@ -252,8 +231,7 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                         state.chat.input_buffer.push(c);
                     }
                     Screen::Neighborhood => {
-                        state.neighborhood.insert_mode_entry_char = None;
-                        state.neighborhood.input_buffer.push(c);
+                        let _ = c;
                     }
                     _ => {}
                 }
@@ -265,8 +243,7 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                 state.chat.input_buffer.pop();
             }
             Screen::Neighborhood => {
-                state.neighborhood.insert_mode_entry_char = None;
-                state.neighborhood.input_buffer.pop();
+                // Neighborhood insert mode is disabled; ignore character edits.
             }
             _ => {}
         },
@@ -282,17 +259,7 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                 }
             }
             Screen::Neighborhood => {
-                if !state.neighborhood.input_buffer.is_empty() {
-                    let content = state.neighborhood.input_buffer.clone();
-                    state.neighborhood.input_buffer.clear();
-                    commands.push(TuiCommand::Dispatch(DispatchCommand::SendHomeMessage {
-                        content,
-                    }));
-                    state.neighborhood.insert_mode = false;
-                    state.neighborhood.insert_mode_entry_char = None;
-                    state.neighborhood.detail_focus = DetailFocus::Messages;
-                    state.neighborhood.message_scroll = 0;
-                }
+                // Neighborhood insert mode is disabled; Enter does not dispatch messaging.
             }
             _ => {}
         },

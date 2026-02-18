@@ -795,7 +795,10 @@ impl InvitationHandler {
             "content-type".to_string(),
             CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE.to_string(),
         );
-        metadata.insert("invitation-id".to_string(), invitation.invitation_id.to_string());
+        metadata.insert(
+            "invitation-id".to_string(),
+            invitation.invitation_id.to_string(),
+        );
         metadata.insert("acceptor-id".to_string(), acceptor_id.to_string());
 
         let envelope = TransportEnvelope {
@@ -905,7 +908,11 @@ impl InvitationHandler {
             };
 
             effects
-                .commit_generic_fact_bytes(context_id, CONTACT_FACT_TYPE_ID, contact_fact.to_bytes())
+                .commit_generic_fact_bytes(
+                    context_id,
+                    CONTACT_FACT_TYPE_ID,
+                    contact_fact.to_bytes(),
+                )
                 .await
                 .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
 
@@ -2688,7 +2695,10 @@ mod tests {
             .unwrap();
         assert_eq!(processed, 1);
 
-        let committed = sender_effects.load_committed_facts(sender_id).await.unwrap();
+        let committed = sender_effects
+            .load_committed_facts(sender_id)
+            .await
+            .unwrap();
 
         let mut found = None::<ContactFact>;
         for fact in committed {

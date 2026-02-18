@@ -226,7 +226,9 @@ impl RendezvousHandler {
 
     /// Cache a peer's descriptor received via journal sync
     pub async fn cache_peer_descriptor(&self, descriptor: RendezvousDescriptor) {
-        self.cache_manager.cache_descriptor(descriptor.clone()).await;
+        self.cache_manager
+            .cache_descriptor(descriptor.clone())
+            .await;
         if let Some(manager) = self.rendezvous_manager.as_ref() {
             if let Err(err) = manager.cache_descriptor(descriptor).await {
                 tracing::debug!(error = %err, "Failed to cache descriptor in rendezvous manager");
@@ -312,11 +314,7 @@ impl RendezvousHandler {
                     .get_descriptor(context_id, peer)
                     .await
                     .ok_or_else(|| AgentError::invalid("Peer descriptor not found in cache"))?,
-                None => {
-                    return Err(AgentError::invalid(
-                        "Peer descriptor not found in cache",
-                    ))
-                }
+                None => return Err(AgentError::invalid("Peer descriptor not found in cache")),
             },
         };
 
@@ -547,9 +545,7 @@ impl RendezvousHandler {
             };
 
             if content_type == HANDSHAKE_INIT_CONTENT_TYPE {
-                if let Err(e) =
-                    self.handle_handshake_init(effects.clone(), envelope).await
-                {
+                if let Err(e) = self.handle_handshake_init(effects.clone(), envelope).await {
                     tracing::debug!(error = %e, "Failed to handle rendezvous handshake init");
                 }
                 processed += 1;
@@ -557,8 +553,9 @@ impl RendezvousHandler {
             }
 
             if content_type == HANDSHAKE_COMPLETE_CONTENT_TYPE {
-                if let Err(e) =
-                    self.handle_handshake_complete(effects.clone(), envelope).await
+                if let Err(e) = self
+                    .handle_handshake_complete(effects.clone(), envelope)
+                    .await
                 {
                     tracing::debug!(error = %e, "Failed to handle rendezvous handshake complete");
                 }
@@ -584,9 +581,7 @@ impl RendezvousHandler {
 
         let init: aura_rendezvous::protocol::HandshakeInit =
             serde_json::from_slice(&envelope.payload).map_err(|e| {
-                AgentError::internal(format!(
-                    "Failed to decode rendezvous handshake init: {e}"
-                ))
+                AgentError::internal(format!("Failed to decode rendezvous handshake init: {e}"))
             })?;
 
         let context_id = envelope.context;
@@ -657,10 +652,8 @@ impl RendezvousHandler {
     }
 }
 
-const HANDSHAKE_INIT_CONTENT_TYPE: &str =
-    "application/aura-rendezvous-handshake-init";
-const HANDSHAKE_COMPLETE_CONTENT_TYPE: &str =
-    "application/aura-rendezvous-handshake-complete";
+const HANDSHAKE_INIT_CONTENT_TYPE: &str = "application/aura-rendezvous-handshake-init";
+const HANDSHAKE_COMPLETE_CONTENT_TYPE: &str = "application/aura-rendezvous-handshake-complete";
 
 fn derive_channel_psk(
     context_id: ContextId,

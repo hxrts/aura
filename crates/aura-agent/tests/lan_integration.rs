@@ -47,8 +47,10 @@ async fn create_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<AuraAgent>>
     let authority_id = AuthorityId::new_from_entropy([seed; 32]);
     let ctx = test_context(authority_id);
 
-    let mut config = AgentConfig::default();
-    config.device_id = DeviceId::from_uuid(authority_id.uuid());
+    let mut config = AgentConfig {
+        device_id: DeviceId::from_uuid(authority_id.uuid()),
+        ..Default::default()
+    };
     config.network.bind_address = "0.0.0.0:0".to_string();
     config.lan_discovery = LanDiscoveryConfig {
         port: lan_port,
@@ -160,13 +162,14 @@ async fn create_production_lan_agent(seed: u8, lan_port: u16) -> TestResult<Arc<
         ExecutionMode::Production,
     );
 
-    let temp_dir =
-        std::env::temp_dir().join(format!("aura-prod-lan-test-{}-{}", seed, lan_port));
+    let temp_dir = std::env::temp_dir().join(format!("aura-prod-lan-test-{seed}-{lan_port}"));
     let _ = std::fs::remove_dir_all(&temp_dir);
     let _ = std::fs::create_dir_all(&temp_dir);
 
-    let mut config = AgentConfig::default();
-    config.device_id = DeviceId::from_uuid(authority_id.uuid());
+    let mut config = AgentConfig {
+        device_id: DeviceId::from_uuid(authority_id.uuid()),
+        ..Default::default()
+    };
     config.network.bind_address = "0.0.0.0:0".to_string();
     config.storage.base_path = temp_dir;
     config.lan_discovery = LanDiscoveryConfig {
@@ -237,15 +240,9 @@ async fn test_lan_sync_roundtrip() -> TestResult {
     effects_a.persist_journal(&journal).await?;
 
     let peer_device_id = DeviceId::from_uuid(agent_b.authority_id().uuid());
-    let sync_a = agent_a
-        .runtime()
-        .sync()
-        .ok_or("sync service not enabled")?;
+    let sync_a = agent_a.runtime().sync().ok_or("sync service not enabled")?;
     let peer_device_id_b = DeviceId::from_uuid(agent_a.authority_id().uuid());
-    let sync_b = agent_b
-        .runtime()
-        .sync()
-        .ok_or("sync service not enabled")?;
+    let sync_b = agent_b.runtime().sync().ok_or("sync service not enabled")?;
 
     sync_a.add_peer(peer_device_id).await;
     sync_b.add_peer(peer_device_id_b).await;

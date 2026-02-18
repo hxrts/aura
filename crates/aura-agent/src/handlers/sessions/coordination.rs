@@ -436,9 +436,7 @@ impl SessionOperations {
                     );
                 }
                 Err(e) => {
-                    return Err(AgentError::effects(format!(
-                        "send invitation failed: {e}"
-                    )));
+                    return Err(AgentError::effects(format!("send invitation failed: {e}")));
                 }
             }
 

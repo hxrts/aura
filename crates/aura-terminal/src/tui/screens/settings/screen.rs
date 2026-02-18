@@ -477,9 +477,11 @@ pub fn SettingsScreen(
                 NetworkStatus::Disconnected => ("Disconnected".to_string(), Theme::WARNING, 0),
                 NetworkStatus::NoPeers => ("Connected (no peers)".to_string(), Theme::TEXT, 0),
                 NetworkStatus::Syncing => ("Connected (syncing)".to_string(), Theme::SECONDARY, 0),
-                NetworkStatus::Synced { last_sync_ms } => {
-                    ("Connected (synced)".to_string(), Theme::SECONDARY, last_sync_ms)
-                }
+                NetworkStatus::Synced { last_sync_ms } => (
+                    "Connected (synced)".to_string(),
+                    Theme::SECONDARY,
+                    last_sync_ms,
+                ),
             };
 
             let (sync_label, sync_color) = match sync_status {
@@ -488,9 +490,7 @@ pub fn SettingsScreen(
                     (format!("Syncing ({progress}%)"), Theme::SECONDARY)
                 }
                 SyncStatus::Synced => ("Synced".to_string(), Theme::SECONDARY),
-                SyncStatus::Failed { message } => {
-                    (format!("Failed: {message}"), Theme::WARNING)
-                }
+                SyncStatus::Failed { message } => (format!("Failed: {message}"), Theme::WARNING),
             };
 
             let last_sync_display = if last_sync_ms > 0 {

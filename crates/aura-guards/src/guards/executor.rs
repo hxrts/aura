@@ -755,8 +755,7 @@ where
     let remaining = if budget.limit == 0 && budget.spent == 0 {
         FlowCost::new(u32::MAX)
     } else {
-        FlowCost::try_from(budget.remaining())
-            .map_err(|e| AuraError::invalid(e.to_string()))?
+        FlowCost::try_from(budget.remaining()).map_err(|e| AuraError::invalid(e.to_string()))?
     };
     budgets.insert((*context, *authority), remaining);
 
