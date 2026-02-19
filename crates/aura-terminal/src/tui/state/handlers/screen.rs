@@ -342,6 +342,10 @@ pub fn handle_neighborhood_key(
                 }
                 DetailFocus::Messages | DetailFocus::Input => {}
             },
+            KeyCode::Char('i') => {
+                state.neighborhood.insert_mode = true;
+                state.neighborhood.insert_mode_entry_char = Some('i');
+            }
             _ => {}
         },
     }

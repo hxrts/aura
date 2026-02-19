@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOC_PATH="docs/107_mpst_and_choreography.md"
+DOC_PATH="docs/108_mpst_and_choreography.md"
 
 if [[ ! -f "$DOC_PATH" ]]; then
   echo "Missing choreography audit doc: $DOC_PATH"
   exit 1
 fi
 
-spec_only_protocols=$(rg -n "\\| Spec-only \\|" "$DOC_PATH" \
-  | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}')
+spec_only_protocols=$(rg -n "\\| Spec-only \\|" "$DOC_PATH" 2>/dev/null \
+  | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' || true)
 
 if [[ -z "$spec_only_protocols" ]]; then
   echo "No Spec-only protocols listed; skipping check."

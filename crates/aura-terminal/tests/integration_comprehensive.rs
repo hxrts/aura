@@ -1266,6 +1266,8 @@ proptest! {
 
         // Enter detail mode for Neighborhood before insert
         if tui.screen() == Screen::Neighborhood {
+            // Need at least one home to enter detail mode
+            tui.state.neighborhood.home_count = 1;
             tui.send_enter();
         }
         tui.send_char('i');

@@ -429,6 +429,9 @@ mod tests {
         // Start in Neighborhood screen
         tui.assert_normal_mode();
 
+        // Set up state: need at least one home to enter detail mode
+        tui.state_mut().neighborhood.home_count = 1;
+
         // Enter home detail mode, then insert mode
         tui.send_event(events::enter());
         tui.send_event(events::char('i'));
