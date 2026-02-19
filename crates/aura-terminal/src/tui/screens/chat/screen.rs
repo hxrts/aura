@@ -17,13 +17,14 @@
 
 use iocraft::prelude::*;
 
-use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL};
+use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL};
 use aura_app::ui::types::{format_timestamp, ChatState};
 
 use crate::tui::callbacks::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
     SetTopicCallback,
 };
+use crate::tui::chat_scope::{active_home_scope_id, channel_matches_scope};
 use crate::tui::components::{ListPanel, MessageInput, MessagePanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
@@ -164,6 +165,10 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Initialize reactive chat state - populated by signal subscription
     let reactive_chat_state = hooks.use_state(ChatState::default);
     let reactive_contacts: State<Vec<Contact>> = hooks.use_state(Vec::new);
+    let reactive_active_scope = hooks.use_state(|| None::<String>);
+    let active_scope_ref = hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None)));
+    let active_scope: std::sync::Arc<std::sync::RwLock<Option<String>>> =
+        active_scope_ref.read().clone();
 
     // Subscribe to contacts signal for nickname lookup
     hooks.use_future({
@@ -181,6 +186,23 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         }
     });
 
+    // Subscribe to neighborhood signal so chat scope follows traversal.
+    hooks.use_future({
+        let mut reactive_active_scope = reactive_active_scope.clone();
+        let active_scope = active_scope.clone();
+        let app_core = app_ctx.app_core.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
+                let scope = active_home_scope_id(&neighborhood);
+                reactive_active_scope.set(Some(scope.clone()));
+                if let Ok(mut guard) = active_scope.write() {
+                    *guard = Some(scope);
+                }
+            })
+            .await;
+        }
+    });
+
     // Subscribe to chat signal updates
     // Uses the unified ReactiveEffects system from aura-core
     hooks.use_future({
@@ -188,29 +210,37 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         let app_core = app_ctx.app_core.clone();
         let update_tx = props.update_tx.clone();
         let shared_selected = props.selected_channel.clone();
+        let active_scope = active_scope.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 // Sync navigation state via UiUpdate channel before consuming chat_state
                 // This ensures channel_count is updated when channels change
                 // Selection is managed by TUI state, not app state
                 if let Some(ref tx) = update_tx {
+                    let scope = active_scope.read().ok().and_then(|g| g.clone());
+                    let scoped_channels: Vec<_> = chat_state
+                        .all_channels()
+                        .filter(|channel| {
+                            let channel_id = channel.id.to_string();
+                            channel_matches_scope(&channel_id, scope.as_deref())
+                        })
+                        .collect();
+
                     // Get the selected channel index from shared state
                     let selected_idx = shared_selected
                         .as_ref()
                         .and_then(|s| s.read().ok().map(|g| *g))
                         .unwrap_or(0);
 
-                    // Get the channel at the selected index
-                    let channels: Vec<_> = chat_state.all_channels().collect();
-                    let selected_channel_message_count = channels
+                    let selected_channel_message_count = scoped_channels
                         .get(selected_idx)
                         .map(|ch| chat_state.messages_for_channel(&ch.id).len())
                         .unwrap_or(0);
 
                     let _ = tx.try_send(UiUpdate::ChatStateUpdated {
-                        channel_count: chat_state.channel_count(),
+                        channel_count: scoped_channels.len(),
                         message_count: selected_channel_message_count,
-                        selected_index: None, // TUI manages selection
+                        selected_index: Some(0),
                     });
                 }
 
@@ -224,7 +254,15 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Use reactive state for rendering (populated by signal subscription)
     let chat_state = reactive_chat_state.read().clone();
     let contacts = reactive_contacts.read().clone();
-    let channels: Vec<Channel> = chat_state.all_channels().map(Channel::from).collect();
+    let active_scope = reactive_active_scope.read().clone();
+    let channels: Vec<Channel> = chat_state
+        .all_channels()
+        .filter(|channel| {
+            let channel_id = channel.id.to_string();
+            channel_matches_scope(&channel_id, active_scope.as_deref())
+        })
+        .map(Channel::from)
+        .collect();
     let selected_channel_id = channels
         .get(props.view.selected_channel)
         .and_then(|ch| ch.id.parse::<aura_core::identifiers::ChannelId>().ok());
@@ -247,7 +285,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         .collect();
 
     let empty_message = if channels.is_empty() {
-        "Select a channel to view messages.".to_string()
+        "No channels available for this block.".to_string()
     } else {
         "No messages yet.".to_string()
     };

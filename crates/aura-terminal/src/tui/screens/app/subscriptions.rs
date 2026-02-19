@@ -15,7 +15,9 @@ use aura_app::ui::signals::{
     NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
     TRANSPORT_PEERS_SIGNAL,
 };
+use aura_app::ui::types::ChatState;
 
+use crate::tui::chat_scope::{active_home_scope_id, channel_matches_scope};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
@@ -413,6 +415,47 @@ pub fn use_messages_subscription(
 /// Used to map selected channel index -> channel ID for send operations.
 pub type SharedChannels = Arc<RwLock<Vec<Channel>>>;
 
+fn scoped_channel_snapshot(
+    chat_state: &ChatState,
+    active_scope: Option<&str>,
+) -> (Vec<Channel>, usize) {
+    let mut channels = Vec::new();
+    let mut message_count = 0usize;
+
+    for channel in chat_state.all_channels() {
+        let channel_id = channel.id.to_string();
+        if !channel_matches_scope(&channel_id, active_scope) {
+            continue;
+        }
+        message_count += chat_state.messages_for_channel(&channel.id).len();
+        channels.push(Channel::from(channel));
+    }
+
+    (channels, message_count)
+}
+
+fn publish_scoped_channels(
+    channels: &SharedChannels,
+    update_tx: &Option<UiUpdateSender>,
+    chat_state: &ChatState,
+    active_scope: Option<&str>,
+) {
+    let (channel_list, message_count) = scoped_channel_snapshot(chat_state, active_scope);
+    let channel_count = channel_list.len();
+
+    if let Ok(mut guard) = channels.write() {
+        *guard = channel_list;
+    }
+
+    if let Some(tx) = update_tx {
+        let _ = tx.try_send(UiUpdate::ChatStateUpdated {
+            channel_count,
+            message_count,
+            selected_index: Some(0),
+        });
+    }
+}
+
 /// Create a shared channels holder and subscribe it to CHAT_SIGNAL.
 pub fn use_channels_subscription(
     hooks: &mut Hooks,
@@ -421,34 +464,49 @@ pub fn use_channels_subscription(
 ) -> SharedChannels {
     let shared_channels_ref = hooks.use_ref(|| Arc::new(RwLock::new(Vec::new())));
     let shared_channels: SharedChannels = shared_channels_ref.read().clone();
+    let active_scope_ref = hooks.use_ref(|| Arc::new(RwLock::new(None::<String>)));
+    let active_scope: Arc<RwLock<Option<String>>> = active_scope_ref.read().clone();
+    let latest_chat_state_ref = hooks.use_ref(|| Arc::new(RwLock::new(ChatState::default())));
+    let latest_chat_state: Arc<RwLock<ChatState>> = latest_chat_state_ref.read().clone();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
+        let active_scope = active_scope.clone();
+        let latest_chat_state = latest_chat_state.clone();
+        let update_tx = update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let channel_list: Vec<Channel> =
-                    chat_state.all_channels().map(Channel::from).collect();
-
-                // Count total messages across all channels for display purposes
-                let total_messages: usize = chat_state
-                    .all_channels()
-                    .map(|c| chat_state.messages_for_channel(&c.id).len())
-                    .sum();
-
-                if let Ok(mut guard) = channels.write() {
-                    *guard = channel_list;
+                if let Ok(mut guard) = latest_chat_state.write() {
+                    *guard = chat_state.clone();
                 }
 
-                if let Some(ref tx) = update_tx {
-                    // Selection is managed by the TUI, not the app layer.
-                    // Send None for selected_index - the shell will manage selection locally.
-                    let _ = tx.try_send(UiUpdate::ChatStateUpdated {
-                        channel_count: chat_state.channel_count(),
-                        message_count: total_messages,
-                        selected_index: None,
-                    });
+                let scope = active_scope.read().ok().and_then(|g| g.clone());
+                publish_scoped_channels(&channels, &update_tx, &chat_state, scope.as_deref());
+            })
+            .await;
+        }
+    });
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let channels = shared_channels.clone();
+        let active_scope = active_scope.clone();
+        let latest_chat_state = latest_chat_state.clone();
+        let update_tx = update_tx.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
+                let scope = active_home_scope_id(&neighborhood);
+                if let Ok(mut guard) = active_scope.write() {
+                    *guard = Some(scope.clone());
                 }
+
+                let chat_state = latest_chat_state
+                    .read()
+                    .ok()
+                    .map(|g| g.clone())
+                    .unwrap_or_default();
+                publish_scoped_channels(&channels, &update_tx, &chat_state, Some(scope.as_str()));
             })
             .await;
         }
@@ -637,4 +695,91 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
     });
 
     shared_threshold
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scoped_channel_snapshot;
+    use aura_app::ui::types::{
+        Channel as AppChannel, ChannelType, ChatState, Message, MessageDeliveryStatus,
+    };
+    use aura_core::crypto::hash::hash;
+    use aura_core::identifiers::{AuthorityId, ChannelId};
+
+    fn test_channel_id(seed: &str) -> ChannelId {
+        ChannelId::from_bytes(hash(seed.as_bytes()))
+    }
+
+    fn test_channel(id: ChannelId, name: &str) -> AppChannel {
+        AppChannel {
+            id,
+            context_id: None,
+            name: name.to_string(),
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: Vec::new(),
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        }
+    }
+
+    fn test_message(channel_id: ChannelId, id: &str, timestamp: u64) -> Message {
+        Message {
+            id: id.to_string(),
+            channel_id,
+            sender_id: AuthorityId::new_from_entropy([3u8; 32]),
+            sender_name: "tester".to_string(),
+            content: "hello".to_string(),
+            timestamp,
+            reply_to: None,
+            is_own: false,
+            is_read: false,
+            delivery_status: MessageDeliveryStatus::Sent,
+            epoch_hint: None,
+            is_finalized: false,
+        }
+    }
+
+    #[test]
+    fn scoped_snapshot_returns_all_channels_without_scope() {
+        let home_a = test_channel_id("home-a");
+        let home_b = test_channel_id("home-b");
+        let mut state = ChatState::from_channels([
+            test_channel(home_a, "Home A"),
+            test_channel(home_b, "Home B"),
+        ]);
+
+        state.apply_message(home_a, test_message(home_a, "m1", 1));
+        state.apply_message(home_b, test_message(home_b, "m2", 2));
+        state.apply_message(home_b, test_message(home_b, "m3", 3));
+
+        let (channels, message_count) = scoped_channel_snapshot(&state, None);
+        assert_eq!(channels.len(), 2);
+        assert_eq!(message_count, 3);
+    }
+
+    #[test]
+    fn scoped_snapshot_filters_to_active_home_channel() {
+        let home_a = test_channel_id("home-a");
+        let home_b = test_channel_id("home-b");
+        let mut state = ChatState::from_channels([
+            test_channel(home_a, "Home A"),
+            test_channel(home_b, "Home B"),
+        ]);
+
+        state.apply_message(home_a, test_message(home_a, "m1", 1));
+        state.apply_message(home_b, test_message(home_b, "m2", 2));
+        state.apply_message(home_b, test_message(home_b, "m3", 3));
+
+        let scope = home_b.to_string();
+        let (channels, message_count) = scoped_channel_snapshot(&state, Some(scope.as_str()));
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].id, home_b.to_string());
+        assert_eq!(message_count, 2);
+    }
 }

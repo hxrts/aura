@@ -58,6 +58,7 @@ pub use state as state_machine;
 
 // Shared infrastructure
 pub mod callbacks;
+pub(crate) mod chat_scope;
 pub mod commands;
 pub mod effects;
 pub mod flow_budget;
