@@ -5,8 +5,10 @@
 
 use crate::workflows::runtime::require_runtime;
 use crate::workflows::signals::{emit_signal, read_signal};
+use crate::workflows::state_helpers::with_recovery_state;
 use crate::{
     signal_defs::{DeviceInfo, SettingsState, SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME},
+    thresholds::normalize_recovery_threshold,
     AppCore,
 };
 use async_lock::RwLock;
@@ -118,6 +120,52 @@ pub async fn set_channel_mode(
 ) -> Result<(), AuraError> {
     // Channel mode is local UI preference, not persisted via RuntimeBridge
     // The UI layer will handle local storage
+    Ok(())
+}
+
+/// Update guardian recovery threshold configuration.
+///
+/// This updates both:
+/// - `RECOVERY_SIGNAL` threshold (used by recovery flows)
+/// - `SETTINGS_SIGNAL` threshold fields (used by settings UI)
+pub async fn update_threshold(
+    app_core: &Arc<RwLock<AppCore>>,
+    threshold_k: u8,
+    threshold_n: u8,
+) -> Result<(), AuraError> {
+    if threshold_n == 0 {
+        return Err(AuraError::invalid("Threshold N must be greater than 0"));
+    }
+
+    let guardian_count = {
+        let core = app_core.read().await;
+        core.snapshot().recovery.guardian_count() as u8
+    };
+
+    if guardian_count == 0 {
+        return Err(AuraError::invalid(
+            "No guardians configured. Add guardians before setting a threshold.",
+        ));
+    }
+
+    if threshold_n != guardian_count {
+        return Err(AuraError::invalid(format!(
+            "Threshold N ({threshold_n}) must match guardian count ({guardian_count})"
+        )));
+    }
+
+    let normalized_k = normalize_recovery_threshold(threshold_k, threshold_n);
+
+    with_recovery_state(app_core, |state| {
+        state.set_threshold(normalized_k as u32);
+    })
+    .await?;
+
+    let mut state = read_signal(app_core, &*SETTINGS_SIGNAL, SETTINGS_SIGNAL_NAME).await?;
+    state.threshold_k = normalized_k;
+    state.threshold_n = threshold_n;
+    emit_signal(app_core, &*SETTINGS_SIGNAL, state, SETTINGS_SIGNAL_NAME).await?;
+
     Ok(())
 }
 

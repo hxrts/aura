@@ -13,6 +13,7 @@ use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
 
 pub use aura_app::ui::workflows::contacts::{remove_contact, update_contact_nickname};
+pub use aura_app::ui::workflows::recovery::toggle_guardian_contact;
 
 /// Handle contact commands
 pub async fn handle_contacts(
@@ -41,11 +42,19 @@ pub async fn handle_contacts(
                 )))),
             }
         }
-        EffectCommand::ToggleContactGuardian { .. } => {
-            // TODO: wire to runtime once guardian toggle workflow is implemented
-            Some(Err(OpError::Failed(
-                "Toggle guardian not yet implemented".to_string(),
-            )))
+        EffectCommand::ToggleContactGuardian { contact_id } => {
+            let now = super::time::current_time_ms(app_core).await;
+            match toggle_guardian_contact(app_core, contact_id, now).await {
+                Ok(true) => Some(Ok(OpResponse::Data(format!(
+                    "Guardian invitation sent to {contact_id}"
+                )))),
+                Ok(false) => Some(Ok(OpResponse::Data(format!(
+                    "Guardian status revoked for {contact_id}"
+                )))),
+                Err(e) => Some(Err(OpError::Failed(format!(
+                    "Failed to toggle guardian status: {e}"
+                )))),
+            }
         }
         _ => None,
     }

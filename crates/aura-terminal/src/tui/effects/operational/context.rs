@@ -14,7 +14,7 @@ use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::ui::workflows::context::{move_position, set_context};
+pub use aura_app::ui::workflows::context::{create_home, move_position, set_context};
 pub use aura_app::ui::workflows::invitation::accept_pending_home_invitation;
 
 /// Handle context commands
@@ -63,12 +63,13 @@ pub async fn handle_context(
             }
         }
 
-        EffectCommand::CreateHome { .. } => {
-            // TODO: wire to runtime once home creation ceremony is implemented
-            Some(Err(super::types::OpError::Failed(
-                "Home creation not yet implemented via runtime".to_string(),
-            )))
-        }
+        EffectCommand::CreateHome { name } => match create_home(app_core, name.clone(), None).await
+        {
+            Ok(home_id) => Some(Ok(OpResponse::Data(format!("Home created: {home_id}")))),
+            Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                "Failed to create home: {e}"
+            )))),
+        },
 
         _ => None,
     }

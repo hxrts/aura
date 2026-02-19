@@ -36,6 +36,7 @@
 
 use async_lock::RwLock;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use aura_app::signal_defs::{
@@ -63,6 +64,16 @@ struct AccountConfig {
     context_id: String,
 }
 
+static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn next_test_uuid(name: &str) -> uuid::Uuid {
+    let counter = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let seed = aura_core::crypto::hash::hash(format!("flow-test:{name}:{counter}").as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&seed[..16]);
+    uuid::Uuid::from_bytes(bytes)
+}
+
 // ============================================================================
 // Test Infrastructure
 // ============================================================================
@@ -79,8 +90,8 @@ struct TestAgent {
 impl TestAgent {
     /// Create a new test agent with initialized context
     async fn new(name: &str) -> Self {
-        // Use random UUID to ensure unique directories across parallel test runs
-        let unique_id = uuid::Uuid::new_v4();
+        // Deterministic unique ID avoids entropy-based UUID generation in tests.
+        let unique_id = next_test_uuid(name);
         let test_dir = std::env::temp_dir().join(format!("aura-flow-test-{name}-{unique_id}"));
         let _ = std::fs::remove_dir_all(&test_dir);
         std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");

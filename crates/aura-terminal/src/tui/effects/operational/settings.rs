@@ -17,6 +17,7 @@ use super::EffectCommand;
 use aura_app::ui::workflows::ceremonies::{
     start_device_enrollment_ceremony, start_device_removal_ceremony,
 };
+pub use aura_app::ui::workflows::settings::update_threshold;
 pub use aura_app::ui::workflows::settings::{set_channel_mode, update_mfa_policy, update_nickname};
 
 /// Handle settings commands
@@ -82,12 +83,15 @@ pub async fn handle_settings(
             }
         }
 
-        EffectCommand::UpdateThreshold { .. } => {
-            // TODO: wire to runtime once threshold update ceremony is implemented
-            Some(Err(super::types::OpError::Failed(
-                "Threshold update not yet implemented".to_string(),
-            )))
-        }
+        EffectCommand::UpdateThreshold {
+            threshold_k,
+            threshold_n,
+        } => match update_threshold(app_core, *threshold_k, *threshold_n).await {
+            Ok(()) => Some(Ok(OpResponse::Ok)),
+            Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                "Failed to update threshold: {e}"
+            )))),
+        },
 
         _ => None,
     }

@@ -313,8 +313,6 @@ fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>
             Text(content: format!("Channels: {} • Focus: #{}", props.channel_count, props.selected_channel_name), color: Theme::TEXT_MUTED)
             Text(content: format!("Residents in view: {}", props.resident_count), color: Theme::TEXT_MUTED)
             Text(content: format!("Steward actions: {}", steward_text), color: Theme::TEXT_MUTED)
-            View(height: 1)
-            Text(content: "Messaging is available on Chat.", color: Theme::SECONDARY)
         }
     }
 }

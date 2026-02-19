@@ -4,12 +4,23 @@
 //! It follows the reactive signal pattern and manages neighborhood navigation state.
 
 use crate::{
-    views::neighborhood::{NeighborhoodState, TraversalPosition},
+    signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME},
+    views::{
+        home::HomeState,
+        neighborhood::{AdjacencyType, NeighborHome, NeighborhoodState, TraversalPosition},
+    },
     AppCore,
 };
 use async_lock::RwLock;
-use aura_core::{identifiers::ChannelId, identifiers::ContextId, AuraError, EffectContext};
+use aura_core::{
+    crypto::hash::hash,
+    identifiers::{ChannelId, ContextId},
+    AuraError, EffectContext,
+};
 use std::sync::Arc;
+
+use crate::workflows::signals::emit_signal;
+use crate::workflows::time::current_time_ms;
 
 /// Set active context for navigation and command targeting
 ///
@@ -105,6 +116,94 @@ pub async fn move_position(
     core.views_mut().set_neighborhood(neighborhood);
 
     Ok(())
+}
+
+/// Create a home and update homes/neighborhood view state.
+///
+/// This is currently a local-first workflow. It creates a deterministic home ID,
+/// updates `HOMES_SIGNAL`, and makes the home visible in `NEIGHBORHOOD_SIGNAL`.
+pub async fn create_home(
+    app_core: &Arc<RwLock<AppCore>>,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<ChannelId, AuraError> {
+    let timestamp_ms = current_time_ms(app_core).await?;
+    let home_name = name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Home")
+        .to_string();
+
+    let creator = {
+        let core = app_core.read().await;
+        core.runtime()
+            .map(|r| r.authority_id())
+            .or_else(|| core.authority().copied())
+    }
+    .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
+
+    let home_id = ChannelId::from_bytes(hash(
+        format!("home:{creator}:{home_name}:{timestamp_ms}").as_bytes(),
+    ));
+    let context_id =
+        ContextId::new_from_entropy(hash(format!("home-context:{creator}:{home_id}").as_bytes()));
+
+    let mut home = HomeState::new(
+        home_id,
+        Some(home_name.clone()),
+        creator,
+        timestamp_ms,
+        context_id,
+    );
+
+    let (homes_state, neighborhood_state) = {
+        let mut core = app_core.write().await;
+
+        let mut homes = core.views().get_homes();
+        if homes.is_empty() {
+            home.is_primary = true;
+        }
+        homes.add_home_with_auto_select(home);
+
+        let mut neighborhood = core.views().get_neighborhood();
+        if neighborhood.home_name.is_empty() {
+            neighborhood.home_home_id = home_id;
+            neighborhood.home_name = home_name.clone();
+            neighborhood.position = Some(TraversalPosition {
+                current_home_id: home_id,
+                current_home_name: home_name.clone(),
+                depth: 2, // Interior
+                path: vec![home_id],
+            });
+        } else if neighborhood.home_home_id != home_id && neighborhood.neighbor(&home_id).is_none()
+        {
+            neighborhood.add_neighbor(NeighborHome {
+                id: home_id,
+                name: home_name.clone(),
+                adjacency: AdjacencyType::Direct,
+                shared_contacts: 0,
+                resident_count: Some(1),
+                can_traverse: true,
+            });
+        }
+
+        core.views_mut().set_homes(homes.clone());
+        core.views_mut().set_neighborhood(neighborhood.clone());
+        (homes, neighborhood)
+    };
+
+    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
+    emit_signal(
+        app_core,
+        &*NEIGHBORHOOD_SIGNAL,
+        neighborhood_state,
+        NEIGHBORHOOD_SIGNAL_NAME,
+    )
+    .await?;
+
+    let _ = description;
+    Ok(home_id)
 }
 
 /// Get current neighborhood state

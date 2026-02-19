@@ -210,7 +210,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         let app_core = app_ctx.app_core.clone();
         let update_tx = props.update_tx.clone();
         let shared_selected = props.selected_channel.clone();
-        let active_scope = active_scope.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 // Sync navigation state via UiUpdate channel before consuming chat_state

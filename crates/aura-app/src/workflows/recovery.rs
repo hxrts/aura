@@ -13,7 +13,9 @@ use crate::workflows::state_helpers::with_recovery_state;
 use crate::workflows::time::current_time_ms;
 use crate::{
     runtime_bridge::CeremonyStatus,
-    views::recovery::{RecoveryProcess, RecoveryProcessStatus, RecoveryState},
+    views::recovery::{
+        Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus, RecoveryState,
+    },
     AppCore,
 };
 use async_lock::RwLock;
@@ -135,6 +137,59 @@ pub async fn start_recovery_from_state(
     })?;
 
     start_recovery(app_core, guardian_ids, threshold).await
+}
+
+/// Toggle guardian membership for a contact.
+///
+/// Returns `true` when the contact became a guardian, `false` when guardian
+/// status was revoked.
+pub async fn toggle_guardian_contact(
+    app_core: &Arc<RwLock<AppCore>>,
+    contact_id: &str,
+    timestamp_ms: u64,
+) -> Result<bool, AuraError> {
+    let contact = parse_authority_id(contact_id)?;
+    let was_guardian = get_recovery_status(app_core).await?.has_guardian(&contact);
+
+    if !was_guardian {
+        let runtime = require_runtime(app_core).await?;
+        let subject = runtime.authority_id();
+        runtime
+            .create_guardian_invitation(contact, subject, None, None)
+            .await
+            .map_err(|e| AuraError::agent(format!("Failed to create guardian invitation: {e}")))?;
+    }
+
+    with_recovery_state(app_core, |state| {
+        if was_guardian {
+            let _ = state.revoke_guardian(&contact);
+        } else if let Some(existing) = state.guardian_mut(&contact) {
+            existing.status = GuardianStatus::Pending;
+            if existing.added_at == 0 {
+                existing.added_at = timestamp_ms;
+            }
+        } else {
+            state.upsert_guardian(Guardian {
+                id: contact,
+                name: String::new(),
+                status: GuardianStatus::Pending,
+                added_at: timestamp_ms,
+                last_seen: None,
+            });
+        }
+
+        let guardian_count = state.guardian_count() as u32;
+        if guardian_count == 0 {
+            state.set_threshold(0);
+        } else if state.threshold() == 0 {
+            state.set_threshold(1);
+        } else if state.threshold() > guardian_count {
+            state.set_threshold(guardian_count);
+        }
+    })
+    .await?;
+
+    Ok(!was_guardian)
 }
 
 /// Approve a recovery request as a guardian

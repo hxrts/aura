@@ -491,9 +491,6 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
-        let active_scope = active_scope.clone();
-        let latest_chat_state = latest_chat_state.clone();
-        let update_tx = update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
