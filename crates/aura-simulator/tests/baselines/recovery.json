@@ -1,0 +1,54 @@
+{
+  "protocol": "recovery",
+  "session_id": "22222222-2222-2222-2222-222222222222",
+  "role_bindings": [
+    {
+      "role": "Account",
+      "authority": "authority-1f1f1f1f-1f1f-1f1f-1f1f-1f1f1f1f1f1f",
+      "role_index": 0
+    },
+    {
+      "role": "Coordinator",
+      "authority": "authority-21212121-2121-2121-2121-212121212121",
+      "role_index": 2
+    },
+    {
+      "role": "Guardian",
+      "authority": "authority-20202020-2020-2020-2020-202020202020",
+      "role_index": 1
+    }
+  ],
+  "role_families": {},
+  "lifecycle": [
+    {
+      "order": 0,
+      "role": "Account",
+      "action": "start"
+    },
+    {
+      "order": 1,
+      "role": "Guardian",
+      "action": "start"
+    },
+    {
+      "order": 2,
+      "role": "Coordinator",
+      "action": "start"
+    },
+    {
+      "order": 3,
+      "role": "Account",
+      "action": "end"
+    },
+    {
+      "order": 4,
+      "role": "Guardian",
+      "action": "end"
+    },
+    {
+      "order": 5,
+      "role": "Coordinator",
+      "action": "end"
+    }
+  ]
+}

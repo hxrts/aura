@@ -1,7 +1,7 @@
 //! Aura Annotation Extraction
 //!
 //! Simple annotation extraction utilities for Aura choreographic effects.
-//! Follows the rumpsteak-aura demo pattern for clean, simple annotation processing.
+//! Uses a minimal parser-oriented pattern for clean annotation processing.
 
 use crate::ids::RoleId;
 use syn::parse::{Parse, ParseStream};
@@ -171,7 +171,7 @@ fn parse_annotation_value(input: ParseStream) -> syn::Result<AnnotationValue> {
 
 /// Extract Aura annotations from a choreography string
 ///
-/// Simple pattern-based extraction following the rumpsteak-aura demo approach.
+/// Simple pattern-based extraction for choreography annotations.
 /// This works with the extension system rather than trying to reparse the AST.
 pub fn extract_aura_annotations(
     choreography_str: &str,

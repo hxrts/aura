@@ -12,7 +12,7 @@
 //! - YES Choreography DSL parsing and code generation
 //! - YES Aura-specific annotation extraction
 //! - YES Type-safe macro generation for distributed protocols
-//! - YES Integration with rumpsteak-aura projection
+//! - YES Integration with Telltale projection
 //! - NO effect handler implementations (that's aura-effects)
 //! - NO runtime coordination logic (that's aura-protocol)
 //! - NO handler composition (that's aura-composition)
@@ -28,9 +28,9 @@ mod error_types;
 mod handler_adapters;
 mod test_macros;
 
-/// Full-featured choreography! macro with complete rumpsteak-aura feature inheritance
+/// Full-featured choreography! macro with complete Telltale feature inheritance
 ///
-/// This macro inherits ALL standard rumpsteak-aura features including:
+/// This macro inherits ALL standard Telltale features including:
 /// - Module namespaces: `module my_protocol exposing (ProtocolName)`
 /// - Parameterized roles: `Worker[N]`, `Signer[*]`
 /// - Choice constructs: `choice at Role { ... }`

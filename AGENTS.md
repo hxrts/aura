@@ -69,7 +69,7 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 2. **Specification** (Domain Crates + `aura-mpst` + `aura-macros`):
    - Domain crates (`aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`): CRDT domains, capability systems, transport semantics. `aura-journal` now exposes fact-based journals and reduction pipelines (`docs/103_journal.md`, `docs/115_maintenance.md`).
    - `aura-mpst`: Session type runtime with guard extensions and leakage tracking (`LeakageTracker`).
-   - `aura-macros`: Choreography DSL parser/annotation extractor (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) that emits rumpsteak projections.
+   - `aura-macros`: Choreography DSL parser/annotation extractor (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) that emits Telltale projections.
 
 3. **Implementation** (`aura-effects` + `aura-composition`): Stateless, single-party handlers (`aura-effects`) and handler composition infrastructure (`aura-composition`). Production handlers implement core effect traits (crypto, network, storage, randomness, console, etc.). Mock/test handlers are in `aura-testkit`.
    - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects` and persists the master key via `SecureStorageEffects` (Keychain/TPM/Keystore; filesystem fallback during bring-up). Application code should not implement ad-hoc storage encryption (e.g., `LocalStore`).

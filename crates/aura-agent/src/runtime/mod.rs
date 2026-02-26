@@ -56,7 +56,13 @@ pub mod simulation_factory;
 pub mod reliability;
 
 // Choreography integration
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub mod choreo_engine;
 pub mod choreography_adapter;
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub mod parity_policy;
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub mod vm_effect_handler;
 
 // Runtime utilities
 pub mod migration;
@@ -66,13 +72,22 @@ pub mod time_handler;
 // Re-export main types for convenience
 pub use builder::EffectSystemBuilder;
 #[allow(unused_imports)] // Re-exported for public API
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use choreo_engine::{AuraChoreoEngine, AuraChoreoEngineError};
+#[allow(unused_imports)] // Re-exported for public API
 pub use choreography_adapter::{
     AuraHandlerAdapter, AuraProtocolAdapter, ChoreographyAdapter, GuardConfig,
     MessageGuardRequirements,
 };
 pub use context::EffectContext;
 pub use effects::AuraEffectSystem;
+#[allow(unused_imports)] // Re-exported for public API
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use parity_policy::{AuraEnvelopeParityError, AuraEnvelopeParityPolicy};
 pub use shared_transport::SharedTransport;
+#[allow(unused_imports)] // Re-exported for public API
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};
 
 // Re-export JournalCoupler for choreography journal coupling
 #[allow(unused_imports)] // Re-exported for public API

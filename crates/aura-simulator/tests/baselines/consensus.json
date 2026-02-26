@@ -1,0 +1,59 @@
+{
+  "protocol": "consensus",
+  "session_id": "0e0e0e0e-0e0e-0e0e-0e0e-0e0e0e0e0e0e",
+  "role_bindings": [
+    {
+      "role": "Coordinator",
+      "authority": "authority-0b0b0b0b-0b0b-0b0b-0b0b-0b0b0b0b0b0b",
+      "role_index": 0
+    },
+    {
+      "role": "Witness[0]",
+      "authority": "authority-0c0c0c0c-0c0c-0c0c-0c0c-0c0c0c0c0c0c",
+      "role_index": 0
+    },
+    {
+      "role": "Witness[1]",
+      "authority": "authority-0d0d0d0d-0d0d-0d0d-0d0d-0d0d0d0d0d0d",
+      "role_index": 1
+    }
+  ],
+  "role_families": {
+    "Witness": [
+      "Witness[0]",
+      "Witness[1]"
+    ]
+  },
+  "lifecycle": [
+    {
+      "order": 0,
+      "role": "Coordinator",
+      "action": "start"
+    },
+    {
+      "order": 1,
+      "role": "Witness[0]",
+      "action": "start"
+    },
+    {
+      "order": 2,
+      "role": "Witness[1]",
+      "action": "start"
+    },
+    {
+      "order": 3,
+      "role": "Coordinator",
+      "action": "end"
+    },
+    {
+      "order": 4,
+      "role": "Witness[0]",
+      "action": "end"
+    },
+    {
+      "order": 5,
+      "role": "Witness[1]",
+      "action": "end"
+    }
+  ]
+}

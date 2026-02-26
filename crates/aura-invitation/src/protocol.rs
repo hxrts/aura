@@ -308,24 +308,24 @@ pub enum DeviceEnrollmentState {
 
 /// Re-exports for InvitationExchange choreography runners
 pub mod exchange_runners {
-    pub use super::exchange::rumpsteak_session_types_invitation::invitation::runners::{
+    pub use super::exchange::telltale_session_types_invitation::invitation::runners::{
         execute_as, run_receiver, run_sender, ReceiverOutput, SenderOutput,
     };
-    pub use super::exchange::rumpsteak_session_types_invitation::invitation::InvitationExchangeRole;
+    pub use super::exchange::telltale_session_types_invitation::invitation::InvitationExchangeRole;
 }
 
 /// Re-exports for GuardianInvitation choreography runners
 pub mod guardian_runners {
-    pub use super::guardian::rumpsteak_session_types_invitation_guardian::invitation_guardian::GuardianInvitationRole;
-    pub use super::guardian::rumpsteak_session_types_invitation_guardian::invitation_guardian::runners::{
+    pub use super::guardian::telltale_session_types_invitation_guardian::invitation_guardian::GuardianInvitationRole;
+    pub use super::guardian::telltale_session_types_invitation_guardian::invitation_guardian::runners::{
         execute_as, run_guardian, run_principal, GuardianOutput, PrincipalOutput,
     };
 }
 
 /// Re-exports for DeviceEnrollment choreography runners
 pub mod device_enrollment_runners {
-    pub use super::device_enrollment::rumpsteak_session_types_invitation_device_enrollment::invitation_device_enrollment::DeviceEnrollmentRole;
-    pub use super::device_enrollment::rumpsteak_session_types_invitation_device_enrollment::invitation_device_enrollment::runners::{
+    pub use super::device_enrollment::telltale_session_types_invitation_device_enrollment::invitation_device_enrollment::DeviceEnrollmentRole;
+    pub use super::device_enrollment::telltale_session_types_invitation_device_enrollment::invitation_device_enrollment::runners::{
         execute_as, run_initiator, run_invitee, InitiatorOutput, InviteeOutput,
     };
 }

@@ -76,8 +76,6 @@ once_cell = { workspace = true }
 parking_lot = { workspace = true }
 
 # Choreographic programming dependencies
-rumpsteak-aura = { workspace = true }
-rumpsteak-aura-choreography = { workspace = true }
 
 # Authorization tokens
 biscuit-auth = { workspace = true }

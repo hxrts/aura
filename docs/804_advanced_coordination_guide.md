@@ -1,10 +1,10 @@
 # Advanced Choreography Guide
 
-This guide covers sophisticated choreographic programming patterns using rumpsteak-aura. You will learn comprehensive DSL syntax, projection patterns, effect handlers, extension systems, and composition techniques for building complex distributed protocols.
+This guide covers sophisticated choreographic programming patterns using Telltale. You will learn comprehensive DSL syntax, projection patterns, effect handlers, extension systems, and composition techniques for building complex distributed protocols.
 
 ## Comprehensive DSL Syntax
 
-Rumpsteak-aura provides a rich choreographic DSL for specifying distributed protocols. The parser supports protocol definitions, role declarations, message passing, choice constructs, loops, parallel composition, and comprehensive annotation systems.
+Telltale provides a rich choreographic DSL for specifying distributed protocols. The parser supports protocol definitions, role declarations, message passing, choice constructs, loops, parallel composition, and comprehensive annotation systems.
 
 ### Protocol Namespacing
 
@@ -38,7 +38,7 @@ Namespaces generate separate module structures in code generation. Protocol name
 
 ### Message Types and Type Annotations
 
-Rumpsteak-aura supports rich message type specifications with optional type annotations:
+Telltale supports rich message type specifications with optional type annotations:
 
 ```rust
 let protocol_with_types = r#"
@@ -66,7 +66,7 @@ Message type annotations provide strong typing for protocol data. Generic types 
 
 ### Dynamic Role Count Support
 
-Rumpsteak-aura provides comprehensive support for protocols with variable participant counts determined at runtime:
+Telltale provides comprehensive support for protocols with variable participant counts determined at runtime:
 
 #### Runtime-Determined Participants
 
@@ -112,7 +112,7 @@ Static role arrays define exactly three worker instances. Individual workers are
 #### Runtime Role Binding
 
 ```rust
-use rumpsteak_aura_choreography::compiler::codegen::generate_choreography_code_with_dynamic_roles;
+use telltale_choreography::compiler::codegen::generate_choreography_code_with_dynamic_roles;
 
 let consensus_protocol = r#"
     choreography ConsensusProtocol {
@@ -123,7 +123,7 @@ let consensus_protocol = r#"
     }
 "#;
 
-let choreo = parse_choreography_str(consensus_protocol)?;
+let choreo = telltale_choreography::compiler::parse_choreography_str(consensus_protocol)?;
 let code = generate_choreography_code_with_dynamic_roles(&choreo, &local_types);
 
 // Runtime binding
@@ -136,7 +136,7 @@ Symbolic parameters `[N]` enable compile-time role count flexibility. Runtime bi
 
 ### Choice Constructs and Branching
 
-Rumpsteak-aura supports rich choice constructs with guards and multi-way branching:
+Telltale supports rich choice constructs with guards and multi-way branching:
 
 #### Basic Choice
 
@@ -184,7 +184,7 @@ Guarded choices add conditional logic to branch selection. Guard expressions use
 
 ### Loop Constructs
 
-Rumpsteak-aura supports various loop patterns for iterative protocols:
+Telltale supports various loop patterns for iterative protocols:
 
 #### Fixed Iteration Count
 
@@ -222,7 +222,7 @@ Role-controlled loops allow participants to decide when to continue or exit. The
 
 ## Aura-Specific Extensions
 
-Aura extends rumpsteak-aura with domain-specific annotations for security, performance, and state management. These extensions integrate with [aura-mpst](108_mpst_and_choreography.md) for runtime enforcement and verification.
+Aura extends Telltale with domain-specific annotations for security, performance, and state management. These extensions integrate with [aura-mpst](108_mpst_and_choreography.md) for runtime enforcement and verification.
 
 ### Guard Capabilities
 
@@ -245,7 +245,7 @@ choreography! {
 }
 ```
 
-Guard capabilities specify required permissions for protocol operations. The `guard_capability` annotation compiles to `CapabilityGuardEffect` instances that integrate with rumpsteak-aura's extension system. The `AuraHandler` validates capabilities through registered extension handlers before executing protocol steps. Failed capability checks prevent unauthorized operations and return appropriate error responses.
+Guard capabilities specify required permissions for protocol operations. The `guard_capability` annotation compiles to `EffectCommand` checks that integrate with Aura guard-chain execution. Failed capability checks prevent unauthorized operations and return appropriate error responses.
 
 ### Flow Cost Control
 
@@ -318,46 +318,47 @@ choreography! {
 }
 ```
 
-Combined annotations compile to multiple extension effects that execute in sequence during protocol operations. Guard capabilities ensure authorization through `CapabilityGuardEffect`. Flow costs control resource usage through `FlowCostEffect`. Journal facts enable auditability through `JournalFactsEffect`. All effects are registered in the `ExtensionRegistry` and execute automatically during choreographic message operations.
+Combined annotations compile to multiple `EffectCommand` items that execute in sequence during protocol operations. Guard capabilities gate authorization checks, flow costs charge budgets, and journal facts record deterministic state transitions. Commands execute through Aura interpreters in both adapter and VM backends.
 
 ## Effect System Integration
 
-Rumpsteak-aura protocols integrate with algebraic effect systems for runtime execution. Effect programs provide composable protocol building blocks for complex distributed systems.
+Telltale protocols integrate with algebraic effect systems for runtime execution. Effect programs provide composable protocol building blocks for complex distributed systems.
 
 ### Effect Programs
 
-Aura choreographies generate session types that integrate with rumpsteak-aura's effect system:
+Aura choreographies generate session types that integrate with Telltale runtime execution:
 
 ```rust
-use aura_protocol::choreography::AuraHandlerAdapter;
+use aura_agent::AuraProtocolAdapter;
+use aura_sync::protocols::epoch_runners::{runners, EpochRotationProtocolRole};
 
-let mut handler = AuraHandlerAdapter::for_testing(device_id)?;
-let mut endpoint = AuraEndpoint::new(context_id);
+let mut adapter = AuraProtocolAdapter::new(...);
 
 // Execute choreography-generated protocol
-let result = execute_alice_role(&mut handler, &mut endpoint).await?;
+let result = runners::execute_as(&mut adapter, EpochRotationProtocolRole::Coordinator, ...).await?;
 ```
 
-Generated protocols execute through rumpsteak-aura's `interpret_extensible` function using the `AuraHandler`. Extension effects execute automatically for annotated messages, providing capability guards, flow budgets, and journal coupling. Results contain received values and execution state with Aura-specific metadata from extension effect execution.
+Generated protocols execute through generated runners (`execute_as`) or the Telltale VM backend (`AuraChoreoEngine`). Extension effects execute automatically for annotated messages, providing capability guards, flow budgets, and journal coupling. Results contain received values and execution state with Aura-specific metadata from effect execution.
 
 ### Handler Abstraction
 
-Aura provides specialized handlers that implement rumpsteak-aura's `ChoreoHandler` trait:
+Aura provides specialized handlers and adapters that implement Telltale choreography traits:
 
 ```rust
-use aura_protocol::choreography::AuraHandlerAdapter;
+use aura_agent::{AuraChoreoEngine, AuraProtocolAdapter, AuraVmEffectHandler};
 
 // Testing handler with in-memory effects
-let test_handler = AuraHandlerAdapter::for_testing(device_id)?;
+let test_adapter = AuraProtocolAdapter::new(...);
 
 // Production handler wiring is owned by aura-agent.
 // Use aura-agent runtime assembly to obtain production handlers.
 
 // Simulation handler with fault injection
-let sim_handler = AuraHandlerAdapter::for_simulation(device_id, config)?;
+let vm_handler = AuraVmEffectHandler::default();
+let vm_engine = AuraChoreoEngine::new(Default::default(), std::sync::Arc::new(vm_handler));
 ```
 
-Different handler modes provide testing capabilities, production deployment, and simulation environments. Each handler implements both `ChoreoHandler` and `ExtensibleHandler` traits with appropriate extension registries for that execution mode. The `AuraHandler` integrates with Aura's effect system through registered extension effects that execute during protocol operations. Handler selection enables flexible protocol execution environments while maintaining consistent choreographic interfaces.
+Different handler modes provide testing capabilities, production deployment, and simulation environments. Adapter mode uses `AuraProtocolAdapter`; VM mode uses `AuraChoreoEngine` + `AuraVmEffectHandler`. Both integrate with Aura's effect system through effect commands executed by interpreters.
 
 ### Protocol Composition
 

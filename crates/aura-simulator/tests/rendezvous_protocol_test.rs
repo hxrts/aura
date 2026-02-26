@@ -7,7 +7,7 @@
 
 use aura_agent::AuraProtocolAdapter;
 use aura_core::{AuthorityId, DeviceId};
-use aura_mpst::rumpsteak_aura_choreography::RoleId;
+use aura_mpst::telltale_choreography::RoleId;
 use aura_rendezvous::protocol::exchange_runners::RendezvousExchangeRole;
 use aura_simulator::{SimulatedMessageBus, TestEffectSystem};
 use aura_testkit::ProtocolTest;

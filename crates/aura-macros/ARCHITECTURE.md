@@ -11,7 +11,7 @@ type-safe Rust code for distributed protocols.
 - Aura-specific annotations (`guard_capability`, `flow_cost`, `journal_facts`).
 
 ## Outputs
-- `choreography!` macro: Full rumpsteak-aura inheritance with Aura extensions.
+- `choreography!` macro: Full Telltale feature inheritance with Aura extensions.
 - `DomainFact` derive macro: Canonical encoding with schema versioning.
 - `aura_effect_handlers` macro: Mock/real handler variant boilerplate.
 - `aura_handler_adapters` macro: AuraHandler trait adapters.

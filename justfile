@@ -65,6 +65,10 @@ test-crate-isolated crate:
     echo "Testing {{crate}} in isolation (lib + unit tests only)..."
     cd "crates/{{crate}}" && cargo test --lib --verbose
 
+# Benchmark Telltale VM cooperative vs threaded backends for Category C shapes
+bench-choreo-parity:
+    cargo bench -p aura-agent --features choreo-backend-telltale-vm --bench telltale_vm_backends
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Linting & Formatting
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -172,6 +176,11 @@ ci-build:
 # Test suite
 ci-test:
     cargo test --workspace -q
+
+# Telltale VM parity gates (determinism profile + replay conformance)
+ci-choreo-parity:
+    cargo test -p aura-agent --features choreo-backend-telltale-vm --test telltale_vm_parity -q
+    cargo test -p aura-agent --features choreo-backend-telltale-vm --lib parity_policy::tests -q
 
 # Effects system violation checks
 ci-effects:
@@ -282,7 +291,7 @@ ci-dry-run:
 
     # Environment check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    printf "[0/8] Rust version... "
+    printf "[0/9] Rust version... "
     if [[ "$LOCAL_RUST" == "{{CI_RUST_VERSION}}" ]]; then
         echo -e "${GREEN}$LOCAL_RUST${NC} (matches CI)"
     elif [[ "$LOCAL_RUST" < "{{CI_RUST_VERSION}}" ]]; then
@@ -293,15 +302,16 @@ ci-dry-run:
     echo ""
 
     # Run CI steps (same as GitHub workflows)
-    run_step "1/7" "Format"  "just ci-format"
-    run_step "2/7" "Clippy"  "just ci-clippy"
-    run_step "3/7" "Build"   "just ci-build"
-    run_step "4/7" "Test"    "just ci-test"
-    run_step "5/8" "Effects" "just ci-effects"
-    run_step "6/8" "Choreo"  "just ci-choreo"
+    run_step "1/9" "Format"          "just ci-format"
+    run_step "2/9" "Clippy"          "just ci-clippy"
+    run_step "3/9" "Build"           "just ci-build"
+    run_step "4/9" "Test"            "just ci-test"
+    run_step "5/9" "Choreo Parity"   "just ci-choreo-parity"
+    run_step "6/9" "Effects"         "just ci-effects"
+    run_step "7/9" "Choreo"          "just ci-choreo"
 
     # Quint (optional - skip if not installed)
-    printf "[7/8] Quint... "
+    printf "[8/9] Quint... "
     if command -v quint &>/dev/null; then
         if just ci-quint-typecheck >/dev/null 2>&1; then
             echo -e "${GREEN}OK${NC}"
@@ -314,7 +324,7 @@ ci-dry-run:
     fi
 
     # Architecture check (warning only)
-    printf "[8/8] Architecture... "
+    printf "[9/9] Architecture... "
     if ./scripts/check-arch.sh --quick >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
     else

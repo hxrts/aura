@@ -2,8 +2,8 @@
 //!
 //! A demonstration of choreographic protocol programming using aura-macros.
 //!
-//! This example shows how to use the choreography macro with both rumpsteak-aura
-//! session types and the Aura effects system integration.
+//! This example shows how to use the choreography macro with Telltale-generated
+//! session types and Aura effects system integration.
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
@@ -17,7 +17,7 @@ pub struct Ping;
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Pong;
 
-// Use the choreography macro - generates both rumpsteak and Aura modules.
+// Use the choreography macro - generates both Telltale session types and Aura modules.
 // Note: Each choreography must have a unique module namespace.
 use aura_macros::choreography;
 choreography!(include_str!("src/main.choreo"));
@@ -127,10 +127,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("   Example execution: FAILED - {}", e),
     }
 
-    println!("\n5. Testing rumpsteak-aura session types integration:");
+    println!("\n5. Testing Telltale session types integration:");
 
-    // Rumpsteak session types are now integrated and available
-    println!("   ✓ Rumpsteak session types module generated");
+    // Telltale session types are now integrated and available
+    println!("   ✓ Telltale session types module generated");
     println!("   ✓ Session type safety and choreographic projection available");
 
     println!("\n=== Integration Summary ===");
@@ -139,11 +139,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("✓ Extension registry and handler integration");
     println!("✓ Multi-role choreography execution");
     println!("✓ Type-safe role system and builder pattern");
-    println!("✓ Rumpsteak-aura session types integration");
+    println!("✓ Telltale session types integration");
     println!("✓ Choreographic projection and deadlock freedom");
     println!();
     println!("Note: This example now uses the complete aura-macros choreography macro!");
-    println!("The macro generates both Aura effects and rumpsteak session types.");
+    println!("The macro generates both Aura effects and Telltale session types.");
 
     println!("\nHello Choreography demo completed.");
 

@@ -20,7 +20,7 @@ and authority-centric messaging.
 - Privacy-by-design: mechanisms integrated into core types.
 - Authority-centric: uses `AuthorityId` for cross-authority communication.
 - Context-scoped: uses `ContextId` for relational context scoping.
-- Compatible with rumpsteak-aura session types.
+- Compatible with Telltale session types.
 
 ## Boundaries
 - No actual network I/O (use TransportEffects).

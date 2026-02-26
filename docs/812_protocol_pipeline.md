@@ -18,11 +18,11 @@ Define fact types with schema versioning. Implement view reducers. Define the st
 
 ### 3. Choreography Specification
 
-Create an MPST definition with roles, messages, and guards. See [MPST and Choreography](108_mpst_and_choreography.md) for the DSL and projection rules.
+Create an MPST definition with roles, messages, and guards in a `.choreo` file. Use `aura-macros::choreography!` (Telltale parser/projection/codegen). See [MPST and Choreography](108_mpst_and_choreography.md) for the DSL and projection rules.
 
 ### 4. Runtime Wiring
 
-Implement role runners in the choreography runtime. Register the protocol with the runtime. Integrate with the guard chain (CapGuard → FlowGuard → JournalCoupler).
+Implement role runners in the choreography runtime and wire execution through `AuraProtocolAdapter` and/or `AuraChoreoEngine`. Register the protocol with the runtime. Integrate with the guard chain (CapGuard → FlowGuard → JournalCoupler).
 
 ### 5. Ceremony Runner Integration (Category C)
 
@@ -34,7 +34,7 @@ Implement `CeremonyStatus` (for Category C) or protocol-specific status views. E
 
 ### 7. Testing
 
-Add shared bus integration tests. Add simulation tests covering partitions, delays, and failures. Add property tests when applicable.
+Add shared bus integration tests. Add simulation tests covering partitions, delays, and failures. Add property tests when applicable. Add parity/replay checks for choreography execution (cooperative vs threaded; replay conformance).
 
 ## Review Gates
 
@@ -52,6 +52,7 @@ Add shared bus integration tests. Add simulation tests covering partitions, dela
 - [ ] Status output implemented
 - [ ] Shared-bus integration test added
 - [ ] Simulation test added
+- [ ] Choreography parity/replay tests added when protocol is Category C
 
 ## Ceremony Facts Macro
 

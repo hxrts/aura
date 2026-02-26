@@ -26,7 +26,7 @@
 //! - Choreographic coordination for multi-party invitation ceremonies
 //! - Integration with Web of Trust for trust relationship validation
 //! - Capability-based authorization checks during invitation acceptance
-//! - MPST protocol definitions and rumpsteak projections for invitations
+//! - MPST protocol definitions and Telltale projections for invitations
 //!
 //! ## What Does NOT Belong Here
 //!

@@ -417,9 +417,9 @@ Privacy costs depend on message content, timing patterns, and recipient relation
 
 [Choreographic programming](108_mpst_and_choreography.md) enables writing distributed protocols from a global perspective. Automatic projection generates local session types for each participant. For theoretical foundations, see [Theoretical Model](002_theoretical_model.md). This ensures protocol compliance and prevents communication errors.
 
-### Rumpsteak-Aura Integration
+### Telltale Integration
 
-Aura uses rumpsteak-aura for choreographic protocol implementation. The framework provides DSL parsing, projection, and effect-based execution. Protocol definitions compile to type-safe Rust implementations through `aura-macros`.
+Aura uses Telltale for choreographic protocol implementation. The framework provides DSL parsing, projection, generated runners, and VM execution. Protocol definitions compile to type-safe Rust implementations through `aura-macros`.
 
 ```rust
 use aura_macros::choreography;
@@ -434,11 +434,11 @@ choreography! {
 }
 ```
 
-The `choreography!` macro extracts Aura-specific annotations, then uses rumpsteak-aura's `parse_choreography_str` for parsing and projection. Generated code creates extension effects for each annotation and integrates with rumpsteak-aura's session types. Protocol execution occurs through `AuraHandler` which implements `ChoreoHandler` and bridges to the Aura effect system.
+The `choreography!` macro extracts Aura-specific annotations, then uses Telltale parse/projection/codegen. Generated code creates effect-bridge helpers for each annotation and integrates with Telltale session/choreography runtime types. Protocol execution occurs through `AuraProtocolAdapter` (adapter backend) or `AuraChoreoEngine` (VM backend), both bridged to Aura effects.
 
 ### Session Types from Choreographies
 
-Projection transforms global protocols into local session types automatically. The `aura-macros` crate generates role-specific session types using rumpsteak-aura's projection algorithms.
+Projection transforms global protocols into local session types automatically. The `aura-macros` crate generates role-specific session types using Telltale projection algorithms.
 
 ```rust
 // Generated code for each role
@@ -450,24 +450,21 @@ Alice's projected type shows send then receive. Bob's projected type shows recei
 
 ### Effect-Based Execution
 
-Protocols execute through rumpsteak-aura's interpreter using `AuraHandler`:
+Protocols execute through generated role runners using `AuraProtocolAdapter`:
 
 ```rust
-use aura_mpst::{AuraHandler, AuraEndpoint};
-use rumpsteak_aura_choreography::effects::interpret_extensible;
+use aura_agent::AuraProtocolAdapter;
+use aura_sync::protocols::epoch_runners::{runners, EpochRotationProtocolRole};
 
-let mut handler = AuraHandler::for_testing(device_id)?;
-let mut endpoint = AuraEndpoint::new(context_id);
-
-// Execute protocol through rumpsteak-aura interpreter
-let result = interpret_extensible(&mut handler, &mut endpoint, program).await?;
+let mut adapter = AuraProtocolAdapter::new(...);
+let result = runners::execute_as(&mut adapter, EpochRotationProtocolRole::Coordinator, ...).await?;
 ```
 
-The `AuraHandler` implements `ChoreoHandler` and `ExtensibleHandler` to bridge rumpsteak-aura session types with Aura's effect system. Extension effects execute automatically for annotated messages, including capability guards, flow budgets, and journal coupling.
+`AuraProtocolAdapter` implements Telltale’s `ChoreographicAdapter` interface plus Aura extensions (`provide_message`/`select_branch`) and bridges to Aura’s guard/effect system. Annotation effects execute automatically for capability guards, flow budgets, leakage tracking, and journal coupling.
 
 ### Aura Choreography Extensions
 
-Aura extends rumpsteak-aura with domain-specific annotations for security and performance:
+Aura extends the choreography runtime with domain-specific annotations for security and performance:
 
 ```rust
 use aura_macros::choreography;
@@ -486,7 +483,7 @@ choreography! {
 }
 ```
 
-Annotations compile to extension effects that execute during protocol operations. The `guard_capability` annotation creates `CapabilityGuardEffect` instances that verify authorization before sending messages. The `flow_cost` annotation creates `FlowCostEffect` instances that charge privacy budgets. The `journal_facts` annotation creates `JournalFactsEffect` instances that update distributed state. All effects integrate seamlessly with rumpsteak-aura's extension system and execute automatically during choreographic operations.
+Annotations compile to effect commands that execute during protocol operations. The `guard_capability` annotation creates capability checks before send. The `flow_cost` annotation charges budgets. The `journal_facts` annotation records facts. These effects execute through the same interpreter path in adapter and VM backends.
 
 ### Protocol Composition
 

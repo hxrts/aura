@@ -26,7 +26,7 @@ Each consensus instance independently agrees on:
 - Sequential linearization across instances
 - Automatic operation dependencies
 
-**To sequence operations, use session types** (`docs/108_mpst_and_choreography.md`):
+**To sequence operations, use session types** (`docs/108_mpst_and_choreography.md`) executed through Aura’s Telltale-backed choreography runtime (`execute_as` runners or VM backend):
 
 ```rust
 use aura_mpst::{choreography, Role};

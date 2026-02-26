@@ -1,0 +1,59 @@
+{
+  "protocol": "epoch_rotation",
+  "session_id": "36363636-3636-3636-3636-363636363636",
+  "role_bindings": [
+    {
+      "role": "Coordinator",
+      "authority": "authority-33333333-3333-3333-3333-333333333333",
+      "role_index": 0
+    },
+    {
+      "role": "Participant1",
+      "authority": "authority-34343434-3434-3434-3434-343434343434",
+      "role_index": 1
+    },
+    {
+      "role": "Participant2",
+      "authority": "authority-35353535-3535-3535-3535-353535353535",
+      "role_index": 2
+    }
+  ],
+  "role_families": {
+    "Participant": [
+      "Participant1",
+      "Participant2"
+    ]
+  },
+  "lifecycle": [
+    {
+      "order": 0,
+      "role": "Coordinator",
+      "action": "start"
+    },
+    {
+      "order": 1,
+      "role": "Participant1",
+      "action": "start"
+    },
+    {
+      "order": 2,
+      "role": "Participant2",
+      "action": "start"
+    },
+    {
+      "order": 3,
+      "role": "Coordinator",
+      "action": "end"
+    },
+    {
+      "order": 4,
+      "role": "Participant1",
+      "action": "end"
+    },
+    {
+      "order": 5,
+      "role": "Participant2",
+      "action": "end"
+    }
+  ]
+}

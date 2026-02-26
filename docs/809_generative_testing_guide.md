@@ -146,6 +146,8 @@ let results = simulator.replay_trace(&trace).await?;
 assert!(results.all_properties_passed());
 ```
 
+When simulator middleware is enabled (fault/network/scenario/property layers), replay should use the async request/resume host boundary (`AsyncSimulatorHostBridge`) so transcript artifacts remain deterministic and comparable across runs.
+
 ### 4. Property Evaluation
 
 Check specification properties against execution results:

@@ -46,7 +46,8 @@ subtle = { workspace = true }
 zeroize = { workspace = true }
 
 # Choreography dependencies
-rumpsteak-aura-choreography = { workspace = true }
+telltale = { workspace = true }
+telltale-vm = { workspace = true, optional = true }
 
 # Serialization
 serde = { workspace = true }
@@ -77,7 +78,6 @@ tokio-tungstenite = { workspace = true, optional = true }
 # Note: axum, tower, tower-http, qrcode not in workspace - would need to be added if dev-console feature is needed
 
 # Platform-specific secure storage
-rumpsteak-aura = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 # security-framework = { workspace = true } # removed - unused
 # core-foundation = { workspace = true } # removed - unused
@@ -115,6 +115,11 @@ simulation = ["aura-core/simulation"]
 effect-container = []
 context-propagation = []
 
+# Choreography backend switch flags.
+# If none is set, runtime defaults to telltale adapter behavior.
+choreo-backend-telltale-adapter = []
+choreo-backend-telltale-vm = ["dep:telltale-vm"]
+
 # Platform-specific presets
 # Enable to access the preset builders and AgentBuilder entrypoints.
 ios = []      # iOS preset: Keychain crypto, app container storage
@@ -128,6 +133,16 @@ tracing-subscriber = { workspace = true }
 futures = { workspace = true }
 trybuild = { workspace = true }
 proptest = { workspace = true }
+telltale-vm = { workspace = true, features = ["multi-thread"] }
+telltale-types = { workspace = true }
+telltale-theory = "1.1.0"
+wasm-bindgen-test = "0.3"
+criterion = { workspace = true }
+
+[[bench]]
+name = "telltale_vm_backends"
+harness = false
+required-features = ["choreo-backend-telltale-vm"]
 
 [lints]
 workspace = true

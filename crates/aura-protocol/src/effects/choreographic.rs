@@ -275,8 +275,8 @@ pub enum ChoreographyError {
     },
 }
 
-impl From<rumpsteak_aura_choreography::ChoreographyError> for ChoreographyError {
-    fn from(e: rumpsteak_aura_choreography::ChoreographyError) -> Self {
+impl From<aura_mpst::telltale_choreography::ChoreographyError> for ChoreographyError {
+    fn from(e: aura_mpst::telltale_choreography::ChoreographyError) -> Self {
         ChoreographyError::InternalError {
             message: e.to_string(),
         }

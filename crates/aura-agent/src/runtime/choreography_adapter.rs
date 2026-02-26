@@ -33,7 +33,7 @@ use aura_core::FlowCost;
 use aura_guards::guards::journal::JournalCoupler;
 use aura_guards::prelude::{GuardContextProvider, GuardEffects, SendGuardChain};
 use aura_guards::LeakageBudget;
-use aura_mpst::rumpsteak_aura_choreography::{LabelId, Message, RoleId};
+use aura_mpst::telltale_choreography::{LabelId, Message, RoleId};
 use aura_mpst::ChoreographicAdapterExt;
 use aura_protocol::effects::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, RoleIndex,
@@ -185,7 +185,7 @@ pub struct MessageRequest<R: RoleId> {
 
 /// Runtime adapter used by generated choreography runners.
 ///
-/// This adapter implements the `ChoreographicAdapter` trait from rumpsteak-aura,
+/// This adapter implements the `ChoreographicAdapter` trait from telltale-choreography,
 /// bridging Aura's effect system with the choreographic programming model.
 ///
 /// ## Role Family Support
@@ -199,7 +199,7 @@ type BranchDeciderFn = Box<dyn FnMut(&[ReceivedMessage]) -> Option<String> + Sen
 
 /// Runtime adapter used by generated choreography runners.
 ///
-/// This adapter implements the `ChoreographicAdapter` trait from rumpsteak-aura,
+/// This adapter implements the `ChoreographicAdapter` trait from telltale-choreography,
 /// bridging Aura's effect system with the choreographic programming model.
 ///
 /// ## Features
@@ -440,7 +440,7 @@ where
 }
 
 #[async_trait]
-impl<E, R> aura_mpst::rumpsteak_aura_choreography::ChoreographicAdapter
+impl<E, R> aura_mpst::telltale_choreography::runtime::ChoreographicAdapter
     for AuraProtocolAdapter<E, R>
 where
     E: ChoreographicEffects

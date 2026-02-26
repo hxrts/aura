@@ -74,11 +74,11 @@ No coordination goes in `aura-effects`. Multiple handlers being orchestrated goe
 
 ### Adding a New Distributed Protocol
 
-1. Write the choreography in `aura-mpst` using session types or DSL syntax with `aura-macros`
+1. Write the choreography in a `.choreo` file and load it through `aura-macros::choreography!` (Telltale parse/projection/codegen)
 2. Use annotation syntax for security: `Role[guard_capability = "...", flow_cost = N] -> Target: Message`
 3. Create the protocol implementation in `aura-protocol` or a feature crate
 4. Implement the coordination logic using handlers from `aura-effects`
-5. Wire the protocol into `aura-agent` runtime with appropriate leakage budget policies
+5. Wire the protocol into `aura-agent` runtime (`AuraProtocolAdapter` and/or `AuraChoreoEngine`) with appropriate leakage budget policies
 6. Expose the protocol through CLI or application interfaces
 
 ### Writing a New Test
@@ -182,7 +182,7 @@ Example:
 ```rust
 pub async fn execute_anti_entropy(
     coordinator: CrdtCoordinator,      // Coordinates multiple CRDT handlers
-    adapter: AuraHandlerAdapter,       // Coordinates choreography and effects
+    adapter: AuraProtocolAdapter,      // Coordinates choreography and effects
     guards: GuardChain,                // Coordinates authorization
 ) -> Result<SyncResult> {
     // Orchestrates distributed sync across parties

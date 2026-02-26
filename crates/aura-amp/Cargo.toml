@@ -28,6 +28,7 @@ aura-consensus = { path = "../aura-consensus" }
 aura-guards = { path = "../aura-guards" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
+telltale = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -44,7 +45,6 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-rumpsteak-aura = { workspace = true }
 futures = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }

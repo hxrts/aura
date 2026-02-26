@@ -293,9 +293,9 @@ Is this a Layer 2 domain crate?
 
 ### Choreography Specification
 
-**`aura-mpst`**: Runtime library providing semantic abstractions for choreographic features including `CapabilityGuard`, `JournalCoupling`, `LeakageBudget`, and `ContextIsolation` traits. Integrates with the guard chain and works with both macro-generated and hand-written protocols.
+**`aura-mpst`**: Aura-facing compatibility crate over Telltale. Re-exports choreography/runtime surfaces and Aura extension traits used by generated protocols and adapters.
 
-**`aura-macros`**: Compile-time DSL parser for choreographies with Aura-specific annotations. Parses `guard_capability`, `flow_cost`, `journal_facts` and generates type-safe Rust code.
+**`aura-macros`**: Compile-time choreography frontend. Parses Aura annotations (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) and emits Telltale-backed generated modules plus Aura effect-bridge helpers.
 
 ## Layer 3: Implementation — `aura-effects` and `aura-composition`
 
@@ -1431,10 +1431,10 @@ Storage domain types with capability-based access control.
 P2P communication abstractions and network addressing.
 
 ### aura-mpst
-Session types and choreography runtime for distributed protocols.
+Aura-facing session/choreography compatibility layer re-exporting Telltale runtime surfaces.
 
 ### aura-macros
-DSL compiler for choreographies with Aura-specific annotations.
+DSL compiler that emits Telltale-backed generated protocols with Aura annotation bridges.
 
 ### aura-effects
 Production-grade stateless effect handlers that delegate to OS services for crypto, network, storage, and time operations.

@@ -2,7 +2,7 @@
 
 ## Purpose
 Runtime library for choreographic protocol specifications and multi-party session
-types. Provides semantic abstractions integrating with rumpsteak-aura for protocol-level
+types. Provides semantic abstractions integrating with Telltale for protocol-level
 guards and Aura-specific extensions.
 
 ## Inputs
@@ -15,13 +15,13 @@ guards and Aura-specific extensions.
 - Journal coupling types (`JournalCoupling`, `JournalAnnotation`).
 - Guard chain integration traits.
 - Choreography error types (`MpstError`).
-- Re-exports of full rumpsteak-aura functionality.
+- Re-exports of Telltale choreography/runtime functionality.
 
 ## Invariants
 - Depends only on aura-core.
 - No handler implementations or composition.
 - Extensions handled externally via aura-macros.
-- Provides same `choreography!` macro interface as rumpsteak-aura.
+- Provides the same `choreography!` macro interface over Telltale.
 
 ## Boundaries
 - No multi-party coordination logic (only types and runtime abstractions).

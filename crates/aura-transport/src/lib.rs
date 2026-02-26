@@ -22,7 +22,7 @@
 //! **Authority-Centric**: Uses `AuthorityId` for cross-authority communication
 //! **Context-Scoped**: Uses `ContextId` for relational context scoping
 //! **Conciseness**: Every file <300 lines, focused implementations, no over-engineering
-//! **Library Integration**: Designed for compatibility with rumpsteak-aura and mature networking libraries
+//! **Library Integration**: Designed for compatibility with Telltale and mature networking libraries
 //! **Clean Architecture**: Pure specification layer with curated API surface
 //!
 //! ## Usage

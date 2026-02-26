@@ -180,7 +180,7 @@ The namespace attribute is required and must be unique within a compilation unit
 
 ### 4.2 Session type integration
 
-Projection yields `LocalSessionType` values executed by `AuraHandler` in `aura-protocol`. `AuraHandler` uses serialized parameters and results for trait object compatibility. Guard evaluation runs before transport sends for each message.
+Projection yields `LocalSessionType` values executed through Telltale-backed runtime paths in Layer 6. Adapter mode uses `AuraProtocolAdapter` with generated `execute_as` runners. VM mode uses `AuraChoreoEngine` + `AuraVmEffectHandler`. Guard evaluation runs before transport sends for each message in both modes.
 
 ### 4.3 Extension effects and annotations
 
@@ -208,6 +208,7 @@ Aura uses eight layers with no cyclic dependencies.
 
 - Layer 1 Foundation uses `aura-core` for effect traits, identifiers, and cryptography.
 - Layer 2 Specification uses domain crates plus `aura-macros` and `aura-mpst`.
+- `aura-mpst` re-exports Telltale choreography/runtime surfaces used by Aura crates.
 - Layer 3 Implementation uses `aura-effects` and `aura-composition`.
 - Layer 4 Orchestration uses `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, and `aura-anti-entropy`.
 - Layer 5 Feature uses crates such as `aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, and `aura-sync`.

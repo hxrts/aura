@@ -30,7 +30,7 @@ use aura_invitation::{InvitationFact, INVITATION_FACT_TYPE_ID};
 use aura_invitation::protocol::exchange_runners::{
     execute_as as invitation_execute_as, InvitationExchangeRole,
 };
-use aura_invitation::protocol::exchange::rumpsteak_session_types_invitation::message_wrappers::{
+use aura_invitation::protocol::exchange::telltale_session_types_invitation::message_wrappers::{
     InvitationAck as ExchangeInvitationAck,
     InvitationOffer as ExchangeInvitationOffer,
     InvitationResponse as ExchangeInvitationResponse,
@@ -38,7 +38,7 @@ use aura_invitation::protocol::exchange::rumpsteak_session_types_invitation::mes
 use aura_invitation::protocol::guardian_runners::{
     execute_as as guardian_execute_as, GuardianInvitationRole,
 };
-use aura_invitation::protocol::guardian::rumpsteak_session_types_invitation_guardian::message_wrappers::{
+use aura_invitation::protocol::guardian::telltale_session_types_invitation_guardian::message_wrappers::{
     GuardianAccept as GuardianInvitationAccept,
     GuardianConfirm as GuardianInvitationConfirm,
     GuardianRequest as GuardianInvitationRequest,
@@ -46,7 +46,7 @@ use aura_invitation::protocol::guardian::rumpsteak_session_types_invitation_guar
 use aura_invitation::protocol::device_enrollment_runners::{
     execute_as as device_enrollment_execute_as, DeviceEnrollmentRole,
 };
-use aura_invitation::protocol::device_enrollment::rumpsteak_session_types_invitation_device_enrollment::message_wrappers::{
+use aura_invitation::protocol::device_enrollment::telltale_session_types_invitation_device_enrollment::message_wrappers::{
     DeviceEnrollmentAccept as DeviceEnrollmentAcceptWrapper,
     DeviceEnrollmentConfirm as DeviceEnrollmentConfirmWrapper,
     DeviceEnrollmentRequest as DeviceEnrollmentRequestWrapper,

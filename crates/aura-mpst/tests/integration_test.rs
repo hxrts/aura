@@ -7,7 +7,7 @@
 //! Use aura-agent::AgentRuntime for new code.
 
 use aura_core::{identifiers::DeviceId, ContextId};
-use rumpsteak_aura_choreography::extensions::ExtensionRegistry;
+use aura_mpst::telltale_choreography::extensions::ExtensionRegistry;
 
 #[test]
 fn test_extension_registry_operations() {

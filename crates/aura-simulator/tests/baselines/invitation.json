@@ -1,0 +1,39 @@
+{
+  "protocol": "invitation",
+  "session_id": "17171717-1717-1717-1717-171717171717",
+  "role_bindings": [
+    {
+      "role": "Receiver",
+      "authority": "authority-16161616-1616-1616-1616-161616161616",
+      "role_index": 1
+    },
+    {
+      "role": "Sender",
+      "authority": "authority-15151515-1515-1515-1515-151515151515",
+      "role_index": 0
+    }
+  ],
+  "role_families": {},
+  "lifecycle": [
+    {
+      "order": 0,
+      "role": "Sender",
+      "action": "start"
+    },
+    {
+      "order": 1,
+      "role": "Receiver",
+      "action": "start"
+    },
+    {
+      "order": 2,
+      "role": "Sender",
+      "action": "end"
+    },
+    {
+      "order": 3,
+      "role": "Receiver",
+      "action": "end"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # hello-choreo
 
-Minimal two-role choreography example that illustrates choreographic protocol programming with the rumpsteak-aura DSL, session types, and guard chain integration concepts.
+Minimal two-role choreography example that illustrates choreographic protocol programming with the Telltale DSL, session types, and guard chain integration concepts.
 
 ## What it shows
 

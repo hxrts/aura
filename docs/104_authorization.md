@@ -38,6 +38,19 @@ Only after all guards pass does transport emit a packet. Any failure returns loc
 
 DKG payloads require special budget handling because dealer packages and transcript exchanges are large. Flow and leakage budgets must be charged proportionally to payload size before any transport send. This ensures DKG traffic cannot bypass the guard chain and prevents unaccounted leakage during fast-path coordination.
 
+## Telltale Admission and VM Guards
+
+Aura uses Telltale runtime admission and VM guard checkpoints, but these do not replace Aura authorization semantics:
+
+- **Runtime admission** (`runtime_contracts`, capability snapshots) gates whether a runtime profile/bundle may execute.
+- **VM acquire/release guards** gate per-session resource leases inside VM execution.
+- **Aura guard chain** (`CapGuard → FlowGuard → JournalCoupler → Leakage → Transport`) remains the authoritative policy and accounting path for application sends.
+
+Failure handling is layered:
+- Admission failure rejects engine/bundle startup.
+- VM acquire deny blocks the guarded VM action.
+- Aura guard-chain failure denies transport and returns deterministic effect errors.
+
 ## Failure Handling and Caching
 
 Runtimes cache evaluated capability frontiers per `(ContextId, CapabilityPredicate)` with an epoch tag. Cache entries invalidate when journal policy facts change or when the epoch rotates.

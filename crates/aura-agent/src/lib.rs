@@ -80,6 +80,15 @@
 
 #![allow(clippy::expect_used)]
 
+#[cfg(all(
+    feature = "choreo-backend-telltale-adapter",
+    feature = "choreo-backend-telltale-vm"
+))]
+compile_error!(
+    "Enable at most one choreography backend feature: \
+     choreo-backend-telltale-adapter | choreo-backend-telltale-vm"
+);
+
 // Core modules (public API)
 pub mod core;
 
@@ -150,7 +159,13 @@ pub use runtime::{
 };
 
 // Protocol adapter for choreography execution (used by tests)
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use runtime::choreo_engine::{AuraChoreoEngine, AuraChoreoEngineError};
 pub use runtime::choreography_adapter::{AuraProtocolAdapter, MessageRequest, ReceivedMessage};
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use runtime::parity_policy::{AuraEnvelopeParityError, AuraEnvelopeParityPolicy};
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use runtime::vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};
 
 // Sync service types
 pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
@@ -178,6 +193,18 @@ pub use runtime::EffectSystemFactory;
 pub use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 
 pub use fact_registry::build_fact_registry;
+
+/// Selected choreography backend label for migration gating.
+///
+/// Priority:
+/// - `choreo-backend-telltale-vm`
+/// - `choreo-backend-telltale-adapter`
+/// - default (unset): telltale adapter
+pub const CHOREO_BACKEND: &str = if cfg!(feature = "choreo-backend-telltale-vm") {
+    "telltale_vm"
+} else {
+    "telltale_adapter"
+};
 
 /// Create a production agent (convenience function)
 pub async fn create_production_agent(

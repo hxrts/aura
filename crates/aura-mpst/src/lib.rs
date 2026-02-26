@@ -5,7 +5,7 @@
 //! **Purpose**: Runtime library for choreographic protocol specifications and multi-party session types.
 //!
 //! This crate provides semantic abstractions for choreographic features, integrating with
-//! rumpsteak-aura to enable full multi-party session type support with Aura-specific extensions.
+//! Telltale to enable full multi-party session type support with Aura-specific extensions.
 //!
 //! # Architecture Constraints
 //!
@@ -21,7 +21,7 @@
 //! # Design Philosophy
 //!
 //! This crate is a **regular crate** (not proc-macro) which allows it to:
-//! 1. Re-export all rumpsteak-aura functionality
+//! 1. Re-export Telltale choreography/runtime functionality
 //! 2. Provide the exact same `choreography!` macro interface
 //! 3. Add Aura-specific extensions via the extension system
 //! 4. Integrate with the guard chain for protocol-level guards
@@ -31,7 +31,7 @@
 //! ```ignore
 //! use aura_mpst::choreography;
 //!
-//! // This works EXACTLY like rumpsteak-aura's choreography! macro
+//! // This works EXACTLY like telltale's choreography! macro
 //! // but with Aura-specific extensions
 //! choreography! {
 //!     choreography Example {
@@ -60,31 +60,31 @@
 //! # Architecture
 //!
 //! ```text
-//! aura-mpst/              ← Regular crate (re-exports rumpsteak-aura + Aura extensions)
+//! aura-mpst/              ← Regular crate (re-exports telltale + Aura extensions)
 //! aura-macros/            ← Proc-macro crate (custom macros)
 //! ```
 
-// Re-export core rumpsteak-aura functionality
-pub use rumpsteak_aura;
-pub use rumpsteak_aura_choreography;
+// Canonical Telltale re-exports for Aura choreography/runtime integration.
+pub use telltale;
+pub use telltale_choreography;
 
 use async_trait::async_trait;
 
-/// Aura extension for rumpsteak choreographic adapters.
+/// Aura extension for choreographic adapters.
 ///
 /// Generated runners call `provide_message` and `select_branch` to source
 /// outbound messages and choice decisions. This trait extends the upstream
 /// adapter with those hooks.
 #[async_trait]
-pub trait ChoreographicAdapterExt: rumpsteak_aura_choreography::ChoreographicAdapter {
+pub trait ChoreographicAdapterExt: telltale_choreography::ChoreographicAdapter {
     /// Provide the next outbound message for a send.
-    async fn provide_message<M: rumpsteak_aura_choreography::Message>(
+    async fn provide_message<M: telltale_choreography::Message>(
         &mut self,
         to: Self::Role,
     ) -> Result<M, Self::Error>;
 
     /// Select a branch label from the available choices.
-    async fn select_branch<L: rumpsteak_aura_choreography::LabelId>(
+    async fn select_branch<L: telltale_choreography::LabelId>(
         &mut self,
         choices: &[L],
     ) -> Result<L, Self::Error>;
@@ -124,7 +124,7 @@ pub mod extensions;
 /// crate via procedural macros that parse and extract annotations at compile-time.
 ///
 /// This function exists for:
-/// 1. Compatibility with rumpsteak's extension system
+/// 1. Compatibility with existing extension registry wiring
 /// 2. Testing that the registry initialization works
 /// 3. Future extensibility if runtime extensions become needed
 ///
@@ -139,17 +139,17 @@ pub mod extensions;
 /// - Compile-time validation of annotations
 /// - Zero runtime overhead for extension processing
 /// - Better error messages via proc macros
-pub fn init_aura_extensions() -> rumpsteak_aura_choreography::extensions::ExtensionRegistry {
+pub fn init_aura_extensions() -> telltale_choreography::extensions::ExtensionRegistry {
     // Create empty registry - extensions are now handled in aura-macros
-    rumpsteak_aura_choreography::extensions::ExtensionRegistry::new()
+    telltale_choreography::extensions::ExtensionRegistry::new()
 }
 
 pub use ast_extraction::{
     extract_aura_annotations, generate_aura_choreography_code, AuraEffect, AuraExtractionError,
 };
-/// Full-featured choreography! macro with ALL rumpsteak-aura features + Aura extensions
+/// Full-featured choreography! macro with Telltale features + Aura extensions
 ///
-/// This macro provides access to ALL rumpsteak-aura features plus Aura-specific extensions:
+/// This macro provides access to Telltale choreography features plus Aura-specific extensions:
 /// - Module namespaces: `module my_protocol exposing (ProtocolName)`
 /// - Parameterized roles: `Worker[N]`, `Signer[*]`
 /// - Choice constructs: `choice at Role { ... }`
@@ -279,11 +279,11 @@ mod tests {
     }
 
     #[test]
-    fn test_all_rumpsteak_features_available() {
-        // Verify we have access to all rumpsteak-aura types and functions
-        let _registry = rumpsteak_aura_choreography::extensions::ExtensionRegistry::new();
-        let _composer = rumpsteak_aura_choreography::compiler::GrammarComposer::new();
-        let _parser = rumpsteak_aura_choreography::compiler::ExtensionParser::new();
+    fn test_all_choreography_features_available() {
+        // Verify we have access to the re-exported choreography types and functions.
+        let _registry = telltale_choreography::extensions::ExtensionRegistry::new();
+        let _composer = telltale_choreography::compiler::GrammarComposer::new();
+        let _parser = telltale_choreography::compiler::ExtensionParser::new();
 
         // If this compiles, we successfully re-exported everything
     }

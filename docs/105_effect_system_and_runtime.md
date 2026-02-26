@@ -634,6 +634,14 @@ This diagram shows the request flow through the guard chain. The guard chain enf
 
 The effect system provides the framework for managing the lifecycle of distributed protocols. Choreographies define the logic of a protocol. A session represents a single, stateful execution of that choreography. The runtime uses the effect system to create, manage, and execute these sessions.
 
+Aura executes choreography sessions through Telltale integration in Layer 6:
+- `AuraProtocolAdapter` bridges generated role runners (`execute_as`) to `ChoreographicEffects`.
+- `AuraChoreoEngine` runs Telltale VM sessions and exposes deterministic trace/replay APIs.
+- `AuraVmEffectHandler` is the synchronous VM host boundary; all real async side effects still run through `EffectInterpreter` and `EffectCommand`.
+- `aura-simulator::AsyncSimulatorHostBridge` provides a simulator-local async request/resume boundary for fault/network/scenario/property middleware while preserving deterministic transcripts.
+
+This split keeps protocol semantics deterministic while preserving async production/simulation effects at the interpreter boundary.
+
 ### 12.1 The Session Management Interface
 
 The abstract interface for all session-related operations is the `SessionManagementEffects` trait defined in `aura-core`. This trait provides the API for creating sessions, joining them, sending and receiving messages, and querying their status.

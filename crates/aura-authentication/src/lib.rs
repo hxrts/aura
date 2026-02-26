@@ -144,16 +144,16 @@ pub use view::{
 
 /// Re-exports for DkdChoreography runners
 pub mod dkd_runners {
-    pub use crate::dkd::rumpsteak_session_types_dkd_protocol::dkd_protocol::runners::{
+    pub use crate::dkd::telltale_session_types_dkd_protocol::dkd_protocol::runners::{
         execute_as, run_initiator, run_participant, InitiatorOutput, ParticipantOutput,
     };
-    pub use crate::dkd::rumpsteak_session_types_dkd_protocol::dkd_protocol::DkdChoreographyRole;
+    pub use crate::dkd::telltale_session_types_dkd_protocol::dkd_protocol::DkdChoreographyRole;
 }
 
 /// Re-exports for GuardianAuthRelational choreography runners
 pub mod guardian_auth_runners {
-    pub use crate::guardian_auth_relational::rumpsteak_session_types_guardian_auth_relational::guardian_auth_relational::GuardianAuthRelationalRole;
-    pub use crate::guardian_auth_relational::rumpsteak_session_types_guardian_auth_relational::guardian_auth_relational::runners::{
+    pub use crate::guardian_auth_relational::telltale_session_types_guardian_auth_relational::guardian_auth_relational::GuardianAuthRelationalRole;
+    pub use crate::guardian_auth_relational::telltale_session_types_guardian_auth_relational::guardian_auth_relational::runners::{
         execute_as, run_account, run_coordinator, run_guardian,
         AccountOutput, CoordinatorOutput, GuardianOutput,
     };

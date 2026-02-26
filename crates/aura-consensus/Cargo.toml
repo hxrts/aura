@@ -23,6 +23,7 @@ aura-macros = { path = "../aura-macros" }
 aura-journal = { path = "../aura-journal" }
 aura-mpst = { path = "../aura-mpst" }
 aura-guards = { path = "../aura-guards" }
+telltale = { workspace = true }
 
 # Cryptography
 frost-ed25519 = { workspace = true }
@@ -52,6 +53,5 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
-rumpsteak-aura = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }

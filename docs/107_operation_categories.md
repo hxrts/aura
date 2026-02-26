@@ -137,7 +137,7 @@ pub enum ApprovalThreshold {
 
 ## 4. Category C: Consensus-Gated Operations
 
-Category C operations do NOT proceed until a ceremony completes. Partial state would be dangerous or irrecoverable. The user must wait for confirmation. These operations use choreographic protocols with session types.
+Category C operations do NOT proceed until a ceremony completes. Partial state would be dangerous or irrecoverable. The user must wait for confirmation. These operations use choreographic protocols with session types, executed through Aura’s Telltale runtime.
 
 ### 4.1 Examples
 
@@ -204,7 +204,7 @@ All Category C ceremonies implement:
 
 3. **Epoch Isolation**: Uncommitted key packages are inert. No explicit rollback needed on abort.
 
-4. **Session Types**: Protocol compliance enforced at compile time via choreographic projection.
+4. **Session Types**: Protocol compliance enforced at compile time via choreographic projection and enforced at runtime via Telltale adapter/VM execution.
 
 ### 5.3 Per-Ceremony Policy Matrix
 

@@ -29,8 +29,8 @@ pub use types::{run_consensus, ConsensusParams, ProtocolStats};
 
 // Re-export generated choreography types for execute_as pattern
 pub mod runners {
-    pub use super::choreography::rumpsteak_session_types_aura_consensus::aura_consensus::AuraConsensusRole;
-    pub use super::choreography::rumpsteak_session_types_aura_consensus::runners::{
+    pub use super::choreography::telltale_session_types_aura_consensus::aura_consensus::AuraConsensusRole;
+    pub use super::choreography::telltale_session_types_aura_consensus::runners::{
         execute_as, run_coordinator, run_witness, CoordinatorOutput, WitnessOutput,
     };
 }

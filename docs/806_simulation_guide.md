@@ -1,6 +1,6 @@
 # Simulation Guide
 
-This guide covers Aura's simulation engine built on the effect system architecture. The simulation provides deterministic, reproducible testing of distributed protocols through effect handlers, fault injection, and middleware-based architecture.
+This guide covers Aura's simulation engine built on the effect system architecture. The simulation provides deterministic, reproducible testing of distributed protocols through effect handlers, fault injection, and an async request/resume host boundary.
 
 ## Core Simulation Philosophy
 
@@ -8,7 +8,7 @@ Aura's simulation approach is built on four key principles:
 
 1. **Production Code Testing** - Run actual protocol implementations through real effect handlers
 2. **Effect System Control** - All impure operations (time, randomness, I/O) controlled via effect traits
-3. **Middleware Pattern** - Fault injection and monitoring via middleware layer
+3. **Async Host Boundary** - Fault/network/scenario/property operations are routed through a deterministic request/resume bridge
 4. **Deterministic Execution** - Controlled effects enable fully reproducible simulations
 
 ## Two Simulation Systems
@@ -155,7 +155,7 @@ When adding retries/backoff, pass the simulator’s `SimulationTimeHandler` into
 
 ## Simulation Infrastructure
 
-Aura's simulation system is built on handler composition and middleware interception.
+Aura's simulation system is built on handler composition and deterministic host bridging.
 
 ### Core Components
 
@@ -191,6 +191,22 @@ let environment = composer
     .with_scenario_support()
     .build()?;
 ```
+
+### Async Host Request/Resume Bridge
+
+For post-cutover Telltale integration, simulator host operations can run through
+`AsyncSimulatorHostBridge`:
+
+```rust
+use aura_simulator::{AsyncHostRequest, AsyncSimulatorHostBridge};
+
+let mut host = AsyncSimulatorHostBridge::new(42);
+host.submit(AsyncHostRequest::VerifyAllProperties);
+let entry = host.resume_next().await?;
+assert_eq!(entry.sequence, 0);
+```
+
+The bridge preserves deterministic ordering (FIFO + monotone sequence IDs) and records replay artifacts (`AsyncHostTranscriptEntry`) so sync-host vs async-host parity is testable.
 
 ### Simulation Factory Abstraction
 

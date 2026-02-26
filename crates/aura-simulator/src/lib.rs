@@ -130,6 +130,8 @@ pub mod utils;
 pub mod context;
 
 // Scenario definitions
+/// Async simulator host bridge for request/resume execution.
+pub mod async_host;
 pub mod scenario;
 /// Simulation scenarios for testing consensus and protocols
 pub mod scenarios;
@@ -175,6 +177,10 @@ pub use protocol_state_machine::{
 };
 
 // Re-export scenario types for convenience
+pub use async_host::{
+    AsyncHostError, AsyncHostRequest, AsyncHostResponse, AsyncHostTranscriptEntry,
+    AsyncSimulatorHostBridge,
+};
 pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};
 
 // Re-export liveness checking types

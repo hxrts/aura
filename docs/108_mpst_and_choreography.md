@@ -38,7 +38,7 @@ This example shows the projected type for role `A`. The type describes that `A` 
 
 ## 3. Runtime Integration
 
-Aura executes generated runners through rumpsteak‑aura’s `ChoreographicAdapter` API. The generated protocol exposes `execute_as`, which runs a specific role with a supplied adapter. Aura provides a runtime adapter in `crates/aura-agent/src/runtime/choreography_adapter.rs` that bridges `ChoreographicEffects` to the generated runners.
+Aura executes generated runners through Telltale’s `ChoreographicAdapter` API. Generated protocols expose `execute_as`, which runs a specific role with a supplied adapter. Aura provides a runtime adapter in `crates/aura-agent/src/runtime/choreography_adapter.rs` and a VM engine in `crates/aura-agent/src/runtime/choreo_engine.rs`.
 
 ```rust
 #[async_trait]
@@ -56,6 +56,10 @@ Generated runners also call:
 - `select_branch` for choice decisions
 
 These are sourced from runtime state (params, journal facts, UI inputs).
+
+Aura currently supports two execution backends with the same guard/effect boundary:
+- Adapter backend (`AuraProtocolAdapter`) for direct generated-runner execution.
+- VM backend (`AuraChoreoEngine`) for Telltale VM execution, replay, and parity checks.
 
 ## 4. Choreography Annotations and Effect Commands
 
@@ -187,7 +191,7 @@ Aura supports multiple execution modes for choreographies. In-memory execution u
 Each mode implements the same handler interface. This ensures that protocol behavior remains consistent across environments. Testing uses deterministic handlers. Production uses optimized handlers.
 
 ```rust
-let handler = AuraHandler::new_in_memory();
+let mut adapter = AuraProtocolAdapter::for_testing(...)?;
 ```
 
 This example shows the creation of an in-memory handler for testing.

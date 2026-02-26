@@ -1,6 +1,6 @@
 //! Hole Punching Protocol Message Types
 //!
-//! Core hole punching messages compatible with rumpsteak-aura choreographic DSL.
+//! Core hole punching messages compatible with Telltale choreographic DSL.
 //! Target: <120 lines (minimal implementation).
 
 use crate::types::endpoint::EndpointAddress;

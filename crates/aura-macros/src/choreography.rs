@@ -1,22 +1,16 @@
 //! Aura Choreography Macro Implementation
 //!
 //! This module provides the choreography! macro that generates both the underlying
-//! rumpsteak-aura choreography and the Aura-specific wrapper module expected by
+//! Telltale choreography and the Aura-specific wrapper module expected by
 //! the examples and integration code.
 //!
 //! The macro generates:
-//! - Core choreographic projection via rumpsteak-aura
+//! - Core choreographic projection via Telltale
 //! - Aura wrapper module with role types and helper functions
 //! - Integration with the Aura effects system
 
 use proc_macro2::{Group, TokenStream, TokenTree};
 use quote::quote;
-use rumpsteak_aura_choreography::{
-    ast::{Choreography, MessageType, Protocol},
-    compiler::{codegen::generate_choreography_code, parse_choreography_str, project},
-    extensions::ExtensionRegistry,
-    parse_and_generate_with_extensions,
-};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use syn::spanned::Spanned;
@@ -24,6 +18,10 @@ use syn::{
     parse::Parse,
     visit_mut::{self, VisitMut},
     Attribute, Expr, ExprLit, ExprMacro, Ident, Lit, LitStr, Stmt, Type,
+};
+use telltale_choreography::{
+    ast::{Choreography, MessageType, Protocol},
+    compiler::{codegen::generate_choreography_code, parse_choreography_str, project},
 };
 
 // Import Biscuit-related types for the updated annotation system
@@ -339,7 +337,7 @@ fn rewrite_generated_code(tokens: TokenStream, role_ident: &Ident) -> TokenStrea
         Err(_) => return tokens,
     };
 
-    let mut rewriter = RumpsteakPathRewriter;
+    let mut rewriter = ChoreoPathRewriter;
     rewriter.visit_file_mut(&mut file);
     let mut role_renamer = RoleRenamer {
         role_ident: role_ident.clone(),
@@ -393,6 +391,8 @@ fn rewrite_runner_imports(items: &mut Vec<syn::Item>) {
         };
         items.insert(insert_pos, syn::Item::Use(adapter_use));
     }
+
+    strip_output_metadata_updates(items);
 }
 
 fn is_super_glob(item_use: &syn::ItemUse) -> bool {
@@ -417,7 +417,7 @@ fn use_tree_contains_adapter(item_use: &syn::ItemUse) -> bool {
         syn::UseTree::Path(path) => {
             if path.ident == "aura_mpst" {
                 if let syn::UseTree::Path(inner) = &*path.tree {
-                    if inner.ident != "rumpsteak_aura_choreography" {
+                    if inner.ident != "telltale_choreography" {
                         return false;
                     }
                     return contains_name(&inner.tree, "ChoreographicAdapter");
@@ -425,7 +425,7 @@ fn use_tree_contains_adapter(item_use: &syn::ItemUse) -> bool {
                 return false;
             }
 
-            if path.ident == "rumpsteak_aura_choreography" {
+            if path.ident == "telltale_choreography" {
                 return contains_name(&path.tree, "ChoreographicAdapter");
             }
 
@@ -472,12 +472,72 @@ fn strip_adapter_from_use(item_use: &mut syn::ItemUse) {
     strip(&mut item_use.tree);
 }
 
-struct RumpsteakPathRewriter;
+fn strip_output_metadata_updates(items: &mut [syn::Item]) {
+    for item in items.iter_mut() {
+        if let syn::Item::Fn(func) = item {
+            let mut stripper = RunnerOutputStripper;
+            stripper.visit_block_mut(&mut func.block);
+        }
+    }
+}
 
-impl VisitMut for RumpsteakPathRewriter {
+struct RunnerOutputStripper;
+
+impl VisitMut for RunnerOutputStripper {
+    fn visit_block_mut(&mut self, block: &mut syn::Block) {
+        visit_mut::visit_block_mut(self, block);
+        block.stmts.retain(|stmt| !is_runner_output_update(stmt));
+    }
+}
+
+fn is_runner_output_update(stmt: &syn::Stmt) -> bool {
+    let expr = match stmt {
+        syn::Stmt::Expr(expr, _) => expr,
+        _ => return false,
+    };
+    match expr {
+        syn::Expr::Assign(assign) => is_output_field_access(assign.left.as_ref()),
+        syn::Expr::Binary(binary) => {
+            let is_assign_op = matches!(
+                binary.op,
+                syn::BinOp::AddAssign(_)
+                    | syn::BinOp::SubAssign(_)
+                    | syn::BinOp::MulAssign(_)
+                    | syn::BinOp::DivAssign(_)
+                    | syn::BinOp::RemAssign(_)
+                    | syn::BinOp::BitXorAssign(_)
+                    | syn::BinOp::BitAndAssign(_)
+                    | syn::BinOp::BitOrAssign(_)
+                    | syn::BinOp::ShlAssign(_)
+                    | syn::BinOp::ShrAssign(_)
+            );
+            is_assign_op && is_output_field_access(binary.left.as_ref())
+        }
+        syn::Expr::MethodCall(method_call) => is_output_field_access(method_call.receiver.as_ref()),
+        _ => false,
+    }
+}
+
+fn is_output_field_access(expr: &syn::Expr) -> bool {
+    match expr {
+        syn::Expr::Field(field) => {
+            if let syn::Expr::Path(path) = field.base.as_ref() {
+                if path.path.is_ident("output") {
+                    return true;
+                }
+            }
+            is_output_field_access(field.base.as_ref())
+        }
+        _ => false,
+    }
+}
+
+struct ChoreoPathRewriter;
+
+impl VisitMut for ChoreoPathRewriter {
     fn visit_path_mut(&mut self, path: &mut syn::Path) {
         if let Some(first) = path.segments.first() {
-            if first.ident == "rumpsteak_aura_choreography" {
+            if first.ident == "telltale_choreography" {
                 let mut segments = syn::punctuated::Punctuated::new();
                 segments.push(syn::PathSegment::from(Ident::new(
                     "aura_mpst",
@@ -495,11 +555,12 @@ impl VisitMut for RumpsteakPathRewriter {
 
     fn visit_use_tree_mut(&mut self, tree: &mut syn::UseTree) {
         if let syn::UseTree::Path(path) = tree {
-            if path.ident == "rumpsteak_aura_choreography" {
+            if path.ident == "telltale_choreography" {
                 let span = path.ident.span();
+                let inner_ident = path.ident.clone();
                 let inner = (*path.tree).clone();
                 let wrapped = syn::UseTree::Path(syn::UsePath {
-                    ident: Ident::new("rumpsteak_aura_choreography", span),
+                    ident: Ident::new(&inner_ident.to_string(), span),
                     colon2_token: Default::default(),
                     tree: Box::new(inner),
                 });
@@ -573,22 +634,22 @@ fn read_choreography_source(expr: Expr) -> Result<(String, proc_macro2::Span), s
 
 /// Implementation of the Aura choreography! macro
 ///
-/// Uses namespace-aware rumpsteak-aura generation to avoid module conflicts
+/// Uses namespace-aware Telltale generation to avoid module conflicts
 pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> {
     // Parse DSL input to extract roles and protocol name for Aura wrapper
     let parsed_input = parse_choreography_source(input.clone())?;
 
-    // Generate the rumpsteak-aura choreography using namespace-aware functions
+    // Generate the Telltale choreography using namespace-aware functions
     let message_type_names = extract_message_type_names(&parsed_input.choreography);
-    let rumpsteak_output =
+    let telltale_output =
         choreography_impl_namespace_aware(&parsed_input.choreography, &message_type_names)
             .unwrap_or_else(|err| {
-                // If rumpsteak fails, generate a helpful error message but continue with Aura wrapper
+                // If generation fails, emit a placeholder module so Aura wrapper compilation can continue.
                 let _error_msg = err.to_string();
                 quote! {
-                    /// Rumpsteak integration failed - using Aura-only mode
-                    pub mod rumpsteak_session_types {
-                        // Rumpsteak integration error (this is expected in some cases):
+                    /// Telltale integration failed - using Aura-only mode
+                    pub mod telltale_session_types {
+                        // Telltale integration error (this is expected in some cases):
                         // #error_msg
                         // Using Aura choreography system only.
                     }
@@ -633,8 +694,8 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     Ok(quote! {
         #namespace_uniqueness_check
 
-        // Rumpsteak-aura generated choreography (session types, projections) - namespace-aware
-        #rumpsteak_output
+        // Telltale-generated choreography (session types, projections) - namespace-aware
+        #telltale_output
 
         // Aura wrapper module (effect system integration) - namespace-aware
         #aura_wrapper
@@ -1305,9 +1366,9 @@ fn generate_aura_wrapper(
     }
 }
 
-/// Namespace-aware rumpsteak-aura implementation
+/// Namespace-aware Telltale implementation
 ///
-/// Uses the namespace-aware rumpsteak functions to avoid module conflicts
+/// Uses namespace-aware generation to avoid module conflicts.
 fn choreography_impl_namespace_aware(
     choreography: &Choreography,
     message_type_names: &[String],
@@ -1362,17 +1423,17 @@ fn choreography_impl_namespace_aware(
         }
     };
 
-    // Generate module name using namespace
-    let module_name = if let Some(ns) = &choreography.namespace {
-        quote::format_ident!("rumpsteak_session_types_{}", ns)
+    // Generate canonical module names using namespace.
+    let canonical_module_name = if let Some(ns) = &choreography.namespace {
+        quote::format_ident!("telltale_session_types_{}", ns)
     } else {
-        quote::format_ident!("rumpsteak_session_types")
+        quote::format_ident!("telltale_session_types")
     };
 
     let imports = quote! {
         #[allow(unused_imports)]
         use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-        use rumpsteak_aura::{
+        use aura_mpst::telltale::{
             channel::*,
             Branch, End, Message, Receive, Role, Roles, Route, Sealable, Select, Send, session,
         };
@@ -1395,9 +1456,9 @@ fn choreography_impl_namespace_aware(
     };
 
     Ok(quote! {
-        /// Rumpsteak-aura generated session types and choreographic projections
+        /// Telltale-generated session types and choreographic projections
         #[allow(clippy::diverging_sub_expression)]
-        pub mod #module_name {
+        pub mod #canonical_module_name {
             #imports
             #helpers
             #generated_code
@@ -1487,163 +1548,5 @@ fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
     } else {
         // No leakage annotations, generate empty module
         quote! {}
-    }
-}
-
-/// Standard rumpsteak-aura implementation with empty extension registry
-///
-/// This follows the external-demo pattern exactly and provides full
-/// rumpsteak-aura feature inheritance without extension conflicts.
-///
-/// NOTE: This is an alternative implementation strategy kept for reference.
-/// The active implementation uses `choreography_impl_namespace_aware` which
-/// provides proper namespace isolation. This standard version is preserved
-/// for cases where namespace isolation is not needed.
-#[allow(dead_code)] // Alternative implementation - active version uses namespace_aware
-fn choreography_impl_standard(input: TokenStream) -> Result<TokenStream, syn::Error> {
-    // Convert token stream to string for parsing
-    let input_str = input.to_string();
-
-    // Create empty extension registry to avoid buggy timeout extension
-    // This follows the external-demo pattern and ensures we inherit ALL
-    // standard rumpsteak-aura features without extension conflicts
-    let registry = ExtensionRegistry::new();
-
-    // Parse and generate code with full rumpsteak-aura feature inheritance
-    match parse_and_generate_with_extensions(&input_str, &registry) {
-        Ok(tokens) => {
-            // Add necessary imports for the generated rumpsteak code following external demo pattern
-            let imports = quote! {
-                #[allow(unused_imports)]
-                use super::{Ping, Pong};
-
-                // Standard rumpsteak-aura imports (from external demo analysis)
-                use rumpsteak_aura::{
-                    channel::{Bidirectional, Pair}, session, try_session,
-                    Branch, End, Message, Receive, Role, Roles, Select, Send, Sealable
-                };
-                use futures::channel::mpsc;
-                use futures::{Sink, Stream};
-                use std::pin::Pin;
-                use std::task::{Context, Poll};
-
-                // Label type for message routing
-                #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-                pub enum Label {
-                    Ping(Ping),
-                    Pong(Pong),
-                }
-
-                const CHANNEL_BUFFER: usize = 64;
-
-                #[derive(Debug)]
-                pub struct BoundedSender<T>(mpsc::Sender<T>);
-
-                #[derive(Debug)]
-                pub struct BoundedReceiver<T>(mpsc::Receiver<T>);
-
-                impl<T> Clone for BoundedSender<T> {
-                    fn clone(&self) -> Self {
-                        Self(self.0.clone())
-                    }
-                }
-
-                impl<T> Pair<BoundedReceiver<T>> for BoundedSender<T> {
-                    fn pair() -> (Self, BoundedReceiver<T>) {
-                        let (sender, receiver) = mpsc::channel(CHANNEL_BUFFER);
-                        (BoundedSender(sender), BoundedReceiver(receiver))
-                    }
-                }
-
-                impl<T> Pair<BoundedSender<T>> for BoundedReceiver<T> {
-                    fn pair() -> (Self, BoundedSender<T>) {
-                        let (sender, receiver) = Pair::pair();
-                        (receiver, sender)
-                    }
-                }
-
-                impl<T> Sealable for BoundedSender<T> {
-                    fn seal(&mut self) {
-                        self.0.close_channel();
-                    }
-
-                    fn is_sealed(&self) -> bool {
-                        self.0.is_closed()
-                    }
-                }
-
-                impl<T> Sealable for BoundedReceiver<T> {
-                    fn seal(&mut self) {
-                        self.0.close();
-                    }
-
-                    fn is_sealed(&self) -> bool {
-                        false
-                    }
-                }
-
-                impl<T> Sink<T> for BoundedSender<T> {
-                    type Error = <mpsc::Sender<T> as Sink<T>>::Error;
-
-                    fn poll_ready(
-                        self: Pin<&mut Self>,
-                        cx: &mut Context<'_>,
-                    ) -> Poll<Result<(), Self::Error>> {
-                        Pin::new(&mut self.get_mut().0).poll_ready(cx)
-                    }
-
-                    fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-                        Pin::new(&mut self.get_mut().0).start_send(item)
-                    }
-
-                    fn poll_flush(
-                        self: Pin<&mut Self>,
-                        cx: &mut Context<'_>,
-                    ) -> Poll<Result<(), Self::Error>> {
-                        Pin::new(&mut self.get_mut().0).poll_flush(cx)
-                    }
-
-                    fn poll_close(
-                        self: Pin<&mut Self>,
-                        cx: &mut Context<'_>,
-                    ) -> Poll<Result<(), Self::Error>> {
-                        Pin::new(&mut self.get_mut().0).poll_close(cx)
-                    }
-                }
-
-                impl<T> Stream for BoundedReceiver<T> {
-                    type Item = <mpsc::Receiver<T> as Stream>::Item;
-
-                    fn poll_next(
-                        self: Pin<&mut Self>,
-                        cx: &mut Context<'_>,
-                    ) -> Poll<Option<Self::Item>> {
-                        Pin::new(&mut self.get_mut().0).poll_next(cx)
-                    }
-                }
-
-                fn channel() -> (BoundedSender<Label>, BoundedReceiver<Label>) {
-                    Pair::pair()
-                }
-
-                // Channel type definition following external demo pattern
-                type Channel = Bidirectional<BoundedSender<Label>, BoundedReceiver<Label>>;
-            };
-
-            Ok(quote! {
-                /// Rumpsteak-aura generated session types and choreographic projections
-                pub mod rumpsteak_session_types {
-                    #imports
-                    #tokens
-                }
-            })
-        }
-        Err(err) => {
-            let error_msg = err.to_string();
-            Err(syn::Error::new(
-                proc_macro2::Span::call_site(),
-                format!("Choreography compilation error: {}", error_msg),
-            ))
-        }
     }
 }

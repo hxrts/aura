@@ -114,7 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   [OK] Namespace isolation");
     println!("   [OK] Session type generation");
     println!("   [OK] Aura annotation extraction");
-    println!("   [OK] Integration with rumpsteak-aura framework");
+    println!("   [OK] Integration with Telltale framework");
 
     println!("\n[INFO] Future Dynamic Role Support:");
     println!("   The foundation is in place for:");

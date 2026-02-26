@@ -1,0 +1,39 @@
+{
+  "protocol": "rendezvous",
+  "session_id": "2b2b2b2b-2b2b-2b2b-2b2b-2b2b2b2b2b2b",
+  "role_bindings": [
+    {
+      "role": "Initiator",
+      "authority": "authority-29292929-2929-2929-2929-292929292929",
+      "role_index": 0
+    },
+    {
+      "role": "Responder",
+      "authority": "authority-2a2a2a2a-2a2a-2a2a-2a2a-2a2a2a2a2a2a",
+      "role_index": 1
+    }
+  ],
+  "role_families": {},
+  "lifecycle": [
+    {
+      "order": 0,
+      "role": "Initiator",
+      "action": "start"
+    },
+    {
+      "order": 1,
+      "role": "Responder",
+      "action": "start"
+    },
+    {
+      "order": 2,
+      "role": "Initiator",
+      "action": "end"
+    },
+    {
+      "order": 3,
+      "role": "Responder",
+      "action": "end"
+    }
+  ]
+}

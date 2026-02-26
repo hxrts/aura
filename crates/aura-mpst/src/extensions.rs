@@ -1,8 +1,7 @@
-//! Aura-specific extension effects for rumpsteak-aura integration
+//! Aura-specific extension effects for Telltale integration.
 //!
-//! This module provides extension types that implement rumpsteak's ExtensionEffect
-//! trait to integrate Aura's capability guards, flow cost management, and journal
-//! coupling into choreographic protocols.
+//! This module provides extension types used to integrate Aura's capability guards,
+//! flow cost management, and journal coupling into choreographic protocols.
 
 use crate::ids::RoleId;
 use serde::{Deserialize, Serialize};

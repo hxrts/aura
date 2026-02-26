@@ -312,6 +312,8 @@ pub trait JournalEffects: Send + Sync {
 
 The effect layer writes facts to persistent storage. Replica synchronization loads facts through effect handlers into journal memory. The effect layer guarantees durability but does not affect CRDT merge semantics.
 
+At the choreography runtime boundary, journal coupling is always driven by guard/effect commands. Generated choreography annotations and runtime guard checks emit `EffectCommand` values, and `JournalCoupler` ensures journal commits occur before transport observables. In VM execution, `AuraVmEffectHandler` emits envelopes, but journal writes still flow through the same `EffectInterpreter` + `JournalEffects` path.
+
 ## 11. AttestedOp Structure
 
 AttestedOp exists in two layers with different levels of detail:

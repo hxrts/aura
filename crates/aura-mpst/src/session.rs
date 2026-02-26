@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Local session type for handler interfaces
 ///
 /// Represents the type signature of session protocols used by handlers.
-/// Maintains compatibility with rumpsteak projections while keeping Aura-specific
+/// Maintains compatibility with generated projections while keeping Aura-specific
 /// metadata (protocol name + serialized params) available for runtime selection.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LocalSessionType {
