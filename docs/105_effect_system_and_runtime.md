@@ -492,7 +492,7 @@ The effect system spans several crates. Each crate defines a specific role in th
 
 The effect system supports deterministic testing. Mock handlers implement predictable behavior. A simulated runtime provides control over time and network behavior. The simulator exposes primitives to inject delays or failures.
 
-Tests use deterministic time control. Tests use in-memory storage. Tests use mock network. These components allow protocol execution without side effects.
+Tests use deterministic time control, in-memory storage, and mock networking. These components allow protocol execution without side effects. Effect boundaries also determine native/WASM conformance parity. See [Conformance and Parity Reference](119_conformance.md) for determinism rules and artifact format.
 
 ```rust
 let system = TestRuntime::new()

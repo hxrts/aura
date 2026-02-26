@@ -188,7 +188,7 @@ let result = execute_guarded_choreography(
 
 Aura supports multiple execution modes for choreographies. In-memory execution uses mock handlers. Production execution uses real network and storage effects. Simulation execution uses deterministic time and fault injection.
 
-Each mode implements the same handler interface. This ensures that protocol behavior remains consistent across environments. Testing uses deterministic handlers. Production uses optimized handlers.
+Each mode implements the same handler interface. This ensures that protocol behavior remains consistent across environments. Choreography execution also captures conformance artifacts for native/WASM parity testing. See [Conformance and Parity Reference](119_conformance.md) for artifact surfaces and diff workflows.
 
 ```rust
 let mut adapter = AuraProtocolAdapter::for_testing(...)?;
@@ -396,4 +396,4 @@ The runtime provides guard chain integration (CapGuard → FlowGuard → Journal
 
 Aura uses choreographic programming to define global protocols. Projection produces local session types. Session types enforce structured communication. Handlers execute protocol steps using effect traits. Extension effects provide authorization, budgeting, and journal updates. Execution modes support testing, simulation, and production. Choreographies define distributed coordination for CRDT sync, FROST signing, and consensus.
 
-Importantly, not all multi-party operations need choreography. Operations within established cryptographic contexts (channels, messages) use optimistic CRDT facts. Choreography is reserved for Category C operations where partial state would be dangerous.
+Not all multi-party operations need choreography. Operations within established cryptographic contexts use optimistic CRDT facts. Choreography is reserved for Category C operations where partial state would be dangerous.
