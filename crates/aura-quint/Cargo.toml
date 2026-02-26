@@ -15,12 +15,12 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
+futures-timer = { version = "3", features = ["wasm-bindgen"] }
 uuid = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 async-process = "1"
-async-io = "1"
 tempfile = "3.0"
 
 # Session types integration - temporarily removed during refactor

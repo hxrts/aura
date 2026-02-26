@@ -51,7 +51,8 @@ pub fn aura_test_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #(#attrs)*
         // NOTE: Test code is explicitly allowed to use tokio runtime (arch-check exemption)
         // This macro generates test infrastructure, not application code
-        #[tokio::test(flavor = "multi_thread")]
+        #[cfg_attr(target_arch = "wasm32", tokio::test(flavor = "current_thread"))]
+        #[cfg_attr(not(target_arch = "wasm32"), tokio::test(flavor = "multi_thread"))]
         #vis #sig {
             // Initialize tracing once (safe to call multiple times)
             let _guard = ::aura_testkit::init_test_tracing();

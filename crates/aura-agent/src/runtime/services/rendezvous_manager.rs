@@ -9,7 +9,9 @@
 //! will announce presence and discover peers on the local network.
 
 use aura_core::crypto::single_signer::SingleSignerKeyPackage;
-use aura_core::effects::network::{UdpEffects, UdpEndpoint};
+use aura_core::effects::network::{UdpEffects, UdpEndpoint, UdpEndpointEffects};
+#[cfg(target_arch = "wasm32")]
+use aura_core::effects::network::NetworkError;
 use aura_core::effects::secure::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
 };
@@ -20,6 +22,8 @@ use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
     RendezvousService, TransportHint,
 };
+use async_trait::async_trait;
+use cfg_if::cfg_if;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -183,6 +187,31 @@ impl RendezvousState {
 /// Task handles for LAN discovery announcer and listener.
 type LanTaskHandles = Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)>;
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+struct WasmUnsupportedUdpEffects;
+
+#[cfg(target_arch = "wasm32")]
+#[async_trait]
+impl UdpEffects for WasmUnsupportedUdpEffects {
+    async fn udp_bind(
+        &self,
+        _addr: UdpEndpoint,
+    ) -> Result<Arc<dyn UdpEndpointEffects>, NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
+}
+
+fn default_udp_effects() -> Arc<dyn UdpEffects> {
+    cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            Arc::new(WasmUnsupportedUdpEffects)
+        } else {
+            Arc::new(aura_effects::RealUdpEffectsHandler::new())
+        }
+    }
+}
+
 /// Manager for rendezvous operations
 ///
 /// Integrates `aura_rendezvous::RendezvousService` into the agent runtime lifecycle.
@@ -234,13 +263,22 @@ impl RendezvousManager {
         }
     }
 
+    /// Create a new rendezvous manager with the default UDP effect backend for this target.
+    pub fn new_with_default_udp(
+        authority_id: AuthorityId,
+        config: RendezvousManagerConfig,
+        time: Arc<dyn PhysicalTimeEffects>,
+    ) -> Self {
+        Self::new(authority_id, config, time, default_udp_effects())
+    }
+
     /// Create with default configuration
     pub fn with_defaults(authority_id: AuthorityId, time: Arc<dyn PhysicalTimeEffects>) -> Self {
         Self::new(
             authority_id,
             RendezvousManagerConfig::default(),
             time,
-            Arc::new(aura_effects::RealUdpEffectsHandler::new()),
+            default_udp_effects(),
         )
     }
 
@@ -895,7 +933,6 @@ impl RendezvousManager {
 
 use super::traits::{RuntimeService, ServiceError, ServiceHealth};
 use super::RuntimeTaskRegistry;
-use async_trait::async_trait;
 
 #[async_trait]
 impl RuntimeService for RendezvousManager {
@@ -1026,7 +1063,7 @@ mod tests {
     }
 
     fn test_udp() -> Arc<dyn UdpEffects> {
-        Arc::new(aura_effects::RealUdpEffectsHandler::new())
+        default_udp_effects()
     }
 
     // Mock for tests

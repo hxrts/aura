@@ -35,8 +35,10 @@ async-trait = { workspace = true }
 
 [dev-dependencies]
 # Testing only - no runtime dependencies
-criterion = { workspace = true }
 
 [[bench]]
 name = "transport"
 harness = false
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = { workspace = true }

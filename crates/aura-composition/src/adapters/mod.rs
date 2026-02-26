@@ -55,8 +55,11 @@ mod tests {
         console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
         storage::FilesystemStorageHandler, system::logging::LoggingSystemHandler,
         time::PhysicalTimeHandler, trace::TraceHandler,
-        TcpTransportHandler as RealTransportHandler,
     };
+    use cfg_if::cfg_if;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use aura_effects::TcpTransportHandler as RealTransportHandler;
 
     #[test]
     fn test_supported_operations_match_registry_map() {
@@ -112,15 +115,19 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let network_ops = TransportHandlerAdapter::new(RealTransportHandler::default())
-            .supported_operations(EffectType::Network);
-        assert_eq!(
-            network_ops,
-            operations_for(EffectType::Network)
-                .iter()
-                .map(|op| (*op).to_string())
-                .collect::<Vec<_>>()
-        );
+        cfg_if! {
+            if #[cfg(not(target_arch = "wasm32"))] {
+                let network_ops = TransportHandlerAdapter::new(RealTransportHandler::default())
+                    .supported_operations(EffectType::Network);
+                assert_eq!(
+                    network_ops,
+                    operations_for(EffectType::Network)
+                        .iter()
+                        .map(|op| (*op).to_string())
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
 
         let system_ops = LoggingSystemHandlerAdapter::new(LoggingSystemHandler::default())
             .supported_operations(EffectType::System);

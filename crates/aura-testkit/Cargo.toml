@@ -44,9 +44,9 @@ aura-agent = { path = "../aura-agent", optional = true }
 
 # Async runtime
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
 futures = { workspace = true }
-async-io = "1"
+futures-timer = { version = "3", features = ["wasm-bindgen"] }
 async-lock = "3"
 async-channel = "1"
 
@@ -86,5 +86,7 @@ serial_test = { workspace = true }
 [dev-dependencies]
 # For testing the test utilities themselves
 # tokio-test = { workspace = true } # removed - unused
-criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
 bincode = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }

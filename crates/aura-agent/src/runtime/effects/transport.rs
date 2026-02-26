@@ -3,11 +3,17 @@ use async_trait::async_trait;
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
 use aura_core::effects::{TransportEffects, TransportError};
 use aura_core::{AuthorityId, ContextId};
+#[cfg(not(target_arch = "wasm32"))]
 use aura_effects::transport::TransportConfig;
 use aura_rendezvous::TransportHint;
+use cfg_if::cfg_if;
+#[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::net::TcpStream;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::time::timeout;
 
 // Implementation of TransportEffects
@@ -167,64 +173,74 @@ async fn resolve_peer_addr(
 }
 
 async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(), TransportError> {
-    let socket_addr: SocketAddr = addr.parse().map_err(|e| TransportError::SendFailed {
-        destination: envelope.destination,
-        reason: format!("Invalid transport address '{addr}': {e}"),
-    })?;
+    cfg_if! {
+        if #[cfg(target_arch = "wasm32")] {
+            let _ = addr;
+            Err(TransportError::SendFailed {
+                destination: envelope.destination,
+                reason: "TCP transport is not available on wasm".to_string(),
+            })
+        } else {
+            let socket_addr: SocketAddr = addr.parse().map_err(|e| TransportError::SendFailed {
+                destination: envelope.destination,
+                reason: format!("Invalid transport address '{addr}': {e}"),
+            })?;
 
-    let config = TransportConfig::default();
-    let mut stream = timeout(
-        config.connect_timeout.get(),
-        TcpStream::connect(socket_addr),
-    )
-    .await
-    .map_err(|_| TransportError::SendFailed {
-        destination: envelope.destination,
-        reason: "TCP connect timeout".to_string(),
-    })?
-    .map_err(|e| TransportError::SendFailed {
-        destination: envelope.destination,
-        reason: format!("TCP connect failed: {e}"),
-    })?;
+            let config = TransportConfig::default();
+            let mut stream = timeout(
+                config.connect_timeout.get(),
+                TcpStream::connect(socket_addr),
+            )
+            .await
+            .map_err(|_| TransportError::SendFailed {
+                destination: envelope.destination,
+                reason: "TCP connect timeout".to_string(),
+            })?
+            .map_err(|e| TransportError::SendFailed {
+                destination: envelope.destination,
+                reason: format!("TCP connect failed: {e}"),
+            })?;
 
-    let payload = aura_core::util::serialization::to_vec(envelope).map_err(|e| {
-        TransportError::SendFailed {
-            destination: envelope.destination,
-            reason: format!("Envelope serialization failed: {e}"),
+            let payload = aura_core::util::serialization::to_vec(envelope).map_err(|e| {
+                TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: format!("Envelope serialization failed: {e}"),
+                }
+            })?;
+
+            let len = (payload.len() as u32).to_be_bytes();
+            timeout(config.write_timeout.get(), stream.write_all(&len))
+                .await
+                .map_err(|_| TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: "TCP write timeout".to_string(),
+                })?
+                .map_err(|e| TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: format!("TCP write failed: {e}"),
+                })?;
+            timeout(config.write_timeout.get(), stream.write_all(&payload))
+                .await
+                .map_err(|_| TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: "TCP write timeout".to_string(),
+                })?
+                .map_err(|e| TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: format!("TCP write failed: {e}"),
+                })?;
+            timeout(config.write_timeout.get(), stream.flush())
+                .await
+                .map_err(|_| TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: "TCP flush timeout".to_string(),
+                })?
+                .map_err(|e| TransportError::SendFailed {
+                    destination: envelope.destination,
+                    reason: format!("TCP flush failed: {e}"),
+                })?;
+
+            Ok(())
         }
-    })?;
-
-    let len = (payload.len() as u32).to_be_bytes();
-    timeout(config.write_timeout.get(), stream.write_all(&len))
-        .await
-        .map_err(|_| TransportError::SendFailed {
-            destination: envelope.destination,
-            reason: "TCP write timeout".to_string(),
-        })?
-        .map_err(|e| TransportError::SendFailed {
-            destination: envelope.destination,
-            reason: format!("TCP write failed: {e}"),
-        })?;
-    timeout(config.write_timeout.get(), stream.write_all(&payload))
-        .await
-        .map_err(|_| TransportError::SendFailed {
-            destination: envelope.destination,
-            reason: "TCP write timeout".to_string(),
-        })?
-        .map_err(|e| TransportError::SendFailed {
-            destination: envelope.destination,
-            reason: format!("TCP write failed: {e}"),
-        })?;
-    timeout(config.write_timeout.get(), stream.flush())
-        .await
-        .map_err(|_| TransportError::SendFailed {
-            destination: envelope.destination,
-            reason: "TCP flush timeout".to_string(),
-        })?
-        .map_err(|e| TransportError::SendFailed {
-            destination: envelope.destination,
-            reason: format!("TCP flush failed: {e}"),
-        })?;
-
-    Ok(())
+    }
 }

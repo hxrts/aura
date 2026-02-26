@@ -1376,7 +1376,10 @@ mod key_conversion_tests {
     proptest! {
         #[test]
         fn test_ed25519_to_x25519_conversion(seed in any::<[u8; 32]>()) {
-            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
             runtime.block_on(async {
                 let handler = RealCryptoHandler::seeded(seed);
 

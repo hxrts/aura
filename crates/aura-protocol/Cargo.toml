@@ -82,4 +82,6 @@ biscuit-auth = { workspace = true }
 
 
 [dev-dependencies]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }

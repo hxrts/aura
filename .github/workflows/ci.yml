@@ -113,6 +113,19 @@ jobs:
         env:
           CARGO_BUILD_JOBS: 4
 
+  agent-wasm:
+    name: Agent WASM Matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: agent-wasm
+      - name: Check aura-agent wasm backends
+        run: nix develop --command just ci-agent-wasm
+        env:
+          CARGO_BUILD_JOBS: 4
+
   effects:
     name: Effects Violations
     runs-on: ubuntu-latest

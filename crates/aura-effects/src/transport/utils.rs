@@ -4,7 +4,7 @@
 //! Target: <200 lines, focus on std/tokio ecosystem.
 
 use super::{TransportError, TransportResult, TransportSocketAddr, TransportUrl};
-use std::net::IpAddr;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -14,8 +14,8 @@ pub struct AddressResolver;
 impl AddressResolver {
     /// Resolve hostname to socket addresses
     pub async fn resolve(host: &str, port: u16) -> TransportResult<Vec<TransportSocketAddr>> {
-        let addresses: Vec<_> = tokio::net::lookup_host((host, port))
-            .await
+        let addresses: Vec<_> = (host, port)
+            .to_socket_addrs()
             .map_err(|e| TransportError::ConnectionFailed(format!("DNS resolution failed: {e}")))?
             .map(TransportSocketAddr::from)
             .collect();

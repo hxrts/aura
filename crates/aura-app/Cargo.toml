@@ -64,7 +64,12 @@ app-internals = []
 uniffi = ["dep:uniffi", "callbacks"]
 
 # WASM for web targets
-wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:web-sys"]
+wasm = [
+    "dep:wasm-bindgen",
+    "dep:js-sys",
+    "dep:web-sys",
+    "dep:console_error_panic_hook",
+]
 
 # =============================================================================
 # Development Features
@@ -118,7 +123,7 @@ async-lock = "3"
 futures-signals = { version = "0.3", optional = true }
 
 # Optional: Async runtime for signal forwarding (signals feature)
-tokio = { version = "1", features = ["rt", "sync"] }
+tokio = { version = "1", default-features = false, features = ["rt", "sync"] }
 futures = { version = "0.3", optional = true }
 
 # Optional: FFI for mobile
@@ -127,7 +132,8 @@ uniffi = { version = "0.25", optional = true }
 # Optional: WASM for web
 wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
-web-sys = { version = "0.3", optional = true, features = ["console"] }
+web-sys = { version = "0.3", optional = true, features = ["console", "WorkerGlobalScope"] }
+console_error_panic_hook = { version = "0.1", optional = true }
 
 # Optional: dominator for Rust web apps
 dominator = { version = "0.5", optional = true }
@@ -151,8 +157,10 @@ getrandom = { version = "0.2", features = ["js"] }
 uniffi = { version = "0.25", features = ["build"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 proptest = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros"] }
 
 [lints]
 workspace = true

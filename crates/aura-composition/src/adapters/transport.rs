@@ -5,8 +5,14 @@ use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::{NetworkCoreEffects, NetworkExtendedEffects};
 use aura_core::{EffectType, ExecutionMode};
-use aura_effects::TcpTransportHandler as RealTransportHandler;
+use cfg_if::cfg_if;
 use std::sync::Arc;
+
+cfg_if! {
+    if #[cfg(not(target_arch = "wasm32"))] {
+        use aura_effects::TcpTransportHandler as RealTransportHandler;
+    }
+}
 
 /// Adapter for TcpTransportHandler (NetworkEffects implementation)
 pub struct TransportHandlerAdapter {
@@ -15,6 +21,7 @@ pub struct TransportHandlerAdapter {
 }
 
 impl TransportHandlerAdapter {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(handler: RealTransportHandler) -> Self {
         let handler = Arc::new(handler);
         let core: Arc<dyn NetworkCoreEffects> = handler.clone();

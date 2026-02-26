@@ -1,10 +1,9 @@
-//! Example showing how to migrate from SendGuardChain to pure guards
+//! Example showing pure guard chain usage
 //!
 //! This example demonstrates:
-//! 1. Using the pure guard chain with existing effect interpreters
-//! 2. Converting old SendGuardChain usage to the new model
-//! 3. Custom guard implementation
-//! 4. Simulation with deterministic effect interpretation (no runtime dependency)
+//! 1. Using the pure guard chain with effect interpreters
+//! 2. Custom guard implementation
+//! 3. Simulation with deterministic effect interpretation
 
 use aura_core::{
     effects::{
@@ -148,31 +147,8 @@ async fn run_examples() -> AuraResult<()> {
     println!("Authorized: {}", outcome.is_authorized());
     println!("Effects executed: {executed}");
 
-    // Example 2: Migration from SendGuardChain
-    println!("\n=== Example 2: Migration Path ===");
-
-    // Old way (would use SendGuardChain)
-    // let send_guard = SendGuardChain::new(
-    //     "message:send".to_string(),
-    //     context,
-    //     peer,
-    //     100,
-    // );
-    // let result = send_guard.evaluate(&effect_system).await?;
-
-    // New way - same behavior, pure implementation
-    let request = GuardRequest::new(authority, "message:send", FlowCost::new(100))
-        .with_capability(Cap::default());
-
-    let guard_chain = GuardChain::standard();
-    let interpreter = SimulationInterpreter::new();
-    let outcome = guard_chain.evaluate(&snapshot, &request);
-    let executed = run_effects(&interpreter, &outcome.effects).await?;
-    println!("Migration result - Authorized: {}", outcome.is_authorized());
-    println!("Effects executed: {executed}");
-
-    // Example 3: Testing guard logic without I/O
-    println!("\n=== Example 3: Pure Testing ===");
+    // Example 2: Testing guard logic without I/O
+    println!("\n=== Example 2: Pure Testing ===");
 
     // Test insufficient budget scenario
     let expensive_request = GuardRequest::new(authority, "expensive_op", FlowCost::new(2000));
@@ -198,7 +174,7 @@ async fn run_effects(
     Ok(executed)
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> AuraResult<()> {
     run_examples().await
 }

@@ -6,7 +6,7 @@
 use aura_core::DeviceId;
 use aura_core::{JoinSemilattice, MeetSemiLattice};
 use aura_journal::algebra::account_state::AccountState;
-use async_io::Timer;
+use futures_timer::Delay;
 use std::time::{Duration, Instant};
 
 /// Assert that an account state has the expected number of devices
@@ -208,7 +208,7 @@ pub async fn assert_eventually_eq<T, F>(
             );
         }
 
-        Timer::after(Duration::from_millis(10)).await;
+        Delay::new(Duration::from_millis(10)).await;
     }
 }
 

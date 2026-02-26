@@ -15,23 +15,31 @@
 //! (routing, retry, connection management) belongs in aura-agent/transport (Layer 6).
 //! These implement pure infrastructure effects only.
 
-// REMOVED: pub mod coordination; // Moved to aura-protocol (Layer 4)
-// REMOVED: pub mod memory; // Moved to aura-testkit (Layer 8)
-pub mod framing;
-pub mod real;
-pub mod tcp;
-pub mod utils;
-pub mod websocket;
+use cfg_if::cfg_if;
 
-// REMOVED: Re-exports moved to aura-protocol
-// pub use coordination::{RetryingTransportManager, TransportCoordinationConfig,
-//                        TransportCoordinationError, CoordinationResult};
-pub use framing::FramingHandler;
-// REMOVED: pub use memory::InMemoryTransportHandler; // Moved to aura-testkit
-pub use real::RealTransportHandler;
-pub use tcp::TcpTransportHandler;
-pub use utils::{AddressResolver, BufferUtils, ConnectionMetrics, TimeoutHelper, UrlValidator};
-pub use websocket::WebSocketTransportHandler;
+cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        pub mod framing;
+        pub mod real;
+        pub mod utils;
+
+        pub use framing::FramingHandler;
+        pub use real::RealTransportHandler;
+        pub use utils::{AddressResolver, BufferUtils, ConnectionMetrics, TimeoutHelper, UrlValidator};
+    } else {
+        pub mod framing;
+        pub mod real;
+        pub mod tcp;
+        pub mod utils;
+        pub mod websocket;
+
+        pub use framing::FramingHandler;
+        pub use real::RealTransportHandler;
+        pub use tcp::TcpTransportHandler;
+        pub use utils::{AddressResolver, BufferUtils, ConnectionMetrics, TimeoutHelper, UrlValidator};
+        pub use websocket::WebSocketTransportHandler;
+    }
+}
 
 use std::num::NonZeroUsize;
 

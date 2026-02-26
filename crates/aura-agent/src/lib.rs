@@ -86,7 +86,8 @@
 ))]
 compile_error!(
     "Enable at most one choreography backend feature: \
-     choreo-backend-telltale-adapter | choreo-backend-telltale-vm"
+     choreo-backend-telltale-adapter | choreo-backend-telltale-vm. \
+     Do not use --all-features for aura-agent; run explicit backend lanes instead."
 );
 
 // Core modules (public API)

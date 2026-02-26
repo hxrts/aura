@@ -25,7 +25,7 @@ choreography!(include_str!("src/main.choreo"));
 // The macro generates the aura_choreography_pingpong module (namespace-prefixed).
 
 /// Demonstration of the choreography system using the actual macro
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("=== Hello Choreography: Aura Macro Demo ===\n");
 

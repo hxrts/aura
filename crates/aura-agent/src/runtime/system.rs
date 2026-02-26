@@ -22,6 +22,7 @@ use aura_core::DeviceId;
 use aura_rendezvous::TransportHint;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
 
 /// Main runtime system for the agent
@@ -537,6 +538,7 @@ impl RuntimeSystem {
                 tracing::warn!(error = %e, "Failed to publish LAN descriptor");
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
         if self.lan_transport.is_some() {
             self.start_lan_transport_listener();
         }
@@ -569,6 +571,7 @@ impl RuntimeSystem {
         .await
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn start_lan_transport_listener(&self) {
         let Some(lan_transport) = &self.lan_transport else {
             return;

@@ -8,10 +8,14 @@ use aura_core::effects::{
 };
 use aura_core::identifiers::AuthorityId;
 use aura_protocol::amp::deserialize_amp_message;
+use cfg_if::cfg_if;
 use std::collections::HashMap;
 use std::collections::HashSet;
+#[cfg(not(target_arch = "wasm32"))]
 use std::net::SocketAddr;
+#[cfg(not(target_arch = "wasm32"))]
 use std::str::FromStr;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncWriteExt;
 
 const NETWORK_CONTENT_TYPE: &str = "application/aura-network";
@@ -214,14 +218,21 @@ impl NetworkExtendedEffects for AuraEffectSystem {
             return Err(NetworkError::NotImplemented);
         }
 
-        // For now, treat the address as a TCP endpoint and validate connectivity.
-        let addr = _address.to_string();
-        let socket_addr = SocketAddr::from_str(&addr)
-            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
-        let _stream = tokio::net::TcpStream::connect(socket_addr)
-            .await
-            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
-        Ok(addr)
+        cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _ = _address;
+                Err(NetworkError::NotImplemented)
+            } else {
+                // For now, treat the address as a TCP endpoint and validate connectivity.
+                let addr = _address.to_string();
+                let socket_addr = SocketAddr::from_str(&addr)
+                    .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+                let _stream = tokio::net::TcpStream::connect(socket_addr)
+                    .await
+                    .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+                Ok(addr)
+            }
+        }
     }
 
     async fn send(&self, _connection_id: &str, _data: Vec<u8>) -> Result<(), NetworkError> {
@@ -230,47 +241,54 @@ impl NetworkExtendedEffects for AuraEffectSystem {
             return Err(NetworkError::NotImplemented);
         }
 
-        let socket_addr =
-            SocketAddr::from_str(_connection_id).map_err(|e| NetworkError::SendFailed {
-                peer_id: None,
-                reason: format!("Invalid connection address: {e}"),
-            })?;
+        cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                let _ = (_connection_id, _data);
+                Err(NetworkError::NotImplemented)
+            } else {
+                let socket_addr =
+                    SocketAddr::from_str(_connection_id).map_err(|e| NetworkError::SendFailed {
+                        peer_id: None,
+                        reason: format!("Invalid connection address: {e}"),
+                    })?;
 
-        let config = aura_effects::transport::TransportConfig::default();
-        let mut stream = tokio::time::timeout(
-            config.connect_timeout.get(),
-            tokio::net::TcpStream::connect(socket_addr),
-        )
-        .await
-        .map_err(|_| NetworkError::OperationTimeout {
-            operation: "network_send_connect".to_string(),
-            timeout_ms: config.connect_timeout.get().as_millis() as u64,
-        })?
-        .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+                let config = aura_effects::transport::TransportConfig::default();
+                let mut stream = tokio::time::timeout(
+                    config.connect_timeout.get(),
+                    tokio::net::TcpStream::connect(socket_addr),
+                )
+                .await
+                .map_err(|_| NetworkError::OperationTimeout {
+                    operation: "network_send_connect".to_string(),
+                    timeout_ms: config.connect_timeout.get().as_millis() as u64,
+                })?
+                .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
 
-        let len = (_data.len() as u32).to_be_bytes();
-        tokio::time::timeout(config.write_timeout.get(), stream.write_all(&len))
-            .await
-            .map_err(|_| NetworkError::OperationTimeout {
-                operation: "network_send_len".to_string(),
-                timeout_ms: config.write_timeout.get().as_millis() as u64,
-            })?
-            .map_err(|e| NetworkError::SendFailed {
-                peer_id: None,
-                reason: e.to_string(),
-            })?;
-        tokio::time::timeout(config.write_timeout.get(), stream.write_all(&_data))
-            .await
-            .map_err(|_| NetworkError::OperationTimeout {
-                operation: "network_send_payload".to_string(),
-                timeout_ms: config.write_timeout.get().as_millis() as u64,
-            })?
-            .map_err(|e| NetworkError::SendFailed {
-                peer_id: None,
-                reason: e.to_string(),
-            })?;
+                let len = (_data.len() as u32).to_be_bytes();
+                tokio::time::timeout(config.write_timeout.get(), stream.write_all(&len))
+                    .await
+                    .map_err(|_| NetworkError::OperationTimeout {
+                        operation: "network_send_len".to_string(),
+                        timeout_ms: config.write_timeout.get().as_millis() as u64,
+                    })?
+                    .map_err(|e| NetworkError::SendFailed {
+                        peer_id: None,
+                        reason: e.to_string(),
+                    })?;
+                tokio::time::timeout(config.write_timeout.get(), stream.write_all(&_data))
+                    .await
+                    .map_err(|_| NetworkError::OperationTimeout {
+                        operation: "network_send_payload".to_string(),
+                        timeout_ms: config.write_timeout.get().as_millis() as u64,
+                    })?
+                    .map_err(|e| NetworkError::SendFailed {
+                        peer_id: None,
+                        reason: e.to_string(),
+                    })?;
 
-        Ok(())
+                Ok(())
+            }
+        }
     }
 
     async fn close(&self, _connection_id: &str) -> Result<(), NetworkError> {

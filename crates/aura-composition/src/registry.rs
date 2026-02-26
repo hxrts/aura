@@ -6,7 +6,7 @@
 
 use crate::adapters::{
     ConsoleHandlerAdapter, CryptoHandlerAdapter, LoggingSystemHandlerAdapter, RandomHandlerAdapter,
-    StorageHandlerAdapter, TimeHandlerAdapter, TraceHandlerAdapter, TransportHandlerAdapter,
+    StorageHandlerAdapter, TimeHandlerAdapter, TraceHandlerAdapter,
 };
 use async_trait::async_trait;
 use aura_core::{
@@ -15,13 +15,21 @@ use aura_core::{
 use aura_effects::{
     console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
     storage::FilesystemStorageHandler, system::logging::LoggingSystemHandler,
-    time::PhysicalTimeHandler, trace::TraceHandler, TcpTransportHandler as RealTransportHandler,
+    time::PhysicalTimeHandler, trace::TraceHandler,
 };
 use aura_mpst::LocalSessionType;
+use cfg_if::cfg_if;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
+
+cfg_if! {
+    if #[cfg(not(target_arch = "wasm32"))] {
+        use crate::adapters::TransportHandlerAdapter;
+        use aura_effects::TcpTransportHandler as RealTransportHandler;
+    }
+}
 
 /// Typed effect identifier for registry metadata keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -507,10 +515,14 @@ impl EffectRegistry {
             EffectType::Time,
             Box::new(TimeHandlerAdapter::new(PhysicalTimeHandler::new())),
         )?;
-        self.register_handler(
-            EffectType::Network,
-            Box::new(TransportHandlerAdapter::new(RealTransportHandler::default())),
-        )?;
+        cfg_if! {
+            if #[cfg(not(target_arch = "wasm32"))] {
+                self.register_handler(
+                    EffectType::Network,
+                    Box::new(TransportHandlerAdapter::new(RealTransportHandler::default())),
+                )?;
+            }
+        }
         self.register_handler(
             EffectType::Trace,
             Box::new(TraceHandlerAdapter::new(TraceHandler::new())),

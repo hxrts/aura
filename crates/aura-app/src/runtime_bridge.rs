@@ -49,7 +49,6 @@ use aura_core::threshold::{
 use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::types::{Epoch, FrostThreshold};
 use aura_core::DeviceId;
-use aura_effects::PhysicalTimeHandler;
 use aura_journal::fact::{FactOptions, RelationalFact};
 use std::sync::Arc;
 
@@ -1381,8 +1380,10 @@ impl RuntimeBridge for OfflineRuntimeBridge {
 
     async fn current_time_ms(&self) -> Result<u64, IntentError> {
         // Offline bridge uses best-effort physical time for UI surfaces.
-        let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
-        Ok(now_ms)
+        let now = std::time::UNIX_EPOCH
+            .elapsed()
+            .map_err(|err| IntentError::internal_error(format!("System clock error: {err}")))?;
+        Ok(now.as_millis() as u64)
     }
 }
 

@@ -10,10 +10,10 @@
 
 use crate::evaluator::QuintEvaluator;
 use crate::{AuraResult, PropertySpec, VerificationResult};
-use async_io::Timer;
 use aura_core::AuraError;
 use futures::pin_mut;
 use futures::{future, Future};
+use futures_timer::Delay;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -245,7 +245,7 @@ async fn with_timeout<F, T>(duration: Duration, fut: F, context: &str) -> AuraRe
 where
     F: Future<Output = AuraResult<T>>,
 {
-    let timer = Timer::after(duration);
+    let timer = Delay::new(duration);
     pin_mut!(timer);
     pin_mut!(fut);
 

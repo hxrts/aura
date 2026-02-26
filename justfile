@@ -182,6 +182,27 @@ ci-choreo-parity:
     cargo test -p aura-agent --features choreo-backend-telltale-vm --test telltale_vm_parity -q
     cargo test -p aura-agent --features choreo-backend-telltale-vm --lib parity_policy::tests -q
 
+# WASM choreography backend matrix for aura-agent.
+# Note: do not use `--all-features` for aura-agent because choreography backends are exclusive.
+ci-agent-wasm:
+    cargo check -p aura-agent --target wasm32-unknown-unknown --features web
+    cargo check -p aura-agent --target wasm32-unknown-unknown --features "web,choreo-backend-telltale-vm"
+
+# WASM workspace test matrix for crates currently supported on wasm.
+# Excludes native-only/runtime-heavy crates:
+# - aura-terminal: native UI/runtime
+# - aura-simulator: native process/simulation host
+# - aura-quint: native quint evaluator dependency path
+# - aura-agent: test suite currently assumes multi-thread tokio runtime
+# Note: intentionally no `-q` because wasm-bindgen-test-runner rejects forwarded `--quiet`.
+ci-workspace-wasm-test:
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+    cargo test --workspace --target wasm32-unknown-unknown \
+      --exclude aura-terminal \
+      --exclude aura-simulator \
+      --exclude aura-quint \
+      --exclude aura-agent
+
 # Effects system violation checks
 ci-effects:
     #!/usr/bin/env bash

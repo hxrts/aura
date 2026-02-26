@@ -30,7 +30,10 @@ async-trait = { workspace = true }
 # Time handling
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["full", "test-util"] }
+tokio = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 default = []

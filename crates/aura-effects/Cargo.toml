@@ -31,9 +31,9 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 futures-util = "0.3"
+cfg-if = "1"
 
 # Transport libraries
-tokio-tungstenite = "0.23"
 url = "2.5"
 
 # Serialization
@@ -67,9 +67,13 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 fastrand = "2.1"
 hex = { workspace = true }
-socket2 = { workspace = true }
 
 [dev-dependencies]
 # tokio-test = { workspace = true } # removed - unused
 tempfile = { workspace = true }
 proptest = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["fs", "net"] }
+tokio-tungstenite = "0.23"
+socket2 = { workspace = true }

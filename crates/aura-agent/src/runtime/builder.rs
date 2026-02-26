@@ -214,11 +214,10 @@ impl EffectSystemBuilder {
         // Create optional rendezvous manager
         let rendezvous_enabled = self.rendezvous_config.is_some();
         let rendezvous_manager = self.rendezvous_config.clone().map(|rendezvous_config| {
-            super::services::RendezvousManager::new(
+            super::services::RendezvousManager::new_with_default_udp(
                 authority_id,
                 rendezvous_config,
                 Arc::new(effect_system.time_effects().clone()),
-                Arc::new(aura_effects::RealUdpEffectsHandler::new()),
             )
         });
 
@@ -228,18 +227,27 @@ impl EffectSystemBuilder {
             .map(|social_config| super::services::SocialManager::new(authority_id, social_config));
 
         // Create optional LAN transport service (used for LAN advertising + future TCP ingress)
-        let lan_transport = if rendezvous_enabled {
-            match super::services::LanTransportService::bind(config.network.bind_address.as_str())
-                .await
+        let lan_transport: Option<Arc<super::services::LanTransportService>> = {
+            #[cfg(target_arch = "wasm32")]
             {
-                Ok(service) => Some(Arc::new(service)),
-                Err(err) => {
-                    tracing::warn!(error = %err, "Failed to start LAN transport listener");
+                None
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                if rendezvous_enabled {
+                    match super::services::LanTransportService::bind(config.network.bind_address.as_str())
+                        .await
+                    {
+                        Ok(service) => Some(Arc::new(service)),
+                        Err(err) => {
+                            tracing::warn!(error = %err, "Failed to start LAN transport listener");
+                            None
+                        }
+                    }
+                } else {
                     None
                 }
             }
-        } else {
-            None
         };
 
         let rendezvous_handler = if rendezvous_enabled {
@@ -316,19 +324,30 @@ impl EffectSystemBuilder {
 
     /// Build the runtime system (sync)
     pub fn build_sync(self) -> Result<RuntimeSystem, String> {
-        // For testing/simulation, we can build synchronously
-        match self.execution_mode {
-            ExecutionMode::Production => Err("Production runtime requires async build".to_string()),
-            _ => {
-                // Create a build-time context for wiring handlers
-                let authority_id = self.authority_id.ok_or("Authority ID required")?;
-                let context_id = aura_core::identifiers::ContextId::new_from_entropy([2u8; 32]);
-                let ctx = EffectContext::new(authority_id, context_id, self.execution_mode);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = self;
+            Err("build_sync is unavailable on wasm32; use build(...).await".to_string())
+        }
 
-                // Use a minimal async runtime just for building
-                let rt = tokio::runtime::Runtime::new()
-                    .map_err(|e| format!("Failed to create runtime: {}", e))?;
-                rt.block_on(self.build(&ctx))
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // For testing/simulation, we can build synchronously
+            match self.execution_mode {
+                ExecutionMode::Production => {
+                    Err("Production runtime requires async build".to_string())
+                }
+                _ => {
+                    // Create a build-time context for wiring handlers
+                    let authority_id = self.authority_id.ok_or("Authority ID required")?;
+                    let context_id = aura_core::identifiers::ContextId::new_from_entropy([2u8; 32]);
+                    let ctx = EffectContext::new(authority_id, context_id, self.execution_mode);
+
+                    // Use a minimal async runtime just for building
+                    let rt = tokio::runtime::Runtime::new()
+                        .map_err(|e| format!("Failed to create runtime: {}", e))?;
+                    rt.block_on(self.build(&ctx))
+                }
             }
         }
     }
