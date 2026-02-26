@@ -2,11 +2,13 @@
 
 Aura is a private peer-to-peer social network designed around a few novel concepts:
 
-Identity is relational • Identity emerges bottom-up between parties that share context. Aura has no transparent state and no global singleton, rather each context is encrypted and governed by its own threshold authority. Aura's relational model enables social recovery and complete account rehydration without transient decryption in scenarios where users have lost all devices.
+Social infrastructure • Aura forms an encrypted mesh across the social graph. Gossip, rendezvous, consensus, and storage all operate through these bounded contexts.
 
-Your friends are the network • Aura forms an encrypted mesh across the social graph. Distributed protocols run within scoped sessions and channels that conceal participant structure. Gossip, rendezvous, consensus, and storage all operate through these bounded contexts.
+Relational identity • Identity emerges bottom-up between parties that share an encrypted, jointly governed context. Social recovery enables restoring full account access through social relationships.
 
-Autonomy from consent • Relationships are expressed through a web-of-trust. Capabilities form a semilattice that attenuates authority. Information is governed via consent predicates, enabling participants to coordinate freely by ensuring boundaries are respected by design.
+Bounded autonomy • Coordination becomes intuitive when capabilities are explicit and composable, and the system enforces consent by design.
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hxrts/aura)
 
 ## Architecture
 
