@@ -69,11 +69,26 @@ jobs:
       - name: Create swap space
         run: |
           # Create 4GB swap for memory-heavy compilation
-          sudo fallocate -l 4G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          echo "Swap enabled:"
+          # Check if swap file already exists and is in use
+          if [ -f /swapfile ]; then
+            echo "Swap file exists, checking if in use..."
+            if swapon --show | grep -q /swapfile; then
+              echo "Swap already enabled at /swapfile, skipping creation"
+            else
+              # File exists but not used as swap - remove and recreate
+              sudo rm -f /swapfile
+              sudo fallocate -l 4G /swapfile
+              sudo chmod 600 /swapfile
+              sudo mkswap /swapfile
+              sudo swapon /swapfile
+            fi
+          else
+            sudo fallocate -l 4G /swapfile
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+          fi
+          echo "Swap status:"
           free -h
       - name: Run tests
         run: nix develop --command just ci-test
