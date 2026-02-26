@@ -4,8 +4,6 @@ Aura is a fully peer-to-peer, private communication system that operates without
 
 Aura achieves this by using [threshold cryptography](102_authority_and_identity.md) to distribute trust, [session typed protocols](108_mpst_and_choreography.md) to coordinate peers safely, a CRDT-based [distributed journal](103_journal.md), and [authorized effects](104_authorization.md) to enforce capability and privacy boundaries.
 
-Choreography execution is now Telltale-based end to end. Aura keeps `choreography!` and `.choreo` as the authoring surface, while runtime execution can run through adapter mode or VM mode with deterministic replay and cross-target parity gates.
-
 ## Implementation
 
 These three pillars combine into an 8-layer architecture. The layers progress from interface definitions through user-facing applications. See [System Architecture](001_system_architecture.md) for the complete layer breakdown.
