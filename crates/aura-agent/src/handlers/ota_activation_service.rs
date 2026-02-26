@@ -35,7 +35,9 @@ impl OtaActivationServiceApi {
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
-        let ceremony_runner = CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new());
+        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let ceremony_runner =
+            CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new(time_effects));
         Self::new_with_runner_and_config(
             effects,
             authority_context,

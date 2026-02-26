@@ -10,6 +10,7 @@ use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
 use crate::runtime::AuraEffectSystem;
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, CeremonyId, ContextId};
 use aura_core::Hash32;
@@ -44,7 +45,9 @@ impl RendezvousServiceApi {
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
         let handler = RendezvousHandler::new(authority_context)?;
-        let ceremony_runner = CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new());
+        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let ceremony_runner =
+            CeremonyRunner::new(crate::runtime::services::CeremonyTracker::new(time_effects));
         Ok(Self {
             handler,
             effects,

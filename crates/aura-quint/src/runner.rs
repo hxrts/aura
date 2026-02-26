@@ -10,13 +10,14 @@
 
 use crate::evaluator::QuintEvaluator;
 use crate::{AuraResult, PropertySpec, VerificationResult};
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::AuraError;
 use futures::pin_mut;
 use futures::{future, Future};
-use futures_timer::Delay;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
@@ -35,7 +36,9 @@ pub struct QuintRunner {
     /// Trace analyzer for optimization
     trace_analyzer: TraceAnalyzer,
     /// Storage provider for reading specs (filesystem-backed by default)
-    storage: std::sync::Arc<dyn aura_core::effects::StorageEffects>,
+    storage: Arc<dyn aura_core::effects::StorageEffects>,
+    /// Time effects for deterministic simulation support
+    time: Arc<dyn PhysicalTimeEffects>,
 }
 
 /// Cache for property verification results with LRU and TTL eviction
@@ -240,16 +243,22 @@ impl Default for RunnerConfig {
     }
 }
 
-/// Runtime-agnostic timeout helper for async operations
-async fn with_timeout<F, T>(duration: Duration, fut: F, context: &str) -> AuraResult<T>
+/// Runtime-agnostic timeout helper for async operations using effect-injected time
+async fn with_timeout<F, T>(
+    duration: Duration,
+    fut: F,
+    context: &str,
+    time: &dyn PhysicalTimeEffects,
+) -> AuraResult<T>
 where
     F: Future<Output = AuraResult<T>>,
 {
-    let timer = Delay::new(duration);
-    pin_mut!(timer);
+    let timeout_ms = duration.as_millis() as u64;
+    let sleep_fut = async { let _ = time.sleep_ms(timeout_ms).await; };
+    pin_mut!(sleep_fut);
     pin_mut!(fut);
 
-    match future::select(fut, timer).await {
+    match future::select(fut, sleep_fut).await {
         future::Either::Left((result, _)) => result,
         future::Either::Right((_, _)) => Err(AuraError::coordination_failed(format!(
             "{} timed out after {:?}",
@@ -689,16 +698,30 @@ impl QuintRunner {
             stats: VerificationStatistics::default(),
             counterexample_generator,
             trace_analyzer,
-            storage: std::sync::Arc::new(
+            storage: Arc::new(
                 aura_effects::storage::FilesystemStorageHandler::with_default_path(),
             ),
+            time: Arc::new(aura_effects::time::PhysicalTimeHandler::new()),
         })
     }
 
     /// Create a new Quint runner with explicit storage provider
     pub fn with_storage(
         config: RunnerConfig,
-        storage: std::sync::Arc<dyn aura_core::effects::StorageEffects>,
+        storage: Arc<dyn aura_core::effects::StorageEffects>,
+    ) -> AuraResult<Self> {
+        Self::with_effects(
+            config,
+            storage,
+            Arc::new(aura_effects::time::PhysicalTimeHandler::new()),
+        )
+    }
+
+    /// Create a new Quint runner with explicit effect providers
+    pub fn with_effects(
+        config: RunnerConfig,
+        storage: Arc<dyn aura_core::effects::StorageEffects>,
+        time: Arc<dyn PhysicalTimeEffects>,
     ) -> AuraResult<Self> {
         let evaluator = QuintEvaluator::new(config.quint_path.clone());
         let property_cache = PropertyCache::new_with_ttl(config.cache_size_limit, config.cache_ttl);
@@ -714,6 +737,7 @@ impl QuintRunner {
             counterexample_generator,
             trace_analyzer,
             storage,
+            time,
         })
     }
 
@@ -774,6 +798,7 @@ impl QuintRunner {
             self.config.default_timeout,
             self.evaluator.parse_file(&spec.spec_file),
             "Verification parse",
+            &*self.time,
         )
         .await
         .map_err(|e| {
@@ -787,6 +812,7 @@ impl QuintRunner {
             self.config.default_timeout,
             self.run_enhanced_simulation(&json_ir, spec),
             "Simulation",
+            &*self.time,
         )
         .await
         .map_err(|e| {
@@ -1078,6 +1104,7 @@ impl QuintRunner {
             self.config.default_timeout,
             self.evaluator.parse_file(file_path),
             "Parse",
+            &*self.time,
         )
         .await
         .map_err(|e| AuraError::invalid(format!("Parse timeout or failure: {}", e)))?;
@@ -1141,6 +1168,7 @@ impl QuintRunner {
             self.config.default_timeout,
             self.evaluator.parse_file(file_path),
             "Simulation parse",
+            &*self.time,
         )
         .await
         .map_err(|e| AuraError::internal(format!("Parse timeout or failure: {}", e)))?;
@@ -1153,6 +1181,7 @@ impl QuintRunner {
             self.config.default_timeout,
             self.evaluator.simulate_via_evaluator(&enhanced_ir),
             "Simulation run",
+            &*self.time,
         )
         .await
         .map_err(|e| AuraError::internal(format!("Simulation timeout or failure: {}", e)))?;

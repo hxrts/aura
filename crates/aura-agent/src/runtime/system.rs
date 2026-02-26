@@ -109,7 +109,9 @@ impl RuntimeSystem {
         authority_id: AuthorityId,
     ) -> Self {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
-        let ceremony_tracker = CeremonyTracker::new();
+        let time_effects: Arc<dyn PhysicalTimeEffects> =
+            Arc::new(effect_system.time_effects().clone());
+        let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         Self {
             effect_executor,
@@ -152,7 +154,9 @@ impl RuntimeSystem {
         authority_id: AuthorityId,
     ) -> Self {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
-        let ceremony_tracker = CeremonyTracker::new();
+        let time_effects: Arc<dyn PhysicalTimeEffects> =
+            Arc::new(effect_system.time_effects().clone());
+        let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         Self {
             effect_executor,
@@ -195,7 +199,9 @@ impl RuntimeSystem {
         authority_id: AuthorityId,
     ) -> Self {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
-        let ceremony_tracker = CeremonyTracker::new();
+        let time_effects: Arc<dyn PhysicalTimeEffects> =
+            Arc::new(effect_system.time_effects().clone());
+        let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         Self {
             effect_executor,
@@ -241,7 +247,9 @@ impl RuntimeSystem {
         authority_id: AuthorityId,
     ) -> Self {
         let threshold_signing = ThresholdSigningService::new(effect_system.clone());
-        let ceremony_tracker = CeremonyTracker::new();
+        let time_effects: Arc<dyn PhysicalTimeEffects> =
+            Arc::new(effect_system.time_effects().clone());
+        let ceremony_tracker = CeremonyTracker::new(time_effects);
         let ceremony_runner = CeremonyRunner::new(ceremony_tracker.clone());
         Self {
             effect_executor,

@@ -33,6 +33,8 @@ pub struct ReactivePipeline {
     update_tx: broadcast::Sender<ViewUpdate>,
     updates: broadcast::Receiver<ViewUpdate>,
     scheduler_task: Option<JoinHandle<()>>,
+    /// Time effects for deterministic simulation support
+    time_effects: Arc<dyn PhysicalTimeEffects>,
 }
 
 impl ReactivePipeline {
@@ -49,7 +51,7 @@ impl ReactivePipeline {
         reactive: ReactiveHandler,
     ) -> Self {
         let (mut scheduler, fact_tx, shutdown_tx, update_tx) =
-            ReactiveScheduler::new(scheduler_config, fact_registry, time_effects);
+            ReactiveScheduler::new(scheduler_config, fact_registry, time_effects.clone());
 
         // Register UI-facing signal views (scheduler → signals).
         scheduler.register_view(Arc::new(ChatSignalView::new(
@@ -75,6 +77,7 @@ impl ReactivePipeline {
             update_tx,
             updates,
             scheduler_task,
+            time_effects,
         }
     }
 
@@ -101,12 +104,20 @@ impl ReactivePipeline {
     }
 
     /// Shutdown the scheduler.
+    ///
+    /// Uses effect-injected time for deterministic simulation support.
     pub async fn shutdown(mut self) {
         let _ = self.shutdown_tx.send(()).await;
         if let Some(mut handle) = self.scheduler_task.take() {
-            let timeout = tokio::time::Duration::from_secs(2);
-            if tokio::time::timeout(timeout, &mut handle).await.is_err() {
-                handle.abort();
+            // Use select! with effect-injected sleep for deterministic shutdown timeout
+            tokio::select! {
+                _ = &mut handle => {
+                    // Task completed normally
+                }
+                _ = async { let _ = self.time_effects.sleep_ms(2000).await; } => {
+                    // Timeout elapsed, abort the task
+                    handle.abort();
+                }
             }
         }
     }

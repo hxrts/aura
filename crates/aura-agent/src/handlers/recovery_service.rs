@@ -78,7 +78,8 @@ impl RecoveryServiceApi {
         authority_context: AuthorityContext,
     ) -> AgentResult<Self> {
         let handler = RecoveryHandler::new(authority_context)?;
-        let ceremony_runner = CeremonyRunner::new(CeremonyTracker::new());
+        let time_effects: Arc<dyn PhysicalTimeEffects> = Arc::new(effects.time_effects().clone());
+        let ceremony_runner = CeremonyRunner::new(CeremonyTracker::new(time_effects));
         Ok(Self {
             handler,
             effects,

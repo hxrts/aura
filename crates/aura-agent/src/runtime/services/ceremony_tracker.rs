@@ -31,6 +31,7 @@ use aura_core::domain::status::{
     CeremonyResponse, CeremonyState as StatusCeremonyState, CeremonyStatus, ParticipantResponse,
     SupersessionReason as StatusSupersessionReason,
 };
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, CeremonyId};
 use aura_core::query::ConsensusId;
 use aura_core::threshold::{policy_for, AgreementMode, CeremonyFlow, ParticipantIdentity};
@@ -38,13 +39,15 @@ use aura_core::time::PhysicalTime;
 use aura_core::{DeviceId, Hash32};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
-use tokio::time::{Duration, Instant};
 
 /// Tracks state of guardian ceremonies
 #[derive(Clone)]
 pub struct CeremonyTracker {
     state: Arc<RwLock<CeremonyTrackerState>>,
+    /// Time effects for deterministic simulation support
+    time: Arc<dyn PhysicalTimeEffects>,
 }
 
 #[derive(Debug, Default)]
@@ -143,7 +146,7 @@ pub struct TrackedCeremony {
     pub enrollment_nickname_suggestion: Option<String>,
 
     /// When the ceremony was initiated
-    pub started_at: Instant,
+    pub started_at: PhysicalTime,
 
     /// Whether the ceremony has failed
     pub has_failed: bool,
@@ -286,9 +289,13 @@ impl CeremonyTracker {
         }
     }
     /// Create a new ceremony tracker
-    pub fn new() -> Self {
+    ///
+    /// # Arguments
+    /// * `time` - Time effects for deterministic simulation support
+    pub fn new(time: Arc<dyn PhysicalTimeEffects>) -> Self {
         Self {
             state: Arc::new(RwLock::new(CeremonyTrackerState::default())),
+            time,
         }
     }
 
@@ -353,6 +360,11 @@ impl CeremonyTracker {
             )));
         }
 
+        // Get current time from injected effect for deterministic simulation support
+        let now = self.time.physical_time().await.map_err(|e| {
+            IntentError::validation_failed(format!("Failed to get current time: {e}"))
+        })?;
+
         let state = TrackedCeremony {
             ceremony_id: ceremony_id.clone(),
             kind,
@@ -364,7 +376,7 @@ impl CeremonyTracker {
             new_epoch,
             enrollment_device_id,
             enrollment_nickname_suggestion,
-            started_at: Instant::now(),
+            started_at: now,
             has_failed: false,
             is_committed: false,
             is_superseded: false,
@@ -596,7 +608,11 @@ impl CeremonyTracker {
     /// True if ceremony has exceeded its timeout
     pub async fn is_timed_out(&self, ceremony_id: &CeremonyId) -> Result<bool, IntentError> {
         let state = self.get(ceremony_id).await?;
-        Ok(state.started_at.elapsed() > state.timeout)
+        let now = self.time.physical_time().await.map_err(|e| {
+            IntentError::validation_failed(format!("Failed to get current time: {e}"))
+        })?;
+        let elapsed_ms = now.ts_ms.saturating_sub(state.started_at.ts_ms);
+        Ok(elapsed_ms > state.timeout.as_millis() as u64)
     }
 
     /// Mark ceremony as failed
@@ -673,13 +689,23 @@ impl CeremonyTracker {
     /// # Returns
     /// Number of ceremonies cleaned up
     pub async fn cleanup_timed_out(&self) -> usize {
+        // Get current time before entering the closure for deterministic simulation support
+        let now_ms = match self.time.physical_time().await {
+            Ok(t) => t.ts_ms,
+            Err(e) => {
+                tracing::warn!("Failed to get current time for cleanup: {e}");
+                return 0;
+            }
+        };
+
         with_state_mut_validated(
             &self.state,
             |tracker| {
                 let mut removed = Vec::new();
 
                 for (id, state) in tracker.ceremonies.iter() {
-                    if state.started_at.elapsed() > state.timeout && !state.has_failed {
+                    let elapsed_ms = now_ms.saturating_sub(state.started_at.ts_ms);
+                    if elapsed_ms > state.timeout.as_millis() as u64 && !state.has_failed {
                         removed.push(id.clone());
                     }
                 }
@@ -873,11 +899,7 @@ impl CeremonyTracker {
     }
 }
 
-impl Default for CeremonyTracker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: Default removed since CeremonyTracker requires a time effect for deterministic simulation
 
 // =============================================================================
 // RuntimeService Implementation
@@ -914,14 +936,19 @@ mod tests {
     use super::*;
     use aura_core::identifiers::{AuthorityId, CeremonyId};
     use aura_core::DeviceId;
+    use aura_effects::time::PhysicalTimeHandler;
 
     fn test_ceremony_id(label: &str) -> CeremonyId {
         CeremonyId::new(label)
     }
 
+    fn test_time() -> Arc<dyn PhysicalTimeEffects> {
+        Arc::new(PhysicalTimeHandler::new())
+    }
+
     #[tokio::test]
     async fn test_ceremony_registration() {
-        let tracker = CeremonyTracker::new();
+        let tracker = CeremonyTracker::new(test_time());
 
         let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
@@ -956,7 +983,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_guardian_acceptance() {
-        let tracker = CeremonyTracker::new();
+        let tracker = CeremonyTracker::new(test_time());
 
         let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
@@ -1008,7 +1035,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ceremony_completion() {
-        let tracker = CeremonyTracker::new();
+        let tracker = CeremonyTracker::new(test_time());
 
         let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
@@ -1056,7 +1083,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agreement_mode_transitions() {
-        let tracker = CeremonyTracker::new();
+        let tracker = CeremonyTracker::new(test_time());
 
         let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
@@ -1102,7 +1129,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_idempotent_acceptance() {
-        let tracker = CeremonyTracker::new();
+        let tracker = CeremonyTracker::new(test_time());
 
         let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
@@ -1144,7 +1171,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ceremony_failure() {
-        let tracker = CeremonyTracker::new();
+        let tracker = CeremonyTracker::new(test_time());
 
         let ceremony_id = test_ceremony_id("ceremony-1");
         let a = AuthorityId::new_from_entropy([1u8; 32]);
@@ -1182,7 +1209,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_device_enrollment_ceremony_acceptance() {
-        let tracker = CeremonyTracker::new();
+        let tracker = CeremonyTracker::new(test_time());
         let device = DeviceId::new_from_entropy([9u8; 32]);
         let initiator = AuthorityId::new_from_entropy([1u8; 32]);
         let ceremony_id = test_ceremony_id("ceremony-device-1");
@@ -1219,7 +1246,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_device_rotation_agreement_mode_transitions() {
-        let tracker = CeremonyTracker::new();
+        let tracker = CeremonyTracker::new(test_time());
         let device_a = DeviceId::new_from_entropy([10u8; 32]);
         let device_b = DeviceId::new_from_entropy([11u8; 32]);
         let initiator = AuthorityId::new_from_entropy([2u8; 32]);
@@ -1262,7 +1289,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_device_removal_agreement_mode_transitions() {
-        let tracker = CeremonyTracker::new();
+        let tracker = CeremonyTracker::new(test_time());
         let device_a = DeviceId::new_from_entropy([12u8; 32]);
         let device_b = DeviceId::new_from_entropy([13u8; 32]);
         let initiator = AuthorityId::new_from_entropy([3u8; 32]);
@@ -1345,7 +1372,10 @@ mod tests {
                     new_epoch: 100,
                     enrollment_device_id: None,
                     enrollment_nickname_suggestion: None,
-                    started_at: Instant::now(),
+                    started_at: PhysicalTime {
+                        ts_ms: 0,
+                        uncertainty: None,
+                    },
                     has_failed: false,
                     is_committed: false,
                     is_superseded: false,
@@ -1387,7 +1417,7 @@ mod tests {
                         new_epoch: 100,
                         enrollment_device_id: None,
                         enrollment_nickname_suggestion: None,
-                        started_at: Instant::now(),
+                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
                         has_failed: false,
                         is_committed: false,
                         is_superseded: false,
@@ -1442,7 +1472,7 @@ mod tests {
                         new_epoch: 100,
                         enrollment_device_id: None,
                         enrollment_nickname_suggestion: None,
-                        started_at: Instant::now(),
+                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
                         has_failed: false,
                         is_committed: false,
                         is_superseded: false,
@@ -1492,7 +1522,7 @@ mod tests {
                         new_epoch: 100,
                         enrollment_device_id: None,
                         enrollment_nickname_suggestion: None,
-                        started_at: Instant::now(),
+                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
                         has_failed: false,
                         is_committed: false,
                         is_superseded: false,
@@ -1553,7 +1583,7 @@ mod tests {
                         new_epoch: 100,
                         enrollment_device_id: None,
                         enrollment_nickname_suggestion: None,
-                        started_at: Instant::now(),
+                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
                         has_failed: false,
                         is_committed: true, // Mark as committed
                         is_superseded: false,
@@ -1610,7 +1640,7 @@ mod tests {
                         new_epoch: 100,
                         enrollment_device_id: None,
                         enrollment_nickname_suggestion: None,
-                        started_at: Instant::now(),
+                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
                         has_failed,
                         is_committed,
                         is_superseded: false,
@@ -1669,7 +1699,7 @@ mod tests {
                         new_epoch: 100,
                         enrollment_device_id: None,
                         enrollment_nickname_suggestion: None,
-                        started_at: Instant::now(),
+                        started_at: PhysicalTime { ts_ms: 0, uncertainty: None },
                         has_failed: is_superseded, // Superseded ceremonies are marked failed
                         is_committed,
                         is_superseded,
