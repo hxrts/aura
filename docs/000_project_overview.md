@@ -1,6 +1,6 @@
 # Project Overview
 
-Aura is a fully peer-to-peer, private communication system that operates without dedicated servers. It uses a web-of-trust architecture to provide discovery, data availability, account recovery, and graceful async protocol evolution.
+[Aura](https://github.com/hxrts/aura) is a fully peer-to-peer, private communication system that operates without dedicated servers. It uses a web-of-trust architecture to provide discovery, data availability, account recovery, and graceful async protocol evolution.
 
 Aura achieves this by using [threshold cryptography](102_authority_and_identity.md) to distribute trust, [session typed protocols](108_mpst_and_choreography.md) to coordinate peers safely, a CRDT-based [distributed journal](103_journal.md), and [authorized effects](104_authorization.md) to enforce capability and privacy boundaries.
 
