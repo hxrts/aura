@@ -1,20 +1,8 @@
 # Project Overview
 
-Aura aims to demonstrate a practical web-of-trust architecture that adheres to the following constraints:
+Aura is a fully peer-to-peer, private communication system that operates without dedicated servers. It uses a web-of-trust architecture to provide discovery, data availability, account recovery, and graceful async protocol evolution.
 
-Network as platform: All coordination and information flow happens peer-to-peer through the social graph.
-
-Privacy by design: Information disclosure must be selective and consent-based.
-
-Cross-platform: The system must run on web (Chrome, Firefox, Safari via WebAssembly), mobile (iOS, Android), and desktop (macOS, Linux).
-
-Mobile-first and Resilient: The system targets mobile devices as the primary substrate for all interaction and service provision. As such it must be highly tolerant of network partitions and device failure.
-
-Social Recovery: Users must be able to store secrets in the network and survive catastrophic device failure.
-
-Version Compatibility: Older clients must interact with newer ones within semantic version compatibility bounds.
-
-In order to achieve these goals, Aura combines [threshold cryptography](102_authority_and_identity.md), [choreographic programs that project to session typed protocols](108_mpst_and_choreography.md), [fact-based semilattices](103_journal.md), [session types](108_mpst_and_choreography.md), and [authorized effects](104_authorization.md).
+Aura achieves this by using [threshold cryptography](102_authority_and_identity.md) to distribute trust, [session typed protocols](108_mpst_and_choreography.md) to coordinate peers safely, a CRDT-based  [distributed journal](103_journal.md), and [authorized effects](104_authorization.md) to enforce capability and privacy boundaries.
 
 ## Implementation
 
