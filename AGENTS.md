@@ -172,6 +172,10 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - Developer guides: `docs/108_mpst_and_choreography.md`, `docs/105_effect_system_and_runtime.md`
 - Cryptography & VSS: `docs/100_crypto.md`
 - Operation categories and ceremonies: `docs/107_operation_categories.md`
+- Test infrastructure: `docs/117_testkit.md`
+- Simulation infrastructure: `docs/118_simulator.md`
+- Conformance and parity: `docs/119_conformance.md`
+- Formal verification: `docs/120_verification.md`
 - Reference: `docs/999_project_structure.md`
 
 ## Agent Quick Reference
@@ -229,7 +233,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **Authorization logic** → `aura-authorization`
 - **Social topology/relay selection** → `aura-social`
 - **Quint specification** → `verification/quint/` + `docs/807_verification_guide.md`
-- **Generative test** → `aura-simulator/src/quint/` + `docs/809_generative_testing_guide.md`
+- **Generative test** → `aura-simulator/src/quint/` + `docs/807_verification_guide.md`
 
 #### "I need to understand..."
 - **How authorities work** → `docs/102_authority_and_identity.md`
@@ -259,7 +263,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`
 - **How simulation works** → `docs/806_simulation_guide.md`
 - **How verification works** → `docs/807_verification_guide.md` (Quint specs + Lean proofs)
-- **How generative testing works** → `docs/809_generative_testing_guide.md`
+- **How generative testing works** → `docs/807_verification_guide.md`
 - **How maintenance and OTA updates work** → `docs/808_maintenance_guide.md` + `docs/115_maintenance.md`
 - **How development patterns work** → `docs/805_development_patterns.md`
 - **The project's goals and constraints** → `docs/000_project_overview.md`
