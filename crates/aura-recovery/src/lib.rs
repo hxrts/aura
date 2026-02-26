@@ -168,10 +168,6 @@ pub use recovery_ceremony::{
     RecoveryCeremonyState, RecoveryCeremonyStatus,
 };
 
-// =============================================================================
-// Generated Runner Re-exports for execute_as Pattern
-// =============================================================================
-
 /// Re-exports for RecoveryProtocol choreography runners
 pub mod recovery_runners {
     pub use crate::recovery_protocol::telltale_session_types_recovery_protocol::recovery_protocol::RecoveryProtocolRole;

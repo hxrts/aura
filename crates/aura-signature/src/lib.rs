@@ -50,8 +50,6 @@ pub(crate) mod registry;
 pub mod session;
 pub mod threshold;
 
-// Messages module is now a single consolidated file (messages.rs)
-
 // Re-export commonly used types
 pub use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 

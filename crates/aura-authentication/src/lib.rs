@@ -46,10 +46,6 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
-// =============================================================================
-// Core Modules (New Architecture)
-// =============================================================================
-
 /// Guard types for authentication operations
 ///
 /// Provides `GuardSnapshot`, `GuardOutcome`, `EffectCommand`, and related types
@@ -137,10 +133,6 @@ pub use service::{
 pub use view::{
     AuthView, AuthViewReducer, ChallengeInfo, FailureRecord, RecoveryInfo, SessionInfo,
 };
-
-// =============================================================================
-// Generated Runner Re-exports for execute_as Pattern
-// =============================================================================
 
 /// Re-exports for DkdChoreography runners
 pub mod dkd_runners {

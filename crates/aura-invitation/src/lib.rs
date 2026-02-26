@@ -54,10 +54,6 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
-// =============================================================================
-// Core Modules (New Architecture)
-// =============================================================================
-
 /// Guard types for invitation operations
 ///
 /// Provides `GuardSnapshot`, `GuardOutcome`, `EffectCommand`, and related types
@@ -107,14 +103,6 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
         .find(|(op, _)| *op == operation)
         .map(|(_, category)| *category)
 }
-
-// =============================================================================
-// Legacy Modules
-// =============================================================================
-//
-// Historical invitation/relationship choreographies have been removed.
-// Use `InvitationService` (service.rs) with `InvitationType` variants and
-// relational contexts (aura-relational) for all invitation flows.
 
 /// Error type for invitation operations
 ///

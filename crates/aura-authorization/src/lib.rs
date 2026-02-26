@@ -51,8 +51,8 @@ pub mod proposals;
 pub mod biscuit_authorization;
 pub mod biscuit_token;
 pub mod facts;
-pub mod resource_scope; // Authority-based resource scopes
-pub mod storage_authorization; // Storage authorization logic
+pub mod resource_scope;
+pub mod storage_authorization;
 
 pub use errors::{WotError, WotResult};
 
@@ -70,15 +70,13 @@ pub use flow_budget::JournalBackedFlowBudgetHandler;
 // Re-export fact types for journal integration
 pub use facts::{WotFact, WotFactDelta, WotFactReducer, WOT_FACT_TYPE_ID};
 
-// Re-export authority-based resource scopes from core
-// These replace the previous Biscuit-specific resource scopes (AdminOperation, JournalOp, etc.)
-// which were internal implementation details that have been migrated to the authority model
+// Authority-based resource scopes from core
 pub use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
 
-// Re-export Biscuit authorization types (now consolidated in biscuit_authorization.rs)
+// Biscuit authorization types
 pub use biscuit_authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
 
-// Re-export storage authorization types (moved from aura-store)
+// Storage authorization types
 pub use storage_authorization::{
     check_biscuit_access, evaluate_biscuit_access, AccessDecision, AuthorizedStorageHandler,
     BiscuitAccessRequest, BiscuitStorageError, BiscuitStorageEvaluator, PermissionMappings,

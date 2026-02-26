@@ -8,13 +8,13 @@
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
-//! - ✅ Transport semantics and message types
-//! - ✅ P2P communication abstractions
-//! - ✅ Privacy-by-design transport types
-//! - ✅ Protocol message specifications
-//! - ❌ NO effect handler implementations (use NetworkEffects from aura-effects)
-//! - ❌ NO multi-party coordination (that's aura-protocol)
-//! - ❌ NO runtime composition (that's aura-composition/aura-agent)
+//! - YES Transport semantics and message types
+//! - YES P2P communication abstractions
+//! - YES Privacy-by-design transport types
+//! - YES Protocol message specifications
+//! - NO effect handler implementations (use NetworkEffects from aura-effects)
+//! - NO multi-party coordination (that's aura-protocol)
+//! - NO runtime composition (that's aura-composition/aura-agent)
 //!
 //! ## Key Design Principles
 //!
@@ -93,9 +93,7 @@ pub mod relay;
 /// Transport layer message types and protocol definitions
 ///
 /// This module contains message types for transport layer protocols including
-/// social coordination messages, rendezvous protocol messages, and other transport
-/// domain concerns that have been moved from higher layers following the architectural
-/// refactoring plan.
+/// social coordination messages and rendezvous protocol messages.
 pub mod messages;
 
 // Re-export types from sub-modules

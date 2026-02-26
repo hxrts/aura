@@ -90,30 +90,19 @@ pub trait ChoreographicAdapterExt: telltale_choreography::ChoreographicAdapter {
     ) -> Result<L, Self::Error>;
 }
 
-// Note: aura-macros generates code that uses aura-mpst types,
-// but we don't import aura-macros here to avoid circular dependency
-
-// ===== Current Modules (Actively Used) =====
-
 /// AST extraction and annotation parsing for Aura choreographies
-/// Used by: aura-macros (production), examples
 pub mod ast_extraction;
 
 /// Identifier newtypes for roles and sessions
 pub mod ids;
 
 /// Journal annotation types for fact-based operations
-/// Used by: aura-protocol/guards/journal_coupler.rs
 pub mod journal;
 
-/// Session type system types (LocalSessionType)
-/// Recently migrated from aura-core
+/// Session type system types
 pub mod session;
 
-// ===== Test/Example-Only Modules =====
-
-/// Extension system integration (used in integration tests)
-/// Note: Extensions now handled by aura-macros; this is test compatibility
+/// Extension system integration
 pub mod extensions;
 
 /// Initialize the Aura extension system (external-demo pattern)

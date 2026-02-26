@@ -1,16 +1,32 @@
-# aura-maintenance
+# Aura Maintenance (Layer 2) - Architecture and Invariants
 
-Layer 2 domain crate defining maintenance facts and reduction helpers.
+## Purpose
+Define maintenance domain facts and reduction helpers for snapshots, cache
+invalidation, OTA upgrades, and admin replacement.
 
-## Responsibilities
-- Schema for maintenance facts (snapshots, cache invalidation, upgrades, admin replacement)
-- Deterministic encoding + decoding via `DomainFact`
-- Reducer that produces typed deltas for monitoring
+## Inputs
+- `aura-core`: Domain types, effect traits, fact encoding.
+
+## Outputs
+- Fact types: `MaintenanceFact` (snapshots, cache, upgrades, admin replacement).
+- Reducer: `MaintenanceFactReducer` producing `MaintenanceFactDelta`.
+- GC planning: `TranscriptGcPlan` for DKG transcript cleanup.
+- Operation categories: `MaintenanceOperation`, `OperationCategory` (A/B/C).
+
+## Key Modules
+- `facts.rs`: `MaintenanceFact` enum with all maintenance fact variants.
+- `gc.rs`: `plan_dkg_transcript_gc()` for transcript garbage collection.
 
 ## Invariants
 - Facts are immutable and merge via join-semilattice semantics.
-- Maintenance facts are stored in authority journals and scoped to the issuing authority.
+- Maintenance facts scoped to issuing authority's journal.
 - Reduction is deterministic: no clocks, randomness, or external state.
+- Category A: Low-risk (cache invalidation).
+- Category B: Medium-risk (snapshot operations).
+- Category C: High-risk (upgrades, admin replacement).
 
-## Operation Categories
-See `OPERATION_CATEGORIES` in `crates/aura-maintenance/src/lib.rs` for the current A/B/C table.
+## Boundaries
+- No storage operations (use `StorageEffects`).
+- No coordination logic (use `aura-protocol`).
+- No runtime composition (use `aura-agent`).
+- Uses Layer 2 fact pattern (no aura-journal dependency).

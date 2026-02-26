@@ -34,7 +34,9 @@
 //! - `CryptoEffects`: Signing, hashing, key derivation
 //! - `NetworkEffects`: TCP, message sending/receiving
 //! - `StorageEffects`: File I/O, chunk operations
-//! - `PhysicalTimeEffects`: Physical clock access, timestamps\n//! - `LogicalClockEffects`: Causal ordering, vector clocks\n//! - `OrderClockEffects`: Privacy-preserving deterministic ordering
+//! - `PhysicalTimeEffects`: Physical clock access, timestamps
+//! - `LogicalClockEffects`: Causal ordering, vector clocks
+//! - `OrderClockEffects`: Privacy-preserving deterministic ordering
 //! - `RandomEffects`: Cryptographic randomness
 //!
 //! **Application Effects** (implemented in domain crates with infrastructure effects):

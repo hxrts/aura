@@ -31,8 +31,6 @@
 //! - **protocol**: Main consensus protocol coordination and execution
 //! - **relational**: Relational consensus adapter for cross-authority operations
 //!
-//! Note: AMP consensus adapter is consolidated under `aura-amp`.
-//!
 //! ## Protocol Design (per docs/106_consensus.md)
 //!
 //! - **Single-shot consensus**: Agrees on one operation bound to a prestate

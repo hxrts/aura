@@ -72,7 +72,8 @@
 //!     .build();
 //! ```
 
-// NOTE: AuthorizationEffects moved to aura-authorization (domain crate) per Layer 2 pattern
+use cfg_if::cfg_if;
+
 pub mod biometric;
 pub mod console;
 pub mod context;
@@ -80,7 +81,6 @@ pub mod context;
 pub mod crypto;
 /// Indexed journal handler with B-tree indexes, Bloom filters, and Merkle trees
 pub mod database;
-// NOTE: JournalEffects moved to aura-journal (domain crate) per Layer 2 pattern
 /// Unified encrypted storage wrapper for transparent encryption at rest
 pub mod encrypted_storage;
 /// Error types for Layer 3 handler implementations.
@@ -95,27 +95,35 @@ pub mod reactive;
 pub mod secure;
 #[cfg(feature = "simulation")]
 pub mod simulation;
-pub mod storage;
-// sync_bridge removed - replaced by pure guard evaluation (ADR-014)
+cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        #[path = "storage_wasm.rs"]
+        pub mod storage;
+    } else {
+        pub mod storage;
+    }
+}
 pub mod system;
 pub mod time;
 pub mod trace;
-pub mod transport;
-pub mod udp;
 
-// Re-export production handlers only - mock handlers moved to aura-testkit
-// NOTE: WotAuthorizationHandler moved to aura-authorization per Layer 2 pattern
+cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        pub mod transport;
+    } else {
+        pub mod transport;
+        pub mod udp;
+    }
+}
+
+// Re-export production handlers
+pub use crate::storage::FilesystemStorageHandler;
 pub use biometric::FallbackBiometricHandler;
 pub use console::RealConsoleHandler;
 pub use context::{EffectContext, StandardContextHandler};
 pub use crypto::RealCryptoHandler;
 pub use database::query::{AuraQuery, FactTerm, QueryError, QueryResult};
 pub use error::Layer3Error;
-pub use query::{
-    format_rule, format_value, parse_arg_to_value, parse_fact_to_row, CapabilityPolicy,
-    QueryHandler,
-};
-// NOTE: JournalHandler moved to aura-journal per Layer 2 pattern
 pub use guard_interpreter::ProductionEffectInterpreter;
 pub use identifiers::{
     new_account_id, new_authority_id, new_context_id, new_device_id, new_event_id, new_guardian_id,
@@ -123,51 +131,59 @@ pub use identifiers::{
 };
 pub use leakage::ProductionLeakageHandler;
 pub use noise::RealNoiseHandler;
+pub use query::{
+    format_rule, format_value, parse_arg_to_value, parse_fact_to_row, CapabilityPolicy,
+    QueryHandler,
+};
 pub use random::RealRandomHandler;
 pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
 pub use secure::RealSecureStorageHandler;
 #[cfg(feature = "simulation")]
 pub use simulation::FallbackSimulationHandler;
-pub use storage::FilesystemStorageHandler;
+#[cfg(not(target_arch = "wasm32"))]
 pub use udp::RealUdpEffectsHandler;
-// Re-export the new unified encrypted storage (Task 1.1)
 pub use encrypted_storage::{EncryptedStorage, EncryptedStorageConfig};
-// ProductionSyncExecutor removed - replaced by ProductionEffectInterpreter (ADR-014)
 #[allow(deprecated)]
 pub use time::{
     LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler, TimeComparisonHandler,
 };
 
-// Note: AuthorizationEffects + JournalEffects are provided by layer 2 domain crates
+// Transport effect handlers
+cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        pub mod transport_effects {
+            //! Transport effect implementations - Layer 3 stateless handlers.
 
-// Transport effect handlers - organized by functionality
-pub mod transport_effects {
-    //! Transport effect implementations - Layer 3 stateless handlers
+            pub use crate::transport::{
+                AddressResolver, BufferUtils, ConnectionMetrics, FramingHandler,
+                RealTransportHandler, TimeoutHelper, TransportError, UrlValidator,
+            };
+        }
+    } else {
+        pub mod transport_effects {
+            //! Transport effect implementations - Layer 3 stateless handlers
 
-    pub use crate::transport::{
-        // Utilities and helpers
-        AddressResolver,
-        BufferUtils,
-        ConnectionMetrics,
-        // Message processing
-        FramingHandler,
+            pub use crate::transport::{
+                // Utilities and helpers
+                AddressResolver,
+                BufferUtils,
+                ConnectionMetrics,
+                // Message processing
+                FramingHandler,
 
-        // InMemoryTransportHandler moved to aura-testkit
+                // Core transport handlers
+                RealTransportHandler,
+                TcpTransportHandler,
+                TimeoutHelper,
+                // Integration helpers
+                TransportError,
+                UrlValidator,
 
-        // Facade patterns removed - migrate to aura-protocol
-        // RetryingTransportManager,
-        // TransportManager,
-
-        // Core transport handlers
-        RealTransportHandler,
-        TcpTransportHandler,
-        TimeoutHelper,
-        // Integration helpers
-        TransportError,
-        UrlValidator,
-
-        WebSocketTransportHandler,
-    };
+                // Web transport
+                WebSocketTransportHandler,
+            };
+        }
+    }
 }
 
 // Convenience re-exports for most common handlers
@@ -175,12 +191,16 @@ pub mod transport_effects {
 pub use system::{LoggingSystemHandler, MetricsSystemHandler, MonitoringSystemHandler};
 
 // Convenience re-exports for most common transport handlers
-pub use transport_effects::{
-    FramingHandler, RealTransportHandler, TcpTransportHandler, TransportError,
-    WebSocketTransportHandler,
-};
+cfg_if! {
+    if #[cfg(target_arch = "wasm32")] {
+        pub use transport_effects::{FramingHandler, RealTransportHandler, TransportError};
+    } else {
+        pub use transport_effects::{
+            FramingHandler, RealTransportHandler, TcpTransportHandler, TransportError,
+            WebSocketTransportHandler,
+        };
+    }
+}
 
 // Re-export core effect traits for convenience
 pub use aura_core::effects::*;
-
-// Compatibility bridge has been removed after fixing all architectural violations
