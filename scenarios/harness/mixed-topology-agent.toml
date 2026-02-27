@@ -1,0 +1,30 @@
+schema_version = 1
+id = "mixed-topology-agent"
+goal = "Run the same state-machine path using agent mode."
+execution_mode = "agent"
+required_capabilities = ["local", "ssh"]
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+expect = "launched"
+timeout_ms = 5000
+
+[[steps]]
+id = "fault-tunnel-drop"
+action = "fault_tunnel_drop"
+timeout_ms = 50
+
+[[steps]]
+id = "local-send"
+action = "send_keys"
+instance = "alice"
+expect = "agent-mode-msg\n"
+timeout_ms = 2000
+
+[[steps]]
+id = "local-wait"
+action = "wait_for"
+instance = "alice"
+expect = "agent-mode-msg"
+timeout_ms = 2000

@@ -181,6 +181,11 @@ ci-harness-build:
 ci-harness-contract:
     cargo test -p aura-harness --test contract_local_loopback -q
 
+# Harness replay regression (nightly mixed-topology lane)
+ci-harness-replay:
+    cargo run -p aura-harness -- run --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml
+    cargo run -p aura-harness -- replay --bundle artifacts/harness/local-loopback-smoke/replay_bundle.json
+
 # Test suite
 ci-test:
     cargo test --workspace -q

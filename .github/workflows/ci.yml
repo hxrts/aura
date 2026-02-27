@@ -5,6 +5,8 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  schedule:
+    - cron: "0 7 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -77,6 +79,17 @@ jobs:
         with:
           cache-name: harness-contract
       - run: nix develop --command just ci-harness-contract
+
+  harness-nightly-replay:
+    name: Harness Nightly Replay
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: harness-nightly-replay
+      - run: nix develop --command just ci-harness-replay
 
   test:
     name: Test
