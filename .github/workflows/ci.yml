@@ -58,6 +58,26 @@ jobs:
           cache-name: build
       - run: nix develop --command just ci-build
 
+  harness-build:
+    name: Harness Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: harness-build
+      - run: nix develop --command just ci-harness-build
+
+  harness-contract:
+    name: Harness Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: harness-contract
+      - run: nix develop --command just ci-harness-contract
+
   test:
     name: Test
     runs-on: ubuntu-latest
