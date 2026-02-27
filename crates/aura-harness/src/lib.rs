@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 
+pub mod api_version;
 pub mod artifacts;
 pub mod backend;
 pub mod capabilities;

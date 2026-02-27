@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
 use crate::config::RunConfig;
 use crate::coordinator::HarnessCoordinator;
-
-pub const TOOL_API_VERSION: &str = "0.1.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,7 +37,7 @@ impl StartupSummary {
             .collect();
 
         Self {
-            tool_api_version: TOOL_API_VERSION.to_string(),
+            tool_api_version: TOOL_API_DEFAULT_VERSION.to_string(),
             schema_version: config.schema_version,
             run_name: config.run.name.clone(),
             instance_count: config.instances.len() as u64,
@@ -50,6 +49,9 @@ impl StartupSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum ToolRequest {
+    Negotiate {
+        client_versions: Vec<String>,
+    },
     Screen {
         instance_id: String,
     },
@@ -91,6 +93,7 @@ pub struct ToolActionRecord {
 pub struct ToolApi {
     coordinator: HarnessCoordinator,
     action_log: Vec<ToolActionRecord>,
+    negotiated_version: String,
 }
 
 impl ToolApi {
@@ -98,6 +101,7 @@ impl ToolApi {
         Self {
             coordinator,
             action_log: Vec::new(),
+            negotiated_version: TOOL_API_DEFAULT_VERSION.to_string(),
         }
     }
 
@@ -112,6 +116,15 @@ impl ToolApi {
     pub fn handle_request(&mut self, request: ToolRequest) -> ToolResponse {
         let request_for_log = request.clone();
         let outcome = match request {
+            ToolRequest::Negotiate { client_versions } => {
+                negotiate(&client_versions).map(|result| {
+                    self.negotiated_version = result.negotiated_version.clone();
+                    serde_json::json!({
+                        "negotiated_version": result.negotiated_version,
+                        "supported_versions": result.supported_versions
+                    })
+                })
+            }
             ToolRequest::Screen { instance_id } => self
                 .coordinator
                 .screen(&instance_id)
@@ -173,5 +186,13 @@ impl ToolApi {
 
     pub fn action_log(&self) -> Vec<ToolActionRecord> {
         self.action_log.clone()
+    }
+
+    pub fn negotiated_version(&self) -> &str {
+        &self.negotiated_version
+    }
+
+    pub fn supported_versions() -> &'static [&'static str] {
+        &TOOL_API_VERSIONS
     }
 }
