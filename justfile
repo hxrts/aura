@@ -173,6 +173,14 @@ ci-clippy:
 ci-build:
     cargo build --workspace -q
 
+# Harness build check (for CI harness scaffolding)
+ci-harness-build:
+    cargo build -p aura-harness -q
+
+# Harness contract tests (for CI harness scaffolding)
+ci-harness-contract:
+    cargo test -p aura-harness --test contract_local_loopback -q
+
 # Test suite
 ci-test:
     cargo test --workspace -q
@@ -924,6 +932,35 @@ test-scenarios: discover-scenarios validate-scenarios
     cargo run --bin aura -- scenarios run --directory scenarios --output-file outcomes/scenario_results.json --detailed-report
     just generate-report outcomes/scenario_results.json outcomes/scenario_report.html
     echo "Report: outcomes/scenario_report.html"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Runtime Harness
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Run harness coordinator with a TOML run config and optional scenario file
+harness-run *ARGS:
+    scripts/harness_cmd.sh run {{ARGS}}
+
+# Lint harness TOML run and scenario files
+harness-lint *ARGS:
+    scripts/harness_cmd.sh lint {{ARGS}}
+
+# Replay a previously recorded harness bundle
+harness-replay *ARGS:
+    scripts/harness_cmd.sh replay {{ARGS}}
+
+# Run harness crate tests
+harness-test:
+    cargo test -p aura-harness
+
+# Run lint/tests and generate checkpoint commit message template
+harness-checkpoint scope="phase" summary="describe-change":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just harness-lint -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml
+    just harness-test
+    printf "harness: %s - %s\n" "{{scope}}" "{{summary}}" > .git/HARNESS_COMMIT_MESSAGE.txt
+    echo "Commit template written to .git/HARNESS_COMMIT_MESSAGE.txt"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Nix / Hermetic Builds

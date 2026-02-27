@@ -34,6 +34,7 @@ members = [
     "crates/aura-relational",
     "crates/aura-chat",
     "crates/aura-social",
+    "crates/aura-harness",
     "examples/hello-crdt",
     "examples/hello-choreo",
 ]
