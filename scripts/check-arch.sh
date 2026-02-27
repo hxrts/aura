@@ -438,6 +438,106 @@ check_effects() {
     | grep -Ev "/tests/|benches/" || true)
   emit_hits "Direct std/async-std sleep" "$std_sleep"
 
+  # ─── Determinism parity-critical paths ───
+  section "Determinism parity lanes — no wall-clock/runtime timers in parity-critical code"
+
+  local parity_scope=(
+    "crates/aura-agent/src/runtime/services"
+    "crates/aura-agent/src/reactive"
+    "crates/aura-quint/src"
+  )
+
+  local parity_clock_hits parity_clock_filtered
+  parity_clock_hits=$(rg --no-heading -n "Instant::now\\(|SystemTime::now\\(" "${parity_scope[@]}" -g "*.rs" || true)
+  parity_clock_filtered=$(echo "$parity_clock_hits" \
+    | grep -v "///" | grep -v "//!" | grep -v "//" || true)
+  parity_clock_filtered=$(filter_test_modules "$parity_clock_filtered")
+  if [[ -n "$parity_clock_filtered" ]]; then
+    emit_hits "Wall-clock access in parity-critical paths" "$parity_clock_filtered"
+    hint "Inject wall-clock through PhysicalTimeEffects/TimeEffects; do not call Instant::now/SystemTime::now in parity-critical code."
+    hint "Persist start/deadline as PhysicalTime/TimeStamp and compare using effect-provided time."
+    hint "Reference: docs/105_effect_system_and_runtime.md (time effects) and docs/806_simulation_guide.md (deterministic simulation constraints)."
+  else
+    info "Wall-clock access in parity-critical paths: none"
+  fi
+
+  local parity_timer_hits parity_timer_filtered
+  parity_timer_hits=$(rg --no-heading -n "tokio::time::(sleep|sleep_until|timeout|interval)|async_std::task::sleep|std::thread::sleep|futures_timer::Delay" "${parity_scope[@]}" -g "*.rs" || true)
+  parity_timer_filtered=$(echo "$parity_timer_hits" \
+    | grep -v "///" | grep -v "//!" | grep -v "//" || true)
+  parity_timer_filtered=$(filter_test_modules "$parity_timer_filtered")
+  if [[ -n "$parity_timer_filtered" ]]; then
+    emit_hits "Runtime timer primitives in parity-critical paths" "$parity_timer_filtered"
+    hint "Replace runtime timers with effect-injected scheduling: PhysicalTimeEffects::sleep_ms plus logical step/weighted-budget progress."
+    hint "Use timeout handles/wake conditions through effects instead of tokio/futures wall-clock timers."
+    hint "Reference: docs/105_effect_system_and_runtime.md (effect boundary rules), docs/806_simulation_guide.md (no wall-clock in simulation)."
+  else
+    info "Runtime timer primitives in parity-critical paths: none"
+  fi
+
+  local parity_random_hits parity_random_filtered
+  parity_random_hits=$(rg --no-heading -n "rand::random|thread_rng\\(\\)|rand::thread_rng|getrandom::|OsRng|Uuid::new_v4|AuthorityId::new\\(\\)|ContextId::new\\(\\)|DeviceId::new\\(\\)" "${parity_scope[@]}" -g "*.rs" || true)
+  parity_random_filtered=$(echo "$parity_random_hits" \
+    | grep -v "///" | grep -v "//!" | grep -v "//" || true)
+  parity_random_filtered=$(filter_test_modules "$parity_random_filtered")
+  if [[ -n "$parity_random_filtered" ]]; then
+    emit_hits "Nondeterministic randomness/ID generation in parity-critical paths" "$parity_random_filtered"
+    hint "Route randomness through RandomEffects and derive values from explicit run seed + deterministic context."
+    hint "Use XxxId::new_from_entropy([...]) / from_uuid(Uuid::from_bytes([...])) in parity lanes; avoid entropy-consuming constructors."
+    hint "Reference: docs/105_effect_system_and_runtime.md (effect boundaries) and docs/805_testing_guide.md (strict conformance lanes)."
+  else
+    info "Nondeterministic randomness/ID generation in parity-critical paths: none"
+  fi
+
+  section "Conformance envelope registry — classify every effect envelope kind"
+
+  local registry_file classified_kinds duplicate_classified
+  registry_file="crates/aura-core/src/conformance.rs"
+  if [[ ! -f "$registry_file" ]]; then
+    violation "Missing conformance registry file: $registry_file"
+    hint "Add AURA_EFFECT_ENVELOPE_CLASSIFICATIONS in aura-core and classify each effect kind."
+  else
+    classified_kinds=$(rg --no-heading '^\s*\(".*",\s*AuraEnvelopeLawClass::' "$registry_file" \
+      | sed -E 's/^\s*\("([^"]+)".*/\1/' | sort -u || true)
+
+    if [[ -z "$classified_kinds" ]]; then
+      violation "No classified effect envelope kinds found in $registry_file"
+      hint "Populate AURA_EFFECT_ENVELOPE_CLASSIFICATIONS with strict/commutative/algebraic entries."
+    else
+      duplicate_classified=$(rg --no-heading '^\s*\(".*",\s*AuraEnvelopeLawClass::' "$registry_file" \
+        | sed -E 's/^\s*\("([^"]+)".*/\1/' | sort | uniq -d || true)
+      if [[ -n "$duplicate_classified" ]]; then
+        violation "Duplicate effect envelope classifications found: $(echo "$duplicate_classified" | tr '\n' ' ' | sed 's/  */ /g')"
+      fi
+
+      local telltale_src upstream_kinds missing
+      telltale_src=$(find "$HOME/.cargo/registry/src" -type d -path "*telltale-vm-*/src" 2>/dev/null | sort -V | tail -n1 || true)
+
+      if [[ -n "$telltale_src" && -d "$telltale_src" ]]; then
+        upstream_kinds=$(rg --no-heading 'effect_kind:\s*"[^"]+"' \
+          "$telltale_src/commit_common.rs" \
+          "$telltale_src/effect/recording_impl.rs" \
+          "$telltale_src/threaded/topology_and_planner.rs" \
+          "$telltale_src/vm/topology_and_dispatch.rs" \
+          | sed -E 's/.*effect_kind:\s*"([^"]+)".*/\1/' | sort -u || true)
+
+        if [[ -n "$upstream_kinds" ]]; then
+          missing=$(comm -23 <(echo "$upstream_kinds") <(echo "$classified_kinds") || true)
+          if [[ -n "$missing" ]]; then
+            violation "Unclassified telltale-vm effect kinds: $(echo "$missing" | tr '\n' ' ' | sed 's/  */ /g')"
+            hint "Add missing kinds to AURA_EFFECT_ENVELOPE_CLASSIFICATIONS in crates/aura-core/src/conformance.rs."
+          else
+            info "Effect envelope registry: all telltale-vm effect kinds are classified"
+          fi
+        else
+          info "Effect envelope registry: telltale-vm effect_kind scan returned no kinds"
+        fi
+      else
+        info "Effect envelope registry: telltale-vm source not found in cargo registry; skipping upstream parity check"
+      fi
+    fi
+  fi
+
   # aura-sync runtime neutrality
   section "aura-sync runtime neutrality"
   local sync_runtime

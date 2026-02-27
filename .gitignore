@@ -76,5 +76,8 @@ verification/lean/.lean_build/
 verification/quint/traces/*.itf.json
 verification/quint/traces/*.json
 
+# Conformance
+artifacts/
+
 # Apalache model checker artifacts
 _apalache-out/

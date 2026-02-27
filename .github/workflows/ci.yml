@@ -113,6 +113,32 @@ jobs:
         env:
           CARGO_BUILD_JOBS: 4
 
+  conformance-gate:
+    name: Conformance Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: conformance-gate
+      - name: Verify conformance gate wiring
+        run: nix develop --command just ci-conformance-policy
+      - name: Run conformance gate
+        run: nix develop --command just ci-conformance
+        env:
+          CARGO_BUILD_JOBS: 4
+          AURA_CONFORMANCE_WRITE_ARTIFACTS: 1
+          AURA_CONFORMANCE_ARTIFACT_DIR: artifacts/conformance
+          AURA_CONFORMANCE_ROTATING_WINDOW: 8
+          AURA_CONFORMANCE_ITF_SEED_WINDOW: 8
+      - name: Upload conformance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/conformance
+          if-no-files-found: warn
+
   agent-wasm:
     name: Agent WASM Matrix
     runs-on: ubuntu-latest

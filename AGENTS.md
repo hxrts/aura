@@ -191,7 +191,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **Mock/test handlers** → `aura-testkit`
 
 ### Common Development Tasks → Docs
-- **Adding new effect trait**: `docs/105_effect_system_and_runtime.md` → `docs/805_development_patterns.md`
+- **Adding new effect trait**: `docs/105_effect_system_and_runtime.md` → `docs/805_development_patterns_guide.md`
 - **Building choreography**: `docs/108_mpst_and_choreography.md` → `docs/803_coordination_guide.md`
 - **Understanding authorities**: `docs/102_authority_and_identity.md` → `docs/103_journal.md`
 - **Debugging architecture**: `docs/999_project_structure.md` + `just check-arch`
@@ -211,7 +211,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 ### Layer-Based Development Workflow
 - **Working on Layer 1 (Foundation)?** Read: `docs/105_effect_system_and_runtime.md`
 - **Working on Layer 2 (Domains)?** Read: Domain-specific docs (`docs/100-112`)
-- **Working on Layer 3 (Effects)?** Read: `docs/805_development_patterns.md`
+- **Working on Layer 3 (Effects)?** Read: `docs/805_development_patterns_guide.md`
 - **Working on Layer 4 (Protocols)?** Read: `docs/108_mpst_and_choreography.md`
 - **Working on Layer 5 (Features)?** Read: `docs/803_coordination_guide.md`
 - **Working on Layer 6 (Runtime)?** Read: `aura-agent/` and `aura-simulator/`
@@ -259,13 +259,13 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **How authorization and capabilities work** → `docs/104_authorization.md`
 - **How Biscuit tokens work** → `docs/104_authorization.md` + `aura-authorization/src/biscuit/`
 - **How to get started as a new developer** → `docs/801_hello_world_guide.md`
-- **How core systems work together** → `docs/802_core_systems_guide.md`
+- **How core systems work together** → `docs/805_development_patterns_guide.md`
 - **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`
 - **How simulation works** → `docs/806_simulation_guide.md`
 - **How verification works** → `docs/807_verification_guide.md` (Quint specs + Lean proofs)
 - **How generative testing works** → `docs/807_verification_guide.md`
 - **How maintenance and OTA updates work** → `docs/808_maintenance_guide.md` + `docs/115_maintenance.md`
-- **How development patterns work** → `docs/805_development_patterns.md`
+- **How development patterns work** → `docs/805_development_patterns_guide.md`
 - **The project's goals and constraints** → `docs/000_project_overview.md`
 
 ## Legacy Cleanup Status

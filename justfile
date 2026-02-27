@@ -196,7 +196,8 @@ ci-agent-wasm:
 # - aura-agent: test suite currently assumes multi-thread tokio runtime
 # Note: intentionally no `-q` because wasm-bindgen-test-runner rejects forwarded `--quiet`.
 ci-workspace-wasm-test:
-    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/wasm-bindgen-test-runner.sh}"
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
     cargo test --workspace --target wasm32-unknown-unknown \
       --exclude aura-terminal \
       --exclude aura-simulator \
@@ -283,6 +284,47 @@ ci-conformance-itf:
 # Differential tests
 ci-conformance-diff:
     cargo test -p aura-testkit --test consensus_differential -- --nocapture
+
+# Strict native/wasm parity and threaded differential lane
+ci-conformance-strict:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export AURA_CONFORMANCE_WRITE_ARTIFACTS="${AURA_CONFORMANCE_WRITE_ARTIFACTS:-1}"
+    export AURA_CONFORMANCE_ARTIFACT_DIR="${AURA_CONFORMANCE_ARTIFACT_DIR:-artifacts/conformance}"
+    export AURA_CONFORMANCE_ROTATING_WINDOW="${AURA_CONFORMANCE_ROTATING_WINDOW:-8}"
+    export AURA_CONFORMANCE_ITF_SEED_WINDOW="${AURA_CONFORMANCE_ITF_SEED_WINDOW:-8}"
+
+    echo "Running native/threaded parity lane..."
+    cargo test -p aura-agent --features choreo-backend-telltale-vm --test telltale_vm_parity -- --nocapture
+
+    echo "Running strict native/wasm parity lane..."
+    : "${CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER:=scripts/wasm-bindgen-test-runner.sh}"
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER" \
+      cargo test -p aura-agent --target wasm32-unknown-unknown \
+      --features web,choreo-backend-telltale-vm \
+      --test telltale_vm_parity -- --nocapture
+
+# Scenario contract bundles (consensus/sync/recovery/reconfiguration)
+ci-conformance-contracts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export AURA_CONFORMANCE_ARTIFACT_DIR="${AURA_CONFORMANCE_ARTIFACT_DIR:-artifacts/conformance}"
+    export AURA_SCENARIO_CONTRACT_ARTIFACT="${AURA_SCENARIO_CONTRACT_ARTIFACT:-$(pwd)/$AURA_CONFORMANCE_ARTIFACT_DIR/scenario_contracts.json}"
+    cargo test -p aura-agent --features choreo-backend-telltale-vm --test telltale_vm_scenario_contracts -- --nocapture
+
+# Policy check: protected-branch CI must keep conformance gate job wired
+ci-conformance-policy:
+    scripts/check-conformance-gate.sh
+
+# Full conformance gate used by CI protected-branch workflows
+ci-conformance: ci-conformance-policy
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just ci-conformance-strict
+    just ci-conformance-contracts
+    cargo test -p aura-testkit --test conformance_golden_fixtures -- --nocapture
+    just ci-conformance-itf
+    just ci-conformance-diff
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CI Dry Run
