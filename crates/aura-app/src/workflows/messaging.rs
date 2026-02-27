@@ -56,6 +56,13 @@ fn dm_channel_id(target: &str) -> ChannelId {
     ChannelId::from_bytes(hash(descriptor.as_bytes()))
 }
 
+fn pair_dm_channel_id(left: AuthorityId, right: AuthorityId) -> ChannelId {
+    let mut participants = [left.to_string(), right.to_string()];
+    participants.sort();
+    let descriptor = format!("dm:{}:{}", participants[0], participants[1]);
+    ChannelId::from_bytes(hash(descriptor.as_bytes()))
+}
+
 /// Parse a channel string into a ChannelRef.
 fn parse_channel_ref(channel: &str) -> ChannelRef {
     ChannelRef::parse(channel)
@@ -63,6 +70,10 @@ fn parse_channel_ref(channel: &str) -> ChannelRef {
 
 fn channel_id_from_input(channel: &str) -> ChannelId {
     parse_channel_ref(channel).to_channel_id()
+}
+
+fn is_invitation_capability_missing(error: &AuraError) -> bool {
+    error.to_string().contains("invitation:capability-missing")
 }
 
 /// Get current home channel id as a typed ChannelId.
@@ -317,7 +328,7 @@ pub async fn create_channel(
             .map_err(|e| AuraError::agent(format!("Failed to bootstrap channel: {e}")))?;
 
         for receiver in &member_ids {
-            let invitation = crate::workflows::invitation::create_channel_invitation(
+            let invitation = match crate::workflows::invitation::create_channel_invitation(
                 app_core,
                 *receiver,
                 channel_id.to_string(),
@@ -325,7 +336,28 @@ pub async fn create_channel(
                 invitation_message.clone(),
                 None,
             )
-            .await?;
+            .await
+            {
+                Ok(invitation) => invitation,
+                Err(error) if is_invitation_capability_missing(&error) => {
+                    // Some runtime profiles do not grant invitation capabilities.
+                    // Fall back to a direct membership join fact so chats remain usable.
+                    runtime
+                        .amp_join_channel(ChannelJoinParams {
+                            context: context_id,
+                            channel: channel_id,
+                            participant: *receiver,
+                        })
+                        .await
+                        .map_err(|join_error| {
+                            AuraError::agent(format!(
+                                "Failed to add member after invitation capability fallback: {join_error}"
+                            ))
+                        })?;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             invitation_ids.push(invitation.invitation_id.as_str().to_string());
         }
 
@@ -658,22 +690,90 @@ pub async fn start_direct_chat(
         .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]));
 
     if backend == MessagingBackend::Runtime {
-        // Runtime mode needs a real channel/context so send_message can route through AMP.
-        // Reuse the channel creation path with a single member to establish a direct room.
-        let members = vec![contact_id.to_string()];
+        // Runtime mode provisions a deterministic two-party channel without requiring
+        // invitation capabilities in the active runtime profile.
+        let contact_authority = parse_authority_id(contact_id)?;
+        let runtime = require_runtime(app_core).await?;
+        let context_id = current_home_context_or_fallback(app_core).await?;
         let channel_name = if contact_name.trim().is_empty() {
             format!("dm-{}", &contact_id[..8.min(contact_id.len())])
         } else {
             format!("DM: {contact_name}")
         };
-        let channel_id = create_channel(
-            app_core,
-            &channel_name,
+        let channel_id = pair_dm_channel_id(runtime.authority_id(), contact_authority);
+
+        let create_result = runtime
+            .amp_create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(channel_id),
+                skip_window: None,
+                topic: Some(format!("Direct messages with {contact_id}")),
+            })
+            .await;
+        if let Err(error) = create_result {
+            let lowered = error.to_string().to_lowercase();
+            if !lowered.contains("already") && !lowered.contains("exists") {
+                return Err(AuraError::agent(format!(
+                    "Failed to create direct channel: {error}"
+                )));
+            }
+        }
+
+        runtime
+            .amp_join_channel(ChannelJoinParams {
+                context: context_id,
+                channel: channel_id,
+                participant: runtime.authority_id(),
+            })
+            .await
+            .map_err(|error| AuraError::agent(format!("Failed to join direct channel: {error}")))?;
+
+        runtime
+            .amp_join_channel(ChannelJoinParams {
+                context: context_id,
+                channel: channel_id,
+                participant: contact_authority,
+            })
+            .await
+            .map_err(|error| {
+                AuraError::agent(format!("Failed to add contact to direct channel: {error}"))
+            })?;
+
+        let fact = ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            channel_name.clone(),
             Some(format!("Direct messages with {contact_id}")),
-            &members,
-            2,
+            true,
             timestamp_ms,
+            runtime.authority_id(),
         )
+        .to_generic();
+
+        runtime
+            .commit_relational_facts(&[fact])
+            .await
+            .map_err(|error| {
+                AuraError::agent(format!("Failed to persist direct channel: {error}"))
+            })?;
+
+        with_chat_state(app_core, |chat_state| {
+            chat_state.upsert_channel(Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: contact_name.clone(),
+                topic: Some(format!("Direct messages with {contact_id}")),
+                channel_type: ChannelType::DirectMessage,
+                unread_count: 0,
+                is_dm: true,
+                member_ids: vec![contact_authority],
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: timestamp_ms,
+                last_finalized_epoch: 0,
+            });
+        })
         .await?;
         return Ok(channel_id.to_string());
     }

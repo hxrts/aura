@@ -18,7 +18,7 @@
 use iocraft::prelude::*;
 
 use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL};
-use aura_app::ui::types::{format_timestamp, ChatState};
+use aura_app::ui::types::{format_timestamp, Channel as AppChannel, ChatState};
 
 use crate::tui::callbacks::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
@@ -104,6 +104,16 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
 
 /// Shared selected channel index for cross-component communication
 pub type SharedSelectedChannel = std::sync::Arc<std::sync::RwLock<usize>>;
+
+fn is_dm_like_channel(channel: &AppChannel) -> bool {
+    channel.is_dm
+        || channel.name.to_ascii_lowercase().starts_with("dm:")
+        || channel
+            .topic
+            .as_deref()
+            .map(|topic| topic.to_ascii_lowercase().starts_with("direct messages"))
+            .unwrap_or(false)
+}
 
 /// Props for ChatScreen
 ///
@@ -221,7 +231,8 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         .all_channels()
                         .filter(|channel| {
                             let channel_id = channel.id.to_string();
-                            channel_matches_scope(&channel_id, scope.as_deref())
+                            is_dm_like_channel(channel)
+                                || channel_matches_scope(&channel_id, scope.as_deref())
                         })
                         .collect();
 
@@ -258,7 +269,8 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         .all_channels()
         .filter(|channel| {
             let channel_id = channel.id.to_string();
-            channel_matches_scope(&channel_id, active_scope.as_deref())
+            is_dm_like_channel(channel)
+                || channel_matches_scope(&channel_id, active_scope.as_deref())
         })
         .map(Channel::from)
         .collect();

@@ -15,7 +15,7 @@ use aura_app::ui::signals::{
     NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
     TRANSPORT_PEERS_SIGNAL,
 };
-use aura_app::ui::types::ChatState;
+use aura_app::ui::types::{Channel as AppChannel, ChatState};
 
 use crate::tui::chat_scope::{active_home_scope_id, channel_matches_scope};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
@@ -415,6 +415,33 @@ pub fn use_messages_subscription(
 /// Used to map selected channel index -> channel ID for send operations.
 pub type SharedChannels = Arc<RwLock<Vec<Channel>>>;
 
+fn is_dm_like_channel(channel: &AppChannel) -> bool {
+    channel.is_dm
+        || channel.name.to_ascii_lowercase().starts_with("dm:")
+        || channel
+            .topic
+            .as_deref()
+            .map(|topic| topic.to_ascii_lowercase().starts_with("direct messages"))
+            .unwrap_or(false)
+}
+
+fn merge_dm_like_channels(incoming: &ChatState, previous: &ChatState) -> ChatState {
+    let mut merged = incoming.clone();
+
+    for channel in previous.all_channels() {
+        if !is_dm_like_channel(channel) || merged.has_channel(&channel.id) {
+            continue;
+        }
+
+        merged.upsert_channel(channel.clone());
+        for message in previous.messages_for_channel(&channel.id) {
+            merged.apply_message(channel.id, message.clone());
+        }
+    }
+
+    merged
+}
+
 fn scoped_channel_snapshot(
     chat_state: &ChatState,
     active_scope: Option<&str>,
@@ -424,7 +451,9 @@ fn scoped_channel_snapshot(
 
     for channel in chat_state.all_channels() {
         let channel_id = channel.id.to_string();
-        if !channel.is_dm && !channel_matches_scope(&channel_id, active_scope) {
+        let dm_like = is_dm_like_channel(channel);
+
+        if !dm_like && !channel_matches_scope(&channel_id, active_scope) {
             continue;
         }
         message_count += chat_state.messages_for_channel(&channel.id).len();
@@ -477,12 +506,37 @@ pub fn use_channels_subscription(
         let update_tx = update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
+                let stabilized = latest_chat_state
+                    .read()
+                    .ok()
+                    .map(|previous| merge_dm_like_channels(&chat_state, &previous))
+                    .unwrap_or_else(|| chat_state.clone());
+                eprintln!(
+                    "CHAT_SIGNAL_UPDATE: incoming={} stabilized={}",
+                    chat_state.channel_count(),
+                    stabilized.channel_count()
+                );
+                let channel_summary = stabilized
+                    .all_channels()
+                    .map(|channel| {
+                        format!(
+                            "{}|is_dm={}|name={}|topic={}",
+                            channel.id,
+                            channel.is_dm,
+                            channel.name,
+                            channel.topic.clone().unwrap_or_default()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ; ");
+                eprintln!("CHAT_SIGNAL_CHANNELS: {channel_summary}");
+
                 if let Ok(mut guard) = latest_chat_state.write() {
-                    *guard = chat_state.clone();
+                    *guard = stabilized.clone();
                 }
 
                 let scope = active_scope.read().ok().and_then(|g| g.clone());
-                publish_scoped_channels(&channels, &update_tx, &chat_state, scope.as_deref());
+                publish_scoped_channels(&channels, &update_tx, &stabilized, scope.as_deref());
             })
             .await;
         }
@@ -696,7 +750,7 @@ pub fn use_threshold_subscription(hooks: &mut Hooks, app_ctx: &AppCoreContext) -
 
 #[cfg(test)]
 mod tests {
-    use super::scoped_channel_snapshot;
+    use super::{merge_dm_like_channels, scoped_channel_snapshot};
     use aura_app::ui::types::{
         Channel as AppChannel, ChannelType, ChatState, Message, MessageDeliveryStatus,
     };
@@ -734,6 +788,24 @@ mod tests {
             channel_type: ChannelType::DirectMessage,
             unread_count: 0,
             is_dm: true,
+            member_ids: Vec::new(),
+            member_count: 2,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        }
+    }
+
+    fn test_dm_like_channel(id: ChannelId, name: &str) -> AppChannel {
+        AppChannel {
+            id,
+            context_id: None,
+            name: name.to_string(),
+            topic: Some("Direct messages with peer".to_string()),
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
             member_ids: Vec::new(),
             member_count: 2,
             last_message: None,
@@ -819,5 +891,41 @@ mod tests {
         assert!(channels.iter().any(|c| c.id == home_b.to_string()));
         assert!(channels.iter().any(|c| c.id == dm.to_string()));
         assert_eq!(message_count, 2);
+    }
+
+    #[test]
+    fn scoped_snapshot_keeps_dm_like_channels_visible_across_scopes() {
+        let home_a = test_channel_id("home-a");
+        let home_b = test_channel_id("home-b");
+        let dm_like = test_channel_id("dm-like-contact");
+        let mut state = ChatState::from_channels([
+            test_channel(home_a, "Home A"),
+            test_channel(home_b, "Home B"),
+            test_dm_like_channel(dm_like, "DM: Contact"),
+        ]);
+
+        state.apply_message(home_b, test_message(home_b, "m1", 1));
+        state.apply_message(dm_like, test_message(dm_like, "m2", 2));
+
+        let scope = home_b.to_string();
+        let (channels, message_count) = scoped_channel_snapshot(&state, Some(scope.as_str()));
+        assert_eq!(channels.len(), 2);
+        assert!(channels.iter().any(|c| c.id == home_b.to_string()));
+        assert!(channels.iter().any(|c| c.id == dm_like.to_string()));
+        assert_eq!(message_count, 2);
+    }
+
+    #[test]
+    fn merge_preserves_dm_like_channels_from_previous_state() {
+        let dm_like = test_channel_id("dm-like-contact");
+
+        let mut previous = ChatState::from_channels([test_dm_like_channel(dm_like, "DM: Contact")]);
+        previous.apply_message(dm_like, test_message(dm_like, "m1", 1));
+
+        let incoming = ChatState::default();
+        let merged = merge_dm_like_channels(&incoming, &previous);
+
+        assert!(merged.has_channel(&dm_like));
+        assert_eq!(merged.messages_for_channel(&dm_like).len(), 1);
     }
 }
