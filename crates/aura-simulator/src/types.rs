@@ -3,6 +3,7 @@
 //! This module contains the foundational types for the Aura simulator,
 //! following pure algebraic effect patterns without legacy middleware concepts.
 
+use aura_core::{AuraFault, AuraFaultKind, CorruptionMode, FaultEdge};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -207,7 +208,7 @@ impl Default for TimeConfig {
     }
 }
 
-/// Fault injection strategies
+/// Legacy fault injection strategies retained for compatibility.
 #[derive(Debug, Clone)]
 pub enum FaultType {
     /// Drop messages
@@ -230,6 +231,61 @@ pub enum FaultType {
     },
     /// Resource exhaustion
     ResourceExhaustion { resource: String, factor: f64 },
+}
+
+impl From<FaultType> for AuraFaultKind {
+    fn from(value: FaultType) -> Self {
+        match value {
+            FaultType::MessageDrop { probability } => AuraFaultKind::MessageDrop {
+                edge: FaultEdge::new("*", "*"),
+                probability,
+            },
+            FaultType::MessageDelay { delay } => AuraFaultKind::MessageDelay {
+                edge: FaultEdge::new("*", "*"),
+                min: delay,
+                max: delay,
+            },
+            FaultType::MessageCorruption { .. } => AuraFaultKind::MessageCorruption {
+                edge: FaultEdge::new("*", "*"),
+                mode: CorruptionMode::Opaque,
+            },
+            FaultType::Byzantine { strategy } => AuraFaultKind::Legacy {
+                fault_type: "byzantine".to_string(),
+                detail: Some(format!("{strategy:?}")),
+            },
+            FaultType::NetworkPartition {
+                participants,
+                duration,
+            } => AuraFaultKind::NetworkPartition {
+                partition: vec![participants],
+                duration: Some(duration),
+            },
+            FaultType::NodeCrash { node_id, duration } => AuraFaultKind::NodeCrash {
+                node: node_id,
+                at_tick: None,
+                duration,
+            },
+            FaultType::ResourceExhaustion { resource, factor } => {
+                if resource.to_ascii_lowercase().contains("flow") {
+                    AuraFaultKind::FlowBudgetExhaustion {
+                        context: None,
+                        factor,
+                    }
+                } else {
+                    AuraFaultKind::Legacy {
+                        fault_type: "resource_exhaustion".to_string(),
+                        detail: Some(format!("{resource}:{factor}")),
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl From<FaultType> for AuraFault {
+    fn from(value: FaultType) -> Self {
+        AuraFault::new(value.into())
+    }
 }
 
 /// Byzantine behavior strategies
@@ -290,7 +346,7 @@ pub enum SimulatorOperation {
 
     /// Inject a fault into the simulation
     InjectFault {
-        fault_type: FaultType,
+        fault: AuraFault,
         target: String,
         duration: Option<Duration>,
     },

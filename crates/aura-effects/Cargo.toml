@@ -17,6 +17,7 @@ workspace = true
 default = []
 # Enable simulation effect handlers (requires aura-core/simulation)
 simulation = ["aura-core/simulation"]
+telltale-runtime-capability = ["dep:telltale-vm"]
 
 [dependencies]
 # Core traits (interface layer)
@@ -67,6 +68,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 fastrand = "2.1"
 hex = { workspace = true }
+telltale-vm = { workspace = true, optional = true }
 
 [dev-dependencies]
 # tokio-test = { workspace = true } # removed - unused

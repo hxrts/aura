@@ -133,6 +133,24 @@ jobs:
           # Disable incremental compilation to reduce disk usage
           CARGO_INCREMENTAL: 0
 
+  property-monitor:
+    name: Property Monitor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: property-monitor
+      - name: Run property-monitored simulations
+        run: nix develop --command just ci-property-monitor
+      - name: Upload property monitor artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: property-monitor-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/property-monitor
+          if-no-files-found: warn
+
   choreo-parity:
     name: Choreo Parity
     runs-on: ubuntu-latest
@@ -145,6 +163,13 @@ jobs:
         run: nix develop --command just ci-choreo-parity
         env:
           CARGO_BUILD_JOBS: 4
+      - name: Upload parity replay artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: choreo-parity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/choreo-parity
+          if-no-files-found: warn
 
   conformance-gate:
     name: Conformance Gate
@@ -170,6 +195,24 @@ jobs:
         with:
           name: conformance-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/conformance
+          if-no-files-found: warn
+
+  lean-quint-bridge:
+    name: Lean-Quint Bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: lean-quint-bridge
+      - name: Run bridge cross-validation lane
+        run: nix develop --command just ci-lean-quint-bridge
+      - name: Upload bridge artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-quint-bridge-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/lean-quint-bridge
           if-no-files-found: warn
 
   agent-wasm:

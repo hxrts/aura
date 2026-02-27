@@ -71,6 +71,7 @@ fn protocol_context_id(protocol: &crate::fact::ProtocolRelationalFact) -> Contex
         AmpChannelPolicy(policy) => policy.context,
         AmpChannelBootstrap(bootstrap) => bootstrap.context,
         LeakageEvent(event) => event.context_id,
+        SessionDelegation(event) => event.context_id,
         DkgTranscriptCommit(commit) => commit.context,
         ConvergenceCert(cert) => cert.context,
         ReversionFact(reversion) => reversion.context,

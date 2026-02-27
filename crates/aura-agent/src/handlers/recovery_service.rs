@@ -12,7 +12,7 @@ use crate::runtime::choreography_adapter::{AuraProtocolAdapter, ReceivedMessage}
 use crate::runtime::services::ceremony_runner::{
     CeremonyCommitMetadata, CeremonyInitRequest, CeremonyRunner,
 };
-use crate::runtime::services::CeremonyTracker;
+use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::runtime::AuraEffectSystem;
 use aura_core::crypto::Ed25519Signature;
 use aura_core::effects::{CryptoCoreEffects, PhysicalTimeEffects, RandomCoreEffects};
@@ -21,7 +21,8 @@ use aura_core::identifiers::CeremonyId;
 use aura_core::identifiers::{AuthorityId, RecoveryId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::util::serialization::from_slice;
-use aura_core::TimeEffects;
+use aura_core::{SessionId, TimeEffects};
+use aura_journal::fact::{ProtocolRelationalFact, RelationalFact};
 use aura_protocol::effects::{ChoreographyError, TreeEffects};
 use aura_recovery::ceremony_runners::{
     execute_as as guardian_execute_as, AbortCeremony, CommitCeremony, GuardianCeremonyRole,
@@ -63,6 +64,7 @@ pub struct RecoveryServiceApi {
     handler: RecoveryHandler,
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: CeremonyRunner,
+    reconfiguration: ReconfigurationManager,
 }
 
 impl std::fmt::Debug for RecoveryServiceApi {
@@ -84,6 +86,7 @@ impl RecoveryServiceApi {
             handler,
             effects,
             ceremony_runner,
+            reconfiguration: ReconfigurationManager::new(),
         })
     }
 
@@ -92,12 +95,14 @@ impl RecoveryServiceApi {
         effects: Arc<AuraEffectSystem>,
         authority_context: AuthorityContext,
         ceremony_runner: CeremonyRunner,
+        reconfiguration: ReconfigurationManager,
     ) -> AgentResult<Self> {
         let handler = RecoveryHandler::new(authority_context)?;
         Ok(Self {
             handler,
             effects,
             ceremony_runner,
+            reconfiguration,
         })
     }
 
@@ -1518,7 +1523,14 @@ impl RecoveryServiceApi {
         };
 
         let _ = adapter.end_session().await;
-        result.map(|_| completion)
+        result.map(|_| completion.clone())?;
+
+        if completion.success {
+            self.apply_guardian_handoff_reconfiguration(&completion, &change)
+                .await?;
+        }
+
+        Ok(completion)
     }
 
     /// Vote on a guardian membership change as a guardian.
@@ -1660,6 +1672,63 @@ impl RecoveryServiceApi {
         }
 
         Ok(acceptances)
+    }
+}
+
+impl RecoveryServiceApi {
+    async fn apply_guardian_handoff_reconfiguration(
+        &self,
+        completion: &ChangeCompletion,
+        change: &MembershipChange,
+    ) -> AgentResult<()> {
+        use crate::core::default_context_id_for_authority;
+        use crate::core::AgentError;
+        use aura_core::Hash32;
+
+        let MembershipChange::UpdateGuardian {
+            guardian_id: previous_guardian,
+            new_profile,
+        } = change
+        else {
+            return Ok(());
+        };
+
+        let session_id = SessionId::from_uuid(membership_session_id(&completion.change_id));
+        let account_authority = self.handler.authority_context().authority_id();
+        let context_id = default_context_id_for_authority(account_authority);
+
+        self.reconfiguration
+            .record_native_session(*previous_guardian, session_id)
+            .await;
+        self.reconfiguration
+            .delegate_session(
+                &self.effects,
+                Some(context_id),
+                session_id,
+                *previous_guardian,
+                new_profile.authority_id,
+                Some("guardian_handoff".to_string()),
+            )
+            .await
+            .map_err(|e| {
+                AgentError::internal(format!("guardian handoff delegation failed: {e}"))
+            })?;
+
+        let binding_fact = RelationalFact::Protocol(ProtocolRelationalFact::GuardianBinding {
+            account_id: account_authority,
+            guardian_id: new_profile.authority_id,
+            binding_hash: Hash32::default(),
+        });
+        self.effects
+            .commit_relational_facts(vec![binding_fact])
+            .await
+            .map_err(|e| {
+                AgentError::internal(format!(
+                    "failed to persist guardian handoff binding context: {e}"
+                ))
+            })?;
+
+        Ok(())
     }
 }
 
@@ -2145,5 +2214,64 @@ mod tests {
         // Different change_id should produce different session
         let session_id3 = membership_session_id("different-change-id");
         assert_ne!(session_id1, session_id3);
+    }
+
+    #[tokio::test]
+    async fn test_guardian_handoff_reconfiguration_emits_audit_facts() {
+        let authority_context = create_test_authority(179);
+        let account_authority = authority_context.authority_id();
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::simulation_for_authority(&config, 1107, account_authority).unwrap(),
+        );
+        let service = RecoveryServiceApi::new(effects.clone(), authority_context).unwrap();
+
+        let previous_guardian = AuthorityId::new_from_entropy([180u8; 32]);
+        let replacement_guardian = AuthorityId::new_from_entropy([181u8; 32]);
+        let change = MembershipChange::UpdateGuardian {
+            guardian_id: previous_guardian,
+            new_profile: GuardianProfile::new(replacement_guardian),
+        };
+        let completion = ChangeCompletion {
+            change_id: "membership_handoff_test".to_string(),
+            success: true,
+            new_guardian_set: GuardianSet::new(vec![GuardianProfile::new(replacement_guardian)]),
+            new_threshold: 1,
+            change_evidence: vec![],
+        };
+
+        service
+            .apply_guardian_handoff_reconfiguration(&completion, &change)
+            .await
+            .expect("guardian handoff reconfiguration");
+
+        let facts = effects
+            .load_committed_facts(account_authority)
+            .await
+            .expect("load committed facts");
+
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                &fact.content,
+                aura_journal::fact::FactContent::Relational(RelationalFact::Protocol(
+                    ProtocolRelationalFact::SessionDelegation(delegation),
+                )) if delegation.bundle_id.as_deref() == Some("guardian_handoff")
+                    && delegation.from_authority == previous_guardian
+                    && delegation.to_authority == replacement_guardian
+            )
+        }));
+
+        assert!(facts.iter().any(|fact| {
+            matches!(
+                &fact.content,
+                aura_journal::fact::FactContent::Relational(RelationalFact::Protocol(
+                    ProtocolRelationalFact::GuardianBinding {
+                        account_id,
+                        guardian_id,
+                        ..
+                    },
+                )) if *account_id == account_authority && *guardian_id == replacement_guardian
+            )
+        }));
     }
 }

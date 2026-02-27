@@ -1,7 +1,7 @@
 //! Aura Terminal Main Entry Point
 //! Uses bpaf for CLI parsing and delegates execution to CLI handlers.
 
-use aura_core::AuraError;
+use aura_core::{AuraConformanceArtifactV1, AuraError, ConformanceSurfaceName};
 // Import app types from aura-app (pure layer)
 use aura_app::ui::prelude::*;
 // Import agent types from aura-agent (runtime layer)
@@ -9,7 +9,7 @@ use async_lock::RwLock;
 use aura_agent::core::AgentConfig;
 use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::effects::ExecutionMode;
-use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ThresholdArgs};
+use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ReplayArgs, ThresholdArgs};
 use aura_terminal::handlers::CliOutput;
 use aura_terminal::ids;
 use aura_terminal::{CliHandler, SyncAction};
@@ -31,6 +31,7 @@ commands:
     authority   Authority management
     context     Relational context inspection
     amp         AMP channel operations
+    replay      Replay conformance/effect trace artifacts
     version     Show version information
 
 run 'aura COMMAND --help' for command-specific options"#;
@@ -72,6 +73,11 @@ async fn main() -> Result<(), AuraError> {
         }
     };
     let command = args.command;
+
+    if let Commands::Replay(replay) = &command {
+        handle_replay_command(replay)?;
+        return Ok(());
+    }
 
     // Create CLI device ID and identifiers
     let device_id = ids::device_id("cli:main-device");
@@ -171,6 +177,7 @@ async fn main() -> Result<(), AuraError> {
             .handle_authority(&command)
             .await
             .map_err(|e| AuraError::agent(format!("{e}")))?,
+        Commands::Replay(_) => unreachable!("replay command is handled before runtime boot"),
         Commands::Context { action } => cli_handler
             .handle_context(&action)
             .await
@@ -254,6 +261,146 @@ fn base_from_config_path(config_path: PathBuf) -> Option<PathBuf> {
         return parent.parent().map(|p| p.to_path_buf());
     }
     Some(parent.to_path_buf())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ReplayEncoding {
+    Json,
+    Cbor,
+}
+
+fn parse_replay_encoding(args: &ReplayArgs) -> Result<ReplayEncoding, AuraError> {
+    if let Some(raw) = args.encoding.as_deref() {
+        return match raw.trim().to_ascii_lowercase().as_str() {
+            "json" => Ok(ReplayEncoding::Json),
+            "cbor" => Ok(ReplayEncoding::Cbor),
+            _ => Err(AuraError::invalid(
+                "invalid replay encoding; expected json or cbor",
+            )),
+        };
+    }
+
+    match args
+        .trace_file
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("cbor") => Ok(ReplayEncoding::Cbor),
+        _ => Ok(ReplayEncoding::Json),
+    }
+}
+
+fn handle_replay_command(args: &ReplayArgs) -> Result<(), AuraError> {
+    let encoding = parse_replay_encoding(args)?;
+    let payload = std::fs::read(&args.trace_file)
+        .map_err(|error| AuraError::invalid(format!("failed to read trace file: {error}")))?;
+
+    let artifact: AuraConformanceArtifactV1 = match encoding {
+        ReplayEncoding::Json => serde_json::from_slice(&payload)
+            .map_err(|error| AuraError::invalid(format!("invalid JSON trace artifact: {error}")))?,
+        ReplayEncoding::Cbor => serde_cbor::from_slice(&payload)
+            .map_err(|error| AuraError::invalid(format!("invalid CBOR trace artifact: {error}")))?,
+    };
+
+    artifact.validate_required_surfaces().map_err(|error| {
+        AuraError::invalid(format!(
+            "trace artifact missing required conformance surfaces: {error}"
+        ))
+    })?;
+
+    let mut recomputed = artifact.clone();
+    recomputed.recompute_digests().map_err(|error| {
+        AuraError::invalid(format!("failed to recompute conformance digests: {error}"))
+    })?;
+
+    if !artifact.step_hashes.is_empty() && artifact.step_hashes != recomputed.step_hashes {
+        return Err(AuraError::invalid(
+            "trace artifact step_hashes mismatch: replay divergence detected",
+        ));
+    }
+
+    if artifact.run_digest_hex.is_some() && artifact.run_digest_hex != recomputed.run_digest_hex {
+        return Err(AuraError::invalid(
+            "trace artifact run_digest mismatch: replay divergence detected",
+        ));
+    }
+
+    for (surface, payload) in &artifact.surfaces {
+        let Some(expected) = payload.digest_hex.as_ref() else {
+            continue;
+        };
+        let Some(actual) = recomputed
+            .surfaces
+            .get(surface)
+            .and_then(|value| value.digest_hex.as_ref())
+        else {
+            return Err(AuraError::invalid(format!(
+                "trace artifact missing recomputed digest for surface {surface:?}"
+            )));
+        };
+        if expected != actual {
+            return Err(AuraError::invalid(format!(
+                "trace artifact surface digest mismatch for {surface:?}: expected={expected} actual={actual}"
+            )));
+        }
+    }
+
+    let mut output = CliOutput::new();
+    output
+        .println(format!(
+            "Replay verification passed: {}",
+            args.trace_file.display()
+        ))
+        .println(format!(
+            "scenario={} target={} profile={}",
+            artifact.metadata.scenario, artifact.metadata.target, artifact.metadata.profile
+        ))
+        .println(format!(
+            "surfaces={} step_hash_sets={} run_digest_present={}",
+            artifact.surfaces.len(),
+            artifact.step_hashes.len(),
+            artifact.run_digest_hex.is_some()
+        ));
+
+    if args.visualize {
+        append_replay_visualization(&mut output, &artifact);
+    }
+    if args.step_through {
+        append_replay_step_through(&mut output, &artifact);
+    }
+    output.render();
+
+    Ok(())
+}
+
+fn append_replay_visualization(output: &mut CliOutput, artifact: &AuraConformanceArtifactV1) {
+    output.println("Replay visualization:".to_string());
+    for surface in ConformanceSurfaceName::REQUIRED {
+        if let Some(payload) = artifact.surfaces.get(&surface) {
+            output.println(format!(
+                "  {surface:?}: entries={} digest={}",
+                payload.entries.len(),
+                payload.digest_hex.as_deref().unwrap_or("<none>")
+            ));
+        }
+    }
+}
+
+fn append_replay_step_through(output: &mut CliOutput, artifact: &AuraConformanceArtifactV1) {
+    output.println("Replay step-through:".to_string());
+    for surface in ConformanceSurfaceName::REQUIRED {
+        let Some(payload) = artifact.surfaces.get(&surface) else {
+            continue;
+        };
+        output.println(format!("  {surface:?}:"));
+        for (index, entry) in payload.entries.iter().enumerate() {
+            let rendered =
+                serde_json::to_string(entry).unwrap_or_else(|_| "<unserializable>".to_string());
+            output.println(format!("    [{index}] {rendered}"));
+        }
+    }
 }
 
 /// Resolve the configuration file path from command line arguments
@@ -372,6 +519,31 @@ mod tests {
             assert_eq!(peers, "peer1,peer2");
         } else {
             panic!("Expected Sync once command");
+        }
+    }
+
+    #[test]
+    fn test_cli_replay() {
+        let args = cli_parser()
+            .to_options()
+            .run_inner(Args::from(&[
+                "replay",
+                "--trace-file",
+                "artifacts/conformance/run.json",
+                "--encoding",
+                "json",
+            ]))
+            .unwrap();
+        if let Commands::Replay(replay) = args.command {
+            assert_eq!(
+                replay.trace_file,
+                PathBuf::from("artifacts/conformance/run.json")
+            );
+            assert_eq!(replay.encoding.as_deref(), Some("json"));
+            assert!(!replay.visualize);
+            assert!(!replay.step_through);
+        } else {
+            panic!("Expected Replay command");
         }
     }
 

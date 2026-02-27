@@ -14,6 +14,8 @@ use aura_consensus::{
     ConsensusId,
 };
 use aura_core::{
+    byzantine::{ByzantineSafetyAttestation, CapabilitySnapshot},
+    effects::CapabilityKey,
     util::serialization::{from_slice, to_vec},
     AuthorityId, Hash32,
 };
@@ -218,6 +220,69 @@ fn test_consensus_result_message_with_evidence() {
         }
         _ => panic!("Expected ConsensusResult message"),
     }
+}
+
+#[test]
+fn test_commit_fact_roundtrip_preserves_byzantine_attestation() {
+    let required = vec![
+        CapabilityKey::new("byzantine_envelope"),
+        CapabilityKey::new("vmEnvelopeAdherence"),
+    ];
+    let snapshot = CapabilitySnapshot::from_inventory(
+        "consensus.test",
+        vec![
+            (CapabilityKey::new("byzantine_envelope"), true),
+            (CapabilityKey::new("vmEnvelopeAdherence"), true),
+        ],
+    );
+    let attestation = ByzantineSafetyAttestation::new(
+        "aura.consensus",
+        required.clone(),
+        snapshot,
+        vec!["evidence://tests/byzantine".to_string()],
+    );
+
+    let commit_fact = aura_consensus::types::CommitFact::new(
+        test_consensus_id(),
+        test_hash(11),
+        test_hash(12),
+        vec![9, 8, 7, 6],
+        aura_core::frost::ThresholdSignature {
+            signature: vec![1u8; 64],
+            signers: vec![1, 2, 3],
+        },
+        None,
+        vec![test_authority()],
+        2,
+        false,
+        aura_core::time::ProvenancedTime {
+            stamp: aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
+                ts_ms: 2000,
+                uncertainty: None,
+            }),
+            proofs: vec![],
+            origin: None,
+        },
+    )
+    .with_byzantine_attestation(attestation.clone());
+
+    let bytes = to_vec(&commit_fact).expect("serialization should succeed");
+    let restored: aura_consensus::types::CommitFact =
+        from_slice(&bytes).expect("deserialization should succeed");
+    let restored_attestation = restored
+        .byzantine_attestation
+        .expect("byzantine attestation should be present");
+
+    assert_eq!(restored_attestation.protocol_id, "aura.consensus");
+    assert_eq!(restored_attestation.required_capabilities, required);
+    assert_eq!(
+        restored_attestation.schema_version,
+        attestation.schema_version
+    );
+    assert_eq!(
+        restored_attestation.evidence_refs,
+        attestation.evidence_refs
+    );
 }
 
 #[test]

@@ -111,8 +111,36 @@ Current registry mappings:
 
 - `aura.consensus` -> `byzantine_envelope`
 - `aura.sync.epoch_rotation` -> `termination_bounded`
+- `aura.dkg.ceremony` -> `byzantine_envelope` + `termination_bounded`
+- `aura.recovery.grant` -> `termination_bounded`
 
 For VM-backed execution, use `AuraChoreoEngine::open_session_admitted(...)` with the required artifact keys before stepping/running the session.
+
+### Dynamic Reconfiguration (`@link` + delegation)
+
+Aura treats protocol reconfiguration as a first-class choreography concern. Static composition uses `@link` metadata in choreographies so compatible bundles can be merged at compile time. Runtime transfer uses delegation receipts and session-footprint coherence checks.
+
+- `@link` annotations are parsed by `aura-mpst` and validated by `aura-macros` for import/export compatibility.
+- `ReconfigurationManager` in `aura-agent` executes link/delegate operations and verifies coherence after each delegation.
+- Delegation writes a `SessionDelegationFact` audit record to the relational journal.
+
+This model is used by device migration and guardian handoff flows: session ownership moves without restarting the full choreography, while invariants remain checkable from persisted facts.
+
+### Quantitative Termination Budgets
+
+Aura derives deterministic step budgets from Telltale's weighted measure:
+
+`W = 2 * sum(depth(local_type)) + sum(buffer_sizes)`
+
+Runtime execution applies:
+
+`max_steps = ceil(k_sigma(protocol) * W * budget_multiplier)`
+
+Implementation points:
+
+- `aura-mpst::termination` computes local-type depth, buffer weight, and weighted measure.
+- `aura-protocol::termination` defines protocol classes (`consensus`, `sync`, `dkg`, `recovery`), calibrated `k_sigma` factors, and expected budget ranges.
+- `AuraChoreoEngine` constructs a `TerminationBudget` at run start, checks budget consumption after every VM scheduler step, emits deterministic `BoundExceeded` failures, warns at >80% utilization, and logs multiplier divergence from computed bounds.
 
 ### Effect Command Generation
 

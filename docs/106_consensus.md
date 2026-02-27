@@ -128,6 +128,7 @@ pub struct CommitFact {
     pub threshold: u16,
     pub timestamp: ProvenancedTime,
     pub fast_path: bool,
+    pub byzantine_attestation: Option<ByzantineSafetyAttestation>,
 }
 ```
 
@@ -136,6 +137,19 @@ The commit fact is the output of consensus. Every peer merges `CommitFact` into 
 The commit fact is inserted into the appropriate journal namespace. This includes account journals for account updates and relational context journals for cross-authority operations.
 
 Ordering of committed facts relies on `OrderTime` (or session/consensus sequencing), not on timestamps. `ProvenancedTime` is semantic metadata and must not be used for cross-domain total ordering or indexing.
+
+### 4.1 Byzantine Admission and Attestation
+
+Consensus-backed ceremonies (including BFT-DKG finalization) are admitted only after runtime capability checks for the consensus profile. Aura currently enforces theorem-pack/runtime capability requirements such as `byzantine_envelope` before executing DKG and threshold-signing paths.
+
+At admission, Aura captures a `CapabilitySnapshot` and records a `ByzantineSafetyAttestation` with:
+
+- protocol id (`aura.consensus`)
+- required capability keys for the profile
+- snapshot of admitted/not-admitted runtime capabilities
+- optional runtime evidence references
+
+The attestation is attached to `CommitFact` and `DkgTranscriptCommit`. Capability mismatches fail before ceremony execution and emit redacted capability references for operational diagnostics.
 
 ## 5. Prestate Model
 

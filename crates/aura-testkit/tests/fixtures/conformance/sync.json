@@ -1,0 +1,34 @@
+{
+  "schema_version": "aura.conformance.v1",
+  "metadata": {
+    "target": "native",
+    "profile": "native_coop",
+    "scenario": "sync",
+    "seed": 102,
+    "commit": null,
+    "async_host_transcript_entries": null,
+    "async_host_transcript_digest_hex": null
+  },
+  "surfaces": {
+    "observable": {
+      "entries": [
+        { "event": "anti_entropy_round", "session": 2, "step": 0 }
+      ],
+      "digest_hex": null
+    },
+    "scheduler_step": {
+      "entries": [
+        { "step_index": 0, "session": 2, "role": "sync_peer" }
+      ],
+      "digest_hex": null
+    },
+    "effect": {
+      "entries": [
+        { "effect_kind": "handle_recv", "ordering_key": 0 }
+      ],
+      "digest_hex": null
+    }
+  },
+  "step_hashes": {},
+  "run_digest_hex": null
+}

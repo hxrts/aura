@@ -60,9 +60,13 @@ pub mod reliability;
 pub mod choreo_engine;
 pub mod choreography_adapter;
 #[cfg(feature = "choreo-backend-telltale-vm")]
+pub mod effect_trace_capture;
+#[cfg(feature = "choreo-backend-telltale-vm")]
 pub mod parity_policy;
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub mod vm_effect_handler;
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub mod vm_hardening;
 
 // Runtime utilities
 pub mod migration;
@@ -80,6 +84,12 @@ pub use choreography_adapter::{
     MessageGuardRequirements,
 };
 pub use context::EffectContext;
+#[allow(unused_imports)] // Re-exported for public API
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use effect_trace_capture::{
+    AuraEffectTraceEncoding, AuraEffectTraceGranularity, EffectTraceBundle, EffectTraceCapture,
+    EffectTraceCaptureError, EffectTraceCaptureOptions,
+};
 pub use effects::AuraEffectSystem;
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
@@ -88,6 +98,18 @@ pub use shared_transport::SharedTransport;
 #[allow(unused_imports)] // Re-exported for public API
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};
+#[allow(unused_imports)] // Re-exported for public API
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use vm_hardening::{
+    aura_flow_policy_predicate, aura_output_predicate_allow_list, build_vm_config,
+    parse_communication_replay_mode, parse_determinism_mode, parse_effect_determinism_tier,
+    validate_determinism_profile, vm_config_for_profile, AuraVmDeterminismProfileError,
+    AuraVmGuardLayer, AuraVmHardeningProfile, AuraVmParityProfile, AURA_OUTPUT_PREDICATE_CHOICE,
+    AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE, AURA_OUTPUT_PREDICATE_GUARD_RELEASE,
+    AURA_OUTPUT_PREDICATE_OBSERVABLE, AURA_OUTPUT_PREDICATE_STEP,
+    AURA_OUTPUT_PREDICATE_TRANSPORT_RECV, AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,
+    AURA_OUTPUT_PREDICATE_VM_OBSERVABLE,
+};
 
 // Re-export JournalCoupler for choreography journal coupling
 #[allow(unused_imports)] // Re-exported for public API

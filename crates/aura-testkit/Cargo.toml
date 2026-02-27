@@ -68,6 +68,7 @@ uuid = { workspace = true }
 once_cell = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_cbor = { workspace = true }
 thiserror = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
@@ -87,6 +88,10 @@ serial_test = { workspace = true }
 # For testing the test utilities themselves
 # tokio-test = { workspace = true } # removed - unused
 bincode = { workspace = true }
+tempfile = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+telltale-vm = { workspace = true }

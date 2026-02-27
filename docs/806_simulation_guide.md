@@ -130,14 +130,29 @@ Simulated time advances only through explicit calls. This enables testing timeou
 
 ```rust
 use aura_simulator::handlers::SimulationFaultHandler;
-use aura_simulator::middleware::FaultType;
+use aura_core::{AuraFault, AuraFaultKind, FaultEdge};
 
-let mut faults = SimulationFaultHandler::new();
-faults.inject_fault(FaultType::NetworkDelay { min_ms: 100, max_ms: 500 });
-faults.inject_fault(FaultType::PacketDrop { probability: 0.1 });
+let faults = SimulationFaultHandler::new(42);
+
+faults.inject_fault(
+    AuraFault::new(AuraFaultKind::MessageDelay {
+        edge: FaultEdge::new("alice", "bob"),
+        min: Duration::from_millis(100),
+        max: Duration::from_millis(500),
+    }),
+    None,
+)?;
+
+faults.inject_fault(
+    AuraFault::new(AuraFaultKind::MessageDrop {
+        edge: FaultEdge::new("alice", "bob"),
+        probability: 0.1,
+    }),
+    None,
+)?;
 ```
 
-Faults apply probabilistically during protocol execution.
+`AuraFault` is the canonical simulator fault model. Legacy scenario fault forms should be converted to `AuraFault` before injection or replay.
 
 ### Triggered Scenarios
 
@@ -148,15 +163,21 @@ use aura_simulator::handlers::{
     TriggerCondition,
     InjectionAction,
 };
+use aura_core::{AuraFault, AuraFaultKind};
 
-let mut handler = SimulationScenarioHandler::new();
-handler.add_scenario(ScenarioDefinition {
-    name: "late_partition".to_string(),
+let handler = SimulationScenarioHandler::new(42);
+handler.register_scenario(ScenarioDefinition {
+    id: "late_partition".to_string(),
+    name: "Late Partition".to_string(),
     trigger: TriggerCondition::AfterTime(Duration::from_secs(30)),
-    action: InjectionAction::PartitionNetwork {
-        group_a: vec![device1, device2],
-        group_b: vec![device3],
+    actions: vec![InjectionAction::TriggerFault {
+        fault: AuraFault::new(AuraFaultKind::NetworkPartition {
+            partition: vec![vec!["device1".into(), "device2".into()], vec!["device3".into()]],
+            duration: Some(Duration::from_secs(15)),
+        }),
     },
+    duration: Some(Duration::from_secs(45)),
+    priority: 10,
 });
 ```
 
@@ -205,6 +226,40 @@ Middleware metrics help identify unexpected behavior.
 Flaky simulation results indicate non-determinism. Check for direct system calls. Check for uncontrolled concurrency. Check for ordering assumptions.
 
 Slow simulations indicate inefficient fault configuration. Reduce fault rates for initial debugging. Increase rates for stress testing.
+
+## Online Property Monitoring
+
+Aura simulator now supports per-tick property monitoring through:
+
+- `aura_simulator::AuraProperty`
+- `aura_simulator::AuraPropertyMonitor`
+- `aura_simulator::default_property_suite(...)`
+
+The monitor checks properties on each simulation tick using `PropertyStateSnapshot` input (events, buffer sizes, local-type depths, flow budgets, and optional session/coroutine/journal snapshots).
+
+```rust
+use aura_simulator::{
+    AuraPropertyMonitor, ProtocolPropertyClass, ProtocolPropertySuiteIds,
+    PropertyMonitoringConfig, SimulationScenarioConfig,
+};
+
+let monitoring = PropertyMonitoringConfig::new(
+    ProtocolPropertyClass::Consensus,
+    ProtocolPropertySuiteIds { session, context },
+)
+.with_check_interval(1)
+.with_snapshot_provider(|tick| build_snapshot_for_tick(tick));
+
+let config = SimulationScenarioConfig {
+    property_monitoring: Some(monitoring),
+    ..SimulationScenarioConfig::default()
+};
+
+let results = env.run_scenario("consensus".into(), "with property checks".into(), config).await?;
+assert!(results.property_violations.is_empty());
+```
+
+Default suites are available for consensus, sync, chat, and recovery protocol classes. Scenario results include `properties_checked` and `property_violations` for CI reporting.
 
 ## Quint Integration
 
@@ -285,6 +340,27 @@ Replay-heavy parity lanes should use shared replay APIs:
 - `run_concurrent_replay_shared(...)`
 
 These APIs reduce duplicate replay state across lanes and keep replay artifacts compatible with canonical trace fragments. Conformance lanes also emit deterministic replay metrics artifacts so regressions in replay footprint are visible during CI review.
+
+For fault-aware replays, persist `entries + faults` bundles and re-inject faults before replay:
+- `aura_testkit::ReplayTrace::load_file(...)`
+- `ReplayTrace::replay_faults(...)`
+- `aura_simulator::AsyncSimulatorHostBridge::replay_expected_with_faults(...)`
+
+### Differential Replay Workflow
+
+Use `aura-simulator::DifferentialTester` to compare baseline/candidate conformance artifacts with one of two profiles:
+
+- `strict`: byte-identical surfaces.
+- `envelope_bounded`: Aura law-aware comparison (`strict` + commutative/algebraic envelopes).
+
+For parity debugging, run:
+
+```bash
+just ci-choreo-parity
+aura replay --trace-file artifacts/choreo-parity/native_replay/<scenario>__seed_<seed>.json
+```
+
+The `replay` command validates required conformance surfaces and verifies stored step/run digests against recomputed values.
 
 ## Best Practices
 

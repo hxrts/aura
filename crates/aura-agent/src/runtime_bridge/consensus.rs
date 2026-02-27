@@ -1,10 +1,17 @@
 use aura_app::IntentError;
 use aura_consensus::protocol::runners::{execute_as as consensus_execute_as, AuraConsensusRole};
 use aura_consensus::protocol::ConsensusParams;
+use aura_core::byzantine::{ByzantineSafetyAttestation, CapabilitySnapshot};
+use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::ParticipantIdentity;
 use aura_core::{AuraError, Hash32, PhysicalTimeEffects, Prestate, TimeEffects};
+use aura_effects::RuntimeCapabilityHandler;
 use aura_guards::prelude::{GuardContextProvider, GuardEffects};
+use aura_protocol::admission::{
+    required_capability_keys, validate_consensus_profile_capabilities, ConsensusCapabilityProfile,
+    PROTOCOL_AURA_CONSENSUS, PROTOCOL_DKG_CEREMONY,
+};
 use aura_protocol::effects::ChoreographicEffects;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -15,6 +22,38 @@ use crate::runtime::choreography_adapter::AuraProtocolAdapter;
 use crate::runtime::consensus::{
     membership_hash_from_participants, participant_identity_to_authority_id,
 };
+
+fn capability_ref(capability: &CapabilityKey) -> String {
+    let digest = aura_core::hash::hash(capability.as_str().as_bytes());
+    let mut out = String::with_capacity(12);
+    for byte in digest.iter().take(6) {
+        use std::fmt::Write as _;
+        let _ = write!(&mut out, "{byte:02x}");
+    }
+    out
+}
+
+fn capability_refs(capabilities: &[CapabilityKey]) -> Vec<String> {
+    capabilities.iter().map(capability_ref).collect()
+}
+
+fn consensus_runtime_capability_handler() -> RuntimeCapabilityHandler {
+    #[cfg(feature = "choreo-backend-telltale-vm")]
+    {
+        let contracts = telltale_vm::runtime_contracts::RuntimeContracts::full();
+        return RuntimeCapabilityHandler::from_runtime_contracts(&contracts);
+    }
+
+    #[cfg(not(feature = "choreo-backend-telltale-vm"))]
+    {
+        RuntimeCapabilityHandler::from_pairs([
+            ("byzantine_envelope", true),
+            ("termination_bounded", true),
+            ("mixed_determinism", true),
+            ("reconfiguration", true),
+        ])
+    }
+}
 
 pub(super) fn map_consensus_error(err: AuraError) -> IntentError {
     IntentError::internal_error(format!("{err}"))
@@ -68,6 +107,85 @@ pub(super) async fn persist_consensus_dkg_transcript(
     }
 
     let store = aura_consensus::dkg::StorageTranscriptStore::new_default(effects.clone());
+    let required_capabilities = required_capability_keys(PROTOCOL_DKG_CEREMONY);
+    let required_refs = capability_refs(&required_capabilities);
+    let capability_handler = consensus_runtime_capability_handler();
+    let capability_snapshot = capability_handler
+        .capability_inventory()
+        .await
+        .map_err(|e| {
+            IntentError::internal_error(format!("Capability inventory unavailable: {e}"))
+        })?;
+    let snapshot_admitted = capability_snapshot
+        .iter()
+        .filter(|(_, admitted)| *admitted)
+        .count();
+    tracing::debug!(
+        protocol = PROTOCOL_AURA_CONSENSUS,
+        epoch,
+        capability_inventory_size = capability_snapshot.len(),
+        capability_inventory_admitted = snapshot_admitted,
+        required_capability_refs = ?required_refs,
+        "Byzantine admission capability snapshot captured"
+    );
+
+    if let Err(error) = validate_consensus_profile_capabilities(
+        ConsensusCapabilityProfile::ThresholdSigning,
+        &capability_snapshot,
+    ) {
+        let missing_ref = match &error {
+            AdmissionError::MissingCapability { capability } => capability_ref(capability),
+            _ => "unknown".to_string(),
+        };
+        tracing::error!(
+            protocol = PROTOCOL_AURA_CONSENSUS,
+            epoch,
+            required_capability_refs = ?required_refs,
+            missing_capability_ref = %missing_ref,
+            "Byzantine admission mismatch: consensus profile requirement failed"
+        );
+        return Err(IntentError::internal_error(format!(
+            "Consensus profile capability validation failed: {error}"
+        )));
+    }
+    tracing::debug!(
+        protocol = PROTOCOL_AURA_CONSENSUS,
+        epoch,
+        required_capability_refs = ?required_refs,
+        "Byzantine admission profile validation passed"
+    );
+
+    if let Err(error) = capability_handler
+        .require_capabilities(&required_capabilities)
+        .await
+    {
+        let missing_ref = match &error {
+            AdmissionError::MissingCapability { capability } => capability_ref(capability),
+            _ => "unknown".to_string(),
+        };
+        tracing::error!(
+            protocol = PROTOCOL_AURA_CONSENSUS,
+            epoch,
+            required_capability_refs = ?required_refs,
+            missing_capability_ref = %missing_ref,
+            "Byzantine admission mismatch: required capability denied before DKG"
+        );
+        return Err(IntentError::internal_error(format!(
+            "Missing Byzantine safety evidence before DKG: {error}"
+        )));
+    }
+    tracing::debug!(
+        protocol = PROTOCOL_AURA_CONSENSUS,
+        epoch,
+        required_capability_refs = ?required_refs,
+        "Byzantine admission capability verification passed"
+    );
+    let byzantine_attestation = ByzantineSafetyAttestation::new(
+        PROTOCOL_AURA_CONSENSUS,
+        required_capabilities.clone(),
+        CapabilitySnapshot::from_inventory("runtime_bridge.consensus", capability_snapshot),
+        vec!["evidence://runtime-bridge/consensus".to_string()],
+    );
     let (commit, consensus_commit) = aura_consensus::dkg::run_consensus_dkg(
         &prestate,
         context,
@@ -77,6 +195,7 @@ pub(super) async fn persist_consensus_dkg_transcript(
         params,
         effects.as_ref(),
         effects.as_ref(),
+        Some(byzantine_attestation),
     )
     .await
     .map_err(|e| IntentError::internal_error(format!("Finalize DKG transcript failed: {e}")))?;
@@ -156,8 +275,12 @@ where
         .collect();
 
     // Create the protocol adapter with the Witness role family registered
+    let required_capabilities = required_capability_keys(PROTOCOL_AURA_CONSENSUS);
+    let capability_handler = Arc::new(consensus_runtime_capability_handler());
+
     let mut adapter = AuraProtocolAdapter::new(effects.clone(), authority_id, role, role_map)
-        .with_role_family("Witness", witness_roles);
+        .with_role_family("Witness", witness_roles)
+        .with_runtime_capability_admission(capability_handler, required_capabilities);
 
     // Start the choreography session
     adapter

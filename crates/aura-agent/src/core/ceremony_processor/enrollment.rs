@@ -5,9 +5,10 @@
 //! - `application/aura-device-enrollment-acceptance`: Acceptance acknowledgment
 
 use super::ProcessResult;
+use crate::core::default_context_id_for_authority;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyRunner};
-use crate::runtime::services::CeremonyTracker;
+use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::effects::{
@@ -16,8 +17,11 @@ use aura_core::effects::{
 use aura_core::identifiers::CeremonyId;
 use aura_core::tree::metadata::DeviceLeafMetadata;
 use aura_core::tree::LeafRole;
-use aura_core::{AttestedOp, AuthorityId, DeviceId, LeafId, LeafNode, NodeIndex, TreeOp};
+use aura_core::{
+    hash, AttestedOp, AuthorityId, DeviceId, LeafId, LeafNode, NodeIndex, SessionId, TreeOp,
+};
 use aura_protocol::effects::TreeEffects;
+use uuid::Uuid;
 
 /// Handles device enrollment ceremony messages
 pub struct EnrollmentHandler<'a> {
@@ -27,6 +31,7 @@ pub struct EnrollmentHandler<'a> {
     ceremony_runner: &'a CeremonyRunner,
     #[allow(dead_code)]
     signing_service: &'a ThresholdSigningService,
+    reconfiguration: &'a ReconfigurationManager,
 }
 
 impl<'a> EnrollmentHandler<'a> {
@@ -37,6 +42,7 @@ impl<'a> EnrollmentHandler<'a> {
         ceremony_tracker: &'a CeremonyTracker,
         ceremony_runner: &'a CeremonyRunner,
         signing_service: &'a ThresholdSigningService,
+        reconfiguration: &'a ReconfigurationManager,
     ) -> Self {
         Self {
             authority_id,
@@ -44,6 +50,7 @@ impl<'a> EnrollmentHandler<'a> {
             ceremony_tracker,
             ceremony_runner,
             signing_service,
+            reconfiguration,
         }
     }
 
@@ -460,6 +467,44 @@ impl<'a> EnrollmentHandler<'a> {
             );
         }
 
+        // Delegate the enrollment session to the newly enrolled device authority.
+        let device_authority = match device_id.to_bytes() {
+            Ok(device_bytes) => AuthorityId::new_from_entropy(hash::hash(&device_bytes)),
+            Err(e) => {
+                tracing::warn!(
+                    ceremony_id = %ceremony_id,
+                    device_id = %device_id,
+                    error = %e,
+                    "failed to derive device authority for delegation"
+                );
+                return Ok(());
+            }
+        };
+
+        let session_id = ceremony_runtime_session_id(ceremony_id);
+        self.reconfiguration
+            .record_native_session(self.authority_id, session_id)
+            .await;
+        if let Err(e) = self
+            .reconfiguration
+            .delegate_session(
+                self.effects,
+                Some(default_context_id_for_authority(self.authority_id)),
+                session_id,
+                self.authority_id,
+                device_authority,
+                Some("device_migration".to_string()),
+            )
+            .await
+        {
+            tracing::warn!(
+                ceremony_id = %ceremony_id,
+                session_id = %session_id,
+                error = %e,
+                "device migration delegation failed after enrollment commit"
+            );
+        }
+
         Ok(())
     }
 
@@ -536,4 +581,11 @@ impl<'a> EnrollmentHandler<'a> {
 
         Ok(())
     }
+}
+
+fn ceremony_runtime_session_id(ceremony_id: &CeremonyId) -> SessionId {
+    let digest = hash::hash(ceremony_id.as_str().as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    SessionId::from_uuid(Uuid::from_bytes(bytes))
 }

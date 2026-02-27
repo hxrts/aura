@@ -5,14 +5,17 @@
 
 use super::state::{with_state_mut, with_state_mut_validated};
 use super::traits::{RuntimeService, ServiceError, ServiceHealth};
-use super::RuntimeTaskRegistry;
+use super::{ReconfigurationManager, RuntimeTaskRegistry};
+use crate::core::default_context_id_for_authority;
 use crate::runtime::choreography_adapter::AuraProtocolAdapter;
 use crate::runtime::AuraEffectSystem;
 use async_trait::async_trait;
 use aura_core::effects::indexed::{IndexedFact, IndexedJournalEffects};
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::hash::hash;
-use aura_core::{AuthorityId, DeviceId};
+use aura_core::{AuthorityId, DelegationReceipt, DeviceId, SessionId};
+use aura_effects::RuntimeCapabilityHandler;
+use aura_protocol::admission::{required_capability_keys, PROTOCOL_SYNC_EPOCH_ROTATION};
 use aura_sync::protocols::epoch_runners::{
     execute_as as epoch_execute_as, EpochRotationProtocolRole,
 };
@@ -164,6 +167,8 @@ pub struct SyncServiceManager {
 
     /// Optional Merkle verifier for fact sync (requires indexed journal)
     merkle_verifier: Option<Arc<MerkleVerifier>>,
+    /// Reconfiguration/session-footprint state for sync choreography delegation.
+    reconfiguration: ReconfigurationManager,
 }
 
 impl SyncServiceManager {
@@ -173,6 +178,7 @@ impl SyncServiceManager {
             config: config.clone(),
             state: Arc::new(RwLock::new(SyncState::new(config.initial_peers))),
             merkle_verifier: None,
+            reconfiguration: ReconfigurationManager::new(),
         }
     }
 
@@ -189,6 +195,7 @@ impl SyncServiceManager {
             config: config.clone(),
             state: Arc::new(RwLock::new(SyncState::new(config.initial_peers))),
             merkle_verifier: Some(Arc::new(MerkleVerifier::new(indexed_journal, time))),
+            reconfiguration: ReconfigurationManager::new(),
         }
     }
 
@@ -623,10 +630,19 @@ impl SyncServiceManager {
         let commit_type = std::any::type_name::<EpochCommit>();
 
         let session_id = epoch_rotation_session_id(&proposal.rotation_id);
+        self.record_native_epoch_session(coordinator_id, session_id)
+            .await;
         let mut proposals = VecDeque::new();
         proposals.push_back(proposal);
         let mut commits = VecDeque::new();
         commits.push_back(commit);
+
+        let required_capabilities = required_capability_keys(PROTOCOL_SYNC_EPOCH_ROTATION);
+        let capability_handler = Arc::new(RuntimeCapabilityHandler::from_pairs(
+            required_capabilities
+                .iter()
+                .map(|capability| (capability.as_str(), true)),
+        ));
 
         let mut adapter = AuraProtocolAdapter::new(
             effects,
@@ -634,6 +650,7 @@ impl SyncServiceManager {
             EpochRotationProtocolRole::Coordinator,
             role_map,
         )
+        .with_runtime_capability_admission(capability_handler, required_capabilities)
         .with_message_provider(move |request, _received| {
             if request.type_name == proposal_type {
                 return proposals
@@ -686,10 +703,20 @@ impl SyncServiceManager {
 
         let confirmation_type = std::any::type_name::<EpochConfirmation>();
         let session_id = epoch_rotation_session_id(&confirmation.rotation_id);
+        self.record_native_epoch_session(participant_id, session_id)
+            .await;
         let mut confirmations = VecDeque::new();
         confirmations.push_back(confirmation);
 
+        let required_capabilities = required_capability_keys(PROTOCOL_SYNC_EPOCH_ROTATION);
+        let capability_handler = Arc::new(RuntimeCapabilityHandler::from_pairs(
+            required_capabilities
+                .iter()
+                .map(|capability| (capability.as_str(), true)),
+        ));
+
         let mut adapter = AuraProtocolAdapter::new(effects, participant_id, role, role_map)
+            .with_runtime_capability_admission(capability_handler, required_capabilities)
             .with_message_provider(move |request, _received| {
                 if request.type_name == confirmation_type {
                     return confirmations
@@ -710,6 +737,42 @@ impl SyncServiceManager {
 
         let _ = adapter.end_session().await;
         result
+    }
+
+    /// Delegate ownership of an epoch-rotation session to another authority.
+    ///
+    /// This updates runtime session footprints and records a relational protocol fact.
+    pub async fn delegate_epoch_rotation_session(
+        &self,
+        effects: Arc<AuraEffectSystem>,
+        rotation_id: &str,
+        from_authority: AuthorityId,
+        to_authority: AuthorityId,
+        bundle_id: Option<String>,
+    ) -> Result<DelegationReceipt, String> {
+        let session_uuid = epoch_rotation_session_id(rotation_id);
+        let session_id = SessionId::from_uuid(session_uuid);
+        self.reconfiguration
+            .record_native_session(from_authority, session_id)
+            .await;
+        self.reconfiguration
+            .delegate_session(
+                &effects,
+                Some(default_context_id_for_authority(from_authority)),
+                session_id,
+                from_authority,
+                to_authority,
+                bundle_id,
+            )
+            .await
+            .map_err(|e| format!("epoch rotation delegation failed: {e}"))
+    }
+
+    async fn record_native_epoch_session(&self, authority_id: AuthorityId, session_uuid: Uuid) {
+        let session_id = SessionId::from_uuid(session_uuid);
+        self.reconfiguration
+            .record_native_session(authority_id, session_id)
+            .await;
     }
 }
 

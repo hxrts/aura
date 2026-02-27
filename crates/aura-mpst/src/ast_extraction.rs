@@ -51,6 +51,27 @@ pub enum AuraEffect {
         /// The role that leaks information
         role: RoleId,
     },
+    /// Static link-composition metadata for choreography bundles.
+    Link {
+        /// Parsed link directive.
+        directive: LinkDirective,
+        /// The role that declared this annotation.
+        role: RoleId,
+    },
+}
+
+/// Parsed `link` annotation directive.
+///
+/// Format:
+/// `link = "bundle=<id>|exports=a,b|imports=c,d"`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkDirective {
+    /// Composed bundle identifier.
+    pub bundle_id: String,
+    /// Interfaces exported by this bundle.
+    pub exports: Vec<String>,
+    /// Interfaces imported by this bundle.
+    pub imports: Vec<String>,
 }
 
 /// Errors that can occur during annotation extraction
@@ -231,6 +252,12 @@ pub fn generate_aura_choreography_code(
                     "    // Leakage to observers {observers:?} for role {role}\n"
                 ));
             }
+            AuraEffect::Link { directive, role } => {
+                code.push_str(&format!(
+                    "    // Link directive bundle={} exports={:?} imports={:?} role={role}\n",
+                    directive.bundle_id, directive.exports, directive.imports
+                ));
+            }
         }
     }
 
@@ -389,6 +416,26 @@ fn detect_annotations_in_text(
                         ))
                     }
                 },
+                "link" => {
+                    let raw = match item.value {
+                        Some(AnnotationValue::Str(value)) => value,
+                        Some(_) => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "link expects a string literal".to_string(),
+                            ))
+                        }
+                        None => {
+                            return Err(AuraExtractionError::InvalidAnnotationValue(
+                                "link requires a string literal".to_string(),
+                            ))
+                        }
+                    };
+                    let directive = parse_link_directive(&raw)?;
+                    effects.push(AuraEffect::Link {
+                        directive,
+                        role: role.clone(),
+                    });
+                }
                 other => {
                     return Err(AuraExtractionError::UnsupportedFeature(format!(
                         "Unknown annotation: {other}"
@@ -460,9 +507,74 @@ fn is_annotation_content(content: &str) -> bool {
         "audit_log",
         "leak",
         "leakage_budget",
+        "link",
     ]
     .iter()
     .any(|key| normalized.contains(key))
+}
+
+fn parse_link_directive(raw: &str) -> Result<LinkDirective, AuraExtractionError> {
+    let mut bundle_id: Option<String> = None;
+    let mut exports = Vec::new();
+    let mut imports = Vec::new();
+
+    for segment in raw.split(['|', ';']) {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+
+        let (key, value) = segment.split_once('=').ok_or_else(|| {
+            AuraExtractionError::InvalidAnnotationValue(
+                "link directive segments must be key=value pairs".to_string(),
+            )
+        })?;
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "bundle" => {
+                if value.is_empty() {
+                    return Err(AuraExtractionError::InvalidAnnotationValue(
+                        "link bundle id cannot be empty".to_string(),
+                    ));
+                }
+                bundle_id = Some(value.to_string());
+            }
+            "exports" => {
+                exports = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|entry| !entry.is_empty())
+                    .map(ToString::to_string)
+                    .collect();
+            }
+            "imports" => {
+                imports = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|entry| !entry.is_empty())
+                    .map(ToString::to_string)
+                    .collect();
+            }
+            other => {
+                return Err(AuraExtractionError::InvalidAnnotationValue(format!(
+                    "unsupported link directive key: {other}"
+                )))
+            }
+        }
+    }
+
+    let bundle_id = bundle_id.ok_or_else(|| {
+        AuraExtractionError::InvalidAnnotationValue(
+            "link directive requires bundle=<id>".to_string(),
+        )
+    })?;
+
+    Ok(LinkDirective {
+        bundle_id,
+        exports,
+        imports,
+    })
 }
 
 /// Extract role from a line - simple implementation
@@ -675,6 +787,34 @@ mod tests {
         assert!(
             has_leakage,
             "Should extract leak annotation with quoted string"
+        );
+    }
+
+    #[test]
+    fn test_link_annotation_parsing() {
+        let choreography = r#"
+            Coordinator[link = "bundle=sync_chat|exports=chat.send,sync.push|imports=journal.commit"] -> Worker: Step;
+        "#;
+        let effects = extract_aura_annotations(choreography).unwrap();
+        let has_link = effects.iter().any(|effect| {
+            matches!(effect, AuraEffect::Link { directive, role }
+                if directive.bundle_id == "sync_chat"
+                && directive.exports.contains(&"chat.send".to_string())
+                && directive.imports.contains(&"journal.commit".to_string())
+                && role.as_str() == "Coordinator")
+        });
+        assert!(has_link, "Should parse link annotation directive");
+    }
+
+    #[test]
+    fn test_link_annotation_requires_bundle_key() {
+        let choreography = r#"
+            Coordinator[link = "exports=chat.send|imports=sync.push"] -> Worker: Step;
+        "#;
+        let err = extract_aura_annotations(choreography).expect_err("missing bundle must fail");
+        assert!(
+            err.to_string().contains("bundle=<id>"),
+            "error should mention required bundle key"
         );
     }
 }

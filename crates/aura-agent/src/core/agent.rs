@@ -7,6 +7,7 @@ use crate::handlers::{
     AuthServiceApi, ChatServiceApi, InvitationServiceApi, OtaActivationServiceApi,
     RecoveryServiceApi, SessionServiceApi,
 };
+use crate::runtime::services::ReconfigurationManager;
 use crate::runtime::services::ThresholdSigningService;
 use crate::runtime::system::RuntimeSystem;
 use crate::runtime::{AuraEffectSystem, EffectContext};
@@ -35,6 +36,7 @@ impl AuraAgent {
         let services = ServiceRegistry::new(
             runtime.effects(),
             runtime.ceremony_runner().clone(),
+            runtime.reconfiguration().clone(),
             context.clone(),
         );
         Self {
@@ -134,6 +136,7 @@ impl AuraAgent {
 struct ServiceRegistry {
     effects: Arc<AuraEffectSystem>,
     ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
+    reconfiguration_manager: ReconfigurationManager,
     authority_context: AuthorityContext,
     account_id: AccountId,
     sessions: OnceCell<SessionServiceApi>,
@@ -148,12 +151,14 @@ impl ServiceRegistry {
     fn new(
         effects: Arc<AuraEffectSystem>,
         ceremony_runner: crate::runtime::services::ceremony_runner::CeremonyRunner,
+        reconfiguration_manager: ReconfigurationManager,
         authority_context: AuthorityContext,
     ) -> Self {
         let account_id = authority_context.account_id();
         Self {
             effects,
             ceremony_runner,
+            reconfiguration_manager,
             authority_context,
             account_id,
             sessions: OnceCell::new(),
@@ -214,6 +219,7 @@ impl ServiceRegistry {
                     self.effects.clone(),
                     self.authority_context.clone(),
                     self.ceremony_runner.clone(),
+                    self.reconfiguration_manager.clone(),
                 )
             })
             .cloned()

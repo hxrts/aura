@@ -372,6 +372,8 @@ Devices produce partial signatures during threshold signing. The operator coordi
 
 The commitment tree manages device membership. The `AddLeaf` and `RemoveLeaf` operations modify device presence in the authority. Device identifiers do not appear outside the authority. No external party can link devices to authorities.
 
+When a device is enrolled or replaced, Aura performs session delegation alongside tree updates. Runtime delegation transfers active protocol session ownership to the receiving device authority and records a `SessionDelegation` fact for auditability. The commitment tree update (`AddLeaf`/`RemoveLeaf`) remains the source of truth for membership, while delegation preserves in-flight protocol continuity during migration.
+
 ## 12. Relational Identity Model
 
 Aura defines identity as contextual and relational. Identity exists only inside a specific relationship and does not exist globally. Authorities represent cryptographic actors rather than people. Identity emerges when two authorities form a shared context.

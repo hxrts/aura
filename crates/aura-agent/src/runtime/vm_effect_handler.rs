@@ -5,13 +5,20 @@
 //! effect interpreters.
 
 use parking_lot::Mutex;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use telltale_vm::effect::{AcquireDecision, EffectHandler};
-use telltale_vm::{SessionId, Value};
+use telltale_vm::{OutputConditionHint, SessionId, Value};
 
 use aura_core::effects::guard::EffectCommand;
 use aura_core::types::scope::ResourceScope;
+
+use super::vm_hardening::{
+    AURA_OUTPUT_PREDICATE_CHOICE, AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE,
+    AURA_OUTPUT_PREDICATE_GUARD_RELEASE, AURA_OUTPUT_PREDICATE_OBSERVABLE,
+    AURA_OUTPUT_PREDICATE_STEP, AURA_OUTPUT_PREDICATE_TRANSPORT_RECV,
+    AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,
+};
 
 /// Structured event emitted by [`AuraVmEffectHandler`] for debugging/replay hooks.
 #[derive(Debug, Clone, PartialEq)]
@@ -114,6 +121,7 @@ pub struct AuraVmEffectHandler {
     denied_layers: Mutex<HashSet<String>>,
     layer_scope_map: Mutex<HashMap<String, ResourceScope>>,
     active_leases: Mutex<HashMap<(SessionId, String, String), AuraVmCapabilityLease>>,
+    output_predicates: Mutex<HashMap<String, String>>,
     telemetry: Mutex<AuraVmTelemetry>,
     events: Mutex<Vec<AuraVmEffectEvent>>,
     envelopes: Mutex<VecDeque<AuraVmEffectEnvelope>>,
@@ -129,6 +137,10 @@ impl std::fmt::Debug for AuraVmEffectHandler {
             .field("denied_layers_len", &self.denied_layers.lock().len())
             .field("layer_scope_map_len", &self.layer_scope_map.lock().len())
             .field("active_leases_len", &self.active_leases.lock().len())
+            .field(
+                "output_predicates_len",
+                &self.output_predicates.lock().len(),
+            )
             .field("telemetry", &*self.telemetry.lock())
             .field("events_len", &self.events.lock().len())
             .field("envelopes_len", &self.envelopes.lock().len())
@@ -152,6 +164,7 @@ impl AuraVmEffectHandler {
             denied_layers: Mutex::new(HashSet::new()),
             layer_scope_map: Mutex::new(HashMap::new()),
             active_leases: Mutex::new(HashMap::new()),
+            output_predicates: Mutex::new(HashMap::new()),
             telemetry: Mutex::new(AuraVmTelemetry::default()),
             events: Mutex::new(Vec::new()),
             envelopes: Mutex::new(VecDeque::new()),
@@ -199,6 +212,19 @@ impl AuraVmEffectHandler {
         self.telemetry.lock().clone()
     }
 
+    /// Guard contention/failure counters suitable for structured telemetry export.
+    pub fn guard_contention_snapshot(&self) -> BTreeMap<String, u64> {
+        let telemetry = self.telemetry();
+        BTreeMap::from([
+            ("acquire_denied".to_string(), telemetry.acquire_denied),
+            ("release_faults".to_string(), telemetry.release_faults),
+            (
+                "envelope_sink_faults".to_string(),
+                telemetry.envelope_sink_faults,
+            ),
+        ])
+    }
+
     /// Snapshot the recorded VM effect events.
     pub fn events(&self) -> Vec<AuraVmEffectEvent> {
         self.events.lock().clone()
@@ -220,6 +246,12 @@ impl AuraVmEffectHandler {
 
     fn record(&self, event: AuraVmEffectEvent) {
         self.events.lock().push(event);
+    }
+
+    fn record_output_predicate(&self, role: &str, predicate_ref: &str) {
+        self.output_predicates
+            .lock()
+            .insert(role.to_string(), predicate_ref.to_string());
     }
 
     fn emit_envelope(&self, envelope: AuraVmEffectEnvelope) -> Result<(), String> {
@@ -253,6 +285,7 @@ impl EffectHandler for AuraVmEffectHandler {
             label: label.to_string(),
         };
         self.record(event.clone());
+        self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_TRANSPORT_SEND);
         self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.send",
@@ -274,7 +307,11 @@ impl EffectHandler for AuraVmEffectHandler {
         state: &mut Vec<Value>,
         payload: &Value,
     ) -> Result<(), String> {
-        state.push(payload.clone());
+        if let Some(last) = state.last_mut() {
+            *last = payload.clone();
+        } else {
+            state.push(payload.clone());
+        }
         let event = AuraVmEffectEvent::Recv {
             role: role.to_string(),
             partner: partner.to_string(),
@@ -282,6 +319,7 @@ impl EffectHandler for AuraVmEffectHandler {
             payload: payload.clone(),
         };
         self.record(event.clone());
+        self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_TRANSPORT_RECV);
         self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.recv",
@@ -318,6 +356,7 @@ impl EffectHandler for AuraVmEffectHandler {
             selected: selected.clone(),
         };
         self.record(event.clone());
+        self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_CHOICE);
         self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.choose",
@@ -332,6 +371,7 @@ impl EffectHandler for AuraVmEffectHandler {
             role: role.to_string(),
         };
         self.record(event.clone());
+        self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_STEP);
         self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.step",
@@ -357,6 +397,7 @@ impl EffectHandler for AuraVmEffectHandler {
             granted,
         };
         self.record(event.clone());
+        self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE);
         self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.acquire",
@@ -403,6 +444,7 @@ impl EffectHandler for AuraVmEffectHandler {
             evidence: evidence.clone(),
         };
         self.record(event.clone());
+        self.record_output_predicate(role, AURA_OUTPUT_PREDICATE_GUARD_RELEASE);
         self.emit_envelope(AuraVmEffectEnvelope::metadata(
             event,
             "vm.release",
@@ -420,6 +462,24 @@ impl EffectHandler for AuraVmEffectHandler {
             ));
         }
         Ok(())
+    }
+
+    fn output_condition_hint(
+        &self,
+        _sid: SessionId,
+        role: &str,
+        _state: &[Value],
+    ) -> Option<OutputConditionHint> {
+        let predicate_ref = self
+            .output_predicates
+            .lock()
+            .get(role)
+            .cloned()
+            .unwrap_or_else(|| AURA_OUTPUT_PREDICATE_OBSERVABLE.to_string());
+        Some(OutputConditionHint {
+            predicate_ref,
+            witness_ref: Some(format!("role:{role}")),
+        })
     }
 }
 
@@ -457,6 +517,7 @@ mod tests {
             .handle_acquire(1, "A", "cap.guard", &[])
             .expect("acquire should return decision");
         assert!(matches!(decision, AcquireDecision::Block));
+        assert_eq!(handler.telemetry().acquire_denied, 1);
     }
 
     #[test]
@@ -492,5 +553,19 @@ mod tests {
             .expect_err("release without prior acquire should fault");
         assert!(err.contains("release without active lease"));
         assert_eq!(handler.telemetry().release_faults, 1);
+    }
+
+    #[test]
+    fn guard_contention_snapshot_surfaces_failure_counters() {
+        let handler = AuraVmEffectHandler::default();
+        handler.deny_layer("cap.guard");
+        let _ = handler
+            .handle_acquire(7, "A", "cap.guard", &[])
+            .expect("acquire decision");
+        let _ = handler.handle_release(7, "A", "cap.guard", &Value::Unit, &[]);
+
+        let snapshot = handler.guard_contention_snapshot();
+        assert_eq!(snapshot.get("acquire_denied"), Some(&1));
+        assert_eq!(snapshot.get("release_faults"), Some(&1));
     }
 }

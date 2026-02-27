@@ -20,6 +20,10 @@ use super::{
     stateless_simulator::SimulationTickResult, SimulationFaultHandler, SimulationScenarioHandler,
     SimulationTimeHandler,
 };
+use crate::properties::{
+    default_property_suite, PropertyStateSnapshot, ProtocolPropertyClass, ProtocolPropertySuiteIds,
+};
+use crate::property_monitor::{AuraPropertyMonitor, PropertyRunReport, PropertyViolation};
 use crate::quint::itf_fuzzer::{ITFBasedFuzzer, ITFFuzzConfig, ITFTrace};
 use aura_agent::{AuraEffectSystem, EffectSystemFactory};
 use aura_core::effects::{
@@ -386,6 +390,16 @@ impl ComposedSimulationEnvironment {
             .map_err(|e| SimulationComposerError::EffectOperationFailed(e.to_string()))?;
 
         let mut results = SimulationResults::new(scenario_name.clone());
+        let mut property_monitor = config.property_monitoring.as_ref().map(|monitoring| {
+            AuraPropertyMonitor::with_properties(default_property_suite(
+                monitoring.protocol_class,
+                monitoring.suite_ids,
+            ))
+        });
+        let property_check_interval = config
+            .property_monitoring
+            .as_ref()
+            .map_or(1, |monitoring| monitoring.check_interval.max(1));
 
         // Execute simulation ticks
         for tick in 1..=config.max_ticks {
@@ -410,6 +424,17 @@ impl ComposedSimulationEnvironment {
 
             results.add_tick_result(tick_result);
 
+            if let Some(monitor) = property_monitor.as_mut() {
+                if tick % property_check_interval == 0 {
+                    let snapshot = config
+                        .property_monitoring
+                        .as_ref()
+                        .and_then(|monitoring| monitoring.snapshot_provider.as_ref())
+                        .map_or_else(PropertyStateSnapshot::default, |provider| provider(tick));
+                    monitor.check_tick(tick, &snapshot);
+                }
+            }
+
             // Check for early termination conditions
             if let Some(condition) = &config.termination_condition {
                 if condition.should_terminate(tick, &results) {
@@ -430,6 +455,11 @@ impl ComposedSimulationEnvironment {
             .record_event("scenario_complete", completion_data)
             .await
             .map_err(|e| SimulationComposerError::EffectOperationFailed(e.to_string()))?;
+
+        if let Some(monitor) = property_monitor {
+            results.properties_checked = monitor.property_count();
+            results.property_violations = monitor.violations().to_vec();
+        }
 
         info!(
             scenario_name = %scenario_name,
@@ -583,6 +613,66 @@ impl ComposedSimulationEnvironment {
 }
 
 /// Configuration for running a simulation scenario
+type PropertySnapshotProvider = Arc<dyn Fn(u64) -> PropertyStateSnapshot + Send + Sync>;
+
+/// Property-monitoring configuration for a scenario run.
+#[derive(Clone)]
+pub struct PropertyMonitoringConfig {
+    /// Protocol class used to auto-register a default suite.
+    pub protocol_class: ProtocolPropertyClass,
+    /// Session/context identifiers used to materialize the suite.
+    pub suite_ids: ProtocolPropertySuiteIds,
+    /// Tick interval for running property checks.
+    pub check_interval: u64,
+    /// Optional snapshot provider for tick-local property inputs.
+    pub snapshot_provider: Option<PropertySnapshotProvider>,
+}
+
+impl PropertyMonitoringConfig {
+    /// Build property-monitoring config with default check interval (`1`).
+    #[must_use]
+    pub fn new(protocol_class: ProtocolPropertyClass, suite_ids: ProtocolPropertySuiteIds) -> Self {
+        Self {
+            protocol_class,
+            suite_ids,
+            check_interval: 1,
+            snapshot_provider: None,
+        }
+    }
+
+    /// Override property-check interval.
+    #[must_use]
+    pub fn with_check_interval(mut self, check_interval: u64) -> Self {
+        self.check_interval = check_interval.max(1);
+        self
+    }
+
+    /// Provide per-tick property snapshot values.
+    #[must_use]
+    pub fn with_snapshot_provider(
+        mut self,
+        provider: impl Fn(u64) -> PropertyStateSnapshot + Send + Sync + 'static,
+    ) -> Self {
+        self.snapshot_provider = Some(Arc::new(provider));
+        self
+    }
+}
+
+impl std::fmt::Debug for PropertyMonitoringConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PropertyMonitoringConfig")
+            .field("protocol_class", &self.protocol_class)
+            .field("suite_ids", &self.suite_ids)
+            .field("check_interval", &self.check_interval)
+            .field(
+                "snapshot_provider",
+                &self.snapshot_provider.as_ref().map(|_| "<provider>"),
+            )
+            .finish()
+    }
+}
+
+/// Configuration for running a simulation scenario
 #[derive(Debug, Clone)]
 pub struct SimulationScenarioConfig {
     /// Maximum number of ticks to execute
@@ -593,6 +683,8 @@ pub struct SimulationScenarioConfig {
     pub parameters: std::collections::HashMap<String, serde_json::Value>,
     /// Optional termination condition
     pub termination_condition: Option<TerminationCondition>,
+    /// Optional online property-monitoring configuration.
+    pub property_monitoring: Option<PropertyMonitoringConfig>,
 }
 
 impl Default for SimulationScenarioConfig {
@@ -602,6 +694,7 @@ impl Default for SimulationScenarioConfig {
             tick_duration: std::time::Duration::from_millis(100),
             parameters: std::collections::HashMap::new(),
             termination_condition: None,
+            property_monitoring: None,
         }
     }
 }
@@ -657,6 +750,8 @@ impl TerminationCondition {
 pub struct SimulationResults {
     pub scenario_name: String,
     pub tick_results: Vec<SimulationTickResult>,
+    pub property_violations: Vec<PropertyViolation>,
+    pub properties_checked: usize,
 }
 
 impl SimulationResults {
@@ -664,6 +759,8 @@ impl SimulationResults {
         Self {
             scenario_name,
             tick_results: Vec::new(),
+            property_violations: Vec::new(),
+            properties_checked: 0,
         }
     }
 
@@ -680,6 +777,15 @@ impl SimulationResults {
             std::time::Duration::ZERO
         } else {
             self.total_execution_time() / self.tick_results.len() as u32
+        }
+    }
+
+    /// Build a serializable property report for regression tracking.
+    #[must_use]
+    pub fn property_run_report(&self) -> PropertyRunReport {
+        PropertyRunReport {
+            properties_checked: self.properties_checked as u64,
+            violations: self.property_violations.clone(),
         }
     }
 }
@@ -792,6 +898,7 @@ mod tests {
         assert_eq!(config.tick_duration, std::time::Duration::from_millis(100));
         assert!(config.parameters.is_empty());
         assert!(config.termination_condition.is_none());
+        assert!(config.property_monitoring.is_none());
     }
 
     #[test]
@@ -846,5 +953,99 @@ mod tests {
 
         let err = SimulationComposerError::EffectOperationFailed("operation failed".to_string());
         assert!(format!("{err}").contains("Effect operation failed"));
+    }
+
+    #[tokio::test]
+    async fn test_run_scenario_with_property_monitoring() {
+        use crate::properties::{PropertyEvent, PropertyStateSnapshot};
+        use aura_core::identifiers::{ContextId, SessionId};
+        use aura_testkit::DeviceTestFixture;
+        use uuid::Uuid;
+
+        let fixture = DeviceTestFixture::new(3);
+        let device_id = fixture.device_id();
+        let env = SimulationEffectComposer::for_testing(device_id)
+            .await
+            .expect("create simulation environment");
+
+        let session = SessionId::from_uuid(Uuid::from_u128(11));
+        let context = ContextId::from_uuid(Uuid::from_u128(22));
+        let monitoring = PropertyMonitoringConfig::new(
+            ProtocolPropertyClass::Consensus,
+            ProtocolPropertySuiteIds { session, context },
+        )
+        .with_snapshot_provider(move |tick| {
+            if tick == 2 {
+                PropertyStateSnapshot {
+                    events: vec![PropertyEvent::Faulted {
+                        session,
+                        reason: "synthetic fault".to_string(),
+                    }],
+                    ..PropertyStateSnapshot::default()
+                }
+            } else {
+                PropertyStateSnapshot::default()
+            }
+        });
+
+        let config = SimulationScenarioConfig {
+            max_ticks: 3,
+            property_monitoring: Some(monitoring),
+            ..SimulationScenarioConfig::default()
+        };
+
+        let results = env
+            .run_scenario(
+                "property_monitoring".to_string(),
+                "property monitoring integration".to_string(),
+                config,
+            )
+            .await
+            .expect("run scenario");
+
+        assert!(results.properties_checked > 0);
+        assert!(!results.property_violations.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_run_scenario_property_monitoring_no_violations() {
+        use aura_core::identifiers::{ContextId, SessionId};
+        use aura_testkit::DeviceTestFixture;
+        use uuid::Uuid;
+
+        let fixture = DeviceTestFixture::new(4);
+        let device_id = fixture.device_id();
+        let env = SimulationEffectComposer::for_testing(device_id)
+            .await
+            .expect("create simulation environment");
+
+        let session = SessionId::from_uuid(Uuid::from_u128(111));
+        let context = ContextId::from_uuid(Uuid::from_u128(222));
+        let monitoring = PropertyMonitoringConfig::new(
+            ProtocolPropertyClass::Consensus,
+            ProtocolPropertySuiteIds { session, context },
+        );
+
+        let config = SimulationScenarioConfig {
+            max_ticks: 3,
+            property_monitoring: Some(monitoring),
+            ..SimulationScenarioConfig::default()
+        };
+
+        let results = env
+            .run_scenario(
+                "property_monitoring_clean".to_string(),
+                "property monitoring no violations".to_string(),
+                config,
+            )
+            .await
+            .expect("run scenario");
+
+        assert!(results.properties_checked > 0);
+        assert!(
+            results.property_violations.is_empty(),
+            "expected no property violations, got: {:?}",
+            results.property_violations
+        );
     }
 }

@@ -25,7 +25,10 @@ pub mod time_control;
 
 // Re-export all handler types
 pub use core::CoreSimulatorHandler;
-pub use effect_composer::{ComposedSimulationEnvironment, SimulationEffectComposer};
+pub use effect_composer::{
+    ComposedSimulationEnvironment, PropertyMonitoringConfig, SimulationEffectComposer,
+    SimulationResults, SimulationScenarioConfig,
+};
 pub use fault_simulation::SimulationFaultHandler;
 pub use retry::{simulated_exponential_backoff, simulated_fixed_retry};
 pub use scenario::{

@@ -1,7 +1,10 @@
 //! Transcript accumulation and finalization (BFT-DKG).
 
 use super::types::{DealerPackage, DkgConfig, DkgTranscript};
-use aura_core::{hash, util::serialization::to_vec, AuraError, ContextId, Hash32, Result};
+use aura_core::{
+    byzantine::ByzantineSafetyAttestation, hash, util::serialization::to_vec, AuraError, ContextId,
+    Hash32, Result,
+};
 use aura_journal::fact::DkgTranscriptCommit;
 
 #[derive(serde::Serialize)]
@@ -70,6 +73,7 @@ pub fn build_transcript_commit(
     context: ContextId,
     transcript: &DkgTranscript,
     blob_ref: Option<Hash32>,
+    byzantine_attestation: Option<ByzantineSafetyAttestation>,
 ) -> DkgTranscriptCommit {
     DkgTranscriptCommit {
         context,
@@ -79,5 +83,6 @@ pub fn build_transcript_commit(
         package_count: transcript.packages.len() as u32,
         transcript_hash: transcript.transcript_hash,
         blob_ref,
+        byzantine_attestation,
     }
 }

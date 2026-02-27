@@ -27,6 +27,8 @@
 //! ```
 
 use async_trait::async_trait;
+use aura_core::effects::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects};
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::util::serialization::{from_slice, to_vec};
 use aura_core::FlowCost;
@@ -197,6 +199,12 @@ type MessageProviderFn<R> =
 
 type BranchDeciderFn = Box<dyn FnMut(&[ReceivedMessage]) -> Option<String> + Send>;
 
+struct RuntimeAdmissionConfig {
+    capability_effects: Arc<dyn RuntimeCapabilityEffects>,
+    required_capabilities: Vec<CapabilityKey>,
+    admitted: bool,
+}
+
 /// Runtime adapter used by generated choreography runners.
 ///
 /// This adapter implements the `ChoreographicAdapter` trait from telltale-choreography,
@@ -235,6 +243,8 @@ where
     guard_config: GuardConfig,
     /// Journal coupler for fact recording after successful sends
     journal_coupler: Option<JournalCoupler>,
+    /// Optional theorem-pack/runtime capability admission gate.
+    runtime_admission: Option<RuntimeAdmissionConfig>,
 }
 
 #[allow(dead_code)]
@@ -274,6 +284,7 @@ where
             branch_decider: None,
             guard_config: GuardConfig::default(),
             journal_coupler: None,
+            runtime_admission: None,
         }
     }
 
@@ -375,6 +386,20 @@ where
         self
     }
 
+    /// Configure runtime capability admission checks for this choreography execution.
+    pub fn with_runtime_capability_admission(
+        mut self,
+        capability_effects: Arc<dyn RuntimeCapabilityEffects>,
+        required_capabilities: Vec<CapabilityKey>,
+    ) -> Self {
+        self.runtime_admission = Some(RuntimeAdmissionConfig {
+            capability_effects,
+            required_capabilities,
+            admitted: false,
+        });
+        self
+    }
+
     /// Get a reference to the journal coupler if configured.
     pub fn journal_coupler(&self) -> Option<&JournalCoupler> {
         self.journal_coupler.as_ref()
@@ -392,7 +417,50 @@ where
         &self.received
     }
 
+    async fn ensure_runtime_admission(&mut self) -> Result<(), ChoreographyError> {
+        let Some(admission) = self.runtime_admission.as_mut() else {
+            return Ok(());
+        };
+
+        if admission.admitted {
+            return Ok(());
+        }
+
+        let inventory = admission
+            .capability_effects
+            .capability_inventory()
+            .await
+            .map_err(|_| ChoreographyError::AuthorizationFailed {
+                reason: "TheoremPackAdmission inventory unavailable".to_string(),
+            })?;
+        let _inventory_size = inventory.len();
+
+        if let Err(error) = admission
+            .capability_effects
+            .require_capabilities(&admission.required_capabilities)
+            .await
+        {
+            let reason = match &error {
+                AdmissionError::MissingCapability { capability } => format!(
+                    "TheoremPackAdmission failed: missing runtime capability ref={}",
+                    capability_key_ref(capability.as_str())
+                ),
+                AdmissionError::MissingRuntimeContracts => {
+                    "TheoremPackAdmission failed: missing runtime contracts".to_string()
+                }
+                AdmissionError::InventoryUnavailable { .. } => {
+                    "TheoremPackAdmission failed: inventory unavailable".to_string()
+                }
+                AdmissionError::Internal { .. } => "TheoremPackAdmission failed".to_string(),
+            };
+            return Err(ChoreographyError::AuthorizationFailed { reason });
+        }
+        admission.admitted = true;
+        Ok(())
+    }
+
     pub async fn start_session(&mut self, session_id: Uuid) -> Result<(), ChoreographyError> {
+        self.ensure_runtime_admission().await?;
         let mut roles = Vec::new();
         let self_role = self.map_role(self.self_role)?;
         roles.push(self_role);
@@ -454,6 +522,7 @@ where
     type Role = R;
 
     async fn send<M: Message>(&mut self, to: Self::Role, msg: M) -> Result<(), Self::Error> {
+        self.ensure_runtime_admission().await?;
         let role = self.map_role(to)?;
         let payload = to_vec(&msg).map_err(|err| ChoreographyError::SerializationFailed {
             reason: err.to_string(),
@@ -549,6 +618,7 @@ where
     }
 
     async fn recv<M: Message>(&mut self, from: Self::Role) -> Result<M, Self::Error> {
+        self.ensure_runtime_admission().await?;
         let role = self.map_role(from)?;
         let payload = self.effects.receive_from_role_bytes(role).await?;
         self.received.push(ReceivedMessage {
@@ -629,6 +699,7 @@ where
     R: RoleId,
 {
     async fn provide_message<M: Message>(&mut self, to: Self::Role) -> Result<M, Self::Error> {
+        self.ensure_runtime_admission().await?;
         let boxed = match self.outbound.pop_front() {
             Some(boxed) => boxed,
             None => {
@@ -663,6 +734,7 @@ where
     }
 
     async fn select_branch<L: LabelId>(&mut self, choices: &[L]) -> Result<L, Self::Error> {
+        self.ensure_runtime_admission().await?;
         let choice = match self.branch_choices.pop_front() {
             Some(choice) => choice,
             None => {
@@ -699,3 +771,8 @@ where
 
 /// Public API alias for the choreography adapter.
 pub type ChoreographyAdapter = AuraHandlerAdapter;
+
+fn capability_key_ref(key: &str) -> String {
+    let digest = hash(key.as_bytes());
+    hex::encode(&digest[..8])
+}

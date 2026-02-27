@@ -52,6 +52,7 @@ telltale-vm = { workspace = true, optional = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_cbor = { workspace = true }
 biscuit-auth = { workspace = true }
 
 # Async
@@ -118,7 +119,7 @@ context-propagation = []
 # Choreography backend switch flags.
 # If none is set, runtime defaults to telltale adapter behavior.
 choreo-backend-telltale-adapter = []
-choreo-backend-telltale-vm = ["dep:telltale-vm"]
+choreo-backend-telltale-vm = ["dep:telltale-vm", "aura-effects/telltale-runtime-capability"]
 
 # Platform-specific presets
 # Enable to access the preset builders and AgentBuilder entrypoints.

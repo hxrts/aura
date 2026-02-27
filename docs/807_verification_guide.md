@@ -275,6 +275,24 @@ just ci-conformance
 
 See [Conformance and Parity Reference](119_conformance.md) for corpus policy details.
 
+## Lean-Quint Bridge Format
+
+`aura-quint` now defines a versioned interchange schema for bridge workflows:
+
+- `BridgeBundleV1` (`schema_version = "aura.lean-quint-bridge.v1"`)
+- `SessionTypeInterchangeV1` for session graph exchange
+- `PropertyInterchangeV1` for Quint/Telltale/Lean property exchange
+- `ProofCertificateV1` for proof or model-check evidence
+
+Use this schema as the canonical data contract when exporting Quint sessions to Telltale formats or importing Telltale/Lean properties into Quint harnesses.
+
+Exporter entry points in `aura-quint`:
+- `parse_quint_modules(...)`
+- `export_quint_to_telltale_bundle(...)`
+- `validate_export_bundle(...)`
+
+For end-to-end bridge workflow details, see [Lean-Quint Bridge Guide](810_lean_quint_bridge.md).
+
 ## Lean Proof Development
 
 ### Adding Theorems

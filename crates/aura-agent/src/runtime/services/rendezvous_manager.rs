@@ -8,10 +8,11 @@
 //! Supports local network peer discovery via UDP broadcast. When enabled, the manager
 //! will announce presence and discover peers on the local network.
 
+use async_trait::async_trait;
 use aura_core::crypto::single_signer::SingleSignerKeyPackage;
-use aura_core::effects::network::{UdpEffects, UdpEndpoint, UdpEndpointEffects};
 #[cfg(target_arch = "wasm32")]
 use aura_core::effects::network::NetworkError;
+use aura_core::effects::network::{UdpEffects, UdpEndpoint, UdpEndpointEffects};
 use aura_core::effects::secure::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation,
 };
@@ -22,7 +23,6 @@ use aura_rendezvous::{
     DiscoveredPeer, LanDiscoveryConfig, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
     RendezvousService, TransportHint,
 };
-use async_trait::async_trait;
 use cfg_if::cfg_if;
 use std::collections::HashMap;
 use std::sync::Arc;

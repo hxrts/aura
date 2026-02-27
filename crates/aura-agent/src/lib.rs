@@ -102,6 +102,7 @@ mod task_registry;
 
 // Handler modules (public for service access)
 pub mod handlers;
+pub mod reconfiguration;
 
 // Runtime-owned indexed journal utilities (stateful)
 pub mod database;
@@ -167,6 +168,22 @@ pub use runtime::choreography_adapter::{AuraProtocolAdapter, MessageRequest, Rec
 pub use runtime::parity_policy::{AuraEnvelopeParityError, AuraEnvelopeParityPolicy};
 #[cfg(feature = "choreo-backend-telltale-vm")]
 pub use runtime::vm_effect_handler::{AuraVmEffectEvent, AuraVmEffectHandler};
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use runtime::vm_hardening::{
+    aura_flow_policy_predicate, aura_output_predicate_allow_list, build_vm_config,
+    parse_communication_replay_mode, parse_determinism_mode, parse_effect_determinism_tier,
+    validate_determinism_profile, vm_config_for_profile, AuraVmDeterminismProfileError,
+    AuraVmGuardLayer, AuraVmHardeningProfile, AuraVmParityProfile, AURA_OUTPUT_PREDICATE_CHOICE,
+    AURA_OUTPUT_PREDICATE_GUARD_ACQUIRE, AURA_OUTPUT_PREDICATE_GUARD_RELEASE,
+    AURA_OUTPUT_PREDICATE_OBSERVABLE, AURA_OUTPUT_PREDICATE_STEP,
+    AURA_OUTPUT_PREDICATE_TRANSPORT_RECV, AURA_OUTPUT_PREDICATE_TRANSPORT_SEND,
+    AURA_OUTPUT_PREDICATE_VM_OBSERVABLE,
+};
+#[cfg(feature = "choreo-backend-telltale-vm")]
+pub use runtime::{
+    AuraEffectTraceEncoding, AuraEffectTraceGranularity, EffectTraceBundle, EffectTraceCapture,
+    EffectTraceCaptureError, EffectTraceCaptureOptions,
+};
 
 // Sync service types
 pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
@@ -178,6 +195,10 @@ pub use runtime::services::{RendezvousManager, RendezvousManagerConfig};
 pub use runtime::services::{SocialManager, SocialManagerConfig, SocialManagerState};
 
 // Threshold signing service types
+pub use reconfiguration::{
+    CoherenceStatus, ReconfigurationController, ReconfigurationError, SessionFootprintClass,
+};
+pub use runtime::services::ReconfigurationManager;
 pub use runtime::services::ThresholdSigningService;
 
 // Re-export core types for convenience

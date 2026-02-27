@@ -235,8 +235,10 @@ impl EffectSystemBuilder {
             #[cfg(not(target_arch = "wasm32"))]
             {
                 if rendezvous_enabled {
-                    match super::services::LanTransportService::bind(config.network.bind_address.as_str())
-                        .await
+                    match super::services::LanTransportService::bind(
+                        config.network.bind_address.as_str(),
+                    )
+                    .await
                     {
                         Ok(service) => Some(Arc::new(service)),
                         Err(err) => {

@@ -4,6 +4,7 @@
 
 use crate::witness::NonEmptyWitnessSet;
 use aura_core::{
+    byzantine::ByzantineSafetyAttestation,
     crypto::tree_signing::frost_verify_aggregate,
     epochs::Epoch,
     frost::{PublicKeyPackage, ThresholdSignature},
@@ -74,6 +75,10 @@ pub struct CommitFact {
 
     /// Whether fast path was used
     pub fast_path: bool,
+
+    /// Optional Byzantine safety attestation captured at admission.
+    #[serde(default)]
+    pub byzantine_attestation: Option<ByzantineSafetyAttestation>,
 }
 
 impl CommitFact {
@@ -102,7 +107,15 @@ impl CommitFact {
             threshold,
             timestamp,
             fast_path,
+            byzantine_attestation: None,
         }
+    }
+
+    /// Attach a Byzantine safety attestation to this commit.
+    #[must_use]
+    pub fn with_byzantine_attestation(mut self, attestation: ByzantineSafetyAttestation) -> Self {
+        self.byzantine_attestation = Some(attestation);
+        self
     }
 
     /// Verify the commit fact is valid

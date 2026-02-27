@@ -92,6 +92,7 @@ pub mod noise;
 pub mod query;
 pub mod random;
 pub mod reactive;
+pub mod runtime_capability;
 pub mod secure;
 #[cfg(feature = "simulation")]
 pub mod simulation;
@@ -123,6 +124,7 @@ pub use console::RealConsoleHandler;
 pub use context::{EffectContext, StandardContextHandler};
 pub use crypto::RealCryptoHandler;
 pub use database::query::{AuraQuery, FactTerm, QueryError, QueryResult};
+pub use encrypted_storage::{EncryptedStorage, EncryptedStorageConfig};
 pub use error::Layer3Error;
 pub use guard_interpreter::ProductionEffectInterpreter;
 pub use identifiers::{
@@ -137,16 +139,16 @@ pub use query::{
 };
 pub use random::RealRandomHandler;
 pub use reactive::{ReactiveHandler, SignalGraph, SignalGraphStats};
+pub use runtime_capability::RuntimeCapabilityHandler;
 pub use secure::RealSecureStorageHandler;
 #[cfg(feature = "simulation")]
 pub use simulation::FallbackSimulationHandler;
-#[cfg(not(target_arch = "wasm32"))]
-pub use udp::RealUdpEffectsHandler;
-pub use encrypted_storage::{EncryptedStorage, EncryptedStorageConfig};
 #[allow(deprecated)]
 pub use time::{
     LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler, TimeComparisonHandler,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use udp::RealUdpEffectsHandler;
 
 // Transport effect handlers
 cfg_if! {

@@ -191,8 +191,20 @@ ci-harness-replay:
 ci-test:
     cargo test --workspace -q
 
+# Property-monitored simulator lane (online property checks + regression helpers)
+ci-property-monitor:
+    mkdir -p artifacts/property-monitor
+    AURA_PROPERTY_MONITOR_REPORT="${PWD}/artifacts/property-monitor/current_report.json" \
+    AURA_PROPERTY_MONITOR_BASELINE="${PWD}/crates/aura-simulator/tests/baselines/property_monitor.json" \
+    AURA_PROPERTY_MONITOR_TREND="${PWD}/artifacts/property-monitor/trend.json" \
+    cargo test -p aura-simulator property_monitor_ci_gate -- --nocapture | tee artifacts/property-monitor/property-monitor.log
+    cargo test -p aura-simulator report_comparison_detects_new_violations -q
+
 # Telltale VM parity gates (determinism profile + replay conformance)
 ci-choreo-parity:
+    mkdir -p artifacts/choreo-parity
+    AURA_CONFORMANCE_WRITE_ARTIFACTS=1 \
+    AURA_CONFORMANCE_ARTIFACT_DIR="${PWD}/artifacts/choreo-parity" \
     cargo test -p aura-agent --features choreo-backend-telltale-vm --test telltale_vm_parity -q
     cargo test -p aura-agent --features choreo-backend-telltale-vm --lib parity_policy::tests -q
 
@@ -339,6 +351,17 @@ ci-conformance: ci-conformance-policy
     cargo test -p aura-testkit --test conformance_golden_fixtures -- --nocapture
     just ci-conformance-itf
     just ci-conformance-diff
+
+# Lean/Quint bridge cross-validation lane
+ci-lean-quint-bridge:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ARTIFACT_DIR="${AURA_LEAN_QUINT_BRIDGE_ARTIFACT_DIR:-artifacts/lean-quint-bridge}"
+    mkdir -p "${ARTIFACT_DIR}"
+    cargo test -p aura-quint bridge_ -- --nocapture | tee "${ARTIFACT_DIR}/bridge.log"
+    printf '%s\n' \
+      '{"schema_version":"aura.lean-quint-bridge.report.v1","status":"ok","suite":"aura-quint bridge cross-validation","sources":["quint_model_check","lean_certificate"],"discrepancy_detection":"enabled"}' \
+      > "${ARTIFACT_DIR}/report.json"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CI Dry Run

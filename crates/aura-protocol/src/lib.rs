@@ -67,6 +67,7 @@
 // Core modules following unified effect system architecture
 pub use aura_amp as amp;
 pub use aura_anti_entropy as sync;
+pub mod admission;
 pub mod choreography;
 pub mod config;
 pub mod effects;
@@ -77,12 +78,16 @@ pub mod messages;
 pub mod prelude;
 pub mod session;
 pub mod state;
+pub mod termination;
 pub mod types;
 
 pub use error::ProtocolError;
 
 // Re-export session types for convenient access
 pub use session::{SessionOutcome, SessionStatus};
+pub use termination::{
+    TerminationBudget, TerminationBudgetConfig, TerminationBudgetError, TerminationProtocolClass,
+};
 
 // Re-export protocol orchestration types for convenient access
 pub use types::{
@@ -98,12 +103,12 @@ pub use types::{
 /// - Device metadata management
 /// - Protocol messaging and guards
 pub mod orchestration {
-    pub use crate::facades::{ProtocolOrchestrator, StandardPatterns};
     pub use crate::effects::AuraEffects;
+    pub use crate::effects::{AntiEntropyConfig, BloomDigest};
     pub use crate::effects::{
         ChoreographicEffects, ChoreographicRole, ChoreographyEvent, ChoreographyMetrics,
     };
-    pub use crate::effects::{AntiEntropyConfig, BloomDigest};
+    pub use crate::facades::{ProtocolOrchestrator, StandardPatterns};
     pub use crate::handlers::{AuraContext, ExecutionMode};
     pub use crate::messages::{AuraMessage, CryptoMessage, CryptoPayload, WIRE_FORMAT_VERSION};
 }

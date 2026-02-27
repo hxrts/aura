@@ -13,7 +13,7 @@ use aura_core::{
         *,
     },
     identifiers::DeviceId,
-    AuraError,
+    AuraError, AuraFault, AuraFaultKind,
 };
 use aura_testkit::stateful_effects::{
     console::MockConsoleHandler,
@@ -31,27 +31,10 @@ use std::sync::{Arc, Mutex};
 pub struct FaultConfig {
     /// Probability of fault occurring (0.0 to 1.0)
     pub probability: f64,
-    /// Type of fault to inject
-    pub fault_type: FaultType,
+    /// Canonical fault to inject.
+    pub fault: AuraFault,
     /// Whether fault is persistent or one-shot
     pub persistent: bool,
-}
-
-/// Types of faults that can be injected
-#[derive(Debug, Clone)]
-pub enum FaultType {
-    /// Network partition - messages dropped
-    NetworkPartition,
-    /// Delayed messages
-    DelayedMessage { delay_ms: u64 },
-    /// Corrupted data
-    CorruptedData,
-    /// Transient storage failure
-    StorageFailure,
-    /// Cryptographic operation failure
-    CryptoFailure,
-    /// Time desynchronization
-    TimeDesync { offset_ms: i64 },
 }
 
 /// Simulation effect system that wraps standard effect handlers with simulation capabilities
@@ -138,7 +121,7 @@ impl SimulationEffectSystem {
     }
 
     /// Check if a fault should be triggered for an operation
-    fn should_trigger_fault(&self, operation: &str) -> Option<FaultType> {
+    fn should_trigger_fault(&self, operation: &str) -> Option<AuraFault> {
         if !self.fault_injection_enabled {
             return None;
         }
@@ -151,10 +134,28 @@ impl SimulationEffectSystem {
             // Simple deterministic "probability" based on seed
             let threshold = (self.seed % 100) as f64 / 100.0;
             if threshold < config.probability {
-                return Some(config.fault_type.clone());
+                return Some(config.fault.clone());
             }
         }
         None
+    }
+
+    fn is_crypto_failure(fault: &AuraFault) -> bool {
+        matches!(
+            &fault.fault,
+            AuraFaultKind::Legacy { fault_type, .. } if fault_type == "crypto_failure"
+        )
+    }
+
+    fn is_storage_failure(fault: &AuraFault) -> bool {
+        matches!(
+            &fault.fault,
+            AuraFaultKind::Legacy { fault_type, .. } if fault_type == "storage_failure"
+        )
+    }
+
+    fn is_network_partition(fault: &AuraFault) -> bool {
+        matches!(fault.fault, AuraFaultKind::NetworkPartition { .. })
     }
 }
 
@@ -169,7 +170,11 @@ impl CryptoCoreEffects for SimulationEffectSystem {
         info: &[u8],
         output_len: u32,
     ) -> Result<Vec<u8>, CryptoError> {
-        if let Some(FaultType::CryptoFailure) = self.should_trigger_fault("hkdf_derive") {
+        if self
+            .should_trigger_fault("hkdf_derive")
+            .as_ref()
+            .is_some_and(Self::is_crypto_failure)
+        {
             return Err(AuraError::crypto("Simulated crypto failure".to_string()));
         }
         self.crypto.hkdf_derive(ikm, salt, info, output_len).await
@@ -192,7 +197,11 @@ impl CryptoCoreEffects for SimulationEffectSystem {
         message: &[u8],
         private_key: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        if let Some(FaultType::CryptoFailure) = self.should_trigger_fault("ed25519_sign") {
+        if self
+            .should_trigger_fault("ed25519_sign")
+            .as_ref()
+            .is_some_and(Self::is_crypto_failure)
+        {
             return Err(AuraError::crypto("Simulated signing failure".to_string()));
         }
         self.crypto.ed25519_sign(message, private_key).await
@@ -354,7 +363,11 @@ impl CryptoExtendedEffects for SimulationEffectSystem {
         key_package: &[u8],
         mode: SigningMode,
     ) -> Result<Vec<u8>, CryptoError> {
-        if let Some(FaultType::CryptoFailure) = self.should_trigger_fault("sign_with_key") {
+        if self
+            .should_trigger_fault("sign_with_key")
+            .as_ref()
+            .is_some_and(Self::is_crypto_failure)
+        {
             return Err(AuraError::crypto("Simulated signing failure".to_string()));
         }
         self.crypto.sign_with_key(message, key_package, mode).await
@@ -411,7 +424,11 @@ impl ConsoleEffects for SimulationEffectSystem {
 #[async_trait]
 impl StorageCoreEffects for SimulationEffectSystem {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        if let Some(FaultType::StorageFailure) = self.should_trigger_fault("store") {
+        if self
+            .should_trigger_fault("store")
+            .as_ref()
+            .is_some_and(Self::is_storage_failure)
+        {
             return Err(StorageError::WriteFailed(
                 "Simulated storage failure".to_string(),
             ));
@@ -420,7 +437,11 @@ impl StorageCoreEffects for SimulationEffectSystem {
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        if let Some(FaultType::StorageFailure) = self.should_trigger_fault("retrieve") {
+        if self
+            .should_trigger_fault("retrieve")
+            .as_ref()
+            .is_some_and(Self::is_storage_failure)
+        {
             return Err(StorageError::ReadFailed(
                 "Simulated storage failure".to_string(),
             ));
@@ -473,7 +494,11 @@ impl NetworkCoreEffects for SimulationEffectSystem {
         peer_id: uuid::Uuid,
         message: Vec<u8>,
     ) -> Result<(), NetworkError> {
-        if let Some(FaultType::NetworkPartition) = self.should_trigger_fault("send_to_peer") {
+        if self
+            .should_trigger_fault("send_to_peer")
+            .as_ref()
+            .is_some_and(Self::is_network_partition)
+        {
             // Drop message silently on network partition
             return Ok(());
         }
@@ -647,7 +672,10 @@ mod tests {
             "crypto",
             FaultConfig {
                 probability: 1.0,
-                fault_type: FaultType::CryptoFailure,
+                fault: AuraFault::new(AuraFaultKind::Legacy {
+                    fault_type: "crypto_failure".to_string(),
+                    detail: None,
+                }),
                 persistent: true,
             },
         );

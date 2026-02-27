@@ -5,6 +5,9 @@
 pub use crate::error::ProtocolError;
 pub use crate::handlers::*;
 pub use crate::session::{SessionOutcome, SessionStatus};
+pub use crate::termination::{
+    TerminationBudget, TerminationBudgetConfig, TerminationBudgetError, TerminationProtocolClass,
+};
 pub use crate::types::{
     ProtocolDuration, ProtocolMode, ProtocolPriority, ProtocolSessionStatus, ProtocolType,
 };

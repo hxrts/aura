@@ -108,9 +108,15 @@ action = "noop"
     let expected_seed_bundle = build_seed_bundle(&run_config);
 
     assert_eq!(seed_bundle.run_seed, expected_seed_bundle.run_seed);
-    assert_eq!(seed_bundle.scenario_seed, expected_seed_bundle.scenario_seed);
+    assert_eq!(
+        seed_bundle.scenario_seed,
+        expected_seed_bundle.scenario_seed
+    );
     assert_eq!(seed_bundle.fault_seed, expected_seed_bundle.fault_seed);
-    assert_eq!(seed_bundle.instance_seeds, expected_seed_bundle.instance_seeds);
+    assert_eq!(
+        seed_bundle.instance_seeds,
+        expected_seed_bundle.instance_seeds
+    );
 
     assert_eq!(replay_bundle.seed_bundle.run_seed, seed_bundle.run_seed);
     assert!(TOOL_API_VERSIONS

@@ -2,13 +2,14 @@
 
 use crate::handlers::{SimulationFaultHandler, SimulationScenarioHandler};
 use aura_core::effects::{ByzantineType, ChaosEffects};
+use aura_core::AuraFault;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use thiserror::Error;
 
 /// Async host request envelope for simulator middleware actions.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AsyncHostRequest {
     /// Register protocol/participants in scenario middleware.
     SetupChoreography {
@@ -32,6 +33,9 @@ pub enum AsyncHostRequest {
         participant: String,
         /// Fault behavior class.
         behavior: String,
+        /// Optional canonical fault payload for typed replay.
+        #[serde(default)]
+        fault: Option<AuraFault>,
     },
     /// Execute simulator property verification pass.
     VerifyAllProperties,
@@ -55,7 +59,7 @@ pub enum AsyncHostResponse {
 }
 
 /// Replay artifact entry for async host boundary.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AsyncHostTranscriptEntry {
     /// Monotone request sequence id.
     pub sequence: u64,
@@ -91,6 +95,12 @@ pub enum AsyncHostError {
         expected: AsyncHostResponse,
         /// Actual response.
         actual: AsyncHostResponse,
+    },
+    /// Replay fault payload could not be injected.
+    #[error("replay fault injection failed: {message}")]
+    ReplayFaultInjection {
+        /// Fault injection failure reason.
+        message: String,
     },
 }
 
@@ -154,6 +164,25 @@ impl AsyncSimulatorHostBridge {
         std::mem::take(&mut self.transcript)
     }
 
+    /// Stable digest of the currently recorded transcript.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if transcript serialization fails.
+    pub fn transcript_digest_hex(&self) -> Result<String, serde_json::Error> {
+        let payload = serde_json::to_vec(&self.transcript)?;
+        Ok(hex::encode(aura_core::hash::hash(&payload)))
+    }
+
+    /// Compact transcript metadata (`entry_count`, `digest_hex`) for conformance artifacts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if transcript serialization fails while hashing.
+    pub fn transcript_metadata(&self) -> Result<(usize, String), serde_json::Error> {
+        Ok((self.transcript.len(), self.transcript_digest_hex()?))
+    }
+
     /// Resume processing for the next queued request.
     pub async fn resume_next(&mut self) -> Result<AsyncHostTranscriptEntry, AsyncHostError> {
         let pending = self.queue.pop_front().ok_or(AsyncHostError::QueueEmpty)?;
@@ -196,6 +225,20 @@ impl AsyncSimulatorHostBridge {
         }
         Ok(())
     }
+
+    /// Inject fault artifacts, then replay the expected transcript deterministically.
+    pub async fn replay_expected_with_faults(
+        &mut self,
+        expected: &[AsyncHostTranscriptEntry],
+        faults: &[AuraFault],
+    ) -> Result<(), AsyncHostError> {
+        self.fault_handler.replay_faults(faults).map_err(|error| {
+            AsyncHostError::ReplayFaultInjection {
+                message: error.to_string(),
+            }
+        })?;
+        self.replay_expected(expected).await
+    }
 }
 
 async fn apply_request(
@@ -220,10 +263,23 @@ async fn apply_request(
         AsyncHostRequest::InjectFault {
             participant,
             behavior,
+            fault,
         } => {
-            let scenario_result = scenario_handler.inject_fault(participant, behavior);
+            let scenario_result = if let Some(fault_payload) = fault {
+                scenario_handler.inject_aura_fault(participant, fault_payload)
+            } else {
+                scenario_handler.inject_fault(participant, behavior)
+            };
             if let Err(err) = scenario_result {
                 Err(err)
+            } else if let Some(fault_payload) = fault {
+                match fault_handler.inject_fault(fault_payload.clone(), None) {
+                    Ok(()) => Ok(()),
+                    Err(err) => Err(aura_core::effects::TestingError::EventRecordingError {
+                        event_type: "inject_fault".to_string(),
+                        reason: err.to_string(),
+                    }),
+                }
             } else {
                 let byzantine = map_byzantine_behavior(behavior);
                 match fault_handler
@@ -263,6 +319,7 @@ fn map_byzantine_behavior(behavior: &str) -> ByzantineType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::AuraFaultKind;
 
     async fn run_sync_host(
         seed: u64,
@@ -311,6 +368,7 @@ mod tests {
             AsyncHostRequest::InjectFault {
                 participant: "guardian-1".to_string(),
                 behavior: "equivocation".to_string(),
+                fault: None,
             },
             AsyncHostRequest::VerifyAllProperties,
             AsyncHostRequest::WaitTicks { ticks: 10 },
@@ -351,5 +409,21 @@ mod tests {
             result,
             Err(AsyncHostError::ReplayResponseMismatch { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn async_host_replay_accepts_fault_bundle() {
+        let requests = representative_requests();
+        let recorded = run_async_host(101, &requests).await;
+        let faults = vec![AuraFault::new(AuraFaultKind::Legacy {
+            fault_type: "protocol_violation".to_string(),
+            detail: Some("guardian-1".to_string()),
+        })];
+
+        let mut bridge = AsyncSimulatorHostBridge::new(101);
+        bridge
+            .replay_expected_with_faults(&recorded, &faults)
+            .await
+            .expect("replay with faults should succeed");
     }
 }

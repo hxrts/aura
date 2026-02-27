@@ -39,6 +39,7 @@ impl AuraAgent {
         let authority_id = self.authority_id();
         let effects = self.runtime().effects();
         let signing_service = self.threshold_signing();
+        let reconfiguration_manager = self.runtime().reconfiguration().clone();
 
         CeremonyProcessor::new(
             authority_id,
@@ -46,6 +47,7 @@ impl AuraAgent {
             ceremony_tracker,
             ceremony_runner,
             signing_service,
+            reconfiguration_manager,
         )
         .process_all()
         .await

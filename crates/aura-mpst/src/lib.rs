@@ -101,6 +101,8 @@ pub mod journal;
 
 /// Session type system types
 pub mod session;
+/// Termination budgeting helpers
+pub mod termination;
 
 /// Extension system integration
 pub mod extensions;
@@ -179,6 +181,9 @@ pub use ids::{MessageTypeId, NonEmptyRoleList, RoleId, SessionTypeId};
 
 pub use journal::{JournalAnnotation, JournalCoupling};
 pub use session::LocalSessionType;
+pub use termination::{
+    compute_buffer_weight, compute_depth, compute_weighted_measure, SessionBufferSnapshot,
+};
 
 /// Standard result type for MPST operations
 pub type MpstResult<T> = std::result::Result<T, MpstError>;

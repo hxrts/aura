@@ -5,8 +5,8 @@
 use super::services::ceremony_runner::CeremonyRunner;
 use super::services::{
     AuthorityManager, AuthorityStatus, CeremonyTracker, ContextManager, FlowBudgetManager,
-    LanTransportService, ReceiptManager, RendezvousManager, RuntimeService, RuntimeTaskRegistry,
-    ServiceError, SocialManager, SyncServiceManager, ThresholdSigningService,
+    LanTransportService, ReceiptManager, ReconfigurationManager, RendezvousManager, RuntimeService,
+    RuntimeTaskRegistry, ServiceError, SocialManager, SyncServiceManager, ThresholdSigningService,
 };
 use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
@@ -76,6 +76,9 @@ pub struct RuntimeSystem {
     /// Threshold signing service (shared state across runtime operations)
     threshold_signing: ThresholdSigningService,
 
+    /// Reconfiguration manager for link/delegate operations.
+    reconfiguration_manager: ReconfigurationManager,
+
     /// Runtime task registry for background work
     runtime_tasks: Arc<RuntimeTaskRegistry>,
 
@@ -130,6 +133,7 @@ impl RuntimeSystem {
             ceremony_tracker,
             ceremony_runner,
             threshold_signing,
+            reconfiguration_manager: ReconfigurationManager::new(),
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
@@ -175,6 +179,7 @@ impl RuntimeSystem {
             ceremony_tracker,
             ceremony_runner,
             threshold_signing,
+            reconfiguration_manager: ReconfigurationManager::new(),
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
@@ -220,6 +225,7 @@ impl RuntimeSystem {
             ceremony_tracker,
             ceremony_runner,
             threshold_signing,
+            reconfiguration_manager: ReconfigurationManager::new(),
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
@@ -268,6 +274,7 @@ impl RuntimeSystem {
             ceremony_tracker,
             ceremony_runner,
             threshold_signing,
+            reconfiguration_manager: ReconfigurationManager::new(),
             runtime_tasks: Arc::new(RuntimeTaskRegistry::new()),
             config,
             authority_id,
@@ -288,6 +295,11 @@ impl RuntimeSystem {
     /// Get the shared threshold signing service.
     pub fn threshold_signing(&self) -> ThresholdSigningService {
         self.threshold_signing.clone()
+    }
+
+    /// Get runtime reconfiguration manager.
+    pub fn reconfiguration(&self) -> &ReconfigurationManager {
+        &self.reconfiguration_manager
     }
 
     /// Get the runtime task registry.

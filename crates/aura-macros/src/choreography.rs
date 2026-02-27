@@ -88,6 +88,9 @@ fn parse_choreography_source(input: TokenStream) -> Result<ChoreographyInput, sy
         .collect::<Vec<_>>();
     let aura_annotations = extract_aura_annotations(&dsl)
         .map_err(|err| syn::Error::new(proc_macro2::Span::call_site(), err.to_string()))?;
+    validate_link_annotations(&aura_annotations).map_err(|err| {
+        syn::Error::new(span, format!("Link annotation validation failed: {err}"))
+    })?;
 
     Ok(ChoreographyInput {
         roles,
@@ -95,6 +98,45 @@ fn parse_choreography_source(input: TokenStream) -> Result<ChoreographyInput, sy
         namespace,
         choreography,
     })
+}
+
+fn validate_link_annotations(annotations: &[AuraEffect]) -> Result<(), String> {
+    let mut bundle_exports: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut bundle_imports: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+
+    for annotation in annotations {
+        if let AuraEffect::Link { directive, .. } = annotation {
+            bundle_exports
+                .entry(directive.bundle_id.clone())
+                .or_default()
+                .extend(directive.exports.iter().cloned());
+            bundle_imports
+                .entry(directive.bundle_id.clone())
+                .or_default()
+                .extend(directive.imports.iter().cloned());
+        }
+    }
+
+    if bundle_exports.is_empty() && bundle_imports.is_empty() {
+        return Ok(());
+    }
+
+    let all_exports = bundle_exports
+        .values()
+        .flat_map(|exports| exports.iter().cloned())
+        .collect::<BTreeSet<_>>();
+
+    for (bundle_id, imports) in bundle_imports {
+        for import in imports {
+            if !all_exports.contains(&import) {
+                return Err(format!(
+                    "bundle '{bundle_id}' imports '{import}' but no link annotation exports it"
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn strip_aura_annotations_for_parser(input: &str) -> String {
@@ -855,6 +897,7 @@ fn generate_aura_wrapper(
 
     // Generate leakage integration code
     let leakage_integration = generate_leakage_integration(annotations);
+    let link_wiring = generate_link_wiring(annotations);
 
     quote! {
         /// Generated Aura choreography module with effects system integration
@@ -1362,6 +1405,7 @@ fn generate_aura_wrapper(
             }
 
             #leakage_integration
+            #link_wiring
         }
     }
 }
@@ -1493,6 +1537,55 @@ fn extract_namespace_from_attrs(attrs: &[Attribute]) -> Result<Option<String>, s
     Ok(None)
 }
 
+/// Generate link wiring metadata from `link` annotations.
+fn generate_link_wiring(annotations: &[AuraEffect]) -> TokenStream {
+    let mut specs = Vec::new();
+
+    for annotation in annotations {
+        if let AuraEffect::Link { directive, role } = annotation {
+            let role_name = role.as_str();
+            let bundle_id = &directive.bundle_id;
+            let exports = directive.exports.iter();
+            let imports = directive.imports.iter();
+            specs.push(quote! {
+                LinkSpec {
+                    role: #role_name,
+                    bundle_id: #bundle_id,
+                    exports: &[#(#exports),*],
+                    imports: &[#(#imports),*],
+                }
+            });
+        }
+    }
+
+    if specs.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            /// Parsed `@link` composition metadata emitted from choreography annotations.
+            #[derive(Debug, Clone, PartialEq, Eq)]
+            pub struct LinkSpec {
+                /// Role that declared the link annotation.
+                pub role: &'static str,
+                /// Bundle id targeted by this link directive.
+                pub bundle_id: &'static str,
+                /// Interfaces exported by the declaring bundle.
+                pub exports: &'static [&'static str],
+                /// Interfaces imported by the declaring bundle.
+                pub imports: &'static [&'static str],
+            }
+
+            /// Link directives extracted at compile time.
+            pub const LINK_SPECS: &[LinkSpec] = &[#(#specs),*];
+
+            /// Accessor for link directives emitted by this choreography module.
+            pub fn link_specs() -> &'static [LinkSpec] {
+                LINK_SPECS
+            }
+        }
+    }
+}
+
 /// Generate leakage integration code from annotations
 fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
     let mut leakage_ops = Vec::new();
@@ -1548,5 +1641,34 @@ fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
     } else {
         // No leakage annotations, generate empty module
         quote! {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_link_annotations;
+    use aura_mpst::ast_extraction::extract_aura_annotations;
+
+    #[test]
+    fn link_validation_accepts_exported_imports() {
+        let dsl = r#"
+            A[link = "bundle=alpha|exports=sync.push|imports=chat.send"] -> B: Msg;
+            B[link = "bundle=beta|exports=chat.send|imports=sync.push"] -> A: Ack;
+        "#;
+        let annotations = extract_aura_annotations(dsl).expect("annotations should parse");
+        validate_link_annotations(&annotations).expect("exports should satisfy imports");
+    }
+
+    #[test]
+    fn link_validation_rejects_missing_export() {
+        let dsl = r#"
+            A[link = "bundle=alpha|exports=sync.push|imports=chat.send"] -> B: Msg;
+        "#;
+        let annotations = extract_aura_annotations(dsl).expect("annotations should parse");
+        let err = validate_link_annotations(&annotations).expect_err("missing export must fail");
+        assert!(
+            err.contains("chat.send"),
+            "error should mention unresolved import"
+        );
     }
 }

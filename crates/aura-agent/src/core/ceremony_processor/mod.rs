@@ -21,7 +21,7 @@ mod threshold;
 
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::ceremony_runner::CeremonyRunner;
-use crate::runtime::services::CeremonyTracker;
+use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::AgentResult;
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
@@ -52,6 +52,7 @@ pub struct CeremonyProcessor<'a> {
     ceremony_tracker: CeremonyTracker,
     ceremony_runner: CeremonyRunner,
     signing_service: ThresholdSigningService,
+    reconfiguration_manager: ReconfigurationManager,
 }
 
 impl<'a> CeremonyProcessor<'a> {
@@ -62,6 +63,7 @@ impl<'a> CeremonyProcessor<'a> {
         ceremony_tracker: CeremonyTracker,
         ceremony_runner: CeremonyRunner,
         signing_service: ThresholdSigningService,
+        reconfiguration_manager: ReconfigurationManager,
     ) -> Self {
         Self {
             authority_id,
@@ -69,6 +71,7 @@ impl<'a> CeremonyProcessor<'a> {
             ceremony_tracker,
             ceremony_runner,
             signing_service,
+            reconfiguration_manager,
         }
     }
 
@@ -120,6 +123,7 @@ impl<'a> CeremonyProcessor<'a> {
                     &self.ceremony_tracker,
                     &self.ceremony_runner,
                     &self.signing_service,
+                    &self.reconfiguration_manager,
                 )
                 .handle(&envelope)
                 .await
@@ -131,6 +135,7 @@ impl<'a> CeremonyProcessor<'a> {
                     &self.ceremony_tracker,
                     &self.ceremony_runner,
                     &self.signing_service,
+                    &self.reconfiguration_manager,
                 )
                 .handle_key_package(&envelope)
                 .await
@@ -142,6 +147,7 @@ impl<'a> CeremonyProcessor<'a> {
                     &self.ceremony_tracker,
                     &self.ceremony_runner,
                     &self.signing_service,
+                    &self.reconfiguration_manager,
                 )
                 .handle_acceptance(&envelope)
                 .await
@@ -153,6 +159,7 @@ impl<'a> CeremonyProcessor<'a> {
                     &self.ceremony_tracker,
                     &self.ceremony_runner,
                     &self.signing_service,
+                    &self.reconfiguration_manager,
                 )
                 .handle_key_package(&envelope)
                 .await
@@ -164,6 +171,7 @@ impl<'a> CeremonyProcessor<'a> {
                     &self.ceremony_tracker,
                     &self.ceremony_runner,
                     &self.signing_service,
+                    &self.reconfiguration_manager,
                 )
                 .handle_acceptance(&envelope)
                 .await
@@ -176,6 +184,7 @@ impl<'a> CeremonyProcessor<'a> {
                     &self.ceremony_tracker,
                     &self.ceremony_runner,
                     &self.signing_service,
+                    &self.reconfiguration_manager,
                 )
                 .handle(&envelope, &content_type)
                 .await

@@ -576,6 +576,17 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 leakage_budget.set_for_observer(observer, next);
                                 continue;
                             }
+                            crate::fact::ProtocolRelationalFact::SessionDelegation(_) => {
+                                let key = protocol.binding_key();
+                                bindings.push(RelationalBinding {
+                                    binding_type: RelationalBindingType::Generic(
+                                        key.sub_type().to_string(),
+                                    ),
+                                    context_id: *context_id,
+                                    data: key.data(),
+                                });
+                                continue;
+                            }
                             crate::fact::ProtocolRelationalFact::DkgTranscriptCommit(_) => {
                                 let key = protocol.binding_key();
                                 bindings.push(RelationalBinding {

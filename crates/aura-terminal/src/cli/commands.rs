@@ -34,6 +34,15 @@ pub struct ThresholdArgs {
     pub mode: String,
 }
 
+/// Replay command arguments for conformance/effect trace debugging.
+#[derive(Debug, Clone)]
+pub struct ReplayArgs {
+    pub trace_file: PathBuf,
+    pub encoding: Option<String>,
+    pub visualize: bool,
+    pub step_through: bool,
+}
+
 /// Top-level CLI commands exposed to the terminal.
 #[derive(Debug, Clone)]
 pub enum Commands {
@@ -64,6 +73,7 @@ pub enum Commands {
     Authority {
         command: AuthorityCommands,
     },
+    Replay(ReplayArgs),
     Version,
     Context {
         action: ContextAction,
@@ -118,6 +128,7 @@ fn commands_parser() -> impl Parser<Commands> {
         recovery_command(),
         invite_command(),
         authority_command(),
+        replay_command(),
         version_command(),
         context_command(),
         amp_command(),
@@ -385,6 +396,33 @@ fn authority_command() -> impl Parser<Commands> {
         .command("authority")
         .help("Authority management")
         .map(|command| Commands::Authority { command })
+}
+
+fn replay_command() -> impl Parser<Commands> {
+    let trace_file = long("trace-file")
+        .help("Path to a conformance/effect trace artifact (json|cbor)")
+        .argument::<PathBuf>("FILE");
+    let encoding = long("encoding")
+        .help("Trace encoding override (json|cbor). Default inferred from extension.")
+        .argument::<String>("ENCODING")
+        .optional();
+    let visualize = long("visualize")
+        .help("Render per-surface replay visualization output")
+        .switch();
+    let step_through = long("step-through")
+        .help("Render step-by-step entry output for replay debugging")
+        .switch();
+
+    construct!(ReplayArgs {
+        trace_file,
+        encoding,
+        visualize,
+        step_through
+    })
+    .to_options()
+    .command("replay")
+    .help("Replay and validate conformance/effect trace artifacts")
+    .map(Commands::Replay)
 }
 
 fn version_command() -> impl Parser<Commands> {

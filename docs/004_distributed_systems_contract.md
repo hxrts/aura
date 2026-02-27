@@ -42,6 +42,28 @@ Commits require threshold participation (`InvariantCommitRequiresThreshold`). Eq
 
 **Verified by**: `Aura.Proofs.Consensus.Agreement`, `consensus/core.qnt`
 
+### 2.3.1 Runtime Byzantine Admission
+
+Before consensus-backed ceremonies execute, Aura validates runtime theorem-pack capability profiles and rejects missing requirements at admission time. This prevents silent downgrade of BFT assumptions.
+
+Capability keys are mapped to threat-model assumptions as follows:
+
+- `byzantine_envelope`: Byzantine threshold/fault model assumptions (`f < n/3`), authenticated participants, evidence validity, conflict exclusion.
+- `termination_bounded`: bounded progress/termination assumptions for long-running protocol lanes.
+- `mixed_determinism`: declared native/wasm determinism envelope and conformance constraints.
+- `reconfiguration`: coherent delegation/link assumptions for live topology changes.
+
+Successful admissions are recorded as `ByzantineSafetyAttestation` payloads attached to consensus outputs (`CommitFact`, DKG transcript commits). Admission mismatches fail closed and surface redacted capability references for debugging.
+
+### 2.3.2 Quantitative Termination Bounds
+
+Category C choreography executions are bounded by deterministic step budgets derived from Telltale weighted measures:
+
+- `W = 2 * sum(depth(local_type)) + sum(buffer_sizes)`
+- `max_steps = ceil(k_sigma * W * budget_multiplier)`
+
+Aura enforces this budget per execution and fails with `BoundExceeded` when the bound is crossed. This removes wall-clock coupling from safety/liveness enforcement and keeps bound checks replay-deterministic across native and wasm conformance lanes.
+
 ### 2.4 Evidence CRDT
 
 The evidence system tracks votes and equivocations as a grow-only CRDT:

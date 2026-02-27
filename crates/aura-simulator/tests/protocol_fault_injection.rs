@@ -14,6 +14,7 @@
 #![allow(clippy::expect_used)]
 
 use aura_core::effects::{ByzantineType, ChaosEffects, CorruptionType, ResourceType};
+use aura_core::AuraFaultKind;
 use aura_simulator::choreography_observer::SimulatorObserver;
 use aura_simulator::handlers::SimulationFaultHandler;
 use aura_simulator::protocol_state_machine::{
@@ -39,7 +40,9 @@ async fn test_fault_handler_message_corruption_injection() {
     assert_eq!(handler.active_fault_count(), 1);
     let faults = handler.get_active_faults();
     assert!(
-        faults.iter().any(|f| f.contains("MessageCorruption")),
+        faults
+            .iter()
+            .any(|f| matches!(f.fault, AuraFaultKind::MessageCorruption { .. })),
         "Expected message corruption fault"
     );
 }
@@ -62,7 +65,9 @@ async fn test_fault_handler_network_partition_injection() {
     assert_eq!(handler.active_fault_count(), 1);
     let faults = handler.get_active_faults();
     assert!(
-        faults.iter().any(|f| f.contains("NetworkPartition")),
+        faults
+            .iter()
+            .any(|f| matches!(f.fault, AuraFaultKind::NetworkPartition { .. })),
         "Expected network partition fault"
     );
 }
@@ -83,7 +88,9 @@ async fn test_fault_handler_byzantine_behavior_injection() {
     assert_eq!(handler.active_fault_count(), 1);
     let faults = handler.get_active_faults();
     assert!(
-        faults.iter().any(|f| f.contains("Byzantine")),
+        faults
+            .iter()
+            .any(|f| matches!(f.fault, AuraFaultKind::MessageCorruption { .. })),
         "Expected byzantine fault"
     );
 }
@@ -104,7 +111,9 @@ async fn test_fault_handler_network_delay_injection() {
     assert_eq!(handler.active_fault_count(), 1);
     let faults = handler.get_active_faults();
     assert!(
-        faults.iter().any(|f| f.contains("NetworkDelay")),
+        faults
+            .iter()
+            .any(|f| matches!(f.fault, AuraFaultKind::MessageDelay { .. })),
         "Expected network delay fault"
     );
 }
@@ -122,7 +131,10 @@ async fn test_fault_handler_timing_fault_injection() {
     assert_eq!(handler.active_fault_count(), 1);
     let faults = handler.get_active_faults();
     assert!(
-        faults.iter().any(|f| f.contains("TimingFaults")),
+        faults.iter().any(|f| matches!(
+            &f.fault,
+            AuraFaultKind::Legacy { fault_type, .. } if fault_type == "timing_faults"
+        )),
         "Expected timing fault"
     );
 }
@@ -140,7 +152,9 @@ async fn test_fault_handler_resource_exhaustion() {
     assert_eq!(handler.active_fault_count(), 1);
     let faults = handler.get_active_faults();
     assert!(
-        faults.iter().any(|f| f.contains("ResourceExhaustion")),
+        faults
+            .iter()
+            .any(|f| matches!(f.fault, AuraFaultKind::FlowBudgetExhaustion { .. })),
         "Expected resource exhaustion fault"
     );
 }
@@ -558,7 +572,9 @@ async fn test_protocol_under_byzantine_behavior() {
 
     // Byzantine fault is tracked
     let faults = handler.get_active_faults();
-    assert!(faults.iter().any(|f| f.contains("Byzantine")));
+    assert!(faults
+        .iter()
+        .any(|f| matches!(f.fault, AuraFaultKind::MessageCorruption { .. })));
 }
 
 // =============================================================================

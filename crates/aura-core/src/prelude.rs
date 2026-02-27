@@ -26,6 +26,7 @@
 
 // === Error Types ===
 pub use crate::errors::{AuraError, ProtocolErrorCode, Result as AuraResult};
+pub use crate::faults::{AuraFault, AuraFaultKind, CorruptionMode, FaultEdge};
 
 // === Core Identifiers ===
 pub use crate::types::identifiers::{

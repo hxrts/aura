@@ -113,6 +113,8 @@ Generic facts should include enough metadata (`bindings`, optional labels) for i
 
 Relational facts express specific cross-authority operations. A `GuardianBinding` fact defines the guardian authority for an account while a `RecoveryGrant` fact defines an allowed update to the account state. A `Generic` fact covers application defined interactions. Consensus-backed facts include the `consensus_commitment` and aggregated signature so reducers can verify provenance even after witnesses rotate.
 
+`SessionDelegation` protocol facts record runtime endpoint transfer events. Aura emits these facts when session ownership moves across authorities (for example, guardian handoff or device migration). Each delegation fact includes source authority, destination authority, session id, optional bundle id, and timestamp so reconfiguration decisions remain auditable.
+
 Reduction applies all relational facts to produce relational state. Reduction verifies that authority commitments in each fact match the current reduced state of each authority.
 
 ```rust

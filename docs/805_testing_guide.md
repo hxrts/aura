@@ -160,6 +160,34 @@ proptest! {
 
 Async property tests require explicit runtime creation within the test body.
 
+## Property-Monitored Simulation Tests
+
+For distributed liveness/safety checks, combine simulator scenarios with online property monitoring.
+
+Use:
+
+- `AuraPropertyMonitor` for tick-by-tick checks
+- `PropertyMonitoringConfig` in `SimulationScenarioConfig`
+- `default_property_suite` for protocol-class defaults
+
+```rust
+let monitoring = PropertyMonitoringConfig::new(
+    ProtocolPropertyClass::Sync,
+    ProtocolPropertySuiteIds { session, context },
+)
+.with_snapshot_provider(|tick| snapshot_for_tick(tick));
+
+let config = SimulationScenarioConfig {
+    property_monitoring: Some(monitoring),
+    ..SimulationScenarioConfig::default()
+};
+
+let results = env.run_scenario("sync".into(), "sync with monitors".into(), config).await?;
+assert!(results.property_violations.is_empty());
+```
+
+If a property fails, `results.property_violations` contains tick-local diagnostics suitable for CI artifacts.
+
 ## GuardSnapshot Pattern
 
 The guard chain separates pure evaluation from async execution. This enables testing authorization logic without async runtime.
@@ -307,6 +335,16 @@ cargo test -p aura-agent --test telltale_vm_parity test_name
 ```
 
 Environment variables select specific scenarios and seeds for reproduction.
+
+### Replay Debugging
+
+Parity lanes emit trace artifacts under `artifacts/choreo-parity` (CI uploads them as workflow artifacts). Verify one artifact locally with:
+
+```bash
+aura replay --trace-file artifacts/choreo-parity/native_replay/<scenario>__seed_<seed>.json
+```
+
+For automated lane comparison in simulator/test workflows, use `aura-simulator::DifferentialTester` with `strict` or `envelope_bounded` profiles.
 
 ## Test Organization
 

@@ -33,12 +33,33 @@
 //! }
 //! ```
 
+pub mod bridge_export;
+pub mod bridge_format;
+pub mod bridge_import;
+pub mod bridge_validate;
 pub mod evaluator;
 pub mod handler;
 pub mod properties;
 pub mod runner;
 pub mod types;
 
+pub use bridge_export::{
+    export_quint_to_telltale_bundle, parse_quint_modules, validate_export_bundle,
+    BridgeExportError, QuintModuleSummary,
+};
+pub use bridge_format::{
+    BridgeBundleV1, ProofBackendV1, ProofCertificateV1, PropertyClassV1, PropertyInterchangeV1,
+    SessionEdgeV1, SessionNodeKindV1, SessionNodeV1, SessionTypeInterchangeV1,
+    AURA_LEAN_QUINT_BRIDGE_SCHEMA_V1,
+};
+pub use bridge_import::{
+    generate_quint_invariant_module, map_certificates_to_quint_assertions,
+    parse_telltale_properties, BridgeImportError,
+};
+pub use bridge_validate::{
+    run_cross_validation, CrossValidationDiscrepancy, CrossValidationReport, QuintCheckResult,
+    QuintModelCheckExecutor, StaticQuintExecutor,
+};
 pub use evaluator::QuintEvaluator;
 pub use handler::{QuintEvaluator as QuintEffectHandler, QuintEvaluatorConfig};
 pub use properties::{PropertyKind, PropertySpec, PropertySuite};

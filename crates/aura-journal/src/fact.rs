@@ -12,8 +12,9 @@
 pub use aura_core::threshold::{ConvergenceCert, ReversionFact, RotateFact};
 pub use aura_core::types::facts::{FactEncoding, FactEnvelope, FactTypeId};
 use aura_core::{
+    byzantine::ByzantineSafetyAttestation,
     domain::{Acknowledgment, Agreement, Consistency, OperationCategory, Propagation},
-    identifiers::{AuthorityId, ChannelId, ContextId},
+    identifiers::{AuthorityId, ChannelId, ContextId, SessionId},
     semilattice::JoinSemilattice,
     time::{OrderTime, PhysicalTime, TimeStamp},
     Hash32, Result,
@@ -831,6 +832,9 @@ pub struct DkgTranscriptCommit {
     pub transcript_hash: Hash32,
     /// Optional blob reference for transcript payload
     pub blob_ref: Option<Hash32>,
+    /// Optional Byzantine safety attestation captured for this transcript finalization.
+    #[serde(default)]
+    pub byzantine_attestation: Option<ByzantineSafetyAttestation>,
 }
 
 /// Channel-level policy controls (governable)
@@ -918,6 +922,23 @@ pub struct LeakageFact {
     pub timestamp: aura_core::time::PhysicalTime,
 }
 
+/// Session delegation event fact for reconfiguration audit trails.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct SessionDelegationFact {
+    /// Context in which delegation was performed.
+    pub context_id: ContextId,
+    /// Delegated session identifier.
+    pub session_id: SessionId,
+    /// Authority transferring ownership.
+    pub from_authority: AuthorityId,
+    /// Authority receiving delegated ownership.
+    pub to_authority: AuthorityId,
+    /// Optional composed bundle id.
+    pub bundle_id: Option<String>,
+    /// Physical delegation timestamp.
+    pub timestamp: aura_core::time::PhysicalTime,
+}
+
 /// Protocol-level relational facts that must remain in `aura-journal`.
 ///
 /// These facts are owned by `aura-journal` because they participate directly in
@@ -966,6 +987,8 @@ pub enum ProtocolRelationalFact {
     AmpChannelBootstrap(ChannelBootstrap),
     /// Leakage tracking event (privacy budget accounting)
     LeakageEvent(LeakageFact),
+    /// Session delegation event for reconfiguration/migration.
+    SessionDelegation(SessionDelegationFact),
     /// Finalized DKG transcript commit
     DkgTranscriptCommit(DkgTranscriptCommit),
     /// Coordinator convergence certificate (soft-safe)
@@ -1043,6 +1066,13 @@ impl ProtocolRelationalFact {
                 destination: event.destination,
                 timestamp: event.timestamp.clone(),
             },
+            ProtocolRelationalFact::SessionDelegation(event) => {
+                ProtocolFactKey::SessionDelegation {
+                    session_id: event.session_id,
+                    from_authority: event.from_authority,
+                    to_authority: event.to_authority,
+                }
+            }
             ProtocolRelationalFact::DkgTranscriptCommit(commit) => {
                 ProtocolFactKey::DkgTranscriptCommit {
                     transcript_hash: commit.transcript_hash,
@@ -1237,6 +1267,15 @@ pub enum ProtocolFactKey {
         /// When the leakage occurred.
         timestamp: aura_core::time::PhysicalTime,
     },
+    /// Session delegation event.
+    SessionDelegation {
+        /// Delegated session identifier.
+        session_id: SessionId,
+        /// Authority transferring ownership.
+        from_authority: AuthorityId,
+        /// Authority receiving ownership.
+        to_authority: AuthorityId,
+    },
     /// Finalized DKG transcript commit.
     DkgTranscriptCommit {
         /// Hash of the committed transcript.
@@ -1272,6 +1311,7 @@ impl ProtocolFactKey {
             ProtocolFactKey::AmpChannelPolicy { .. } => "amp-channel-policy",
             ProtocolFactKey::AmpChannelBootstrap { .. } => "amp-channel-bootstrap",
             ProtocolFactKey::LeakageEvent { .. } => "leakage-event",
+            ProtocolFactKey::SessionDelegation { .. } => "session-delegation",
             ProtocolFactKey::DkgTranscriptCommit { .. } => "dkg-transcript-commit",
             ProtocolFactKey::ConvergenceCert { .. } => "convergence-cert",
             ProtocolFactKey::ReversionFact { .. } => "reversion-fact",
@@ -1337,6 +1377,14 @@ impl ProtocolFactKey {
                 timestamp,
             } => aura_core::util::serialization::to_vec(&(source, destination, timestamp))
                 .unwrap_or_default(),
+            ProtocolFactKey::SessionDelegation {
+                session_id,
+                from_authority,
+                to_authority,
+            } => {
+                aura_core::util::serialization::to_vec(&(session_id, from_authority, to_authority))
+                    .unwrap_or_default()
+            }
             ProtocolFactKey::DkgTranscriptCommit { transcript_hash } => {
                 transcript_hash.as_bytes().to_vec()
             }

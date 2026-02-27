@@ -14,6 +14,7 @@ workspace = true
 # Re-export telltale choreography/runtime surfaces
 telltale = { workspace = true }
 telltale-choreography = { workspace = true }
+telltale-types = { workspace = true }
 
 # Note: aura-macros generates code that uses aura-mpst types, 
 # but aura-mpst does not depend on aura-macros to avoid circular dependency

@@ -70,6 +70,7 @@ pub mod reactive; // FRP as algebraic effects
 pub mod registry; // Canonical operation mappings
 pub mod relay; // Relay selection for message forwarding
 pub mod reliability;
+pub mod runtime_capability; // Runtime theorem-pack capability admission
 pub mod secure;
 pub mod storage;
 pub mod supertraits;
@@ -191,6 +192,7 @@ pub use reliability::{
     RetryPolicy,
     RetryResult,
 };
+pub use runtime_capability::{AdmissionError, CapabilityKey, RuntimeCapabilityEffects};
 pub use secure::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
 };

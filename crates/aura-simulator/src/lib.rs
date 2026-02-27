@@ -112,7 +112,13 @@ pub mod effects;
 pub mod handlers;
 
 // Bounded liveness checking infrastructure
+/// Differential replay/conformance tester for envelope-bounded comparisons.
+pub mod differential_tester;
 pub mod liveness;
+/// Online property definitions for simulator monitoring.
+pub mod properties;
+/// Per-tick property monitor runtime.
+pub mod property_monitor;
 
 // AMP scenario helpers
 pub mod amp;
@@ -157,9 +163,9 @@ pub use types::{
 
 // Re-export effect handlers (pure algebraic effects)
 pub use handlers::{
-    ComposedSimulationEnvironment, CoreSimulatorHandler, SimulationEffectComposer,
-    SimulationFaultHandler, SimulationScenarioHandler, SimulationTimeHandler,
-    StatelessSimulatorHandler,
+    ComposedSimulationEnvironment, CoreSimulatorHandler, PropertyMonitoringConfig,
+    SimulationEffectComposer, SimulationFaultHandler, SimulationResults, SimulationScenarioConfig,
+    SimulationScenarioHandler, SimulationTimeHandler, StatelessSimulatorHandler,
 };
 
 // Re-export testkit bridge
@@ -184,9 +190,21 @@ pub use async_host::{
 pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};
 
 // Re-export liveness checking types
+pub use differential_tester::{
+    DifferentialMismatch, DifferentialProfile, DifferentialReport, DifferentialTester,
+    DifferentialTesterError,
+};
 pub use liveness::{
     check_consensus_terminates_within, consensus_liveness_checker, BoundedLivenessChecker,
     BoundedLivenessProperty, LivenessCheckResult, SynchronyAssumption,
+};
+pub use properties::{
+    default_property_suite, AuraProperty, GuardStage, PropertyContext, PropertyEvent,
+    PropertyStateSnapshot, ProtocolPropertyClass, ProtocolPropertySuiteIds,
+};
+pub use property_monitor::{
+    AuraPropertyMonitor, PropertyRegression, PropertyRunReport, PropertyTrendTracker,
+    PropertyViolation,
 };
 
 // Re-export Duration for convenience

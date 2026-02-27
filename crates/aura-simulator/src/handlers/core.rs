@@ -69,11 +69,12 @@ impl SimulatorHandler for CoreSimulatorHandler {
             })),
 
             SimulatorOperation::InjectFault {
-                fault_type,
+                fault,
                 target,
                 duration,
             } => Ok(json!({
-                "fault_type": format!("{:?}", fault_type),
+                "fault_type": format!("{:?}", fault.fault),
+                "fault_schema_version": fault.schema_version,
                 "target": target,
                 "duration_ms": duration.map(|d| d.as_millis()),
                 "status": "injected"

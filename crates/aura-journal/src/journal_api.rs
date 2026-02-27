@@ -320,6 +320,9 @@ impl Journal {
                             crate::fact::ProtocolRelationalFact::LeakageEvent(..),
                         ) => "LeakageEvent".to_string(),
                         crate::fact::RelationalFact::Protocol(
+                            crate::fact::ProtocolRelationalFact::SessionDelegation(..),
+                        ) => "SessionDelegation".to_string(),
+                        crate::fact::RelationalFact::Protocol(
                             crate::fact::ProtocolRelationalFact::DkgTranscriptCommit(..),
                         ) => "DkgTranscriptCommit".to_string(),
                         crate::fact::RelationalFact::Protocol(

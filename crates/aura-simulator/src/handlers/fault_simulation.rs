@@ -7,6 +7,7 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
+use aura_core::{AuraFault, AuraFaultKind, CorruptionMode, FaultEdge};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -30,10 +31,9 @@ pub struct SimulationFaultHandler {
 
 #[derive(Debug, Clone)]
 struct ActiveFault {
-    fault_type: String,
+    fault: AuraFault,
     start_tick: u64,
     duration_ms: Option<u64>,
-    parameters: HashMap<String, String>,
 }
 
 // Mutex::lock().unwrap() is used throughout - simulation code doesn't handle poisoning
@@ -87,14 +87,13 @@ impl SimulationFaultHandler {
         format!("{prefix}_{id}")
     }
 
-    /// Add fault to active tracking
-    fn track_fault(&self, fault_id: String, fault_type: String, duration: Option<Duration>) {
+    /// Add fault to active tracking.
+    fn track_fault(&self, fault_id: String, fault: AuraFault, duration: Option<Duration>) {
         let duration_ms = duration.map(|d| d.as_millis() as u64);
         let fault = ActiveFault {
-            fault_type,
+            fault,
             start_tick: self.next_tick(),
             duration_ms,
-            parameters: HashMap::new(),
         };
 
         let mut active_faults = self.active_faults.lock().unwrap();
@@ -121,6 +120,55 @@ impl SimulationFaultHandler {
         let active_faults = self.active_faults.lock().unwrap();
         active_faults.len() < self.max_concurrent_faults
     }
+
+    fn default_edge() -> FaultEdge {
+        FaultEdge::new("*", "*")
+    }
+
+    fn inject_aura_fault_internal(
+        &self,
+        prefix: &str,
+        fault: AuraFault,
+        duration: Option<Duration>,
+    ) -> Result<(), ChaosError> {
+        self.cleanup_expired_faults();
+        if !self.can_inject_more_faults() {
+            return Err(ChaosError::InjectionFailed {
+                fault_type: prefix.to_string(),
+                reason: "Maximum concurrent faults reached".to_string(),
+            });
+        }
+        let fault_id = self.next_fault_id(prefix);
+        self.track_fault(fault_id, fault, duration);
+        Ok(())
+    }
+
+    /// Inject one canonical Aura fault.
+    pub fn inject_fault(
+        &self,
+        fault: AuraFault,
+        duration: Option<Duration>,
+    ) -> Result<(), ChaosError> {
+        let prefix = match &fault.fault {
+            AuraFaultKind::MessageDrop { .. } => "message_drop",
+            AuraFaultKind::MessageDelay { .. } => "message_delay",
+            AuraFaultKind::MessageCorruption { .. } => "message_corruption",
+            AuraFaultKind::NodeCrash { .. } => "node_crash",
+            AuraFaultKind::NetworkPartition { .. } => "network_partition",
+            AuraFaultKind::FlowBudgetExhaustion { .. } => "flow_budget_exhaustion",
+            AuraFaultKind::JournalCorruption { .. } => "journal_corruption",
+            AuraFaultKind::Legacy { .. } => "legacy_fault",
+        };
+        self.inject_aura_fault_internal(prefix, fault, duration)
+    }
+
+    /// Inject a replay fault sequence.
+    pub fn replay_faults(&self, faults: &[AuraFault]) -> Result<(), ChaosError> {
+        for fault in faults {
+            self.inject_fault(fault.clone(), None)?;
+        }
+        Ok(())
+    }
 }
 
 impl Default for SimulationFaultHandler {
@@ -136,29 +184,24 @@ impl ChaosEffects for SimulationFaultHandler {
         corruption_rate: f64,
         corruption_type: CorruptionType,
     ) -> Result<(), ChaosError> {
-        self.cleanup_expired_faults();
-
-        if !self.can_inject_more_faults() {
-            return Err(ChaosError::InjectionFailed {
-                fault_type: "message_corruption".to_string(),
-                reason: "Maximum concurrent faults reached".to_string(),
-            });
-        }
-
         if !(0.0..=1.0).contains(&corruption_rate) {
             return Err(ChaosError::InvalidConfiguration {
                 reason: "Corruption rate must be between 0.0 and 1.0".to_string(),
             });
         }
 
-        let fault_id = self.next_fault_id("corruption");
-        self.track_fault(
-            fault_id,
-            format!("MessageCorruption({corruption_type:?})"),
-            None, // Permanent until stopped
-        );
-
-        Ok(())
+        let mode = match corruption_type {
+            CorruptionType::BitFlip => CorruptionMode::BitFlip,
+            CorruptionType::Truncation => CorruptionMode::Truncation,
+            CorruptionType::Duplication => CorruptionMode::Duplication,
+            CorruptionType::Insertion => CorruptionMode::Insertion,
+            CorruptionType::Reordering => CorruptionMode::Reordering,
+        };
+        let fault = AuraFault::new(AuraFaultKind::MessageCorruption {
+            edge: Self::default_edge(),
+            mode,
+        });
+        self.inject_aura_fault_internal("corruption", fault, None)
     }
 
     async fn inject_network_delay(
@@ -166,34 +209,25 @@ impl ChaosEffects for SimulationFaultHandler {
         delay_range: (Duration, Duration),
         affected_peers: Option<Vec<String>>,
     ) -> Result<(), ChaosError> {
-        self.cleanup_expired_faults();
-
-        if !self.can_inject_more_faults() {
-            return Err(ChaosError::InjectionFailed {
-                fault_type: "network_delay".to_string(),
-                reason: "Maximum concurrent faults reached".to_string(),
-            });
-        }
-
         if delay_range.0 > delay_range.1 {
             return Err(ChaosError::InvalidConfiguration {
                 reason: "Min delay cannot be greater than max delay".to_string(),
             });
         }
 
-        let fault_id = self.next_fault_id("delay");
-        let peers_desc = match affected_peers {
-            Some(ref peers) => format!("peers: {peers:?}"),
-            None => "all peers".to_string(),
+        let edge = if let Some(mut peers) = affected_peers {
+            peers.sort();
+            let to = peers.join(",");
+            FaultEdge::new("*", to)
+        } else {
+            Self::default_edge()
         };
-
-        self.track_fault(
-            fault_id,
-            format!("NetworkDelay({delay_range:?}, {peers_desc})"),
-            None,
-        );
-
-        Ok(())
+        let fault = AuraFault::new(AuraFaultKind::MessageDelay {
+            edge,
+            min: delay_range.0,
+            max: delay_range.1,
+        });
+        self.inject_aura_fault_internal("delay", fault, None)
     }
 
     async fn inject_network_partition(
@@ -201,29 +235,17 @@ impl ChaosEffects for SimulationFaultHandler {
         partition_groups: Vec<Vec<String>>,
         duration: Duration,
     ) -> Result<(), ChaosError> {
-        self.cleanup_expired_faults();
-
-        if !self.can_inject_more_faults() {
-            return Err(ChaosError::InjectionFailed {
-                fault_type: "network_partition".to_string(),
-                reason: "Maximum concurrent faults reached".to_string(),
-            });
-        }
-
         if partition_groups.is_empty() {
             return Err(ChaosError::InvalidConfiguration {
                 reason: "Partition groups cannot be empty".to_string(),
             });
         }
 
-        let fault_id = self.next_fault_id("partition");
-        self.track_fault(
-            fault_id,
-            format!("NetworkPartition({} groups)", partition_groups.len()),
-            Some(duration),
-        );
-
-        Ok(())
+        let fault = AuraFault::new(AuraFaultKind::NetworkPartition {
+            partition: partition_groups,
+            duration: Some(duration),
+        });
+        self.inject_aura_fault_internal("partition", fault, Some(duration))
     }
 
     async fn inject_byzantine_behavior(
@@ -231,33 +253,36 @@ impl ChaosEffects for SimulationFaultHandler {
         byzantine_peers: Vec<String>,
         behavior_type: ByzantineType,
     ) -> Result<(), ChaosError> {
-        self.cleanup_expired_faults();
-
-        if !self.can_inject_more_faults() {
-            return Err(ChaosError::InjectionFailed {
-                fault_type: "byzantine_behavior".to_string(),
-                reason: "Maximum concurrent faults reached".to_string(),
-            });
-        }
-
         if byzantine_peers.is_empty() {
             return Err(ChaosError::InvalidConfiguration {
                 reason: "Byzantine peers list cannot be empty".to_string(),
             });
         }
 
-        let fault_id = self.next_fault_id("byzantine");
-        self.track_fault(
-            fault_id,
-            format!(
-                "Byzantine({:?}, {} peers)",
-                behavior_type,
-                byzantine_peers.len()
-            ),
-            None,
-        );
-
-        Ok(())
+        let detail = format!("peers={}", byzantine_peers.join(","));
+        let fault_kind = match behavior_type {
+            ByzantineType::Equivocation => AuraFaultKind::MessageCorruption {
+                edge: Self::default_edge(),
+                mode: CorruptionMode::Opaque,
+            },
+            ByzantineType::Silent => AuraFaultKind::MessageDrop {
+                edge: Self::default_edge(),
+                probability: 1.0,
+            },
+            ByzantineType::InvalidSignature => AuraFaultKind::Legacy {
+                fault_type: "invalid_signature".to_string(),
+                detail: Some(detail),
+            },
+            ByzantineType::ProtocolViolation => AuraFaultKind::Legacy {
+                fault_type: "protocol_violation".to_string(),
+                detail: Some(detail),
+            },
+            ByzantineType::Random => AuraFaultKind::Legacy {
+                fault_type: "random_byzantine".to_string(),
+                detail: Some(detail),
+            },
+        };
+        self.inject_aura_fault_internal("byzantine", AuraFault::new(fault_kind), None)
     }
 
     async fn inject_resource_exhaustion(
@@ -265,29 +290,29 @@ impl ChaosEffects for SimulationFaultHandler {
         resource_type: ResourceType,
         constraint_level: f64,
     ) -> Result<(), ChaosError> {
-        self.cleanup_expired_faults();
-
-        if !self.can_inject_more_faults() {
-            return Err(ChaosError::InjectionFailed {
-                fault_type: "resource_exhaustion".to_string(),
-                reason: "Maximum concurrent faults reached".to_string(),
-            });
-        }
-
         if !(0.0..=1.0).contains(&constraint_level) {
             return Err(ChaosError::InvalidConfiguration {
                 reason: "Constraint level must be between 0.0 and 1.0".to_string(),
             });
         }
 
-        let fault_id = self.next_fault_id("resource");
-        self.track_fault(
-            fault_id,
-            format!("ResourceExhaustion({resource_type:?}, {constraint_level:.2})"),
-            None,
-        );
-
-        Ok(())
+        let fault = match resource_type {
+            ResourceType::Memory => AuraFault::new(AuraFaultKind::FlowBudgetExhaustion {
+                context: None,
+                factor: 1.0 + constraint_level,
+            }),
+            ResourceType::Storage => AuraFault::new(AuraFaultKind::JournalCorruption {
+                domain: "storage".to_string(),
+                probability: constraint_level,
+            }),
+            ResourceType::Cpu | ResourceType::NetworkBandwidth | ResourceType::FileDescriptors => {
+                AuraFault::new(AuraFaultKind::Legacy {
+                    fault_type: "resource_exhaustion".to_string(),
+                    detail: Some(format!("{resource_type:?}:{constraint_level}")),
+                })
+            }
+        };
+        self.inject_aura_fault_internal("resource", fault, None)
     }
 
     async fn inject_timing_faults(
@@ -295,29 +320,20 @@ impl ChaosEffects for SimulationFaultHandler {
         time_skew: Duration,
         clock_drift_rate: f64,
     ) -> Result<(), ChaosError> {
-        self.cleanup_expired_faults();
-
-        if !self.can_inject_more_faults() {
-            return Err(ChaosError::InjectionFailed {
-                fault_type: "timing_faults".to_string(),
-                reason: "Maximum concurrent faults reached".to_string(),
-            });
-        }
-
         if clock_drift_rate < 0.0 {
             return Err(ChaosError::InvalidConfiguration {
                 reason: "Clock drift rate cannot be negative".to_string(),
             });
         }
 
-        let fault_id = self.next_fault_id("timing");
-        self.track_fault(
-            fault_id,
-            format!("TimingFaults(skew: {time_skew:?}, drift: {clock_drift_rate:.2})"),
-            None,
-        );
-
-        Ok(())
+        let fault = AuraFault::new(AuraFaultKind::Legacy {
+            fault_type: "timing_faults".to_string(),
+            detail: Some(format!(
+                "skew_ms={},drift={clock_drift_rate:.4}",
+                time_skew.as_millis()
+            )),
+        });
+        self.inject_aura_fault_internal("timing", fault, None)
     }
 
     async fn stop_all_injections(&self) -> Result<(), ChaosError> {
@@ -330,15 +346,15 @@ impl ChaosEffects for SimulationFaultHandler {
 }
 
 impl SimulationFaultHandler {
-    /// Get information about currently active faults
-    pub fn get_active_faults(&self) -> Vec<String> {
+    /// Get currently active canonical faults.
+    pub fn get_active_faults(&self) -> Vec<AuraFault> {
         self.cleanup_expired_faults();
         #[allow(clippy::unwrap_used)]
         // Simulation code - lock poisoning is not expected in test scenarios
         let active_faults = self.active_faults.lock().unwrap();
         active_faults
             .values()
-            .map(|fault| fault.fault_type.clone())
+            .map(|fault| fault.fault.clone())
             .collect()
     }
 
@@ -366,7 +382,10 @@ mod tests {
         assert!(result.is_ok());
 
         assert_eq!(handler.active_fault_count(), 1);
-        assert!(handler.get_active_faults()[0].contains("MessageCorruption"));
+        assert!(matches!(
+            handler.get_active_faults()[0].fault,
+            AuraFaultKind::MessageCorruption { .. }
+        ));
     }
 
     #[tokio::test]

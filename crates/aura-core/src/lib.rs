@@ -84,6 +84,8 @@ pub mod messages;
 pub mod query;
 /// Reactive primitives for TUI and database subscriptions
 pub mod reactive;
+/// Protocol reconfiguration/link/delegation domain types
+pub mod reconfiguration;
 /// Relational domain types for cross-authority coordination
 pub mod relational;
 /// Core algebraic types and semilattice laws
@@ -95,10 +97,16 @@ pub mod time;
 /// Tree operation types
 pub mod tree;
 
+/// Byzantine safety admission and attestation types
+pub mod byzantine;
 /// Ceremony types for Category C operations (supersession, lifecycle)
 pub mod ceremony;
+/// Native/WASM conformance artifact schema and envelope classification registry
+pub mod conformance;
 /// Consolidated constants for size limits and defaults
 pub mod constants;
+/// Unified fault schema for simulator/chaos/replay workflows
+pub mod faults;
 /// Convenient re-exports of commonly used types
 pub mod prelude;
 /// Protocol types for version negotiation and capabilities
@@ -123,6 +131,10 @@ pub use util::context as context_derivation;
 pub use time::TimeDomain;
 
 // Core algebraic types
+pub use byzantine::{
+    ByzantineAdmissionRequirement, ByzantineSafetyAttestation, CapabilitySnapshot,
+    CapabilitySnapshotEntry, BYZANTINE_ATTESTATION_SCHEMA_V1,
+};
 #[doc = "stable: Core journal types with semver guarantees"]
 pub use domain::journal::{
     ActorId, AuthLevel, Cap, Fact, FactKey, FactOpId, FactTimestamp, FactValue, Journal,
@@ -133,7 +145,17 @@ pub use semilattice::{
 };
 
 // Identifiers and contexts
+#[doc = "unstable: Conformance schema and envelope registry are under active development"]
+pub use conformance::{
+    assert_effect_kinds_classified, envelope_law_class, AuraConformanceArtifactV1,
+    AuraConformanceRunMetadataV1, AuraConformanceSurfaceV1, AuraEnvelopeLawClass,
+    ConformanceSurfaceName, ConformanceValidationError, AURA_CONFORMANCE_SCHEMA_VERSION,
+    AURA_EFFECT_ENVELOPE_CLASSIFICATIONS,
+};
 pub use context::{ContextSnapshot, EffectContext};
+pub use reconfiguration::{
+    ComposedBundle, DelegationReceipt, SessionFootprint, RECONFIGURATION_SCHEMA_V1,
+};
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use types::identifiers::{
     AccountId, AuthorityId, CeremonyId, ChannelId, ContextId, DataId, DeviceId, DkdContextId,
@@ -189,6 +211,7 @@ pub use util::serialization::{
 // Errors
 #[doc = "stable: Error types with semver guarantees"]
 pub use errors::{AuraError, ProtocolErrorCode, Result as AuraResult};
+pub use faults::{AuraFault, AuraFaultKind, CorruptionMode, FaultEdge, AURA_FAULT_SCHEMA_V1};
 
 // Effect interfaces
 pub use effects::{

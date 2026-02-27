@@ -8,6 +8,7 @@ use super::{
 };
 use crate::protocol::{run_consensus, ConsensusParams};
 use crate::types::CommitFact;
+use aura_core::byzantine::ByzantineSafetyAttestation;
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
 use aura_core::{AuraError, ContextId, Prestate, Result};
 use aura_journal::fact::DkgTranscriptCommit;
@@ -36,9 +37,15 @@ pub async fn persist_transcript<S: DkgTranscriptStore + ?Sized>(
     store: &S,
     context: ContextId,
     transcript: &DkgTranscript,
+    byzantine_attestation: Option<ByzantineSafetyAttestation>,
 ) -> Result<DkgTranscriptCommit> {
     let blob_ref = store.put(transcript).await?;
-    Ok(build_transcript_commit(context, transcript, blob_ref))
+    Ok(build_transcript_commit(
+        context,
+        transcript,
+        blob_ref,
+        byzantine_attestation,
+    ))
 }
 
 /// Run a consensus-backed DKG transcript finalization.
@@ -51,10 +58,15 @@ pub async fn run_consensus_dkg<S: DkgTranscriptStore + ?Sized>(
     params: ConsensusParams,
     random: &(impl RandomEffects + ?Sized),
     time: &(impl PhysicalTimeEffects + ?Sized),
+    byzantine_attestation: Option<ByzantineSafetyAttestation>,
 ) -> Result<(DkgTranscriptCommit, CommitFact)> {
     let transcript = run_dkg_ceremony(config, packages)?;
-    let commit = persist_transcript(store, context, &transcript).await?;
-    let consensus_commit = run_consensus(prestate, &commit, params, random, time).await?;
+    let commit =
+        persist_transcript(store, context, &transcript, byzantine_attestation.clone()).await?;
+    let mut consensus_commit = run_consensus(prestate, &commit, params, random, time).await?;
+    if let Some(attestation) = byzantine_attestation {
+        consensus_commit = consensus_commit.with_byzantine_attestation(attestation);
+    }
     Ok((commit, consensus_commit))
 }
 

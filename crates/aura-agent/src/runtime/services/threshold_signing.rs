@@ -30,6 +30,7 @@ use aura_core::effects::{
     crypto::KeyGenerationMethod, CryptoExtendedEffects, SecureStorageCapability,
     SecureStorageEffects, SecureStorageLocation,
 };
+use aura_core::effects::{CapabilityKey, RuntimeCapabilityEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::threshold::{
     AgreementMode, ApprovalContext, ParticipantIdentity, SignableOperation, SigningContext,
@@ -41,6 +42,7 @@ use aura_core::{
     threshold::{ConvergenceCert, ReversionFact},
     AuraError, ContextId, Epoch, Hash32,
 };
+use aura_effects::RuntimeCapabilityHandler;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -177,6 +179,9 @@ pub struct ThresholdSigningService {
 
     /// In-memory signing state (contexts + leases)
     state: Arc<RwLock<ThresholdSigningState>>,
+
+    /// Runtime capability admission snapshot for threshold-signing gates.
+    runtime_capabilities: RuntimeCapabilityHandler,
 }
 
 impl std::fmt::Debug for ThresholdSigningService {
@@ -192,6 +197,7 @@ impl Clone for ThresholdSigningService {
         Self {
             effects: self.effects.clone(),
             state: self.state.clone(),
+            runtime_capabilities: self.runtime_capabilities.clone(),
         }
     }
 }
@@ -199,14 +205,34 @@ impl Clone for ThresholdSigningService {
 impl ThresholdSigningService {
     /// Create a new threshold signing service
     pub fn new(effects: Arc<AuraEffectSystem>) -> Self {
+        let runtime_capabilities =
+            RuntimeCapabilityHandler::from_pairs([("byzantine_envelope", true)]);
         Self {
             effects,
             state: Arc::new(RwLock::new(ThresholdSigningState::default())),
+            runtime_capabilities,
+        }
+    }
+
+    /// Create a threshold signing service with explicit runtime capabilities.
+    pub fn with_runtime_capabilities(
+        effects: Arc<AuraEffectSystem>,
+        runtime_capabilities: RuntimeCapabilityHandler,
+    ) -> Self {
+        Self {
+            effects,
+            state: Arc::new(RwLock::new(ThresholdSigningState::default())),
+            runtime_capabilities,
         }
     }
 
     fn transcript_store(&self) -> StorageTranscriptStore<AuraEffectSystem> {
         StorageTranscriptStore::new_default(self.effects.clone())
+    }
+
+    fn capability_ref(key: &str) -> String {
+        let digest = aura_core::hash::hash(key.as_bytes());
+        hex::encode(&digest[..8])
     }
 
     /// Load a finalized DKG transcript by blob reference.
@@ -767,6 +793,17 @@ impl ThresholdSigningEffects for ThresholdSigningService {
         if state.config.threshold == 1 {
             return self.sign_solo(&context.authority, &message, &state).await;
         }
+
+        // Enforce theorem-pack runtime capability for threshold signing paths.
+        self.runtime_capabilities
+            .require_capabilities(&[CapabilityKey::new("byzantine_envelope")])
+            .await
+            .map_err(|_| {
+                AuraError::permission_denied(format!(
+                    "threshold signing denied: missing runtime capability ref={}",
+                    Self::capability_ref("byzantine_envelope")
+                ))
+            })?;
 
         // Threshold signing via local share aggregation (demo/prototyping path).
         self.sign_threshold_local(&context.authority, &message, &state)

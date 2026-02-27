@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use aura_core::effects::{TestingEffects, TestingError};
 use aura_core::frost::ThresholdSignature;
-use aura_core::{AuraError, AuthorityId};
+use aura_core::{AuraError, AuraFault, AuraFaultKind, AuthorityId, CorruptionMode, FaultEdge};
 use aura_testkit::simulation::choreography::{test_threshold_group, ChoreographyTestHarness};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
@@ -170,10 +170,7 @@ pub enum InjectionAction {
     /// Change simulation behavior
     ModifyBehavior { component: String, behavior: String },
     /// Trigger fault injection
-    TriggerFault {
-        fault_type: String,
-        parameters: HashMap<String, String>,
-    },
+    TriggerFault { fault: AuraFault },
     /// Create chat group for multi-actor scenarios
     CreateChatGroup {
         group_name: String,
@@ -209,6 +206,70 @@ pub enum InjectionAction {
         target: String,
         validation_steps: Vec<String>,
     },
+}
+
+impl ScenarioDefinition {
+    /// Build a scenario that injects a Telltale-style network partition fault.
+    pub fn telltale_network_partition(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        groups: Vec<Vec<String>>,
+        duration: Duration,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            actions: vec![InjectionAction::TriggerFault {
+                fault: AuraFault::new(AuraFaultKind::NetworkPartition {
+                    partition: groups,
+                    duration: Some(duration),
+                }),
+            }],
+            trigger: TriggerCondition::Immediate,
+            duration: Some(duration),
+            priority: 10,
+        }
+    }
+
+    /// Build a scenario that injects a Telltale-style message delay fault.
+    pub fn telltale_message_delay(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        min_delay: Duration,
+        max_delay: Duration,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            actions: vec![InjectionAction::TriggerFault {
+                fault: AuraFault::new(AuraFaultKind::MessageDelay {
+                    edge: FaultEdge::new("*", "*"),
+                    min: min_delay,
+                    max: max_delay,
+                }),
+            }],
+            trigger: TriggerCondition::Immediate,
+            duration: Some(max_delay),
+            priority: 10,
+        }
+    }
+
+    /// Build a scenario that injects a Telltale-style message corruption fault.
+    pub fn telltale_message_corruption(id: impl Into<String>, name: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            actions: vec![InjectionAction::TriggerFault {
+                fault: AuraFault::new(AuraFaultKind::MessageCorruption {
+                    edge: FaultEdge::new("*", "*"),
+                    mode: CorruptionMode::Opaque,
+                }),
+            }],
+            trigger: TriggerCondition::Immediate,
+            duration: None,
+            priority: 10,
+        }
+    }
 }
 
 /// Conditions for triggering scenarios
@@ -300,6 +361,41 @@ struct ScenarioCheckpoint {
     label: String,
     timestamp: SimTimestamp,
     state_snapshot: HashMap<String, String>,
+}
+
+/// Portable checkpoint snapshot payload used by simulator upgrade/resume tests.
+#[derive(Debug, Clone)]
+pub struct ScenarioCheckpointSnapshot {
+    /// Checkpoint identifier.
+    pub id: String,
+    /// Human-readable checkpoint label.
+    pub label: String,
+    /// Tick timestamp at checkpoint creation.
+    pub timestamp: SimTimestamp,
+    /// Captured state fields.
+    pub state_snapshot: HashMap<String, String>,
+}
+
+impl From<ScenarioCheckpoint> for ScenarioCheckpointSnapshot {
+    fn from(checkpoint: ScenarioCheckpoint) -> Self {
+        Self {
+            id: checkpoint.id,
+            label: checkpoint.label,
+            timestamp: checkpoint.timestamp,
+            state_snapshot: checkpoint.state_snapshot,
+        }
+    }
+}
+
+impl From<ScenarioCheckpointSnapshot> for ScenarioCheckpoint {
+    fn from(snapshot: ScenarioCheckpointSnapshot) -> Self {
+        Self {
+            id: snapshot.id,
+            label: snapshot.label,
+            timestamp: snapshot.timestamp,
+            state_snapshot: snapshot.state_snapshot,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -477,6 +573,26 @@ impl SimulationScenarioHandler {
         )
     }
 
+    /// Inject a canonical Aura fault (logged as JSON for replay/debugging).
+    pub fn inject_aura_fault(
+        &self,
+        participant: &str,
+        fault: &AuraFault,
+    ) -> Result<(), TestingError> {
+        let fault_json = serde_json::to_string(fault).map_err(|error| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!(
+                "failed to serialize fault payload: {error}"
+            )))
+        })?;
+        self.record_simple_event(
+            "fault_injection",
+            HashMap::from([
+                ("participant".to_string(), participant.to_string()),
+                ("fault".to_string(), fault_json),
+            ]),
+        )
+    }
+
     /// Create a lightweight checkpoint of simulation state
     pub fn create_checkpoint(&self, label: &str) -> Result<String, TestingError> {
         let mut state = self.state.lock().map_err(|e| {
@@ -492,6 +608,39 @@ impl SimulationScenarioHandler {
         };
         state.checkpoints.insert(checkpoint_id.clone(), checkpoint);
         Ok(checkpoint_id)
+    }
+
+    /// Export one checkpoint snapshot payload for cross-instance restore tests.
+    pub fn export_checkpoint_snapshot(
+        &self,
+        checkpoint_id: &str,
+    ) -> Result<ScenarioCheckpointSnapshot, TestingError> {
+        let state = self.state.lock().map_err(|e| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
+        })?;
+        let checkpoint = state
+            .checkpoints
+            .get(checkpoint_id)
+            .cloned()
+            .ok_or_else(|| TestingError::CheckpointError {
+                checkpoint_id: checkpoint_id.to_string(),
+                reason: "Checkpoint not found".to_string(),
+            })?;
+        Ok(checkpoint.into())
+    }
+
+    /// Import one checkpoint snapshot payload into this simulator instance.
+    pub fn import_checkpoint_snapshot(
+        &self,
+        snapshot: ScenarioCheckpointSnapshot,
+    ) -> Result<(), TestingError> {
+        let mut state = self.state.lock().map_err(|e| {
+            TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {e}")))
+        })?;
+        state
+            .checkpoints
+            .insert(snapshot.id.clone(), snapshot.into());
+        Ok(())
     }
 
     /// Record export trace intent
@@ -1753,6 +1902,15 @@ impl TestingEffects for SimulationScenarioHandler {
                     })
                 }
             }
+            "simulation" => match path {
+                "current_tick" => Ok(Box::new(state.current_tick)),
+                "checkpoint_count" => Ok(Box::new(state.checkpoints.len())),
+                _ => Err(TestingError::StateInspectionError {
+                    component: component.to_string(),
+                    path: path.to_string(),
+                    reason: "Unknown simulation path".to_string(),
+                }),
+            },
             _ => Err(TestingError::StateInspectionError {
                 component: component.to_string(),
                 path: path.to_string(),
@@ -2103,5 +2261,131 @@ mod tests {
             2,                         // But need 2
         );
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_checkpoint_baseline_suites_are_persisted() {
+        let handler = SimulationScenarioHandler::new(123);
+        let suites = ["consensus", "sync", "recovery", "reconfiguration"];
+
+        for suite in suites {
+            aura_core::effects::testing::TestingEffects::create_checkpoint(
+                &handler,
+                &format!("baseline_{suite}"),
+                &format!("baseline {suite}"),
+            )
+            .await
+            .expect("create baseline checkpoint");
+        }
+
+        let checkpoint_count = handler
+            .inspect_state("simulation", "checkpoint_count")
+            .await
+            .expect("inspect checkpoint count")
+            .downcast::<usize>()
+            .expect("checkpoint count type");
+        assert_eq!(*checkpoint_count, 4);
+    }
+
+    #[tokio::test]
+    async fn test_restore_and_continue_from_checkpoint() {
+        let handler = SimulationScenarioHandler::new(123);
+
+        handler.wait_ticks(5).expect("advance ticks");
+        aura_core::effects::testing::TestingEffects::create_checkpoint(
+            &handler,
+            "restore_resume",
+            "restore resume baseline",
+        )
+        .await
+        .expect("create restore checkpoint");
+        handler.wait_ticks(9).expect("advance ticks");
+
+        aura_core::effects::testing::TestingEffects::restore_checkpoint(&handler, "restore_resume")
+            .await
+            .expect("restore checkpoint");
+        let restored_tick = handler
+            .inspect_state("simulation", "current_tick")
+            .await
+            .expect("inspect current tick")
+            .downcast::<u64>()
+            .expect("tick type");
+        assert_eq!(*restored_tick, 5);
+
+        handler.wait_ticks(3).expect("continue after restore");
+        let resumed_tick = handler
+            .inspect_state("simulation", "current_tick")
+            .await
+            .expect("inspect resumed tick")
+            .downcast::<u64>()
+            .expect("tick type");
+        assert_eq!(*resumed_tick, 8);
+    }
+
+    #[tokio::test]
+    async fn test_upgrade_resume_from_exported_checkpoint_snapshot() {
+        let source = SimulationScenarioHandler::new(123);
+        source.wait_ticks(11).expect("advance source ticks");
+        aura_core::effects::testing::TestingEffects::create_checkpoint(
+            &source,
+            "pre_upgrade",
+            "pre-upgrade baseline",
+        )
+        .await
+        .expect("create pre-upgrade checkpoint");
+        let snapshot = source
+            .export_checkpoint_snapshot("pre_upgrade")
+            .expect("export snapshot");
+
+        let upgraded = SimulationScenarioHandler::new(999);
+        upgraded
+            .import_checkpoint_snapshot(snapshot)
+            .expect("import snapshot");
+        aura_core::effects::testing::TestingEffects::restore_checkpoint(&upgraded, "pre_upgrade")
+            .await
+            .expect("restore imported checkpoint");
+        let upgraded_tick = upgraded
+            .inspect_state("simulation", "current_tick")
+            .await
+            .expect("inspect upgraded tick")
+            .downcast::<u64>()
+            .expect("tick type");
+        assert_eq!(*upgraded_tick, 11);
+
+        upgraded.wait_ticks(2).expect("continue upgraded run");
+        let resumed_tick = upgraded
+            .inspect_state("simulation", "current_tick")
+            .await
+            .expect("inspect resumed tick")
+            .downcast::<u64>()
+            .expect("tick type");
+        assert_eq!(*resumed_tick, 13);
+    }
+
+    #[test]
+    fn test_telltale_fault_pattern_builders() {
+        let partition = ScenarioDefinition::telltale_network_partition(
+            "partition",
+            "Network Partition",
+            vec![vec!["a".to_string()], vec!["b".to_string()]],
+            Duration::from_secs(5),
+        );
+        assert!(matches!(
+            partition.actions.first(),
+            Some(InjectionAction::TriggerFault { fault })
+                if matches!(fault.fault, AuraFaultKind::NetworkPartition { .. })
+        ));
+
+        let delay = ScenarioDefinition::telltale_message_delay(
+            "delay",
+            "Delay",
+            Duration::from_millis(10),
+            Duration::from_millis(50),
+        );
+        assert!(matches!(
+            delay.actions.first(),
+            Some(InjectionAction::TriggerFault { fault })
+                if matches!(fault.fault, AuraFaultKind::MessageDelay { .. })
+        ));
     }
 }

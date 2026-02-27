@@ -124,7 +124,7 @@ impl ConsensusProtocol {
         store: &S,
     ) -> Result<aura_journal::fact::DkgTranscriptCommit> {
         let transcript = dkg::ceremony::run_dkg_ceremony(config, packages)?;
-        dkg::ceremony::persist_transcript(store, context, &transcript).await
+        dkg::ceremony::persist_transcript(store, context, &transcript, None).await
     }
 
     /// Handle epoch change

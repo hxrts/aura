@@ -112,6 +112,8 @@
 // Existing modular structure
 pub mod builders;
 pub mod configuration;
+pub mod conformance; // Native/WASM conformance artifact replay helpers
+pub mod conformance_diff; // Law-based conformance diffing and envelope registry
 pub mod consensus; // ITF conformance and differential testing for consensus
 pub mod differential; // Lean oracle differential testing (T7.11)
 pub mod effect_api;
@@ -124,6 +126,8 @@ pub mod mock_effects;
 pub mod mock_runtime_bridge;
 pub mod mocks;
 pub mod protocol_test; // Fluent protocol test API
+#[cfg(not(target_arch = "wasm32"))]
+pub mod replay; // Effect trace replay helpers for native parity/debug tooling
 pub mod simulation;
 pub mod stateful_effects;
 pub mod time;
@@ -138,6 +142,8 @@ pub mod privacy {
 #[allow(ambiguous_glob_reexports)]
 pub use builders::*;
 pub use configuration::TestConfig as ConfigTestConfig;
+pub use conformance::*;
+pub use conformance_diff::*;
 pub use effect_api::*;
 #[allow(ambiguous_glob_reexports)]
 pub use fixtures::*;
@@ -146,6 +152,8 @@ pub use infrastructure::*;
 pub use mock_effects::MockEffects;
 pub use mock_runtime_bridge::MockRuntimeBridge;
 pub use mocks::*;
+#[cfg(not(target_arch = "wasm32"))]
+pub use replay::*;
 // Re-export simulation components (excluding ambiguous transport)
 pub use simulation::transport as simulation_transport;
 pub use simulation::{choreography::*, network::*};

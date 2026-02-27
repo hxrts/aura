@@ -254,7 +254,9 @@ where
     F: Future<Output = AuraResult<T>>,
 {
     let timeout_ms = duration.as_millis() as u64;
-    let sleep_fut = async { let _ = time.sleep_ms(timeout_ms).await; };
+    let sleep_fut = async {
+        let _ = time.sleep_ms(timeout_ms).await;
+    };
     pin_mut!(sleep_fut);
     pin_mut!(fut);
 
@@ -698,9 +700,7 @@ impl QuintRunner {
             stats: VerificationStatistics::default(),
             counterexample_generator,
             trace_analyzer,
-            storage: Arc::new(
-                aura_effects::storage::FilesystemStorageHandler::with_default_path(),
-            ),
+            storage: Arc::new(aura_effects::storage::FilesystemStorageHandler::with_default_path()),
             time: Arc::new(aura_effects::time::PhysicalTimeHandler::new()),
         })
     }

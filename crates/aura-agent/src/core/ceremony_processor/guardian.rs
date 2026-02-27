@@ -7,7 +7,7 @@
 use super::ProcessResult;
 use crate::runtime::effects::AuraEffectSystem;
 use crate::runtime::services::ceremony_runner::{CeremonyCommitMetadata, CeremonyRunner};
-use crate::runtime::services::CeremonyTracker;
+use crate::runtime::services::{CeremonyTracker, ReconfigurationManager};
 use crate::ThresholdSigningService;
 use aura_core::effects::transport::TransportEnvelope;
 use aura_core::identifiers::CeremonyId;
@@ -23,6 +23,8 @@ pub struct GuardianHandler<'a> {
     ceremony_tracker: &'a CeremonyTracker,
     ceremony_runner: &'a CeremonyRunner,
     signing_service: &'a ThresholdSigningService,
+    #[allow(dead_code)]
+    reconfiguration: &'a ReconfigurationManager,
 }
 
 impl<'a> GuardianHandler<'a> {
@@ -33,6 +35,7 @@ impl<'a> GuardianHandler<'a> {
         ceremony_tracker: &'a CeremonyTracker,
         ceremony_runner: &'a CeremonyRunner,
         signing_service: &'a ThresholdSigningService,
+        reconfiguration: &'a ReconfigurationManager,
     ) -> Self {
         Self {
             authority_id,
@@ -40,6 +43,7 @@ impl<'a> GuardianHandler<'a> {
             ceremony_tracker,
             ceremony_runner,
             signing_service,
+            reconfiguration,
         }
     }
 
