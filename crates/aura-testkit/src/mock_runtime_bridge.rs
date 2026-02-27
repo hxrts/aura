@@ -297,6 +297,15 @@ impl RuntimeBridge for MockRuntimeBridge {
         Ok(())
     }
 
+    async fn send_chat_fact(
+        &self,
+        _peer: AuthorityId,
+        _context: ContextId,
+        _fact: &RelationalFact,
+    ) -> Result<(), IntentError> {
+        Ok(())
+    }
+
     // =========================================================================
     // AMP Channel Operations (Override defaults to return success)
     // =========================================================================

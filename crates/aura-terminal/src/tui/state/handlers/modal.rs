@@ -79,9 +79,9 @@ pub fn handle_queued_modal_key(
             handle_create_invitation_key_queue(state, commands, key, modal_state, Screen::Contacts);
         }
         QueuedModal::ContactsCode(modal_state) => {
-            // Code display modal: Esc to dismiss, c to copy
+            // Code display modal: Esc/Enter to dismiss, c to copy
             match key.code {
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::Enter => {
                     state.modal_queue.dismiss();
                 }
                 KeyCode::Char('c') => {

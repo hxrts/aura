@@ -14,6 +14,7 @@ use std::env;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 // Import app types from aura-app (pure layer)
 use aura_app::ui::prelude::*;
@@ -25,7 +26,7 @@ use aura_app::ui::workflows::account::{
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
 use aura_agent::core::config::{NetworkConfig, StorageConfig};
-use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
+use aura_agent::{AgentBuilder, AgentConfig, EffectContext, SyncManagerConfig};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
@@ -562,10 +563,15 @@ async fn handle_tui_launch(
     let _demo_simulator_for_bob: Option<()> = None;
 
     // Build agent using appropriate builder method based on mode
+    let sync_config = SyncManagerConfig {
+        auto_sync_interval: Duration::from_secs(2),
+        ..SyncManagerConfig::default()
+    };
     let agent = match mode {
         TuiMode::Production => AgentBuilder::new()
             .with_config(agent_config)
             .with_authority(authority_id)
+            .with_sync_config(sync_config.clone())
             .build_production(&effect_ctx)
             .await
             .map_err(|e| AuraError::internal(format!("Failed to create agent: {e}")))?,
@@ -586,6 +592,7 @@ async fn handle_tui_launch(
                 AgentBuilder::new()
                     .with_config(agent_config)
                     .with_authority(authority_id)
+                    .with_sync_config(sync_config.clone())
                     .build_simulation_async_with_shared_transport(
                         seed,
                         &effect_ctx,
@@ -606,6 +613,7 @@ async fn handle_tui_launch(
                 AgentBuilder::new()
                     .with_config(agent_config)
                     .with_authority(authority_id)
+                    .with_sync_config(sync_config.clone())
                     .build_simulation_async(seed, &effect_ctx)
                     .await
                     .map_err(|e| {

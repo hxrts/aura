@@ -164,15 +164,26 @@ async fn resolve_peer_addr(
     peer: AuthorityId,
 ) -> Option<String> {
     let manager = effects.rendezvous_manager()?;
-    let descriptor = if let Some(descriptor) = manager.get_descriptor(context, peer).await {
-        descriptor
-    } else {
-        let fallback_context = default_context_id_for_authority(peer);
-        if fallback_context == context {
-            return None;
-        }
-        manager.get_descriptor(fallback_context, peer).await?
-    };
+    if let Some(addr) = manager
+        .get_descriptor(context, peer)
+        .await
+        .and_then(descriptor_tcp_addr)
+    {
+        return Some(addr);
+    }
+
+    let fallback_context = default_context_id_for_authority(peer);
+    if fallback_context == context {
+        return None;
+    }
+
+    manager
+        .get_descriptor(fallback_context, peer)
+        .await
+        .and_then(descriptor_tcp_addr)
+}
+
+fn descriptor_tcp_addr(descriptor: aura_rendezvous::RendezvousDescriptor) -> Option<String> {
     for hint in descriptor.transport_hints {
         if let TransportHint::TcpDirect { addr } = hint {
             return Some(addr.to_string());
@@ -251,5 +262,70 @@ async fn send_envelope_tcp(addr: &str, envelope: &TransportEnvelope) -> Result<(
 
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::AgentConfig;
+    use crate::runtime::services::{RendezvousManager, RendezvousManagerConfig};
+    use aura_rendezvous::RendezvousDescriptor;
+    use std::sync::Arc;
+
+    fn descriptor(
+        authority_id: AuthorityId,
+        context_id: ContextId,
+        transport_hints: Vec<TransportHint>,
+    ) -> RendezvousDescriptor {
+        RendezvousDescriptor {
+            authority_id,
+            context_id,
+            transport_hints,
+            handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
+            valid_from: 1,
+            valid_until: u64::MAX,
+            nonce: [0u8; 32],
+            nickname_suggestion: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_peer_addr_falls_back_when_primary_descriptor_has_no_tcp_hint() {
+        let authority = AuthorityId::new_from_entropy([210u8; 32]);
+        let peer = AuthorityId::new_from_entropy([211u8; 32]);
+        let primary_context = ContextId::new_from_entropy([212u8; 32]);
+        let fallback_context = default_context_id_for_authority(peer);
+
+        let config = AgentConfig::default();
+        let effects = AuraEffectSystem::testing_for_authority(&config, authority).unwrap();
+        let manager = RendezvousManager::new_with_default_udp(
+            authority,
+            RendezvousManagerConfig::default(),
+            Arc::new(effects.time_effects().clone()),
+        );
+        effects.attach_rendezvous_manager(manager.clone());
+
+        manager
+            .cache_descriptor(descriptor(
+                peer,
+                primary_context,
+                vec![TransportHint::quic_direct("127.0.0.1:55001").unwrap()],
+            ))
+            .await
+            .unwrap();
+
+        manager
+            .cache_descriptor(descriptor(
+                peer,
+                fallback_context,
+                vec![TransportHint::tcp_direct("127.0.0.1:55002").unwrap()],
+            ))
+            .await
+            .unwrap();
+
+        let resolved = resolve_peer_addr(&effects, primary_context, peer).await;
+        assert_eq!(resolved.as_deref(), Some("127.0.0.1:55002"));
     }
 }

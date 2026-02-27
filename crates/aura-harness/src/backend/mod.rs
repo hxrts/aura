@@ -29,9 +29,15 @@ pub enum BackendHandle {
 }
 
 impl BackendHandle {
-    pub fn from_config(config: InstanceConfig) -> Result<Self> {
+    pub fn from_config(
+        config: InstanceConfig,
+        pty_rows: Option<u16>,
+        pty_cols: Option<u16>,
+    ) -> Result<Self> {
         match config.mode {
-            InstanceMode::Local => Ok(Self::Local(local_pty::LocalPtyBackend::new(config))),
+            InstanceMode::Local => Ok(Self::Local(local_pty::LocalPtyBackend::new(
+                config, pty_rows, pty_cols,
+            ))),
             InstanceMode::Ssh => Ok(Self::Ssh(ssh_tunnel::SshTunnelBackend::new(config))),
         }
     }

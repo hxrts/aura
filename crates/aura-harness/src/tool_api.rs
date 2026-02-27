@@ -59,6 +59,12 @@ pub enum ToolRequest {
         instance_id: String,
         keys: String,
     },
+    SendKey {
+        instance_id: String,
+        key: ToolKey,
+        #[serde(default)]
+        repeat: u16,
+    },
     WaitFor {
         instance_id: String,
         pattern: String,
@@ -74,6 +80,25 @@ pub enum ToolRequest {
     Kill {
         instance_id: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKey {
+    Enter,
+    Esc,
+    Tab,
+    BackTab,
+    Up,
+    Down,
+    Left,
+    Right,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Backspace,
+    Delete,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +157,14 @@ impl ToolApi {
             ToolRequest::SendKeys { instance_id, keys } => self
                 .coordinator
                 .send_keys(&instance_id, &keys)
+                .map(|_| serde_json::json!({ "status": "sent" })),
+            ToolRequest::SendKey {
+                instance_id,
+                key,
+                repeat,
+            } => self
+                .coordinator
+                .send_key(&instance_id, key, repeat)
                 .map(|_| serde_json::json!({ "status": "sent" })),
             ToolRequest::WaitFor {
                 instance_id,

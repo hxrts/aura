@@ -30,6 +30,7 @@ use aura_core::{
 use aura_journal::fact::FactOptions;
 use aura_journal::DomainFact;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 /// Messaging backend policy (runtime-backed vs UI-local).
@@ -154,6 +155,37 @@ async fn context_id_for_channel(
     // (e.g. AMP-created channels in demos/tests). Fall back to the currently
     // selected home context (or per-authority demo context).
     current_home_context_or_fallback(app_core).await
+}
+
+async fn recipient_peers_for_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    self_authority: AuthorityId,
+) -> Vec<AuthorityId> {
+    let chat = chat_snapshot(app_core).await;
+    let Some(channel) = chat.channel(&channel_id) else {
+        return Vec::new();
+    };
+
+    let mut recipients = BTreeSet::new();
+    for member in &channel.member_ids {
+        if *member != self_authority {
+            recipients.insert(*member);
+        }
+    }
+
+    // Reactive channel reductions currently do not carry explicit members for DM channels.
+    // Fall back to known contacts so reply traffic can route in two-party chats.
+    if recipients.is_empty() && channel.is_dm {
+        let contacts = contacts_snapshot(app_core).await;
+        for contact_id in contacts.contact_ids() {
+            if *contact_id != self_authority {
+                recipients.insert(*contact_id);
+            }
+        }
+    }
+
+    recipients.into_iter().collect()
 }
 
 /// Send a direct message to a contact
@@ -298,9 +330,16 @@ pub async fn create_channel(
         .to_generic();
 
         runtime
-            .commit_relational_facts(&[fact])
+            .commit_relational_facts(&[fact.clone()])
             .await
             .map_err(|e| AuraError::agent(format!("Failed to persist channel: {e}")))?;
+
+        for peer in member_ids.iter().copied() {
+            if peer == runtime.authority_id() {
+                continue;
+            }
+            let _ = runtime.send_chat_fact(peer, context_id, &fact).await;
+        }
     } else if !name.trim().is_empty() {
         channel_id = channel_id_from_input(name);
     }
@@ -624,11 +663,17 @@ pub async fn send_message_ref(
         // Enable ack tracking for message facts to support delivery confirmation
         runtime
             .commit_relational_facts_with_options(
-                &[fact],
+                &[fact.clone()],
                 FactOptions::default().with_ack_tracking(),
             )
             .await
             .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
+
+        let recipients =
+            recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
+        for peer in recipients {
+            let _ = runtime.send_chat_fact(peer, context_id, &fact).await;
+        }
 
         runtime.authority_id()
     } else {
@@ -775,11 +820,15 @@ pub async fn start_direct_chat(
         .to_generic();
 
         runtime
-            .commit_relational_facts(&[fact])
+            .commit_relational_facts(&[fact.clone()])
             .await
             .map_err(|error| {
                 AuraError::agent(format!("Failed to persist direct channel: {error}"))
             })?;
+
+        let _ = runtime
+            .send_chat_fact(contact_authority, context_id, &fact)
+            .await;
 
         with_chat_state(app_core, |chat_state| {
             chat_state.upsert_channel(Channel {

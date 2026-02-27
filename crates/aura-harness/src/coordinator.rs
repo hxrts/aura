@@ -6,6 +6,7 @@ use crate::backend::BackendHandle;
 use crate::config::RunConfig;
 use crate::events::EventStream;
 use crate::screen_normalization::normalize_screen;
+use crate::tool_api::ToolKey;
 
 pub struct HarnessCoordinator {
     backends: HashMap<String, BackendHandle>,
@@ -15,9 +16,11 @@ pub struct HarnessCoordinator {
 impl HarnessCoordinator {
     pub fn from_run_config(config: &RunConfig) -> Result<Self> {
         let mut backends = HashMap::new();
+        let pty_rows = config.run.pty_rows;
+        let pty_cols = config.run.pty_cols;
         for instance in &config.instances {
             let id = instance.id.clone();
-            let backend = BackendHandle::from_config(instance.clone())?;
+            let backend = BackendHandle::from_config(instance.clone(), pty_rows, pty_cols)?;
             backends.insert(id, backend);
         }
 
@@ -73,6 +76,15 @@ impl HarnessCoordinator {
             serde_json::json!({ "bytes": keys.len() }),
         );
         backend.as_trait_mut().send_keys(keys)
+    }
+
+    pub fn send_key(&mut self, instance_id: &str, key: ToolKey, repeat: u16) -> Result<()> {
+        let sequence = key_sequence(key);
+        let repeat = repeat.max(1);
+        for _ in 0..repeat {
+            self.send_keys(instance_id, sequence)?;
+        }
+        Ok(())
     }
 
     pub fn wait_for(
@@ -161,6 +173,25 @@ impl HarnessCoordinator {
 
     pub fn event_snapshot(&self) -> Vec<crate::events::HarnessEvent> {
         self.events.snapshot()
+    }
+}
+
+fn key_sequence(key: ToolKey) -> &'static str {
+    match key {
+        ToolKey::Enter => "\r",
+        ToolKey::Esc => "\x1b",
+        ToolKey::Tab => "\t",
+        ToolKey::BackTab => "\x1b[Z",
+        ToolKey::Up => "\x1b[A",
+        ToolKey::Down => "\x1b[B",
+        ToolKey::Right => "\x1b[C",
+        ToolKey::Left => "\x1b[D",
+        ToolKey::Home => "\x1b[H",
+        ToolKey::End => "\x1b[F",
+        ToolKey::PageUp => "\x1b[5~",
+        ToolKey::PageDown => "\x1b[6~",
+        ToolKey::Backspace => "\x7f",
+        ToolKey::Delete => "\x1b[3~",
     }
 }
 

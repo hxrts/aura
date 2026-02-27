@@ -25,6 +25,16 @@ use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use tokio::io::AsyncReadExt;
 
+const MIN_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
+const MAX_SYNC_PEER_RECONCILE_INTERVAL: Duration = Duration::from_secs(30);
+
+fn sync_peer_reconcile_interval(sync_manager: &SyncServiceManager) -> Duration {
+    sync_manager.config().auto_sync_interval.clamp(
+        MIN_SYNC_PEER_RECONCILE_INTERVAL,
+        MAX_SYNC_PEER_RECONCILE_INTERVAL,
+    )
+}
+
 /// Main runtime system for the agent
 pub struct RuntimeSystem {
     /// Effect executor
@@ -373,7 +383,7 @@ impl RuntimeSystem {
         if let (Some(sync_manager), Some(rendezvous_manager)) =
             (sync_manager.clone(), rendezvous_manager.clone())
         {
-            let interval = Duration::from_secs(30);
+            let interval = sync_peer_reconcile_interval(&sync_manager);
             tasks.spawn_interval_until(time_effects.clone(), interval, move || {
                 let sync_manager = sync_manager.clone();
                 let rendezvous_manager = rendezvous_manager.clone();
@@ -896,4 +906,49 @@ async fn publish_lan_descriptor_with(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::services::SyncManagerConfig;
+
+    #[test]
+    fn sync_peer_reconcile_interval_follows_fast_sync_config() {
+        let manager = SyncServiceManager::new(SyncManagerConfig {
+            auto_sync_interval: Duration::from_secs(2),
+            ..SyncManagerConfig::default()
+        });
+
+        assert_eq!(
+            sync_peer_reconcile_interval(&manager),
+            Duration::from_secs(2)
+        );
+    }
+
+    #[test]
+    fn sync_peer_reconcile_interval_clamps_large_values() {
+        let manager = SyncServiceManager::new(SyncManagerConfig {
+            auto_sync_interval: Duration::from_secs(120),
+            ..SyncManagerConfig::default()
+        });
+
+        assert_eq!(
+            sync_peer_reconcile_interval(&manager),
+            Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn sync_peer_reconcile_interval_clamps_small_values() {
+        let manager = SyncServiceManager::new(SyncManagerConfig {
+            auto_sync_interval: Duration::from_millis(100),
+            ..SyncManagerConfig::default()
+        });
+
+        assert_eq!(
+            sync_peer_reconcile_interval(&manager),
+            Duration::from_secs(1)
+        );
+    }
 }

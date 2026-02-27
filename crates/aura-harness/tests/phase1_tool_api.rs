@@ -2,7 +2,7 @@
 
 use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
 use aura_harness::coordinator::HarnessCoordinator;
-use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
+use aura_harness::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
 #[test]
 fn tool_api_primitives_control_local_pty_instance() {
@@ -75,6 +75,30 @@ fn tool_api_primitives_control_local_pty_instance() {
     }) {
         ToolResponse::Ok { .. } => {}
         ToolResponse::Error { message } => panic!("wait_for failed: {message}"),
+    }
+
+    match tool_api.handle_request(ToolRequest::SendKeys {
+        instance_id: "alice".to_string(),
+        keys: "hello-key".to_string(),
+    }) {
+        ToolResponse::Ok { .. } => {}
+        ToolResponse::Error { message } => panic!("send_keys hello-key failed: {message}"),
+    }
+    match tool_api.handle_request(ToolRequest::SendKey {
+        instance_id: "alice".to_string(),
+        key: ToolKey::Enter,
+        repeat: 1,
+    }) {
+        ToolResponse::Ok { .. } => {}
+        ToolResponse::Error { message } => panic!("send_key enter failed: {message}"),
+    }
+    match tool_api.handle_request(ToolRequest::WaitFor {
+        instance_id: "alice".to_string(),
+        pattern: "hello-key".to_string(),
+        timeout_ms: 2000,
+    }) {
+        ToolResponse::Ok { .. } => {}
+        ToolResponse::Error { message } => panic!("wait_for hello-key failed: {message}"),
     }
 
     let screen_payload = match tool_api.handle_request(ToolRequest::Screen {
@@ -174,6 +198,36 @@ fn tool_request_json_round_trip() {
         ToolRequest::SendKeys { instance_id, keys } => {
             assert_eq!(instance_id, "alice");
             assert_eq!(keys, "abc");
+        }
+        _ => panic!("decoded request variant mismatch"),
+    }
+}
+
+#[test]
+fn tool_request_send_key_round_trip() {
+    let request = ToolRequest::SendKey {
+        instance_id: "alice".to_string(),
+        key: ToolKey::Esc,
+        repeat: 2,
+    };
+    let encoded = match serde_json::to_string(&request) {
+        Ok(encoded) => encoded,
+        Err(error) => panic!("encode failed: {error}"),
+    };
+    let decoded: ToolRequest = match serde_json::from_str(&encoded) {
+        Ok(decoded) => decoded,
+        Err(error) => panic!("decode failed: {error}"),
+    };
+
+    match decoded {
+        ToolRequest::SendKey {
+            instance_id,
+            key,
+            repeat,
+        } => {
+            assert_eq!(instance_id, "alice");
+            assert!(matches!(key, ToolKey::Esc));
+            assert_eq!(repeat, 2);
         }
         _ => panic!("decoded request variant mismatch"),
     }

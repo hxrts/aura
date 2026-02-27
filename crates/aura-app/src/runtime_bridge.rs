@@ -401,6 +401,21 @@ pub trait RuntimeBridge: Send + Sync {
         self.commit_relational_facts(facts).await
     }
 
+    /// Send a chat relational fact to a peer over transport.
+    ///
+    /// Runtime implementations should forward this fact out-of-band so remote
+    /// peers can ingest it without relying on anti-entropy sync.
+    async fn send_chat_fact(
+        &self,
+        _peer: AuthorityId,
+        _context: ContextId,
+        _fact: &RelationalFact,
+    ) -> Result<(), IntentError> {
+        Err(IntentError::no_agent(
+            "Chat fact transport not available in offline mode",
+        ))
+    }
+
     // =========================================================================
     // AMP Channel Operations
     // =========================================================================

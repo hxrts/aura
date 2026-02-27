@@ -11,6 +11,7 @@ use crate::core::{default_context_id_for_authority, AgentError, AgentResult, Aut
 use crate::runtime::services::InvitationManager;
 use crate::runtime::AuraEffectSystem;
 use crate::InvitationServiceApi;
+use aura_chat::CHAT_FACT_TYPE_ID;
 use aura_core::effects::amp::ChannelBootstrapPackage;
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::RandomExtendedEffects;
@@ -75,6 +76,7 @@ pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
 
 const CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE: &str =
     "application/aura-contact-invitation-acceptance";
+const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct ContactInvitationAcceptance {
@@ -881,109 +883,142 @@ impl InvitationHandler {
                 continue;
             };
 
-            if content_type != CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE {
-                effects.requeue_envelope(envelope);
-                deferred = deferred.saturating_add(1);
-                if deferred >= MAX_DEFERRED_SCANS {
-                    break;
+            if content_type == CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE {
+                let acceptance: ContactInvitationAcceptance =
+                    match serde_json::from_slice(&envelope.payload) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Invalid contact invitation acceptance payload"
+                            );
+                            continue;
+                        }
+                    };
+
+                if acceptance.acceptor_id == self.context.authority.authority_id() {
+                    continue;
                 }
+
+                if let Some(addr) = envelope.metadata.get("acceptor-addr") {
+                    let now_ms = effects.current_timestamp().await.unwrap_or(0);
+                    self.cache_tcp_descriptor_for_peer(
+                        effects.as_ref(),
+                        acceptance.acceptor_id,
+                        addr,
+                        now_ms,
+                    )
+                    .await;
+                }
+
+                let Some(invitation) = Self::load_created_invitation(
+                    effects.as_ref(),
+                    self.context.authority.authority_id(),
+                    &acceptance.invitation_id,
+                )
+                .await
+                else {
+                    tracing::debug!(
+                        invitation_id = %acceptance.invitation_id,
+                        "Ignoring acceptance for unknown invitation"
+                    );
+                    continue;
+                };
+
+                if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
+                    continue;
+                }
+
+                if invitation.status == InvitationStatus::Accepted {
+                    continue;
+                }
+
+                let now_ms = effects.current_timestamp().await.unwrap_or(0);
+                let context_id = self.context.authority.default_context_id();
+
+                let fact = InvitationFact::accepted_ms(
+                    acceptance.invitation_id.clone(),
+                    acceptance.acceptor_id,
+                    now_ms,
+                );
+                execute_journal_append(fact, &self.context.authority, context_id, effects.as_ref())
+                    .await?;
+
+                let contact_fact = ContactFact::Added {
+                    context_id,
+                    owner_id: self.context.authority.authority_id(),
+                    contact_id: acceptance.acceptor_id,
+                    nickname: acceptance.acceptor_id.to_string(),
+                    added_at: PhysicalTime {
+                        ts_ms: now_ms,
+                        uncertainty: None,
+                    },
+                };
+
+                effects
+                    .commit_generic_fact_bytes(
+                        context_id,
+                        CONTACT_FACT_TYPE_ID,
+                        contact_fact.to_bytes(),
+                    )
+                    .await
+                    .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
+
+                effects.await_next_view_update().await;
+
+                let mut updated = invitation.clone();
+                updated.status = InvitationStatus::Accepted;
+                Self::persist_created_invitation(
+                    effects.as_ref(),
+                    self.context.authority.authority_id(),
+                    &updated,
+                )
+                .await?;
+                self.invitation_cache.cache_invitation(updated).await;
+
+                processed = processed.saturating_add(1);
+                deferred = 0;
                 continue;
             }
 
-            let acceptance: ContactInvitationAcceptance =
-                match serde_json::from_slice(&envelope.payload) {
-                    Ok(data) => data,
-                    Err(e) => {
+            if content_type == CHAT_FACT_CONTENT_TYPE {
+                let fact: RelationalFact = match from_slice(&envelope.payload) {
+                    Ok(fact) => fact,
+                    Err(error) => {
                         tracing::warn!(
-                            error = %e,
-                            "Invalid contact invitation acceptance payload"
+                            error = %error,
+                            "Invalid chat fact payload envelope"
                         );
                         continue;
                     }
                 };
 
-            if acceptance.acceptor_id == self.context.authority.authority_id() {
+                match &fact {
+                    RelationalFact::Generic { envelope, .. }
+                        if envelope.type_id.as_str() == CHAT_FACT_TYPE_ID => {}
+                    _ => {
+                        tracing::warn!("Received non-chat fact in chat fact envelope");
+                        continue;
+                    }
+                }
+
+                effects
+                    .commit_relational_facts(vec![fact])
+                    .await
+                    .map_err(|e| AgentError::effects(format!("commit chat fact: {e}")))?;
+                effects.await_next_view_update().await;
+
+                processed = processed.saturating_add(1);
+                deferred = 0;
                 continue;
             }
 
-            if let Some(addr) = envelope.metadata.get("acceptor-addr") {
-                let now_ms = effects.current_timestamp().await.unwrap_or(0);
-                self.cache_tcp_descriptor_for_peer(
-                    effects.as_ref(),
-                    acceptance.acceptor_id,
-                    addr,
-                    now_ms,
-                )
-                .await;
+            effects.requeue_envelope(envelope);
+            deferred = deferred.saturating_add(1);
+            if deferred >= MAX_DEFERRED_SCANS {
+                break;
             }
-
-            let Some(invitation) = Self::load_created_invitation(
-                effects.as_ref(),
-                self.context.authority.authority_id(),
-                &acceptance.invitation_id,
-            )
-            .await
-            else {
-                tracing::debug!(
-                    invitation_id = %acceptance.invitation_id,
-                    "Ignoring acceptance for unknown invitation"
-                );
-                continue;
-            };
-
-            if !matches!(invitation.invitation_type, InvitationType::Contact { .. }) {
-                continue;
-            }
-
-            if invitation.status == InvitationStatus::Accepted {
-                continue;
-            }
-
-            let now_ms = effects.current_timestamp().await.unwrap_or(0);
-            let context_id = self.context.authority.default_context_id();
-
-            let fact = InvitationFact::accepted_ms(
-                acceptance.invitation_id.clone(),
-                acceptance.acceptor_id,
-                now_ms,
-            );
-            execute_journal_append(fact, &self.context.authority, context_id, effects.as_ref())
-                .await?;
-
-            let contact_fact = ContactFact::Added {
-                context_id,
-                owner_id: self.context.authority.authority_id(),
-                contact_id: acceptance.acceptor_id,
-                nickname: acceptance.acceptor_id.to_string(),
-                added_at: PhysicalTime {
-                    ts_ms: now_ms,
-                    uncertainty: None,
-                },
-            };
-
-            effects
-                .commit_generic_fact_bytes(
-                    context_id,
-                    CONTACT_FACT_TYPE_ID,
-                    contact_fact.to_bytes(),
-                )
-                .await
-                .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
-
-            effects.await_next_view_update().await;
-
-            let mut updated = invitation.clone();
-            updated.status = InvitationStatus::Accepted;
-            Self::persist_created_invitation(
-                effects.as_ref(),
-                self.context.authority.authority_id(),
-                &updated,
-            )
-            .await?;
-            self.invitation_cache.cache_invitation(updated).await;
-
-            processed = processed.saturating_add(1);
-            deferred = 0;
+            continue;
         }
 
         Ok(processed)
@@ -2459,9 +2494,11 @@ mod tests {
     use super::*;
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
-    use aura_core::identifiers::{AuthorityId, ContextId, InvitationId};
+    use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
+    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
     use aura_invitation::guards::{EffectCommand, GuardOutcome};
     use aura_journal::fact::{FactContent, RelationalFact};
+    use aura_journal::DomainFact;
     use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -2848,9 +2885,8 @@ mod tests {
         let sender_id = AuthorityId::new_from_entropy([128u8; 32]);
         let receiver_id = AuthorityId::new_from_entropy([129u8; 32]);
         let config = AgentConfig::default();
-        let effects = Arc::new(
-            AuraEffectSystem::testing_for_authority(&config, sender_id).unwrap(),
-        );
+        let effects =
+            Arc::new(AuraEffectSystem::testing_for_authority(&config, sender_id).unwrap());
         let handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
 
         handler
@@ -2968,6 +3004,78 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(processed, 1);
+    }
+
+    #[tokio::test]
+    async fn contact_acceptance_processing_commits_chat_fact_envelopes() {
+        let authority = AuthorityId::new_from_entropy([201u8; 32]);
+        let peer = AuthorityId::new_from_entropy([202u8; 32]);
+        let config = AgentConfig::default();
+        let effects =
+            Arc::new(AuraEffectSystem::testing_for_authority(&config, authority).unwrap());
+        let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+
+        let context_id = ContextId::new_from_entropy([203u8; 32]);
+        let channel_id = ChannelId::from_bytes([204u8; 32]);
+        let chat_fact = ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "dm".to_string(),
+            Some("Direct messages".to_string()),
+            true,
+            1_700_000_000_000,
+            peer,
+        )
+        .to_generic();
+
+        let payload = aura_core::util::serialization::to_vec(&chat_fact).unwrap();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CHAT_FACT_CONTENT_TYPE.to_string(),
+        );
+
+        effects
+            .send_envelope(TransportEnvelope {
+                destination: authority,
+                source: peer,
+                context: context_id,
+                payload,
+                metadata,
+                receipt: None,
+            })
+            .await
+            .unwrap();
+
+        let processed = handler
+            .process_contact_invitation_acceptances(effects.clone())
+            .await
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        let committed = effects.load_committed_facts(authority).await.unwrap();
+        let mut found = false;
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+            if envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+                continue;
+            }
+            let Some(ChatFact::ChannelCreated {
+                channel_id: seen, ..
+            }) = ChatFact::from_envelope(&envelope)
+            else {
+                continue;
+            };
+            if seen == channel_id {
+                found = true;
+                break;
+            }
+        }
+
+        assert!(found, "expected committed chat fact from inbound envelope");
     }
 
     #[tokio::test]

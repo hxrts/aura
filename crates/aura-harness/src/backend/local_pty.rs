@@ -2,6 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
@@ -27,14 +28,18 @@ pub struct LocalPtyBackend {
     config: InstanceConfig,
     state: BackendState,
     session: Option<RunningSession>,
+    pty_rows: u16,
+    pty_cols: u16,
 }
 
 impl LocalPtyBackend {
-    pub fn new(config: InstanceConfig) -> Self {
+    pub fn new(config: InstanceConfig, pty_rows: Option<u16>, pty_cols: Option<u16>) -> Self {
         Self {
             config,
             state: BackendState::Stopped,
             session: None,
+            pty_rows: pty_rows.unwrap_or(40),
+            pty_cols: pty_cols.unwrap_or(120),
         }
     }
 
@@ -53,7 +58,7 @@ impl LocalPtyBackend {
     }
 
     fn parser_size(&self) -> (u16, u16) {
-        (40, 120)
+        (self.pty_rows, self.pty_cols)
     }
 }
 
@@ -164,7 +169,11 @@ impl InstanceBackend for LocalPtyBackend {
             .session
             .as_ref()
             .with_context(|| format!("instance {} is not running", self.config.id))?;
-        Ok(session.parser.blocking_lock().screen().contents())
+        let parser = session.parser.blocking_lock();
+        let screen = parser.screen();
+        let (_, cols) = screen.size();
+        let rows: Vec<String> = screen.rows(0, cols).collect();
+        Ok(rows.join("\n"))
     }
 
     fn send_keys(&mut self, keys: &str) -> Result<()> {
@@ -172,11 +181,38 @@ impl InstanceBackend for LocalPtyBackend {
             .session
             .as_ref()
             .with_context(|| format!("instance {} is not running", self.config.id))?;
-        let mut writer = session.writer.blocking_lock();
-        writer
-            .write_all(keys.as_bytes())
-            .with_context(|| format!("failed writing keys for instance {}", self.config.id))?;
-        writer.flush().context("failed flushing PTY writer")?;
+        if !keys.as_bytes().contains(&0x1b) {
+            let mut writer = session.writer.blocking_lock();
+            writer
+                .write_all(keys.as_bytes())
+                .with_context(|| format!("failed writing keys for instance {}", self.config.id))?;
+            writer.flush().context("failed flushing PTY writer")?;
+            return Ok(());
+        }
+
+        let bytes = keys.as_bytes();
+        let mut index = 0usize;
+        while index < bytes.len() {
+            {
+                let mut writer = session.writer.blocking_lock();
+                writer
+                    .write_all(&bytes[index..index + 1])
+                    .with_context(|| {
+                        format!("failed writing keys for instance {}", self.config.id)
+                    })?;
+                writer.flush().context("failed flushing PTY writer")?;
+            }
+
+            if bytes[index] == 0x1b
+                && bytes
+                    .get(index + 1)
+                    .is_some_and(|next| *next != b'[' && *next != b'O')
+            {
+                // Prevent accidental Alt-key combos when callers intend standalone Esc.
+                thread::sleep(Duration::from_millis(40));
+            }
+            index += 1;
+        }
         Ok(())
     }
 
@@ -248,7 +284,7 @@ mod tests {
 
     #[test]
     fn local_backend_start_send_snapshot_stop() {
-        let mut backend = LocalPtyBackend::new(test_config());
+        let mut backend = LocalPtyBackend::new(test_config(), Some(40), Some(120));
         if let Err(error) = backend.start() {
             panic!("backend must start: {error}");
         }

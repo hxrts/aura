@@ -180,8 +180,11 @@ impl ChatCallbacks {
                             content: content_clone,
                         });
                     }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    Err(e) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                            "send",
+                            e.to_string(),
+                        )));
                     }
                 }
             });

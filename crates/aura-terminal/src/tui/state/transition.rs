@@ -138,11 +138,9 @@ mod tests {
         use crate::tui::state::views::InvitationCodeModalState;
 
         let mut state = TuiState::new();
-        state
-            .modal_queue
-            .enqueue(QueuedModal::ContactsCode(InvitationCodeModalState::for_code(
-                "aura:v1:test".to_string(),
-            )));
+        state.modal_queue.enqueue(QueuedModal::ContactsCode(
+            InvitationCodeModalState::for_code("aura:v1:test".to_string()),
+        ));
         state.toast_success("welcome");
         assert!(state.has_queued_modal());
         assert!(state.toast_queue.is_active());

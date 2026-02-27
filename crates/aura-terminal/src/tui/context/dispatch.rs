@@ -214,7 +214,10 @@ impl DispatchHelper {
             // Operational path.
             match result {
                 Ok(response) => self.handle_op_response(response).await,
-                Err(e) => Err(e.to_string()),
+                Err(e) => {
+                    eprintln!("dispatch operation error: {e}");
+                    Err(e.to_string())
+                }
             }
         } else {
             // Unknown command.

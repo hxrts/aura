@@ -6,7 +6,7 @@ use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ScenarioConfig, ScenarioStep};
-use crate::tool_api::{ToolApi, ToolRequest, ToolResponse};
+use crate::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -212,6 +212,26 @@ fn execute_step(
             )?;
             Ok(())
         }
+        "send_key" => {
+            let instance_id = step
+                .instance
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
+            let key_name = step
+                .expect
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing expect key", step.id))?;
+            let key = parse_tool_key(key_name)?;
+            dispatch(
+                tool_api,
+                ToolRequest::SendKey {
+                    instance_id: instance_id.to_string(),
+                    key,
+                    repeat: 1,
+                },
+            )?;
+            Ok(())
+        }
         "wait_for" => {
             let instance_id = step
                 .instance
@@ -270,6 +290,26 @@ fn execute_step(
             Ok(())
         }
         action => bail!("unsupported scenario action: {action}"),
+    }
+}
+
+fn parse_tool_key(name: &str) -> Result<ToolKey> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "enter" => Ok(ToolKey::Enter),
+        "esc" | "escape" => Ok(ToolKey::Esc),
+        "tab" => Ok(ToolKey::Tab),
+        "backtab" | "shift_tab" | "shift-tab" => Ok(ToolKey::BackTab),
+        "up" => Ok(ToolKey::Up),
+        "down" => Ok(ToolKey::Down),
+        "left" => Ok(ToolKey::Left),
+        "right" => Ok(ToolKey::Right),
+        "home" => Ok(ToolKey::Home),
+        "end" => Ok(ToolKey::End),
+        "pageup" | "page_up" | "page-up" => Ok(ToolKey::PageUp),
+        "pagedown" | "page_down" | "page-down" => Ok(ToolKey::PageDown),
+        "backspace" => Ok(ToolKey::Backspace),
+        "delete" | "del" => Ok(ToolKey::Delete),
+        other => bail!("unsupported send_key value: {other}"),
     }
 }
 

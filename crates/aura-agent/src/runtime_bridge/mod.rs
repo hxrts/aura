@@ -27,7 +27,7 @@ use aura_core::effects::{
     task::TaskSpawner,
     time::PhysicalTimeEffects,
     SecureStorageCapability, SecureStorageEffects, SecureStorageLocation, ThresholdSigningEffects,
-    TransportEffects,
+    TransportEffects, TransportEnvelope,
 };
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -67,6 +67,8 @@ mod settings;
 use amp::map_amp_error;
 use consensus::{map_consensus_error, persist_consensus_dkg_transcript};
 use invitation::convert_invitation_to_bridge_info;
+
+const CHAT_FACT_CONTENT_TYPE: &str = "application/aura-chat-fact";
 
 fn service_error_to_intent(err: ServiceError) -> IntentError {
     IntentError::service_error(err.to_string())
@@ -151,6 +153,39 @@ impl RuntimeBridge for AgentRuntimeBridge {
             .map_err(|e| IntentError::internal_error(format!("Failed to commit facts: {e}")))?;
 
         Ok(())
+    }
+
+    async fn send_chat_fact(
+        &self,
+        peer: AuthorityId,
+        context: ContextId,
+        fact: &RelationalFact,
+    ) -> Result<(), IntentError> {
+        let payload = aura_core::util::serialization::to_vec(fact).map_err(|e| {
+            IntentError::internal_error(format!("Failed to serialize chat fact envelope: {e}"))
+        })?;
+
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CHAT_FACT_CONTENT_TYPE.to_string(),
+        );
+
+        let envelope = TransportEnvelope {
+            destination: peer,
+            source: self.agent.authority_id(),
+            context,
+            payload,
+            metadata,
+            receipt: None,
+        };
+
+        self.agent
+            .runtime()
+            .effects()
+            .send_envelope(envelope)
+            .await
+            .map_err(|e| IntentError::network_error(format!("Failed to send chat fact: {e}")))
     }
 
     // AMP Channel Operations
