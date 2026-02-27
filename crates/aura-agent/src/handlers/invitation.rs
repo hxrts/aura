@@ -57,6 +57,7 @@ use aura_invitation::{
     InvitationResponse,
 };
 use aura_journal::fact::{FactContent, RelationalFact};
+use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use std::sync::Arc;
 use aura_journal::DomainFact;
 use aura_protocol::effects::EffectApiEffects;
@@ -406,6 +407,34 @@ impl InvitationHandler {
             expires_at,
             message,
         };
+
+        // Optimistically materialize invited contacts for the sender.
+        // This keeps contact-driven UI/navigation usable even before the invitee's
+        // acceptance envelope is delivered back over transport.
+        if matches!(invitation.invitation_type, InvitationType::Contact { .. })
+            && invitation.receiver_id != invitation.sender_id
+        {
+            let now_ms = effects.current_timestamp().await.unwrap_or(current_time);
+            let contact_fact = ContactFact::Added {
+                context_id: invitation.context_id,
+                owner_id: invitation.sender_id,
+                contact_id: invitation.receiver_id,
+                nickname: invitation.receiver_id.to_string(),
+                added_at: PhysicalTime {
+                    ts_ms: now_ms,
+                    uncertainty: None,
+                },
+            };
+            effects
+                .commit_generic_fact_bytes(
+                    invitation.context_id,
+                    CONTACT_FACT_TYPE_ID,
+                    contact_fact.to_bytes(),
+                )
+                .await
+                .map_err(|e| AgentError::effects(format!("commit contact fact: {e}")))?;
+            effects.await_next_view_update().await;
+        }
 
         // Persist the invitation to storage (so it survives service recreation)
         Self::persist_created_invitation(
@@ -800,6 +829,10 @@ impl InvitationHandler {
             invitation.invitation_id.to_string(),
         );
         metadata.insert("acceptor-id".to_string(), acceptor_id.to_string());
+        let bind_addr = effects.config().network.bind_address.trim();
+        if !bind_addr.is_empty() && bind_addr != "0.0.0.0:0" {
+            metadata.insert("acceptor-addr".to_string(), bind_addr.to_string());
+        }
 
         let envelope = TransportEnvelope {
             destination: invitation.sender_id,
@@ -826,6 +859,8 @@ impl InvitationHandler {
         effects: Arc<AuraEffectSystem>,
     ) -> AgentResult<usize> {
         let mut processed = 0usize;
+        let mut deferred = 0usize;
+        const MAX_DEFERRED_SCANS: usize = 256;
 
         loop {
             let envelope = match effects.receive_envelope().await {
@@ -839,12 +874,20 @@ impl InvitationHandler {
 
             let Some(content_type) = envelope.metadata.get("content-type") else {
                 effects.requeue_envelope(envelope);
-                break;
+                deferred = deferred.saturating_add(1);
+                if deferred >= MAX_DEFERRED_SCANS {
+                    break;
+                }
+                continue;
             };
 
             if content_type != CONTACT_INVITATION_ACCEPTANCE_CONTENT_TYPE {
                 effects.requeue_envelope(envelope);
-                break;
+                deferred = deferred.saturating_add(1);
+                if deferred >= MAX_DEFERRED_SCANS {
+                    break;
+                }
+                continue;
             }
 
             let acceptance: ContactInvitationAcceptance =
@@ -861,6 +904,17 @@ impl InvitationHandler {
 
             if acceptance.acceptor_id == self.context.authority.authority_id() {
                 continue;
+            }
+
+            if let Some(addr) = envelope.metadata.get("acceptor-addr") {
+                let now_ms = effects.current_timestamp().await.unwrap_or(0);
+                self.cache_tcp_descriptor_for_peer(
+                    effects.as_ref(),
+                    acceptance.acceptor_id,
+                    addr,
+                    now_ms,
+                )
+                .await;
             }
 
             let Some(invitation) = Self::load_created_invitation(
@@ -929,6 +983,7 @@ impl InvitationHandler {
             self.invitation_cache.cache_invitation(updated).await;
 
             processed = processed.saturating_add(1);
+            deferred = 0;
         }
 
         Ok(processed)
@@ -1246,6 +1301,7 @@ impl InvitationHandler {
 
         let shareable = ShareableInvitation::from_code(code)
             .map_err(|e| crate::core::AgentError::invalid(format!("{e}")))?;
+        let sender_hint_addr = ShareableInvitation::sender_addr_from_code(code);
 
         tracing::debug!(
             invitation_id = %shareable.invitation_id,
@@ -1276,6 +1332,10 @@ impl InvitationHandler {
         }
 
         let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        if let Some(addr) = sender_hint_addr {
+            self.cache_tcp_descriptor_for_peer(effects, shareable.sender_id, &addr, now_ms)
+                .await;
+        }
         let context_id = match &shareable.invitation_type {
             InvitationType::Channel { .. } => default_context_id_for_authority(shareable.sender_id),
             _ => self.context.effect_context.context_id(),
@@ -1299,6 +1359,34 @@ impl InvitationHandler {
             .await;
 
         Ok(invitation)
+    }
+
+    async fn cache_tcp_descriptor_for_peer(
+        &self,
+        effects: &AuraEffectSystem,
+        peer: AuthorityId,
+        addr: &str,
+        now_ms: u64,
+    ) {
+        let Some(manager) = effects.rendezvous_manager() else {
+            return;
+        };
+        let Ok(hint) = TransportHint::tcp_direct(addr) else {
+            return;
+        };
+        let context_id = default_context_id_for_authority(peer);
+        let descriptor = RendezvousDescriptor {
+            authority_id: peer,
+            context_id,
+            transport_hints: vec![hint],
+            handshake_psk_commitment: [0u8; 32],
+            public_key: [0u8; 32],
+            valid_from: now_ms.saturating_sub(1),
+            valid_until: now_ms.saturating_add(86_400_000),
+            nonce: [0u8; 32],
+            nickname_suggestion: None,
+        };
+        let _ = manager.cache_descriptor(descriptor).await;
     }
 
     /// Decline an invitation
@@ -2010,7 +2098,7 @@ impl ShareableInvitation {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
         let parts: Vec<&str> = code.split(':').collect();
-        if parts.len() != 3 {
+        if parts.len() != 3 && parts.len() != 4 {
             return Err(ShareableInvitationError::InvalidFormat);
         }
 
@@ -2036,6 +2124,30 @@ impl ShareableInvitation {
             .map_err(|_| ShareableInvitationError::DecodingFailed)?;
 
         serde_json::from_slice(&json).map_err(|_| ShareableInvitationError::ParsingFailed)
+    }
+
+    /// Extract optional sender transport address from a code.
+    ///
+    /// Codes may include an optional 4th segment:
+    /// `aura:v1:<payload-b64>:<sender-addr-b64>`.
+    pub fn sender_addr_from_code(code: &str) -> Option<String> {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        let parts: Vec<&str> = code.split(':').collect();
+        if parts.len() != 4 {
+            return None;
+        }
+        if parts[0] != Self::PREFIX {
+            return None;
+        }
+
+        let decoded = URL_SAFE_NO_PAD.decode(parts[3]).ok()?;
+        let addr = String::from_utf8(decoded).ok()?;
+        let trimmed = addr.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        Some(trimmed.to_string())
     }
 }
 
@@ -2351,6 +2463,7 @@ mod tests {
     use aura_invitation::guards::{EffectCommand, GuardOutcome};
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
@@ -2731,6 +2844,133 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn creating_contact_invitation_materializes_sender_contact() {
+        let sender_id = AuthorityId::new_from_entropy([128u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([129u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(
+            AuraEffectSystem::testing_for_authority(&config, sender_id).unwrap(),
+        );
+        let handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
+
+        handler
+            .create_invitation(
+                effects.clone(),
+                receiver_id,
+                InvitationType::Contact { nickname: None },
+                Some("Contact invitation".to_string()),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let committed = effects.load_committed_facts(sender_id).await.unwrap();
+        let mut found = false;
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+            if envelope.type_id.as_str() != CONTACT_FACT_TYPE_ID {
+                continue;
+            }
+            let Some(ContactFact::Added {
+                owner_id,
+                contact_id,
+                ..
+            }) = ContactFact::from_envelope(&envelope)
+            else {
+                continue;
+            };
+            if owner_id == sender_id && contact_id == receiver_id {
+                found = true;
+                break;
+            }
+        }
+
+        assert!(
+            found,
+            "expected ContactFact::Added for sender invitation recipient"
+        );
+    }
+
+    #[tokio::test]
+    async fn contact_acceptance_processing_skips_unrelated_envelopes() {
+        let shared_transport = crate::runtime::SharedTransport::new();
+        let config = AgentConfig::default();
+
+        let sender_id = AuthorityId::new_from_entropy([126u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([127u8; 32]);
+
+        let sender_effects = Arc::new(
+            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+                &config,
+                20013,
+                sender_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+        let receiver_effects = Arc::new(
+            AuraEffectSystem::simulation_with_shared_transport_for_authority(
+                &config,
+                20014,
+                receiver_id,
+                shared_transport.clone(),
+            )
+            .unwrap(),
+        );
+
+        let sender_handler = InvitationHandler::new(AuthorityContext::new(sender_id)).unwrap();
+        let receiver_handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+
+        let invitation = sender_handler
+            .create_invitation(
+                sender_effects.clone(),
+                sender_id,
+                InvitationType::Contact { nickname: None },
+                Some("Contact invitation".to_string()),
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Queue an unrelated envelope ahead of the acceptance notification.
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            "application/aura-unrelated".to_string(),
+        );
+        receiver_effects
+            .send_envelope(TransportEnvelope {
+                destination: sender_id,
+                source: receiver_id,
+                context: default_context_id_for_authority(sender_id),
+                payload: b"noop".to_vec(),
+                metadata,
+                receipt: None,
+            })
+            .await
+            .unwrap();
+
+        let code = InvitationServiceApi::export_invitation(&invitation);
+        let imported = receiver_handler
+            .import_invitation_code(&receiver_effects, &code)
+            .await
+            .unwrap();
+        receiver_handler
+            .accept_invitation(receiver_effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let processed = sender_handler
+            .process_contact_invitation_acceptances(sender_effects.clone())
+            .await
+            .unwrap();
+        assert_eq!(processed, 1);
+    }
+
+    #[tokio::test]
     async fn imported_invitation_is_resolvable_across_handler_instances() {
         let own_authority = AuthorityId::new_from_entropy([122u8; 32]);
         let config = AgentConfig::default();
@@ -3007,6 +3247,34 @@ mod tests {
             }
             _ => panic!("wrong invitation type"),
         }
+    }
+
+    #[test]
+    fn shareable_invitation_parses_optional_sender_addr_segment() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        let sender_id = AuthorityId::new_from_entropy([46u8; 32]);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: InvitationId::new("inv-addr-001"),
+            sender_id,
+            invitation_type: InvitationType::Contact { nickname: None },
+            expires_at: None,
+            message: None,
+        };
+        let base = shareable.to_code();
+        let code = format!(
+            "{base}:{}",
+            URL_SAFE_NO_PAD.encode("127.0.0.1:43501".as_bytes())
+        );
+
+        let decoded = ShareableInvitation::from_code(&code).unwrap();
+        assert_eq!(decoded.invitation_id, shareable.invitation_id);
+        assert_eq!(decoded.sender_id, shareable.sender_id);
+        assert_eq!(
+            ShareableInvitation::sender_addr_from_code(&code),
+            Some("127.0.0.1:43501".to_string())
+        );
     }
 
     #[test]

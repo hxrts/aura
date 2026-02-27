@@ -90,25 +90,12 @@ pub async fn handle_messaging(
             // Use workflow for business logic
             let timestamp = super::time::current_time_ms(app_core).await;
             match start_direct_chat(app_core, contact_id, timestamp).await {
-                Ok(dm_channel_id) => {
-                    if let Ok(state) =
-                        aura_app::ui::workflows::messaging::get_chat_state(app_core).await
-                    {
-                        eprintln!(
-                            "START_DIRECT_CHAT_OK: channel={dm_channel_id} channel_count={}",
-                            state.channel_count()
-                        );
-                    }
-                    Some(Ok(OpResponse::Data(format!(
-                        "Started DM chat: {dm_channel_id}"
-                    ))))
-                }
-                Err(e) => {
-                    eprintln!("START_DIRECT_CHAT_ERR: {e:?}");
-                    Some(Err(super::types::OpError::Failed(format!(
-                        "Failed to start chat: {e}"
-                    ))))
-                }
+                Ok(dm_channel_id) => Some(Ok(OpResponse::Data(format!(
+                    "Started DM chat: {dm_channel_id}"
+                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to start chat: {e}"
+                )))),
             }
         }
 

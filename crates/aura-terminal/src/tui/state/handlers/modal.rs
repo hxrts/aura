@@ -38,15 +38,6 @@ pub fn handle_queued_modal_key(
     key: KeyEvent,
     modal: QueuedModal,
 ) {
-    // First, check for toast dismissal on Esc (toasts have priority)
-    if key.code == KeyCode::Esc {
-        if let Some(toast_id) = state.toast_queue.current().map(|t| t.id.clone()) {
-            state.toast_queue.dismiss();
-            commands.push(TuiCommand::DismissToast { id: toast_id });
-            return;
-        }
-    }
-
     // Route to specific handlers based on modal type
     match modal {
         QueuedModal::AccountSetup(modal_state) => {

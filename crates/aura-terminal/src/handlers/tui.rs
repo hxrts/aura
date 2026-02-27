@@ -24,7 +24,7 @@ use aura_app::ui::workflows::account::{
 };
 // Import agent types from aura-agent (runtime layer)
 use async_lock::RwLock;
-use aura_agent::core::config::StorageConfig;
+use aura_agent::core::config::{NetworkConfig, StorageConfig};
 use aura_agent::{AgentBuilder, AgentConfig, EffectContext};
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::effects::{StorageCoreEffects, StorageExtendedEffects};
@@ -450,7 +450,14 @@ pub async fn handle_tui(args: &TuiArgs) -> crate::error::TerminalResult<()> {
         .or(if args.demo { Some("demo:bob") } else { None });
 
     // Path resolution happens in handle_tui_launch via resolve_storage_path
-    handle_tui_launch(stdio, args.data_dir.as_deref(), device_id, mode).await
+    handle_tui_launch(
+        stdio,
+        args.data_dir.as_deref(),
+        device_id,
+        args.bind_address.as_deref(),
+        mode,
+    )
+    .await
 }
 
 /// Launch the TUI with the specified mode
@@ -458,6 +465,7 @@ async fn handle_tui_launch(
     stdio: PreFullscreenStdio,
     data_dir: Option<&str>,
     device_id_str: Option<&str>,
+    bind_address: Option<&str>,
     mode: TuiMode,
 ) -> crate::error::TerminalResult<()> {
     let mode_str = match mode {
@@ -488,6 +496,9 @@ async fn handle_tui_launch(
 
     stdio.println(format_args!("Data directory: {}", base_path.display()));
     stdio.println(format_args!("Device ID: {device_id}"));
+    if let Some(addr) = bind_address {
+        stdio.println(format_args!("Bind address: {addr}"));
+    }
     std::env::set_var("AURA_DEMO_BOB_DEVICE_ID", device_id.to_string());
 
     // Determine device ID string for account derivation
@@ -517,6 +528,10 @@ async fn handle_tui_launch(
         storage: StorageConfig {
             base_path: base_path.clone(),
             ..StorageConfig::default()
+        },
+        network: NetworkConfig {
+            bind_address: bind_address.unwrap_or("0.0.0.0:0").to_string(),
+            ..NetworkConfig::default()
         },
         ..AgentConfig::default()
     };

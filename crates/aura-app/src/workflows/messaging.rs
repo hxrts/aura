@@ -63,6 +63,13 @@ fn pair_dm_channel_id(left: AuthorityId, right: AuthorityId) -> ChannelId {
     ChannelId::from_bytes(hash(descriptor.as_bytes()))
 }
 
+fn pair_dm_context_id(left: AuthorityId, right: AuthorityId) -> ContextId {
+    let mut participants = [left.to_string(), right.to_string()];
+    participants.sort();
+    let descriptor = format!("dm-context:{}:{}", participants[0], participants[1]);
+    ContextId::new_from_entropy(hash(descriptor.as_bytes()))
+}
+
 /// Parse a channel string into a ChannelRef.
 fn parse_channel_ref(channel: &str) -> ChannelRef {
     ChannelRef::parse(channel)
@@ -110,12 +117,26 @@ pub async fn current_home_channel_ref(
 async fn context_id_for_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
+    local_authority: Option<AuthorityId>,
 ) -> Result<ContextId, AuraError> {
     {
         let chat = chat_snapshot(app_core).await;
         if let Some(channel) = chat.channel(&channel_id) {
             if let Some(ctx_id) = channel.context_id {
                 return Ok(ctx_id);
+            }
+            if channel.is_dm {
+                if let Some(self_authority) = local_authority {
+                    if let Some(peer_authority) = channel
+                        .member_ids
+                        .iter()
+                        .copied()
+                        .find(|member| *member != self_authority)
+                        .or_else(|| channel.member_ids.first().copied())
+                    {
+                        return Ok(pair_dm_context_id(self_authority, peer_authority));
+                    }
+                }
             }
         }
     }
@@ -440,7 +461,7 @@ pub async fn close_channel(
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
-    let context_id = context_id_for_channel(app_core, channel_id).await?;
+    let context_id = context_id_for_channel(app_core, channel_id, None).await?;
 
     runtime
         .amp_close_channel(ChannelCloseParams {
@@ -483,7 +504,7 @@ pub async fn set_topic(
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
-    let context_id = context_id_for_channel(app_core, channel_id).await?;
+    let context_id = context_id_for_channel(app_core, channel_id, None).await?;
 
     runtime
         .channel_set_topic(context_id, channel_id, text.to_string(), timestamp_ms)
@@ -565,7 +586,8 @@ pub async fn send_message_ref(
     let mut epoch_hint: Option<u32> = None;
     let sender_id = if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
-        let context_id = context_id_for_channel(app_core, channel_id).await?;
+        let context_id =
+            context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
         channel_context = Some(context_id);
 
         let cipher = runtime
@@ -694,7 +716,9 @@ pub async fn start_direct_chat(
         // invitation capabilities in the active runtime profile.
         let contact_authority = parse_authority_id(contact_id)?;
         let runtime = require_runtime(app_core).await?;
-        let context_id = current_home_context_or_fallback(app_core).await?;
+        // Use a pairwise deterministic context so both peers converge on the same
+        // transport/journal scope instead of each side's current home context.
+        let context_id = pair_dm_context_id(runtime.authority_id(), contact_authority);
         let channel_name = if contact_name.trim().is_empty() {
             format!("dm-{}", &contact_id[..8.min(contact_id.len())])
         } else {
@@ -906,5 +930,12 @@ mod tests {
 
         let state = get_chat_state(&app_core).await.unwrap();
         assert!(state.is_empty());
+    }
+
+    #[test]
+    fn test_pair_dm_context_id_commutative() {
+        let a = AuthorityId::new_from_entropy([1u8; 32]);
+        let b = AuthorityId::new_from_entropy([2u8; 32]);
+        assert_eq!(pair_dm_context_id(a, b), pair_dm_context_id(b, a));
     }
 }

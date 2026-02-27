@@ -17,6 +17,9 @@ pub struct TuiArgs {
     /// Device ID to use for this session
     pub device_id: Option<String>,
 
+    /// Bind address for runtime transport listener (for multi-instance runs)
+    pub bind_address: Option<String>,
+
     /// Run in demo mode with simulated Alice and Carol peer agents.
     /// Uses a real agent runtime with deterministic simulation.
     /// Demo data is stored in .aura-demo and cleared on each startup.
@@ -35,12 +38,17 @@ pub fn tui_parser() -> impl Parser<TuiArgs> {
         .help("Device ID to use for this session")
         .argument::<String>("DEVICE")
         .optional();
+    let bind_address = long("bind-address")
+        .help("Bind address for runtime transport listener (e.g. 127.0.0.1:43101)")
+        .argument::<String>("ADDR")
+        .optional();
     let demo = long("demo")
         .help("Run demo mode with simulated Alice/Carol peers (data in .aura-demo, cleared on startup)")
         .switch();
     construct!(TuiArgs {
         data_dir,
         device_id,
+        bind_address,
         demo
     })
 }

@@ -133,6 +133,38 @@ mod tests {
     }
 
     #[test]
+    fn test_escape_closes_modal_before_dismissing_toast() {
+        use crate::tui::state::modal_queue::QueuedModal;
+        use crate::tui::state::views::InvitationCodeModalState;
+
+        let mut state = TuiState::new();
+        state
+            .modal_queue
+            .enqueue(QueuedModal::ContactsCode(InvitationCodeModalState::for_code(
+                "aura:v1:test".to_string(),
+            )));
+        state.toast_success("welcome");
+        assert!(state.has_queued_modal());
+        assert!(state.toast_queue.is_active());
+
+        let (state, _) = transition(&state, events::escape());
+        assert!(
+            !state.has_queued_modal(),
+            "Esc should dismiss active modal first"
+        );
+        assert!(
+            state.toast_queue.is_active(),
+            "Toast should remain after modal dismissal"
+        );
+
+        let (state, _) = transition(&state, events::escape());
+        assert!(
+            !state.toast_queue.is_active(),
+            "Second Esc should dismiss toast when no modal is active"
+        );
+    }
+
+    #[test]
     fn test_send_message_command() {
         let mut state = TuiState::new();
         state.router.go_to(Screen::Chat);

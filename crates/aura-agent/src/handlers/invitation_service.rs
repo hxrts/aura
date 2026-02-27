@@ -420,6 +420,8 @@ impl InvitationServiceApi {
     /// # Errors
     /// Returns an error if the invitation is not found
     pub async fn export_code(&self, invitation_id: &InvitationId) -> AgentResult<String> {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
         let invitation = self
             .handler
             .get_invitation_with_storage(&self.effects, invitation_id)
@@ -427,8 +429,14 @@ impl InvitationServiceApi {
             .ok_or_else(|| {
                 aura_core::AuraError::not_found(format!("Invitation not found: {}", invitation_id))
             })?;
+        let mut code = Self::export_invitation(&invitation);
+        let bind_addr = self.effects.config().network.bind_address.trim();
+        if !bind_addr.is_empty() && bind_addr != "0.0.0.0:0" {
+            let encoded_addr = URL_SAFE_NO_PAD.encode(bind_addr.as_bytes());
+            code = format!("{code}:{encoded_addr}");
+        }
 
-        Ok(Self::export_invitation(&invitation))
+        Ok(code)
     }
 
     /// Import an invitation from a shareable code string

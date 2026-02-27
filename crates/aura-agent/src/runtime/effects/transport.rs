@@ -1,4 +1,5 @@
 use super::AuraEffectSystem;
+use crate::core::default_context_id_for_authority;
 use async_trait::async_trait;
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
 use aura_core::effects::{TransportEffects, TransportError};
@@ -163,7 +164,15 @@ async fn resolve_peer_addr(
     peer: AuthorityId,
 ) -> Option<String> {
     let manager = effects.rendezvous_manager()?;
-    let descriptor = manager.get_descriptor(context, peer).await?;
+    let descriptor = if let Some(descriptor) = manager.get_descriptor(context, peer).await {
+        descriptor
+    } else {
+        let fallback_context = default_context_id_for_authority(peer);
+        if fallback_context == context {
+            return None;
+        }
+        manager.get_descriptor(fallback_context, peer).await?
+    };
     for hint in descriptor.transport_hints {
         if let TransportHint::TcpDirect { addr } = hint {
             return Some(addr.to_string());

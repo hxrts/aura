@@ -35,7 +35,13 @@ pub use screen::{
 /// 3. Global key handlers
 /// 4. Screen-specific handlers
 pub fn handle_key_event(state: &mut TuiState, commands: &mut Vec<TuiCommand>, key: KeyEvent) {
-    // Escape precedence: toasts first, then modals, then everything else.
+    // Queued modal gets priority (all modals are now queue-based)
+    if state.has_queued_modal() {
+        handle_modal_key(state, commands, key);
+        return;
+    }
+
+    // Escape dismisses toast when no modal is active.
     if key.code == KeyCode::Esc && state.toast_queue.is_active() {
         state.toast_queue.dismiss();
         return;
@@ -53,12 +59,6 @@ pub fn handle_key_event(state: &mut TuiState, commands: &mut Vec<TuiCommand>, ke
                 return;
             }
         }
-    }
-
-    // Queued modal gets priority (all modals are now queue-based)
-    if state.has_queued_modal() {
-        handle_modal_key(state, commands, key);
-        return;
     }
 
     // Insert mode gets priority
