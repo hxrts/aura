@@ -2,10 +2,12 @@
 
 pub mod artifacts;
 pub mod backend;
+pub mod capabilities;
 pub mod config;
 pub mod coordinator;
 pub mod events;
 pub mod executor;
+pub mod preflight;
 pub mod replay;
 pub mod routing;
 pub mod scenario;

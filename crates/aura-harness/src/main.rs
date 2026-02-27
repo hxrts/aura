@@ -10,6 +10,7 @@ use aura_harness::config::require_existing_file;
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::executor::ScenarioExecutor;
 use aura_harness::load_and_validate_run_config;
+use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
@@ -90,11 +91,20 @@ fn run(args: RunArgs) -> Result<()> {
 
     let summary = build_startup_summary(&config);
     let artifact_bundle = ArtifactBundle::create(&args.artifacts_dir, &config.run.name)?;
+    let preflight_report = match run_preflight(&config, scenario_config.as_ref()) {
+        Ok(report) => report,
+        Err(error) => {
+            let payload = serde_json::json!({ "error": error.to_string() });
+            let _ = artifact_bundle.write_json("preflight_error.json", &payload);
+            return Err(error);
+        }
+    };
 
     let run_result = run_with_artifacts(
         &config,
         &artifact_bundle,
         &summary,
+        &preflight_report,
         scenario_config.as_ref(),
     );
     if let Err(error) = run_result {
@@ -114,6 +124,7 @@ fn run_with_artifacts(
     config: &aura_harness::config::RunConfig,
     artifact_bundle: &ArtifactBundle,
     summary: &aura_harness::tool_api::StartupSummary,
+    preflight_report: &PreflightReport,
     scenario_config: Option<&aura_harness::config::ScenarioConfig>,
 ) -> Result<()> {
     let coordinator = HarnessCoordinator::from_run_config(config)?;
@@ -159,6 +170,7 @@ fn run_with_artifacts(
     };
 
     artifact_bundle.write_json("startup_summary.json", summary)?;
+    artifact_bundle.write_json("preflight_report.json", preflight_report)?;
     artifact_bundle.write_json("events.json", &events)?;
     artifact_bundle.write_json("initial_screens.json", &initial_screens)?;
     artifact_bundle.write_json("routing_metadata.json", &routing_metadata)?;
