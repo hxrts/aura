@@ -3,6 +3,8 @@
 pub mod artifacts;
 pub mod backend;
 pub mod config;
+pub mod coordinator;
+pub mod events;
 pub mod scenario;
 pub mod tool_api;
 

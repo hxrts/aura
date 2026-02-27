@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::config::RunConfig;
+use crate::coordinator::HarnessCoordinator;
 
 pub const TOOL_API_VERSION: &str = "0.1.0";
 
@@ -78,4 +79,76 @@ pub enum ToolRequest {
 pub enum ToolResponse {
     Ok { payload: serde_json::Value },
     Error { message: String },
+}
+
+pub struct ToolApi {
+    coordinator: HarnessCoordinator,
+}
+
+impl ToolApi {
+    pub fn new(coordinator: HarnessCoordinator) -> Self {
+        Self { coordinator }
+    }
+
+    pub fn start_all(&mut self) -> anyhow::Result<()> {
+        self.coordinator.start_all()
+    }
+
+    pub fn stop_all(&mut self) -> anyhow::Result<()> {
+        self.coordinator.stop_all()
+    }
+
+    pub fn handle_request(&mut self, request: ToolRequest) -> ToolResponse {
+        let outcome = match request {
+            ToolRequest::Screen { instance_id } => self
+                .coordinator
+                .screen(&instance_id)
+                .map(|screen| serde_json::json!({ "screen": screen })),
+            ToolRequest::SendKeys { instance_id, keys } => self
+                .coordinator
+                .send_keys(&instance_id, &keys)
+                .map(|_| serde_json::json!({ "status": "sent" })),
+            ToolRequest::WaitFor {
+                instance_id,
+                pattern,
+                timeout_ms,
+            } => self
+                .coordinator
+                .wait_for(&instance_id, &pattern, timeout_ms)
+                .map(|screen| serde_json::json!({ "matched": true, "screen": screen })),
+            ToolRequest::TailLog { instance_id, lines } => self
+                .coordinator
+                .tail_log(
+                    &instance_id,
+                    match usize::try_from(lines) {
+                        Ok(lines) => lines,
+                        Err(_) => {
+                            return ToolResponse::Error {
+                                message: format!("tail_log lines out of range: {lines}"),
+                            };
+                        }
+                    },
+                )
+                .map(|lines| serde_json::json!({ "lines": lines })),
+            ToolRequest::Restart { instance_id } => self
+                .coordinator
+                .restart(&instance_id)
+                .map(|_| serde_json::json!({ "status": "restarted" })),
+            ToolRequest::Kill { instance_id } => self
+                .coordinator
+                .kill(&instance_id)
+                .map(|_| serde_json::json!({ "status": "killed" })),
+        };
+
+        match outcome {
+            Ok(payload) => ToolResponse::Ok { payload },
+            Err(error) => ToolResponse::Error {
+                message: error.to_string(),
+            },
+        }
+    }
+
+    pub fn event_snapshot(&self) -> Vec<crate::events::HarnessEvent> {
+        self.coordinator.event_snapshot()
+    }
 }
