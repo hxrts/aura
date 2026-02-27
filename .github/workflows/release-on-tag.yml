@@ -1,0 +1,58 @@
+name: Release On Tag
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ensure-release:
+    name: Ensure GitHub Release Exists
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release if missing
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.ref.replace("refs/tags/", "");
+            if (!tag.startsWith("v")) {
+              core.info(`Skipping non-v tag: ${tag}`);
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: tag,
+              });
+              core.info(`Release already exists for ${tag}: ${existing.data.html_url}`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+              core.info(`No release found for ${tag}; creating one.`);
+            }
+
+            const created = await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              name: tag,
+              draft: false,
+              prerelease: false,
+              generate_release_notes: true,
+            });
+
+            core.notice(`Created release for ${tag}: ${created.data.html_url}`);
