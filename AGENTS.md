@@ -4,7 +4,7 @@
 
 **IMPORTANT**: When starting any session, immediately:
 1. Enter the Nix environment if not already in the shell: `nix develop`
-3. Read `.claude/skills/aura-quick-ref/SKILL.md` for enhanced context
+2. Review `docs/000_project_overview.md` and `docs/999_project_structure.md` for architecture context
 
 ## Project Overview
 
@@ -279,7 +279,5 @@ To conserve agent usage, prefer:
 - Specific file paths over broad searches when known
 - Targeted grep patterns over reading entire files
 - Architecture compliance (`just check-arch`) before complex refactoring
-- Quick reference skills over re-reading documentation
 - Batch operations and parallel tool calls when possible
-- Use `.claude/skills/` for project-specific knowledge
-- Note: `work/` is ignored; do not commit files from this directory
+- Note: `work/` is non-authoritative scratch and may be removed
