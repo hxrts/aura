@@ -49,9 +49,23 @@ pub struct InstanceConfig {
     pub env: Vec<String>,
     pub log_path: Option<PathBuf>,
     pub ssh_host: Option<String>,
+    pub ssh_user: Option<String>,
+    pub ssh_port: Option<u16>,
+    #[serde(default = "default_true")]
+    pub ssh_strict_host_key_checking: bool,
+    pub ssh_known_hosts_file: Option<PathBuf>,
+    pub ssh_fingerprint: Option<String>,
+    #[serde(default)]
+    pub ssh_require_fingerprint: bool,
+    #[serde(default = "default_true")]
+    pub ssh_dry_run: bool,
     pub remote_workdir: Option<PathBuf>,
     pub lan_discovery: Option<LanDiscoveryConfig>,
     pub tunnel: Option<TunnelConfig>,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -193,6 +207,25 @@ impl RunConfig {
                     {
                         bail!("ssh instance {} must set remote_workdir", instance.id);
                     }
+                    if !instance.ssh_strict_host_key_checking {
+                        bail!(
+                            "ssh instance {} must keep ssh_strict_host_key_checking enabled",
+                            instance.id
+                        );
+                    }
+                    if instance.ssh_require_fingerprint
+                        && instance
+                            .ssh_fingerprint
+                            .as_deref()
+                            .unwrap_or_default()
+                            .trim()
+                            .is_empty()
+                    {
+                        bail!(
+                            "ssh instance {} requires ssh_fingerprint when ssh_require_fingerprint is true",
+                            instance.id
+                        );
+                    }
                     if instance.command.is_some()
                         || !instance.args.is_empty()
                         || !instance.env.is_empty()
@@ -304,6 +337,13 @@ mod tests {
                     env: vec![],
                     log_path: None,
                     ssh_host: None,
+                    ssh_user: None,
+                    ssh_port: None,
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: None,
+                    ssh_fingerprint: None,
+                    ssh_require_fingerprint: false,
+                    ssh_dry_run: true,
                     remote_workdir: None,
                     lan_discovery: None,
                     tunnel: None,
@@ -320,6 +360,13 @@ mod tests {
                     env: vec![],
                     log_path: None,
                     ssh_host: None,
+                    ssh_user: None,
+                    ssh_port: None,
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: None,
+                    ssh_fingerprint: None,
+                    ssh_require_fingerprint: false,
+                    ssh_dry_run: true,
                     remote_workdir: None,
                     lan_discovery: None,
                     tunnel: None,

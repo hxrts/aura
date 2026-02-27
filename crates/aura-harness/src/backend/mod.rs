@@ -13,6 +13,9 @@ pub trait InstanceBackend {
     fn snapshot(&self) -> Result<String>;
     fn send_keys(&mut self, keys: &str) -> Result<()>;
     fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
+    fn health_check(&self) -> Result<bool> {
+        Ok(self.is_healthy())
+    }
     fn restart(&mut self) -> Result<()> {
         self.stop()?;
         self.start()

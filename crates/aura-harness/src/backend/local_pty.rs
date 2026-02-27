@@ -197,6 +197,10 @@ impl InstanceBackend for LocalPtyBackend {
         Ok(result)
     }
 
+    fn health_check(&self) -> Result<bool> {
+        Ok(self.state == BackendState::Running && self.session.is_some())
+    }
+
     fn is_healthy(&self) -> bool {
         self.state == BackendState::Running
     }
@@ -229,6 +233,13 @@ mod tests {
             env: vec![],
             log_path: None,
             ssh_host: None,
+            ssh_user: None,
+            ssh_port: None,
+            ssh_strict_host_key_checking: true,
+            ssh_known_hosts_file: None,
+            ssh_fingerprint: None,
+            ssh_require_fingerprint: false,
+            ssh_dry_run: true,
             remote_workdir: None,
             lan_discovery: None,
             tunnel: None,

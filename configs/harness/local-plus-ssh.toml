@@ -27,6 +27,12 @@ data_dir = "/tmp/aura-harness/bob"
 device_id = "bob-dev-01"
 bind_address = "0.0.0.0:41001"
 ssh_host = "devbox-b"
+ssh_user = "dev"
+ssh_port = 22
+ssh_strict_host_key_checking = true
+ssh_require_fingerprint = true
+ssh_fingerprint = "SHA256:replace-with-real-host-key-fingerprint"
+ssh_dry_run = true
 remote_workdir = "/home/dev/aura"
 
 [instances.tunnel]
