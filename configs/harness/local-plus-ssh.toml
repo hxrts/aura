@@ -1,0 +1,34 @@
+schema_version = 1
+
+[run]
+name = "mixed-local-ssh-smoke"
+pty_rows = 40
+pty_cols = 120
+artifact_dir = "artifacts/harness/mixed-local-ssh-smoke"
+
+[[instances]]
+id = "alice"
+mode = "local"
+data_dir = ".tmp/harness/alice"
+device_id = "alice-dev-01"
+bind_address = "127.0.0.1:41001"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19433
+
+[[instances]]
+id = "bob"
+mode = "ssh"
+data_dir = "/tmp/aura-harness/bob"
+device_id = "bob-dev-01"
+bind_address = "0.0.0.0:41001"
+ssh_host = "devbox-b"
+remote_workdir = "/home/dev/aura"
+
+[instances.tunnel]
+type = "ssh"
+local_forward = ["54101:127.0.0.1:41001"]

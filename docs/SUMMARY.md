@@ -38,5 +38,6 @@
 - [Reactive Signals Guide](810_reactive_signals_guide.md)
 - [Aura CLI Recovery Demo](811_recovery_tui_demo.md)
 - [Protocol Pipeline](812_protocol_pipeline.md)
+- [Runtime Harness Guide](813_runtime_harness_guide.md)
 - [Verification Coverage Report](998_verification_coverage.md)
 - [Aura Crate Structure and Dependency Graph](999_project_structure.md)

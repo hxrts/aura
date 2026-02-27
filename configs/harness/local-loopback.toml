@@ -1,0 +1,35 @@
+schema_version = 1
+
+[run]
+name = "local-loopback-smoke"
+pty_rows = 40
+pty_cols = 120
+artifact_dir = "artifacts/harness/local-loopback-smoke"
+
+[[instances]]
+id = "alice"
+mode = "local"
+data_dir = ".tmp/harness/alice"
+device_id = "alice-dev-01"
+bind_address = "127.0.0.1:41001"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19433
+
+[[instances]]
+id = "bob"
+mode = "local"
+data_dir = ".tmp/harness/bob"
+device_id = "bob-dev-01"
+bind_address = "127.0.0.1:41002"
+demo_mode = false
+
+[instances.lan_discovery]
+enabled = true
+bind_addr = "127.0.0.1"
+broadcast_addr = "127.0.0.1"
+port = 19434
