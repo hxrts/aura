@@ -88,13 +88,13 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to Aura.
 
-[Core Systems Guide](802_core_systems_guide.md) explains the core systems and how they work together.
+[Development Patterns and Workflows](805_development_patterns_guide.md) explains core implementation patterns, including time domain selection.
 
 [Coordination Guide](803_coordination_guide.md) covers choreographic protocol design and implementation patterns.
 
 [Advanced Coordination Guide](804_advanced_coordination_guide.md) documents advanced techniques for distributed coordination.
 
-[Development Patterns and Workflows](805_development_patterns.md) covers practical patterns for developing Aura systems, including code location guidance and typical implementation workflows.
+[Development Patterns and Workflows](805_development_patterns_guide.md) covers practical patterns for developing Aura systems, including code location guidance and typical implementation workflows.
 
 [Testing Guide](805_testing_guide.md) describes property testing, simulation harnesses, and validation frameworks.
 

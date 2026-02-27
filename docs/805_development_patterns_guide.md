@@ -76,10 +76,11 @@ No coordination goes in `aura-effects`. Multiple handlers being orchestrated goe
 
 1. Write the choreography in a `.choreo` file and load it through `aura-macros::choreography!` (Telltale parse/projection/codegen)
 2. Use annotation syntax for security: `Role[guard_capability = "...", flow_cost = N] -> Target: Message`
-3. Create the protocol implementation in `aura-protocol` or a feature crate
-4. Implement the coordination logic using handlers from `aura-effects`
-5. Wire the protocol into `aura-agent` runtime (`AuraProtocolAdapter` and/or `AuraChoreoEngine`) with appropriate leakage budget policies
-6. Expose the protocol through CLI or application interfaces
+3. Select the narrowest `TimeStamp` domain for each time field and compare mixed domains with `TimeStamp::compare(policy)`
+4. Create the protocol implementation in `aura-protocol` or a feature crate
+5. Implement the coordination logic using handlers from `aura-effects`
+6. Wire the protocol into `aura-agent` runtime (`AuraProtocolAdapter` and/or `AuraChoreoEngine`) with appropriate leakage budget policies
+7. Expose the protocol through CLI or application interfaces
 
 ### Writing a New Test
 
@@ -120,6 +121,33 @@ Lifecycle order:
 8. `Cancelled` - Session was cancelled
 
 All crates that track session state use the canonical definition from `aura-core`.
+
+### TimeStamp Domain Selection
+
+`TimeStamp` in `aura-core` is the only time type for new facts and public APIs.
+
+| Domain | Effect Trait | Primary Use |
+|--------|--------------|-------------|
+| `PhysicalClock` | `PhysicalTimeEffects` | Wall time semantics such as cooldowns, receipt timestamps, and liveness checks |
+| `LogicalClock` | `LogicalClockEffects` | Causal ordering for CRDT merge and happens-before checks |
+| `OrderClock` | `OrderClockEffects` | Deterministic ordering without leaking timing or causality |
+| `Range` | `PhysicalTimeEffects` + policy | Validity windows and dispute windows with bounded skew |
+| `ProvenancedTime` | `TimeAttestationEffects` | Attested timestamps for consensus commits and cross-party evidence |
+
+Use effect traits for all time reads. Do not call `SystemTime::now()` or chrono APIs in application logic.
+
+Use the narrowest domain that satisfies the requirement. Compare mixed domains with `TimeStamp::compare(policy)`.
+
+Persist `TimeStamp` values directly in facts. Do not add raw `u64` timestamps or legacy ordering IDs to new schemas.
+
+In deterministic tests, use handlers from `aura-testkit` or `aura-simulator` for all time domains.
+
+### Time Domain Anti-Patterns
+
+- Mixing `PhysicalClock`, `LogicalClock`, and `OrderClock` in one sort path without an explicit policy
+- Using `PhysicalClock` for privacy-sensitive ordering that should use `OrderClock`
+- Using UUID order or fact insertion order as a proxy for time
+- Exposing `SystemTime` or chrono types in domain interfaces
 
 ### Capability System Layering
 
@@ -457,6 +485,8 @@ Every agent requires these five effects:
 | Time | Wall-clock timestamps | `PhysicalTimeEffects` |
 | Random | Cryptographically secure randomness | `RandomEffects` |
 | Console | Logging and output | `ConsoleEffects` |
+
+`PhysicalTimeEffects` is required for wall time. Use [TimeStamp Domain Selection](#timestamp-domain-selection) to choose other time domains.
 
 #### Optional Effects
 

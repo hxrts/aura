@@ -684,6 +684,36 @@ The relationship between the runtime, effects, sessions, and choreographies foll
 
 The session system is a generic, stateful executor. A choreography is the specific, verifiable script that the executor runs.
 
+### 12.4 VM Hardening Profiles and Parity Lanes
+
+Telltale VM execution in `aura-agent` is configured through explicit runtime profiles in `crates/aura-agent/src/runtime/vm_hardening.rs`. Use `build_vm_config(hardening, parity)` (or `AuraChoreoEngine::new_with_profiles(...)`) instead of ad-hoc `VMConfig` mutation.
+
+`AuraVmHardeningProfile` controls safety posture:
+
+| Profile | Intended Use | Key Settings |
+|---------|--------------|--------------|
+| `Dev` | Local debugging | Host contract assertions on, full trace capture, cooperative scheduling |
+| `Ci` | Conformance and regression gates | Strict output predicate allow-list, predicate flow policy, sequence replay mode, host assertions |
+| `Prod` | Runtime default | Safety checks preserved with bounded overhead (`TopologyOnly` trace capture) |
+
+`AuraVmParityProfile` controls deterministic cross-target lanes:
+
+| Parity Profile | Target Lane | Key Settings |
+|----------------|------------|--------------|
+| `NativeCooperative` | Native parity baseline | Cooperative scheduling, full determinism, strict effect determinism tier |
+| `NativeThreaded` | Native threaded differential lane | Round-robin scheduling, replay-deterministic tier |
+| `WasmCooperative` | WASM parity lane | Cooperative scheduling, full determinism, strict effect determinism tier |
+| `RuntimeDefault` | Non-parity runtime | Leaves parity-specific knobs unchanged |
+
+Hardening profiles also pin:
+
+- `OutputConditionPolicy::PredicateAllowList(...)` for commit-visible observables (`aura.transport.send`, `aura.transport.recv`, `aura.protocol.choice`, `aura.protocol.step`, guard acquire/release).
+- `FlowPolicy::PredicateExpr(...)` from Aura role/category constraints.
+- VM `guard_layers` for typed scarce resources (`aura.guard.migration_lock`, `aura.guard.high_value_protocol_slot`).
+- `PayloadValidationMode::Structural` and host contract assertions to catch host/VM boundary mismatches early.
+
+When an output-condition check fails, `AuraChoreoEngine` maps the VM error into `OutputConditionRejected { predicate_ref, tick, witness_ref, output_digest }` so CI failures are deterministic and actionable.
+
 ## 13. Fact Registry Integration
 
 The `FactRegistry` provides domain-specific fact type registration and reduction for the reactive scheduling system. It is integrated into the effect system via the `AuraEffectSystem` rather than being constructed separately.

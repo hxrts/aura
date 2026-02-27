@@ -51,6 +51,33 @@ Failure handling is layered:
 - VM acquire deny blocks the guarded VM action.
 - Aura guard-chain failure denies transport and returns deterministic effect errors.
 
+## Theorem-Pack Runtime Capability Admission
+
+Aura now uses a dedicated admission surface for theorem-pack/runtime capability checks before choreography execution:
+
+- `RuntimeCapabilityEffects` (`aura-core`) defines capability inventory queries and admission checks.
+- `RuntimeCapabilityHandler` (`aura-effects`) stores a boot-time immutable capability snapshot and can load Telltale runtime-contract inventories.
+- `aura-protocol::admission` declares protocol requirements (`aura.consensus`, `aura.sync.epoch_rotation`) and maps them to capability keys.
+
+Current protocol capability keys include:
+
+- `byzantine_envelope` for consensus ceremony admission.
+- `termination_bounded` for sync epoch-rotation admission.
+- `reconfiguration` for dynamic topology transfer paths.
+- `mixed_determinism` for cross-target/native-wasm mixed lanes.
+
+Execution order is:
+
+1. Runtime capability admission (theorem-pack surface).
+2. VM/runtime profile gates.
+3. Aura guard chain (`CapGuard → FlowGuard → JournalCoupler → Leakage → Transport`).
+
+Admission diagnostics must respect Aura privacy constraints:
+
+- Production runtime paths must not emit plaintext capability inventory/capability-key events.
+- Admission failures returned to callers use redacted capability references.
+- Detailed admission telemetry belongs in simulator/test lanes only.
+
 ## Failure Handling and Caching
 
 Runtimes cache evaluated capability frontiers per `(ContextId, CapabilityPredicate)` with an epoch tag. Cache entries invalidate when journal policy facts change or when the epoch rotates.

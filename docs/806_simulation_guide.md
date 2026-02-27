@@ -248,6 +248,44 @@ just ci-conformance
 
 Conformance lanes compare execution across platforms using simulation-controlled environments.
 
+## Checkpoints, Contracts, and Shared Replay
+
+Phase 0 hardening uses three simulator workflows as CI gates.
+
+### Checkpoint Snapshot Workflow
+
+`SimulationScenarioHandler` supports portable checkpoint snapshots:
+
+- `export_checkpoint_snapshot(label)` exports a serializable `ScenarioCheckpointSnapshot`.
+- `import_checkpoint_snapshot(snapshot)` restores a checkpoint into a fresh simulator instance.
+
+This enables:
+
+- Baseline checkpoint persistence for representative choreography suites.
+- Restore-and-continue regression tests.
+- Upgrade smoke tests that resume from pre-upgrade snapshots.
+
+Use checkpoints when validating runtime upgrades or migration safety, not only end-to-end success.
+
+### Scenario Contract Workflow
+
+Conformance CI includes scenario contracts for consensus, sync, recovery, and reconfiguration. Each bundle is validated over a seed corpus for:
+
+- Terminal status (`AllDone`).
+- Required labels observed in trace.
+- Minimum observable event count.
+
+Contract results are written as JSON artifacts and CI fails on any violation with structured output.
+
+### Shared Replay Workflow
+
+Replay-heavy parity lanes should use shared replay APIs:
+
+- `run_replay_shared(...)`
+- `run_concurrent_replay_shared(...)`
+
+These APIs reduce duplicate replay state across lanes and keep replay artifacts compatible with canonical trace fragments. Conformance lanes also emit deterministic replay metrics artifacts so regressions in replay footprint are visible during CI review.
+
 ## Best Practices
 
 Start with simple scenarios. Add faults incrementally. Use deterministic seeds. Capture metrics for analysis.

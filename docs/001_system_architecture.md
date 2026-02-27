@@ -309,7 +309,7 @@ Aura classifies operations into categories A, B, and C to decide when consensus 
 - [Operation Categories](107_operation_categories.md)
 - [Aura Crate Structure and Dependency Graph](999_project_structure.md)
 - [Coordination Systems Guide](803_coordination_guide.md)
-- [Development Patterns and Workflows](805_development_patterns.md)
+- [Development Patterns and Workflows](805_development_patterns_guide.md)
 - [Testing Guide](805_testing_guide.md)
 - [Distributed Systems Contract](004_distributed_systems_contract.md)
 - [Aura System Invariants](005_system_invariants.md)

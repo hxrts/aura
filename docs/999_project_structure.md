@@ -973,7 +973,7 @@ Some effect traits in aura-core (e.g., `BloomEffects`) represent pure mathematic
 
 This is acceptable technical debt - the pattern consistency outweighs the semantic impurity. Future refactoring may move pure math to methods on types in aura-core.
 
-For detailed guidance on code location decisions, see [Development Patterns and Workflows](805_development_patterns.md).
+For detailed guidance on code location decisions, see [Development Patterns and Workflows](805_development_patterns_guide.md).
 
 ### Architectural Compliance Checking
 
@@ -1382,18 +1382,18 @@ The `just check-arch --serialization` command validates:
 - **How authorization and capabilities work** → `docs/104_authorization.md`
 - **How Biscuit tokens work** → `docs/104_authorization.md` + `aura-authorization/src/biscuit/`
 - **How to get started as a new developer** → `docs/801_hello_world_guide.md`
-- **How core systems work together** → `docs/802_core_systems_guide.md`
+- **How core systems work together** → `docs/805_development_patterns_guide.md`
 - **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`
 - **How simulation works** → `docs/806_simulation_guide.md`
 - **How maintenance and OTA updates work** → `docs/808_maintenance_guide.md` + `docs/115_maintenance.md`
-- **How development patterns work** → `docs/805_development_patterns.md`
+- **How development patterns work** → `docs/805_development_patterns_guide.md`
 - **The project's goals and constraints** → `docs/000_project_overview.md`
 - **How to debug architecture** → `just check-arch` + this document
 
 ### Layer-Based Development Workflow
 **Working on Layer 1 (Foundation)?** Read: `docs/105_effect_system_and_runtime.md`  
 **Working on Layer 2 (Domains)?** Read: Domain-specific docs (`docs/100-112`)  
-**Working on Layer 3 (Effects)?** Read: `docs/805_development_patterns.md`  
+**Working on Layer 3 (Effects)?** Read: `docs/805_development_patterns_guide.md`  
 **Working on Layer 4 (Protocols)?** Read: `docs/108_mpst_and_choreography.md`  
 **Working on Layer 5 (Features)?** Read: `docs/803_coordination_guide.md`  
 **Working on Layer 6 (Runtime)?** Read: `aura-agent/` and `aura-simulator/`  
@@ -1529,6 +1529,6 @@ Formal verification bridge to Quint model checker and property evaluator.
 ## Documents That Reference This Guide
 
 - [System Architecture](001_system_architecture.md) - References the 8-layer architecture defined here
-- [Development Patterns and Workflows](805_development_patterns.md) - Uses crate organization patterns from this guide
+- [Development Patterns and Workflows](805_development_patterns_guide.md) - Uses crate organization patterns from this guide
 - [Effect System and Runtime](105_effect_system_and_runtime.md) - Implements the effect system architecture described here
 - [Testing Guide](805_testing_guide.md) - Uses the testing infrastructure organization from this guide

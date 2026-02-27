@@ -275,6 +275,6 @@ See [System Invariants](005_system_invariants.md) for details. When developing, 
 
 You now have a working Aura development environment. The hello world protocol demonstrates basic choreographic programming concepts.
 
-Continue with [Core Systems Guide](802_core_systems_guide.md) to learn about effect systems, authentication, and capabilities. Learn advanced coordination patterns in [Coordination Systems Guide](803_coordination_guide.md). For detailed protocol development, see [MPST and Choreography](108_mpst_and_choreography.md).
+Continue with [Development Patterns and Workflows](805_development_patterns_guide.md) to learn about effect systems, time domain selection, authentication, and capabilities. Learn advanced coordination patterns in [Coordination Systems Guide](803_coordination_guide.md). For detailed protocol development, see [MPST and Choreography](108_mpst_and_choreography.md).
 
 Explore the simulation system in [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md) for comprehensive protocol testing approaches.

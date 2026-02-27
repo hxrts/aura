@@ -90,6 +90,30 @@ A[leak = "External,Neighbor"] -> B: PublicMsg;
 A[leak: External] -> B: PublicMsg;
 ```
 
+### Protocol Artifact Requirements
+
+Aura binds choreography bundles to runtime capability requirements through `aura-protocol::admission` and adapter/VM admission hooks.
+
+```rust
+use aura_protocol::admission::{required_capability_keys, PROTOCOL_AURA_CONSENSUS};
+use aura_effects::RuntimeCapabilityHandler;
+
+let required = required_capability_keys(PROTOCOL_AURA_CONSENSUS);
+let capability_handler = std::sync::Arc::new(RuntimeCapabilityHandler::from_pairs(
+    required.iter().map(|capability| (capability.as_str(), true)),
+));
+
+let adapter = AuraProtocolAdapter::new(effects, authority_id, role, role_map)
+    .with_runtime_capability_admission(capability_handler, required);
+```
+
+Current registry mappings:
+
+- `aura.consensus` -> `byzantine_envelope`
+- `aura.sync.epoch_rotation` -> `termination_bounded`
+
+For VM-backed execution, use `AuraChoreoEngine::open_session_admitted(...)` with the required artifact keys before stepping/running the session.
+
 ### Effect Command Generation
 
 The macro generates an `effect_bridge` module containing:
@@ -391,6 +415,23 @@ Generated runners call `provide_message` for outbound payloads and `select_branc
 ### 10.4 Integration Features
 
 The runtime provides guard chain integration (CapGuard → FlowGuard → JournalCoupler), transport effects for message passing, and session lifecycle management with metrics.
+
+### 10.5 Output and Flow Policy Integration Points
+
+Aura binds choreography execution to VM output/flow gates at the runtime boundary.
+
+`AuraVmEffectHandler` tags VM-observable operations with output-condition predicate hints so `OutputConditionPolicy` can enforce commit visibility rules. The hardening profile allow-list admits only known predicates (transport send/recv, protocol choice/step, guard acquire/release). Unknown predicates are rejected in CI profiles.
+
+Flow constraints are enforced with `FlowPolicy::PredicateExpr(...)` derived from Aura role/category constraints. This keeps pre-send flow checks aligned with Aura's information-flow contract while preserving deterministic replay behavior.
+
+Practical integration points:
+
+1. Choreography annotations declare intent (`guard_capability`, `flow_cost`, `journal_facts`, `leak`).
+2. Macro output emits `EffectCommand` sequences.
+3. Guard chain evaluates commands and budgets at send sites.
+4. VM output/flow policies gate observable commits and cross-role message flow before transport effects execute.
+
+This means choreography-level guard semantics and VM-level hardening are additive, not competing: annotations define required effects; policies constrain which effects are allowed to become observable.
 
 ## 11. Summary
 

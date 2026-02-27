@@ -111,4 +111,4 @@ See the consensus implementation for best-practice reference:
 
 - [Operation Categories](107_operation_categories.md) for classification and ceremony contract
 - [MPST and Choreography](108_mpst_and_choreography.md) for choreography DSL and runtime
-- [Development Patterns](805_development_patterns.md) for general development workflows
+- [Development Patterns](805_development_patterns_guide.md) for general development workflows
