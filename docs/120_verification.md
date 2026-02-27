@@ -149,6 +149,8 @@ axiom hash_collision_resistance :
 
 Proofs that depend on these assumptions are sound under standard cryptographic hardness assumptions.
 
+The consensus proofs also depend on domain-level axioms for signature binding. These axioms establish that valid signatures bind to unique results. See `verification/lean/Aura/Assumptions.lean` for the full axiom reduction analysis.
+
 ### Claims Bundles
 
 Related theorems group into claims bundles.

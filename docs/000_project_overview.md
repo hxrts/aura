@@ -26,7 +26,7 @@ The layers are as follows:
 
 8. Testing and tools (`aura-testkit`, `aura-quint`): Test fixtures, mock effect handlers, and simulation harnesses.
 
-**Lifecycle taxonomy**: Aura separates key generation (K1/K2/K3) from agreement/finality (A1/A2/A3). Fast paths (provisional/coordinator) provide immediate usability, but durable shared state is always consensus-finalized.
+Aura separates key generation (K1/K2/K3) from agreement and finality (A1/A2/A3). Fast paths using provisional or coordinator modes provide immediate usability. Durable shared state is always consensus-finalized.
 
 ## Documentation Index
 
@@ -46,21 +46,17 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 **Core Systems**
 
-[Authority and Identity](102_authority_and_identity.md) describes the authority-centric identity model with opaque authorities and relational contexts.
+[Authority and Identity](102_authority_and_identity.md) describes the authority-centric identity model with opaque authorities, relational contexts, and commitment tree structure.
 
 [Identifiers and Boundaries](101_identifiers_and_boundaries.md) documents the identifier system and context isolation.
 
-[Authority and Identity](102_authority_and_identity.md) covers the commitment tree structure for threshold identity management.
+[Operation Categories](107_operation_categories.md) defines the A/B/C operation classification, ceremony contract for key rotations and membership changes, and how ceremonies relate to optimistic CRDT operations.
 
-[Operation Categories](107_operation_categories.md) defines the A/B/C operation classification, ceremony contract for key rotations and membership changes (devices, guardians, groups, home authorities, etc.), and consistency metadata.
-
-[Journal System](103_journal.md) documents the fact-based journal, validation rules, and deterministic reduction flows.
+[Journal System](103_journal.md) documents the fact-based journal, validation rules, deterministic reduction flows, and flow budgets.
 
 [Relational Contexts](112_relational_contexts.md) covers guardian bindings, recovery grants, and context-scoped journals.
 
 [Consensus](106_consensus.md) describes the Aura Consensus protocol for strong agreement.
-
-[Operation Categories](107_operation_categories.md) defines the A/B/C operation classification used throughout the system and how ceremonies relate to optimistic CRDT operations.
 
 [Effect System and Runtime](105_effect_system_and_runtime.md) covers effect system architecture and runtime composition.
 
@@ -71,8 +67,6 @@ Additional documentation covers specific aspects of the system. The Foundation c
 [Authorization](104_authorization.md) describes the authorization flow from capabilities to Biscuit tokens.
 
 [Rendezvous Architecture](111_rendezvous.md) covers context-scoped rendezvous envelopes and channel establishment.
-
-[Journal System](103_journal.md) describes fact-based journals, validation rules, deterministic reduction, and flow budgets.
 
 [Maintenance](115_maintenance.md) covers the distributed maintenance stack including snapshots and garbage collection.
 
@@ -88,13 +82,11 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to Aura.
 
-[Development Patterns and Workflows](805_development_patterns_guide.md) explains core implementation patterns, including time domain selection.
+[Development Patterns and Workflows](805_development_patterns_guide.md) explains core implementation patterns, time domain selection, code location guidance, and typical workflows.
 
 [Coordination Guide](803_coordination_guide.md) covers choreographic protocol design and implementation patterns.
 
 [Advanced Coordination Guide](804_advanced_coordination_guide.md) documents advanced techniques for distributed coordination.
-
-[Development Patterns and Workflows](805_development_patterns_guide.md) covers practical patterns for developing Aura systems, including code location guidance and typical implementation workflows.
 
 [Testing Guide](805_testing_guide.md) describes property testing, simulation harnesses, and validation frameworks.
 

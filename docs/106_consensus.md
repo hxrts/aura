@@ -836,11 +836,11 @@ We intentionally sacrifice tight timing bounds (the theoretical 2Δ from [optima
 
 ### Parameter Guidance
 
-- `T_fallback`: set to roughly `2–3 ×` the median witness RTT. Too aggressive causes unnecessary fallback; too lax delays recovery when an initiator stalls.
+- `T_fallback`: set to roughly 2-3 times the median witness RTT. Too aggressive causes unnecessary fallback. Too lax delays recovery when an initiator stalls.
 - Gossip fanout `f`: see the fanout adequacy analysis below for principled selection.
-- Gossip interval: 250–500 ms is a good default. Ensure at least a few gossip rounds occur before timers retrigger, giving the network time to converge.
+- Gossip interval: 250-500 ms is a good default. Ensure at least a few gossip rounds occur before timers retrigger. This gives the network time to converge.
 
-These parameters should be tuned per deployment, but the ranges above keep fallback responsive without overwhelming the network.
+These parameters should be tuned per deployment. The ranges above keep fallback responsive without overwhelming the network.
 
 ### Fanout Adequacy for Slow Path
 
