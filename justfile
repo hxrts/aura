@@ -180,6 +180,7 @@ ci-harness-build:
 # Harness contract tests (for CI harness scaffolding)
 ci-harness-contract:
     cargo test -p aura-harness --test contract_local_loopback -q
+    cargo test -p aura-harness --test contract_suite -q
 
 # Harness replay regression (nightly mixed-topology lane)
 ci-harness-replay:
