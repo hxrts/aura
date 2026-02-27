@@ -42,6 +42,12 @@ pub struct InstanceConfig {
     pub bind_address: String,
     #[serde(default)]
     pub demo_mode: bool,
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<String>,
+    pub log_path: Option<PathBuf>,
     pub ssh_host: Option<String>,
     pub remote_workdir: Option<PathBuf>,
     pub lan_discovery: Option<LanDiscoveryConfig>,
@@ -160,6 +166,14 @@ impl RunConfig {
                             instance.id
                         );
                     }
+                    if instance
+                        .command
+                        .as_deref()
+                        .map(str::trim)
+                        .is_some_and(str::is_empty)
+                    {
+                        bail!("local instance {} has empty command", instance.id);
+                    }
                 }
                 InstanceMode::Ssh => {
                     if instance
@@ -178,6 +192,15 @@ impl RunConfig {
                         .unwrap_or(true)
                     {
                         bail!("ssh instance {} must set remote_workdir", instance.id);
+                    }
+                    if instance.command.is_some()
+                        || !instance.args.is_empty()
+                        || !instance.env.is_empty()
+                    {
+                        bail!(
+                            "ssh instance {} must not set local command/args/env",
+                            instance.id
+                        );
                     }
                 }
             }
@@ -276,6 +299,10 @@ mod tests {
                     device_id: None,
                     bind_address: "127.0.0.1:41001".to_string(),
                     demo_mode: false,
+                    command: None,
+                    args: vec![],
+                    env: vec![],
+                    log_path: None,
                     ssh_host: None,
                     remote_workdir: None,
                     lan_discovery: None,
@@ -288,6 +315,10 @@ mod tests {
                     device_id: None,
                     bind_address: "127.0.0.1:41002".to_string(),
                     demo_mode: false,
+                    command: None,
+                    args: vec![],
+                    env: vec![],
+                    log_path: None,
                     ssh_host: None,
                     remote_workdir: None,
                     lan_discovery: None,

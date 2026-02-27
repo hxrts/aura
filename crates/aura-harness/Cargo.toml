@@ -28,3 +28,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+portable-pty = "0.9"
+vt100 = "0.15"
+regex = "1.11"

@@ -10,6 +10,9 @@ pub trait InstanceBackend {
     fn backend_kind(&self) -> &'static str;
     fn start(&mut self) -> Result<()>;
     fn stop(&mut self) -> Result<()>;
+    fn snapshot(&self) -> Result<String>;
+    fn send_keys(&mut self, keys: &str) -> Result<()>;
+    fn tail_log(&self, lines: usize) -> Result<Vec<String>>;
     fn restart(&mut self) -> Result<()> {
         self.stop()?;
         self.start()
@@ -31,6 +34,13 @@ impl BackendHandle {
     }
 
     pub fn as_trait_mut(&mut self) -> &mut dyn InstanceBackend {
+        match self {
+            Self::Local(backend) => backend,
+            Self::Ssh(backend) => backend,
+        }
+    }
+
+    pub fn as_trait(&self) -> &dyn InstanceBackend {
         match self {
             Self::Local(backend) => backend,
             Self::Ssh(backend) => backend,
