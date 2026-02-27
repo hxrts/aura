@@ -9,6 +9,8 @@ use aura_harness::build_startup_summary;
 use aura_harness::config::require_existing_file;
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::load_and_validate_run_config;
+use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
+use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
 use aura_harness::tool_api::{ToolApi, ToolRequest};
 use clap::{Parser, Subcommand};
@@ -125,11 +127,26 @@ fn run_with_artifacts(
     }
 
     let events = tool_api.event_snapshot();
+    let action_log = tool_api.action_log();
     tool_api.stop_all()?;
+
+    let routing_metadata: Vec<_> = config
+        .instances
+        .iter()
+        .map(|instance| AddressResolver::resolve(instance, &instance.bind_address))
+        .collect();
+    let replay_bundle = ReplayBundle {
+        schema_version: REPLAY_SCHEMA_VERSION,
+        run_config: config.clone(),
+        actions: action_log,
+        routing_metadata: routing_metadata.clone(),
+    };
 
     artifact_bundle.write_json("startup_summary.json", summary)?;
     artifact_bundle.write_json("events.json", &events)?;
     artifact_bundle.write_json("initial_screens.json", &initial_screens)?;
+    artifact_bundle.write_json("routing_metadata.json", &routing_metadata)?;
+    artifact_bundle.write_json("replay_bundle.json", &replay_bundle)?;
 
     Ok(())
 }
@@ -170,7 +187,17 @@ fn tool(args: ToolArgs) -> Result<()> {
 
 fn replay(args: ReplayArgs) -> Result<()> {
     require_existing_file(&args.bundle, "replay bundle")?;
-    println!("replay bundle accepted: {}", args.bundle.display());
-    println!("replay execution will be implemented in Phase 2");
+    let payload = std::fs::read_to_string(&args.bundle).with_context(|| {
+        format!(
+            "failed to read replay bundle from {}",
+            args.bundle.display()
+        )
+    })?;
+    let bundle = parse_bundle(&payload)?;
+    let outcome = ReplayRunner::execute(&bundle)?;
+    println!(
+        "replay_ok actions_executed={} mismatches={}",
+        outcome.actions_executed, outcome.mismatches
+    );
     Ok(())
 }

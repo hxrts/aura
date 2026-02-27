@@ -81,13 +81,24 @@ pub enum ToolResponse {
     Error { message: String },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolActionRecord {
+    pub request: ToolRequest,
+    pub response: ToolResponse,
+}
+
 pub struct ToolApi {
     coordinator: HarnessCoordinator,
+    action_log: Vec<ToolActionRecord>,
 }
 
 impl ToolApi {
     pub fn new(coordinator: HarnessCoordinator) -> Self {
-        Self { coordinator }
+        Self {
+            coordinator,
+            action_log: Vec::new(),
+        }
     }
 
     pub fn start_all(&mut self) -> anyhow::Result<()> {
@@ -99,6 +110,7 @@ impl ToolApi {
     }
 
     pub fn handle_request(&mut self, request: ToolRequest) -> ToolResponse {
+        let request_for_log = request.clone();
         let outcome = match request {
             ToolRequest::Screen { instance_id } => self
                 .coordinator
@@ -140,15 +152,26 @@ impl ToolApi {
                 .map(|_| serde_json::json!({ "status": "killed" })),
         };
 
-        match outcome {
+        let response = match outcome {
             Ok(payload) => ToolResponse::Ok { payload },
             Err(error) => ToolResponse::Error {
                 message: error.to_string(),
             },
-        }
+        };
+
+        self.action_log.push(ToolActionRecord {
+            request: request_for_log,
+            response: response.clone(),
+        });
+
+        response
     }
 
     pub fn event_snapshot(&self) -> Vec<crate::events::HarnessEvent> {
         self.coordinator.event_snapshot()
+    }
+
+    pub fn action_log(&self) -> Vec<ToolActionRecord> {
+        self.action_log.clone()
     }
 }
