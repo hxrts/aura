@@ -645,20 +645,42 @@ pub async fn start_direct_chat(
     contact_id: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    let channel_id = dm_channel_id(contact_id);
-
-    // Parse contact_id as AuthorityId for lookup
-    let authority_id =
-        parse_authority_id(contact_id).unwrap_or_else(|_| AuthorityId::new_from_entropy([1u8; 32]));
-
+    let backend = messaging_backend(app_core).await;
     let contacts = contacts_snapshot(app_core).await;
 
     // Get contact name from ViewState for the channel name
     let contact_name = contacts
-        .contact(&authority_id)
+        .contact(
+            &parse_authority_id(contact_id)
+                .unwrap_or_else(|_| AuthorityId::new_from_entropy([1u8; 32])),
+        )
         .map(|c| c.nickname.clone())
         .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]));
 
+    if backend == MessagingBackend::Runtime {
+        // Runtime mode needs a real channel/context so send_message can route through AMP.
+        // Reuse the channel creation path with a single member to establish a direct room.
+        let members = vec![contact_id.to_string()];
+        let channel_name = if contact_name.trim().is_empty() {
+            format!("dm-{}", &contact_id[..8.min(contact_id.len())])
+        } else {
+            format!("DM: {contact_name}")
+        };
+        let channel_id = create_channel(
+            app_core,
+            &channel_name,
+            Some(format!("Direct messages with {contact_id}")),
+            &members,
+            2,
+            timestamp_ms,
+        )
+        .await?;
+        return Ok(channel_id.to_string());
+    }
+
+    let channel_id = dm_channel_id(contact_id);
+    let authority_id =
+        parse_authority_id(contact_id).unwrap_or_else(|_| AuthorityId::new_from_entropy([1u8; 32]));
     let now = timestamp_ms;
 
     // Create the DM channel

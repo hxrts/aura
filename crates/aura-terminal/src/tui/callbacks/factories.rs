@@ -390,7 +390,8 @@ impl ContactsCallbacks {
                             contact_id: contact_id_clone,
                         });
                     }
-                    Err(_e) => {
+                    Err(e) => {
+                        tracing::error!(error = %e, contact_id = %contact_id_clone, "StartDirectChat dispatch failed");
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.
                     }
                 }

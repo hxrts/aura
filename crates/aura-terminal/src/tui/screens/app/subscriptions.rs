@@ -424,7 +424,7 @@ fn scoped_channel_snapshot(
 
     for channel in chat_state.all_channels() {
         let channel_id = channel.id.to_string();
-        if !channel_matches_scope(&channel_id, active_scope) {
+        if !channel.is_dm && !channel_matches_scope(&channel_id, active_scope) {
             continue;
         }
         message_count += chat_state.messages_for_channel(&channel.id).len();
@@ -725,6 +725,24 @@ mod tests {
         }
     }
 
+    fn test_dm_channel(id: ChannelId, name: &str) -> AppChannel {
+        AppChannel {
+            id,
+            context_id: None,
+            name: name.to_string(),
+            topic: None,
+            channel_type: ChannelType::DirectMessage,
+            unread_count: 0,
+            is_dm: true,
+            member_ids: Vec::new(),
+            member_count: 2,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        }
+    }
+
     fn test_message(channel_id: ChannelId, id: &str, timestamp: u64) -> Message {
         Message {
             id: id.to_string(),
@@ -777,6 +795,29 @@ mod tests {
         let (channels, message_count) = scoped_channel_snapshot(&state, Some(scope.as_str()));
         assert_eq!(channels.len(), 1);
         assert_eq!(channels[0].id, home_b.to_string());
+        assert_eq!(message_count, 2);
+    }
+
+    #[test]
+    fn scoped_snapshot_keeps_dm_channels_visible_across_scopes() {
+        let home_a = test_channel_id("home-a");
+        let home_b = test_channel_id("home-b");
+        let dm = test_channel_id("dm-contact");
+        let mut state = ChatState::from_channels([
+            test_channel(home_a, "Home A"),
+            test_channel(home_b, "Home B"),
+            test_dm_channel(dm, "DM"),
+        ]);
+
+        state.apply_message(home_a, test_message(home_a, "m1", 1));
+        state.apply_message(home_b, test_message(home_b, "m2", 2));
+        state.apply_message(dm, test_message(dm, "m3", 3));
+
+        let scope = home_b.to_string();
+        let (channels, message_count) = scoped_channel_snapshot(&state, Some(scope.as_str()));
+        assert_eq!(channels.len(), 2);
+        assert!(channels.iter().any(|c| c.id == home_b.to_string()));
+        assert!(channels.iter().any(|c| c.id == dm.to_string()));
         assert_eq!(message_count, 2);
     }
 }
