@@ -23,6 +23,8 @@ pub struct RunSection {
     pub pty_rows: Option<u16>,
     pub pty_cols: Option<u16>,
     pub artifact_dir: Option<PathBuf>,
+    pub global_budget_ms: Option<u64>,
+    pub step_budget_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -329,6 +331,8 @@ mod tests {
                 pty_rows: Some(40),
                 pty_cols: Some(120),
                 artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
             },
             instances: vec![
                 InstanceConfig {

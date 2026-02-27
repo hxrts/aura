@@ -74,6 +74,8 @@ mod tests {
                 pty_rows: Some(40),
                 pty_cols: Some(120),
                 artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
             },
             instances: vec![
                 base_instance("alice", InstanceMode::Local),

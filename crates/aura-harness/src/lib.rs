@@ -11,6 +11,7 @@ pub mod preflight;
 pub mod replay;
 pub mod routing;
 pub mod scenario;
+pub mod screen_normalization;
 pub mod tool_api;
 
 use std::path::Path;

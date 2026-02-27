@@ -35,6 +35,21 @@ pub struct ScenarioExecutor {
     mode: ExecutionMode,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ExecutionBudgets {
+    pub global_budget_ms: Option<u64>,
+    pub default_step_budget_ms: u64,
+}
+
+impl Default for ExecutionBudgets {
+    fn default() -> Self {
+        Self {
+            global_budget_ms: None,
+            default_step_budget_ms: 2000,
+        }
+    }
+}
+
 impl ScenarioExecutor {
     pub fn new(mode: ExecutionMode) -> Self {
         Self { mode }
@@ -53,6 +68,15 @@ impl ScenarioExecutor {
         scenario: &ScenarioConfig,
         tool_api: &mut ToolApi,
     ) -> Result<ScenarioReport> {
+        self.execute_with_budgets(scenario, tool_api, ExecutionBudgets::default())
+    }
+
+    pub fn execute_with_budgets(
+        &self,
+        scenario: &ScenarioConfig,
+        tool_api: &mut ToolApi,
+        budgets: ExecutionBudgets,
+    ) -> Result<ScenarioReport> {
         let machine = StateMachine::from_steps(&scenario.steps);
         let mut current = machine
             .start_state
@@ -60,14 +84,30 @@ impl ScenarioExecutor {
             .ok_or_else(|| anyhow!("scenario has no start state"))?;
         let mut visited = Vec::new();
         let mut transitions = Vec::new();
+        let mut global_remaining = budgets.global_budget_ms;
 
         loop {
             let state = machine
                 .states
                 .get(&current)
                 .ok_or_else(|| anyhow!("missing state {current}"))?;
+            let step_budget = state
+                .step
+                .timeout_ms
+                .unwrap_or(budgets.default_step_budget_ms);
+            if let Some(remaining) = global_remaining {
+                if remaining < step_budget {
+                    bail!(
+                        "scenario budget exceeded at state {} remaining_ms={} required_ms={}",
+                        state.id,
+                        remaining,
+                        step_budget
+                    );
+                }
+                global_remaining = Some(remaining.saturating_sub(step_budget));
+            }
             visited.push(state.id.clone());
-            execute_step(&state.step, tool_api)?;
+            execute_step(&state.step, tool_api, step_budget)?;
 
             let next = match self.mode {
                 ExecutionMode::Scripted => state.next_state.clone(),
@@ -134,7 +174,7 @@ impl StateMachine {
     }
 }
 
-fn execute_step(step: &ScenarioStep, tool_api: &mut ToolApi) -> Result<()> {
+fn execute_step(step: &ScenarioStep, tool_api: &mut ToolApi, step_budget_ms: u64) -> Result<()> {
     match step.action.as_str() {
         "launch_instances" | "noop" => Ok(()),
         "send_keys" => {
@@ -166,7 +206,7 @@ fn execute_step(step: &ScenarioStep, tool_api: &mut ToolApi) -> Result<()> {
                 ToolRequest::WaitFor {
                     instance_id: instance_id.to_string(),
                     pattern: pattern.to_string(),
-                    timeout_ms: step.timeout_ms.unwrap_or(2000),
+                    timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms),
                 },
             )?;
             Ok(())
@@ -198,7 +238,7 @@ fn execute_step(step: &ScenarioStep, tool_api: &mut ToolApi) -> Result<()> {
             Ok(())
         }
         "fault_delay" => {
-            let delay_ms = step.timeout_ms.unwrap_or(50);
+            let delay_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
             Ok(())
         }
@@ -232,6 +272,8 @@ mod tests {
                 pty_rows: Some(40),
                 pty_cols: Some(120),
                 artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -314,6 +356,8 @@ mod tests {
                 pty_rows: Some(40),
                 pty_cols: Some(120),
                 artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),

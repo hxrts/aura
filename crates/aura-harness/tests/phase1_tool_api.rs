@@ -18,6 +18,8 @@ fn tool_api_primitives_control_local_pty_instance() {
             pty_rows: Some(40),
             pty_cols: Some(120),
             artifact_dir: None,
+            global_budget_ms: None,
+            step_budget_ms: None,
         },
         instances: vec![InstanceConfig {
             id: "alice".to_string(),

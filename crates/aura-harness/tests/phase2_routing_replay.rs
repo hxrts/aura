@@ -28,6 +28,8 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
             pty_rows: Some(40),
             pty_cols: Some(120),
             artifact_dir: None,
+            global_budget_ms: None,
+            step_budget_ms: None,
         },
         instances: vec![local_instance(
             "alice",

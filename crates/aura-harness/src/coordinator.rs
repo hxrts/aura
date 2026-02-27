@@ -5,6 +5,7 @@ use anyhow::{anyhow, bail, Result};
 use crate::backend::BackendHandle;
 use crate::config::RunConfig;
 use crate::events::EventStream;
+use crate::screen_normalization::normalize_screen;
 
 pub struct HarnessCoordinator {
     backends: HashMap<String, BackendHandle>,
@@ -86,12 +87,17 @@ impl HarnessCoordinator {
 
         while attempts < max_attempts {
             let screen = self.screen(instance_id)?;
-            if screen.contains(pattern) {
+            let normalized = normalize_screen(&screen);
+            if screen.contains(pattern) || normalized.contains(pattern) {
                 self.events.push(
                     "observation",
                     "wait_for",
                     Some(instance_id.to_string()),
-                    serde_json::json!({ "pattern": pattern, "attempts": attempts + 1 }),
+                    serde_json::json!({
+                        "pattern": pattern,
+                        "attempts": attempts + 1,
+                        "matched_view": if screen.contains(pattern) { "raw" } else { "normalized" }
+                    }),
                 );
                 return Ok(screen);
             }

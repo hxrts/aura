@@ -3,17 +3,18 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use aura_harness::artifacts::ArtifactBundle;
 use aura_harness::build_startup_summary;
 use aura_harness::config::require_existing_file;
 use aura_harness::coordinator::HarnessCoordinator;
-use aura_harness::executor::ScenarioExecutor;
+use aura_harness::executor::{ExecutionBudgets, ScenarioExecutor};
 use aura_harness::load_and_validate_run_config;
 use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
+use aura_harness::screen_normalization::normalize_screen;
 use aura_harness::tool_api::{ToolApi, ToolRequest};
 use clap::{Parser, Subcommand};
 
@@ -148,7 +149,19 @@ fn run_with_artifacts(
 
     let scenario_report = if let Some(scenario) = scenario_config {
         let executor = ScenarioExecutor::from_config(scenario);
-        Some(executor.execute(scenario, &mut tool_api)?)
+        let budgets = ExecutionBudgets {
+            global_budget_ms: config.run.global_budget_ms,
+            default_step_budget_ms: config.run.step_budget_ms.unwrap_or(2000),
+        };
+        match executor.execute_with_budgets(scenario, &mut tool_api, budgets) {
+            Ok(report) => Some(report),
+            Err(error) => {
+                let diagnostics =
+                    collect_timeout_diagnostics(config, &mut tool_api, &error.to_string());
+                artifact_bundle.write_json("timeout_diagnostics.json", &diagnostics)?;
+                return Err(error);
+            }
+        }
     } else {
         None
     };
@@ -182,12 +195,71 @@ fn run_with_artifacts(
     Ok(())
 }
 
+fn collect_timeout_diagnostics(
+    config: &aura_harness::config::RunConfig,
+    tool_api: &mut ToolApi,
+    error_message: &str,
+) -> serde_json::Value {
+    let mut instances = BTreeMap::new();
+    for instance in &config.instances {
+        let screen_response = tool_api.handle_request(ToolRequest::Screen {
+            instance_id: instance.id.clone(),
+        });
+        let raw_screen = match screen_response {
+            aura_harness::tool_api::ToolResponse::Ok { payload } => payload
+                .get("screen")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            aura_harness::tool_api::ToolResponse::Error { message } => {
+                format!("screen_capture_error: {message}")
+            }
+        };
+
+        let log_response = tool_api.handle_request(ToolRequest::TailLog {
+            instance_id: instance.id.clone(),
+            lines: 50,
+        });
+        let log_tail = match log_response {
+            aura_harness::tool_api::ToolResponse::Ok { payload } => payload
+                .get("lines")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([])),
+            aura_harness::tool_api::ToolResponse::Error { message } => {
+                serde_json::json!([format!("tail_log_error: {message}")])
+            }
+        };
+
+        instances.insert(
+            instance.id.clone(),
+            serde_json::json!({
+                "raw_screen": raw_screen,
+                "normalized_screen": normalize_screen(&raw_screen),
+                "log_tail": log_tail
+            }),
+        );
+    }
+
+    serde_json::json!({
+        "error": error_message,
+        "instances": instances,
+        "events": tool_api.event_snapshot()
+    })
+}
+
 fn lint(args: LintArgs) -> Result<()> {
     require_existing_file(&args.config, "run config")?;
     let config = load_and_validate_run_config(&args.config)?;
 
     if let Some(path) = &args.scenario {
-        ScenarioRunner::load_and_validate(path)?;
+        let scenario = ScenarioRunner::load_and_validate(path)?;
+        let lint = ScenarioRunner::lint(&config, &scenario);
+        if !lint.errors.is_empty() {
+            bail!("scenario lint failed: {}", lint.errors.join(" | "));
+        }
+        if !lint.warnings.is_empty() {
+            println!("lint_warnings={}", lint.warnings.join(" | "));
+        }
     }
 
     println!(
