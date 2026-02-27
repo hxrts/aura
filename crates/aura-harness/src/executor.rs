@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
 use anyhow::{anyhow, bail, Result};
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ScenarioConfig, ScenarioStep};
@@ -39,6 +41,8 @@ pub struct ScenarioExecutor {
 pub struct ExecutionBudgets {
     pub global_budget_ms: Option<u64>,
     pub default_step_budget_ms: u64,
+    pub scenario_seed: u64,
+    pub fault_seed: u64,
 }
 
 impl Default for ExecutionBudgets {
@@ -46,6 +50,8 @@ impl Default for ExecutionBudgets {
         Self {
             global_budget_ms: None,
             default_step_budget_ms: 2000,
+            scenario_seed: 0,
+            fault_seed: 0,
         }
     }
 }
@@ -85,6 +91,8 @@ impl ScenarioExecutor {
         let mut visited = Vec::new();
         let mut transitions = Vec::new();
         let mut global_remaining = budgets.global_budget_ms;
+        let mut scenario_rng = ChaCha8Rng::seed_from_u64(budgets.scenario_seed);
+        let mut fault_rng = ChaCha8Rng::seed_from_u64(budgets.fault_seed);
 
         loop {
             let state = machine
@@ -107,7 +115,13 @@ impl ScenarioExecutor {
                 global_remaining = Some(remaining.saturating_sub(step_budget));
             }
             visited.push(state.id.clone());
-            execute_step(&state.step, tool_api, step_budget)?;
+            execute_step(
+                &state.step,
+                tool_api,
+                step_budget,
+                &mut scenario_rng,
+                &mut fault_rng,
+            )?;
 
             let next = match self.mode {
                 ExecutionMode::Scripted => state.next_state.clone(),
@@ -174,7 +188,13 @@ impl StateMachine {
     }
 }
 
-fn execute_step(step: &ScenarioStep, tool_api: &mut ToolApi, step_budget_ms: u64) -> Result<()> {
+fn execute_step(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    step_budget_ms: u64,
+    scenario_rng: &mut ChaCha8Rng,
+    fault_rng: &mut ChaCha8Rng,
+) -> Result<()> {
     match step.action.as_str() {
         "launch_instances" | "noop" => Ok(()),
         "send_keys" => {
@@ -238,11 +258,17 @@ fn execute_step(step: &ScenarioStep, tool_api: &mut ToolApi, step_budget_ms: u64
             Ok(())
         }
         "fault_delay" => {
-            let delay_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+            let delay_ms = step
+                .timeout_ms
+                .unwrap_or_else(|| 25 + fault_rng.gen_range(0..25));
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
             Ok(())
         }
-        "fault_loss" | "fault_tunnel_drop" => Ok(()),
+        "fault_loss" | "fault_tunnel_drop" => {
+            // Consume deterministic RNG state so replay and injected faults are seed-driven.
+            let _decision: u8 = scenario_rng.gen_range(0..=1);
+            Ok(())
+        }
         action => bail!("unsupported scenario action: {action}"),
     }
 }
@@ -274,6 +300,11 @@ mod tests {
                 artifact_dir: None,
                 global_budget_ms: None,
                 step_budget_ms: None,
+                seed: Some(5),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),
@@ -358,6 +389,11 @@ mod tests {
                 artifact_dir: None,
                 global_budget_ms: None,
                 step_budget_ms: None,
+                seed: Some(6),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
             },
             instances: vec![InstanceConfig {
                 id: "alice".to_string(),

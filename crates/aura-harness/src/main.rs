@@ -8,14 +8,17 @@ use aura_harness::artifacts::ArtifactBundle;
 use aura_harness::build_startup_summary;
 use aura_harness::config::require_existing_file;
 use aura_harness::coordinator::HarnessCoordinator;
+use aura_harness::determinism::build_seed_bundle;
 use aura_harness::executor::{ExecutionBudgets, ScenarioExecutor};
 use aura_harness::load_and_validate_run_config;
 use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
+use aura_harness::resource_guards::ResourceGuard;
 use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
 use aura_harness::screen_normalization::normalize_screen;
 use aura_harness::tool_api::{ToolApi, ToolRequest};
+use aura_harness::{api_version::TOOL_API_DEFAULT_VERSION, artifact_sync::sync_remote_artifacts};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -128,6 +131,10 @@ fn run_with_artifacts(
     preflight_report: &PreflightReport,
     scenario_config: Option<&aura_harness::config::ScenarioConfig>,
 ) -> Result<()> {
+    let seed_bundle = build_seed_bundle(config);
+    let mut resource_guard = ResourceGuard::from_run_config(config);
+    resource_guard.sample("run_start");
+
     let coordinator = HarnessCoordinator::from_run_config(config)?;
     let mut tool_api = ToolApi::new(coordinator);
     tool_api.start_all()?;
@@ -152,6 +159,8 @@ fn run_with_artifacts(
         let budgets = ExecutionBudgets {
             global_budget_ms: config.run.global_budget_ms,
             default_step_budget_ms: config.run.step_budget_ms.unwrap_or(2000),
+            scenario_seed: seed_bundle.scenario_seed,
+            fault_seed: seed_bundle.fault_seed,
         };
         match executor.execute_with_budgets(scenario, &mut tool_api, budgets) {
             Ok(report) => Some(report),
@@ -169,6 +178,7 @@ fn run_with_artifacts(
     let events = tool_api.event_snapshot();
     let action_log = tool_api.action_log();
     tool_api.stop_all()?;
+    resource_guard.sample("run_stop");
 
     let routing_metadata: Vec<_> = config
         .instances
@@ -177,10 +187,14 @@ fn run_with_artifacts(
         .collect();
     let replay_bundle = ReplayBundle {
         schema_version: REPLAY_SCHEMA_VERSION,
+        tool_api_version: TOOL_API_DEFAULT_VERSION.to_string(),
         run_config: config.clone(),
         actions: action_log,
         routing_metadata: routing_metadata.clone(),
+        seed_bundle: seed_bundle.clone(),
     };
+    let remote_sync_report = sync_remote_artifacts(config, artifact_bundle)?;
+    let resource_report = resource_guard.report();
 
     artifact_bundle.write_json("startup_summary.json", summary)?;
     artifact_bundle.write_json("preflight_report.json", preflight_report)?;
@@ -188,6 +202,9 @@ fn run_with_artifacts(
     artifact_bundle.write_json("initial_screens.json", &initial_screens)?;
     artifact_bundle.write_json("routing_metadata.json", &routing_metadata)?;
     artifact_bundle.write_json("replay_bundle.json", &replay_bundle)?;
+    artifact_bundle.write_json("seed_bundle.json", &seed_bundle)?;
+    artifact_bundle.write_json("resource_report.json", &resource_report)?;
+    artifact_bundle.write_json("remote_artifact_sync.json", &remote_sync_report)?;
     if let Some(report) = &scenario_report {
         artifact_bundle.write_json("scenario_report.json", report)?;
     }

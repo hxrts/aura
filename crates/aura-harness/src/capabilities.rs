@@ -76,6 +76,11 @@ mod tests {
                 artifact_dir: None,
                 global_budget_ms: None,
                 step_budget_ms: None,
+                seed: Some(3),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
             },
             instances: vec![
                 base_instance("alice", InstanceMode::Local),

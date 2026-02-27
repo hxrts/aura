@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use aura_harness::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, TunnelConfig};
 use aura_harness::coordinator::HarnessCoordinator;
+use aura_harness::determinism::build_seed_bundle;
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::routing::AddressResolver;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
@@ -30,6 +31,11 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
             artifact_dir: None,
             global_budget_ms: None,
             step_budget_ms: None,
+            seed: Some(8),
+            max_cpu_percent: None,
+            max_memory_bytes: None,
+            max_open_files: None,
+            require_remote_artifact_sync: false,
         },
         instances: vec![local_instance(
             "alice",
@@ -62,6 +68,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
 
     let bundle = ReplayBundle {
         schema_version: REPLAY_SCHEMA_VERSION,
+        tool_api_version: "1.0".to_string(),
         run_config: run_config.clone(),
         actions: tool_api.action_log(),
         routing_metadata: run_config
@@ -69,6 +76,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
             .iter()
             .map(|instance| AddressResolver::resolve(instance, &instance.bind_address))
             .collect(),
+        seed_bundle: build_seed_bundle(&run_config),
     };
 
     let encoded = match serde_json::to_string_pretty(&bundle) {

@@ -25,6 +25,12 @@ pub struct RunSection {
     pub artifact_dir: Option<PathBuf>,
     pub global_budget_ms: Option<u64>,
     pub step_budget_ms: Option<u64>,
+    pub seed: Option<u64>,
+    pub max_cpu_percent: Option<u8>,
+    pub max_memory_bytes: Option<u64>,
+    pub max_open_files: Option<u64>,
+    #[serde(default)]
+    pub require_remote_artifact_sync: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -333,6 +339,11 @@ mod tests {
                 artifact_dir: None,
                 global_budget_ms: None,
                 step_budget_ms: None,
+                seed: None,
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
             },
             instances: vec![
                 InstanceConfig {

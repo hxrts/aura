@@ -1,15 +1,18 @@
 #![allow(missing_docs)]
 
 pub mod api_version;
+pub mod artifact_sync;
 pub mod artifacts;
 pub mod backend;
 pub mod capabilities;
 pub mod config;
 pub mod coordinator;
+pub mod determinism;
 pub mod events;
 pub mod executor;
 pub mod preflight;
 pub mod replay;
+pub mod resource_guards;
 pub mod routing;
 pub mod scenario;
 pub mod screen_normalization;

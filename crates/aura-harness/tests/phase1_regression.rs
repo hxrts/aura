@@ -21,6 +21,11 @@ fn two_local_instances_are_controllable() {
             artifact_dir: None,
             global_budget_ms: None,
             step_budget_ms: None,
+            seed: Some(2),
+            max_cpu_percent: None,
+            max_memory_bytes: None,
+            max_open_files: None,
+            require_remote_artifact_sync: false,
         },
         instances: vec![
             instance("alice", root.join("alice"), "127.0.0.1:42001"),

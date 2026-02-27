@@ -32,6 +32,11 @@ tokio = { workspace = true, features = ["sync"] }
 portable-pty = "0.9"
 vt100 = "0.15"
 regex = "1.11"
+hex = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+sysinfo = { workspace = true }
+aura-core = { path = "../aura-core" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
