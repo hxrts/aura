@@ -8,6 +8,7 @@ use aura_harness::artifacts::ArtifactBundle;
 use aura_harness::build_startup_summary;
 use aura_harness::config::require_existing_file;
 use aura_harness::coordinator::HarnessCoordinator;
+use aura_harness::executor::ScenarioExecutor;
 use aura_harness::load_and_validate_run_config;
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::routing::AddressResolver;
@@ -81,14 +82,21 @@ fn run(args: RunArgs) -> Result<()> {
     require_existing_file(&args.config, "run config")?;
     let config = load_and_validate_run_config(&args.config)?;
 
-    if let Some(path) = &args.scenario {
-        ScenarioRunner::load_and_validate(path)?;
-    }
+    let scenario_config = if let Some(path) = &args.scenario {
+        Some(ScenarioRunner::load_and_validate(path)?)
+    } else {
+        None
+    };
 
     let summary = build_startup_summary(&config);
     let artifact_bundle = ArtifactBundle::create(&args.artifacts_dir, &config.run.name)?;
 
-    let run_result = run_with_artifacts(&config, &artifact_bundle, &summary);
+    let run_result = run_with_artifacts(
+        &config,
+        &artifact_bundle,
+        &summary,
+        scenario_config.as_ref(),
+    );
     if let Err(error) = run_result {
         let failure_payload = serde_json::json!({ "error": error.to_string() });
         let _ = artifact_bundle.write_json("failure.json", &failure_payload);
@@ -106,6 +114,7 @@ fn run_with_artifacts(
     config: &aura_harness::config::RunConfig,
     artifact_bundle: &ArtifactBundle,
     summary: &aura_harness::tool_api::StartupSummary,
+    scenario_config: Option<&aura_harness::config::ScenarioConfig>,
 ) -> Result<()> {
     let coordinator = HarnessCoordinator::from_run_config(config)?;
     let mut tool_api = ToolApi::new(coordinator);
@@ -125,6 +134,13 @@ fn run_with_artifacts(
             initial_screens.insert(instance.id.clone(), screen);
         }
     }
+
+    let scenario_report = if let Some(scenario) = scenario_config {
+        let executor = ScenarioExecutor::from_config(scenario);
+        Some(executor.execute(scenario, &mut tool_api)?)
+    } else {
+        None
+    };
 
     let events = tool_api.event_snapshot();
     let action_log = tool_api.action_log();
@@ -147,6 +163,9 @@ fn run_with_artifacts(
     artifact_bundle.write_json("initial_screens.json", &initial_screens)?;
     artifact_bundle.write_json("routing_metadata.json", &routing_metadata)?;
     artifact_bundle.write_json("replay_bundle.json", &replay_bundle)?;
+    if let Some(report) = &scenario_report {
+        artifact_bundle.write_json("scenario_report.json", report)?;
+    }
 
     Ok(())
 }

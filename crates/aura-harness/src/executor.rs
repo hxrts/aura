@@ -1,0 +1,376 @@
+use std::collections::BTreeMap;
+
+use anyhow::{anyhow, bail, Result};
+use serde::{Deserialize, Serialize};
+
+use crate::config::{ScenarioConfig, ScenarioStep};
+use crate::tool_api::{ToolApi, ToolRequest, ToolResponse};
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    Scripted,
+    Agent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScenarioReport {
+    pub scenario_id: String,
+    pub execution_mode: ExecutionMode,
+    pub states_visited: Vec<String>,
+    pub transitions: Vec<StateTransitionEvent>,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StateTransitionEvent {
+    pub from_state: String,
+    pub to_state: Option<String>,
+    pub reason: String,
+}
+
+pub struct ScenarioExecutor {
+    mode: ExecutionMode,
+}
+
+impl ScenarioExecutor {
+    pub fn new(mode: ExecutionMode) -> Self {
+        Self { mode }
+    }
+
+    pub fn from_config(config: &ScenarioConfig) -> Self {
+        let mode = match config.execution_mode.as_deref() {
+            Some("agent") => ExecutionMode::Agent,
+            _ => ExecutionMode::Scripted,
+        };
+        Self::new(mode)
+    }
+
+    pub fn execute(
+        &self,
+        scenario: &ScenarioConfig,
+        tool_api: &mut ToolApi,
+    ) -> Result<ScenarioReport> {
+        let machine = StateMachine::from_steps(&scenario.steps);
+        let mut current = machine
+            .start_state
+            .clone()
+            .ok_or_else(|| anyhow!("scenario has no start state"))?;
+        let mut visited = Vec::new();
+        let mut transitions = Vec::new();
+
+        loop {
+            let state = machine
+                .states
+                .get(&current)
+                .ok_or_else(|| anyhow!("missing state {current}"))?;
+            visited.push(state.id.clone());
+            execute_step(&state.step, tool_api)?;
+
+            let next = match self.mode {
+                ExecutionMode::Scripted => state.next_state.clone(),
+                // Agent mode currently reuses the same transition graph and chooses the next
+                // valid edge, making behavior deterministic until agent planning is added.
+                ExecutionMode::Agent => state.next_state.clone(),
+            };
+
+            transitions.push(StateTransitionEvent {
+                from_state: state.id.clone(),
+                to_state: next.clone(),
+                reason: "step_complete".to_string(),
+            });
+
+            let Some(next_state) = next else {
+                break;
+            };
+            current = next_state;
+        }
+
+        Ok(ScenarioReport {
+            scenario_id: scenario.id.clone(),
+            execution_mode: self.mode,
+            states_visited: visited,
+            transitions,
+            completed: true,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ScenarioState {
+    id: String,
+    step: ScenarioStep,
+    next_state: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct StateMachine {
+    start_state: Option<String>,
+    states: BTreeMap<String, ScenarioState>,
+}
+
+impl StateMachine {
+    fn from_steps(steps: &[ScenarioStep]) -> Self {
+        let mut states = BTreeMap::new();
+
+        for (index, step) in steps.iter().enumerate() {
+            let next_state = steps.get(index + 1).map(|step| step.id.clone());
+            states.insert(
+                step.id.clone(),
+                ScenarioState {
+                    id: step.id.clone(),
+                    step: step.clone(),
+                    next_state,
+                },
+            );
+        }
+
+        Self {
+            start_state: steps.first().map(|step| step.id.clone()),
+            states,
+        }
+    }
+}
+
+fn execute_step(step: &ScenarioStep, tool_api: &mut ToolApi) -> Result<()> {
+    match step.action.as_str() {
+        "launch_instances" | "noop" => Ok(()),
+        "send_keys" => {
+            let instance_id = step
+                .instance
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
+            let keys = step.expect.clone().unwrap_or_else(|| "\n".to_string());
+            dispatch(
+                tool_api,
+                ToolRequest::SendKeys {
+                    instance_id: instance_id.to_string(),
+                    keys,
+                },
+            )?;
+            Ok(())
+        }
+        "wait_for" => {
+            let instance_id = step
+                .instance
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
+            let pattern = step
+                .expect
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing expect pattern", step.id))?;
+            dispatch(
+                tool_api,
+                ToolRequest::WaitFor {
+                    instance_id: instance_id.to_string(),
+                    pattern: pattern.to_string(),
+                    timeout_ms: step.timeout_ms.unwrap_or(2000),
+                },
+            )?;
+            Ok(())
+        }
+        "restart" => {
+            let instance_id = step
+                .instance
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
+            dispatch(
+                tool_api,
+                ToolRequest::Restart {
+                    instance_id: instance_id.to_string(),
+                },
+            )?;
+            Ok(())
+        }
+        "kill" => {
+            let instance_id = step
+                .instance
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
+            dispatch(
+                tool_api,
+                ToolRequest::Kill {
+                    instance_id: instance_id.to_string(),
+                },
+            )?;
+            Ok(())
+        }
+        "fault_delay" => {
+            let delay_ms = step.timeout_ms.unwrap_or(50);
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            Ok(())
+        }
+        "fault_loss" | "fault_tunnel_drop" => Ok(()),
+        action => bail!("unsupported scenario action: {action}"),
+    }
+}
+
+fn dispatch(tool_api: &mut ToolApi, request: ToolRequest) -> Result<()> {
+    match tool_api.handle_request(request) {
+        ToolResponse::Ok { .. } => Ok(()),
+        ToolResponse::Error { message } => Err(anyhow!(message)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
+    use crate::coordinator::HarnessCoordinator;
+
+    #[test]
+    fn scripted_and_agent_modes_share_same_transition_path() {
+        let temp_root = std::env::temp_dir().join("aura-harness-executor-test");
+        let _ = std::fs::create_dir_all(&temp_root);
+
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "executor-test".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+            },
+            instances: vec![InstanceConfig {
+                id: "alice".to_string(),
+                mode: InstanceMode::Local,
+                data_dir: temp_root,
+                device_id: None,
+                bind_address: "127.0.0.1:45001".to_string(),
+                demo_mode: false,
+                command: Some("bash".to_string()),
+                args: vec!["-lc".to_string(), "cat".to_string()],
+                env: vec![],
+                log_path: None,
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None,
+            }],
+        };
+
+        let scenario = ScenarioConfig {
+            schema_version: 1,
+            id: "executor-smoke".to_string(),
+            goal: "verify transitions".to_string(),
+            execution_mode: None,
+            required_capabilities: vec![],
+            steps: vec![ScenarioStep {
+                id: "step-1".to_string(),
+                action: "noop".to_string(),
+                instance: None,
+                expect: None,
+                timeout_ms: None,
+            }],
+        };
+
+        let mut scripted_api = ToolApi::new(
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
+        );
+        if let Err(error) = scripted_api.start_all() {
+            panic!("start_all failed: {error}");
+        }
+        let scripted = ScenarioExecutor::new(ExecutionMode::Scripted)
+            .execute(&scenario, &mut scripted_api)
+            .unwrap_or_else(|error| panic!("scripted execute failed: {error}"));
+        if let Err(error) = scripted_api.stop_all() {
+            panic!("stop_all failed: {error}");
+        }
+
+        let mut agent_api = ToolApi::new(
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
+        );
+        if let Err(error) = agent_api.start_all() {
+            panic!("start_all failed: {error}");
+        }
+        let agent = ScenarioExecutor::new(ExecutionMode::Agent)
+            .execute(&scenario, &mut agent_api)
+            .unwrap_or_else(|error| panic!("agent execute failed: {error}"));
+        if let Err(error) = agent_api.stop_all() {
+            panic!("stop_all failed: {error}");
+        }
+
+        assert_eq!(scripted.states_visited, agent.states_visited);
+    }
+
+    #[test]
+    fn state_machine_rejects_unknown_action() {
+        let temp_root = std::env::temp_dir().join("aura-harness-executor-test-2");
+        let _ = std::fs::create_dir_all(&temp_root);
+
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "executor-test-2".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+            },
+            instances: vec![InstanceConfig {
+                id: "alice".to_string(),
+                mode: InstanceMode::Local,
+                data_dir: temp_root,
+                device_id: None,
+                bind_address: "127.0.0.1:45002".to_string(),
+                demo_mode: false,
+                command: Some("bash".to_string()),
+                args: vec!["-lc".to_string(), "cat".to_string()],
+                env: vec![],
+                log_path: None,
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None,
+            }],
+        };
+
+        let scenario = ScenarioConfig {
+            schema_version: 1,
+            id: "executor-invalid".to_string(),
+            goal: "verify action validation".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: vec![],
+            steps: vec![ScenarioStep {
+                id: "step-1".to_string(),
+                action: "unsupported_action".to_string(),
+                instance: None,
+                expect: None,
+                timeout_ms: None,
+            }],
+        };
+
+        let mut api = ToolApi::new(
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
+        );
+        if let Err(error) = api.start_all() {
+            panic!("start_all failed: {error}");
+        }
+
+        let error =
+            match ScenarioExecutor::new(ExecutionMode::Scripted).execute(&scenario, &mut api) {
+                Ok(_) => panic!("unsupported actions must fail"),
+                Err(error) => error,
+            };
+        if let Err(error) = api.stop_all() {
+            panic!("stop_all failed: {error}");
+        }
+
+        assert!(error.to_string().contains("unsupported scenario action"));
+    }
+}

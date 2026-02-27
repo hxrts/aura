@@ -5,6 +5,7 @@ pub mod backend;
 pub mod config;
 pub mod coordinator;
 pub mod events;
+pub mod executor;
 pub mod replay;
 pub mod routing;
 pub mod scenario;

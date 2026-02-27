@@ -92,6 +92,7 @@ pub struct ScenarioConfig {
     pub schema_version: u32,
     pub id: String,
     pub goal: String,
+    pub execution_mode: Option<String>,
     #[serde(default)]
     pub required_capabilities: Vec<String>,
     pub steps: Vec<ScenarioStep>,
@@ -259,6 +260,11 @@ impl ScenarioConfig {
         if self.goal.trim().is_empty() {
             bail!("scenario goal must be non-empty");
         }
+        if let Some(mode) = self.execution_mode.as_deref() {
+            if mode != "scripted" && mode != "agent" {
+                bail!("scenario execution_mode must be one of: scripted, agent");
+            }
+        }
         if self.steps.is_empty() {
             bail!("scenario must include at least one step");
         }
@@ -392,6 +398,7 @@ mod tests {
             goal: "test".to_string(),
             required_capabilities: vec![],
             steps: vec![],
+            execution_mode: None,
         };
 
         let error = match config.validate() {
