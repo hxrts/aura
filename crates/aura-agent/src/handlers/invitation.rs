@@ -253,6 +253,8 @@ impl InvitationHandler {
                 CapabilityId::from("invitation:accept"),
                 CapabilityId::from("invitation:decline"),
                 CapabilityId::from("invitation:cancel"),
+                CapabilityId::from("invitation:guardian"),
+                CapabilityId::from("invitation:channel"),
                 CapabilityId::from("invitation:device"),
             ]
         };

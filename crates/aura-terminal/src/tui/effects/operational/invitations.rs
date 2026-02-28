@@ -125,16 +125,22 @@ pub async fn handle_invitations(
                     let home_id = if let Some(id) = extra {
                         id
                     } else {
-                        // Best effort: use the currently-selected home/channel from the reactive view.
+                        // Best effort: use the current home from reactive state.
+                        // Prefer HOMES_SIGNAL; fall back to NEIGHBORHOOD_SIGNAL before "home".
                         let core = app_core.read().await;
                         let homes_state = core
                             .read(&*aura_app::ui::signals::HOMES_SIGNAL)
                             .await
                             .unwrap_or_default();
-                        homes_state
-                            .current_home_id()
-                            .map(|id| id.to_string())
-                            .unwrap_or_else(|| "home".to_string())
+                        if let Some(id) = homes_state.current_home_id() {
+                            id.to_string()
+                        } else if let Ok(neighborhood_state) =
+                            core.read(&*aura_app::ui::signals::NEIGHBORHOOD_SIGNAL).await
+                        {
+                            neighborhood_state.home_home_id.to_string()
+                        } else {
+                            "home".to_string()
+                        }
                     };
 
                     if home_id.trim().is_empty() {
