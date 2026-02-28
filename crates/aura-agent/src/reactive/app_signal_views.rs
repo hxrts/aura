@@ -23,10 +23,11 @@ use aura_app::views::{
 };
 use aura_app::ReactiveHandler;
 use aura_core::effects::reactive::ReactiveEffects;
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinParams};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::{DomainFact, ProtocolRelationalFact};
-use aura_protocol::amp::amp_recv;
+use aura_protocol::amp::{amp_recv, get_channel_state};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -725,6 +726,74 @@ impl ChatSignalView {
             effects,
         }
     }
+
+    async fn ensure_amp_channel_state(
+        &self,
+        context_id: ContextId,
+        channel_id: ChannelId,
+        creator_id: AuthorityId,
+    ) {
+        if get_channel_state(self.effects.as_ref(), context_id, channel_id)
+            .await
+            .is_ok()
+        {
+            return;
+        }
+
+        tracing::debug!(
+            context_id = %context_id,
+            channel_id = %channel_id,
+            creator_id = %creator_id,
+            "Provisioning AMP channel state from inbound ChannelCreated fact"
+        );
+
+        if let Err(err) = self
+            .effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(channel_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+        {
+            let lowered = err.to_string().to_ascii_lowercase();
+            if !lowered.contains("already") && !lowered.contains("exists") {
+                tracing::warn!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    error = %err,
+                    "Failed to provision AMP channel checkpoint from chat fact"
+                );
+                return;
+            }
+        }
+
+        let mut participants = vec![self.own_authority];
+        if creator_id != self.own_authority {
+            participants.push(creator_id);
+        }
+
+        for participant in participants {
+            if let Err(err) = self
+                .effects
+                .join_channel(ChannelJoinParams {
+                    context: context_id,
+                    channel: channel_id,
+                    participant,
+                })
+                .await
+            {
+                tracing::debug!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    participant = %participant,
+                    error = %err,
+                    "AMP join from chat fact provisioning failed (continuing)"
+                );
+            }
+        }
+    }
 }
 
 impl ReactiveView for ChatSignalView {
@@ -778,8 +847,14 @@ impl ReactiveView for ChatSignalView {
                             topic,
                             is_dm,
                             created_at,
+                            creator_id,
                             ..
                         } => {
+                            drop(state);
+                            self.ensure_amp_channel_state(context_id, channel_id, creator_id)
+                                .await;
+                            state = self.state.lock().await;
+
                             let channel = Channel {
                                 id: channel_id,
                                 context_id: Some(context_id),

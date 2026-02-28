@@ -96,37 +96,40 @@ cfg_if! {
                 let port = local_addr.port();
 
                 let mut advertised_addrs = Vec::new();
-                let mut loopback_addrs = Vec::new();
-                match get_if_addrs() {
-                    Ok(ifaces) => {
-                        for iface in ifaces {
-                            let addr = match iface.addr {
-                                IfAddr::V4(v4) => IpAddr::V4(v4.ip),
-                                IfAddr::V6(v6) => IpAddr::V6(v6.ip),
-                            };
-                            if is_advertisable_ip(addr) {
-                                advertised_addrs.push(format!("{addr}:{port}"));
-                                continue;
-                            }
-                            if addr.is_loopback() {
-                                loopback_addrs.push(format!("{addr}:{port}"));
-                                continue;
+                let local_ip = local_addr.ip();
+                if !local_ip.is_unspecified() {
+                    // If bound to a specific interface, advertise only that exact listener address.
+                    advertised_addrs.push(local_addr.to_string());
+                } else {
+                    let mut loopback_addrs = Vec::new();
+                    match get_if_addrs() {
+                        Ok(ifaces) => {
+                            for iface in ifaces {
+                                let addr = match iface.addr {
+                                    IfAddr::V4(v4) => IpAddr::V4(v4.ip),
+                                    IfAddr::V6(v6) => IpAddr::V6(v6.ip),
+                                };
+                                if is_advertisable_ip(addr) {
+                                    advertised_addrs.push(format!("{addr}:{port}"));
+                                    continue;
+                                }
+                                if addr.is_loopback() {
+                                    loopback_addrs.push(format!("{addr}:{port}"));
+                                    continue;
+                                }
                             }
                         }
+                        Err(err) => {
+                            tracing::warn!(error = %err, "Failed to enumerate interfaces for LAN advertise");
+                        }
                     }
-                    Err(err) => {
-                        tracing::warn!(error = %err, "Failed to enumerate interfaces for LAN advertise");
-                    }
-                }
 
-                if advertised_addrs.is_empty() {
-                    if !loopback_addrs.is_empty() {
-                        advertised_addrs.extend(loopback_addrs);
-                    } else if local_addr.ip().is_unspecified() {
-                        advertised_addrs.push(format!("127.0.0.1:{port}"));
-                    } else {
-                        // Fallback to the listener address (may be 0.0.0.0). Better than nothing.
-                        advertised_addrs.push(local_addr.to_string());
+                    if advertised_addrs.is_empty() {
+                        if !loopback_addrs.is_empty() {
+                            advertised_addrs.extend(loopback_addrs);
+                        } else {
+                            advertised_addrs.push(format!("127.0.0.1:{port}"));
+                        }
                     }
                 }
 

@@ -638,7 +638,11 @@ pub async fn send_message_ref(
                 reply_to: None,
             })
             .await
-            .map_err(|e| AuraError::agent(format!("Failed to send message: {e}")))?;
+            .map_err(|e| {
+                AuraError::agent(format!(
+                    "Failed to send message on context {context_id} channel {channel_id}: {e}"
+                ))
+            })?;
 
         let wire = AmpMessage::new(cipher.header.clone(), cipher.ciphertext.clone());
         let sealed = serialize_amp_message(&wire)
