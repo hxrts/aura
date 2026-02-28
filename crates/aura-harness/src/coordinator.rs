@@ -100,7 +100,7 @@ impl HarnessCoordinator {
         while attempts < max_attempts {
             let screen = self.screen(instance_id)?;
             let normalized = normalize_screen(&screen);
-            if screen.contains(pattern) || normalized.contains(pattern) {
+            if normalized.contains(pattern) {
                 self.events.push(
                     "observation",
                     "wait_for",
@@ -108,7 +108,7 @@ impl HarnessCoordinator {
                     serde_json::json!({
                         "pattern": pattern,
                         "attempts": attempts + 1,
-                        "matched_view": if screen.contains(pattern) { "raw" } else { "normalized" }
+                        "matched_view": "normalized"
                     }),
                 );
                 return Ok(screen);

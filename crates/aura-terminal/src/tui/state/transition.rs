@@ -173,11 +173,37 @@ mod tests {
         // Press Enter to send
         let (new_state, commands) = transition(&state, events::enter());
         assert!(new_state.chat.input_buffer.is_empty());
+        assert!(!new_state.chat.insert_mode);
+        assert!(!new_state.is_insert_mode());
+        assert_eq!(new_state.chat.focus, ChatFocus::Channels);
         assert!(commands.iter().any(|c| matches!(
             c,
             TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content })
             if content == "hello"
         )));
+    }
+
+    #[test]
+    fn test_reenter_insert_mode_after_send_does_not_prefix_i() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+
+        // Enter insert mode and send one message.
+        let (state, _) = transition(&state, events::char('i'));
+        let (state, _) = transition(&state, events::char('h'));
+        let (state, commands) = transition(&state, events::enter());
+        assert!(commands.iter().any(|c| matches!(
+            c,
+            TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content })
+            if content == "h"
+        )));
+        assert!(!state.is_insert_mode());
+
+        // Re-enter insert mode and type the next message starter.
+        let (state, _) = transition(&state, events::char('i'));
+        assert!(state.is_insert_mode());
+        let (state, _) = transition(&state, events::char('m'));
+        assert_eq!(state.chat.input_buffer, "m");
     }
 
     #[test]

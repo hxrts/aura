@@ -855,6 +855,20 @@ impl ReactiveView for ChatSignalView {
                                 .await;
                             state = self.state.lock().await;
 
+                            // Seed DM membership from the inbound channel fact so reply
+                            // routing has deterministic peers even before richer membership
+                            // reductions are available.
+                            let (member_ids, member_count) = if is_dm {
+                                let mut members = vec![self.own_authority];
+                                if creator_id != self.own_authority {
+                                    members.push(creator_id);
+                                }
+                                let count = members.len().max(2) as u32;
+                                (members, count)
+                            } else {
+                                (Vec::new(), 0)
+                            };
+
                             let channel = Channel {
                                 id: channel_id,
                                 context_id: Some(context_id),
@@ -867,8 +881,8 @@ impl ReactiveView for ChatSignalView {
                                 },
                                 unread_count: 0,
                                 is_dm,
-                                member_ids: Vec::new(),
-                                member_count: 0,
+                                member_ids,
+                                member_count,
                                 last_message: None,
                                 last_message_time: None,
                                 last_activity: created_at.ts_ms,

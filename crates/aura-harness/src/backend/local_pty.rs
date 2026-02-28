@@ -206,7 +206,7 @@ impl InstanceBackend for LocalPtyBackend {
             if bytes[index] == 0x1b
                 && bytes
                     .get(index + 1)
-                    .is_some_and(|next| *next != b'[' && *next != b'O')
+                    .map_or(true, |next| *next != b'[' && *next != b'O')
             {
                 // Prevent accidental Alt-key combos when callers intend standalone Esc.
                 thread::sleep(Duration::from_millis(40));

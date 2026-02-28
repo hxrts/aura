@@ -255,7 +255,11 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                     commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
                         content,
                     }));
-                    // Stay in insert mode so user can continue typing
+                    state.chat.insert_mode = false;
+                    state.chat.insert_mode_entry_char = None;
+                    state.chat.focus = ChatFocus::Channels;
+                    // Auto-scroll to bottom (show latest messages)
+                    state.chat.message_scroll = 0;
                 }
             }
             Screen::Neighborhood => {
