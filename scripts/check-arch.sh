@@ -112,6 +112,8 @@ ALLOW_TUI_BOOTSTRAP="crates/aura-terminal/src/handlers/tui.rs"
 ALLOW_TUI_INFRA="crates/aura-terminal/src/tui/fullscreen_stdio.rs"
 # Layer 8: Test infrastructure
 ALLOW_TESTS="crates/aura-testkit/|/tests/|/testing/|/examples/|benches/"
+# Layer 8: Harness tooling/runtime glue
+ALLOW_HARNESS="crates/aura-harness/src/"
 # Layer 5: App native-only code (cfg-gated)
 ALLOW_APP_NATIVE="crates/aura-app/src/core/app.rs|crates/aura-app/src/core/signal_sync.rs"
 # Crypto: Direct library usage
@@ -356,14 +358,14 @@ check_effects() {
   # std::fs usage
   local fs_hits filtered_fs
   fs_hits=$(rg --no-heading "std::fs::|std::io::File|std::io::BufReader|std::io::BufWriter" crates -g "*.rs" || true)
-  filtered_fs=$(filter_allow "$fs_hits" "$ALLOW_RUNTIME|$ALLOW_APP_NATIVE|$ALLOW_TUI_BOOTSTRAP|$ALLOW_TUI_INFRA|$ALLOW_MACROS")
+  filtered_fs=$(filter_allow "$fs_hits" "$ALLOW_RUNTIME|$ALLOW_APP_NATIVE|$ALLOW_TUI_BOOTSTRAP|$ALLOW_TUI_INFRA|$ALLOW_MACROS|$ALLOW_HARNESS")
   filtered_fs=$(filter_test_modules "$filtered_fs")
   emit_hits "Direct std::fs (use StorageEffects)" "$filtered_fs"
 
   # std::net usage
   local net_hits filtered_net
   net_hits=$(rg --no-heading "std::net::|TcpStream|TcpListener|UdpSocket" crates -g "*.rs" || true)
-  filtered_net=$(filter_allow "$net_hits" "$ALLOW_RUNTIME")
+  filtered_net=$(filter_allow "$net_hits" "$ALLOW_RUNTIME|$ALLOW_HARNESS")
   emit_hits "Direct std::net (use NetworkEffects)" "$filtered_net"
 
   # ─── Runtime coupling ───
@@ -378,6 +380,7 @@ check_effects() {
     | grep -v "crates/aura-terminal/" \
     | grep -v "crates/aura-composition/" \
     | grep -v "crates/aura-testkit/" \
+    | grep -v "crates/aura-harness/" \
     | grep -v "crates/aura-macros/" \
     | grep -Ev "$ALLOW_APP_NATIVE" \
     | grep -v "crates/aura-authorization/src/storage_authorization.rs" \
@@ -435,6 +438,7 @@ check_effects() {
     | grep -v "crates/aura-effects/src/time.rs" \
     | grep -v "crates/aura-simulator/" \
     | grep -v "crates/aura-testkit/" \
+    | grep -v "crates/aura-harness/" \
     | grep -Ev "/tests/|benches/" || true)
   emit_hits "Direct std/async-std sleep" "$std_sleep"
 
@@ -1137,6 +1141,8 @@ check_style() {
     [[ -z "$dir" ]] && continue
     # Skip if it's a git directory or target
     [[ "$dir" == *".git"* || "$dir" == *"target"* ]] && continue
+    # Skip gitignored directories
+    git check-ignore -q "$dir" 2>/dev/null && continue
     # Check if directory is truly empty (no files, no subdirs)
     local file_count
     file_count=$(find "$dir" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' ')
