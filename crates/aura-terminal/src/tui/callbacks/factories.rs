@@ -277,8 +277,11 @@ impl ChatCallbacks {
                         Ok(_) => {
                             let _ = tx.try_send(UiUpdate::ChannelCreated(channel_name));
                         }
-                        Err(_e) => {
-                            // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                        Err(e) => {
+                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                "create-channel",
+                                e.to_string(),
+                            )));
                         }
                     }
                 });
@@ -1015,6 +1018,7 @@ pub struct NeighborhoodCallbacks {
     pub on_enter_home: Arc<dyn Fn(String, TraversalDepth) + Send + Sync>,
     pub on_go_home: GoHomeCallback,
     pub on_back_to_street: GoHomeCallback,
+    pub on_create_home: CreateHomeCallback,
 }
 
 impl NeighborhoodCallbacks {
@@ -1023,7 +1027,8 @@ impl NeighborhoodCallbacks {
         Self {
             on_enter_home: Self::make_enter_home(ctx.clone(), tx.clone()),
             on_go_home: Self::make_go_home(ctx.clone(), tx.clone()),
-            on_back_to_street: Self::make_back_to_street(ctx, tx),
+            on_back_to_street: Self::make_back_to_street(ctx.clone(), tx.clone()),
+            on_create_home: Self::make_create_home(ctx, tx),
         }
     }
 
@@ -1096,6 +1101,30 @@ impl NeighborhoodCallbacks {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::NavigatedToStreet);
+                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    }
+                }
+            });
+        })
+    }
+
+    fn make_create_home(ctx: Arc<IoContext>, tx: UiUpdateSender) -> CreateHomeCallback {
+        Arc::new(move |name: String, _description: Option<String>| {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            let display_name = name.trim().to_string();
+            let cmd = EffectCommand::CreateHome {
+                name: Some(display_name.clone()),
+            };
+            spawn_ctx(ctx.clone(), async move {
+                match ctx.dispatch(cmd).await {
+                    Ok(_) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
+                            "home",
+                            format!("Home '{display_name}' created"),
+                        )));
                     }
                     Err(_e) => {
                         // Error already emitted to ERROR_SIGNAL by dispatch layer.

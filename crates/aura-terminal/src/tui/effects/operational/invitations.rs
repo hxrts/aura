@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
+use aura_app::ui::signals::SETTINGS_SIGNAL;
 use aura_app::ui::types::InvitationBridgeType;
 use aura_core::effects::reactive::ReactiveEffects;
 
@@ -53,10 +54,29 @@ pub async fn handle_invitations(
 
             let info = match kind {
                 "contact" | "personal" => {
+                    // If no explicit contact nickname is provided, default to the
+                    // sender's current nickname suggestion so recipients can render
+                    // a friendly display name immediately after import.
+                    let contact_nickname = if let Some(name) = extra.as_ref() {
+                        let name = name.trim();
+                        if name.is_empty() {
+                            None
+                        } else {
+                            Some(name.to_string())
+                        }
+                    } else {
+                        let core = app_core.read().await;
+                        core.read(&*SETTINGS_SIGNAL)
+                            .await
+                            .ok()
+                            .map(|settings| settings.nickname_suggestion.trim().to_string())
+                            .filter(|name| !name.is_empty())
+                    };
+
                     match create_contact_invitation(
                         app_core,
                         receiver,
-                        None,
+                        contact_nickname,
                         message.clone(),
                         ttl_ms,
                     )

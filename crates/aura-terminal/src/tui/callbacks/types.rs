@@ -77,6 +77,8 @@ pub type ImportInvitationCallback = IdCallback;
 
 // --- Neighborhood Screen ---
 pub type GoHomeCallback = NoArgCallback;
+/// Create home callback: (name, optional_description)
+pub type CreateHomeCallback = StringOptStringCallback;
 
 // --- App Screen ---
 pub type CreateAccountCallback = IdCallback;

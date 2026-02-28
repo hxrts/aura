@@ -48,8 +48,9 @@ use crate::tui::layout::dim;
 use crate::tui::screens::app::subscriptions::{
     use_authority_id_subscription, use_channels_subscription, use_contacts_subscription,
     use_devices_subscription, use_discovered_peers_subscription, use_messages_subscription,
-    use_nav_status_signals, use_neighborhood_homes_subscription, use_notifications_subscription,
-    use_pending_requests_subscription, use_threshold_subscription,
+    use_nav_status_signals, use_neighborhood_home_meta_subscription,
+    use_neighborhood_homes_subscription, use_notifications_subscription,
+    use_pending_requests_subscription, use_threshold_subscription, SharedNeighborhoodHomeMeta,
 };
 use crate::tui::screens::router::Screen;
 use crate::tui::screens::{
@@ -237,6 +238,35 @@ impl std::ops::Deref for TuiRenderState {
     }
 }
 
+fn sync_neighborhood_navigation_state(
+    state: &mut TuiState,
+    shared_homes: &Arc<std::sync::RwLock<Vec<String>>>,
+    shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
+    shared_home_meta: &SharedNeighborhoodHomeMeta,
+) {
+    let home_count = shared_homes.read().map(|guard| guard.len()).unwrap_or(0);
+    state.neighborhood.home_count = home_count;
+    state.neighborhood.grid.set_count(home_count);
+    state.neighborhood.selected_home = state.neighborhood.grid.current();
+
+    let channel_count = shared_channels.read().map(|guard| guard.len()).unwrap_or(0);
+    state.neighborhood.channel_count = channel_count;
+    if channel_count == 0 {
+        state.neighborhood.selected_channel = 0;
+    } else if state.neighborhood.selected_channel >= channel_count {
+        state.neighborhood.selected_channel = channel_count.saturating_sub(1);
+    }
+
+    let home_meta = shared_home_meta.read().map(|guard| *guard).unwrap_or_default();
+    state.neighborhood.resident_count = home_meta.resident_count;
+    state.neighborhood.steward_actions_enabled = home_meta.steward_actions_enabled;
+    if home_meta.resident_count == 0 {
+        state.neighborhood.selected_resident = 0;
+    } else if state.neighborhood.selected_resident >= home_meta.resident_count {
+        state.neighborhood.selected_resident = home_meta.resident_count.saturating_sub(1);
+    }
+}
+
 #[allow(clippy::field_reassign_with_default)] // Large struct with many conditional fields
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
@@ -371,6 +401,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Neighborhood homes subscription: SharedNeighborhoodHomes for dispatch handlers to read
     // =========================================================================
     let shared_neighborhood_homes = use_neighborhood_homes_subscription(&mut hooks, &app_ctx);
+    let shared_neighborhood_home_meta =
+        use_neighborhood_home_meta_subscription(&mut hooks, &app_ctx);
 
     // =========================================================================
     // Pending requests subscription: SharedPendingRequests for dispatch handlers to read
@@ -893,8 +925,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::ChannelSelected(_) => {
                             // Navigation/state machine owns selected channel.
                         }
-                        UiUpdate::ChannelCreated(_) => {
-                            // CHAT_SIGNAL should reflect the new channel; no extra work.
+                        UiUpdate::ChannelCreated(name) => {
+                            enqueue_toast!(
+                                format!("Created '{name}'."),
+                                crate::tui::state_machine::ToastLevel::Success
+                            );
                         }
                         UiUpdate::ChatStateUpdated {
                             channel_count,
@@ -1513,6 +1548,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         // Clone shared contacts Arc for guardian setup dispatch
         let shared_channels_for_dispatch = shared_channels;
         let shared_neighborhood_homes_for_dispatch = shared_neighborhood_homes;
+        let shared_neighborhood_home_meta_for_dispatch = shared_neighborhood_home_meta;
         let shared_pending_requests_for_dispatch = shared_pending_requests;
         // This Arc is updated by a reactive subscription, so reading from it
         // always gets current contacts (not stale props)
@@ -1531,7 +1567,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Convert iocraft event to aura-core event and run through state machine
             if let Some(core_event) = convert_iocraft_event(event) {
                 // Get current state, apply transition, update state
-                let current = tui.read_clone();
+                let mut current = tui.read_clone();
+                sync_neighborhood_navigation_state(
+                    &mut current,
+                    &shared_neighborhood_homes_for_dispatch,
+                    &shared_channels_for_dispatch,
+                    &shared_neighborhood_home_meta_for_dispatch,
+                );
                 let (mut new_state, commands) = transition(&current, core_event);
 
                 // Sync TuiState changes to iocraft hooks
@@ -1688,7 +1730,14 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 .iter()
                                                 .map(|c| crate::tui::state_machine::ChatMemberCandidate {
                                                     id: c.id.clone(),
-                                                    name: c.nickname.clone(),
+                                                    name: if !c.nickname.is_empty() {
+                                                        c.nickname.clone()
+                                                    } else if let Some(s) = &c.nickname_suggestion {
+                                                        s.clone()
+                                                    } else {
+                                                        let short = c.id.chars().take(8).collect::<String>();
+                                                        format!("{short}...")
+                                                    },
                                                 })
                                                 .collect();
 
@@ -2510,10 +2559,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         );
                                     }
                                     DispatchCommand::CreateHome { name, description } => {
-                                        // UI-only for now; home creation is not wired to runtime yet.
-                                        new_state.toast_success(format!("Home '{name}' created"));
+                                        (cb.neighborhood.on_create_home)(name, description);
                                         new_state.modal_queue.dismiss();
-                                        let _ = description; // Suppress unused warning until wired
                                     }
 
                                     // === Navigation Commands ===

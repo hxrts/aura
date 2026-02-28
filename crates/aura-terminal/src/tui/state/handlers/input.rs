@@ -96,13 +96,8 @@ pub fn handle_mouse_event(
 
 /// Handle a paste event
 ///
-/// Inserts pasted text into the current input buffer if in insert mode.
+/// Inserts pasted text into modal fields or the current input buffer.
 pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>, text: &str) {
-    // Only handle paste if we're in insert mode
-    if !state.is_insert_mode() {
-        return;
-    }
-
     // Handle modal input fields first
     if let Some(modal) = state.modal_queue.current_mut() {
         match modal {
@@ -168,6 +163,11 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
         }
     }
 
+    // Screen-level paste requires insert mode.
+    if !state.is_insert_mode() {
+        return;
+    }
+
     // Handle screen-level input buffers
     match state.screen() {
         Screen::Chat => {
@@ -179,6 +179,45 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
             let _ = text;
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::screens::Screen;
+    use crate::tui::state::views::{ChatFocus, ImportInvitationModalState};
+
+    #[test]
+    fn paste_updates_contacts_import_modal_without_insert_mode() {
+        let mut state = TuiState::new();
+        state.modal_queue.enqueue(QueuedModal::ContactsImport(
+            ImportInvitationModalState::default(),
+        ));
+        assert!(!state.is_insert_mode());
+
+        handle_paste_event(&mut state, &mut Vec::new(), "invite-code");
+
+        match state.modal_queue.current() {
+            Some(QueuedModal::ContactsImport(modal_state)) => {
+                assert_eq!(modal_state.code, "invite-code")
+            }
+            _ => panic!("expected contacts import modal to remain active"),
+        }
+    }
+
+    #[test]
+    fn paste_updates_chat_input_only_in_insert_mode() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Input;
+
+        handle_paste_event(&mut state, &mut Vec::new(), "ignored");
+        assert_eq!(state.chat.input_buffer, "");
+
+        state.chat.insert_mode = true;
+        handle_paste_event(&mut state, &mut Vec::new(), "hello");
+        assert_eq!(state.chat.input_buffer, "hello");
     }
 }
 

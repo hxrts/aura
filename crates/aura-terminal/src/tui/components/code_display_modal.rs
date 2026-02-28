@@ -280,11 +280,41 @@ pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'
 /// Silently succeeds if clipboard is unavailable (e.g., headless environment).
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     use arboard::Clipboard;
+    use std::fs;
+    use std::path::Path;
+
+    let fallback_written = std::env::var("AURA_CLIPBOARD_FILE")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .and_then(|path| {
+            let p = Path::new(path.trim());
+            if let Some(parent) = p.parent() {
+                if let Err(err) = fs::create_dir_all(parent) {
+                    tracing::warn!(error = %err, path = %p.display(), "Failed to create clipboard capture directory");
+                    return None;
+                }
+            }
+            match fs::write(p, text) {
+                Ok(()) => Some(()),
+                Err(err) => {
+                    tracing::warn!(error = %err, path = %p.display(), "Failed to write clipboard capture file");
+                    None
+                }
+            }
+        })
+        .is_some();
 
     match Clipboard::new() {
         Ok(mut clipboard) => clipboard
             .set_text(text)
-            .map_err(|e| format!("Failed to copy: {e}")),
+            .map_err(|e| format!("Failed to copy: {e}"))
+            .or_else(|err| {
+                if fallback_written {
+                    Ok(())
+                } else {
+                    Err(err)
+                }
+            }),
         Err(e) => {
             // Log but don't fail - clipboard may not be available in all environments
             tracing::debug!("Clipboard unavailable: {}", e);

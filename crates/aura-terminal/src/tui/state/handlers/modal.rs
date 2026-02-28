@@ -528,7 +528,6 @@ fn handle_chat_create_key_queue(
                         Some(modal_state.topic.clone())
                     };
                     let members = modal_state.selected_member_ids();
-                    let member_count = members.len();
                     let channel_name = modal_state.name.clone();
 
                     commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
@@ -538,24 +537,8 @@ fn handle_chat_create_key_queue(
                         threshold_k: modal_state.threshold_k,
                     }));
 
-                    // Dismiss modal and show toast
+                    // Dismiss modal; success/error toasts are emitted from async callbacks.
                     state.modal_queue.dismiss();
-                    state.next_toast_id += 1;
-                    let toast_message = if member_count > 0 {
-                        format!(
-                            "Created '{}'. {} invite{} sent.",
-                            channel_name,
-                            member_count,
-                            if member_count == 1 { "" } else { "s" }
-                        )
-                    } else {
-                        format!("Created '{channel_name}'.")
-                    };
-                    state.toast_queue.enqueue(QueuedToast::new(
-                        state.next_toast_id,
-                        toast_message,
-                        ToastLevel::Success,
-                    ));
                 }
             }
             _ => {}

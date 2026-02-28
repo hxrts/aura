@@ -171,9 +171,7 @@ impl InstanceBackend for LocalPtyBackend {
             .with_context(|| format!("instance {} is not running", self.config.id))?;
         let parser = session.parser.blocking_lock();
         let screen = parser.screen();
-        let (_, cols) = screen.size();
-        let rows: Vec<String> = screen.rows(0, cols).collect();
-        Ok(rows.join("\n"))
+        Ok(screen.contents())
     }
 
     fn send_keys(&mut self, keys: &str) -> Result<()> {
@@ -300,5 +298,19 @@ mod tests {
         if let Err(error) = backend.stop() {
             panic!("backend must stop: {error}");
         }
+    }
+
+    #[test]
+    fn local_snapshot_is_bounded_by_pty_rows() {
+        let mut backend = LocalPtyBackend::new(test_config(), Some(40), Some(120));
+        backend.start().expect("backend must start");
+        thread::sleep(Duration::from_millis(50));
+        let screen = backend.snapshot().expect("snapshot must succeed");
+        let line_count = screen.lines().count();
+        assert!(
+            line_count <= 40,
+            "snapshot should not exceed configured PTY rows (got {line_count})"
+        );
+        backend.stop().expect("backend must stop");
     }
 }

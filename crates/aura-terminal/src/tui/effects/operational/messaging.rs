@@ -14,6 +14,8 @@ use std::sync::Arc;
 
 use async_lock::RwLock;
 use aura_app::ui::prelude::*;
+use aura_app::ui::signals::CHAT_SIGNAL;
+use aura_core::effects::reactive::ReactiveEffects;
 
 use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
@@ -23,9 +25,27 @@ use super::EffectCommand;
 // TUI uses *_by_name variants for string-based user input
 pub use aura_app::ui::workflows::messaging::{
     close_channel_by_name, create_channel, invite_user_to_channel, join_channel_by_name,
-    leave_channel_by_name, send_action_by_name, send_direct_message, send_message_by_name,
+    leave_channel_by_name, send_action_by_name, send_direct_message, send_message,
+    send_message_by_name,
     set_topic_by_name, start_direct_chat,
 };
+
+async fn resolve_channel_id(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_ref: &str,
+) -> Option<aura_core::identifiers::ChannelId> {
+    let core = app_core.read().await;
+    let chat_state = core.read(&*CHAT_SIGNAL).await.ok()?;
+
+    if let Some(channel) = chat_state
+        .all_channels()
+        .find(|channel| channel.id.to_string() == channel_ref || channel.name == channel_ref)
+    {
+        return Some(channel.id);
+    }
+
+    channel_ref.parse::<aura_core::identifiers::ChannelId>().ok()
+}
 
 /// Handle messaging commands
 ///
@@ -64,8 +84,12 @@ pub async fn handle_messaging(
 
         EffectCommand::SendMessage { channel, content } => {
             let timestamp = super::time::current_time_ms(app_core).await;
-            // Use send_message_by_name for string-based channel input from TUI
-            match send_message_by_name(app_core, channel, content, timestamp).await {
+            let result = if let Some(channel_id) = resolve_channel_id(app_core, channel).await {
+                send_message(app_core, channel_id, content, timestamp).await
+            } else {
+                send_message_by_name(app_core, channel, content, timestamp).await
+            };
+            match result {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!("Message sent: {message_id}")))),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
                     "Failed to send message: {e}"
@@ -182,8 +206,12 @@ pub async fn handle_messaging(
             content,
         } => {
             let timestamp = super::time::current_time_ms(app_core).await;
-            // Use send_message_by_name for string-based channel input from TUI
-            match send_message_by_name(app_core, channel, content, timestamp).await {
+            let result = if let Some(channel_id) = resolve_channel_id(app_core, channel).await {
+                send_message(app_core, channel_id, content, timestamp).await
+            } else {
+                send_message_by_name(app_core, channel, content, timestamp).await
+            };
+            match result {
                 Ok(message_id) => Some(Ok(OpResponse::Data(format!(
                     "Message retried: {message_id}"
                 )))),

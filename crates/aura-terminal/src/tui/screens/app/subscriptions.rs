@@ -12,12 +12,12 @@ use iocraft::prelude::*;
 use aura_app::ui::signals::{
     ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL,
     CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL,
-    NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
+    HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
     TRANSPORT_PEERS_SIGNAL,
 };
 use aura_app::ui::types::{Channel as AppChannel, ChatState};
 
-use crate::tui::chat_scope::{active_home_scope_id, channel_matches_scope};
+use crate::tui::chat_scope::active_home_scope_id;
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
@@ -375,7 +375,11 @@ pub fn use_messages_subscription(
 
                 // Get messages for that channel (or empty if none selected)
                 let message_list: Vec<Message> = if let Some(channel_id) = channel_id {
-                    if let Ok(cid) = channel_id.parse::<aura_core::identifiers::ChannelId>() {
+                    if let Some(cid) = chat_state
+                        .all_channels()
+                        .find(|channel| channel.id.to_string() == channel_id)
+                        .map(|channel| channel.id)
+                    {
                         chat_state
                             .messages_for_channel(&cid)
                             .iter()
@@ -426,6 +430,12 @@ fn is_dm_like_channel(channel: &AppChannel) -> bool {
 }
 
 fn merge_dm_like_channels(incoming: &ChatState, previous: &ChatState) -> ChatState {
+    if incoming.channel_count() == 0 && previous.channel_count() > 0 {
+        // Runtime reductions may briefly publish an empty chat snapshot during
+        // convergence. Keep the previous view to avoid dropping active channels/messages.
+        return previous.clone();
+    }
+
     let mut merged = incoming.clone();
 
     for channel in previous.all_channels() {
@@ -448,13 +458,34 @@ fn scoped_channel_snapshot(
 ) -> (Vec<Channel>, usize) {
     let mut channels = Vec::new();
     let mut message_count = 0usize;
+    let active_home_channel = active_scope.and_then(|scope| {
+        chat_state
+            .all_channels()
+            .find(|channel| channel.id.to_string() == scope)
+    });
+    let has_active_home_channel = active_home_channel.is_some();
+    let active_home_context = active_home_channel.and_then(|channel| channel.context_id);
 
     for channel in chat_state.all_channels() {
         let channel_id = channel.id.to_string();
         let dm_like = is_dm_like_channel(channel);
 
-        if !dm_like && !channel_matches_scope(&channel_id, active_scope) {
-            continue;
+        if !dm_like {
+            let in_scope = match active_scope {
+                None => true,
+                Some(scope) => {
+                    let id_match = channel_id == scope;
+                    let context_match = active_home_context
+                        .map(|ctx| channel.context_id == Some(ctx))
+                        .unwrap_or(false);
+                    // If we don't have a root home channel in CHAT_SIGNAL yet,
+                    // keep non-DM channels visible instead of hiding everything.
+                    id_match || context_match || !has_active_home_channel
+                }
+            };
+            if !in_scope {
+                continue;
+            }
         }
         message_count += chat_state.messages_for_channel(&channel.id).len();
         channels.push(Channel::from(channel));
@@ -637,6 +668,46 @@ pub fn use_neighborhood_homes_subscription(
     });
 
     shared_homes
+}
+
+/// Shared current-home metadata used by neighborhood state machine navigation.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NeighborhoodHomeMeta {
+    pub resident_count: usize,
+    pub steward_actions_enabled: bool,
+}
+
+pub type SharedNeighborhoodHomeMeta = Arc<RwLock<NeighborhoodHomeMeta>>;
+
+/// Create shared current-home metadata from HOMES_SIGNAL.
+pub fn use_neighborhood_home_meta_subscription(
+    hooks: &mut Hooks,
+    app_ctx: &AppCoreContext,
+) -> SharedNeighborhoodHomeMeta {
+    let shared_meta_ref = hooks.use_ref(|| Arc::new(RwLock::new(NeighborhoodHomeMeta::default())));
+    let shared_meta: SharedNeighborhoodHomeMeta = shared_meta_ref.read().clone();
+
+    hooks.use_future({
+        let app_core = app_ctx.app_core.clone();
+        let meta = shared_meta.clone();
+        async move {
+            subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
+                let snapshot = homes_state
+                    .current_home()
+                    .map(|home| NeighborhoodHomeMeta {
+                        resident_count: home.residents.len(),
+                        steward_actions_enabled: home.is_admin(),
+                    })
+                    .unwrap_or_default();
+                if let Ok(mut guard) = meta.write() {
+                    *guard = snapshot;
+                }
+            })
+            .await;
+        }
+    });
+
+    shared_meta
 }
 
 /// Shared pending recovery requests.
