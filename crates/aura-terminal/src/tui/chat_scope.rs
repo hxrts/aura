@@ -1,6 +1,7 @@
 //! Chat scoping helpers tied to neighborhood traversal state.
 
-use aura_app::ui::types::NeighborhoodState;
+use aura_app::ui::types::{Channel as AppChannel, HomesState, NeighborhoodState};
+use aura_core::identifiers::ChannelId;
 
 /// Resolve the active home scope for chat from neighborhood traversal state.
 #[must_use]
@@ -14,10 +15,28 @@ pub fn active_home_scope_id(neighborhood: &NeighborhoodState) -> String {
 
 /// Returns true when a channel belongs to the active traversal scope.
 #[must_use]
-pub fn channel_matches_scope(channel_id: &str, active_home_scope: Option<&str>) -> bool {
-    active_home_scope
-        .map(|home_id| channel_id == home_id)
-        .unwrap_or(true)
+pub fn channel_matches_scope(
+    channel: &AppChannel,
+    active_home_scope: Option<&str>,
+    homes: Option<&HomesState>,
+) -> bool {
+    let Some(active_home_scope) = active_home_scope else {
+        return true;
+    };
+
+    let Some(homes) = homes else {
+        return true;
+    };
+
+    let Ok(home_id) = active_home_scope.parse::<ChannelId>() else {
+        return true;
+    };
+
+    let Some(home_context_id) = homes.home_state(&home_id).and_then(|home| home.context_id) else {
+        return true;
+    };
+
+    channel.context_id == Some(home_context_id)
 }
 
 #[cfg(test)]
@@ -54,12 +73,13 @@ mod tests {
 
     #[test]
     fn channel_scope_match_defaults_to_true_without_scope() {
-        assert!(channel_matches_scope("abc", None));
+        let channel = aura_app::ui::types::Channel::default();
+        assert!(channel_matches_scope(&channel, None, None));
     }
 
     #[test]
-    fn channel_scope_match_requires_exact_home_channel() {
-        assert!(channel_matches_scope("home-1", Some("home-1")));
-        assert!(!channel_matches_scope("home-2", Some("home-1")));
+    fn channel_scope_match_defaults_true_when_home_mapping_missing() {
+        let channel = aura_app::ui::types::Channel::default();
+        assert!(channel_matches_scope(&channel, Some("not-a-home-id"), None));
     }
 }
