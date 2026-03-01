@@ -21,6 +21,32 @@ EffectCommands; no guard performs I/O directly.
 - Leakage accounting is recorded as journal facts (RelationalFact::LeakageEvent).
 - Guards are pure and deterministic given the snapshot.
 
+## Detailed Invariant Specifications
+
+### `CHARGE_BEFORE_SEND`
+No observable network behavior may occur before capability validation, flow budget charging, and journal coupling succeed.
+
+Enforcement locus:
+- `src/guards/pure.rs`: `GuardChain` defines pure decision order.
+- `src/guards/executor.rs`: `GuardChainExecutor` applies effect commands before transport send.
+- `src/guards/capability_guard.rs`: authorization checks run before budget logic.
+- `src/guards/flow.rs` and `src/guards/journal.rs`: flow charge and journal coupling are linked.
+
+Failure mode:
+- Unauthorized packets reach the network.
+- Budget exhaustion fails open.
+- Journal and transport diverge on send accounting.
+
+Verification hooks:
+- `just check-arch`
+- `cargo test -p aura-protocol guard_chain_invariant`
+- `cargo test -p aura-simulator invariant_tests`
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines guard-mediated observability.
+- [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines charge-before-send and flow budget invariants.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantSentMessagesHaveFacts` and `InvariantFlowBudgetNonNegative`.
+
 ## Boundaries
 - No direct transport or storage calls inside guards.
 - Effect execution happens via interpreters (production, simulation, test).

@@ -32,6 +32,54 @@ conflict-free state reduction across distributed replicas.
 - Namespace isolation: Authority and Context journals distinct.
 - Content addressing: Facts identified by hash (CID).
 
+## Detailed Invariant Specifications
+
+### `CRDT_CONVERGENCE`
+Identical fact sets must reduce to identical state across replicas, independent of arrival order.
+
+Enforcement locus:
+- `src/reduction.rs`: `reduce_authority()` and `reduce_context()` are deterministic reducers.
+- `src/reduction.rs`: validation path enforces structural and attestation preconditions.
+- `src/semilattice/`: join semantics remain commutative, associative, and idempotent.
+- `src/fact.rs`: namespace scoping prevents cross-context pollution during reduction.
+
+Failure mode:
+- Replica divergence for the same fact set.
+- Inconsistent authority or relational state reconstruction.
+- Non-deterministic replay behavior in simulation or recovery.
+
+Verification hooks:
+- `cargo test -p aura-journal convergence`
+- `cargo test -p aura-simulator crdt_convergence_scenario`
+- property tests for deterministic replay and permutation stability
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines join-semilattice semantics and deterministic reduction.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines journal CRDT safety and deterministic reduction order.
+
+### `AUTHORITY_TREE_TOPOLOGY_COMMITMENT_COHERENCE`
+Authority tree topology and commitment caches must remain coherent after every mutation.
+
+Enforcement locus:
+- `src/commitment_tree/authority_state.rs`: deterministic topology materialization.
+- `src/commitment_tree/authority_state.rs`: dirty-path propagation and bottom-up commitment recompute.
+- `src/commitment_tree/authority_state.rs`: topology invariant assertions and validation wrappers.
+- `src/commitment_tree/authority_state.rs`: Merkle proof path updates derived from materialized topology.
+
+Failure mode:
+- Parent and child pointer inconsistency.
+- Root commitment mismatch for equivalent state.
+- Invalid Merkle proofs or non-deterministic branch indexing.
+
+Verification hooks:
+- `cargo test -p aura-journal --test authority_tree_correctness`
+- differential checks against full recomputation
+- randomized mutation sequence checks with invariant assertions
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) requires deterministic state transitions.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) requires safety under replay and anti-entropy.
+
 ## Boundaries
 - No storage implementations (use `StorageEffects`).
 - No multi-party coordination (use `aura-protocol`).

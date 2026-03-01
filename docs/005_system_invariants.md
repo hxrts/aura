@@ -1,136 +1,83 @@
 # Aura System Invariants
 
-This document serves as an index to invariant documentation colocated with enforcement code throughout the Aura codebase. Each invariant is documented where it is enforced, ensuring documentation stays synchronized with implementation.
+This document indexes invariants across Aura and maps them to enforcement loci.
+Invariant specifications live in crate `ARCHITECTURE.md` files.
+Contracts in [Theoretical Model](002_theoretical_model.md), [Privacy and Information Flow Contract](003_information_flow_contract.md), and [Distributed Systems Contract](004_distributed_systems_contract.md) define the cross-crate safety model.
 
-## What Are System Invariants?
+## Scope
 
-System invariants are properties that must always hold true for Aura to maintain its security, consistency, and correctness guarantees. Violating an invariant indicates a critical bug that could compromise the entire system.
+This index tracks invariants that protect safety, consistency, and privacy.
+Every invariant must include a canonical name, enforcement locus, failure mode, and verification hooks.
+Standalone `INVARIANTS.md` files are not used.
 
-## Core System Invariants
+## Canonical Naming
 
-### 1. **Charge-Before-Send**
-**Location**: [`crates/aura-guards/src/guards/INVARIANTS.md`](../crates/aura-guards/src/guards/INVARIANTS.md)
+Use `InvariantXxx` names in proofs and tests.
+Use prose aliases for readability when needed.
+When both forms appear, introduce the alias once and then reference the canonical name.
 
-No observable network behavior may occur without successful authorization and flow budget charging. All messages must pass through the guard chain before reaching the network.
+Examples:
+- `Charge-Before-Send` maps to `InvariantSentMessagesHaveFacts` and `InvariantFlowBudgetNonNegative`.
+- `Context Isolation` maps to `InvariantContextIsolation`.
+- `Secure Channel Lifecycle` maps to `InvariantReceiptValidityWindow` and `InvariantCrossEpochReplayPrevention`.
 
-**Key Properties**:
-- Authorization via capabilities must succeed
-- Flow budget must have sufficient headroom
-- Journal facts must be atomically coupled
-- No bypass paths to `TransportEffects::send()`
+## Core Invariant Index
 
-### 2. **CRDT Convergence**
-**Location**: `crates/aura-journal/` (invariants documented in module code)
+| Alias | Canonical Name(s) | Primary Enforcement | Related Contracts |
+| --- | --- | --- | --- |
+| Charge-Before-Send | `InvariantSentMessagesHaveFacts`, `InvariantFlowBudgetNonNegative` | [crates/aura-guards/ARCHITECTURE.md](../crates/aura-guards/ARCHITECTURE.md) | [Privacy and Information Flow Contract](003_information_flow_contract.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
+| CRDT Convergence | `InvariantCRDTConvergence` | [crates/aura-journal/ARCHITECTURE.md](../crates/aura-journal/ARCHITECTURE.md) | [Theoretical Model](002_theoretical_model.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
+| Context Isolation | `InvariantContextIsolation` | [crates/aura-core/ARCHITECTURE.md](../crates/aura-core/ARCHITECTURE.md) | [Theoretical Model](002_theoretical_model.md), [Privacy and Information Flow Contract](003_information_flow_contract.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
+| Secure Channel Lifecycle | `InvariantSecureChannelLifecycle`, `InvariantReceiptValidityWindow`, `InvariantCrossEpochReplayPrevention` | [crates/aura-rendezvous/ARCHITECTURE.md](../crates/aura-rendezvous/ARCHITECTURE.md) | [Privacy and Information Flow Contract](003_information_flow_contract.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
+| Authority Tree Topology and Commitment Coherence | `InvariantAuthorityTreeTopologyCommitmentCoherence` | [crates/aura-journal/ARCHITECTURE.md](../crates/aura-journal/ARCHITECTURE.md) | [Theoretical Model](002_theoretical_model.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
 
-Identical sets of facts must always produce identical reduced state, ensuring eventual consistency across all nodes.
+## Distributed Contract Invariant Names
 
-**Key Properties**:
-- Deterministic reduction functions
-- Commutative and associative fact operations
-- No external dependencies during reduction
-- Pure functions only (no side effects)
+The distributed and privacy contracts define additional canonical names used by proofs and conformance tests.
+These include:
 
-### 3. **Context Isolation**
-**Location**: [`crates/aura-core/src/relational/INVARIANTS.md`](../crates/aura-core/src/relational/INVARIANTS.md)
+- `InvariantUniqueCommitPerInstance`
+- `InvariantCommitRequiresThreshold`
+- `InvariantEquivocatorsExcluded`
+- `InvariantNonceUnique`
+- `InvariantSequenceMonotonic`
+- `InvariantReceiptValidityWindow`
+- `InvariantCrossEpochReplayPrevention`
+- `InvariantVectorClockConsistent`
+- `InvariantHonestMajorityCanCommit`
+- `InvariantCompromisedNoncesExcluded`
 
-Information must not flow across relational context boundaries without explicit authorization. Each context maintains isolated state.
+When a crate enforces one of these invariants, record the same canonical name in that crate `ARCHITECTURE.md`.
 
-**Key Properties**:
-- Separate journal namespaces per context
-- Facts cannot cross context boundaries
-- Channels bound to single context
-- No cross-context state reduction
+## Validation and Verification
 
-### 4. **Secure Channel Lifecycle**
-**Location**: `crates/aura-transport/` (invariants documented in module code)
+Use `just check-arch` to validate architecture and layering constraints.
+Use `just test` for workspace-wide regression checks.
+Use `just test-crate <crate>` for focused enforcement checks in a crate.
+Use `nix flake check` for hermetic conformance.
 
-Secure channels are strictly bound to epochs and follow a defined state machine. Messages on stale channels must be rejected.
+Formal and model checks should reference the same canonical names listed here and in contracts.
 
-**Key Properties**:
-- Channels bound to specific epoch
-- State transitions follow FSM rules
-- Epoch rotation forces channel closure
-- No messages accepted from wrong epoch
+## Adding or Updating an Invariant
 
-## Derived Invariants
+1. Add or update the invariant under `## Invariants` in the crate `ARCHITECTURE.md`.
+2. Add a detailed specification section in the same file with invariant name, enforcement locus, failure mode, and verification hooks.
+3. Use canonical `InvariantXxx` naming for traceability across docs, tests, and proofs.
+4. Add or update tests and simulator scenarios that detect violations.
+5. Update this index if the invariant is cross-crate or contract-level.
 
-These invariants follow from the core invariants:
+## Incident Handling for Invariant Violations
 
-- **Budget Monotonicity**: Flow budget spent counters only increase
-- **Fact Immutability**: Facts never change after creation  
-- **Epoch Monotonicity**: Epoch numbers only increase
-- **Snapshot Determinism**: Snapshots taken at same facts produce same state
-
-## Validation and Testing
-
-### Automated Validation
-
-Run architectural validation:
-```bash
-just check-arch
-```
-
-This validates:
-- Invariant documentation follows required schema
-- No guard chain bypasses exist
-- Effect placement is correct
-- Impure functions are properly isolated
-
-### Testing Invariants
-
-Each invariant has associated tests:
-
-```bash
-# Test charge-before-send
-cargo test -p aura-protocol guard_chain_invariant
-
-# Test CRDT convergence  
-cargo test -p aura-journal convergence
-
-# Test context isolation
-cargo test -p aura-core context_isolation
-
-# Test channel lifecycle
-cargo test -p aura-transport channel_lifecycle
-```
-
-### Simulator Scenarios
-
-The simulator includes specific scenarios to stress-test invariants:
-
-```bash
-# Run all invariant scenarios
-cargo test -p aura-simulator invariant_tests
-```
-
-## Adding New Invariants
-
-When adding a new invariant:
-
-1. Create `INVARIANTS.md` in the module that enforces it
-2. Follow the schema:
-   - Invariant name
-   - Enforcement locus (module/function)
-   - Failure mode (observable consequences)
-   - Detection method (test/sim/arch-check)
-3. Add tests that verify the invariant
-4. Update this index with a link
-
-## Invariant Violations
-
-If you discover an invariant violation:
-
-1. **STOP** - Do not deploy code with known violations
-2. File a critical bug with:
-   - Which invariant was violated
-   - Steps to reproduce
-   - Potential security impact
-3. Add regression test before fixing
-4. Document the fix in the invariant file
+1. Stop release or deployment for the affected path.
+2. File a critical issue with invariant name, impact, and reproduction steps.
+3. Add a failing regression test that captures the violation.
+4. Implement the fix and reference the canonical invariant name in the change.
+5. Verify conformance and update documentation links if enforcement moved.
 
 ## Related Documentation
 
-- [System Architecture](001_system_architecture.md) - Architectural context for invariants
-- [Distributed Systems Contract](004_distributed_systems_contract.md) - Distributed system guarantees
-- [Information Flow Contract](003_information_flow_contract.md) - Privacy and flow invariants
-- [Effect System and Runtime](105_effect_system_and_runtime.md) - Effect system design
+- [Aura System Architecture](001_system_architecture.md)
+- [Theoretical Model](002_theoretical_model.md)
+- [Privacy and Information Flow Contract](003_information_flow_contract.md)
+- [Distributed Systems Contract](004_distributed_systems_contract.md)
+- [Effect System and Runtime](105_effect_system_and_runtime.md)

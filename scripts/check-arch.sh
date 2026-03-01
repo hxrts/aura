@@ -25,7 +25,7 @@ Options (run all when none given):
   --deps           Dependency direction checks
   --effects        Effect placement and handler sanity
   --guards         Guard-chain bypass heuristics
-  --invariants     INVARIANTS.md schema validation
+  --invariants     ARCHITECTURE.md invariant section validation
   --todos          Incomplete code markers
   --registration   Handler composition vs direct instantiation
   --crypto         Crypto library usage boundaries
@@ -659,19 +659,41 @@ check_guards() {
 # CHECK: Invariant Documentation
 # ═══════════════════════════════════════════════════════════════════════════════
 check_invariants() {
-  section "Invariant docs — INVARIANTS.md must include required headings"
+  section "Invariant docs — crate ARCHITECTURE.md must define invariant sections"
 
-  local inv_files
-  inv_files=$(find crates -name INVARIANTS.md 2>/dev/null | sort)
-  [[ -z "$inv_files" ]] && { violation "No INVARIANTS.md files found"; return; }
+  local arch_files
+  arch_files=$(find crates -maxdepth 2 -name ARCHITECTURE.md 2>/dev/null | sort)
+  [[ -z "$arch_files" ]] && { violation "No crate ARCHITECTURE.md files found"; return; }
 
-  for inv in $inv_files; do
-    local missing=()
-    for heading in "Invariant Name" "Enforcement Locus" "Failure Mode" "Detection Method"; do
-      grep -q "$heading" "$inv" || missing+=("$heading")
-    done
-    [[ ${#missing[@]} -gt 0 ]] && violation "Missing sections [$(IFS=,; echo "${missing[*]}")]: $inv" || info "OK: $inv"
+  local with_invariants=0 with_detailed=0
+  for arch in $arch_files; do
+    if rg -q "^## Invariants" "$arch"; then
+      ((with_invariants+=1))
+      info "Invariants section: $arch"
+    fi
+
+    if rg -q "^## Detailed Invariant Specifications" "$arch"; then
+      ((with_detailed+=1))
+      local missing=()
+      rg -qi "Enforcement locus:" "$arch" || missing+=("Enforcement locus")
+      rg -qi "Failure mode:" "$arch" || missing+=("Failure mode")
+      rg -qi "Verification hooks:" "$arch" || missing+=("Verification hooks")
+      if [[ ${#missing[@]} -gt 0 ]]; then
+        violation "Missing detailed invariant fields [$(IFS=,; echo "${missing[*]}")]: $arch"
+      else
+        info "Detailed invariant fields: $arch"
+      fi
+    fi
   done
+
+  if [[ "$with_invariants" -eq 0 ]]; then
+    violation "No crate ARCHITECTURE.md includes an Invariants section"
+  fi
+  if [[ "$with_detailed" -eq 0 ]]; then
+    info "No crate has detailed invariant specs yet"
+  fi
+
+  return 0
 }
 
 
