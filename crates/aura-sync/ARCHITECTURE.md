@@ -21,6 +21,25 @@ coordination, and writer fence semantics for distributed journal consistency.
 - Protocols should operate on explicit inputs (snapshot, budget, timestamp).
 - Merkle verification ensures fact integrity across peers.
 
+### Detailed Specifications
+
+### InvariantSyncMerkleVerification
+Synchronization must reject unverifiable merkle evidence and preserve guard-aware transport constraints.
+
+Enforcement locus:
+- src protocols validate merkle proofs and fact integrity.
+- Sync paths operate on explicit snapshot, budget, and timestamp inputs.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-sync
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic replication semantics.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines anti-entropy and integrity guarantees.
 ## Boundaries
 - Fact storage lives in aura-journal.
 - Transport effects live in aura-effects.
@@ -28,3 +47,4 @@ coordination, and writer fence semantics for distributed journal consistency.
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+

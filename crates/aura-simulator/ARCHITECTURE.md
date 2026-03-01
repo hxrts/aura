@@ -25,7 +25,27 @@ delays or inherent failures.
 - Must NOT create persistent effect handlers (use aura-effects).
 - Must NOT implement multi-party coordination (use aura-protocol).
 
+### Detailed Specifications
+
+### InvariantSimulationDeterministicReplay
+Given the same seed and inputs, simulation execution paths and outcomes must be deterministic.
+
+Enforcement locus:
+- src simulator control paths derive behavior from explicit deterministic inputs.
+- No direct runtime globals are used for simulation state progression.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-simulator
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic interpretation constraints.
+- [Simulator](../../docs/118_simulator.md) defines replay and determinism expectations.
 ## Boundaries
 - Must NOT be imported by Layers 1-5.
 - Composable fault injection combines with production effects.
 - Quint specs live in verification/quint/.
+

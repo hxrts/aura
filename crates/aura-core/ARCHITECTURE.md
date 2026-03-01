@@ -25,9 +25,9 @@ foundational algebraic types with zero dependencies on other Aura crates.
 - Semilattice laws: monotonic growth (facts), monotonic restriction (capabilities).
 - Context isolation prevents cross-context information flow.
 
-## Detailed Invariant Specifications
+### Detailed Specifications
 
-### `CONTEXT_ISOLATION`
+### InvariantContextIsolation
 Information must not flow across relational context boundaries without explicit authorization.
 
 Enforcement locus:

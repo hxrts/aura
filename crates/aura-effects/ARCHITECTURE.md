@@ -21,7 +21,27 @@ Delegates to OS services for crypto, storage, networking, and time.
 - Handlers must be context-free (no assumptions about caller context).
 - No dependencies on domain crates or aura-protocol.
 
+### Detailed Specifications
+
+### InvariantStatelessHandlerBoundary
+Infrastructure handlers remain stateless, single-party, and isolated from domain semantics.
+
+Enforcement locus:
+- src handler implementations map effect traits to operating system integration points.
+- No domain crate dependencies are introduced in handler modules.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just check-arch and just test-crate aura-effects
+
+Contract alignment:
+- [Aura System Architecture](../../docs/001_system_architecture.md) defines handler placement.
+- [Effect System and Runtime](../../docs/105_effect_system_and_runtime.md) defines stateless handler rules.
 ## Boundaries
 - Stateful caches belong in Layer 6 services.
 - Multi-party coordination belongs in aura-protocol.
 - Application-specific handlers belong in domain crates.
+

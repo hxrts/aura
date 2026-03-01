@@ -21,9 +21,9 @@ EffectCommands; no guard performs I/O directly.
 - Leakage accounting is recorded as journal facts (RelationalFact::LeakageEvent).
 - Guards are pure and deterministic given the snapshot.
 
-## Detailed Invariant Specifications
+### Detailed Specifications
 
-### `CHARGE_BEFORE_SEND`
+### InvariantSentMessagesHaveFacts
 No observable network behavior may occur before capability validation, flow budget charging, and journal coupling succeed.
 
 Enforcement locus:

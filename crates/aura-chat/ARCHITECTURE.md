@@ -20,6 +20,25 @@ state reduction for encrypted group and direct messaging.
 - Message payloads are opaque bytes; decryption is a higher-layer concern.
 - Channel creation and membership changes are journaled as facts.
 
+### Detailed Specifications
+
+### InvariantChatContextReduction
+Chat facts reduce only within their context and preserve deterministic replay order.
+
+Enforcement locus:
+- src fact services and reducers validate context boundaries.
+- Message and membership state transitions are journal backed.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-chat
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines context isolation and deterministic reduction.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines consistency expectations.
 ## Boundaries
 - Encryption/decryption lives in aura-effects (crypto handlers).
 - Transport coordination lives in aura-protocol.
@@ -27,3 +46,4 @@ state reduction for encrypted group and direct messaging.
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+

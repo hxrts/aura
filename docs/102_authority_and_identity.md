@@ -343,7 +343,7 @@ pub fn reduce(ops: &[AttestedOp]) -> Result<TreeState, ReductionError> {
 Conflict resolution uses operation hash as the tie-breaker. When multiple operations share the same parent, they are sorted by hash and the maximum hash wins. This ensures deterministic winner selection across all replicas.
 
 ```mermaid
-graph LR
+graph TD
     OpLog["OpLog<br/>(CRDT OR-set of AttestedOp)"]
     Verify["verify_attested_op()"]
     Check["check_attested_op()"]

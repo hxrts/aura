@@ -19,6 +19,25 @@ relational journal facts.
 - Channel epochs are monotone; committed bumps supersede proposals.
 - Evidence is optional and does not affect channel state reconstruction.
 
+### Detailed Specifications
+
+### InvariantAmpEpochMonotonic
+AMP channel epochs must advance monotonically and committed bumps must supersede proposals.
+
+Enforcement locus:
+- src channel and fact reducers apply epoch transitions.
+- Operation category gates protect high-risk transitions.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-amp
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines monotone transition laws.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines epoch validity expectations.
 ## Boundaries
 - No direct StorageEffects for channel facts (journal only).
 - Evidence storage is isolated behind AmpEvidenceEffects.
@@ -27,3 +46,4 @@ relational journal facts.
 ## Core + Orchestrator Rule
 - Pure helpers live under `amp/core`.
 - Orchestrators must depend on effects explicitly.
+

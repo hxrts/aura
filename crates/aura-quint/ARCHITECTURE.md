@@ -23,7 +23,27 @@ verification capabilities.
 - Used for protocol specification verification, not runtime.
 - Re-exports `quint_evaluator` types for interop.
 
+### Detailed Specifications
+
+### InvariantQuintIrDeterminism
+Quint bridge import and export must produce stable intermediate representation for identical inputs.
+
+Enforcement locus:
+- src bridge import and export modules map model representations deterministically.
+- src bridge validate enforces schema and compatibility checks.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-quint
+
+Contract alignment:
+- [Verification](../../docs/120_verification.md) defines model-checking expectations.
+- [Aura System Invariants](../../docs/005_system_invariants.md) defines canonical invariant naming.
 ## Boundaries
 - Quint specifications live in verification/quint/.
 - Runtime simulation lives in aura-simulator.
 - Protocol implementations live in feature crates.
+

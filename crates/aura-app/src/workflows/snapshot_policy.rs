@@ -4,14 +4,8 @@ use std::sync::Arc;
 
 use crate::signal_defs::{CHAT_SIGNAL, CHAT_SIGNAL_NAME, CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
 use crate::workflows::signals::read_signal;
-use crate::{AppCore, ChatState, ContactsState, RecoveryState, StateSnapshot};
+use crate::{AppCore, ChatState, ContactsState, RecoveryState};
 use async_lock::RwLock;
-
-/// Read a full snapshot. Prefer narrow helpers when possible.
-pub async fn full_snapshot(app_core: &Arc<RwLock<AppCore>>) -> StateSnapshot {
-    let core = app_core.read().await;
-    core.snapshot()
-}
 
 /// Read chat state from a snapshot (narrow scope).
 #[cfg_attr(not(feature = "signals"), allow(dead_code))]

@@ -23,7 +23,27 @@ testing across all layers.
 - Mock effects behave consistently with production ones.
 - Mock handlers MAY be stateful (using `Arc<Mutex<>>`) for controllable testing.
 
+### Detailed Specifications
+
+### InvariantMockContractFidelity
+Mock effects must preserve observable contracts used by production guard and protocol paths.
+
+Enforcement locus:
+- src mock handlers model production effect behavior for deterministic tests.
+- Fixtures and helpers avoid hidden nondeterminism in conformance scenarios.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-testkit
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines expected observable semantics.
+- [Testing Guide](../../docs/805_testing_guide.md) defines mock fidelity requirements.
 ## Boundaries
 - Foundation layers should create internal test utilities instead.
 - Production handlers live in aura-effects (stateless).
 - Simulation runtime lives in aura-simulator.
+

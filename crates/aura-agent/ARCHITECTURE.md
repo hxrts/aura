@@ -38,7 +38,27 @@ management, and choreography adapters.
 - `std::sync` locks where poison detection is required.
 - See subsystem modules for lock ordering rules.
 
+### Detailed Specifications
+
+### InvariantRuntimeCompositionBoundary
+Runtime composition must assemble existing effect handlers without introducing new effect implementations or protocol logic.
+
+Enforcement locus:
+- src/runtime composes handlers and services through registry and builder types.
+- src/builder constrains runtime modes and dependency wiring.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just check-arch and just test-crate aura-agent
+
+Contract alignment:
+- [Aura System Architecture](../../docs/001_system_architecture.md) defines layer boundaries.
+- [Effect System and Runtime](../../docs/105_effect_system_and_runtime.md) defines composition constraints.
 ## Boundaries
 - Stateless handlers live in aura-effects.
 - Protocol logic lives in aura-protocol.
 - Application core lives in aura-app.
+

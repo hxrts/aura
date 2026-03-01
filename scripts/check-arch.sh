@@ -503,14 +503,14 @@ check_effects() {
     hint "Add AURA_EFFECT_ENVELOPE_CLASSIFICATIONS in aura-core and classify each effect kind."
   else
     classified_kinds=$(rg --no-heading '^\s*\(".*",\s*AuraEnvelopeLawClass::' "$registry_file" \
-      | sed -E 's/^\s*\("([^"]+)".*/\1/' | sort -u || true)
+      | sed -E 's/^[[:space:]]*\("([^"]+)".*/\1/' | sort -u || true)
 
     if [[ -z "$classified_kinds" ]]; then
       violation "No classified effect envelope kinds found in $registry_file"
       hint "Populate AURA_EFFECT_ENVELOPE_CLASSIFICATIONS with strict/commutative/algebraic entries."
     else
       duplicate_classified=$(rg --no-heading '^\s*\(".*",\s*AuraEnvelopeLawClass::' "$registry_file" \
-        | sed -E 's/^\s*\("([^"]+)".*/\1/' | sort | uniq -d || true)
+        | sed -E 's/^[[:space:]]*\("([^"]+)".*/\1/' | sort | uniq -d || true)
       if [[ -n "$duplicate_classified" ]]; then
         violation "Duplicate effect envelope classifications found: $(echo "$duplicate_classified" | tr '\n' ' ' | sed 's/  */ /g')"
       fi
@@ -524,7 +524,7 @@ check_effects() {
           "$telltale_src/effect/recording_impl.rs" \
           "$telltale_src/threaded/topology_and_planner.rs" \
           "$telltale_src/vm/topology_and_dispatch.rs" \
-          | sed -E 's/.*effect_kind:\s*"([^"]+)".*/\1/' | sort -u || true)
+          | sed -E 's/.*effect_kind:[[:space:]]*"([^"]+)".*/\1/' | sort -u || true)
 
         if [[ -n "$upstream_kinds" ]]; then
           missing=$(comm -23 <(echo "$upstream_kinds") <(echo "$classified_kinds") || true)
@@ -673,7 +673,7 @@ check_invariants() {
       info "Invariants section: $arch"
     fi
 
-    if rg -q "^## Detailed Invariant Specifications" "$arch"; then
+    if rg -q "^### Detailed Specifications$|^## Detailed Invariant Specifications$" "$arch"; then
       ((with_detailed+=1))
       local missing=()
       rg -qi "Enforcement locus:" "$arch" || missing+=("Enforcement locus")

@@ -23,7 +23,27 @@ inversion through the `RuntimeBridge` trait.
 - Push-based reactive flow: Intent → Journal → Reduce → ViewState → Signal → UI.
 - Frontend agnostic: Works with multiple platform frontends.
 
+### Detailed Specifications
+
+### InvariantAppWorkflowPurity
+Application workflows remain pure and frontend agnostic. Runtime effects are consumed through abstraction boundaries.
+
+Enforcement locus:
+- src workflows perform intent and state transitions.
+- src core exposes platform-neutral integration surfaces.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just check-arch and just test-crate aura-app
+
+Contract alignment:
+- [Aura System Architecture](../../docs/001_system_architecture.md) defines dependency inversion.
+- [Effect System and Runtime](../../docs/105_effect_system_and_runtime.md) defines purity boundaries.
 ## Boundaries
 - No aura-agent imports (uses RuntimeBridge trait instead).
 - No direct effect implementations.
 - Platform-specific code isolated behind feature flags.
+

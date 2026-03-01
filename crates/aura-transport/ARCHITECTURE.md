@@ -21,7 +21,29 @@ and authority-centric messaging.
 - Authority-centric: uses `AuthorityId` for cross-authority communication.
 - Context-scoped: uses `ContextId` for relational context scoping.
 - Compatible with Telltale session types.
+- Canonical transport invariants use contract names: `InvariantSequenceMonotonic`,
+  `InvariantContextIsolation`, `InvariantReceiptValidityWindow`, and
+  `InvariantCrossEpochReplayPrevention`.
 
+### Detailed Specifications
+
+### InvariantSequenceMonotonic
+Transport sequencing and context scoping must remain monotone with fact-backed send observability.
+
+Enforcement locus:
+- src transport envelope and channel logic maintain sequence and epoch constraints.
+- Transport operations integrate with guard-chain requirements in higher layers.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-transport
+
+Contract alignment:
+- [Privacy and Information Flow Contract](../../docs/003_information_flow_contract.md) defines `InvariantReceiptValidityWindow` and `InvariantCrossEpochReplayPrevention`.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantSequenceMonotonic` and `InvariantContextIsolation`.
 ## Boundaries
 - No actual network I/O (use TransportEffects).
 - Transport handlers live in aura-effects.

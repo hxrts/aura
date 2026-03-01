@@ -49,6 +49,26 @@ These include:
 
 When a crate enforces one of these invariants, record the same canonical name in that crate `ARCHITECTURE.md`.
 
+## Canonical Traceability Matrix
+
+This matrix provides a single cross-reference for contract names, owning crate docs, and proof/test artifacts.
+
+| Canonical Name | Crate Architecture Spec | Proof/Test Artifact |
+| --- | --- | --- |
+| `InvariantSentMessagesHaveFacts` | [crates/aura-guards/ARCHITECTURE.md](../crates/aura-guards/ARCHITECTURE.md) | `verification/quint/transport.qnt` |
+| `InvariantFlowBudgetNonNegative` | [crates/aura-guards/ARCHITECTURE.md](../crates/aura-guards/ARCHITECTURE.md) | `verification/quint/transport.qnt` |
+| `InvariantContextIsolation` | [crates/aura-core/ARCHITECTURE.md](../crates/aura-core/ARCHITECTURE.md), [crates/aura-transport/ARCHITECTURE.md](../crates/aura-transport/ARCHITECTURE.md) | `verification/quint/transport.qnt` |
+| `InvariantSequenceMonotonic` | [crates/aura-transport/ARCHITECTURE.md](../crates/aura-transport/ARCHITECTURE.md) | `verification/quint/transport.qnt` |
+| `InvariantReceiptValidityWindow` | [crates/aura-rendezvous/ARCHITECTURE.md](../crates/aura-rendezvous/ARCHITECTURE.md) | `verification/quint/epochs.qnt` |
+| `InvariantCrossEpochReplayPrevention` | [crates/aura-rendezvous/ARCHITECTURE.md](../crates/aura-rendezvous/ARCHITECTURE.md) | `verification/quint/epochs.qnt` |
+| `InvariantNonceUnique` | [crates/aura-journal/ARCHITECTURE.md](../crates/aura-journal/ARCHITECTURE.md) | `verification/quint/journal/core.qnt` |
+| `InvariantVectorClockConsistent` | [crates/aura-anti-entropy/ARCHITECTURE.md](../crates/aura-anti-entropy/ARCHITECTURE.md) | `verification/quint/journal/anti_entropy.qnt` |
+| `InvariantUniqueCommitPerInstance` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/core.qnt`, `verification/lean/Aura/Proofs/Consensus/Agreement.lean` |
+| `InvariantCommitRequiresThreshold` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/core.qnt`, `verification/lean/Aura/Proofs/Consensus/Validity.lean` |
+| `InvariantEquivocatorsExcluded` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/core.qnt`, `verification/lean/Aura/Proofs/Consensus/Adversary.lean` |
+| `InvariantHonestMajorityCanCommit` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/adversary.qnt`, `verification/lean/Aura/Proofs/Consensus/Adversary.lean` |
+| `InvariantCompromisedNoncesExcluded` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/adversary.qnt` |
+
 ## Validation and Verification
 
 Use `just check-arch` to validate architecture and layering constraints.

@@ -22,9 +22,9 @@ flood propagation, and LAN discovery for P2P connectivity.
 - Channel establishment requires valid, non-expired descriptors.
 - Flood packets use nonce-based replay protection.
 
-## Detailed Invariant Specifications
+### Detailed Specifications
 
-### `SECURE_CHANNEL_LIFECYCLE`
+### InvariantSecureChannelLifecycle
 Secure channels are bound to `(context_id, peer, epoch)` and follow a strict lifecycle state machine.
 
 Enforcement locus:

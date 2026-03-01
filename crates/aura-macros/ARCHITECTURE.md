@@ -23,7 +23,27 @@ type-safe Rust code for distributed protocols.
 - All work happens at compile time.
 - Uses empty extension registry (extensions handled by aura-macros itself).
 
+### Detailed Specifications
+
+### InvariantChoreographyAnnotationProjection
+Choreography annotations must project deterministically into runtime metadata.
+
+Enforcement locus:
+- src proc-macro parsing captures guard, flow, and leakage annotations.
+- Expansion outputs remain compile-time only and avoid runtime side effects.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-macros
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines annotation semantics for guards and leakage.
+- [MPST and Choreography](../../docs/108_mpst_and_choreography.md) defines projection expectations.
 ## Boundaries
 - No runtime code or effect implementations.
 - Generated code uses types from aura-mpst for choreographies.
 - No multi-party coordination (only generates code).
+

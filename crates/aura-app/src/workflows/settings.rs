@@ -114,12 +114,24 @@ pub async fn update_nickname(
 /// This operation updates local channel preferences (e.g., notifications).
 /// The UI layer handles persistence to local storage.
 pub async fn set_channel_mode(
-    _app_core: &Arc<RwLock<AppCore>>,
+    app_core: &Arc<RwLock<AppCore>>,
     _channel_id: String,
     _flags: String,
 ) -> Result<(), AuraError> {
-    // Channel mode is local UI preference, not persisted via RuntimeBridge
-    // The UI layer will handle local storage
+    // Channel mode mutations are steward/admin actions.
+    let core = app_core.read().await;
+    let homes = core.views().get_homes();
+    let home = homes
+        .current_home()
+        .ok_or_else(|| AuraError::not_found("No current home selected"))?;
+    if !home.is_admin() {
+        return Err(AuraError::permission_denied(
+            "Only stewards can set channel mode",
+        ));
+    }
+
+    // Persisted channel mode facts are not wired yet; this validates authorization
+    // and allows the UI layer to maintain local mode flags until fact persistence lands.
     Ok(())
 }
 

@@ -31,7 +31,10 @@ use aura_journal::fact::FactOptions;
 use aura_journal::DomainFact;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+static MESSAGE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Messaging backend policy (runtime-backed vs UI-local).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +81,31 @@ fn parse_channel_ref(channel: &str) -> ChannelRef {
 
 fn channel_id_from_input(channel: &str) -> ChannelId {
     parse_channel_ref(channel).to_channel_id()
+}
+
+fn hex_prefix(bytes: &[u8], byte_len: usize) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(byte_len * 2);
+    for byte in bytes.iter().take(byte_len) {
+        out.push(char::from(HEX[usize::from(byte >> 4)]));
+        out.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    out
+}
+
+fn next_message_id(
+    channel_id: ChannelId,
+    sender_id: AuthorityId,
+    timestamp_ms: u64,
+    content: &str,
+) -> String {
+    // Include a monotonic per-process counter to avoid same-millisecond collisions.
+    let local_nonce = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let digest = hash(
+        format!("{channel_id}:{sender_id}:{timestamp_ms}:{local_nonce}:{content}").as_bytes(),
+    );
+    let suffix = hex_prefix(&digest, 8);
+    format!("msg-{channel_id}-{timestamp_ms}-{suffix}")
 }
 
 fn is_invitation_capability_missing(error: &AuraError) -> bool {
@@ -217,53 +245,21 @@ pub async fn send_direct_message(
     content: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    let channel_id = dm_channel_id(target);
-    let target_id = parse_authority_id(target).ok();
+    let contact = crate::workflows::query::resolve_contact(app_core, target).await?;
+    let target_id = contact.id;
 
-    let now = timestamp_ms;
-    with_chat_state(app_core, |chat_state| {
-        // Ensure the DM channel exists (create if needed)
-        if !chat_state.has_channel(&channel_id) {
-            let dm_channel = Channel {
-                id: channel_id,
-                context_id: None,
-                name: format!("DM with {}", &target[..8.min(target.len())]),
-                topic: Some(format!("Direct messages with {target}")),
-                channel_type: ChannelType::DirectMessage,
-                unread_count: 0,
-                is_dm: true,
-                member_ids: target_id.into_iter().collect(),
-                member_count: target_id.map_or(1, |_| 2), // Self + target (if known)
-                last_message: None,
-                last_message_time: None,
-                last_activity: now,
-                last_finalized_epoch: 0,
-            };
-            chat_state.add_channel(dm_channel);
+    if let Ok(runtime) = require_runtime(app_core).await {
+        if target_id == runtime.authority_id() {
+            return Err(AuraError::invalid("Cannot send direct message to yourself"));
         }
+    }
 
-        // Create the message with deterministic ID
-        // Use AuthorityId::new_from_entropy([1u8; 32]) for self - in production this would be the actual user's ID
-        let message = Message {
-            id: format!("msg-{channel_id}-{now}"),
-            channel_id,
-            sender_id: AuthorityId::new_from_entropy([1u8; 32]),
-            sender_name: "You".to_string(),
-            content: content.to_string(),
-            timestamp: now,
-            reply_to: None,
-            is_own: true,
-            is_read: true,
-            delivery_status: MessageDeliveryStatus::Sent,
-            epoch_hint: None,
-            is_finalized: false,
-        };
+    let channel_id = start_direct_chat(app_core, &target_id.to_string(), timestamp_ms)
+        .await?
+        .parse::<ChannelId>()
+        .map_err(|e| AuraError::agent(format!("Invalid direct channel ID: {e}")))?;
 
-        // Apply message to state
-        chat_state.apply_message(channel_id, message);
-    })
-    .await?;
-
+    let _message_id = send_message(app_core, channel_id, content, timestamp_ms).await?;
     Ok(channel_id.to_string())
 }
 
@@ -496,11 +492,16 @@ pub async fn join_channel_by_name(
                 .all_channels()
                 .any(|channel| channel.name.eq_ignore_ascii_case(channel_name))
     };
+    let known_members: Vec<String> = contacts_snapshot(app_core)
+        .await
+        .contact_ids()
+        .map(ToString::to_string)
+        .collect();
 
     // Local-only frontends still need "/join" to create/select channels.
     if messaging_backend(app_core).await == MessagingBackend::LocalOnly {
         if !channel_exists_locally {
-            create_channel(app_core, channel_name, None, &[], 1, 0).await?;
+            create_channel(app_core, channel_name, None, &known_members, 0, 0).await?;
         }
         return Ok(());
     }
@@ -515,7 +516,14 @@ pub async fn join_channel_by_name(
             }
 
             let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
-            create_channel(app_core, channel_name, None, &[], 1, timestamp_ms)
+            create_channel(
+                app_core,
+                channel_name,
+                None,
+                &known_members,
+                0,
+                timestamp_ms,
+            )
                 .await
                 .map(|_| ())
                 .map_err(|create_error| {
@@ -685,12 +693,13 @@ pub async fn send_message_ref(
         ChannelRef::Name(name) => name.clone(),
     };
 
-    let message_id = format!("msg-{channel_id}-{timestamp_ms}");
     let backend = messaging_backend(app_core).await;
     let mut channel_context: Option<ContextId> = None;
     let mut epoch_hint: Option<u32> = None;
-    let sender_id = if backend == MessagingBackend::Runtime {
+    let (sender_id, message_id) = if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
+        let sender_id = runtime.authority_id();
+        let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
         let context_id =
             context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
         channel_context = Some(context_id);
@@ -699,7 +708,7 @@ pub async fn send_message_ref(
             .amp_send_message(ChannelSendParams {
                 context: context_id,
                 channel: channel_id,
-                sender: runtime.authority_id(),
+                sender: sender_id,
                 plaintext: content.as_bytes().to_vec(),
                 reply_to: None,
             })
@@ -721,7 +730,7 @@ pub async fn send_message_ref(
             context_id,
             channel_id,
             message_id.clone(),
-            runtime.authority_id(),
+            sender_id,
             "You".to_string(),
             sealed,
             timestamp_ms,
@@ -740,7 +749,7 @@ pub async fn send_message_ref(
             .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
 
         let recipients =
-            recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
+            recipient_peers_for_channel(app_core, channel_id, sender_id).await;
         let mut attempted_fanout = 0usize;
         let mut failed_fanout = Vec::new();
         for peer in recipients {
@@ -761,9 +770,11 @@ pub async fn send_message_ref(
             )));
         }
 
-        runtime.authority_id()
+        (sender_id, message_id)
     } else {
-        AuthorityId::new_from_entropy([1u8; 32])
+        let sender_id = AuthorityId::new_from_entropy([1u8; 32]);
+        let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
+        (sender_id, message_id)
     };
 
     // Update UI state for responsiveness.
@@ -1078,6 +1089,20 @@ mod tests {
         let a = AuthorityId::new_from_entropy([1u8; 32]);
         let b = AuthorityId::new_from_entropy([2u8; 32]);
         assert_eq!(pair_dm_context_id(a, b), pair_dm_context_id(b, a));
+    }
+
+    #[test]
+    fn test_next_message_id_changes_for_same_timestamp() {
+        let channel_id = ChannelId::from_bytes(hash(b"channel:next-message-id-test"));
+        let sender_id = AuthorityId::new_from_entropy([7u8; 32]);
+        let ts = 1_701_000_000_000u64;
+
+        let first = next_message_id(channel_id, sender_id, ts, "same-content");
+        let second = next_message_id(channel_id, sender_id, ts, "same-content");
+
+        assert_ne!(first, second);
+        assert!(first.starts_with(&format!("msg-{channel_id}-{ts}-")));
+        assert!(second.starts_with(&format!("msg-{channel_id}-{ts}-")));
     }
 
     #[tokio::test]

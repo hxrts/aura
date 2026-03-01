@@ -23,6 +23,25 @@ invitation creation, redemption, and ceremony coordination.
 - Invitation identifiers are treated as stable binding keys.
 - Invitation redemption creates mutual relational context.
 
+### Detailed Specifications
+
+### InvariantInvitationRedemptionUniqueness
+Invitation redemption must be unique and must produce consistent relational context state.
+
+Enforcement locus:
+- src invitation fact reducers validate identifier and context binding.
+- Redemption writes journal evidence for replay and audit.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-invitation
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines context-scoped fact semantics.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines invitation safety expectations.
 ## Boundaries
 - Relationship state lives in aura-relational.
 - Transport coordination lives in aura-protocol.
@@ -30,3 +49,4 @@ invitation creation, redemption, and ceremony coordination.
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+

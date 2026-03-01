@@ -3,14 +3,13 @@
 //! This module contains query operations that are portable across all frontends.
 //! These are read-only operations that query contact and channel state.
 
-use crate::signal_defs::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::signals::read_signal;
-use crate::workflows::snapshot_policy::full_snapshot;
+use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
 use aura_core::AuraError;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 /// List participants in a channel
@@ -25,14 +24,12 @@ pub async fn list_participants(
     app_core: &Arc<RwLock<AppCore>>,
     channel: &str,
 ) -> Result<Vec<String>, AuraError> {
-    let snapshot = full_snapshot(app_core).await;
-    let contacts = &snapshot.contacts;
-    let chat = &snapshot.chat;
+    let contacts = contacts_snapshot(app_core).await;
+    let chat = chat_snapshot(app_core).await;
 
-    let mut participants = Vec::new();
-
-    // Always include self (current user)
-    participants.push("You".to_string());
+    let mut participants = vec!["You".to_string()];
+    let mut seen = BTreeSet::new();
+    seen.insert("You".to_string());
 
     let channel_ref = ChannelRef::parse(channel);
     let channel_entry = match channel_ref {
@@ -43,11 +40,27 @@ pub async fn list_participants(
     };
 
     if let Some(channel_entry) = channel_entry {
+        let mut added_members = false;
         for member_id in &channel_entry.member_ids {
-            if let Some(contact) = contacts.contact(member_id) {
-                participants.push(effective_name(contact));
+            let name = if let Some(contact) = contacts.contact(member_id) {
+                effective_name(contact)
             } else {
-                participants.push(member_id.to_string());
+                member_id.to_string()
+            };
+            if seen.insert(name.clone()) {
+                participants.push(name);
+                added_members = true;
+            }
+        }
+
+        // Group channel membership may lag behind channel creation/join updates.
+        // Fall back to known contacts so `/who` remains useful in live sessions.
+        if !channel_entry.is_dm && !added_members {
+            for contact in contacts.all_contacts() {
+                let name = effective_name(contact);
+                if seen.insert(name.clone()) {
+                    participants.push(name);
+                }
             }
         }
         return Ok(participants);
@@ -83,25 +96,56 @@ pub async fn get_user_info(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
 ) -> Result<Contact, AuraError> {
-    let snapshot = full_snapshot(app_core).await;
-    let contacts = &snapshot.contacts;
+    resolve_contact(app_core, target).await
+}
 
-    // Look up contact by ID (if parseable as AuthorityId)
+/// Resolve a user target string to a contact.
+///
+/// Resolution order:
+/// 1. Exact authority ID match
+/// 2. Exact nickname / nickname suggestion match (case-insensitive)
+/// 3. Prefix ID or partial effective-name match (case-insensitive)
+pub async fn resolve_contact(
+    app_core: &Arc<RwLock<AppCore>>,
+    target: &str,
+) -> Result<Contact, AuraError> {
+    let contacts = contacts_snapshot(app_core).await;
+    let target = target.trim();
+    if target.is_empty() {
+        return Err(AuraError::invalid("User target cannot be empty"));
+    }
+
     if let Ok(authority_id) = parse_authority_id(target) {
         if let Some(contact) = contacts.contact(&authority_id) {
             return Ok(contact.clone());
         }
     }
 
-    // Try partial match by name
-    let matching: Vec<_> = contacts
-        .all_contacts()
-        .filter(|c| {
-            effective_name(c)
-                .to_lowercase()
-                .contains(&target.to_lowercase())
-        })
-        .collect();
+    let target_lower = target.to_lowercase();
+    let mut exact = Vec::new();
+    let mut fuzzy = Vec::new();
+    for contact in contacts.all_contacts() {
+        let id = contact.id.to_string();
+        let nickname = contact.nickname.trim();
+        let suggestion = contact.nickname_suggestion.as_deref().unwrap_or("").trim();
+        let effective = effective_name(contact);
+
+        if id.eq_ignore_ascii_case(target)
+            || (!nickname.is_empty() && nickname.eq_ignore_ascii_case(target))
+            || (!suggestion.is_empty() && suggestion.eq_ignore_ascii_case(target))
+        {
+            exact.push(contact.clone());
+            continue;
+        }
+
+        if id.to_lowercase().starts_with(&target_lower)
+            || effective.to_lowercase().contains(&target_lower)
+        {
+            fuzzy.push(contact.clone());
+        }
+    }
+
+    let matching = if exact.is_empty() { fuzzy } else { exact };
 
     if matching.len() == 1 {
         Ok(matching[0].clone())
@@ -126,15 +170,7 @@ pub async fn get_user_info(
 /// This function reads from CONTACTS_SIGNAL first, which is populated by the agent's
 /// reactive pipeline. Falls back to ViewState snapshot if the signal is not available.
 pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
-    // Try to read from CONTACTS_SIGNAL first (populated by agent's reactive pipeline)
-    if let Ok(contacts_state) = read_signal(app_core, &*CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME).await
-    {
-        return contacts_state.all_contacts().cloned().collect();
-    }
-
-    // Fallback to ViewState snapshot (for offline/non-agent mode)
-    let snapshot = full_snapshot(app_core).await;
-    snapshot.contacts.all_contacts().cloned().collect()
+    contacts_snapshot(app_core).await.all_contacts().cloned().collect()
 }
 
 /// Helper function to get effective name from contact
@@ -154,7 +190,11 @@ fn effective_name(contact: &Contact) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signal_defs::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
+    use crate::views::{Contact, ContactsState};
+    use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
+    use aura_core::identifiers::AuthorityId;
 
     #[tokio::test]
     async fn test_list_contacts() {
@@ -173,6 +213,39 @@ mod tests {
 
         let result = get_user_info(&app_core, "nonexistent").await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_user_info_reads_contacts_signal() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let bob_id = AuthorityId::new_from_entropy([7u8; 32]);
+        let bob = Contact {
+            id: bob_id,
+            nickname: "Bob".to_string(),
+            nickname_suggestion: Some("Bobby".to_string()),
+            is_guardian: false,
+            is_resident: false,
+            last_interaction: None,
+            is_online: true,
+            read_receipt_policy: Default::default(),
+        };
+        emit_signal(
+            &app_core,
+            &*CONTACTS_SIGNAL,
+            ContactsState::from_contacts(vec![bob.clone()]),
+            CONTACTS_SIGNAL_NAME,
+        )
+        .await
+        .unwrap();
+
+        let by_name = get_user_info(&app_core, "bob").await.unwrap();
+        assert_eq!(by_name.id, bob_id);
+
+        let by_id = get_user_info(&app_core, &bob_id.to_string()).await.unwrap();
+        assert_eq!(by_id.id, bob_id);
     }
 
     #[tokio::test]

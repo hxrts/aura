@@ -37,8 +37,28 @@ The crate coordinates local PTY and SSH-backed instances, exposes a structured t
 - Bounded execution: step and global scenario budgets cap execution time and fail with diagnostics on timeout.
 - Secure SSH defaults: strict host key checking stays enabled and fingerprint policy is enforced when required.
 
+### Detailed Specifications
+
+### InvariantHarnessDeterministicReplayInputs
+Harness replay depends on validated config, negotiated API version, and deterministic seed bundles.
+
+Enforcement locus:
+- src replay validates schema and tool API compatibility before replay.
+- src determinism derives stable seeds from run configuration.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-harness and just check-arch
+
+Contract alignment:
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines reproducibility assumptions for testing.
+- [Aura System Invariants](../../docs/005_system_invariants.md) defines canonical naming.
 ## Boundaries
 - This crate is tooling and test infrastructure. It is not part of the runtime layer stack.
 - It does not define Aura effect traits, domain semantics, or protocol safety rules.
 - It drives instances through process, PTY, and tool API surfaces rather than direct protocol mutation.
 - It may use direct OS operations for orchestration, capture, and preflight checks by design.
+

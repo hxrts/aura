@@ -1,43 +1,36 @@
 # Runtime Harness Guide
 
-## Purpose
+## Overview
 
 The runtime harness executes one or more real Aura instances in PTYs.
 It provides deterministic control over input, screen capture, restart, and replay.
-It is used for end-to-end runtime validation and UI-level evidence.
+Use it for end-to-end runtime validation, UI-level evidence, and replay bundles.
+The harness complements the [simulator](118_simulator.md), which remains primary for protocol correctness.
 
-The harness complements the simulator.
-The simulator remains the primary system for protocol correctness and fault-space exploration.
-See [Simulation Infrastructure Reference](118_simulator.md) for simulator design and usage.
+The harness supports two execution modes:
 
-## Scope
+1. **Scripted mode** runs predefined steps from a scenario file. Each step specifies an action, target instance, and timeout. Use scripted mode for regression testing and CI gates where the exact sequence is known.
 
-Use the harness when you need runtime behavior with real binaries.
-Use it for local loopback and mixed local plus SSH topology checks.
-Use it when you need replay bundles and timeout diagnostics.
-
-Do not use the harness as a replacement for simulator property testing.
-Use simulator checks for semantic guarantees.
-Use harness checks for runtime integration behavior.
+2. **Agent mode** lets an LLM drive execution toward high-level goals. The harness exposes a tool API and the agent decides what actions to take based on screen state and constraints. Use agent mode for exploratory debugging and validating complex user flows.
 
 ## Prerequisites
 
 Run commands from the repository root inside `nix develop`.
-Use TOML run configs and TOML scenario files.
 Use unique `data_dir` paths per local instance.
 
-Use the baseline files in `configs/harness/` and `scenarios/harness/`.
-Treat `work/` as scratch.
-Do not rely on `work/` as an authoritative spec.
+The harness uses two TOML file types:
+
+1. Run configs define instance topology and resource limits
+2. Scenario files define execution mode and steps (scripted) or goals (agent)
+
+Baseline configs and scenarios live in `configs/harness/` and `scenarios/harness/`.
 
 ## Run Config
 
 The run config defines instance topology and runtime limits.
-`schema_version` is required and must be `1`.
-Every instance must have a unique `id` and `bind_address`.
 
 ```toml
-schema_version = 1
+schema_version = 1  # required
 
 [run]
 name = "local-loopback-smoke"
@@ -48,11 +41,11 @@ max_cpu_percent = 95
 require_remote_artifact_sync = false
 
 [[instances]]
-id = "alice"
+id = "alice"                       # must be unique per instance
 mode = "local"
 data_dir = ".tmp/harness/alice"
 device_id = "alice-dev-01"
-bind_address = "127.0.0.1:41001"
+bind_address = "127.0.0.1:41001"   # must be unique per instance
 demo_mode = false
 
 [instances.lan_discovery]
@@ -69,14 +62,12 @@ Remote sync enforcement is controlled by `run.require_remote_artifact_sync`.
 ## Scenario File
 
 The scenario file defines scripted or agent-mode step execution.
-`schema_version` is required and must be `1`.
-Supported `execution_mode` values are `scripted` and `agent`.
 
 ```toml
-schema_version = 1
+schema_version = 1  # required
 id = "mixed-topology-smoke"
 goal = "Exercise local plus ssh-dry-run topology with state-machine execution."
-execution_mode = "scripted"
+execution_mode = "scripted"  # "scripted" or "agent"
 
 [[steps]]
 id = "launch"
@@ -87,19 +78,17 @@ timeout_ms = 5000
 id = "local-send"
 action = "send_keys"
 instance = "alice"
-expect = "mixed-topology-msg\n"
+expect = "mixed-topology-msg\n"  # key payload to send
 timeout_ms = 2000
 
 [[steps]]
 id = "local-wait"
 action = "wait_for"
 instance = "alice"
-expect = "mixed-topology-msg"
+expect = "mixed-topology-msg"    # required match pattern
 timeout_ms = 2000
 ```
 
-For `send_keys`, the value in `expect` is the key payload sent to the instance.
-For `wait_for`, the value in `expect` is the required match pattern.
 Scenario lint rejects unknown instance references and unsupported action names.
 
 ## Common Commands
@@ -173,25 +162,13 @@ The harness supports a complete manual invitation and chat flow.
 Use two instances and deterministic message tokens.
 Capture evidence after each phase.
 
-```text
-Phase 1:
-1) Create invitation on Alice in Contacts.
-2) Press c on the invitation modal to copy the full code.
-3) Import the code on Bob and confirm Contacts (1) on both sides.
+The flow proceeds in three phases. In phase one, create an invitation on Alice in Contacts. Press `c` on the invitation modal to copy the full code. Import the code on Bob and confirm that Contacts shows one entry on both sides.
 
-Phase 2:
-1) Create a channel on Alice.
-2) In member selection, verify "1 selected" before continuing.
-3) Confirm Channels (1) appears on Bob.
+In phase two, create a channel on Alice. Verify that member selection shows one selected before continuing. Confirm that Channels shows one entry on Bob.
 
-Phase 3:
-1) Exchange msg-a-1, msg-b-1, msg-a-2, msg-b-2.
-2) Confirm each token appears on both screens before sending the next token.
-```
+In phase three, exchange messages using tokens `msg-a-1`, `msg-b-1`, `msg-a-2`, and `msg-b-2`. Confirm each token appears on both screens before sending the next token.
 
-This is the validated manual checklist for the current harness and TUI workflow.
-For headless capture of copied invitation text, set `AURA_CLIPBOARD_FILE` in each instance `env`.
-Read the file after pressing `c` to get the full out-of-band payload.
+For headless capture of copied invitation text, set `AURA_CLIPBOARD_FILE` in each instance `env`. Read the file after pressing `c` to get the full out-of-band payload.
 
 ## Artifacts
 
@@ -199,17 +176,7 @@ Each `run` writes a machine-readable bundle.
 The default root is `artifacts/harness/<run-name>/`.
 Use this directory as the primary debugging source.
 
-Key files:
-- `startup_summary.json`
-- `preflight_report.json`
-- `events.json`
-- `initial_screens.json`
-- `replay_bundle.json`
-- `seed_bundle.json`
-- `resource_report.json`
-- `remote_artifact_sync.json`
-- `scenario_report.json` when a scenario is provided
-- `timeout_diagnostics.json` when scenario execution times out
+The bundle includes `startup_summary.json`, `preflight_report.json`, `events.json`, and `initial_screens.json`. It also includes `replay_bundle.json`, `seed_bundle.json`, `resource_report.json`, and `remote_artifact_sync.json`. When a scenario is provided, `scenario_report.json` is written. When scenario execution times out, `timeout_diagnostics.json` is written.
 
 These files provide startup metadata, event history, and deterministic replay data.
 `timeout_diagnostics.json` includes authoritative, raw, and normalized screen captures.

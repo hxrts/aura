@@ -17,7 +17,46 @@ with explicit guard chain enforcement on network operations.
 - Reconciliation logic is pure (see `sync/pure.rs`).
 - Network-visible operations must be guard-chain approved.
 - Persistent storage uses shared commitment tree storage keys.
+- Vector-clock metadata remains causally consistent (`InvariantVectorClockConsistent`).
 
+### Detailed Specifications
+
+### InvariantAntiEntropyReconciliationPurity
+Anti-entropy reconciliation remains pure and deterministic for identical inputs.
+
+Enforcement locus:
+- sync pure logic computes reconciliation decisions without side effects.
+- Network execution applies outputs only after guard-chain approval.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-anti-entropy
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic reduction.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines eventual convergence and vector-clock consistency.
+
+### InvariantVectorClockConsistent
+Anti-entropy reconciliation must preserve causal ordering metadata so merged views never violate vector-clock partial order.
+
+Enforcement locus:
+- sync digest exchange carries causal metadata for reconciliation decisions.
+- merge path applies operations in a causally admissible order.
+- guard-approved transport path preserves per-context sequencing assumptions.
+
+Failure mode:
+- Causal anomalies during replay/reconciliation.
+- Divergent merged states after partition healing.
+
+Verification hooks:
+- `cargo test -p aura-anti-entropy`
+- `quint run --invariant=InvariantVectorClockConsistent verification/quint/journal/anti_entropy.qnt`
+
+Contract alignment:
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantVectorClockConsistent`.
 ## Boundaries
 - No guardless network sends.
 - Storage helpers are shared via `aura_journal::commitment_tree::storage`.

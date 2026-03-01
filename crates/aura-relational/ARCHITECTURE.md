@@ -21,6 +21,25 @@ guardian request handling, and consensus-backed relationship establishment.
 - Cross-authority relationships are established through explicit consensus flows.
 - Guardian bindings require mutual agreement.
 
+### Detailed Specifications
+
+### InvariantRelationalMutualAgreement
+Relational state activation requires explicit mutual agreement across authorities.
+
+Enforcement locus:
+- src relationship reducers validate bilateral facts before active state.
+- Cross-authority flows route through consensus and journal evidence.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-relational
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines context-bound relational state.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines operation-scoped agreement.
 ## Boundaries
 - Recovery protocol logic lives in aura-recovery.
 - Consensus coordination lives in aura-consensus.
@@ -28,3 +47,4 @@ guardian request handling, and consensus-backed relationship establishment.
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+

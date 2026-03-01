@@ -31,10 +31,11 @@ conflict-free state reduction across distributed replicas.
 - Immutability: Facts immutable; metadata updates monotonic.
 - Namespace isolation: Authority and Context journals distinct.
 - Content addressing: Facts identified by hash (CID).
+- Nonce uniqueness per namespace (`InvariantNonceUnique`).
 
-## Detailed Invariant Specifications
+### Detailed Specifications
 
-### `CRDT_CONVERGENCE`
+### InvariantCRDTConvergence
 Identical fact sets must reduce to identical state across replicas, independent of arrival order.
 
 Enforcement locus:
@@ -52,12 +53,34 @@ Verification hooks:
 - `cargo test -p aura-journal convergence`
 - `cargo test -p aura-simulator crdt_convergence_scenario`
 - property tests for deterministic replay and permutation stability
+- `quint run --invariant=InvariantNonceUnique verification/quint/journal/core.qnt`
 
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines join-semilattice semantics and deterministic reduction.
-- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines journal CRDT safety and deterministic reduction order.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines journal CRDT safety, deterministic reduction order, and `InvariantNonceUnique`.
 
-### `AUTHORITY_TREE_TOPOLOGY_COMMITMENT_COHERENCE`
+### InvariantNonceUnique
+No two accepted facts may share the same nonce within the same journal namespace.
+
+Enforcement locus:
+- `src/fact.rs`: namespace + nonce identity model for fact uniqueness.
+- `src/reduction.rs`: validation/reduction path rejects duplicate nonce facts per namespace.
+- `src/crdt/`: merge semantics preserve uniqueness constraints under replay and anti-entropy.
+
+Failure mode:
+- Replay acceptance for duplicate facts.
+- Divergent reducers caused by nonce collisions.
+- Ambiguous event identity in evidence/audit pipelines.
+
+Verification hooks:
+- `cargo test -p aura-journal nonce`
+- `quint run --invariant=InvariantNonceUnique verification/quint/journal/core.qnt`
+
+Contract alignment:
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantNonceUnique`.
+- [Aura System Invariants](../../docs/005_system_invariants.md) indexes canonical naming used by tests and proofs.
+
+### InvariantAuthorityTreeTopologyCommitmentCoherence
 Authority tree topology and commitment caches must remain coherent after every mutation.
 
 Enforcement locus:

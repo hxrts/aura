@@ -25,8 +25,28 @@ invalidation, OTA upgrades, and admin replacement.
 - Category B: Medium-risk (snapshot operations).
 - Category C: High-risk (upgrades, admin replacement).
 
+### Detailed Specifications
+
+### InvariantMaintenanceReducerDeterminism
+Maintenance reducers must remain deterministic and high-risk operations must preserve consensus evidence requirements.
+
+Enforcement locus:
+- src maintenance facts are reduced without external clock or randomness input.
+- Operation categories gate high-impact transitions.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-maintenance
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines deterministic reduction.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines agreement constraints for high-risk operations.
 ## Boundaries
 - No storage operations (use `StorageEffects`).
 - No coordination logic (use `aura-protocol`).
 - No runtime composition (use `aura-agent`).
 - Uses Layer 2 fact pattern (no aura-journal dependency).
+

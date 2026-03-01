@@ -22,6 +22,25 @@ relationships. Includes guardian setup, membership management, and recovery cere
 - Recovery and guardian membership transitions are consensus-gated (Category C).
 - Guardian threshold must be satisfied for successful recovery.
 
+### Detailed Specifications
+
+### InvariantRecoveryThresholdEnforcement
+Recovery transitions require guardian threshold satisfaction and consensus-gated membership changes.
+
+Enforcement locus:
+- src recovery reducers and services validate guardian threshold state.
+- Category C transitions rely on consensus outputs.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just test-crate aura-recovery
+
+Contract alignment:
+- [Theoretical Model](../../docs/002_theoretical_model.md) defines monotone state transitions.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines threshold safety expectations.
 ## Boundaries
 - Threshold cryptography lives in aura-core (FROST primitives).
 - Consensus coordination lives in aura-consensus.
@@ -29,3 +48,4 @@ relationships. Includes guardian setup, membership management, and recovery cere
 
 ## Operation Categories
 See `OPERATION_CATEGORIES` in `src/lib.rs` for the current A/B/C table.
+

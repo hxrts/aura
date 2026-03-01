@@ -22,7 +22,27 @@ platform-agnostic.
 - Uses dependency inversion: imports from both aura-app and aura-agent.
 - Terminal-specific rendering must stay in this layer.
 
+### Detailed Specifications
+
+### InvariantTerminalUiBoundary
+Terminal interfaces must remain a presentation layer over aura-app and must not introduce runtime effect implementations.
+
+Enforcement locus:
+- src tui and command handlers map user intents to app workflows.
+- User interface state changes are derived from reactive app signals.
+
+Failure mode:
+- Behavior diverges from the crate contract and produces non-reproducible outcomes.
+- Cross-layer assumptions drift and break composition safety.
+
+Verification hooks:
+- just check-arch and just test-crate aura-terminal
+
+Contract alignment:
+- [Aura System Architecture](../../docs/001_system_architecture.md) defines interface layer boundaries.
+- [Effect System and Runtime](../../docs/105_effect_system_and_runtime.md) defines signal and workflow integration.
 ## Boundaries
 - Business logic lives in aura-app.
 - Effect implementations live in aura-effects.
 - Runtime composition lives in aura-agent.
+

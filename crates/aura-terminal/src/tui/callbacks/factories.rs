@@ -75,11 +75,36 @@ impl ChatCallbacks {
                 if trimmed.starts_with("/") {
                     // IRC-style command path
                     match parse_command(trimmed) {
-                        Ok(IrcCommand::Help { .. }) => {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
-                                "help",
-                                "Use ? for TUI help. Supported slash commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink",
-                            )));
+                        Ok(IrcCommand::Help { command }) => {
+                            if let Some(raw_name) = command
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                            {
+                                let normalized = raw_name.trim_start_matches('/').to_lowercase();
+                                if let Some(help) =
+                                    aura_app::ui::workflows::chat_commands::command_help(
+                                        &normalized,
+                                    )
+                                {
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
+                                        "help",
+                                        format!("{} — {}", help.syntax, help.description),
+                                    )));
+                                } else {
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(
+                                        ToastMessage::error(
+                                            "help",
+                                            format!("Unknown command: /{normalized}"),
+                                        ),
+                                    ));
+                                }
+                            } else {
+                                let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
+                                    "help",
+                                    "Use ? for TUI help. Run /help <command> for details. Core commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink",
+                                )));
+                            }
                             return;
                         }
                         Ok(irc) => {
