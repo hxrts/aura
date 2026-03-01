@@ -12,8 +12,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 ```
 ┌────────────────────────────────────────────────────┐
 │ Layer 8: Testing & Development Tools               │
-│   • aura-testkit                                   │
-│   • aura-quint                                     │
+│   • aura-testkit    • aura-quint    • aura-harness │
 ├────────────────────────────────────────────────────┤
 │ Layer 7: User Interface                            │
 │   • aura-terminal                                  │
@@ -449,9 +448,16 @@ Is this a Layer 2 domain crate?
 - Verification runner with caching and counterexample generation
 - Effect trait implementations for property evaluation during simulation
 
+**`aura-harness`**: Multi-instance runtime harness for orchestrating test scenarios including:
+- Coordinator and executor for managing multiple Aura instances
+- Scenario definition and replay capabilities
+- Artifact synchronization and determinism validation
+- Screen normalization and VT100 terminal emulation for TUI testing
+- Resource guards and capability checking
+
 **Key characteristics**: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.
 
-**Dependencies**: `aura-agent`, `aura-composition`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`.
+**Dependencies**: `aura-core` (for aura-harness); `aura-agent`, `aura-composition`, `aura-journal`, `aura-transport`, `aura-core`, `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy` (for aura-testkit and aura-quint).
 
 ## Workspace Structure
 
@@ -468,6 +474,7 @@ crates/
 ├── aura-core            Foundation types and effect traits
 ├── aura-effects         Effect handler implementations
 ├── aura-guards          Guard chain enforcement
+├── aura-harness         Multi-instance runtime harness
 ├── aura-invitation      Invitation choreographies
 ├── aura-journal         Fact-based journal domain
 ├── aura-macros          Choreography DSL compiler
@@ -539,6 +546,7 @@ graph TD
     %% Testing Layer
     testkit[aura-testkit]
     quint[aura-quint]
+    harness[aura-harness]
 
     %% Dependencies
     verify --> types
@@ -633,6 +641,7 @@ graph TD
     testkit --> transport
     testkit --> types
     testkit --> protocol
+    harness --> types
 
     %% Styling
     classDef foundation fill:#e1f5fe
@@ -653,7 +662,7 @@ graph TD
     class auth,chat,recovery,invitation,frost,relational,rendezvous,sync,store feature
     class agent,simulator,app runtime
     class terminal app
-    class testkit,quint test
+    class testkit,quint,harness test
 ```
 
 ## Effect Trait Classification
@@ -1509,6 +1518,9 @@ Terminal-based user interface combining CLI commands and interactive TUI. Provid
 
 ### aura-testkit
 Comprehensive testing infrastructure including test fixtures, scenario builders, property test helpers, and mock effect handlers with controllable stateful behavior for deterministic testing.
+
+### aura-harness
+Multi-instance runtime harness for orchestrating complex test scenarios. Provides coordinator and executor for managing multiple Aura instances, scenario definition and replay, artifact synchronization, determinism validation, and screen normalization for TUI testing. Binary is named `aura-harness`.
 
 ### aura-quint
 Formal verification bridge to Quint model checker and property evaluator.
