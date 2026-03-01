@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Result};
@@ -69,13 +70,14 @@ impl HarnessCoordinator {
             .backends
             .get_mut(instance_id)
             .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        let normalized = normalize_key_stream(keys);
         self.events.push(
             "action",
             "send_keys",
             Some(instance_id.to_string()),
-            serde_json::json!({ "bytes": keys.len() }),
+            serde_json::json!({ "bytes": normalized.len() }),
         );
-        backend.as_trait_mut().send_keys(keys)
+        backend.as_trait_mut().send_keys(normalized.as_ref())
     }
 
     pub fn send_key(&mut self, instance_id: &str, key: ToolKey, repeat: u16) -> Result<()> {
@@ -114,6 +116,9 @@ impl HarnessCoordinator {
                 return Ok(screen);
             }
             attempts = attempts.saturating_add(1);
+            if attempts >= max_attempts {
+                break;
+            }
             std::thread::sleep(std::time::Duration::from_millis(poll_ms));
         }
 
@@ -195,8 +200,34 @@ fn key_sequence(key: ToolKey) -> &'static str {
     }
 }
 
+fn normalize_key_stream(keys: &str) -> Cow<'_, str> {
+    if keys.contains('\n') {
+        Cow::Owned(keys.replace('\n', "\r"))
+    } else {
+        Cow::Borrowed(keys)
+    }
+}
+
 impl Drop for HarnessCoordinator {
     fn drop(&mut self) {
         let _ = self.stop_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_key_stream;
+
+    #[test]
+    fn normalize_key_stream_rewrites_newline_to_carriage_return() {
+        assert_eq!(
+            normalize_key_stream("hello\nworld").as_ref(),
+            "hello\rworld"
+        );
+    }
+
+    #[test]
+    fn normalize_key_stream_keeps_plain_text() {
+        assert_eq!(normalize_key_stream("abc123").as_ref(), "abc123");
     }
 }

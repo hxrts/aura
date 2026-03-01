@@ -4,7 +4,7 @@
 //! test utilities into reusable, semantic test setup objects. These fixtures
 //! eliminate boilerplate test setup across the codebase.
 //!
-//! Enhanced for stateless effect system architecture (work/021.md).
+//! Enhanced for stateless effect system architecture.
 
 use crate::{
     builders::device::DeviceSetBuilder, test_account_with_threshold, TestEffectsBuilder,

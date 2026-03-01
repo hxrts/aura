@@ -6,11 +6,11 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, ItemFn};
 
-/// Test macro with automatic tracing and timeout
+/// Test macro with automatic tracing initialization
 ///
 /// Wraps async tests with aura-specific setup:
 /// - Automatic tracing initialization via aura-testkit
-/// - Default 30s timeout
+/// - Multi-threaded tokio runtime (current_thread on wasm32)
 /// - Proper error handling
 ///
 /// # Example

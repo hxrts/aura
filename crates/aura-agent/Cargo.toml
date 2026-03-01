@@ -80,21 +80,14 @@ tokio-tungstenite = { workspace = true, optional = true }
 
 # Platform-specific secure storage
 [target.'cfg(target_os = "macos")'.dependencies]
-# security-framework = { workspace = true } # removed - unused
-# core-foundation = { workspace = true } # removed - unused
 
 [target.'cfg(target_os = "ios")'.dependencies]
-# security-framework = { workspace = true } # removed - unused
-# core-foundation = { workspace = true } # removed - unused
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# windows = { workspace = true } # removed - unused
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# keyutils = { workspace = true } # removed - unused
 
 [target.'cfg(target_os = "android")'.dependencies]
-# jni = { workspace = true } # removed - unused
 
 
 [features]
@@ -128,7 +121,6 @@ android = []  # Android preset: Keystore crypto, encrypted storage
 web = []      # Web/WASM preset: Web Crypto API, IndexedDB storage
 
 [dev-dependencies]
-# tokio-test = { workspace = true } # removed - unused
 aura-testkit = { path = "../aura-testkit" }
 async-lock = { workspace = true }
 tracing-subscriber = { workspace = true }

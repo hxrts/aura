@@ -648,6 +648,21 @@ async fn handle_tui_launch(
         "AppCore initialized (with runtime bridge and reactive signals)"
     ));
 
+    // Process inbound envelopes continuously in both production and demo modes.
+    // Without this, production TUI sessions may never drain transport inboxes,
+    // causing cross-instance chat/invitation updates to stall until a command
+    // opportunistically polls the runtime bridge.
+    let ceremony_agent = agent.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+        loop {
+            interval.tick().await;
+            if let Err(e) = ceremony_agent.process_ceremony_acceptances().await {
+                tracing::debug!("Error processing ceremony acceptances: {}", e);
+            }
+        }
+    });
+
     #[cfg(feature = "development")]
     let mut simulator: Option<DemoSimulator> = match mode {
         TuiMode::Demo { .. } => {
@@ -667,30 +682,6 @@ async fn handle_tui_launch(
             if let Err(e) = aura_app::ui::workflows::system::refresh_account(app_core.raw()).await {
                 tracing::warn!("Demo: Failed to refresh account state: {}", e);
             }
-
-            // Start background task to process ceremony acceptances
-            let ceremony_agent = agent.clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
-                loop {
-                    interval.tick().await;
-                    match ceremony_agent.process_ceremony_acceptances().await {
-                        Ok((acceptances, completions)) => {
-                            if acceptances > 0 {
-                                tracing::info!(
-                                    acceptances = acceptances,
-                                    completions = completions,
-                                    "Processed guardian ceremony acceptances"
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!("Error processing ceremony acceptances: {}", e);
-                        }
-                    }
-                }
-            });
-            stdio.println(format_args!("Ceremony acceptance processor started"));
 
             Some(sim)
         }

@@ -92,7 +92,7 @@ fn replay_runner_reexecutes_recorded_actions_without_llm() {
         Err(error) => panic!("replay execute failed: {error}"),
     };
 
-    assert_eq!(outcome.actions_executed, bundle.actions.len());
+    assert_eq!(outcome.actions_executed, bundle.actions.len() as u64);
     assert_eq!(outcome.mismatches, 0);
 }
 

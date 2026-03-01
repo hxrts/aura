@@ -52,13 +52,18 @@ pub(super) async fn get_lan_peers(bridge: &AgentRuntimeBridge) -> Vec<LanPeerInf
 }
 
 pub(super) async fn send_lan_invitation(
-    _bridge: &AgentRuntimeBridge,
-    _peer: &LanPeerInfo,
-    _invitation_code: &str,
+    bridge: &AgentRuntimeBridge,
+    peer: &LanPeerInfo,
+    invitation_code: &str,
 ) -> Result<(), IntentError> {
-    // LAN invitation sending is not yet implemented in RendezvousManager
-    // Future: Add direct peer-to-peer invitation exchange over LAN
-    Err(IntentError::internal_error(
-        "LAN invitation sending not yet implemented",
-    ))
+    if let Some(rendezvous) = bridge.agent.runtime().rendezvous() {
+        rendezvous
+            .send_lan_invitation(&peer.authority_id, &peer.address, invitation_code)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to send LAN invitation: {}", e))
+            })
+    } else {
+        Err(service_unavailable("rendezvous_service"))
+    }
 }

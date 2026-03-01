@@ -1,8 +1,6 @@
 //! Session epochs and participant IDs
 //!
 //! This module provides foundation types for managing session epochs and protocol participants.
-//! Session orchestration types (SessionStatus, SessionOutcome) have moved to aura-protocol.
-//! Session type system types (LocalSessionType) have moved to aura-mpst.
 
 use crate::types::identifiers::DeviceId;
 use crate::{AuraError, GuardianId};

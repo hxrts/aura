@@ -21,7 +21,7 @@
 //!
 //! # Reference
 //!
-//! See [`docs/123_commitment_tree.md`](../../../docs/123_commitment_tree.md) - Commitments section.
+//! See [`docs/102_authority_and_identity.md`](../../../../docs/102_authority_and_identity.md) - Commitments section.
 
 use super::{Epoch, NodeIndex, Policy, TreeCommitment, TreeHash32};
 use crate::crypto::hash;

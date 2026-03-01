@@ -1,7 +1,6 @@
 //! # Budget Handlers - Terminal-Specific Formatting
 //!
 //! This module provides terminal-specific budget formatting for CLI and TUI.
-//! Business logic has been moved to `aura_app::ui::workflows::budget`.
 //!
 //! ## Architecture
 //!

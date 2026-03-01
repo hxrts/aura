@@ -117,7 +117,7 @@ pub use aura_guards::guards::journal::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
 
-// Subsystem re-exports (available for incremental adoption; see Task 3.6 in work/033.md)
+// Subsystem re-exports (available for incremental adoption
 #[allow(unused_imports)]
 pub use subsystems::{ChoreographyState, CryptoSubsystem, JournalSubsystem, TransportSubsystem};
 

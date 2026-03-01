@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
 use crate::config::RunConfig;
 use crate::coordinator::HarnessCoordinator;
+use crate::screen_normalization::{authoritative_screen, normalize_screen};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -150,10 +151,19 @@ impl ToolApi {
                     })
                 })
             }
-            ToolRequest::Screen { instance_id } => self
-                .coordinator
-                .screen(&instance_id)
-                .map(|screen| serde_json::json!({ "screen": screen })),
+            ToolRequest::Screen { instance_id } => {
+                self.coordinator.screen(&instance_id).map(|screen| {
+                    let authoritative = authoritative_screen(&screen);
+                    let normalized = normalize_screen(&screen);
+                    serde_json::json!({
+                        "screen": authoritative.clone(),
+                        "raw_screen": screen,
+                        "authoritative_screen": authoritative,
+                        "normalized_screen": normalized,
+                        "capture_consistency": "settled"
+                    })
+                })
+            }
             ToolRequest::SendKeys { instance_id, keys } => self
                 .coordinator
                 .send_keys(&instance_id, &keys)
@@ -173,7 +183,18 @@ impl ToolApi {
             } => self
                 .coordinator
                 .wait_for(&instance_id, &pattern, timeout_ms)
-                .map(|screen| serde_json::json!({ "matched": true, "screen": screen })),
+                .map(|screen| {
+                    let authoritative = authoritative_screen(&screen);
+                    let normalized = normalize_screen(&screen);
+                    serde_json::json!({
+                        "matched": true,
+                        "screen": authoritative.clone(),
+                        "raw_screen": screen,
+                        "authoritative_screen": authoritative,
+                        "normalized_screen": normalized,
+                        "matched_view": "normalized"
+                    })
+                }),
             ToolRequest::TailLog { instance_id, lines } => self
                 .coordinator
                 .tail_log(

@@ -154,8 +154,6 @@ impl fmt::Display for RelationshipStatus {
     }
 }
 
-// ContextId has been moved to identifiers.rs to avoid duplication and use UUID-based implementation
-
 /// Trust level enumeration
 ///
 /// Indicates the level of trust in a relationship or entity.

@@ -6,7 +6,7 @@
 use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME},
     views::{
-        home::HomeState,
+        home::{HomeState, HomesState},
         neighborhood::{AdjacencyType, NeighborHome, NeighborhoodState, TraversalPosition},
     },
     AppCore,
@@ -72,6 +72,7 @@ pub async fn move_position(
 
     // Get current neighborhood state
     let mut neighborhood = core.views().get_neighborhood();
+    let mut homes = core.views().get_homes();
 
     // Determine target home ID
     let target_home_id = if home_id == "home" {
@@ -112,8 +113,208 @@ pub async fn move_position(
     };
     neighborhood.position = Some(position);
 
+    // Keep homes selection aligned with neighborhood traversal when the target
+    // home is known locally (for resident/channel metadata lookups).
+    if homes.has_home(&target_home_id) {
+        homes.select_home(Some(target_home_id));
+        core.views_mut().set_homes(homes);
+    }
+
     // Set the updated state
     core.views_mut().set_neighborhood(neighborhood);
+
+    Ok(())
+}
+
+fn resolve_target_home_id(
+    neighborhood: &NeighborhoodState,
+    home_id: &str,
+) -> Result<ChannelId, AuraError> {
+    if home_id == "home" {
+        return Ok(neighborhood.home_home_id);
+    }
+    if home_id == "current" {
+        return Ok(neighborhood
+            .position
+            .as_ref()
+            .map(|p| p.current_home_id)
+            .unwrap_or(neighborhood.home_home_id));
+    }
+
+    home_id
+        .parse::<ChannelId>()
+        .map_err(|_| AuraError::invalid(format!("Invalid home ID: {home_id}")))
+}
+
+fn resolve_home_name(
+    homes: &HomesState,
+    neighborhood: &NeighborhoodState,
+    home_id: ChannelId,
+) -> String {
+    if let Some(home) = homes.home_state(&home_id) {
+        if !home.name.trim().is_empty() {
+            return home.name.clone();
+        }
+    }
+
+    if home_id == neighborhood.home_home_id {
+        return neighborhood.home_name.clone();
+    }
+
+    neighborhood
+        .neighbor(&home_id)
+        .map(|n| n.name.clone())
+        .unwrap_or_else(|| home_id.to_string())
+}
+
+/// Create or select the active neighborhood.
+///
+/// This is a local-first workflow that stamps a deterministic neighborhood ID
+/// and updates `NEIGHBORHOOD_SIGNAL`.
+pub async fn create_neighborhood(
+    app_core: &Arc<RwLock<AppCore>>,
+    name: String,
+) -> Result<String, AuraError> {
+    let timestamp_ms = current_time_ms(app_core).await?;
+    let neighborhood_name = if name.trim().is_empty() {
+        "Neighborhood".to_string()
+    } else {
+        name.trim().to_string()
+    };
+
+    let authority = {
+        let core = app_core.read().await;
+        core.runtime()
+            .map(|r| r.authority_id())
+            .or_else(|| core.authority().copied())
+    }
+    .ok_or_else(|| AuraError::permission_denied("Authority not set"))?;
+
+    let neighborhood_id = ChannelId::from_bytes(hash(
+        format!("neighborhood:{authority}:{neighborhood_name}:{timestamp_ms}").as_bytes(),
+    ))
+    .to_string();
+
+    let neighborhood_state = {
+        let mut core = app_core.write().await;
+        let mut neighborhood = core.views().get_neighborhood();
+        neighborhood.neighborhood_id = Some(neighborhood_id.clone());
+        neighborhood.neighborhood_name = Some(neighborhood_name);
+        core.views_mut().set_neighborhood(neighborhood.clone());
+        neighborhood
+    };
+
+    emit_signal(
+        app_core,
+        &*NEIGHBORHOOD_SIGNAL,
+        neighborhood_state,
+        NEIGHBORHOOD_SIGNAL_NAME,
+    )
+    .await?;
+
+    Ok(neighborhood_id)
+}
+
+/// Add a home as a member of the active neighborhood and apply donation budget.
+///
+/// The workflow is idempotent per home ID for the currently active neighborhood.
+pub async fn add_home_to_neighborhood(
+    app_core: &Arc<RwLock<AppCore>>,
+    home_id: &str,
+) -> Result<(), AuraError> {
+    let (homes_state, neighborhood_state) = {
+        let mut core = app_core.write().await;
+        let mut homes = core.views().get_homes();
+        let mut neighborhood = core.views().get_neighborhood();
+
+        let target_home_id = resolve_target_home_id(&neighborhood, home_id)?;
+        let target_home_name = resolve_home_name(&homes, &neighborhood, target_home_id);
+        let target_resident_count = homes
+            .home_state(&target_home_id)
+            .map(|home| home.resident_count);
+
+        if target_home_id != neighborhood.home_home_id
+            && neighborhood.neighbor(&target_home_id).is_none()
+        {
+            neighborhood.add_neighbor(NeighborHome {
+                id: target_home_id,
+                name: target_home_name,
+                adjacency: AdjacencyType::Direct,
+                shared_contacts: 0,
+                resident_count: target_resident_count,
+                can_traverse: true,
+            });
+        }
+
+        let newly_joined = neighborhood.add_member_home(target_home_id);
+        if newly_joined {
+            if let Some(home) = homes.home_mut(&target_home_id) {
+                home.storage
+                    .join_neighborhood()
+                    .map_err(|e| AuraError::budget_exceeded(e.to_string()))?;
+            }
+        }
+
+        core.views_mut().set_homes(homes.clone());
+        core.views_mut().set_neighborhood(neighborhood.clone());
+        (homes, neighborhood)
+    };
+
+    emit_signal(app_core, &*HOMES_SIGNAL, homes_state, HOMES_SIGNAL_NAME).await?;
+    emit_signal(
+        app_core,
+        &*NEIGHBORHOOD_SIGNAL,
+        neighborhood_state,
+        NEIGHBORHOOD_SIGNAL_NAME,
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Force direct adjacency between local home and the target home in the active neighborhood.
+pub async fn link_home_adjacency(
+    app_core: &Arc<RwLock<AppCore>>,
+    home_id: &str,
+) -> Result<(), AuraError> {
+    let neighborhood_state = {
+        let mut core = app_core.write().await;
+        let homes = core.views().get_homes();
+        let mut neighborhood = core.views().get_neighborhood();
+
+        let target_home_id = resolve_target_home_id(&neighborhood, home_id)?;
+        if target_home_id == neighborhood.home_home_id {
+            return Err(AuraError::invalid(
+                "Cannot create adjacency from home to itself",
+            ));
+        }
+
+        let target_home_name = resolve_home_name(&homes, &neighborhood, target_home_id);
+        let target_resident_count = homes
+            .home_state(&target_home_id)
+            .map(|home| home.resident_count);
+
+        let updated_neighbor = NeighborHome {
+            id: target_home_id,
+            name: target_home_name,
+            adjacency: AdjacencyType::Direct,
+            shared_contacts: 0,
+            resident_count: target_resident_count,
+            can_traverse: true,
+        };
+
+        neighborhood.add_neighbor(updated_neighbor);
+        core.views_mut().set_neighborhood(neighborhood.clone());
+        neighborhood
+    };
+
+    emit_signal(
+        app_core,
+        &*NEIGHBORHOOD_SIGNAL,
+        neighborhood_state,
+        NEIGHBORHOOD_SIGNAL_NAME,
+    )
+    .await?;
 
     Ok(())
 }
@@ -303,7 +504,9 @@ pub async fn initialize_test_home(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::views::home::HomeState;
     use crate::AppConfig;
+    use aura_core::crypto::hash::hash;
 
     #[tokio::test]
     async fn test_set_context() {
@@ -326,5 +529,66 @@ mod tests {
 
         let state = get_neighborhood_state(&app_core).await;
         assert!(state.neighbors_is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_move_position_selects_known_target_home() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let authority = aura_core::identifiers::AuthorityId::new_from_entropy([11u8; 32]);
+
+        let home_a = ChannelId::from_bytes(hash(b"home-a"));
+        let home_b = ChannelId::from_bytes(hash(b"home-b"));
+        let ctx_a = ContextId::new_from_entropy(hash(b"ctx-a"));
+        let ctx_b = ContextId::new_from_entropy(hash(b"ctx-b"));
+
+        {
+            let mut core = app_core.write().await;
+            let mut homes = core.views().get_homes();
+            homes.add_home_with_auto_select(HomeState::new(
+                home_a,
+                Some("Alpha".to_string()),
+                authority,
+                1,
+                ctx_a,
+            ));
+            homes.add_home(HomeState::new(
+                home_b,
+                Some("Beta".to_string()),
+                authority,
+                2,
+                ctx_b,
+            ));
+            homes.select_home(Some(home_a));
+            core.views_mut().set_homes(homes);
+
+            let mut neighborhood = core.views().get_neighborhood();
+            neighborhood.home_home_id = home_a;
+            neighborhood.home_name = "Alpha".to_string();
+            neighborhood.add_neighbor(NeighborHome {
+                id: home_b,
+                name: "Beta".to_string(),
+                adjacency: AdjacencyType::Direct,
+                shared_contacts: 0,
+                resident_count: Some(1),
+                can_traverse: true,
+            });
+            core.views_mut().set_neighborhood(neighborhood);
+        }
+
+        move_position(&app_core, &home_b.to_string(), "interior")
+            .await
+            .unwrap();
+
+        let core = app_core.read().await;
+        let homes = core.views().get_homes();
+        let neighborhood = core.views().get_neighborhood();
+
+        assert_eq!(homes.current_home_id().copied(), Some(home_b));
+        assert_eq!(
+            neighborhood.position.as_ref().map(|p| p.current_home_id),
+            Some(home_b)
+        );
+        assert_eq!(neighborhood.position.as_ref().map(|p| p.depth), Some(2));
     }
 }

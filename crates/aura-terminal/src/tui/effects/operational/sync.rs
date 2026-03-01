@@ -1,7 +1,6 @@
 //! Sync command handlers - TUI Operational Layer
 //!
 //! This module provides TUI-specific sync operation handling.
-//! Business logic has been moved to `aura_app::ui::workflows::sync`.
 //!
 //! ## Architecture
 //!

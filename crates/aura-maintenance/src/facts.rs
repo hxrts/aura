@@ -562,16 +562,15 @@ mod proptest_semilattice {
     }
 
     proptest! {
-        /// Idempotence: merging with self leaves the value unchanged
-        /// a.merge(&a) == a
+        /// Additive merge: merging with self doubles the counters
+        /// Note: This is NOT idempotent (a + a = 2a, not a).
+        /// Counter-based deltas use additive semantics, not max-semilattice.
         #[test]
-        fn merge_idempotent(a in arb_delta()) {
+        fn merge_additive(a in arb_delta()) {
             let original = a.clone();
             let mut result = a.clone();
             result.merge(&original);
-            // For additive deltas, idempotence means a + a = 2a
-            // But for semilattice merge (max), a merge a = a
-            // Our delta uses addition, so we check that merge(a,a) = 2a
+            // Additive deltas: a + a = 2a (not idempotent)
             prop_assert_eq!(result.snapshot_proposals, original.snapshot_proposals * 2);
             prop_assert_eq!(result.snapshot_completions, original.snapshot_completions * 2);
         }

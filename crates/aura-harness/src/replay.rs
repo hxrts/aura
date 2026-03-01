@@ -24,8 +24,8 @@ pub struct ReplayBundle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplayOutcome {
-    pub actions_executed: usize,
-    pub mismatches: usize,
+    pub actions_executed: u64,
+    pub mismatches: u64,
 }
 
 impl ReplayBundle {
@@ -62,18 +62,19 @@ impl ReplayRunner {
         let mut tool_api = ToolApi::new(coordinator);
         tool_api.start_all()?;
 
-        let mut mismatches = 0usize;
+        let mut mismatches = 0_u64;
         for action in &bundle.actions {
             let actual = tool_api.handle_request(action.request.clone());
             if !response_shape_matches(&actual, &action.response) {
-                mismatches = mismatches.saturating_add(1);
+                mismatches = mismatches.saturating_add(1_u64);
             }
         }
 
         tool_api.stop_all()?;
 
         Ok(ReplayOutcome {
-            actions_executed: bundle.actions.len(),
+            actions_executed: u64::try_from(bundle.actions.len())
+                .map_err(|_| anyhow!("replay action count exceeds u64"))?,
             mismatches,
         })
     }

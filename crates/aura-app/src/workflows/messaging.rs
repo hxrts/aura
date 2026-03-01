@@ -174,14 +174,18 @@ async fn recipient_peers_for_channel(
         }
     }
 
-    // Reactive channel reductions currently do not carry explicit members for DM channels.
-    // Fall back to known contacts so reply traffic can route in two-party chats.
-    if recipients.is_empty() && channel.is_dm {
+    // Reactive channel reductions may temporarily omit explicit members.
+    // Fall back to known contacts for two-party sessions so reply traffic keeps flowing.
+    // Keep this conservative for non-DM channels: only apply if there is a single peer.
+    if recipients.is_empty() {
         let contacts = contacts_snapshot(app_core).await;
         for contact_id in contacts.contact_ids() {
             if *contact_id != self_authority {
                 recipients.insert(*contact_id);
             }
+        }
+        if !channel.is_dm && recipients.len() > 1 {
+            recipients.clear();
         }
     }
 
@@ -334,11 +338,22 @@ pub async fn create_channel(
             .await
             .map_err(|e| AuraError::agent(format!("Failed to persist channel: {e}")))?;
 
+        let mut attempted_fanout = 0usize;
+        let mut failed_fanout = Vec::new();
         for peer in member_ids.iter().copied() {
             if peer == runtime.authority_id() {
                 continue;
             }
-            let _ = runtime.send_chat_fact(peer, context_id, &fact).await;
+            attempted_fanout = attempted_fanout.saturating_add(1);
+            if let Err(error) = runtime.send_chat_fact(peer, context_id, &fact).await {
+                failed_fanout.push(format!("{peer}: {error}"));
+            }
+        }
+        if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
+            return Err(AuraError::agent(format!(
+                "Failed to deliver channel fact to members: {}",
+                failed_fanout.join("; ")
+            )));
         }
     } else if !name.trim().is_empty() {
         channel_id = channel_id_from_input(name);
@@ -362,7 +377,9 @@ pub async fn create_channel(
             last_finalized_epoch: 0,
         };
 
-        chat_state.add_channel(channel);
+        // Upsert to avoid races with reactive ChannelCreated reductions that may
+        // insert the channel first without populated member_ids.
+        chat_state.upsert_channel(channel);
     })
     .await?;
 
@@ -382,17 +399,26 @@ pub async fn create_channel(
             "Group threshold: {threshold_k}-of-{total_n} (keys rotate after everyone accepts)"
         ));
 
-        let bootstrap = runtime
-            .amp_create_channel_bootstrap(context_id, channel_id, member_ids.clone())
-            .await
-            .map_err(|e| AuraError::agent(format!("Failed to bootstrap channel: {e}")))?;
+        // Two-party groups can operate without explicit bootstrap handoff.
+        // This keeps delivery/decryption functional when invitation capability
+        // grants are unavailable for bootstrap exchange.
+        let bootstrap = if member_ids.len() > 1 {
+            Some(
+                runtime
+                    .amp_create_channel_bootstrap(context_id, channel_id, member_ids.clone())
+                    .await
+                    .map_err(|e| AuraError::agent(format!("Failed to bootstrap channel: {e}")))?,
+            )
+        } else {
+            None
+        };
 
         for receiver in &member_ids {
             let invitation = match crate::workflows::invitation::create_channel_invitation(
                 app_core,
                 *receiver,
                 channel_id.to_string(),
-                Some(bootstrap.clone()),
+                bootstrap.clone(),
                 invitation_message.clone(),
                 None,
             )
@@ -457,8 +483,48 @@ pub async fn join_channel_by_name(
     app_core: &Arc<RwLock<AppCore>>,
     channel_name: &str,
 ) -> Result<(), AuraError> {
+    let channel_name = channel_name.trim();
+    if channel_name.is_empty() {
+        return Err(AuraError::invalid("Channel name cannot be empty"));
+    }
+
     let channel_id = channel_id_from_input(channel_name);
-    join_channel(app_core, channel_id).await
+    let channel_exists_locally = {
+        let chat = chat_snapshot(app_core).await;
+        chat.channel(&channel_id).is_some()
+            || chat
+                .all_channels()
+                .any(|channel| channel.name.eq_ignore_ascii_case(channel_name))
+    };
+
+    // Local-only frontends still need "/join" to create/select channels.
+    if messaging_backend(app_core).await == MessagingBackend::LocalOnly {
+        if !channel_exists_locally {
+            create_channel(app_core, channel_name, None, &[], 1, 0).await?;
+        }
+        return Ok(());
+    }
+
+    match join_channel(app_core, channel_id).await {
+        Ok(()) => Ok(()),
+        Err(join_error) => {
+            // "/join" is "join or create". If the channel is unknown locally,
+            // create it in the current context as a fallback.
+            if channel_exists_locally {
+                return Err(join_error);
+            }
+
+            let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
+            create_channel(app_core, channel_name, None, &[], 1, timestamp_ms)
+                .await
+                .map(|_| ())
+                .map_err(|create_error| {
+                    AuraError::agent(format!(
+                        "Failed to join channel: {join_error}; failed to create missing channel: {create_error}"
+                    ))
+                })
+        }
+    }
 }
 
 /// Leave a channel using a typed ChannelId.
@@ -535,7 +601,7 @@ pub async fn close_channel_by_name(
 /// Set a channel topic using a typed ChannelId.
 ///
 /// Today this is a UI-local operation that updates the channel entry in `CHAT_SIGNAL`.
-/// A fully persisted implementation will commit a topic fact (see work/007.md).
+/// A fully persisted implementation will commit a topic fact.
 pub async fn set_topic(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
@@ -675,8 +741,24 @@ pub async fn send_message_ref(
 
         let recipients =
             recipient_peers_for_channel(app_core, channel_id, runtime.authority_id()).await;
+        let mut attempted_fanout = 0usize;
+        let mut failed_fanout = Vec::new();
         for peer in recipients {
-            let _ = runtime.send_chat_fact(peer, context_id, &fact).await;
+            attempted_fanout = attempted_fanout.saturating_add(1);
+            if let Err(error) = runtime.send_chat_fact(peer, context_id, &fact).await {
+                failed_fanout.push(format!("{peer}: {error}"));
+            }
+        }
+        if attempted_fanout == 0 {
+            return Err(AuraError::agent(format!(
+                "No recipient peers resolved for channel {channel_id}"
+            )));
+        }
+        if attempted_fanout > 0 && failed_fanout.len() == attempted_fanout {
+            return Err(AuraError::agent(format!(
+                "Failed to deliver message fact to recipients: {}",
+                failed_fanout.join("; ")
+            )));
         }
 
         runtime.authority_id()
@@ -830,9 +912,14 @@ pub async fn start_direct_chat(
                 AuraError::agent(format!("Failed to persist direct channel: {error}"))
             })?;
 
-        let _ = runtime
+        runtime
             .send_chat_fact(contact_authority, context_id, &fact)
-            .await;
+            .await
+            .map_err(|error| {
+                AuraError::agent(format!(
+                    "Failed to deliver direct channel fact to {contact_authority}: {error}"
+                ))
+            })?;
 
         with_chat_state(app_core, |chat_state| {
             chat_state.upsert_channel(Channel {
@@ -990,5 +1077,45 @@ mod tests {
         let a = AuthorityId::new_from_entropy([1u8; 32]);
         let b = AuthorityId::new_from_entropy([2u8; 32]);
         assert_eq!(pair_dm_context_id(a, b), pair_dm_context_id(b, a));
+    }
+
+    #[tokio::test]
+    async fn test_join_channel_by_name_local_creates_channel() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        join_channel_by_name(&app_core, "porch")
+            .await
+            .expect("local join should create channel");
+
+        let state = get_chat_state(&app_core).await.unwrap();
+        let found = state
+            .all_channels()
+            .any(|channel| channel.name.eq_ignore_ascii_case("porch"));
+        assert!(found, "expected porch channel to exist after /join");
+    }
+
+    #[tokio::test]
+    async fn test_join_channel_by_name_local_is_idempotent() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        join_channel_by_name(&app_core, "porch")
+            .await
+            .expect("first local join should create channel");
+        join_channel_by_name(&app_core, "porch")
+            .await
+            .expect("second local join should be a no-op");
+
+        let state = get_chat_state(&app_core).await.unwrap();
+        let count = state
+            .all_channels()
+            .filter(|channel| channel.name.eq_ignore_ascii_case("porch"))
+            .count();
+        assert_eq!(count, 1, "join should not duplicate channels");
     }
 }

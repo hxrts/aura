@@ -48,6 +48,3 @@ pub mod crdt_sync;
 
 // Re-export CRDT synchronization types
 pub use crdt_sync::{CrdtOperation, CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
-
-// NOTE: Epoch management has been moved to aura-sync (Layer 5)
-// Import aura-sync directly if you need epoch coordination protocols

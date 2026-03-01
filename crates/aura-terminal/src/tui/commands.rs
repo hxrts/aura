@@ -1,13 +1,9 @@
 //! # IRC-Style Commands
 //!
 //! Command parser and dispatcher for IRC-style slash commands.
-//! See `work/neighbor.md` Section 4.4 for the command specification.
 //!
-//! ## Architecture
-//!
-//! Business logic has been moved to `aura_app::ui::workflows::chat_commands`.
-//! This module re-exports the portable types and adds TUI-specific aliases
-//! for backwards compatibility.
+//! This module re-exports portable types from `aura_app::ui::workflows::chat_commands`
+//! and adds TUI-specific aliases for backwards compatibility.
 
 // Re-export portable types from aura-app
 pub use aura_app::ui::types::{

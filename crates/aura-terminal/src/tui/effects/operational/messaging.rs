@@ -1,7 +1,6 @@
 //! Messaging command handlers - TUI Operational Layer
 //!
 //! This module provides TUI-specific messaging operation handling.
-//! Business logic has been moved to `aura_app::ui::workflows::messaging`.
 //!
 //! ## Architecture
 //!
@@ -26,8 +25,7 @@ use super::EffectCommand;
 pub use aura_app::ui::workflows::messaging::{
     close_channel_by_name, create_channel, invite_user_to_channel, join_channel_by_name,
     leave_channel_by_name, send_action_by_name, send_direct_message, send_message,
-    send_message_by_name,
-    set_topic_by_name, start_direct_chat,
+    send_message_by_name, set_topic_by_name, start_direct_chat,
 };
 
 async fn resolve_channel_id(
@@ -44,7 +42,9 @@ async fn resolve_channel_id(
         return Some(channel.id);
     }
 
-    channel_ref.parse::<aura_core::identifiers::ChannelId>().ok()
+    channel_ref
+        .parse::<aura_core::identifiers::ChannelId>()
+        .ok()
 }
 
 /// Handle messaging commands

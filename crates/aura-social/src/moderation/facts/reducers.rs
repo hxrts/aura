@@ -184,6 +184,60 @@ impl FactReducer for HomeUnpinFactReducer {
     }
 }
 
+struct HomeGrantStewardFactReducer;
+
+impl FactReducer for HomeGrantStewardFactReducer {
+    fn handles_type(&self) -> &'static str {
+        HOME_GRANT_STEWARD_FACT_TYPE_ID
+    }
+
+    fn reduce_envelope(
+        &self,
+        context_id: ContextId,
+        envelope: &FactEnvelope,
+    ) -> Option<RelationalBinding> {
+        if envelope.type_id.as_str() != HOME_GRANT_STEWARD_FACT_TYPE_ID {
+            return None;
+        }
+
+        let _fact = HomeGrantStewardFact::from_envelope(envelope)?;
+        Some(RelationalBinding {
+            binding_type: RelationalBindingType::Generic(
+                HOME_GRANT_STEWARD_FACT_TYPE_ID.to_string(),
+            ),
+            context_id,
+            data: envelope.payload.clone(),
+        })
+    }
+}
+
+struct HomeRevokeStewardFactReducer;
+
+impl FactReducer for HomeRevokeStewardFactReducer {
+    fn handles_type(&self) -> &'static str {
+        HOME_REVOKE_STEWARD_FACT_TYPE_ID
+    }
+
+    fn reduce_envelope(
+        &self,
+        context_id: ContextId,
+        envelope: &FactEnvelope,
+    ) -> Option<RelationalBinding> {
+        if envelope.type_id.as_str() != HOME_REVOKE_STEWARD_FACT_TYPE_ID {
+            return None;
+        }
+
+        let _fact = HomeRevokeStewardFact::from_envelope(envelope)?;
+        Some(RelationalBinding {
+            binding_type: RelationalBindingType::Generic(
+                HOME_REVOKE_STEWARD_FACT_TYPE_ID.to_string(),
+            ),
+            context_id,
+            data: envelope.payload.clone(),
+        })
+    }
+}
+
 /// Register moderation domain facts with the journal registry.
 pub fn register_moderation_facts(registry: &mut FactRegistry) {
     registry.register::<HomeMuteFact>(HOME_MUTE_FACT_TYPE_ID, Box::new(HomeMuteFactReducer));
@@ -193,4 +247,12 @@ pub fn register_moderation_facts(registry: &mut FactRegistry) {
     registry.register::<HomeKickFact>(HOME_KICK_FACT_TYPE_ID, Box::new(HomeKickFactReducer));
     registry.register::<HomePinFact>(HOME_PIN_FACT_TYPE_ID, Box::new(HomePinFactReducer));
     registry.register::<HomeUnpinFact>(HOME_UNPIN_FACT_TYPE_ID, Box::new(HomeUnpinFactReducer));
+    registry.register::<HomeGrantStewardFact>(
+        HOME_GRANT_STEWARD_FACT_TYPE_ID,
+        Box::new(HomeGrantStewardFactReducer),
+    );
+    registry.register::<HomeRevokeStewardFact>(
+        HOME_REVOKE_STEWARD_FACT_TYPE_ID,
+        Box::new(HomeRevokeStewardFactReducer),
+    );
 }

@@ -17,14 +17,14 @@
 
 use iocraft::prelude::*;
 
-use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL};
-use aura_app::ui::types::{format_timestamp, Channel as AppChannel, ChatState, HomesState};
+use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, NEIGHBORHOOD_SIGNAL};
+use aura_app::ui::types::{format_timestamp, ChatState};
 
 use crate::tui::callbacks::{
     ChannelSelectCallback, CreateChannelCallback, RetryMessageCallback, SendCallback,
     SetTopicCallback,
 };
-use crate::tui::chat_scope::{active_home_scope_id, channel_matches_scope};
+use crate::tui::chat_scope::{active_home_scope_id, scoped_channels};
 use crate::tui::components::{ListPanel, MessageInput, MessagePanel};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
@@ -105,16 +105,6 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
 /// Shared selected channel index for cross-component communication
 pub type SharedSelectedChannel = std::sync::Arc<std::sync::RwLock<usize>>;
 
-fn is_dm_like_channel(channel: &AppChannel) -> bool {
-    channel.is_dm
-        || channel.name.to_ascii_lowercase().starts_with("dm:")
-        || channel
-            .topic
-            .as_deref()
-            .map(|topic| topic.to_ascii_lowercase().starts_with("direct messages"))
-            .unwrap_or(false)
-}
-
 /// Props for ChatScreen
 ///
 /// ## Compile-Time Safety
@@ -176,12 +166,9 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let reactive_chat_state = hooks.use_state(ChatState::default);
     let reactive_contacts: State<Vec<Contact>> = hooks.use_state(Vec::new);
     let reactive_active_scope = hooks.use_state(|| None::<String>);
-    let reactive_homes = hooks.use_state(|| None::<HomesState>);
     let active_scope_ref = hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None)));
-    let homes_ref = hooks.use_ref(|| std::sync::Arc::new(std::sync::RwLock::new(None)));
     let active_scope: std::sync::Arc<std::sync::RwLock<Option<String>>> =
         active_scope_ref.read().clone();
-    let homes: std::sync::Arc<std::sync::RwLock<Option<HomesState>>> = homes_ref.read().clone();
 
     // Subscribe to contacts signal for nickname lookup
     hooks.use_future({
@@ -216,22 +203,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         }
     });
 
-    // Subscribe to homes signal so chat scope can resolve home context IDs.
-    hooks.use_future({
-        let mut reactive_homes = reactive_homes.clone();
-        let homes = homes.clone();
-        let app_core = app_ctx.app_core.clone();
-        async move {
-            subscribe_signal_with_retry(app_core, &*HOMES_SIGNAL, move |homes_state| {
-                reactive_homes.set(Some(homes_state.clone()));
-                if let Ok(mut guard) = homes.write() {
-                    *guard = Some(homes_state);
-                }
-            })
-            .await;
-        }
-    });
-
     // Subscribe to chat signal updates
     // Uses the unified ReactiveEffects system from aura-core
     hooks.use_future({
@@ -246,14 +217,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 // Selection is managed by TUI state, not app state
                 if let Some(ref tx) = update_tx {
                     let scope = active_scope.read().ok().and_then(|g| g.clone());
-                    let homes = homes.read().ok().and_then(|g| g.clone());
-                    let scoped_channels: Vec<_> = chat_state
-                        .all_channels()
-                        .filter(|channel| {
-                            is_dm_like_channel(channel)
-                                || channel_matches_scope(channel, scope.as_deref(), homes.as_ref())
-                        })
-                        .collect();
+                    let scoped = scoped_channels(&chat_state, scope.as_deref());
 
                     // Get the selected channel index from shared state
                     let selected_idx = shared_selected
@@ -261,15 +225,15 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         .and_then(|s| s.read().ok().map(|g| *g))
                         .unwrap_or(0);
 
-                    let selected_channel_message_count = scoped_channels
+                    let selected_channel_message_count = scoped
                         .get(selected_idx)
                         .map(|ch| chat_state.messages_for_channel(&ch.id).len())
                         .unwrap_or(0);
 
                     let _ = tx.try_send(UiUpdate::ChatStateUpdated {
-                        channel_count: scoped_channels.len(),
+                        channel_count: scoped.len(),
                         message_count: selected_channel_message_count,
-                        selected_index: Some(0),
+                        selected_index: None,
                     });
                 }
 
@@ -284,13 +248,8 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let chat_state = reactive_chat_state.read().clone();
     let contacts = reactive_contacts.read().clone();
     let active_scope = reactive_active_scope.read().clone();
-    let homes = reactive_homes.read().clone();
-    let channels: Vec<Channel> = chat_state
-        .all_channels()
-        .filter(|channel| {
-            is_dm_like_channel(channel)
-                || channel_matches_scope(channel, active_scope.as_deref(), homes.as_ref())
-        })
+    let channels: Vec<Channel> = scoped_channels(&chat_state, active_scope.as_deref())
+        .into_iter()
         .map(Channel::from)
         .collect();
     let selected_channel_id = channels

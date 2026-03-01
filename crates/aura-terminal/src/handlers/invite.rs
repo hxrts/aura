@@ -1,7 +1,6 @@
 //! Invitation CLI handlers - Terminal-Specific Formatting
 //!
 //! This module provides terminal-specific invitation formatting for CLI and TUI.
-//! Business logic has been moved to `aura_app::ui::workflows::invitation`.
 //!
 //! ## Architecture
 //!
@@ -238,6 +237,7 @@ mod tests {
             version: 1,
             invitation_id: InvitationId::new("test-invitation-123"),
             sender_id: AuthorityId::new_from_entropy([42u8; 32]),
+            context_id: None,
             invitation_type,
             message: None,
             expires_at: None,

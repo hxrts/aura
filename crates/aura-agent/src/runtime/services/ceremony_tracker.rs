@@ -632,6 +632,17 @@ impl CeremonyTracker {
                     IntentError::validation_failed(format!("Ceremony {} not found", ceremony_id))
                 })?;
 
+                // Committed ceremonies are terminal-success states and must never
+                // transition into failed, otherwise invariants and downstream flows break.
+                if state.is_committed {
+                    tracing::warn!(
+                        ceremony_id = %ceremony_id,
+                        error = ?error_message,
+                        "Ignoring failure for already committed ceremony"
+                    );
+                    return Ok(());
+                }
+
                 state.has_failed = true;
                 state.error_message = error_message.clone();
 
@@ -705,7 +716,11 @@ impl CeremonyTracker {
 
                 for (id, state) in tracker.ceremonies.iter() {
                     let elapsed_ms = now_ms.saturating_sub(state.started_at.ts_ms);
-                    if elapsed_ms > state.timeout.as_millis() as u64 && !state.has_failed {
+                    if elapsed_ms > state.timeout.as_millis() as u64
+                        && !state.has_failed
+                        && !state.is_committed
+                        && !state.is_superseded
+                    {
                         removed.push(id.clone());
                     }
                 }
@@ -898,8 +913,6 @@ impl CeremonyTracker {
         state.supersession_records.clone()
     }
 }
-
-// Note: Default removed since CeremonyTracker requires a time effect for deterministic simulation
 
 // =============================================================================
 // RuntimeService Implementation
@@ -1205,6 +1218,87 @@ mod tests {
         let state = tracker.get(&ceremony_id).await.unwrap();
         assert!(state.has_failed);
         assert_eq!(state.error_message, Some("Test failure".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_mark_failed_ignores_committed_ceremony() {
+        let tracker = CeremonyTracker::new(test_time());
+
+        let ceremony_id = test_ceremony_id("ceremony-committed");
+        let a = AuthorityId::new_from_entropy([21u8; 32]);
+
+        tracker
+            .register(
+                ceremony_id.clone(),
+                CeremonyKind::Invitation,
+                a,
+                1,
+                1,
+                vec![ParticipantIdentity::guardian(a)],
+                0,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        tracker
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(a))
+            .await
+            .unwrap();
+        tracker.mark_committed(&ceremony_id).await.unwrap();
+        tracker
+            .mark_failed(&ceremony_id, Some("should be ignored".to_string()))
+            .await
+            .unwrap();
+
+        let state = tracker.get(&ceremony_id).await.unwrap();
+        assert!(state.is_committed);
+        assert!(!state.has_failed);
+        assert_eq!(state.error_message, None);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_timed_out_skips_committed_ceremony() {
+        let tracker = CeremonyTracker::new(test_time());
+
+        let ceremony_id = test_ceremony_id("ceremony-timeout-committed");
+        let a = AuthorityId::new_from_entropy([22u8; 32]);
+
+        tracker
+            .register(
+                ceremony_id.clone(),
+                CeremonyKind::Invitation,
+                a,
+                1,
+                1,
+                vec![ParticipantIdentity::guardian(a)],
+                0,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        tracker
+            .mark_accepted(&ceremony_id, ParticipantIdentity::guardian(a))
+            .await
+            .unwrap();
+        tracker.mark_committed(&ceremony_id).await.unwrap();
+
+        {
+            let mut guard = tracker.state.write().await;
+            let state = guard.ceremonies.get_mut(&ceremony_id).unwrap();
+            state.started_at.ts_ms = state.started_at.ts_ms.saturating_sub(60_000);
+            state.timeout = Duration::from_millis(1);
+        }
+
+        let cleaned = tracker.cleanup_timed_out().await;
+        assert_eq!(cleaned, 0);
+
+        let state = tracker.get(&ceremony_id).await.unwrap();
+        assert!(state.is_committed);
+        assert!(!state.has_failed);
     }
 
     #[tokio::test]

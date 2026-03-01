@@ -72,7 +72,7 @@ impl FlowBudgetView {
     }
 }
 
-/// Create an example budget with neighborhoods for table (Section 8.1 of work/neighbor.md)
+/// Create an example budget with neighborhoods for table
 ///
 /// Returns a vec of (neighborhood_count, budget) pairs for documentation/testing.
 #[must_use]

@@ -10,33 +10,35 @@ use aura_protocol::effects::EffectApiEffects;
 
 impl SessionOperations {
     /// Create threshold operation session
+    ///
+    /// Creates a session with threshold metadata that is coordinated through
+    /// the choreographic protocol, ensuring all participants agree on the
+    /// threshold parameters.
     pub async fn create_threshold_session(
         &self,
         participants: Vec<DeviceId>,
         threshold: usize,
     ) -> AgentResult<SessionHandle> {
-        let _effects = self.effects().clone();
-
         if participants.len() < threshold {
             return Err(AgentError::config("Not enough participants for threshold"));
         }
 
-        let mut handle = self
-            .create_session(SessionType::ThresholdOperation, participants)
-            .await?;
-
-        // Add threshold metadata
-        handle.metadata.insert(
+        // Build threshold metadata to be included in the coordinated session request
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
             "threshold".to_string(),
             serde_json::Value::Number(threshold.into()),
         );
-        handle.metadata.insert(
+        metadata.insert(
             "total_participants".to_string(),
-            serde_json::Value::Number(handle.participants.len().into()),
+            serde_json::Value::Number(participants.len().into()),
         );
 
-        // Update session with metadata (this would be coordinated in a full implementation)
-        // Session created successfully
+        // Create session with threshold metadata - this goes through the choreographic
+        // protocol which ensures all participants receive and agree on the metadata
+        let handle = self
+            .create_session_with_metadata(SessionType::ThresholdOperation, participants, metadata)
+            .await?;
 
         Ok(handle)
     }

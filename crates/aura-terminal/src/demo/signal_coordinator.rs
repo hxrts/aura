@@ -11,7 +11,7 @@
 //!
 //! ## Single Source of Truth
 //!
-//! Demo mode uses the same fact-based pipeline as production (per work/002.md C2.5):
+//! Demo mode uses the same fact-based pipeline as production:
 //! - Facts are committed via the runtime bridge
 //! - The `ReactiveScheduler` processes facts and updates signals
 //! - UI components subscribe to signals

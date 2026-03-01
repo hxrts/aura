@@ -112,7 +112,19 @@ fn tool_api_primitives_control_local_pty_instance() {
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
+    let authoritative_screen_text = screen_payload
+        .get("authoritative_screen")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let raw_screen_text = screen_payload
+        .get("raw_screen")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(screen_text, authoritative_screen_text);
     assert!(screen_text.contains("hello-pty"));
+    assert!(raw_screen_text.contains("hello-pty"));
 
     let tail_payload = match tool_api.handle_request(ToolRequest::TailLog {
         instance_id: "alice".to_string(),

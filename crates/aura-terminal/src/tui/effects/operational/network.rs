@@ -93,45 +93,65 @@ pub async fn handle_network(
             // 1. Create a contact invitation for this peer
             // 2. Export the invitation code
             // 3. Send the code to the peer's address via LAN transport
-            //
-            // NOTE: LAN transport for invitation delivery needs send_lan_invitation()
-            // added to RuntimeBridge. Currently falls back to exporting code for manual sharing.
             tracing::info!(
                 "Inviting LAN peer: authority={} at address={}",
                 authority_id,
                 address
             );
 
-            // Export an invitation code that could be shared manually
-            let app_core = app_core.read().await;
+            let app_core_guard = app_core.read().await;
 
-            // Try to export an invitation (requires runtime)
-            // The invitation_id would normally come from a created invitation
-            // For LAN invites, we generate a placeholder ID based on the target
+            // Generate invitation ID from authority
             let invitation_id =
                 format!("lan-invite-{}", &authority_id[..8.min(authority_id.len())]);
 
-            match app_core.export_invitation(&invitation_id).await {
-                Ok(code) => {
-                    tracing::info!(
-                        "Generated invitation code for LAN peer (code would be sent to {})",
-                        address
-                    );
-                    // Return the code - in a full implementation, this would be sent via LAN
-                    Some(Ok(OpResponse::Data(format!(
-                        "Invitation ready for {} (LAN send not yet implemented): {}",
-                        address,
-                        &code[..50.min(code.len())]
-                    ))))
-                }
+            // Export the invitation code
+            let code = match app_core_guard.export_invitation(&invitation_id).await {
+                Ok(code) => code,
                 Err(e) => {
-                    // No runtime available - log and return success anyway
-                    // (LAN invites would work when runtime is present)
                     tracing::debug!("Could not export invitation (no runtime): {}", e);
-                    Some(Ok(OpResponse::Data(format!(
+                    return Some(Ok(OpResponse::Data(format!(
                         "LAN invitation queued for {authority_id} at {address} (requires runtime)"
-                    ))))
+                    ))));
                 }
+            };
+
+            // Get the runtime bridge to send the invitation via LAN
+            if let Some(runtime) = app_core_guard.runtime() {
+                // Create LanPeerInfo for the bridge call (type from ui::prelude)
+                let peer_info = LanPeerInfo {
+                    authority_id: authority_id
+                        .parse()
+                        .unwrap_or_else(|_| AuthorityId::new_from_entropy([0u8; 32])),
+                    address: address.clone(),
+                    discovered_at_ms: 0,
+                    nickname_suggestion: None,
+                };
+
+                match runtime.send_lan_invitation(&peer_info, &code).await {
+                    Ok(()) => {
+                        tracing::info!("Sent LAN invitation to {}", address);
+                        Some(Ok(OpResponse::Data(format!(
+                            "Invitation sent to {} via LAN",
+                            address
+                        ))))
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to send LAN invitation: {}", e);
+                        // Fall back to showing the code for manual sharing
+                        Some(Ok(OpResponse::Data(format!(
+                            "LAN send failed ({}), share code manually: {}",
+                            e,
+                            &code[..50.min(code.len())]
+                        ))))
+                    }
+                }
+            } else {
+                // No runtime - show code for manual sharing
+                Some(Ok(OpResponse::Data(format!(
+                    "No runtime available. Share invitation code manually: {}",
+                    &code[..50.min(code.len())]
+                ))))
             }
         }
 

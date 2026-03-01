@@ -514,6 +514,112 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
+    let discovery_port = next_lan_port();
+    let bind_port_a = next_lan_port();
+    let bind_port_b = next_lan_port();
+
+    let agent_a = create_production_lan_agent_with_bind(53, discovery_port, bind_port_a).await?;
+    let agent_b = create_production_lan_agent_with_bind(54, discovery_port, bind_port_b).await?;
+
+    wait_for_lan_peer(&agent_a, agent_b.authority_id()).await?;
+    wait_for_lan_peer(&agent_b, agent_a.authority_id()).await?;
+
+    let app_a = create_runtime_app(agent_a.clone()).await?;
+    let app_b = create_runtime_app(agent_b.clone()).await?;
+
+    // Establish direct contact first.
+    let invite = invitation_workflow::create_contact_invitation(
+        &app_a,
+        agent_b.authority_id(),
+        None,
+        Some("group channel bootstrap".to_string()),
+        None,
+    )
+    .await?;
+    let invite_code = invitation_workflow::export_invitation(&app_a, &invite.invitation_id).await?;
+    invitation_workflow::import_invitation(&app_b, &invite_code).await?;
+    invitation_workflow::accept_invitation(&app_b, &invite.invitation_id).await?;
+
+    let effects_a = agent_a.runtime().effects();
+    timeout(Duration::from_secs(8), async {
+        loop {
+            if effects_a
+                .is_channel_established(
+                    aura_agent::core::default_context_id_for_authority(agent_b.authority_id()),
+                    agent_b.authority_id(),
+                )
+                .await
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .map_err(|_| "timed out waiting for sender-side descriptor cache")?;
+
+    // Alice creates a group channel and invites Bob.
+    let members = vec![agent_b.authority_id().to_string()];
+    let channel_id = messaging_workflow::create_channel(
+        &app_a,
+        "lan-group",
+        None,
+        &members,
+        1,
+        1_700_000_100_000,
+    )
+    .await?;
+    let effects_b = agent_b.runtime().effects();
+    let channel_created_fact =
+        wait_for_matching_chat_fact(&effects_b, agent_b.authority_id(), |fact| {
+            matches!(
+                fact,
+                ChatFact::ChannelCreated {
+                    channel_id: seen,
+                    creator_id,
+                    ..
+                } if *seen == channel_id && *creator_id == agent_a.authority_id()
+            )
+        })
+        .await?;
+    let channel_context = match &channel_created_fact.content {
+        FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
+            match ChatFact::from_envelope(envelope) {
+                Some(ChatFact::ChannelCreated { context_id, .. }) => context_id,
+                _ => return Err("expected ChannelCreated chat fact".into()),
+            }
+        }
+        _ => return Err("expected relational generic fact for channel create".into()),
+    };
+
+    aura_protocol::amp::get_channel_state(&*effects_b, channel_context, channel_id)
+        .await
+        .map_err(|e| format!("recipient AMP channel state missing before send: {e}"))?;
+
+    let msg_text = "lan-group-a1";
+    messaging_workflow::send_message(&app_a, channel_id, msg_text, 1_700_000_100_010).await?;
+    wait_for_chat_signal_message(&app_b, agent_a.authority_id(), msg_text).await?;
+
+    let reply_text = "lan-group-b1";
+    let reply_result =
+        messaging_workflow::send_message(&app_b, channel_id, reply_text, 1_700_000_100_020).await;
+    if let Err(err) = reply_result {
+        let post_send_state =
+            aura_protocol::amp::get_channel_state(&*effects_b, channel_context, channel_id).await;
+        return Err(format!(
+            "group reply send failed; context={channel_context} channel={channel_id} \
+             post_send_channel_state_present={} err={err}",
+            post_send_state.is_ok()
+        )
+        .into());
+    }
+    wait_for_chat_signal_message(&app_a, agent_b.authority_id(), reply_text).await?;
+
+    Ok(())
+}
+
 /// Create a LAN agent in **Production** execution mode.
 ///
 /// Unlike `create_lan_agent` (Testing mode), this exercises the real guard

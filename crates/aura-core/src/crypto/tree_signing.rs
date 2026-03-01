@@ -3,7 +3,7 @@
 //! This module provides pure cryptographic primitives for FROST threshold signatures
 //! used in commitment tree operations. It contains **NO** tree logic or business logic.
 //!
-//! ## Design Principles (from work/015.md)
+//! ## Design Principles
 //!
 //! - **Pure Cryptography**: Only signing, aggregation, and verification
 //! - **No Tree State**: No knowledge of TreeState, NodeIndex, or tree structure
@@ -20,7 +20,7 @@
 //!
 //! ## References
 //!
-//! - [`docs/123_commitment_tree.md`](../../../../docs/123_commitment_tree.md) - Tree operations
+//! - [`docs/102_authority_and_identity.md`](../../../../docs/102_authority_and_identity.md) - Tree operations
 //! - FROST paper: https://eprint.iacr.org/2020/852
 
 use crate::crypto::hash;

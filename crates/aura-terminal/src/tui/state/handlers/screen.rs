@@ -278,6 +278,24 @@ pub fn handle_neighborhood_key(
                 // Create a new home
                 commands.push(TuiCommand::Dispatch(DispatchCommand::OpenHomeCreate));
             }
+            KeyCode::Char('m') => {
+                // Create/select active neighborhood with a default label.
+                commands.push(TuiCommand::Dispatch(DispatchCommand::CreateNeighborhood {
+                    name: "Neighborhood".to_string(),
+                }));
+            }
+            KeyCode::Char('v') => {
+                // Add selected home as a neighborhood member.
+                commands.push(TuiCommand::Dispatch(
+                    DispatchCommand::AddSelectedHomeToNeighborhood,
+                ));
+            }
+            KeyCode::Char('L') => {
+                // Force direct adjacency for selected home.
+                commands.push(TuiCommand::Dispatch(
+                    DispatchCommand::LinkSelectedHomeAdjacency,
+                ));
+            }
             KeyCode::Char('g') | KeyCode::Char('H') => {
                 commands.push(TuiCommand::Dispatch(DispatchCommand::GoHome));
             }

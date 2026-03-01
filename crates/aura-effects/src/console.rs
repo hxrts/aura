@@ -46,5 +46,3 @@ impl ConsoleEffects for RealConsoleHandler {
         Ok(())
     }
 }
-
-// MockConsoleHandler moved to aura-testkit

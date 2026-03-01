@@ -1,3 +1,21 @@
+//! Snapshot and Cut Types for Tree History Pruning
+//!
+//! This module provides types for creating snapshots of tree state at epoch
+//! boundaries, enabling safe pruning of historical operations while preserving
+//! the ability to verify and merge future operations.
+//!
+//! # Key Types
+//!
+//! - **Snapshot**: Compact representation of tree state (roster, policies, commitment)
+//! - **Cut**: Proposal for where to snapshot the operation log
+//! - **Partial**: Threshold signature share for snapshot approval
+//!
+//! # Invariants
+//!
+//! - Snapshots are immutable once created
+//! - Snapshots can only be created at epoch boundaries
+//! - Snapshot creation requires threshold approval
+
 use super::{Epoch, LeafId, NodeIndex, Policy, TreeHash32};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

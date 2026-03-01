@@ -487,7 +487,7 @@ impl RuntimeSystem {
     /// Start the reactive scheduler pipeline (facts → scheduler → view updates).
     ///
     /// This is a best-effort wiring step; the pipeline becomes fully useful once
-    /// the runtime publishes typed facts into it (work/002.md C2).
+    /// the runtime publishes typed facts into it.
     pub async fn start_reactive_pipeline(&mut self) -> Result<(), String> {
         if self.reactive_pipeline.is_some() {
             return Ok(());
@@ -506,7 +506,7 @@ impl RuntimeSystem {
         );
 
         // Attach the scheduler ingestion channel to the effect system so all journal commits
-        // go through the single typed-fact pipeline (work/002.md C2).
+        // go through the single typed-fact pipeline.
         self.effect_system.attach_fact_sink(pipeline.fact_sender());
 
         // Attach the view update sender so callers can await fact processing completion.

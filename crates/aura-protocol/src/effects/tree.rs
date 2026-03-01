@@ -4,7 +4,7 @@
 //! the algebraic effects pattern. It defines what tree operations can be
 //! performed without specifying how they are implemented.
 //!
-//! ## Architecture (from work/015.md)
+//! ## Architecture
 //!
 //! - **Effect Traits**: Define operations (this module)
 //! - **Handlers**: Implement operations (handlers/tree/)
@@ -18,8 +18,8 @@
 //!
 //! ## References
 //!
-//! - [`docs/002_system_architecture.md`](../../../docs/002_system_architecture.md) - Effect system architecture
-//! - [`docs/123_commitment_tree.md`](../../../docs/123_commitment_tree.md) - Tree operations
+//! - [`docs/105_effect_system_and_runtime.md`](../../../../docs/105_effect_system_and_runtime.md) - Effect system architecture
+//! - [`docs/102_authority_and_identity.md`](../../../../docs/102_authority_and_identity.md) - Tree operations
 
 use async_trait::async_trait;
 use aura_core::{
@@ -75,7 +75,7 @@ pub struct Snapshot {
 /// 2. Run threshold ceremony (separate) → Collect signatures → `AttestedOp`
 /// 3. Apply operation → `apply_attested_op()` → Updates tree state
 ///
-/// See: [`docs/002_system_architecture.md`](../../../docs/002_system_architecture.md) for architectural guidelines
+/// See: [`docs/105_effect_system_and_runtime.md`](../../../../docs/105_effect_system_and_runtime.md) for architectural guidelines
 #[async_trait]
 pub trait TreeEffects: Send + Sync {
     // ===== State Queries =====

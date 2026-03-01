@@ -99,6 +99,138 @@ async fn contacts_signal_updates_from_contact_facts_as_snapshots() {
 }
 
 #[tokio::test]
+async fn contacts_signal_updates_existing_contact_nickname_suggestion_on_added_fact() {
+    let reactive = ReactiveHandler::new();
+    register_app_signals(&reactive).await.unwrap();
+
+    let time_effects = Arc::new(ControllableTimeSource::new(0));
+    let own_authority = AuthorityId::new_from_entropy([62u8; 32]);
+    let config = AgentConfig::default();
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_authority(&config, 10062, own_authority).unwrap(),
+    );
+
+    let pipeline = ReactivePipeline::start(
+        SchedulerConfig::default(),
+        Arc::new(build_fact_registry()),
+        time_effects,
+        effects,
+        own_authority,
+        reactive.clone(),
+    );
+
+    let ctx = ContextId::new_from_entropy([63u8; 32]);
+    let alice = AuthorityId::new_from_entropy([64u8; 32]);
+
+    let initial_added = ContactFact::Added {
+        context_id: ctx,
+        owner_id: own_authority,
+        contact_id: alice,
+        nickname: "Alice".to_string(),
+        added_at: t(1),
+    };
+    let updated_added = ContactFact::Added {
+        context_id: ctx,
+        owner_id: own_authority,
+        contact_id: alice,
+        nickname: "Alice-Maple".to_string(),
+        added_at: t(2),
+    };
+
+    let mut updates = pipeline.subscribe();
+    pipeline
+        .publish_journal_facts(vec![
+            fact(1, FactContent::Relational(initial_added.to_generic())),
+            fact(2, FactContent::Relational(updated_added.to_generic())),
+        ])
+        .await;
+
+    let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
+        Ok(Ok(update)) => update,
+        Ok(Err(err)) => panic!("expected scheduler batch, got recv error: {err}"),
+        Err(_) => panic!("expected scheduler batch"),
+    };
+    assert!(matches!(update, ViewUpdate::Batch { count } if count > 0));
+
+    let contacts_state = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
+    let contact = match contacts_state.contact(&alice) {
+        Some(contact) => contact,
+        None => panic!("alice exists"),
+    };
+    assert_eq!(
+        contact.nickname_suggestion.as_deref(),
+        Some("Alice-Maple"),
+        "latest ContactFact::Added nickname should refresh nickname_suggestion"
+    );
+}
+
+#[tokio::test]
+async fn contacts_signal_does_not_overwrite_human_suggestion_with_fallback_identity() {
+    let reactive = ReactiveHandler::new();
+    register_app_signals(&reactive).await.unwrap();
+
+    let time_effects = Arc::new(ControllableTimeSource::new(0));
+    let own_authority = AuthorityId::new_from_entropy([72u8; 32]);
+    let config = AgentConfig::default();
+    let effects = Arc::new(
+        AuraEffectSystem::simulation_for_authority(&config, 10072, own_authority).unwrap(),
+    );
+
+    let pipeline = ReactivePipeline::start(
+        SchedulerConfig::default(),
+        Arc::new(build_fact_registry()),
+        time_effects,
+        effects,
+        own_authority,
+        reactive.clone(),
+    );
+
+    let ctx = ContextId::new_from_entropy([73u8; 32]);
+    let contact_id = AuthorityId::new_from_entropy([74u8; 32]);
+
+    let human_named = ContactFact::Added {
+        context_id: ctx,
+        owner_id: own_authority,
+        contact_id,
+        nickname: "Alice-Maple".to_string(),
+        added_at: t(1),
+    };
+    let fallback_named = ContactFact::Added {
+        context_id: ctx,
+        owner_id: own_authority,
+        contact_id,
+        nickname: contact_id.to_string(),
+        added_at: t(2),
+    };
+
+    let mut updates = pipeline.subscribe();
+    pipeline
+        .publish_journal_facts(vec![
+            fact(1, FactContent::Relational(human_named.to_generic())),
+            fact(2, FactContent::Relational(fallback_named.to_generic())),
+        ])
+        .await;
+
+    let update = match tokio::time::timeout(Duration::from_secs(1), updates.recv()).await {
+        Ok(Ok(update)) => update,
+        Ok(Err(err)) => panic!("expected scheduler batch, got recv error: {err}"),
+        Err(_) => panic!("expected scheduler batch"),
+    };
+    assert!(matches!(update, ViewUpdate::Batch { count } if count > 0));
+
+    let contacts_state = reactive.read(&*CONTACTS_SIGNAL).await.unwrap();
+    let contact = match contacts_state.contact(&contact_id) {
+        Some(contact) => contact,
+        None => panic!("contact exists"),
+    };
+    assert_eq!(
+        contact.nickname_suggestion.as_deref(),
+        Some("Alice-Maple"),
+        "fallback identity nicknames must not overwrite a prior human suggestion"
+    );
+}
+
+#[tokio::test]
 async fn contacts_signal_reflects_guardian_binding_protocol_fact() {
     let reactive = ReactiveHandler::new();
     register_app_signals(&reactive).await.unwrap();

@@ -2,12 +2,15 @@
 
 use std::fs;
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use aura_harness::api_version::TOOL_API_VERSIONS;
 use aura_harness::artifact_sync::RemoteArtifactSyncReport;
+use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::{build_seed_bundle, SeedBundle};
 use aura_harness::replay::ReplayBundle;
 use aura_harness::resource_guards::ResourceGuardReport;
+use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
 
 #[test]
 fn phase5_run_emits_hardening_artifacts_with_seed_and_sync_metadata() {
@@ -144,6 +147,76 @@ action = "noop"
     assert_eq!(remote_sync_report.records[0].instance_id, "bob");
     assert_eq!(remote_sync_report.records[0].status, "simulated");
     assert!(!remote_sync_report.records[0].checksum_sha256.is_empty());
+}
+
+#[test]
+fn wait_for_timeout_uses_wall_clock_budget_under_continuous_output() {
+    let temp = match tempfile::tempdir() {
+        Ok(temp) => temp,
+        Err(error) => panic!("tempdir failed: {error}"),
+    };
+    let config_path = temp.path().join("run.toml");
+    let config_body = format!(
+        r#"schema_version = 1
+
+[run]
+name = "phase5-wait-timeout-budget"
+pty_rows = 40
+pty_cols = 120
+
+[[instances]]
+id = "alice"
+mode = "local"
+data_dir = "{}"
+bind_address = "127.0.0.1:52003"
+command = "bash"
+args = ["-lc", "yes churn"]
+"#,
+        temp.path().join("alice-data").display()
+    );
+    if let Err(error) = fs::write(&config_path, config_body) {
+        panic!("failed writing run config: {error}");
+    }
+
+    let run_config = match aura_harness::load_and_validate_run_config(&config_path) {
+        Ok(config) => config,
+        Err(error) => panic!("failed to load run config: {error}"),
+    };
+    let coordinator = match HarnessCoordinator::from_run_config(&run_config) {
+        Ok(coordinator) => coordinator,
+        Err(error) => panic!("failed to build coordinator: {error}"),
+    };
+    let mut tool_api = ToolApi::new(coordinator);
+    if let Err(error) = tool_api.start_all() {
+        panic!("failed to start tool api: {error}");
+    }
+
+    let started_at = Instant::now();
+    let response = tool_api.handle_request(ToolRequest::WaitFor {
+        instance_id: "alice".to_string(),
+        pattern: "__never_matches__".to_string(),
+        timeout_ms: 500,
+    });
+    let elapsed = started_at.elapsed();
+
+    if let Err(error) = tool_api.stop_all() {
+        panic!("failed to stop tool api: {error}");
+    }
+
+    match response {
+        ToolResponse::Error { message } => {
+            assert!(message.contains("wait_for timed out"));
+        }
+        ToolResponse::Ok { payload } => {
+            panic!("expected wait_for timeout, got success payload: {payload}");
+        }
+    }
+
+    assert!(
+        elapsed < Duration::from_millis(3500),
+        "wait_for exceeded wall-clock budget: elapsed_ms={}",
+        elapsed.as_millis()
+    );
 }
 
 fn read_json<T>(path: &std::path::Path) -> T

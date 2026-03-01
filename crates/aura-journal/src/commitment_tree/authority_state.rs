@@ -298,15 +298,19 @@ impl AuthorityTreeState {
     }
 
     /// Recompute commitment for a specific subtree
+    ///
+    /// Currently recomputes the entire tree because the `branches` structure
+    /// is not populated with parent-child relationships. For incremental
+    /// computation, `branches` would need to maintain the tree hierarchy
+    /// so we could walk up from the affected node to the root.
     fn recompute_subtree_commitment(&mut self, node_id: u32) {
-        // For a specific node, recompute its commitment based on children
-        // This would use the actual tree structure in a full implementation
-
         if node_id == 0 {
             // Root node - compute from all leaves
             self.compute_tree_commitment();
         } else {
             // Leaf or internal node - compute based on its role and children
+            // Currently delegates to full tree computation since branches
+            // structure is not maintained (see compute_node_commitment)
             self.compute_node_commitment(node_id);
         }
     }

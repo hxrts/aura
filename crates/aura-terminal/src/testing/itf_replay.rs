@@ -241,7 +241,7 @@ impl ITFTraceReplayer {
             "Notifications" => Ok(Screen::Notifications),
             "Settings" => Ok(Screen::Settings),
             "Recovery" => Ok(Screen::Notifications),
-            // "Invitations" was removed - functionality moved to Contacts screen
+            // "Invitations" is handled via the Contacts screen
             _ => Err(format!("Unknown screen: {tag}")),
         }
     }

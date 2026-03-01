@@ -237,8 +237,6 @@ impl RandomCoreEffects for RealCryptoHandler {
     }
 }
 
-// (MockCryptoHandler implementation moved to aura-testkit)
-
 // Crypto core implementation for RealCryptoHandler
 #[async_trait]
 impl CryptoCoreEffects for RealCryptoHandler {

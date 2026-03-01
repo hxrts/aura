@@ -244,12 +244,41 @@ fn sync_neighborhood_navigation_state(
     shared_channels: &Arc<std::sync::RwLock<Vec<Channel>>>,
     shared_home_meta: &SharedNeighborhoodHomeMeta,
 ) {
-    let home_count = shared_homes.read().map(|guard| guard.len()).unwrap_or(0);
+    let (home_count, selected_home_id, local_home_id) = shared_homes
+        .read()
+        .map(|guard| {
+            let count = guard.len();
+            let selected = guard.get(state.neighborhood.grid.current()).cloned();
+            let local = guard.first().cloned();
+            (count, selected, local)
+        })
+        .unwrap_or((0, None, None));
     state.neighborhood.home_count = home_count;
+    // Neighborhood map is currently rendered as a single-column list.
+    // Keep GridNav columns non-zero so map navigation works.
+    state.neighborhood.grid.set_cols(1);
     state.neighborhood.grid.set_count(home_count);
     state.neighborhood.selected_home = state.neighborhood.grid.current();
 
-    let channel_count = shared_channels.read().map(|guard| guard.len()).unwrap_or(0);
+    let is_local_home_selected = selected_home_id == local_home_id;
+    let is_selected_home_entered = selected_home_id
+        .as_ref()
+        .map(|selected| state.neighborhood.entered_home_id.as_ref() == Some(selected))
+        .unwrap_or(false);
+    let is_detail_mode = matches!(
+        state.neighborhood.mode,
+        crate::tui::state_machine::NeighborhoodMode::Detail
+    );
+    let expose_remote_home_details = is_selected_home_entered
+        && is_detail_mode
+        && matches!(state.neighborhood.enter_depth, TraversalDepth::Interior);
+    let expose_home_details = is_local_home_selected || expose_remote_home_details;
+
+    let channel_count = if expose_home_details {
+        shared_channels.read().map(|guard| guard.len()).unwrap_or(0)
+    } else {
+        0
+    };
     state.neighborhood.channel_count = channel_count;
     if channel_count == 0 {
         state.neighborhood.selected_channel = 0;
@@ -257,13 +286,27 @@ fn sync_neighborhood_navigation_state(
         state.neighborhood.selected_channel = channel_count.saturating_sub(1);
     }
 
-    let home_meta = shared_home_meta.read().map(|guard| *guard).unwrap_or_default();
-    state.neighborhood.resident_count = home_meta.resident_count;
-    state.neighborhood.steward_actions_enabled = home_meta.steward_actions_enabled;
-    if home_meta.resident_count == 0 {
+    let home_meta = shared_home_meta
+        .read()
+        .map(|guard| *guard)
+        .unwrap_or_default();
+    let resident_count = if expose_home_details {
+        home_meta.resident_count
+    } else {
+        0
+    };
+    state.neighborhood.resident_count = resident_count;
+    state.neighborhood.steward_actions_enabled = if expose_home_details {
+        home_meta.steward_actions_enabled
+    } else {
+        false
+    };
+    if resident_count == 0 {
         state.neighborhood.selected_resident = 0;
-    } else if state.neighborhood.selected_resident >= home_meta.resident_count {
-        state.neighborhood.selected_resident = home_meta.resident_count.saturating_sub(1);
+    } else {
+        if state.neighborhood.selected_resident >= resident_count {
+            state.neighborhood.selected_resident = resident_count.saturating_sub(1);
+        }
     }
 }
 
@@ -937,7 +980,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             selected_index,
                         } => {
                             tui.with_mut(|state| {
-                                let prev_channel_count = state.chat.channel_count;
                                 let prev_message_count = state.chat.message_count;
                                 let was_at_bottom = state.chat.message_scroll == 0;
 
@@ -950,16 +992,13 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     return;
                                 }
 
-                                // Only update selected_channel from app layer when:
-                                // 1. Current selection is out of bounds, OR
-                                // 2. Channel count changed (channels added/removed), OR
-                                // 3. No valid selection yet (selected_channel >= channel_count)
-                                // This prevents the app layer from overwriting user navigation
+                                // Only update selected_channel from app layer when the
+                                // current selection is invalid. This preserves user-driven
+                                // channel focus across reactive updates.
                                 let current_selection_invalid =
                                     state.chat.selected_channel >= channel_count;
-                                let channel_list_changed = prev_channel_count != channel_count;
 
-                                if current_selection_invalid || channel_list_changed {
+                                if current_selection_invalid {
                                     let mut idx = selected_index.unwrap_or(0);
                                     if idx >= channel_count {
                                         idx = channel_count.saturating_sub(1);
@@ -1526,6 +1565,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             KeyHint::new("a", "Accept"),
             KeyHint::new("d", "Depth"),
             KeyHint::new("n", "New"),
+            KeyHint::new("m", "Neighborhood"),
+            KeyHint::new("v", "Join"),
         ],
         Screen::Notifications => vec![KeyHint::new("j/k", "Move"), KeyHint::new("h/l", "Focus")],
         Screen::Settings => vec![
@@ -1575,14 +1616,12 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     &shared_neighborhood_home_meta_for_dispatch,
                 );
                 let (mut new_state, commands) = transition(&current, core_event);
-
-                // Sync TuiState changes to iocraft hooks
-                if new_state.screen() != current.screen() {
-                    screen.set(new_state.screen());
-                }
-                if new_state.should_exit && !current.should_exit {
-                    should_exit.set(true);
-                }
+                sync_neighborhood_navigation_state(
+                    &mut new_state,
+                    &shared_neighborhood_homes_for_dispatch,
+                    &shared_channels_for_dispatch,
+                    &shared_neighborhood_home_meta_for_dispatch,
+                );
 
                 // Execute commands using callbacks registry
                 if let Some(ref cb) = callbacks {
@@ -1622,12 +1661,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         // Get channel_id from TUI's selected_channel to avoid
                                         // race condition with async channel selection updates
                                         let idx = new_state.chat.selected_channel;
+                                        let is_slash_command = content.trim_start().starts_with('/');
                                         if let Ok(guard) = shared_channels_for_dispatch.read() {
                                             if let Some(channel) = guard.get(idx) {
                                                 (cb.chat.on_send)(
                                                     channel.id.clone(),
                                                     content,
                                                 );
+                                            } else if is_slash_command {
+                                                // Allow slash commands even when no channel is selected.
+                                                // This unblocks bootstrap flows such as `/join <name>`.
+                                                let fallback_channel = new_state
+                                                    .neighborhood
+                                                    .entered_home_id
+                                                    .clone()
+                                                    .unwrap_or_else(|| "home".to_string());
+                                                (cb.chat.on_send)(fallback_channel, content);
                                             } else {
                                                 new_state.toast_error("No channel selected");
                                             }
@@ -1887,6 +1936,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         if let Ok(guard) = shared_contacts_for_dispatch.read() {
                                             if let Some(contact) = guard.get(idx) {
                                                 (cb.contacts.on_start_chat)(contact.id.clone());
+                                                // Move to Chat immediately so operators can proceed
+                                                // while the async start-chat command finalizes.
+                                                new_state.router.go_to(Screen::Chat);
                                             } else {
                                                 new_state.toast_error("No contact selected");
                                             }
@@ -2532,6 +2584,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                         let idx = new_state.neighborhood.grid.current();
                                         if let Ok(guard) = shared_neighborhood_homes_for_dispatch.read() {
                                             if let Some(home_id) = guard.get(idx) {
+                                                // Keep entered_home_id authoritative as a real home ID.
+                                                // The state-machine layer sets an index sentinel first.
+                                                new_state.neighborhood.entered_home_id = Some(home_id.clone());
                                                 // Default to Street-level traversal depth
                                                 (cb.neighborhood.on_enter_home)(
                                                     home_id.clone(),
@@ -2561,6 +2616,43 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::CreateHome { name, description } => {
                                         (cb.neighborhood.on_create_home)(name, description);
                                         new_state.modal_queue.dismiss();
+                                    }
+                                    DispatchCommand::CreateNeighborhood { name } => {
+                                        (cb.neighborhood.on_create_neighborhood)(name);
+                                    }
+                                    DispatchCommand::AddSelectedHomeToNeighborhood => {
+                                        let idx = new_state.neighborhood.grid.current();
+                                        if let Ok(guard) = shared_neighborhood_homes_for_dispatch.read() {
+                                            if let Some(home_id) = guard.get(idx) {
+                                                (cb.neighborhood.on_add_home_to_neighborhood)(
+                                                    home_id.clone(),
+                                                );
+                                            } else {
+                                                new_state.toast_error("No home selected");
+                                            }
+                                        } else {
+                                            new_state.toast_error("Failed to read neighborhood homes");
+                                        }
+                                    }
+                                    DispatchCommand::AddHomeToNeighborhood { home_id } => {
+                                        (cb.neighborhood.on_add_home_to_neighborhood)(home_id);
+                                    }
+                                    DispatchCommand::LinkSelectedHomeAdjacency => {
+                                        let idx = new_state.neighborhood.grid.current();
+                                        if let Ok(guard) = shared_neighborhood_homes_for_dispatch.read() {
+                                            if let Some(home_id) = guard.get(idx) {
+                                                (cb.neighborhood.on_link_home_adjacency)(
+                                                    home_id.clone(),
+                                                );
+                                            } else {
+                                                new_state.toast_error("No home selected");
+                                            }
+                                        } else {
+                                            new_state.toast_error("Failed to read neighborhood homes");
+                                        }
+                                    }
+                                    DispatchCommand::LinkHomeAdjacency { home_id } => {
+                                        (cb.neighborhood.on_link_home_adjacency)(home_id);
                                     }
 
                                     // === Navigation Commands ===
@@ -2594,6 +2686,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             }
                         }
                     }
+                }
+
+                // Sync final TuiState changes to iocraft hooks.
+                // Important: dispatch commands above can mutate `new_state.router` and
+                // `new_state.should_exit`, so synchronization must happen after command execution.
+                if new_state.screen() != screen.get() {
+                    screen.set(new_state.screen());
+                }
+                if new_state.should_exit && !should_exit.get() {
+                    should_exit.set(true);
                 }
 
                 // Update TuiState (and always bump render version)

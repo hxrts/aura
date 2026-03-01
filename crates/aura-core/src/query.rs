@@ -31,6 +31,7 @@ use crate::domain::ConsistencyMap;
 use crate::time::PhysicalTime;
 use crate::Hash32;
 use crate::ResourceScope;
+use std::collections::BTreeMap;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Query Isolation
@@ -696,12 +697,29 @@ impl DatalogRow {
 /// A predicate pattern for matching facts.
 ///
 /// Used to determine which queries need re-evaluation when facts change.
+/// Supports both positional argument matching (for Datalog facts) and
+/// named constraint matching (for structured facts with fields).
+///
+/// # Example
+///
+/// ```ignore
+/// // Match any channel_fact with channel_id "ch1"
+/// let pred = FactPredicate::named("channel_fact")
+///     .with_named_constraint("channel_id", "ch1");
+///
+/// // Match channel_fact where first positional arg is "ch1"
+/// let pred = FactPredicate::named("channel_fact")
+///     .with_arg(Some("ch1".to_string()));
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct FactPredicate {
     /// The predicate name to match
     pub name: String,
-    /// Optional argument patterns (None = wildcard)
+    /// Optional positional argument patterns (None = wildcard)
     pub arg_patterns: Vec<Option<String>>,
+    /// Named field constraints for structured facts
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub named_constraints: BTreeMap<String, String>,
 }
 
 impl FactPredicate {
@@ -710,6 +728,7 @@ impl FactPredicate {
         Self {
             name: name.into(),
             arg_patterns: Vec::new(),
+            named_constraints: BTreeMap::new(),
         }
     }
 
@@ -718,40 +737,73 @@ impl FactPredicate {
         Self::named(name)
     }
 
-    /// Create a predicate with specific argument constraints
+    /// Create a predicate with named field constraints.
+    ///
+    /// This stores named constraints for matching against structured facts
+    /// that have named fields (e.g., `channel_id`, `authority`).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Match channel_fact where channel_id is "ch1" and type is "home"
+    /// let pred = FactPredicate::with_args("channel_fact", vec![
+    ///     ("channel_id", "ch1"),
+    ///     ("type", "home"),
+    /// ]);
+    /// ```
     #[must_use]
     pub fn with_args(name: impl Into<String>, args: Vec<(&str, &str)>) -> Self {
         let mut predicate = Self::named(name);
-        // Convert (name, value) pairs to positional arg patterns
-        // For simplicity, we store constraints as named patterns
-        // In a full implementation, this would use a more sophisticated matching
         for (arg_name, arg_value) in args {
             predicate
-                .arg_patterns
-                .push(Some(format!("{arg_name}={arg_value}")));
+                .named_constraints
+                .insert(arg_name.to_string(), arg_value.to_string());
         }
         predicate
     }
 
-    /// Add an argument pattern (Some = must match, None = wildcard)
+    /// Add a positional argument pattern (Some = must match, None = wildcard)
+    ///
+    /// For Datalog-style facts with positional arguments.
     #[must_use]
     pub fn with_arg(mut self, pattern: Option<String>) -> Self {
         self.arg_patterns.push(pattern);
         self
     }
 
-    /// Check if this predicate matches a fact
+    /// Add a named field constraint for structured facts.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let pred = FactPredicate::named("channel_fact")
+    ///     .with_named_constraint("channel_id", "ch1")
+    ///     .with_named_constraint("type", "home");
+    /// ```
+    #[must_use]
+    pub fn with_named_constraint(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.named_constraints.insert(name.into(), value.into());
+        self
+    }
+
+    /// Check if this predicate matches a fact with positional arguments.
+    ///
+    /// For Datalog-style facts where arguments are positional.
     pub fn matches_fact(&self, fact_name: &str, fact_args: &[String]) -> bool {
         if self.name != fact_name {
             return false;
         }
 
-        // If no arg patterns, match any args
+        // If no positional arg patterns, match any positional args
         if self.arg_patterns.is_empty() {
             return true;
         }
 
-        // Check each arg pattern
+        // Check each positional arg pattern
         for (i, pattern) in self.arg_patterns.iter().enumerate() {
             if let Some(expected) = pattern {
                 if fact_args.get(i) != Some(expected) {
@@ -763,38 +815,102 @@ impl FactPredicate {
         true
     }
 
+    /// Check if this predicate matches a fact with named fields.
+    ///
+    /// For structured facts where fields are named (e.g., from serde serialization).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let pred = FactPredicate::with_args("channel_fact", vec![
+    ///     ("channel_id", "ch1"),
+    ///     ("type", "home"),
+    /// ]);
+    ///
+    /// let fact_fields = [
+    ///     ("channel_id".to_string(), "ch1".to_string()),
+    ///     ("type".to_string(), "home".to_string()),
+    ///     ("created_at".to_string(), "2024-01-01".to_string()),
+    /// ].into_iter().collect();
+    ///
+    /// assert!(pred.matches_named_fact("channel_fact", &fact_fields));
+    /// ```
+    pub fn matches_named_fact(
+        &self,
+        fact_name: &str,
+        fact_fields: &BTreeMap<String, String>,
+    ) -> bool {
+        if self.name != fact_name {
+            return false;
+        }
+
+        // If no named constraints, match any fact with this name
+        if self.named_constraints.is_empty() {
+            return true;
+        }
+
+        // All named constraints must match
+        for (key, expected_value) in &self.named_constraints {
+            match fact_fields.get(key) {
+                Some(actual_value) if actual_value == expected_value => continue,
+                _ => return false,
+            }
+        }
+
+        true
+    }
+
     /// Check if this predicate could match another predicate.
     ///
     /// Two predicates match if:
     /// - They have the same name
-    /// - Either has no arg patterns (wildcard), OR
-    /// - Their arg patterns are compatible (same values where both specify)
+    /// - Their positional arg patterns are compatible (wildcards or same values)
+    /// - Their named constraints are compatible (wildcards or same values)
     pub fn matches(&self, other: &FactPredicate) -> bool {
         // Names must match
         if self.name != other.name {
             return false;
         }
 
-        // If either has no arg patterns, they match
-        if self.arg_patterns.is_empty() || other.arg_patterns.is_empty() {
-            return true;
+        // Check positional arg compatibility
+        if !self.arg_patterns.is_empty() && !other.arg_patterns.is_empty() {
+            let max_len = self.arg_patterns.len().max(other.arg_patterns.len());
+            for i in 0..max_len {
+                let self_arg = self.arg_patterns.get(i).and_then(|a| a.as_ref());
+                let other_arg = other.arg_patterns.get(i).and_then(|a| a.as_ref());
+
+                match (self_arg, other_arg) {
+                    // Both specify a value - must match
+                    (Some(a), Some(b)) if a != b => return false,
+                    // At least one is wildcard - compatible
+                    _ => continue,
+                }
+            }
         }
 
-        // Check that specified args are compatible
-        let max_len = self.arg_patterns.len().max(other.arg_patterns.len());
-        for i in 0..max_len {
-            let self_arg = self.arg_patterns.get(i).and_then(|a| a.as_ref());
-            let other_arg = other.arg_patterns.get(i).and_then(|a| a.as_ref());
-
-            match (self_arg, other_arg) {
-                // Both specify a value - must match
-                (Some(a), Some(b)) if a != b => return false,
-                // At least one is wildcard - compatible
-                _ => continue,
+        // Check named constraint compatibility
+        if !self.named_constraints.is_empty() && !other.named_constraints.is_empty() {
+            // For each key that exists in both, values must match
+            for (key, self_value) in &self.named_constraints {
+                if let Some(other_value) = other.named_constraints.get(key) {
+                    if self_value != other_value {
+                        return false;
+                    }
+                }
             }
         }
 
         true
+    }
+
+    /// Check if this predicate has any constraints (positional or named).
+    pub fn has_constraints(&self) -> bool {
+        !self.arg_patterns.is_empty() || !self.named_constraints.is_empty()
+    }
+
+    /// Get the named constraints as an iterator.
+    pub fn named_constraints_iter(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.named_constraints.iter()
     }
 }
 
@@ -1033,6 +1149,99 @@ mod tests {
         ));
         assert!(!pred_with_arg
             .matches(&FactPredicate::named("channel_fact").with_arg(Some("other_id".to_string()))));
+    }
+
+    #[test]
+    fn test_fact_predicate_named_constraints() {
+        // Test with_args constructor
+        let pred = FactPredicate::with_args(
+            "channel_fact",
+            vec![("channel_id", "ch1"), ("type", "home")],
+        );
+        assert_eq!(pred.name, "channel_fact");
+        assert_eq!(
+            pred.named_constraints.get("channel_id"),
+            Some(&"ch1".to_string())
+        );
+        assert_eq!(
+            pred.named_constraints.get("type"),
+            Some(&"home".to_string())
+        );
+
+        // Test with_named_constraint builder
+        let pred2 = FactPredicate::named("channel_fact")
+            .with_named_constraint("channel_id", "ch1")
+            .with_named_constraint("type", "home");
+        assert_eq!(pred, pred2);
+    }
+
+    #[test]
+    fn test_fact_predicate_matches_named_fact() {
+        let pred = FactPredicate::with_args(
+            "channel_fact",
+            vec![("channel_id", "ch1"), ("type", "home")],
+        );
+
+        // Matching fact
+        let mut fact_fields = BTreeMap::new();
+        fact_fields.insert("channel_id".to_string(), "ch1".to_string());
+        fact_fields.insert("type".to_string(), "home".to_string());
+        fact_fields.insert("created_at".to_string(), "2024-01-01".to_string());
+        assert!(pred.matches_named_fact("channel_fact", &fact_fields));
+
+        // Wrong name
+        assert!(!pred.matches_named_fact("other_fact", &fact_fields));
+
+        // Wrong channel_id
+        let mut wrong_id = fact_fields.clone();
+        wrong_id.insert("channel_id".to_string(), "ch2".to_string());
+        assert!(!pred.matches_named_fact("channel_fact", &wrong_id));
+
+        // Missing required field
+        let mut missing_field = BTreeMap::new();
+        missing_field.insert("channel_id".to_string(), "ch1".to_string());
+        // Missing "type" field
+        assert!(!pred.matches_named_fact("channel_fact", &missing_field));
+
+        // Predicate with no constraints matches any fact with same name
+        let wildcard = FactPredicate::named("channel_fact");
+        assert!(wildcard.matches_named_fact("channel_fact", &fact_fields));
+        assert!(wildcard.matches_named_fact("channel_fact", &BTreeMap::new()));
+    }
+
+    #[test]
+    fn test_fact_predicate_matches_with_named_constraints() {
+        // Two predicates with compatible named constraints
+        let pred1 = FactPredicate::with_args("channel_fact", vec![("channel_id", "ch1")]);
+        let pred2 = FactPredicate::with_args(
+            "channel_fact",
+            vec![("channel_id", "ch1"), ("type", "home")],
+        );
+        assert!(pred1.matches(&pred2));
+        assert!(pred2.matches(&pred1));
+
+        // Incompatible named constraints
+        let pred3 = FactPredicate::with_args("channel_fact", vec![("channel_id", "ch2")]);
+        assert!(!pred1.matches(&pred3));
+
+        // Wildcard matches anything
+        let wildcard = FactPredicate::named("channel_fact");
+        assert!(wildcard.matches(&pred1));
+        assert!(pred1.matches(&wildcard));
+    }
+
+    #[test]
+    fn test_fact_predicate_has_constraints() {
+        let no_constraints = FactPredicate::named("channel_fact");
+        assert!(!no_constraints.has_constraints());
+
+        let with_positional =
+            FactPredicate::named("channel_fact").with_arg(Some("ch1".to_string()));
+        assert!(with_positional.has_constraints());
+
+        let with_named =
+            FactPredicate::named("channel_fact").with_named_constraint("channel_id", "ch1");
+        assert!(with_named.has_constraints());
     }
 
     #[test]

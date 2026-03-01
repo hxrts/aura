@@ -141,6 +141,9 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         HelpCommand::new("a", "a", "Accept invitation code", "Neighborhood"),
         HelpCommand::new("d", "d", "Cycle traversal depth", "Neighborhood"),
         HelpCommand::new("g", "g", "Go to primary home", "Neighborhood"),
+        HelpCommand::new("m", "m", "Create/select neighborhood", "Neighborhood"),
+        HelpCommand::new("v", "v", "Add selected home as member", "Neighborhood"),
+        HelpCommand::new("L", "Shift+l", "Link direct adjacency", "Neighborhood"),
         // Traversal depth descriptions
         HelpCommand::new("Street", "", "View blocks, no interaction", "Neighborhood"),
         HelpCommand::new(

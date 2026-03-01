@@ -44,9 +44,10 @@ use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
 use aura_social::moderation::{
-    HomeBanFact, HomeKickFact, HomeMuteFact, HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID,
-    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_UNBAN_FACT_TYPE_ID,
-    HOME_UNMUTE_FACT_TYPE_ID,
+    HomeBanFact, HomeGrantStewardFact, HomeKickFact, HomeMuteFact, HomeRevokeStewardFact,
+    HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID, HOME_GRANT_STEWARD_FACT_TYPE_ID,
+    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_REVOKE_STEWARD_FACT_TYPE_ID,
+    HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
 };
 
 async fn emit_internal_error(reactive: &ReactiveHandler, message: String) {
@@ -319,9 +320,11 @@ impl ReactiveView for ContactsSignalView {
                             };
 
                             if let Some(contact) = state.contact_mut(&contact_id) {
-                                // Preserve any user-set nickname; only fill suggestion if missing.
-                                if contact.nickname_suggestion.is_none() {
-                                    contact.nickname_suggestion = suggested_name;
+                                // Preserve user-set local nickname and keep any existing
+                                // human-friendly suggestion when incoming facts only carry
+                                // fallback identity strings.
+                                if let Some(suggested_name) = suggested_name {
+                                    contact.nickname_suggestion = Some(suggested_name);
                                 }
                                 contact.last_interaction = Some(added_at.ts_ms);
                             } else {
@@ -565,12 +568,16 @@ impl ReactiveView for RecoverySignalView {
 // =============================================================================
 
 pub struct HomeSignalView {
+    own_authority: AuthorityId,
     reactive: ReactiveHandler,
 }
 
 impl HomeSignalView {
-    pub fn new(reactive: ReactiveHandler) -> Self {
-        Self { reactive }
+    pub fn new(own_authority: AuthorityId, reactive: ReactiveHandler) -> Self {
+        Self {
+            own_authority,
+            reactive,
+        }
     }
 
     fn home_for_context<'a>(
@@ -678,6 +685,32 @@ impl ReactiveView for HomeSignalView {
                     if let Some(unpin) = HomeUnpinFact::from_envelope(envelope) {
                         if home_state.unpin_message(&unpin.message_id) {
                             changed = true;
+                        }
+                    }
+                }
+                HOME_GRANT_STEWARD_FACT_TYPE_ID => {
+                    if let Some(grant) = HomeGrantStewardFact::from_envelope(envelope) {
+                        if let Some(resident) = home_state.resident_mut(&grant.target_authority) {
+                            resident.role = aura_app::views::home::ResidentRole::Admin;
+                            if grant.target_authority == self.own_authority {
+                                home_state.my_role = aura_app::views::home::ResidentRole::Admin;
+                            }
+                            changed = true;
+                        }
+                    }
+                }
+                HOME_REVOKE_STEWARD_FACT_TYPE_ID => {
+                    if let Some(revoke) = HomeRevokeStewardFact::from_envelope(envelope) {
+                        if let Some(resident) = home_state.resident_mut(&revoke.target_authority) {
+                            if !matches!(resident.role, aura_app::views::home::ResidentRole::Owner)
+                            {
+                                resident.role = aura_app::views::home::ResidentRole::Resident;
+                                if revoke.target_authority == self.own_authority {
+                                    home_state.my_role =
+                                        aura_app::views::home::ResidentRole::Resident;
+                                }
+                                changed = true;
+                            }
                         }
                     }
                 }
@@ -855,9 +888,9 @@ impl ReactiveView for ChatSignalView {
                                 .await;
                             state = self.state.lock().await;
 
-                            // Seed DM membership from the inbound channel fact so reply
-                            // routing has deterministic peers even before richer membership
-                            // reductions are available.
+                            // Seed membership from inbound channel facts so reply routing
+                            // has at least one deterministic peer even before richer
+                            // membership reductions are available.
                             let (member_ids, member_count) = if is_dm {
                                 let mut members = vec![self.own_authority];
                                 if creator_id != self.own_authority {
@@ -865,6 +898,10 @@ impl ReactiveView for ChatSignalView {
                                 }
                                 let count = members.len().max(2) as u32;
                                 (members, count)
+                            } else if creator_id != self.own_authority {
+                                // For group channels we may not know the full roster yet.
+                                // Seed the creator as an initial peer so recipients can reply.
+                                (vec![creator_id], 2)
                             } else {
                                 (Vec::new(), 0)
                             };
@@ -1090,7 +1127,9 @@ mod tests {
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
-    use aura_social::moderation::facts::{HomePinFact, HomeUnpinFact};
+    use aura_social::moderation::facts::{
+        HomeGrantStewardFact, HomePinFact, HomeRevokeStewardFact, HomeUnpinFact,
+    };
     use aura_social::moderation::HomeBanFact;
 
     async fn setup_homes(reactive: &ReactiveHandler, context: ContextId) -> HomesState {
@@ -1129,7 +1168,7 @@ mod tests {
         let homes = setup_homes(&reactive, context_id).await;
         let home_id = homes.current_home().unwrap().id;
 
-        let view = HomeSignalView::new(reactive.clone());
+        let view = HomeSignalView::new(AuthorityId::new_from_entropy([1u8; 32]), reactive.clone());
 
         let pin = HomePinFact::new_ms(
             context_id,
@@ -1168,7 +1207,7 @@ mod tests {
         let home_id = homes.current_home().unwrap().id;
         let target = AuthorityId::new_from_entropy([9u8; 32]);
 
-        let view = HomeSignalView::new(reactive.clone());
+        let view = HomeSignalView::new(AuthorityId::new_from_entropy([1u8; 32]), reactive.clone());
 
         let ban = HomeBanFact::new_ms(
             context_id,
@@ -1187,5 +1226,64 @@ mod tests {
         assert!(home_state.ban_list.contains_key(&target));
         assert_eq!(home_state.ban_list.get(&target).unwrap().reason, "spamming");
         assert_eq!(home_state.id, home_id);
+    }
+
+    #[tokio::test]
+    async fn home_signal_view_updates_steward_roles() {
+        let reactive = ReactiveHandler::new();
+        let context_id = ContextId::new_from_entropy([3u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let target = AuthorityId::new_from_entropy([9u8; 32]);
+        let mut homes = setup_homes(&reactive, context_id).await;
+
+        {
+            let home = homes.current_home_mut().expect("home exists");
+            home.add_resident(aura_app::views::home::Resident {
+                id: target,
+                name: "target".to_string(),
+                role: aura_app::views::home::ResidentRole::Resident,
+                is_online: true,
+                joined_at: 1,
+                last_seen: Some(1),
+                storage_allocated: 0,
+            });
+            reactive.emit(&*HOMES_SIGNAL, homes.clone()).await.unwrap();
+        }
+
+        let view = HomeSignalView::new(target, reactive.clone());
+
+        let grant = HomeGrantStewardFact::new_ms(context_id, target, owner, 100).to_generic();
+        view.update(&[fact_from_relational(grant)]).await;
+
+        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home_state = updated.current_home().unwrap();
+        let resident = home_state
+            .resident(&target)
+            .expect("target resident exists");
+        assert!(matches!(
+            resident.role,
+            aura_app::views::home::ResidentRole::Admin
+        ));
+        assert!(matches!(
+            home_state.my_role,
+            aura_app::views::home::ResidentRole::Admin
+        ));
+
+        let revoke = HomeRevokeStewardFact::new_ms(context_id, target, owner, 101).to_generic();
+        view.update(&[fact_from_relational(revoke)]).await;
+
+        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home_state = updated.current_home().unwrap();
+        let resident = home_state
+            .resident(&target)
+            .expect("target resident exists");
+        assert!(matches!(
+            resident.role,
+            aura_app::views::home::ResidentRole::Resident
+        ));
+        assert!(matches!(
+            home_state.my_role,
+            aura_app::views::home::ResidentRole::Resident
+        ));
     }
 }

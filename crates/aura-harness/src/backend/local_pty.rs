@@ -1,6 +1,9 @@
 use std::fs;
 use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::thread;
 use std::time::Duration;
 
@@ -10,6 +13,7 @@ use tokio::sync::Mutex;
 
 use crate::backend::InstanceBackend;
 use crate::config::InstanceConfig;
+use crate::screen_normalization::{authoritative_screen, has_nav_header};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum BackendState {
@@ -21,6 +25,7 @@ struct RunningSession {
     child: Box<dyn Child + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     parser: Arc<Mutex<vt100::Parser>>,
+    parse_generation: Arc<AtomicU64>,
     reader_thread: Option<thread::JoinHandle<()>>,
 }
 
@@ -30,6 +35,7 @@ pub struct LocalPtyBackend {
     session: Option<RunningSession>,
     pty_rows: u16,
     pty_cols: u16,
+    last_authoritative_screen: Arc<StdMutex<Option<String>>>,
 }
 
 impl LocalPtyBackend {
@@ -40,6 +46,7 @@ impl LocalPtyBackend {
             session: None,
             pty_rows: pty_rows.unwrap_or(40),
             pty_cols: pty_cols.unwrap_or(120),
+            last_authoritative_screen: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -60,6 +67,26 @@ impl LocalPtyBackend {
     fn parser_size(&self) -> (u16, u16) {
         (self.pty_rows, self.pty_cols)
     }
+
+    fn read_screen(parser: &Arc<Mutex<vt100::Parser>>) -> String {
+        let parser = parser.blocking_lock();
+        parser.screen().contents()
+    }
+
+    fn select_authoritative_screen(&self, current_screen: String) -> String {
+        let current_authoritative = authoritative_screen(&current_screen);
+        let mut cached = match self.last_authoritative_screen.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        if has_nav_header(&current_authoritative) {
+            *cached = Some(current_authoritative.clone());
+            return current_authoritative;
+        }
+
+        cached.clone().unwrap_or(current_authoritative)
+    }
 }
 
 impl InstanceBackend for LocalPtyBackend {
@@ -74,6 +101,9 @@ impl InstanceBackend for LocalPtyBackend {
     fn start(&mut self) -> Result<()> {
         if self.state == BackendState::Running {
             return Ok(());
+        }
+        if let Ok(mut cached) = self.last_authoritative_screen.lock() {
+            *cached = None;
         }
 
         let (rows, cols) = self.parser_size();
@@ -124,13 +154,18 @@ impl InstanceBackend for LocalPtyBackend {
             .context("failed to acquire PTY writer")?;
 
         let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 0)));
+        let parse_generation = Arc::new(AtomicU64::new(0));
         let parser_for_thread = Arc::clone(&parser);
+        let generation_for_thread = Arc::clone(&parse_generation);
         let reader_thread = thread::spawn(move || {
             let mut buffer = [0u8; 4096];
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
-                    Ok(read) => parser_for_thread.blocking_lock().process(&buffer[..read]),
+                    Ok(read) => {
+                        parser_for_thread.blocking_lock().process(&buffer[..read]);
+                        generation_for_thread.fetch_add(1, Ordering::Release);
+                    }
                     Err(_) => break,
                 }
             }
@@ -140,6 +175,7 @@ impl InstanceBackend for LocalPtyBackend {
             child,
             writer: Arc::new(Mutex::new(writer)),
             parser,
+            parse_generation,
             reader_thread: Some(reader_thread),
         });
         self.state = BackendState::Running;
@@ -169,9 +205,39 @@ impl InstanceBackend for LocalPtyBackend {
             .session
             .as_ref()
             .with_context(|| format!("instance {} is not running", self.config.id))?;
-        let parser = session.parser.blocking_lock();
-        let screen = parser.screen();
-        Ok(screen.contents())
+        const SETTLE_DELAY_MS: u64 = 25;
+        const MAX_SETTLE_ATTEMPTS: u8 = 8;
+        const HEADER_RECOVERY_DELAY_MS: u64 = 20;
+        const HEADER_RECOVERY_ATTEMPTS: u8 = 30;
+
+        let mut last_generation = session.parse_generation.load(Ordering::Acquire);
+        let mut last_screen = Self::read_screen(&session.parser);
+
+        for _ in 0..MAX_SETTLE_ATTEMPTS {
+            thread::sleep(Duration::from_millis(SETTLE_DELAY_MS));
+            let current_generation = session.parse_generation.load(Ordering::Acquire);
+            let current_screen = Self::read_screen(&session.parser);
+            if current_generation == last_generation && current_screen == last_screen {
+                return Ok(self.select_authoritative_screen(current_screen));
+            }
+            last_generation = current_generation;
+            last_screen = current_screen;
+        }
+
+        // Transitional frames can briefly miss the nav header while a full-screen redraw
+        // is still in flight. Sample for a short bounded window before falling back.
+        let mut recovered_screen = last_screen.clone();
+        if !has_nav_header(&recovered_screen) {
+            for _ in 0..HEADER_RECOVERY_ATTEMPTS {
+                thread::sleep(Duration::from_millis(HEADER_RECOVERY_DELAY_MS));
+                recovered_screen = Self::read_screen(&session.parser);
+                if has_nav_header(&recovered_screen) {
+                    break;
+                }
+            }
+        }
+
+        Ok(self.select_authoritative_screen(recovered_screen))
     }
 
     fn send_keys(&mut self, keys: &str) -> Result<()> {
@@ -219,9 +285,21 @@ impl InstanceBackend for LocalPtyBackend {
             return Ok(Vec::new());
         };
 
-        let body = match fs::read_to_string(path) {
-            Ok(body) => body,
-            Err(_) => return Ok(Vec::new()),
+        let mut candidates = Vec::with_capacity(2);
+        candidates.push(path.clone());
+        candidates.push(PathBuf::from(format!("{}.dat", path.display())));
+
+        let mut body: Option<String> = None;
+        for candidate in candidates {
+            let bytes = match fs::read(&candidate) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            body = Some(String::from_utf8_lossy(&bytes).into_owned());
+            break;
+        }
+        let Some(body) = body else {
+            return Ok(Vec::new());
         };
 
         let mut result: Vec<String> = body.lines().map(ToOwned::to_owned).collect();
@@ -248,6 +326,7 @@ impl Drop for LocalPtyBackend {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::thread;
     use std::time::Duration;
 
@@ -312,5 +391,62 @@ mod tests {
             "snapshot should not exceed configured PTY rows (got {line_count})"
         );
         backend.stop().expect("backend must stop");
+    }
+
+    #[test]
+    fn local_snapshot_observes_recent_output_without_extra_sleep() {
+        let mut backend = LocalPtyBackend::new(test_config(), Some(40), Some(120));
+        backend.start().expect("backend must start");
+        backend
+            .send_keys("freshness-check\n")
+            .expect("send_keys must succeed");
+        let screen = backend.snapshot().expect("snapshot must succeed");
+        assert!(screen.contains("freshness-check"));
+        backend.stop().expect("backend must stop");
+    }
+
+    #[test]
+    fn local_tail_log_reads_dat_fallback_path() {
+        let temp_root = std::env::temp_dir().join("aura-harness-tail-log-dat");
+        let _ = fs::remove_dir_all(&temp_root);
+        fs::create_dir_all(&temp_root).expect("create temp dir");
+
+        let mut config = test_config();
+        config.data_dir = temp_root.clone();
+        config.log_path = Some(temp_root.join("instance.log"));
+
+        fs::write(temp_root.join("instance.log.dat"), "line-1\nline-2\n").expect("write log");
+
+        let backend = LocalPtyBackend::new(config, Some(40), Some(120));
+        let lines = backend.tail_log(1).expect("tail_log should succeed");
+        assert_eq!(lines, vec!["line-2".to_string()]);
+    }
+
+    #[test]
+    fn authoritative_snapshot_falls_back_to_cached_tui_frame() {
+        let backend = LocalPtyBackend::new(test_config(), Some(40), Some(120));
+        let tui_frame = "Neighborhood Chat Contacts Notifications Settings\nframe".to_string();
+        let noisy = "2026-01-01T00:00:00Z INFO log line".to_string();
+
+        let first = backend.select_authoritative_screen(tui_frame.clone());
+        assert_eq!(first, tui_frame);
+
+        let second = backend.select_authoritative_screen(noisy);
+        assert_eq!(second, first);
+    }
+
+    #[test]
+    fn authoritative_snapshot_strips_stale_prefix_rows() {
+        let backend = LocalPtyBackend::new(test_config(), Some(40), Some(120));
+        let mixed = "\
+stale footer row\n\
+Neighborhood Chat Contacts Notifications Settings\n\
+latest frame row";
+
+        let selected = backend.select_authoritative_screen(mixed.to_string());
+        assert_eq!(
+            selected,
+            "Neighborhood Chat Contacts Notifications Settings\nlatest frame row"
+        );
     }
 }

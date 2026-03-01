@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use std::collections::BTreeMap;
+use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
@@ -222,14 +223,23 @@ fn collect_timeout_diagnostics(
         let screen_response = tool_api.handle_request(ToolRequest::Screen {
             instance_id: instance.id.clone(),
         });
-        let raw_screen = match screen_response {
-            aura_harness::tool_api::ToolResponse::Ok { payload } => payload
-                .get("screen")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
+        let (authoritative_screen, raw_screen) = match screen_response {
+            aura_harness::tool_api::ToolResponse::Ok { payload } => {
+                let authoritative = payload
+                    .get("screen")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                let raw = payload
+                    .get("raw_screen")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(authoritative.as_str())
+                    .to_string();
+                (authoritative, raw)
+            }
             aura_harness::tool_api::ToolResponse::Error { message } => {
-                format!("screen_capture_error: {message}")
+                let error = format!("screen_capture_error: {message}");
+                (error.clone(), error)
             }
         };
 
@@ -250,6 +260,7 @@ fn collect_timeout_diagnostics(
         instances.insert(
             instance.id.clone(),
             serde_json::json!({
+                "screen": authoritative_screen,
                 "raw_screen": raw_screen,
                 "normalized_screen": normalize_screen(&raw_screen),
                 "log_tail": log_tail
@@ -307,7 +318,7 @@ fn tool(args: ToolArgs) -> Result<()> {
 
 fn replay(args: ReplayArgs) -> Result<()> {
     require_existing_file(&args.bundle, "replay bundle")?;
-    let payload = std::fs::read_to_string(&args.bundle).with_context(|| {
+    let payload = fs::read_to_string(&args.bundle).with_context(|| {
         format!(
             "failed to read replay bundle from {}",
             args.bundle.display()

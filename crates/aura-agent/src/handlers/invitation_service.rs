@@ -355,7 +355,7 @@ impl InvitationServiceApi {
     /// # Returns
     /// List of pending invitations
     pub async fn list_pending(&self) -> Vec<Invitation> {
-        self.handler.list_pending().await
+        self.handler.list_pending_with_storage(&self.effects).await
     }
 
     /// Get an invitation by ID

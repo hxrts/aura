@@ -701,8 +701,7 @@ impl RateLimitResult {
 /// Rate limiter for operations
 ///
 /// Provides token bucket-based rate limiting with per-peer and
-/// global limits. Moved from aura-sync to provide unified rate limiting
-/// for all crates.
+/// global limits. Provides unified rate limiting for all crates.
 pub struct RateLimiter {
     /// Configuration
     config: RateLimitConfig,

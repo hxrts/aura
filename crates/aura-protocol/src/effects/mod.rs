@@ -108,16 +108,6 @@ pub use tree::TreeEffects;
 // Re-export unified error system
 pub use aura_core::{AuraError, AuraResult};
 
-// SystemEffects trait and SystemError now imported from aura-core
-// (was previously in system_traits module, now moved to Layer 1)
-
-// NOTE: Runtime infrastructure has been moved to aura-composition (Layer 3) and aura-agent (Layer 6)
-// Handler composition available from aura_composition::
-// - EffectBuilder, EffectRegistry, HandlerContainer
-// Runtime assembly available from aura_agent::runtime:
-// - AuraEffectSystem, LifecycleManager
-// - Context management, services, optimizations
-//
 /// Composite trait that combines all effect traits
 ///
 /// This trait combines all individual effect traits into a single trait object
@@ -148,13 +138,6 @@ pub trait AuraEffects:
     fn execution_mode(&self) -> aura_core::effects::ExecutionMode;
 }
 
-// NOTE: Effect composition moved to aura-composition (Layer 3), runtime moved to aura-agent (Layer 6)
-// Handler composition available from aura_composition::
-// - EffectRegistry: Builder pattern for effect composition
-// - EffectBuilder: Compile-time type-safe effect building
-// Runtime assembly available from aura_agent::runtime:
-// - AuraEffectSystem: Concrete effect system type
-
 /// Protocol requirement specification marker
 ///
 /// Used by protocol crates to surface the effect bounds they need at compile time.
@@ -164,5 +147,3 @@ pub trait ProtocolRequirements {
     /// Type-level specification of required effects
     type Requirements;
 }
-
-// Note: AuraEffectSystem concrete type and implementations moved to aura-agent runtime

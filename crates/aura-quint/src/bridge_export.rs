@@ -18,7 +18,7 @@ pub struct QuintModuleSummary {
     /// Definition names declared by module.
     pub definitions: Vec<String>,
     /// Assumption count from IR.
-    pub assumptions: usize,
+    pub assumptions: u64,
 }
 
 /// Bridge export failures.
@@ -78,7 +78,9 @@ pub fn parse_quint_modules(ir: &JsonValue) -> Result<Vec<QuintModuleSummary>, Br
             let assumptions = module
                 .get("assumptions")
                 .and_then(JsonValue::as_array)
-                .map_or(0, std::vec::Vec::len);
+                .map_or(0_u64, |items| {
+                    u64::try_from(items.len()).unwrap_or(u64::MAX)
+                });
 
             Ok(QuintModuleSummary {
                 name,

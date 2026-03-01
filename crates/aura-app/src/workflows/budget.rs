@@ -1,7 +1,6 @@
 //! # Flow Budget Domain Logic & Workflows
 //!
 //! Home storage budget tracking, enforcement, and portable business logic.
-//! See `work/neighbor.md` Section 8 for the storage model.
 //!
 //! ## Storage Model (v1)
 //!

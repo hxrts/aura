@@ -1,9 +1,11 @@
 //! Unified Neighborhood Screen.
 
 use iocraft::prelude::*;
+use std::sync::Arc;
 
 use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL, HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL};
 
+use crate::tui::chat_scope::{active_home_scope_id, scoped_channels};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::layout::dim;
 use crate::tui::props::NeighborhoodViewProps;
@@ -273,6 +275,7 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
 struct SocialStatusProps {
     neighborhood_name: String,
     selected_home_name: String,
+    selected_home_id: String,
     enter_depth: TraversalDepth,
     entered_home: bool,
     homes_count: usize,
@@ -308,6 +311,7 @@ fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>
             Text(content: "Social View", weight: Weight::Bold, color: Theme::PRIMARY)
             Text(content: format!("Neighborhood: {}", props.neighborhood_name), color: Theme::TEXT)
             Text(content: format!("Selected block: {}", props.selected_home_name), color: Theme::TEXT)
+            Text(content: format!("Home ID: {}", props.selected_home_id), color: Theme::TEXT_MUTED)
             Text(content: format!("Traversal: {} • {}", props.enter_depth.label(), entered_text), color: Theme::TEXT_MUTED)
             Text(content: format!("Known homes: {}", props.homes_count), color: Theme::TEXT_MUTED)
             Text(content: format!("Channels: {} • Focus: #{}", props.channel_count, props.selected_channel_name), color: Theme::TEXT_MUTED)
@@ -363,9 +367,9 @@ fn convert_neighbor_home(
 
 fn convert_traversal_depth(depth: u32) -> TraversalDepth {
     match depth {
-        0 => TraversalDepth::Interior,
+        0 => TraversalDepth::Street,
         1 => TraversalDepth::Frontage,
-        _ => TraversalDepth::Street,
+        _ => TraversalDepth::Interior,
     }
 }
 
@@ -379,6 +383,8 @@ pub fn NeighborhoodScreen(
     let reactive_neighborhood_name = hooks.use_state(String::new);
     let reactive_homes = hooks.use_state(Vec::new);
     let reactive_depth = hooks.use_state(TraversalDepth::default);
+    let active_scope_ref = hooks.use_ref(|| Arc::new(std::sync::RwLock::new(String::new())));
+    let active_scope: Arc<std::sync::RwLock<String>> = active_scope_ref.read().clone();
 
     let reactive_residents = hooks.use_state(Vec::new);
     let reactive_budget = hooks.use_state(HomeBudget::default);
@@ -390,6 +396,7 @@ pub fn NeighborhoodScreen(
         let mut reactive_neighborhood_name = reactive_neighborhood_name.clone();
         let mut reactive_homes = reactive_homes.clone();
         let mut reactive_depth = reactive_depth.clone();
+        let active_scope = active_scope.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |n| {
                 let home_id = &n.home_home_id;
@@ -412,7 +419,14 @@ pub fn NeighborhoodScreen(
                     .as_ref()
                     .map(|p| convert_traversal_depth(p.depth))
                     .unwrap_or(TraversalDepth::Interior);
-                reactive_neighborhood_name.set(n.home_name.clone());
+                if let Ok(mut guard) = active_scope.write() {
+                    *guard = active_home_scope_id(&n);
+                }
+                reactive_neighborhood_name.set(
+                    n.neighborhood_name
+                        .clone()
+                        .unwrap_or_else(|| n.home_name.clone()),
+                );
                 reactive_homes.set(homes);
                 reactive_depth.set(depth);
             })
@@ -465,15 +479,18 @@ pub fn NeighborhoodScreen(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut reactive_channels = reactive_channels.clone();
+        let active_scope = active_scope.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
-                let channel_list: Vec<ChannelSummary> = chat_state
-                    .all_channels()
-                    .map(|c| ChannelSummary {
-                        id: c.id.to_string(),
-                        name: c.name.clone(),
-                    })
-                    .collect();
+                let scope: Option<String> = active_scope.read().ok().map(|guard| guard.clone());
+                let channel_list: Vec<ChannelSummary> =
+                    scoped_channels(&chat_state, scope.as_deref())
+                        .into_iter()
+                        .map(|c| ChannelSummary {
+                            id: c.id.to_string(),
+                            name: c.name.clone(),
+                        })
+                        .collect();
                 reactive_channels.set(channel_list);
             })
             .await;
@@ -493,21 +510,46 @@ pub fn NeighborhoodScreen(
         .get(props.view.selected_home)
         .and_then(|b| b.name.clone())
         .unwrap_or_else(|| neighborhood_name.clone());
-    let selected_channel_name = channels
+    let selected_home_id = homes
+        .get(props.view.selected_home)
+        .map(|b| b.id.clone())
+        .unwrap_or_default();
+    // Only expose channel/resident detail when interior access is active.
+    // This keeps Street/Frontage traversal views from leaking interior-only data.
+    let interior_entered =
+        is_detail && is_entered && matches!(props.view.enter_depth, TraversalDepth::Interior);
+    let show_detail_lists = !is_detail || interior_entered;
+    let display_channels = if show_detail_lists {
+        channels.clone()
+    } else {
+        Vec::new()
+    };
+    let display_residents = if show_detail_lists {
+        residents.clone()
+    } else {
+        Vec::new()
+    };
+
+    let selected_channel_name = display_channels
         .get(props.view.selected_channel)
         .map(|c| c.name.clone())
         .unwrap_or_else(|| "none".to_string());
     let homes_count = homes.len();
-    let channel_count = channels.len();
-    let resident_count = residents.len();
+    let channel_count = display_channels.len();
+    let resident_count = display_residents.len();
+    let display_steward_actions_enabled = props.view.steward_actions_enabled && show_detail_lists;
 
-    let storage_text = format!(
-        "Storage: {}/{}MB",
-        (budget.used as f64 / (1024.0 * 1024.0)).round() as u64,
-        (budget.total as f64 / (1024.0 * 1024.0)).round() as u64
-    );
+    let storage_text = if budget.total > 0 {
+        format!(
+            "Storage: {}/{}MB",
+            (budget.used as f64 / (1024.0 * 1024.0)).round() as u64,
+            (budget.total as f64 / (1024.0 * 1024.0)).round() as u64
+        )
+    } else {
+        "Storage: --/--MB".to_string()
+    };
 
-    let steward_label = if props.view.steward_actions_enabled {
+    let steward_label = if display_steward_actions_enabled {
         "Steward: Yes".to_string()
     } else {
         "Steward: No".to_string()
@@ -536,12 +578,36 @@ pub fn NeighborhoodScreen(
                                     storage_text: storage_text,
                                     steward_label: steward_label,
                                 )
-                                ChannelList(channels: channels.clone(), selected_index: props.view.selected_channel)
-                                ResidentList(
-                                    residents: residents.clone(),
-                                    selected_index: props.view.selected_resident,
-                                    steward_actions_enabled: props.view.steward_actions_enabled,
-                                )
+                                #(if show_detail_lists {
+                                    vec![element! {
+                                        View(flex_direction: FlexDirection::Column, gap: 0) {
+                                            ChannelList(channels: display_channels.clone(), selected_index: props.view.selected_channel)
+                                            ResidentList(
+                                                residents: display_residents.clone(),
+                                                selected_index: props.view.selected_resident,
+                                                steward_actions_enabled: display_steward_actions_enabled,
+                                            )
+                                        }
+                                    }]
+                                } else {
+                                    vec![
+                                        element! {
+                                            View(
+                                                border_style: BorderStyle::Round,
+                                                border_color: Theme::BORDER,
+                                                padding_left: 1,
+                                                padding_right: 1,
+                                                padding_top: 1,
+                                                padding_bottom: 1,
+                                            ) {
+                                                Text(
+                                                    content: "Frontage/Street view: interior channel and resident details are hidden",
+                                                    color: Theme::TEXT_MUTED,
+                                                )
+                                            }
+                                        }
+                                    ]
+                                })
                             }
                         }]
                     } else {
@@ -556,13 +622,14 @@ pub fn NeighborhoodScreen(
                     SocialStatusPanel(
                         neighborhood_name: neighborhood_name,
                         selected_home_name: current_home_name,
+                        selected_home_id: selected_home_id,
                         enter_depth: props.view.enter_depth,
                         entered_home: is_entered,
                         homes_count: homes_count,
                         channel_count: channel_count,
                         selected_channel_name: selected_channel_name,
                         resident_count: resident_count,
-                        steward_actions_enabled: props.view.steward_actions_enabled,
+                        steward_actions_enabled: display_steward_actions_enabled,
                     )
                 }
             }

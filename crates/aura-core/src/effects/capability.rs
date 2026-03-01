@@ -515,8 +515,6 @@ impl TokenStatus {
     }
 }
 
-// Removed chrono dependency - use PhysicalTimeEffects trait for time operations
-
 #[cfg(test)]
 mod tests {
     use super::*;

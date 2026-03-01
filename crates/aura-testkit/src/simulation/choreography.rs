@@ -4,7 +4,7 @@
 //! It extends aura-testkit with specialized infrastructure for testing distributed protocols
 //! that require coordination across multiple simulated devices.
 //!
-//! Enhanced for stateless effect system architecture (work/021.md).
+//! Enhanced for stateless effect system architecture.
 
 use crate::foundation::CompositeTestHandler;
 use crate::{DeviceTestFixture, TestEffectsBuilder, TestExecutionMode};

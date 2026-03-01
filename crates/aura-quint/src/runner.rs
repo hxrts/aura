@@ -1603,18 +1603,98 @@ impl QuintRunner {
                     spec_path
                 );
 
+                let mut failed_invariants = Vec::new();
+                let mut failed_properties = Vec::new();
+
                 // Run Quint verification for each invariant
                 for invariant in invariants {
                     debug!("Checking invariant: {}", invariant);
-                    // In a full implementation, this would run:
-                    // quint verify --invariant={invariant} {spec_path}
+                    match self.evaluator.verify_invariant(spec_path, invariant).await {
+                        Ok(result) => {
+                            if result.holds {
+                                info!("Invariant '{}' verified successfully", invariant);
+                            } else {
+                                warn!(
+                                    "Invariant '{}' violated: {:?}",
+                                    invariant,
+                                    result
+                                        .counterexample
+                                        .as_deref()
+                                        .unwrap_or("no counterexample")
+                                );
+                                failed_invariants.push(invariant.to_string());
+                            }
+                        }
+                        Err(e) => {
+                            // Log error but continue checking other invariants
+                            warn!(
+                                "Failed to verify invariant '{}': {}. Continuing with other checks.",
+                                invariant, e
+                            );
+                            failed_invariants.push(format!("{} (error: {})", invariant, e));
+                        }
+                    }
                 }
 
                 // Run Quint verification for each temporal property
                 for property in properties {
-                    debug!("Checking property: {}", property);
-                    // In a full implementation, this would run:
-                    // quint verify --temporal={property} {spec_path}
+                    debug!("Checking temporal property: {}", property);
+                    match self.evaluator.verify_temporal(spec_path, property).await {
+                        Ok(result) => {
+                            if result.holds {
+                                if result.used_invariant_fallback {
+                                    info!(
+                                        "Temporal property '{}' verified (using invariant fallback)",
+                                        property
+                                    );
+                                } else {
+                                    info!("Temporal property '{}' verified successfully", property);
+                                }
+                            } else {
+                                warn!(
+                                    "Temporal property '{}' violated: {:?}",
+                                    property,
+                                    result
+                                        .counterexample
+                                        .as_deref()
+                                        .unwrap_or("no counterexample")
+                                );
+                                failed_properties.push(property.to_string());
+                            }
+                        }
+                        Err(e) => {
+                            // Log error but continue checking other properties
+                            warn!(
+                                "Failed to verify temporal property '{}': {}. Continuing with other checks.",
+                                property, e
+                            );
+                            failed_properties.push(format!("{} (error: {})", property, e));
+                        }
+                    }
+                }
+
+                // Return error if any verifications failed
+                if !failed_invariants.is_empty() || !failed_properties.is_empty() {
+                    let mut error_msg = String::new();
+                    if !failed_invariants.is_empty() {
+                        error_msg.push_str(&format!(
+                            "Failed invariants: [{}]",
+                            failed_invariants.join(", ")
+                        ));
+                    }
+                    if !failed_properties.is_empty() {
+                        if !error_msg.is_empty() {
+                            error_msg.push_str("; ");
+                        }
+                        error_msg.push_str(&format!(
+                            "Failed properties: [{}]",
+                            failed_properties.join(", ")
+                        ));
+                    }
+                    return Err(AuraError::invalid(format!(
+                        "Capability verification failed: {}",
+                        error_msg
+                    )));
                 }
 
                 Ok(())

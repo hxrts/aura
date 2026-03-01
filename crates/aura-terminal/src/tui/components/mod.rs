@@ -2,7 +2,7 @@
 //!
 //! Declarative UI components for building screens.
 //!
-//! Screen-specific modals have been moved to their respective screen directories:
+//! Screen-specific modals are located in their respective screen directories:
 //! - `screens/chat/` - ChannelInfoModal, ChatCreateModal
 //! - `screens/invitations/` - InvitationCodeModal, InvitationCreateModal, InvitationImportModal
 //! - `screens/recovery/` - GuardianSetupModal, ThresholdModal

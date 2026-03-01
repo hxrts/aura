@@ -64,6 +64,7 @@ async fn test_invitation_code_roundtrip() -> TestResult {
         version: 1,
         invitation_id: InvitationId::new("inv-test-123"),
         sender_id,
+        context_id: None,
         invitation_type: InvitationType::Contact {
             nickname: Some("alice".to_string()),
         },

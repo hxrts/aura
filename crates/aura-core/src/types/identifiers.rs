@@ -257,8 +257,6 @@ uuid_id!(
     prefix: "event-"
 );
 
-// EventIdExt moved to aura-effects to maintain clean interface layer
-
 /// Event nonce for ordering and uniqueness
 ///
 /// Provides ordering guarantees for events within sessions.
@@ -542,9 +540,6 @@ impl ContextId {
     }
 }
 
-// Extension traits for Effects-based ID generation moved to aura-effects
-// to maintain clean interface layer separation
-
 /// Extension trait for IndividualId with additional utility methods
 pub trait IndividualIdExt {
     /// Create from device ID (device-specific identity)
@@ -580,8 +575,6 @@ impl DataId {
     pub fn new_encrypted() -> Self {
         Self(Self::derive_tagged("encrypted:"))
     }
-
-    // Effects-based methods moved to aura-effects
 
     fn derive_tagged(prefix: &str) -> String {
         let uuid = derived_uuid(prefix.as_bytes());

@@ -53,6 +53,10 @@ pub struct TraversalPosition {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct NeighborhoodState {
+    /// Active neighborhood identifier (opaque runtime-local ID)
+    pub neighborhood_id: Option<String>,
+    /// Human-friendly neighborhood name
+    pub neighborhood_name: Option<String>,
     /// Home home ID
     pub home_home_id: ChannelId,
     /// Home name
@@ -65,6 +69,12 @@ pub struct NeighborhoodState {
     pub max_depth: u32,
     /// Whether currently loading neighbors
     pub loading: bool,
+    /// Member homes for the active neighborhood.
+    ///
+    /// This is separate from `neighbors`: homes can be visible as neighbors
+    /// without being explicit members of the currently selected neighborhood.
+    #[serde(default)]
+    member_home_ids: HashSet<ChannelId>,
     /// Currently connected peer IDs
     ///
     /// Managed by the network workflow - terminals should not maintain local peer state.
@@ -87,6 +97,8 @@ impl NeighborhoodState {
         neighbors: impl IntoIterator<Item = NeighborHome>,
     ) -> Self {
         Self {
+            neighborhood_id: None,
+            neighborhood_name: None,
             home_home_id,
             home_name,
             neighbors: neighbors.into_iter().collect(),
@@ -155,6 +167,47 @@ impl NeighborhoodState {
     /// Set neighbors, replacing all existing
     pub fn set_neighbors(&mut self, neighbors: impl IntoIterator<Item = NeighborHome>) {
         self.neighbors = neighbors.into_iter().collect();
+    }
+
+    // =========================================================================
+    // Membership Accessors
+    // =========================================================================
+
+    /// Get all member home IDs for the active neighborhood.
+    #[must_use]
+    pub fn member_home_ids(&self) -> &HashSet<ChannelId> {
+        &self.member_home_ids
+    }
+
+    /// Number of member homes in the active neighborhood.
+    #[must_use]
+    pub fn member_count(&self) -> usize {
+        self.member_home_ids.len()
+    }
+
+    /// Check whether a home is a member of the active neighborhood.
+    #[must_use]
+    pub fn is_member_home(&self, id: &ChannelId) -> bool {
+        self.member_home_ids.contains(id)
+    }
+
+    /// Mark a home as a member of the active neighborhood.
+    ///
+    /// Returns `true` when the membership is newly inserted.
+    pub fn add_member_home(&mut self, id: ChannelId) -> bool {
+        self.member_home_ids.insert(id)
+    }
+
+    /// Remove a home from active neighborhood membership.
+    ///
+    /// Returns `true` when the membership existed.
+    pub fn remove_member_home(&mut self, id: &ChannelId) -> bool {
+        self.member_home_ids.remove(id)
+    }
+
+    /// Replace all neighborhood memberships.
+    pub fn set_member_homes(&mut self, ids: impl IntoIterator<Item = ChannelId>) {
+        self.member_home_ids = ids.into_iter().collect();
     }
 
     // =========================================================================

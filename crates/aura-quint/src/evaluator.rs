@@ -12,6 +12,39 @@ use futures::io::AsyncWriteExt;
 
 use crate::{AuraError, AuraResult};
 
+/// Result of verifying an invariant property
+#[derive(Debug, Clone)]
+pub struct InvariantVerificationResult {
+    /// Name of the invariant that was checked
+    pub invariant_name: String,
+    /// Whether the invariant holds (true) or was violated (false)
+    pub holds: bool,
+    /// Counterexample trace if the invariant was violated
+    pub counterexample: Option<String>,
+    /// Raw stdout from the quint verify command
+    pub output: String,
+    /// Raw stderr from the quint verify command (if any)
+    pub error_output: Option<String>,
+}
+
+/// Result of verifying a temporal property
+#[derive(Debug, Clone)]
+pub struct TemporalVerificationResult {
+    /// Name of the temporal property that was checked
+    pub property_name: String,
+    /// Whether the property holds (true) or was violated (false)
+    pub holds: bool,
+    /// Whether we fell back to invariant-style checking
+    /// (occurs when --temporal flag is not supported)
+    pub used_invariant_fallback: bool,
+    /// Counterexample trace if the property was violated
+    pub counterexample: Option<String>,
+    /// Raw stdout from the quint verify command
+    pub output: String,
+    /// Raw stderr from the quint verify command (if any)
+    pub error_output: Option<String>,
+}
+
 /// Native Quint evaluator that uses the Rust evaluation engine directly
 pub struct QuintEvaluator {
     quint_path: Option<String>,
@@ -50,6 +83,178 @@ impl QuintEvaluator {
             .map_err(|e| AuraError::invalid(format!("Invalid UTF-8 in quint output: {}", e)))?;
 
         Ok(json_output)
+    }
+
+    /// Verify an invariant property using Quint model checking
+    ///
+    /// Runs `quint verify --invariant={invariant_name} {spec_path}` and returns
+    /// a verification result indicating whether the invariant holds.
+    pub async fn verify_invariant(
+        &self,
+        spec_path: &str,
+        invariant_name: &str,
+    ) -> AuraResult<InvariantVerificationResult> {
+        let quint_cmd = self.quint_path.as_deref().unwrap_or("quint");
+
+        let output = Command::new(quint_cmd)
+            .args([
+                "verify",
+                &format!("--invariant={}", invariant_name),
+                spec_path,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| {
+                AuraError::invalid(format!(
+                    "Failed to execute quint verify for invariant '{}': {}",
+                    invariant_name, e
+                ))
+            })?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // Quint verify returns exit code 0 if property holds, non-zero if violated
+        let holds = output.status.success();
+
+        // Parse counterexample from output if verification failed
+        let counterexample = if !holds {
+            // Try to extract counterexample trace from output
+            Self::extract_counterexample(&stdout, &stderr)
+        } else {
+            None
+        };
+
+        Ok(InvariantVerificationResult {
+            invariant_name: invariant_name.to_string(),
+            holds,
+            counterexample,
+            output: stdout.to_string(),
+            error_output: if stderr.is_empty() {
+                None
+            } else {
+                Some(stderr.to_string())
+            },
+        })
+    }
+
+    /// Verify a temporal property using Quint model checking
+    ///
+    /// Runs `quint verify --temporal={property_name} {spec_path}` and returns
+    /// a verification result indicating whether the temporal property holds.
+    ///
+    /// Note: Temporal property verification may require Apalache backend and
+    /// additional configuration. If the quint CLI doesn't support --temporal
+    /// directly, this will fall back to treating it as an invariant check.
+    pub async fn verify_temporal(
+        &self,
+        spec_path: &str,
+        property_name: &str,
+    ) -> AuraResult<TemporalVerificationResult> {
+        let quint_cmd = self.quint_path.as_deref().unwrap_or("quint");
+
+        // Try temporal flag first; if that fails, fall back to invariant check
+        // since some temporal properties can be expressed as safety invariants
+        let output = Command::new(quint_cmd)
+            .args([
+                "verify",
+                &format!("--temporal={}", property_name),
+                spec_path,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await;
+
+        let (output, used_fallback) = match output {
+            Ok(out) => {
+                // Check if the error indicates unsupported flag
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                if stderr.contains("Unknown option") || stderr.contains("unknown option") {
+                    // Fall back to invariant-style check
+                    let fallback_output = Command::new(quint_cmd)
+                        .args([
+                            "verify",
+                            &format!("--invariant={}", property_name),
+                            spec_path,
+                        ])
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .output()
+                        .await
+                        .map_err(|e| {
+                            AuraError::invalid(format!(
+                                "Failed to execute quint verify for temporal property '{}': {}",
+                                property_name, e
+                            ))
+                        })?;
+                    (fallback_output, true)
+                } else {
+                    (out, false)
+                }
+            }
+            Err(e) => {
+                return Err(AuraError::invalid(format!(
+                    "Failed to execute quint verify for temporal property '{}': {}",
+                    property_name, e
+                )));
+            }
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        let holds = output.status.success();
+
+        let counterexample = if !holds {
+            Self::extract_counterexample(&stdout, &stderr)
+        } else {
+            None
+        };
+
+        Ok(TemporalVerificationResult {
+            property_name: property_name.to_string(),
+            holds,
+            used_invariant_fallback: used_fallback,
+            counterexample,
+            output: stdout.to_string(),
+            error_output: if stderr.is_empty() {
+                None
+            } else {
+                Some(stderr.to_string())
+            },
+        })
+    }
+
+    /// Extract counterexample trace from Quint verification output
+    fn extract_counterexample(stdout: &str, stderr: &str) -> Option<String> {
+        // Quint outputs counterexamples in ITF format or as structured trace
+        // Look for common patterns indicating a counterexample
+        let combined = format!("{}\n{}", stdout, stderr);
+
+        // Check for ITF trace markers
+        if combined.contains("\"#meta\"") && combined.contains("\"states\"") {
+            // Looks like an ITF trace - return the relevant portion
+            if let Some(start) = combined.find('{') {
+                if let Some(end) = combined.rfind('}') {
+                    return Some(combined[start..=end].to_string());
+                }
+            }
+        }
+
+        // Check for "counterexample" or "violation" keywords
+        if combined.contains("counterexample") || combined.contains("violation") {
+            return Some(combined);
+        }
+
+        // If verification failed but no structured counterexample, return the output as context
+        if !stdout.is_empty() || !stderr.is_empty() {
+            Some(combined)
+        } else {
+            None
+        }
     }
 
     /// Simulate using the native Rust evaluator via stdin interface

@@ -7,6 +7,7 @@
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
+use crate::tui::commands::{parse_command, IrcCommand};
 use crate::tui::layout::dim;
 use crate::tui::screens::Screen;
 
@@ -219,6 +220,42 @@ mod tests {
         handle_paste_event(&mut state, &mut Vec::new(), "hello");
         assert_eq!(state.chat.input_buffer, "hello");
     }
+
+    #[test]
+    fn enter_parses_neighborhood_slash_command() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Input;
+        state.chat.insert_mode = true;
+        state.chat.input_buffer = "/nhadd home-123".to_string();
+
+        let mut commands = Vec::new();
+        handle_insert_mode_key(&mut state, &mut commands, KeyEvent::press(KeyCode::Enter));
+
+        assert!(matches!(
+            commands.first(),
+            Some(TuiCommand::Dispatch(DispatchCommand::AddHomeToNeighborhood { home_id }))
+                if home_id == "home-123"
+        ));
+    }
+
+    #[test]
+    fn enter_reports_unsupported_slash_command() {
+        let mut state = TuiState::new();
+        state.router.go_to(Screen::Chat);
+        state.chat.focus = ChatFocus::Input;
+        state.chat.insert_mode = true;
+        state.chat.input_buffer = "/kick alice".to_string();
+
+        let mut commands = Vec::new();
+        handle_insert_mode_key(&mut state, &mut commands, KeyEvent::press(KeyCode::Enter));
+
+        assert!(matches!(
+            commands.first(),
+            Some(TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content }))
+                if content == "/kick alice"
+        ));
+    }
 }
 
 /// Handle insert mode key events
@@ -291,9 +328,42 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                 if !state.chat.input_buffer.is_empty() {
                     let content = state.chat.input_buffer.clone();
                     state.chat.input_buffer.clear();
-                    commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
-                        content,
-                    }));
+                    if content.starts_with('/') {
+                        match parse_command(&content) {
+                            Ok(IrcCommand::Neighborhood { name }) => {
+                                commands.push(TuiCommand::Dispatch(
+                                    DispatchCommand::CreateNeighborhood { name },
+                                ));
+                            }
+                            Ok(IrcCommand::NhAdd { home_id }) => {
+                                commands.push(TuiCommand::Dispatch(
+                                    DispatchCommand::AddHomeToNeighborhood { home_id },
+                                ));
+                            }
+                            Ok(IrcCommand::NhLink { home_id }) => {
+                                commands.push(TuiCommand::Dispatch(
+                                    DispatchCommand::LinkHomeAdjacency { home_id },
+                                ));
+                            }
+                            Ok(_other) => {
+                                // Route all other slash commands through the existing chat
+                                // send path so callbacks can parse and dispatch them.
+                                commands.push(TuiCommand::Dispatch(
+                                    DispatchCommand::SendChatMessage { content },
+                                ));
+                            }
+                            Err(error) => {
+                                commands.push(TuiCommand::ShowToast {
+                                    message: error.to_string(),
+                                    level: super::super::toast::ToastLevel::Error,
+                                });
+                            }
+                        }
+                    } else {
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
+                            content,
+                        }));
+                    }
                     state.chat.insert_mode = false;
                     state.chat.insert_mode_entry_char = None;
                     state.chat.focus = ChatFocus::Channels;

@@ -1,8 +1,7 @@
 //! AMP Transport Types (Layer 2 - Pure Domain Types)
 //!
 //! This module provides the core AMP (Asynchronous Message Protocol) transport types
-//! without dependencies on journal or authorization domains. Domain-specific logic
-//! has been moved to aura-protocol (Layer 4) where it belongs.
+//! without dependencies on journal or authorization domains.
 
 #![allow(missing_docs)] // Macro-generated variants/fields
 

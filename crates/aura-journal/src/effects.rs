@@ -13,7 +13,6 @@ use aura_core::{
     semilattice::JoinSemilattice,
     AuraError, FactValue, Journal,
 };
-// Flow budget handling moved to effects system
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 

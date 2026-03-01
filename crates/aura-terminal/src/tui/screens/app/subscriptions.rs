@@ -11,13 +11,13 @@ use iocraft::prelude::*;
 
 use aura_app::ui::signals::{
     ConnectionStatus, DiscoveredPeer, DiscoveredPeerMethod, NetworkStatus, CHAT_SIGNAL,
-    CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, INVITATIONS_SIGNAL,
-    HOMES_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL, SETTINGS_SIGNAL,
-    TRANSPORT_PEERS_SIGNAL,
+    CONNECTION_STATUS_SIGNAL, CONTACTS_SIGNAL, DISCOVERED_PEERS_SIGNAL, HOMES_SIGNAL,
+    INVITATIONS_SIGNAL, NEIGHBORHOOD_SIGNAL, NETWORK_STATUS_SIGNAL, RECOVERY_SIGNAL,
+    SETTINGS_SIGNAL, TRANSPORT_PEERS_SIGNAL,
 };
-use aura_app::ui::types::{Channel as AppChannel, ChatState};
+use aura_app::ui::types::ChatState;
 
-use crate::tui::chat_scope::active_home_scope_id;
+use crate::tui::chat_scope::{active_home_scope_id, is_dm_like_channel, scoped_channels};
 use crate::tui::hooks::{subscribe_signal_with_retry, AppCoreContext};
 use crate::tui::types::{Channel, Contact, Device, Invitation, Message, PendingRequest};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
@@ -419,16 +419,6 @@ pub fn use_messages_subscription(
 /// Used to map selected channel index -> channel ID for send operations.
 pub type SharedChannels = Arc<RwLock<Vec<Channel>>>;
 
-fn is_dm_like_channel(channel: &AppChannel) -> bool {
-    channel.is_dm
-        || channel.name.to_ascii_lowercase().starts_with("dm:")
-        || channel
-            .topic
-            .as_deref()
-            .map(|topic| topic.to_ascii_lowercase().starts_with("direct messages"))
-            .unwrap_or(false)
-}
-
 fn merge_dm_like_channels(incoming: &ChatState, previous: &ChatState) -> ChatState {
     if incoming.channel_count() == 0 && previous.channel_count() > 0 {
         // Runtime reductions may briefly publish an empty chat snapshot during
@@ -456,41 +446,12 @@ fn scoped_channel_snapshot(
     chat_state: &ChatState,
     active_scope: Option<&str>,
 ) -> (Vec<Channel>, usize) {
-    let mut channels = Vec::new();
-    let mut message_count = 0usize;
-    let active_home_channel = active_scope.and_then(|scope| {
-        chat_state
-            .all_channels()
-            .find(|channel| channel.id.to_string() == scope)
-    });
-    let has_active_home_channel = active_home_channel.is_some();
-    let active_home_context = active_home_channel.and_then(|channel| channel.context_id);
-
-    for channel in chat_state.all_channels() {
-        let channel_id = channel.id.to_string();
-        let dm_like = is_dm_like_channel(channel);
-
-        if !dm_like {
-            let in_scope = match active_scope {
-                None => true,
-                Some(scope) => {
-                    let id_match = channel_id == scope;
-                    let context_match = active_home_context
-                        .map(|ctx| channel.context_id == Some(ctx))
-                        .unwrap_or(false);
-                    // If we don't have a root home channel in CHAT_SIGNAL yet,
-                    // keep non-DM channels visible instead of hiding everything.
-                    id_match || context_match || !has_active_home_channel
-                }
-            };
-            if !in_scope {
-                continue;
-            }
-        }
-        message_count += chat_state.messages_for_channel(&channel.id).len();
-        channels.push(Channel::from(channel));
-    }
-
+    let scoped = scoped_channels(chat_state, active_scope);
+    let message_count = scoped
+        .iter()
+        .map(|channel| chat_state.messages_for_channel(&channel.id).len())
+        .sum();
+    let channels = scoped.into_iter().map(Channel::from).collect();
     (channels, message_count)
 }
 
@@ -511,7 +472,7 @@ fn publish_scoped_channels(
         let _ = tx.try_send(UiUpdate::ChatStateUpdated {
             channel_count,
             message_count,
-            selected_index: Some(0),
+            selected_index: None,
         });
     }
 }

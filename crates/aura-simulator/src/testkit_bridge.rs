@@ -4,7 +4,7 @@
 //! enabling clean interoperability between foundation testing utilities and advanced
 //! simulation orchestration.
 //!
-//! Designed for the stateless effect system architecture (work/021.md).
+//! Designed for the stateless effect system architecture.
 //!
 //! ## Decoupling via Factory Abstraction
 //!

@@ -12,6 +12,7 @@ use aura_app::ui::prelude::*;
 use aura_app::ui::signals::SETTINGS_SIGNAL;
 use aura_app::ui::types::InvitationBridgeType;
 use aura_core::effects::reactive::ReactiveEffects;
+use aura_core::identifiers::ChannelId;
 
 use super::types::{OpError, OpResponse, OpResult};
 use super::EffectCommand;
@@ -23,6 +24,30 @@ pub use aura_app::ui::workflows::invitation::{
     decline_invitation_by_str, export_invitation, export_invitation_by_str,
     import_invitation_details,
 };
+
+fn is_zero_channel_id(id: &ChannelId) -> bool {
+    id.as_bytes().iter().all(|b| *b == 0)
+}
+
+fn choose_channel_invitation_home_id(
+    current_home_id: Option<ChannelId>,
+    first_home_id: Option<ChannelId>,
+    chat_channel_id: Option<ChannelId>,
+    neighborhood_home_id: Option<ChannelId>,
+) -> Option<String> {
+    if let Some(id) = current_home_id.filter(|id| !is_zero_channel_id(id)) {
+        return Some(id.to_string());
+    }
+    if let Some(id) = first_home_id.filter(|id| !is_zero_channel_id(id)) {
+        return Some(id.to_string());
+    }
+    if let Some(id) = chat_channel_id.filter(|id| !is_zero_channel_id(id)) {
+        return Some(id.to_string());
+    }
+    neighborhood_home_id
+        .filter(|id| !is_zero_channel_id(id))
+        .map(|id| id.to_string())
+}
 
 /// Handle invitation commands
 pub async fn handle_invitations(
@@ -125,21 +150,34 @@ pub async fn handle_invitations(
                     let home_id = if let Some(id) = extra {
                         id
                     } else {
-                        // Best effort: use the current home from reactive state.
-                        // Prefer HOMES_SIGNAL; fall back to NEIGHBORHOOD_SIGNAL before "home".
+                        // Resolve to a concrete home ID only. Avoid default zero-value placeholders.
                         let core = app_core.read().await;
                         let homes_state = core
                             .read(&*aura_app::ui::signals::HOMES_SIGNAL)
                             .await
                             .unwrap_or_default();
-                        if let Some(id) = homes_state.current_home_id() {
-                            id.to_string()
-                        } else if let Ok(neighborhood_state) =
-                            core.read(&*aura_app::ui::signals::NEIGHBORHOOD_SIGNAL).await
-                        {
-                            neighborhood_state.home_home_id.to_string()
-                        } else {
-                            "home".to_string()
+                        let neighborhood_home_id = core
+                            .read(&*aura_app::ui::signals::NEIGHBORHOOD_SIGNAL)
+                            .await
+                            .ok()
+                            .map(|state| state.home_home_id);
+                        let chat_channel_id = core
+                            .read(&*aura_app::ui::signals::CHAT_SIGNAL)
+                            .await
+                            .ok()
+                            .and_then(|chat| chat.all_channels().next().map(|channel| channel.id));
+                        match choose_channel_invitation_home_id(
+                            homes_state.current_home_id().cloned(),
+                            homes_state.first_home_id(),
+                            chat_channel_id,
+                            neighborhood_home_id,
+                        ) {
+                            Some(id) => id,
+                            None => {
+                                return Some(Err(OpError::InvalidArgument(
+                                    "No active home/channel to invite to".to_string(),
+                                )));
+                            }
                         }
                     };
 
@@ -195,20 +233,28 @@ pub async fn handle_invitations(
                 }
             };
 
-            // Best effort: use the currently-selected home from the reactive view.
+            // Resolve to a concrete home ID only. Avoid placeholder fallbacks.
             let home_id = {
                 use aura_core::effects::reactive::ReactiveEffects;
 
                 let core = app_core.read().await;
 
                 if let Ok(homes) = core.read(&*aura_app::ui::signals::HOMES_SIGNAL).await {
-                    homes
-                        .current_home_id()
-                        .map(|id| id.to_string())
-                        .unwrap_or_else(|| "home".to_string())
+                    choose_channel_invitation_home_id(
+                        homes.current_home_id().cloned(),
+                        homes.first_home_id(),
+                        None,
+                        None,
+                    )
                 } else {
-                    "home".to_string()
+                    None
                 }
+            };
+
+            let Some(home_id) = home_id else {
+                return Some(Err(OpError::InvalidArgument(
+                    "No active home/channel to invite to".to_string(),
+                )));
             };
 
             match create_channel_invitation(app_core, receiver, home_id, None, None, None).await {
@@ -243,10 +289,13 @@ pub async fn handle_invitations(
             // Delegate to workflow for parsing via RuntimeBridge
             match import_invitation_details(app_core, code).await {
                 Ok(invitation) => {
-                    // Demo semantics: importing a CONTACT invite code is the acceptance step.
+                    // Interactive semantics: importing non-device invitations
+                    // performs the acceptance step immediately.
                     if matches!(
                         invitation.invitation_type,
                         InvitationBridgeType::Contact { .. }
+                            | InvitationBridgeType::Channel { .. }
+                            | InvitationBridgeType::Guardian { .. }
                     ) {
                         if let Err(e) = accept_invitation(app_core, &invitation.invitation_id).await
                         {
@@ -342,5 +391,69 @@ pub async fn handle_invitations(
         }
 
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{choose_channel_invitation_home_id, is_zero_channel_id};
+    use aura_core::identifiers::ChannelId;
+
+    #[test]
+    fn choose_channel_invitation_home_id_prefers_current_home() {
+        let current = ChannelId::from_bytes([1u8; 32]);
+        let first = ChannelId::from_bytes([2u8; 32]);
+        let chat = ChannelId::from_bytes([4u8; 32]);
+        let neighborhood = ChannelId::from_bytes([3u8; 32]);
+
+        let chosen = choose_channel_invitation_home_id(
+            Some(current),
+            Some(first),
+            Some(chat),
+            Some(neighborhood),
+        );
+
+        assert_eq!(chosen.as_deref(), Some(current.to_string().as_str()));
+    }
+
+    #[test]
+    fn choose_channel_invitation_home_id_falls_back_to_first_home() {
+        let first = ChannelId::from_bytes([2u8; 32]);
+        let chat = ChannelId::from_bytes([4u8; 32]);
+        let neighborhood = ChannelId::from_bytes([3u8; 32]);
+
+        let chosen =
+            choose_channel_invitation_home_id(None, Some(first), Some(chat), Some(neighborhood));
+
+        assert_eq!(chosen.as_deref(), Some(first.to_string().as_str()));
+    }
+
+    #[test]
+    fn choose_channel_invitation_home_id_ignores_zero_placeholder() {
+        let zero = ChannelId::from_bytes([0u8; 32]);
+        let neighborhood = ChannelId::from_bytes([9u8; 32]);
+
+        assert!(is_zero_channel_id(&zero));
+
+        let chosen = choose_channel_invitation_home_id(
+            Some(zero),
+            Some(zero),
+            Some(zero),
+            Some(neighborhood),
+        );
+
+        assert_eq!(chosen.as_deref(), Some(neighborhood.to_string().as_str()));
+    }
+
+    #[test]
+    fn choose_channel_invitation_home_id_uses_chat_channel_before_neighborhood() {
+        let zero = ChannelId::from_bytes([0u8; 32]);
+        let chat = ChannelId::from_bytes([7u8; 32]);
+        let neighborhood = ChannelId::from_bytes([9u8; 32]);
+
+        let chosen =
+            choose_channel_invitation_home_id(None, Some(zero), Some(chat), Some(neighborhood));
+
+        assert_eq!(chosen.as_deref(), Some(chat.to_string().as_str()));
     }
 }

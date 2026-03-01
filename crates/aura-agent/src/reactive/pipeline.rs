@@ -65,7 +65,7 @@ impl ReactivePipeline {
         )));
         scheduler.register_view(Arc::new(ContactsSignalView::new(reactive.clone())));
         scheduler.register_view(Arc::new(RecoverySignalView::new(reactive.clone())));
-        scheduler.register_view(Arc::new(HomeSignalView::new(reactive)));
+        scheduler.register_view(Arc::new(HomeSignalView::new(own_authority, reactive)));
 
         let updates = scheduler.subscribe();
 

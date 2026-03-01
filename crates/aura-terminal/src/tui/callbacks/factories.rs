@@ -78,11 +78,12 @@ impl ChatCallbacks {
                         Ok(IrcCommand::Help { .. }) => {
                             let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(
                                 "help",
-                                "Use ? for TUI help. Supported slash commands: /msg /me /nick /who /whois /join /leave /topic /invite /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode",
+                                "Use ? for TUI help. Supported slash commands: /msg /me /nick /who /whois /join /leave /topic /invite /homeinvite /homeaccept /kick /ban /unban /mute /unmute /pin /unpin /op /deop /mode /neighborhood /nhadd /nhlink",
                             )));
                             return;
                         }
                         Ok(irc) => {
+                            let irc_name = irc.name().to_string();
                             let mut dispatcher =
                                 CommandDispatcher::with_policy(CapabilityPolicy::AllowAll);
                             dispatcher.set_current_channel(channel_id_clone.clone());
@@ -151,9 +152,23 @@ impl ChatCallbacks {
                                         }
                                     }
                                 }
-                                _ => {
-                                    let _ = ctx.dispatch(effect).await;
-                                }
+                                _ => match ctx.dispatch(effect).await {
+                                    Ok(_) => {
+                                        let _ = tx.try_send(UiUpdate::ToastAdded(
+                                            ToastMessage::success(
+                                                "command",
+                                                format!("/{irc_name} succeeded"),
+                                            ),
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        let _ =
+                                            tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                                "command",
+                                                format!("/{irc_name}: {e}"),
+                                            )));
+                                    }
+                                },
                             }
                             return;
                         }
@@ -1019,6 +1034,9 @@ pub struct NeighborhoodCallbacks {
     pub on_go_home: GoHomeCallback,
     pub on_back_to_street: GoHomeCallback,
     pub on_create_home: CreateHomeCallback,
+    pub on_create_neighborhood: CreateNeighborhoodCallback,
+    pub on_add_home_to_neighborhood: NeighborhoodHomeCallback,
+    pub on_link_home_adjacency: NeighborhoodHomeCallback,
 }
 
 impl NeighborhoodCallbacks {
@@ -1028,7 +1046,13 @@ impl NeighborhoodCallbacks {
             on_enter_home: Self::make_enter_home(ctx.clone(), tx.clone()),
             on_go_home: Self::make_go_home(ctx.clone(), tx.clone()),
             on_back_to_street: Self::make_back_to_street(ctx.clone(), tx.clone()),
-            on_create_home: Self::make_create_home(ctx, tx),
+            on_create_home: Self::make_create_home(ctx.clone(), tx.clone()),
+            on_create_neighborhood: Self::make_create_neighborhood(ctx.clone(), tx.clone()),
+            on_add_home_to_neighborhood: Self::make_add_home_to_neighborhood(
+                ctx.clone(),
+                tx.clone(),
+            ),
+            on_link_home_adjacency: Self::make_link_home_adjacency(ctx, tx),
         }
     }
 
@@ -1124,6 +1148,87 @@ impl NeighborhoodCallbacks {
                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
                             "home",
                             format!("Home '{display_name}' created"),
+                        )));
+                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    }
+                }
+            });
+        })
+    }
+
+    fn make_create_neighborhood(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> CreateNeighborhoodCallback {
+        Arc::new(move |name: String| {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            let display_name = if name.trim().is_empty() {
+                "Neighborhood".to_string()
+            } else {
+                name.trim().to_string()
+            };
+            let cmd = EffectCommand::CreateNeighborhood {
+                name: display_name.clone(),
+            };
+            spawn_ctx(ctx.clone(), async move {
+                match ctx.dispatch(cmd).await {
+                    Ok(_) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
+                            "neighborhood",
+                            format!("Neighborhood '{display_name}' ready"),
+                        )));
+                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    }
+                }
+            });
+        })
+    }
+
+    fn make_add_home_to_neighborhood(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> NeighborhoodHomeCallback {
+        Arc::new(move |home_id: String| {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            let cmd = EffectCommand::AddHomeToNeighborhood {
+                home_id: home_id.clone(),
+            };
+            spawn_ctx(ctx.clone(), async move {
+                match ctx.dispatch(cmd).await {
+                    Ok(_) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
+                            "neighborhood",
+                            "Home added to neighborhood",
+                        )));
+                    }
+                    Err(_e) => {
+                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    }
+                }
+            });
+        })
+    }
+
+    fn make_link_home_adjacency(
+        ctx: Arc<IoContext>,
+        tx: UiUpdateSender,
+    ) -> NeighborhoodHomeCallback {
+        Arc::new(move |home_id: String| {
+            let ctx = ctx.clone();
+            let tx = tx.clone();
+            let cmd = EffectCommand::LinkHomeAdjacency { home_id };
+            spawn_ctx(ctx.clone(), async move {
+                match ctx.dispatch(cmd).await {
+                    Ok(_) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
+                            "neighborhood",
+                            "Adjacency linked",
                         )));
                     }
                     Err(_e) => {

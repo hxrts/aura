@@ -14,7 +14,10 @@ use super::types::{OpResponse, OpResult};
 use super::EffectCommand;
 
 // Re-export workflows for convenience
-pub use aura_app::ui::workflows::context::{create_home, move_position, set_context};
+pub use aura_app::ui::workflows::context::{
+    add_home_to_neighborhood, create_home, create_neighborhood, link_home_adjacency, move_position,
+    set_context,
+};
 pub use aura_app::ui::workflows::invitation::accept_pending_home_invitation;
 
 /// Handle context commands
@@ -70,6 +73,35 @@ pub async fn handle_context(
                 "Failed to create home: {e}"
             )))),
         },
+
+        EffectCommand::CreateNeighborhood { name } => {
+            match create_neighborhood(app_core, name.clone()).await {
+                Ok(neighborhood_id) => Some(Ok(OpResponse::Data(format!(
+                    "Neighborhood created: {neighborhood_id}"
+                )))),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to create neighborhood: {e}"
+                )))),
+            }
+        }
+
+        EffectCommand::AddHomeToNeighborhood { home_id } => {
+            match add_home_to_neighborhood(app_core, home_id).await {
+                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to add home to neighborhood: {e}"
+                )))),
+            }
+        }
+
+        EffectCommand::LinkHomeAdjacency { home_id } => {
+            match link_home_adjacency(app_core, home_id).await {
+                Ok(()) => Some(Ok(OpResponse::Ok)),
+                Err(e) => Some(Err(super::types::OpError::Failed(format!(
+                    "Failed to link home adjacency: {e}"
+                )))),
+            }
+        }
 
         _ => None,
     }

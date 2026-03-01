@@ -10,13 +10,13 @@
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
-//! - ✅ Session type runtime and choreographic abstractions
-//! - ✅ Guard chain integration traits (`CapabilityGuard`, `JournalCoupling`, etc.)
-//! - ✅ Protocol specification support
-//! - ✅ Extensions for leakage tracking and context isolation
-//! - ❌ NO effect handler implementations
-//! - ❌ NO multi-party coordination logic (that's aura-protocol)
-//! - ❌ NO handler composition (that's aura-composition)
+//! - YES Session type runtime and choreographic abstractions
+//! - YES Guard chain integration traits (`CapabilityGuard`, `JournalCoupling`, etc.)
+//! - YES Protocol specification support
+//! - YES Extensions for leakage tracking and context isolation
+//! - NO effect handler implementations
+//! - NO multi-party coordination logic (that's aura-protocol)
+//! - NO handler composition (that's aura-composition)
 //!
 //! # Design Philosophy
 //!

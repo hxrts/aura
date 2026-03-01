@@ -75,7 +75,7 @@ async fn main() -> Result<(), AuraError> {
     let command = args.command;
 
     if let Commands::Replay(replay) = &command {
-        handle_replay_command(replay)?;
+        handle_replay_command(replay).await?;
         return Ok(());
     }
 
@@ -292,9 +292,10 @@ fn parse_replay_encoding(args: &ReplayArgs) -> Result<ReplayEncoding, AuraError>
     }
 }
 
-fn handle_replay_command(args: &ReplayArgs) -> Result<(), AuraError> {
+async fn handle_replay_command(args: &ReplayArgs) -> Result<(), AuraError> {
     let encoding = parse_replay_encoding(args)?;
-    let payload = std::fs::read(&args.trace_file)
+    let payload = tokio::fs::read(&args.trace_file)
+        .await
         .map_err(|error| AuraError::invalid(format!("failed to read trace file: {error}")))?;
 
     let artifact: AuraConformanceArtifactV1 = match encoding {

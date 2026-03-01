@@ -182,6 +182,22 @@ pub enum DispatchCommand {
         name: String,
         description: Option<String>,
     },
+    /// Create/select active neighborhood
+    CreateNeighborhood {
+        name: String,
+    },
+    /// Add selected home as member of active neighborhood
+    AddSelectedHomeToNeighborhood,
+    /// Add an explicit home ID as member of active neighborhood
+    AddHomeToNeighborhood {
+        home_id: String,
+    },
+    /// Link selected home adjacency as direct
+    LinkSelectedHomeAdjacency,
+    /// Link explicit home adjacency as direct
+    LinkHomeAdjacency {
+        home_id: String,
+    },
 
     // Account setup
     CreateAccount {

@@ -1,4 +1,4 @@
-// Core types for the CRDT effect_api
+//! Guardian metadata and policy types for recovery workflows
 
 use aura_core::time::TimeStamp;
 use aura_core::Ed25519VerifyingKey;
@@ -7,15 +7,6 @@ use serde::{Deserialize, Serialize};
 // Re-export shared types from crypto and aura-core
 use aura_core::identifiers::DeviceId;
 use aura_core::GuardianId;
-
-// Import authentication types (ThresholdSig is imported where needed)
-
-// Re-export consolidated types from aura-core
-// ProtocolType has moved to aura-protocol (Layer 4)
-// SessionStatus and SessionOutcome are defined in aura-core
-// Use ContentId from aura-core
-
-// Display for AccountId is implemented in aura-core crate
 
 /// Guardian metadata
 ///
@@ -58,17 +49,3 @@ impl Default for GuardianPolicy {
         }
     }
 }
-
-// ParticipantId is now imported from aura-core
-
-// SessionId is now imported from aura-core
-
-// ProtocolType is now imported from aura-core
-
-// EventNonce is now imported from aura-core
-//
-// Note: Session type was removed - session tracking now happens in aura-protocol (Layer 4)
-
-// SessionStatus is now imported from aura-core
-
-// SessionOutcome is now imported from aura-core

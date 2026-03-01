@@ -75,8 +75,6 @@ pub enum FactSource {
 ///     }
 /// }
 /// ```
-///
-/// See work/reactive.md Section 4.1 for the theoretical foundation.
 pub trait ViewReduction<Delta>: Send + Sync {
     /// Pure function: facts → deltas
     ///

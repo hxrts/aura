@@ -60,7 +60,7 @@ pub use bridge_validate::{
     run_cross_validation, CrossValidationDiscrepancy, CrossValidationReport, QuintCheckResult,
     QuintModelCheckExecutor, StaticQuintExecutor,
 };
-pub use evaluator::QuintEvaluator;
+pub use evaluator::{InvariantVerificationResult, QuintEvaluator, TemporalVerificationResult};
 pub use handler::{QuintEvaluator as QuintEffectHandler, QuintEvaluatorConfig};
 pub use properties::{PropertyKind, PropertySpec, PropertySuite};
 pub use runner::{QuintRunner, RunnerConfig};

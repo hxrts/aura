@@ -152,6 +152,33 @@ pub enum ChatCommand {
         command: Option<String>,
     },
 
+    /// `/neighborhood <name>` - Create/select active neighborhood
+    Neighborhood {
+        /// Neighborhood display name
+        name: String,
+    },
+
+    /// `/nhadd <home_id>` - Add a home to the active neighborhood
+    NhAdd {
+        /// Home ID to add as a member
+        home_id: String,
+    },
+
+    /// `/nhlink <home_id>` - Link direct adjacency to a home
+    NhLink {
+        /// Home ID to link directly
+        home_id: String,
+    },
+
+    /// `/homeinvite <user>` - Send a home invitation to a user
+    HomeInvite {
+        /// User authority ID to invite
+        target: String,
+    },
+
+    /// `/homeaccept` - Accept the first pending home invitation
+    HomeAccept,
+
     // === Moderator Commands ===
     /// `/kick <user> [reason]` - Remove user
     Kick {
@@ -248,6 +275,11 @@ impl ChatCommand {
             Self::Leave => CommandCapability::LeaveContext,
             Self::Join { .. } => CommandCapability::JoinChannel,
             Self::Help { .. } => CommandCapability::None,
+            Self::Neighborhood { .. } | Self::NhAdd { .. } | Self::NhLink { .. } => {
+                CommandCapability::None
+            }
+            Self::HomeInvite { .. } => CommandCapability::Invite,
+            Self::HomeAccept => CommandCapability::JoinChannel,
             Self::Kick { .. } => CommandCapability::ModerateKick,
             Self::Ban { .. } | Self::Unban { .. } => CommandCapability::ModerateBan,
             Self::Mute { .. } | Self::Unmute { .. } => CommandCapability::ModerateMute,
@@ -271,6 +303,11 @@ impl ChatCommand {
             Self::Leave => "leave",
             Self::Join { .. } => "join",
             Self::Help { .. } => "help",
+            Self::Neighborhood { .. } => "neighborhood",
+            Self::NhAdd { .. } => "nhadd",
+            Self::NhLink { .. } => "nhlink",
+            Self::HomeInvite { .. } => "homeinvite",
+            Self::HomeAccept => "homeaccept",
             Self::Kick { .. } => "kick",
             Self::Ban { .. } => "ban",
             Self::Unban { .. } => "unban",
@@ -299,6 +336,11 @@ impl ChatCommand {
                 | Self::Leave
                 | Self::Join { .. }
                 | Self::Help { .. }
+                | Self::Neighborhood { .. }
+                | Self::NhAdd { .. }
+                | Self::NhLink { .. }
+                | Self::HomeInvite { .. }
+                | Self::HomeAccept
         )
     }
 
@@ -482,6 +524,56 @@ pub fn parse_chat_command(input: &str) -> Result<ChatCommand, CommandError> {
             };
             Ok(ChatCommand::Help { command })
         }
+
+        "neighborhood" | "nh" => {
+            if args.is_empty() {
+                return Err(CommandError::MissingArgument {
+                    command: "neighborhood".to_string(),
+                    argument: "name".to_string(),
+                });
+            }
+            Ok(ChatCommand::Neighborhood {
+                name: args.to_string(),
+            })
+        }
+
+        "nhadd" => {
+            if args.is_empty() {
+                return Err(CommandError::MissingArgument {
+                    command: "nhadd".to_string(),
+                    argument: "home_id".to_string(),
+                });
+            }
+            Ok(ChatCommand::NhAdd {
+                home_id: args.to_string(),
+            })
+        }
+
+        "nhlink" => {
+            if args.is_empty() {
+                return Err(CommandError::MissingArgument {
+                    command: "nhlink".to_string(),
+                    argument: "home_id".to_string(),
+                });
+            }
+            Ok(ChatCommand::NhLink {
+                home_id: args.to_string(),
+            })
+        }
+
+        "homeinvite" | "hinvite" => {
+            if args.is_empty() {
+                return Err(CommandError::MissingArgument {
+                    command: "homeinvite".to_string(),
+                    argument: "user".to_string(),
+                });
+            }
+            Ok(ChatCommand::HomeInvite {
+                target: args.to_string(),
+            })
+        }
+
+        "homeaccept" | "haccept" => Ok(ChatCommand::HomeAccept),
 
         "kick" => {
             let mut arg_parts = args.splitn(2, ' ');
@@ -821,6 +913,41 @@ pub fn all_command_help() -> Vec<CommandHelp> {
             capability: CommandCapability::None,
             category: CommandCategory::User,
         },
+        CommandHelp {
+            name: "neighborhood",
+            syntax: "/neighborhood <name>",
+            description: "Create/select the active neighborhood",
+            capability: CommandCapability::None,
+            category: CommandCategory::User,
+        },
+        CommandHelp {
+            name: "nhadd",
+            syntax: "/nhadd <home_id>",
+            description: "Add a home as a neighborhood member",
+            capability: CommandCapability::None,
+            category: CommandCategory::User,
+        },
+        CommandHelp {
+            name: "nhlink",
+            syntax: "/nhlink <home_id>",
+            description: "Create direct adjacency to a home",
+            capability: CommandCapability::None,
+            category: CommandCategory::User,
+        },
+        CommandHelp {
+            name: "homeinvite",
+            syntax: "/homeinvite <user>",
+            description: "Send a home invitation to a user authority",
+            capability: CommandCapability::Invite,
+            category: CommandCategory::User,
+        },
+        CommandHelp {
+            name: "homeaccept",
+            syntax: "/homeaccept",
+            description: "Accept the first pending home invitation",
+            capability: CommandCapability::JoinChannel,
+            category: CommandCategory::User,
+        },
         // Moderator commands
         CommandHelp {
             name: "kick",
@@ -1042,6 +1169,44 @@ mod tests {
             parse_chat_command("/?").unwrap(),
             ChatCommand::Help { command: None }
         );
+    }
+
+    #[test]
+    fn test_parse_neighborhood_commands() {
+        let cmd = parse_chat_command("/neighborhood North Block").unwrap();
+        assert_eq!(
+            cmd,
+            ChatCommand::Neighborhood {
+                name: "North Block".to_string()
+            }
+        );
+
+        let cmd = parse_chat_command("/nhadd home-123").unwrap();
+        assert_eq!(
+            cmd,
+            ChatCommand::NhAdd {
+                home_id: "home-123".to_string()
+            }
+        );
+
+        let cmd = parse_chat_command("/nhlink home-456").unwrap();
+        assert_eq!(
+            cmd,
+            ChatCommand::NhLink {
+                home_id: "home-456".to_string()
+            }
+        );
+
+        let cmd = parse_chat_command("/homeinvite authority-abc").unwrap();
+        assert_eq!(
+            cmd,
+            ChatCommand::HomeInvite {
+                target: "authority-abc".to_string()
+            }
+        );
+
+        let cmd = parse_chat_command("/homeaccept").unwrap();
+        assert_eq!(cmd, ChatCommand::HomeAccept);
     }
 
     #[test]

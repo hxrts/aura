@@ -36,7 +36,7 @@
 //! **Handler Categories** (organized by concern):
 //! - **core**: Base effect handler traits, registry infrastructure, error types
 //! - **tree**: Commitment tree reduction and application handlers
-//! - **memory**: (moved to aura-testkit) In-memory handlers for testing and simulation
+//! - **memory**: In-memory handlers for testing (see aura-testkit)
 //! - **storage**: Storage coordination handlers
 //! - **context**: Context/lifecycle management for handler operations
 //!
@@ -229,7 +229,7 @@ impl aura_core::ProtocolErrorCode for AuraHandlerError {
 
 // Re-export types from submodules (selective to avoid ambiguous re-exports)
 
-// Core handler infrastructure (type erasure only - composition moved to aura-composition)
+// Core handler infrastructure (type erasure)
 pub mod core;
 pub use core::{AuraHandler, BoxedHandler, HandlerUtils};
 
@@ -243,8 +243,6 @@ pub use context::{
     MetricsContext, PlatformInfo, PropertyCheckingConfig, SessionMetadata, SimulationContext,
     TracingContext,
 };
-
-// Memory-based handlers moved to aura-testkit.
 
 // Convert AuraHandlerError to AuraError for ? operator
 impl From<AuraHandlerError> for aura_core::AuraError {

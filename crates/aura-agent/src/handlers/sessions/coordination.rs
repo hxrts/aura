@@ -248,7 +248,22 @@ impl SessionOperations {
         session_type: SessionType,
         participants: Vec<DeviceId>,
     ) -> AgentResult<SessionHandle> {
-        self.create_session_choreography(session_type, participants)
+        self.create_session_with_metadata(session_type, participants, HashMap::new())
+            .await
+    }
+
+    /// Create a new coordination session with initial metadata
+    ///
+    /// The metadata is included in the session request and coordinated through
+    /// the choreographic protocol, ensuring all participants receive the same
+    /// metadata as part of the session creation process.
+    pub async fn create_session_with_metadata(
+        &self,
+        session_type: SessionType,
+        participants: Vec<DeviceId>,
+        metadata: HashMap<String, serde_json::Value>,
+    ) -> AgentResult<SessionHandle> {
+        self.create_session_choreography_with_metadata(session_type, participants, metadata)
             .await
     }
 
@@ -257,6 +272,20 @@ impl SessionOperations {
         &self,
         session_type: SessionType,
         participants: Vec<DeviceId>,
+    ) -> AgentResult<SessionHandle> {
+        self.create_session_choreography_with_metadata(session_type, participants, HashMap::new())
+            .await
+    }
+
+    /// Create session using choreographic protocol with initial metadata
+    ///
+    /// The metadata is included in the session request and distributed to all
+    /// participants through the choreography, ensuring consistent state.
+    pub async fn create_session_choreography_with_metadata(
+        &self,
+        session_type: SessionType,
+        participants: Vec<DeviceId>,
+        metadata: HashMap<String, serde_json::Value>,
     ) -> AgentResult<SessionHandle> {
         self.enforce_guard(&self.effects, "session:create", FlowCost::new(100))
             .await?;
@@ -268,13 +297,13 @@ impl SessionOperations {
         let session_id = SessionId::from_uuid(session_uuid);
         let session_id_string = session_id.to_string();
 
-        // Create session request message for choreography
+        // Create session request message for choreography with provided metadata
         let session_request = SessionRequest {
             session_type: session_type.clone(),
             participants: participants.clone(),
             initiator_id: device_id,
             session_id: session_id_string.clone(),
-            metadata: HashMap::new(),
+            metadata,
         };
 
         // Execute the choreographic protocol
@@ -488,7 +517,8 @@ impl SessionOperations {
             metadata: request.metadata.clone(),
         };
 
-        // In a full implementation, this would journal the session creation
+        // Session journaling happens in the caller (create_session_choreography_with_metadata)
+        // via HandlerUtilities::append_relational_fact after the handle is created
         tracing::info!("Session handle created for session {}", request.session_id);
 
         Ok(session_handle)
@@ -865,9 +895,9 @@ impl SessionOperations {
         _effects: &AuraEffectSystem,
         _session_id: &aura_core::identifiers::SessionId,
     ) -> AgentResult<Option<SessionHandle>> {
-        // Lookup session status (logging removed for simplicity)
+        // Lookup session status
 
-        // Session lookup requires persistent storage integration - return None until wired
+        // TODO Session lookup requires persistent storage integration - return None until wired
         // Real implementation would query effects.retrieve() for session state by ID
         Ok(None)
     }
@@ -878,7 +908,7 @@ impl SessionOperations {
         _effects: &AuraEffectSystem,
         session_id: &str,
     ) -> AgentResult<SessionHandle> {
-        // End session (logging removed for simplicity)
+        // End session
         let current_time = self.effects.current_timestamp().await.unwrap_or(0);
 
         let device_id = self.device_id();
@@ -909,7 +939,7 @@ impl SessionOperations {
         &self,
         _effects: &AuraEffectSystem,
     ) -> AgentResult<Vec<String>> {
-        // List sessions (logging removed for simplicity)
+        // List sessions
         // Return empty list (no persistent storage yet)
         Ok(Vec::new())
     }
@@ -937,9 +967,9 @@ impl SessionOperations {
         _effects: &AuraEffectSystem,
         _max_age_seconds: u64,
     ) -> AgentResult<Vec<String>> {
-        // Cleanup sessions (logging removed for simplicity)
+        // Cleanup sessions
 
-        // Return empty list (no persistent storage yet)
+        // Return empty list (no persistent storage yet TODO)
         Ok(Vec::new())
     }
 }

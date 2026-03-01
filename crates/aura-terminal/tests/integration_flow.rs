@@ -993,7 +993,6 @@ async fn test_signal_emission_coverage() {
 
     println!("\nNote: Actual emission verification requires authority context.");
     println!("See effect_command_propagation.rs for unit-level tests.");
-    println!("See work/tui_flows.md for the full verification plan.");
 
     println!("\n=== Signal Emission Coverage Test Complete ===\n");
 }

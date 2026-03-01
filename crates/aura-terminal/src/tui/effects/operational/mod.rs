@@ -117,7 +117,10 @@ impl OperationalHandler {
             EffectCommand::SetContext { .. }
             | EffectCommand::MovePosition { .. }
             | EffectCommand::AcceptPendingHomeInvitation
-            | EffectCommand::CreateHome { .. } => {
+            | EffectCommand::CreateHome { .. }
+            | EffectCommand::CreateNeighborhood { .. }
+            | EffectCommand::AddHomeToNeighborhood { .. }
+            | EffectCommand::LinkHomeAdjacency { .. } => {
                 context::handle_context(command, &self.app_core).await
             }
 

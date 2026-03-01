@@ -323,6 +323,18 @@ impl CommandDispatcher {
                 })
             }
 
+            IrcCommand::Neighborhood { name } => Ok(EffectCommand::CreateNeighborhood { name }),
+
+            IrcCommand::NhAdd { home_id } => Ok(EffectCommand::AddHomeToNeighborhood { home_id }),
+
+            IrcCommand::NhLink { home_id } => Ok(EffectCommand::LinkHomeAdjacency { home_id }),
+
+            IrcCommand::HomeInvite { target } => {
+                Ok(EffectCommand::SendHomeInvitation { contact_id: target })
+            }
+
+            IrcCommand::HomeAccept => Ok(EffectCommand::AcceptPendingHomeInvitation),
+
             IrcCommand::Join { channel } => Ok(EffectCommand::JoinChannel { channel }),
 
             IrcCommand::Kick { target, reason } => {
@@ -519,6 +531,36 @@ mod tests {
                 assert_eq!(target, "alice");
                 assert_eq!(duration_secs, Some(300));
             }
+            _ => panic!("Wrong effect command type"),
+        }
+    }
+
+    #[test]
+    fn test_dispatch_homeinvite() {
+        let dispatcher = CommandDispatcher::new();
+        let cmd = IrcCommand::HomeInvite {
+            target: "authority-abc".to_string(),
+        };
+
+        let result = dispatcher.dispatch_unchecked(cmd);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            EffectCommand::SendHomeInvitation { contact_id } => {
+                assert_eq!(contact_id, "authority-abc");
+            }
+            _ => panic!("Wrong effect command type"),
+        }
+    }
+
+    #[test]
+    fn test_dispatch_homeaccept() {
+        let dispatcher = CommandDispatcher::new();
+        let cmd = IrcCommand::HomeAccept;
+
+        let result = dispatcher.dispatch_unchecked(cmd);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            EffectCommand::AcceptPendingHomeInvitation => {}
             _ => panic!("Wrong effect command type"),
         }
     }

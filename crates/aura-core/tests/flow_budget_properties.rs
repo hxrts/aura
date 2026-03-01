@@ -1,6 +1,6 @@
 //! Flow budget property tests for CRDT semantics
 //!
-//! Tests the core invariants required by work/007.md Section 3:
+//! Tests the core invariants:
 //! - FlowBudget CRDT properties: associative, commutative, idempotent
 //! - Budget charging respects limits
 //! - Epoch rotation behavior

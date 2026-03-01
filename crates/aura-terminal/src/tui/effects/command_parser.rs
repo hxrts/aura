@@ -89,6 +89,21 @@ pub enum EffectCommand {
         /// Contact ID to invite
         contact_id: String,
     },
+    /// Create/select active neighborhood
+    CreateNeighborhood {
+        /// Neighborhood display name
+        name: String,
+    },
+    /// Add a home as neighborhood member
+    AddHomeToNeighborhood {
+        /// Home ID ("home", "current", or explicit ID)
+        home_id: String,
+    },
+    /// Force direct adjacency between home and selected target home
+    LinkHomeAdjacency {
+        /// Target home ID ("current" or explicit ID)
+        home_id: String,
+    },
 
     // === Chat Commands ===
     /// Send a message
@@ -433,6 +448,9 @@ impl EffectCommand {
             | Self::CancelInvitation { .. }
             | Self::AcceptPendingHomeInvitation
             | Self::SendHomeInvitation { .. }
+            | Self::CreateNeighborhood { .. }
+            | Self::AddHomeToNeighborhood { .. }
+            | Self::LinkHomeAdjacency { .. }
             | Self::InviteLanPeer { .. }
             | Self::SetContext { .. }
             | Self::RemoveContact { .. } => CommandAuthorizationLevel::Basic,

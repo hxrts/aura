@@ -13,7 +13,7 @@ use std::str::FromStr;
 ///
 /// Returns `CliOutput` instead of printing directly.
 ///
-/// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
+/// **Standardized Signature**: Uses `HandlerContext` for unified parameter passing.
 pub async fn handle_amp(ctx: &HandlerContext<'_>, action: &AmpAction) -> TerminalResult<CliOutput> {
     match action {
         AmpAction::Inspect { context, channel } => handle_amp_inspect(ctx, context, channel).await,

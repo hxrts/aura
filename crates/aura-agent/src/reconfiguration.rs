@@ -229,6 +229,22 @@ impl ReconfigurationController {
             .unwrap_or_else(SessionFootprint::new);
 
         let mut candidate = self.clone_without_log();
+
+        // If from_authority had delegated_in for this session, they received it from
+        // a previous delegator. When re-delegating, the previous delegator's
+        // delegated_out should be cleared since the session has moved on.
+        if from_before.delegated_in_sessions.contains(&session_id) {
+            // Find the previous delegator (who has delegated_out for this session)
+            // and clear their delegated_out since the chain is being extended
+            for (authority, footprint) in &self.footprints {
+                if footprint.delegated_out_sessions.contains(&session_id)
+                    && *authority != from_authority
+                {
+                    candidate.footprint_remove(*authority, session_id);
+                }
+            }
+        }
+
         candidate.footprint_remove(from_authority, session_id);
         candidate.footprint_extend(
             from_authority,

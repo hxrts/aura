@@ -305,7 +305,7 @@ impl AuraEffectSystem {
             if config.storage.opaque_names {
                 cfg = cfg.with_opaque_names();
             }
-            // Note: Legacy plaintext migration support removed - all data must be encrypted
+
             let _ = test_mode; // Suppress unused warning
             cfg
         };

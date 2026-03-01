@@ -103,6 +103,7 @@ aura-effects = { path = "../aura-effects" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
 aura-chat = { path = "../aura-chat" }
+aura-social = { path = "../aura-social" }
 aura-maintenance = { path = "../aura-maintenance" }
 aura-protocol = { path = "../aura-protocol" }
 aura-recovery = { path = "../aura-recovery" }
