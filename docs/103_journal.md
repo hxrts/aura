@@ -156,6 +156,12 @@ pub struct TreeStateSummary {
 
 The `TreeStateSummary` is a lightweight public view that hides internal device structure. For the full internal representation with branches, leaves, and topology, see `TreeState` in `aura-journal::commitment_tree`.
 
+Internally, `AuthorityTreeState` materializes explicit branch topology to support incremental commitment updates. It keeps ordered branch children, branch/leaf parent pointers, and branch depth metadata. The topology is deterministic: active leaves are sorted by `LeafId`, paired in stable order, and materialized with `NodeIndex(0)` as root followed by breadth-first branch assignment. This guarantees identical branch structure for identical active leaf sets across replicas.
+
+Commitment recomputation for non-structural mutations is path-local. Aura marks affected branches dirty, collects their paths to root, then recomputes only those branches bottom-up. Structural mutations (`AddLeaf`, `RemoveLeaf`) currently use deterministic rebuild of topology and branch commitments (correctness-first baseline). Merkle proof paths are derived from the same materialized topology so proof generation and commitment caches share one source of truth.
+
+Maintenance note: do not change topology construction or branch indexing rules without updating replay fixtures and root commitment fixtures. Determinism depends on stable leaf sort order, stable pair composition, and stable branch index assignment.
+
 Reduction follows these steps:
 
 1. Identify all `AttestedOp` facts.

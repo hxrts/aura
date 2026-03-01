@@ -54,3 +54,10 @@ async-trait = { workspace = true }
 # tokio-test = { workspace = true } # removed - unused
 rand_chacha = { workspace = true }
 proptest = { workspace = true }
+
+[[bench]]
+name = "authority_tree_incremental"
+harness = false
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = { workspace = true }

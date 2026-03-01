@@ -114,3 +114,64 @@ Run convergence tests:
 cargo test -p aura-journal convergence
 cargo test -p aura-simulator crdt_convergence_scenario
 ```
+
+## Authority Tree Topology + Commitment Invariant
+
+### Invariant Name
+`AUTHORITY_TREE_TOPOLOGY_COMMITMENT_COHERENCE`
+
+### Description
+For authority-internal tree state (`AuthorityTreeState`), topology and commitment caches must remain coherent after every mutation:
+
+1. Every active leaf has exactly one parent branch.
+2. Every non-root branch has exactly one parent branch.
+3. Every branch has exactly two ordered children `(left, right)`.
+4. Parent and child pointers are bidirectionally consistent.
+5. Branch commitments are recomputed bottom-up from the same deterministic topology.
+6. `root_commitment` must match deterministic finalization of the current root branch commitment.
+
+### Enforcement Locus
+
+1. **Topology materialization**:
+   - Module: `aura-journal/src/commitment_tree/authority_state.rs`
+   - Function: `rebuild_topology_from_active_leaves()`
+   - Deterministic shape:
+     - leaves sorted by `LeafId`
+     - stable pair composition per level
+     - root is always `NodeIndex(0)`
+     - remaining branches assigned breadth-first
+
+2. **Incremental commitment propagation**:
+   - Function: `mark_dirty_from_leaf()`
+   - Function: `collect_dirty_paths_to_root()`
+   - Function: `flush_dirty_commitments_bottom_up()`
+   - Function: `recompute_branch_commitment()`
+
+3. **Invariant checking**:
+   - Function: `assert_topology_invariants()`
+   - Public wrapper: `validate_topology_invariants()`
+   - Debug assertions run after mutation entry points (`add_device`, `remove_device`, `update_*`, `rotate_epoch`)
+
+4. **Proof/cache coherence**:
+   - Function: `update_merkle_proof_paths()`
+   - Proof paths are derived from the materialized topology, not from ad-hoc structure reconstruction.
+
+### Failure Mode
+
+**Observable Consequences**:
+1. Invalid or stale parent/child pointers.
+2. Commitment mismatch across replicas for identical fact sets.
+3. Invalid Merkle proofs after mutation.
+4. Non-deterministic branch indexing under replay.
+
+### Detection Method
+
+1. `cargo test -p aura-journal --test authority_tree_correctness`
+2. Differential checks: incremental root vs `recompute_root_commitment_full()`
+3. Topology invariant checks after random mutation sequences (property tests)
+
+### Implementation Notes
+
+- Determinism depends on stable ordering and on avoiding nondeterministic map iteration.
+- Structural changes currently use deterministic topology rebuild (correctness-first).
+- Non-structural updates (leaf key / policy / epoch) recompute only affected branch-to-root paths.

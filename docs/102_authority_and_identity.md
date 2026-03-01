@@ -63,6 +63,8 @@ The `epoch` field is monotonically increasing. The `root_commitment` is the hash
 
 The `leaf_commitments` map caches leaf commitment hashes. The `tree_topology` tracks parent-child relationships. The `branch_signing_keys` map stores FROST group public keys for verification.
 
+For the authority-internal reducer implementation (`AuthorityTreeState`), topology is explicitly materialized as ordered binary edges with parent pointers. Active leaves are canonically sorted by `LeafId`, paired in stable order, and assigned deterministic branch indices (`NodeIndex(0)` root, then breadth-first). This allows path-local commitment recomputation for non-structural updates while preserving deterministic replay semantics.
+
 TreeState is derived state and is never stored directly in the journal. It is computed on-demand from the OpLog via the reduction function.
 
 ```rust
