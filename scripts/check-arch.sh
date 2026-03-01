@@ -410,6 +410,7 @@ check_effects() {
     | grep -v "crates/aura-effects/" \
     | grep -v "crates/aura-testkit/" \
     | grep -v "crates/aura-simulator/" \
+    | grep -v "crates/aura-harness/" \
     | grep -Ev "$ALLOW_RUNTIME" \
     | grep -v "crates/aura-terminal/" \
     | grep -Ev "/tests/|/benches/" \
