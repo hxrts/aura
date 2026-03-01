@@ -129,7 +129,7 @@ trybuild = { workspace = true }
 proptest = { workspace = true }
 telltale-vm = { workspace = true, features = ["multi-thread"] }
 telltale-types = { workspace = true }
-telltale-theory = "1.1.0"
+telltale-theory = "2.1"
 wasm-bindgen-test = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
