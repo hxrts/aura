@@ -102,10 +102,7 @@ impl ReconfigurationController {
         session_id: SessionId,
         class: SessionFootprintClass,
     ) {
-        let footprint = self
-            .footprints
-            .entry(authority)
-            .or_insert_with(SessionFootprint::new);
+        let footprint = self.footprints.entry(authority).or_default();
         match class {
             SessionFootprintClass::Native => footprint.add_native(session_id),
             SessionFootprintClass::DelegatedIn => footprint.add_delegated_in(session_id),

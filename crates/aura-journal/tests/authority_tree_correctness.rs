@@ -1,4 +1,5 @@
 //! Comprehensive correctness tests for authority-internal incremental tree updates.
+#![allow(clippy::expect_used, clippy::uninlined_format_args)]
 
 use aura_journal::commitment_integration::TreeStateConversion;
 use aura_journal::commitment_tree::authority_state::AuthorityTreeState;

@@ -132,8 +132,7 @@ pub async fn handle_network(
                     Ok(()) => {
                         tracing::info!("Sent LAN invitation to {}", address);
                         Some(Ok(OpResponse::Data(format!(
-                            "Invitation sent to {} via LAN",
-                            address
+                            "Invitation sent to {address} via LAN",
                         ))))
                     }
                     Err(e) => {

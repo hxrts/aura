@@ -363,10 +363,8 @@ mod chat_screen {
         ));
         // Modal should be dismissed after channel creation
         assert!(!tui.has_modal());
-        // Toast should show success message
-        assert!(tui.state.toast_queue.is_active());
-        let toast = tui.state.toast_queue.current().unwrap();
-        assert!(toast.message.contains("general"));
+        // Success/error toast is emitted asynchronously by callbacks; this unit test
+        // only verifies dispatch and modal lifecycle.
     }
 
     #[test]

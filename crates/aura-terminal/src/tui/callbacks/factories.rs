@@ -196,10 +196,7 @@ impl ChatCallbacks {
                         });
                     }
                     Err(e) => {
-                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                            "send",
-                            e.to_string(),
-                        )));
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error("send", e)));
                     }
                 }
             });
@@ -295,7 +292,7 @@ impl ChatCallbacks {
                         Err(e) => {
                             let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                 "create-channel",
-                                e.to_string(),
+                                e,
                             )));
                         }
                     }
@@ -1196,9 +1193,7 @@ impl NeighborhoodCallbacks {
         Arc::new(move |home_id: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let cmd = EffectCommand::AddHomeToNeighborhood {
-                home_id: home_id.clone(),
-            };
+            let cmd = EffectCommand::AddHomeToNeighborhood { home_id };
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {

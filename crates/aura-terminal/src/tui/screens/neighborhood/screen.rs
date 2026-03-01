@@ -479,7 +479,6 @@ pub fn NeighborhoodScreen(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let mut reactive_channels = reactive_channels.clone();
-        let active_scope = active_scope.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let scope: Option<String> = active_scope.read().ok().map(|guard| guard.clone());
@@ -520,12 +519,12 @@ pub fn NeighborhoodScreen(
         is_detail && is_entered && matches!(props.view.enter_depth, TraversalDepth::Interior);
     let show_detail_lists = !is_detail || interior_entered;
     let display_channels = if show_detail_lists {
-        channels.clone()
+        channels
     } else {
         Vec::new()
     };
     let display_residents = if show_detail_lists {
-        residents.clone()
+        residents
     } else {
         Vec::new()
     };

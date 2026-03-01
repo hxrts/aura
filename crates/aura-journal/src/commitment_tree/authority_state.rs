@@ -545,10 +545,12 @@ impl AuthorityTreeState {
 
             for child in [temp_branch.left, temp_branch.right] {
                 if let TempChild::Branch(child_temp_id) = child {
-                    if !temp_to_branch.contains_key(&child_temp_id) {
+                    if let std::collections::btree_map::Entry::Vacant(entry) =
+                        temp_to_branch.entry(child_temp_id)
+                    {
                         let child_node = NodeIndex(next_node_index);
                         next_node_index = next_node_index.saturating_add(1);
-                        temp_to_branch.insert(child_temp_id, child_node);
+                        entry.insert(child_node);
                         self.branch_parent.insert(child_node, node_index);
                         self.branch_depth
                             .insert(child_node, depth.saturating_add(1));

@@ -590,6 +590,7 @@ fn extract_role_from_line(line: &str) -> Option<RoleId> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

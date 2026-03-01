@@ -1,10 +1,10 @@
 //! Law-based conformance diff engine for `AuraConformanceArtifactV1`.
 
 use aura_core::{
-    envelope_law_class, AuraConformanceArtifactV1, AuraEnvelopeLawClass, ConformanceSurfaceName,
+    crypto::hash, envelope_law_class, AuraConformanceArtifactV1, AuraEnvelopeLawClass,
+    ConformanceSurfaceName,
 };
 use serde_json::Value as JsonValue;
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Effect envelope law registry used by diffing.
@@ -311,9 +311,7 @@ fn algebraic_normal_form(
 
 fn stable_hash_hex_json(value: &JsonValue) -> Result<String, serde_json::Error> {
     let payload = serde_json::to_vec(value)?;
-    let mut hasher = Sha256::new();
-    hasher.update(&payload);
-    let digest = hasher.finalize();
+    let digest = hash::hash(&payload);
     Ok(hex::encode(digest))
 }
 

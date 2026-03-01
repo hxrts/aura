@@ -215,7 +215,7 @@ impl DispatchHelper {
             match result {
                 Ok(response) => self.handle_op_response(response).await,
                 Err(e) => {
-                    eprintln!("dispatch operation error: {e}");
+                    tracing::error!("dispatch operation error: {e}");
                     Err(e.to_string())
                 }
             }

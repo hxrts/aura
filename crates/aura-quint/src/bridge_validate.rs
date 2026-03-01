@@ -119,6 +119,7 @@ pub fn run_cross_validation<E: QuintModelCheckExecutor>(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::bridge_format::{

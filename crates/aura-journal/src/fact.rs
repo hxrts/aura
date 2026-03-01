@@ -1131,6 +1131,7 @@ impl ProtocolRelationalFact {
 ///
 /// Domain crates implement `DomainFact` trait and register reducers in
 /// `aura-agent/src/fact_registry.rs`.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RelationalFact {
     // ========================================================================

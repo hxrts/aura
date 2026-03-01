@@ -36,9 +36,9 @@ fn bench_incremental_vs_full(c: &mut Criterion) {
                 b.iter_batched(
                     || state.clone(),
                     |mut candidate| {
-                        candidate
-                            .update_leaf_public_key(leaf, new_key.clone())
-                            .expect("leaf update should succeed");
+                        if let Err(err) = candidate.update_leaf_public_key(leaf, new_key.clone()) {
+                            panic!("leaf update should succeed: {err}");
+                        }
                         black_box(candidate.root_commitment);
                     },
                     BatchSize::SmallInput,
@@ -53,9 +53,9 @@ fn bench_incremental_vs_full(c: &mut Criterion) {
                 b.iter_batched(
                     || state.clone(),
                     |mut candidate| {
-                        candidate
-                            .update_leaf_public_key(leaf, new_key.clone())
-                            .expect("leaf update should succeed");
+                        if let Err(err) = candidate.update_leaf_public_key(leaf, new_key.clone()) {
+                            panic!("leaf update should succeed: {err}");
+                        }
                         let root = candidate.recompute_root_commitment_full();
                         black_box(root);
                     },

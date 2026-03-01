@@ -149,6 +149,7 @@ action = "noop"
     assert!(!remote_sync_report.records[0].checksum_sha256.is_empty());
 }
 
+#[allow(clippy::disallowed_methods)]
 #[test]
 fn wait_for_timeout_uses_wall_clock_budget_under_continuous_output() {
     let temp = match tempfile::tempdir() {

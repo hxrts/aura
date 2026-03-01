@@ -108,6 +108,7 @@ impl RuntimeCapabilityEffects for RuntimeCapabilityHandler {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

@@ -250,6 +250,7 @@ fn step_budget_from_weight(weight: u64, scheduler_factor: f64) -> u64 {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

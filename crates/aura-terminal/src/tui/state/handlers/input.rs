@@ -184,6 +184,7 @@ pub fn handle_paste_event(state: &mut TuiState, _commands: &mut Vec<TuiCommand>,
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
     use crate::tui::screens::Screen;
@@ -201,7 +202,7 @@ mod tests {
 
         match state.modal_queue.current() {
             Some(QueuedModal::ContactsImport(modal_state)) => {
-                assert_eq!(modal_state.code, "invite-code")
+                assert_eq!(modal_state.code, "invite-code");
             }
             _ => panic!("expected contacts import modal to remain active"),
         }

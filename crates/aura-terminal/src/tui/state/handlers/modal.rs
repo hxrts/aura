@@ -531,7 +531,7 @@ fn handle_chat_create_key_queue(
                     let channel_name = modal_state.name.clone();
 
                     commands.push(TuiCommand::Dispatch(DispatchCommand::CreateChannel {
-                        name: channel_name.clone(),
+                        name: channel_name,
                         topic,
                         members,
                         threshold_k: modal_state.threshold_k,

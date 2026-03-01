@@ -303,10 +303,8 @@ fn sync_neighborhood_navigation_state(
     };
     if resident_count == 0 {
         state.neighborhood.selected_resident = 0;
-    } else {
-        if state.neighborhood.selected_resident >= resident_count {
-            state.neighborhood.selected_resident = resident_count.saturating_sub(1);
-        }
+    } else if state.neighborhood.selected_resident >= resident_count {
+        state.neighborhood.selected_resident = resident_count.saturating_sub(1);
     }
 }
 

@@ -503,7 +503,7 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|previous| merge_dm_like_channels(&chat_state, &previous))
                     .unwrap_or_else(|| chat_state.clone());
-                eprintln!(
+                tracing::debug!(
                     "CHAT_SIGNAL_UPDATE: incoming={} stabilized={}",
                     chat_state.channel_count(),
                     stabilized.channel_count()
@@ -521,7 +521,7 @@ pub fn use_channels_subscription(
                     })
                     .collect::<Vec<_>>()
                     .join(" ; ");
-                eprintln!("CHAT_SIGNAL_CHANNELS: {channel_summary}");
+                tracing::debug!("CHAT_SIGNAL_CHANNELS: {channel_summary}");
 
                 if let Ok(mut guard) = latest_chat_state.write() {
                     *guard = stabilized.clone();

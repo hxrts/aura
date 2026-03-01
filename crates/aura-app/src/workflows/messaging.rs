@@ -334,7 +334,7 @@ pub async fn create_channel(
         .to_generic();
 
         runtime
-            .commit_relational_facts(&[fact.clone()])
+            .commit_relational_facts(std::slice::from_ref(&fact))
             .await
             .map_err(|e| AuraError::agent(format!("Failed to persist channel: {e}")))?;
 
@@ -733,7 +733,7 @@ pub async fn send_message_ref(
         // Enable ack tracking for message facts to support delivery confirmation
         runtime
             .commit_relational_facts_with_options(
-                &[fact.clone()],
+                std::slice::from_ref(&fact),
                 FactOptions::default().with_ack_tracking(),
             )
             .await
@@ -906,7 +906,7 @@ pub async fn start_direct_chat(
         .to_generic();
 
         runtime
-            .commit_relational_facts(&[fact.clone()])
+            .commit_relational_facts(std::slice::from_ref(&fact))
             .await
             .map_err(|error| {
                 AuraError::agent(format!("Failed to persist direct channel: {error}"))
@@ -1057,6 +1057,7 @@ pub async fn invite_user_to_channel(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::AppConfig;

@@ -178,6 +178,7 @@ pub struct ProofCertificateV1 {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

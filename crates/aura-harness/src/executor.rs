@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
 use anyhow::{anyhow, bail, Result};
-use rand::{Rng, SeedableRng};
-use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{ScenarioConfig, ScenarioStep};
@@ -91,8 +89,8 @@ impl ScenarioExecutor {
         let mut visited = Vec::new();
         let mut transitions = Vec::new();
         let mut global_remaining = budgets.global_budget_ms;
-        let mut scenario_rng = ChaCha8Rng::seed_from_u64(budgets.scenario_seed);
-        let mut fault_rng = ChaCha8Rng::seed_from_u64(budgets.fault_seed);
+        let mut scenario_rng = DeterministicRng::new(budgets.scenario_seed);
+        let mut fault_rng = DeterministicRng::new(budgets.fault_seed);
 
         loop {
             let state = machine
@@ -192,8 +190,8 @@ fn execute_step(
     step: &ScenarioStep,
     tool_api: &mut ToolApi,
     step_budget_ms: u64,
-    scenario_rng: &mut ChaCha8Rng,
-    fault_rng: &mut ChaCha8Rng,
+    scenario_rng: &mut DeterministicRng,
+    fault_rng: &mut DeterministicRng,
 ) -> Result<()> {
     match step.action.as_str() {
         "launch_instances" | "noop" => Ok(()),
@@ -280,16 +278,50 @@ fn execute_step(
         "fault_delay" => {
             let delay_ms = step
                 .timeout_ms
-                .unwrap_or_else(|| 25 + fault_rng.gen_range(0..25));
+                .unwrap_or_else(|| 25 + fault_rng.range_u64(0, 25));
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
             Ok(())
         }
         "fault_loss" | "fault_tunnel_drop" => {
             // Consume deterministic RNG state so replay and injected faults are seed-driven.
-            let _decision: u8 = scenario_rng.gen_range(0..=1);
+            let _decision = scenario_rng.range_u64(0, 2);
             Ok(())
         }
         action => bail!("unsupported scenario action: {action}"),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DeterministicRng {
+    state: u64,
+}
+
+impl DeterministicRng {
+    fn new(seed: u64) -> Self {
+        // Keep a non-zero state for xorshift to avoid degenerating to all zeros.
+        let state = if seed == 0 {
+            0x9E37_79B9_7F4A_7C15
+        } else {
+            seed
+        };
+        Self { state }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.state = x;
+        x
+    }
+
+    fn range_u64(&mut self, start_inclusive: u64, end_exclusive: u64) -> u64 {
+        let span = end_exclusive.saturating_sub(start_inclusive);
+        if span == 0 {
+            return start_inclusive;
+        }
+        start_inclusive + (self.next_u64() % span)
     }
 }
 

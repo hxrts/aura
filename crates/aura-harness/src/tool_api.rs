@@ -156,9 +156,9 @@ impl ToolApi {
                     let authoritative = authoritative_screen(&screen);
                     let normalized = normalize_screen(&screen);
                     serde_json::json!({
-                        "screen": authoritative.clone(),
+                        "screen": &authoritative,
                         "raw_screen": screen,
-                        "authoritative_screen": authoritative,
+                        "authoritative_screen": &authoritative,
                         "normalized_screen": normalized,
                         "capture_consistency": "settled"
                     })
@@ -188,9 +188,9 @@ impl ToolApi {
                     let normalized = normalize_screen(&screen);
                     serde_json::json!({
                         "matched": true,
-                        "screen": authoritative.clone(),
+                        "screen": &authoritative,
                         "raw_screen": screen,
-                        "authoritative_screen": authoritative,
+                        "authoritative_screen": &authoritative,
                         "normalized_screen": normalized,
                         "matched_view": "normalized"
                     })

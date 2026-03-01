@@ -3,7 +3,6 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
 use std::thread;
 use std::time::Duration;
 
@@ -35,7 +34,7 @@ pub struct LocalPtyBackend {
     session: Option<RunningSession>,
     pty_rows: u16,
     pty_cols: u16,
-    last_authoritative_screen: Arc<StdMutex<Option<String>>>,
+    last_authoritative_screen: Arc<Mutex<Option<String>>>,
 }
 
 impl LocalPtyBackend {
@@ -46,7 +45,7 @@ impl LocalPtyBackend {
             session: None,
             pty_rows: pty_rows.unwrap_or(40),
             pty_cols: pty_cols.unwrap_or(120),
-            last_authoritative_screen: Arc::new(StdMutex::new(None)),
+            last_authoritative_screen: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -75,10 +74,7 @@ impl LocalPtyBackend {
 
     fn select_authoritative_screen(&self, current_screen: String) -> String {
         let current_authoritative = authoritative_screen(&current_screen);
-        let mut cached = match self.last_authoritative_screen.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut cached = self.last_authoritative_screen.blocking_lock();
 
         if has_nav_header(&current_authoritative) {
             *cached = Some(current_authoritative.clone());
@@ -102,9 +98,7 @@ impl InstanceBackend for LocalPtyBackend {
         if self.state == BackendState::Running {
             return Ok(());
         }
-        if let Ok(mut cached) = self.last_authoritative_screen.lock() {
-            *cached = None;
-        }
+        *self.last_authoritative_screen.blocking_lock() = None;
 
         let (rows, cols) = self.parser_size();
         let pty_system = native_pty_system();
@@ -226,7 +220,7 @@ impl InstanceBackend for LocalPtyBackend {
 
         // Transitional frames can briefly miss the nav header while a full-screen redraw
         // is still in flight. Sample for a short bounded window before falling back.
-        let mut recovered_screen = last_screen.clone();
+        let mut recovered_screen = last_screen;
         if !has_nav_header(&recovered_screen) {
             for _ in 0..HEADER_RECOVERY_ATTEMPTS {
                 thread::sleep(Duration::from_millis(HEADER_RECOVERY_DELAY_MS));
@@ -382,43 +376,64 @@ mod tests {
     #[test]
     fn local_snapshot_is_bounded_by_pty_rows() {
         let mut backend = LocalPtyBackend::new(test_config(), Some(40), Some(120));
-        backend.start().expect("backend must start");
+        if let Err(error) = backend.start() {
+            panic!("backend must start: {error}");
+        }
         thread::sleep(Duration::from_millis(50));
-        let screen = backend.snapshot().expect("snapshot must succeed");
+        let screen = match backend.snapshot() {
+            Ok(screen) => screen,
+            Err(error) => panic!("snapshot must succeed: {error}"),
+        };
         let line_count = screen.lines().count();
         assert!(
             line_count <= 40,
             "snapshot should not exceed configured PTY rows (got {line_count})"
         );
-        backend.stop().expect("backend must stop");
+        if let Err(error) = backend.stop() {
+            panic!("backend must stop: {error}");
+        }
     }
 
     #[test]
     fn local_snapshot_observes_recent_output_without_extra_sleep() {
         let mut backend = LocalPtyBackend::new(test_config(), Some(40), Some(120));
-        backend.start().expect("backend must start");
-        backend
-            .send_keys("freshness-check\n")
-            .expect("send_keys must succeed");
-        let screen = backend.snapshot().expect("snapshot must succeed");
+        if let Err(error) = backend.start() {
+            panic!("backend must start: {error}");
+        }
+        if let Err(error) = backend.send_keys("freshness-check\n") {
+            panic!("send_keys must succeed: {error}");
+        }
+        let screen = match backend.snapshot() {
+            Ok(screen) => screen,
+            Err(error) => panic!("snapshot must succeed: {error}"),
+        };
         assert!(screen.contains("freshness-check"));
-        backend.stop().expect("backend must stop");
+        if let Err(error) = backend.stop() {
+            panic!("backend must stop: {error}");
+        }
     }
 
     #[test]
     fn local_tail_log_reads_dat_fallback_path() {
         let temp_root = std::env::temp_dir().join("aura-harness-tail-log-dat");
         let _ = fs::remove_dir_all(&temp_root);
-        fs::create_dir_all(&temp_root).expect("create temp dir");
+        if let Err(error) = fs::create_dir_all(&temp_root) {
+            panic!("create temp dir: {error}");
+        }
 
         let mut config = test_config();
         config.data_dir = temp_root.clone();
         config.log_path = Some(temp_root.join("instance.log"));
 
-        fs::write(temp_root.join("instance.log.dat"), "line-1\nline-2\n").expect("write log");
+        if let Err(error) = fs::write(temp_root.join("instance.log.dat"), "line-1\nline-2\n") {
+            panic!("write log: {error}");
+        }
 
         let backend = LocalPtyBackend::new(config, Some(40), Some(120));
-        let lines = backend.tail_log(1).expect("tail_log should succeed");
+        let lines = match backend.tail_log(1) {
+            Ok(lines) => lines,
+            Err(error) => panic!("tail_log should succeed: {error}"),
+        };
         assert_eq!(lines, vec!["line-2".to_string()]);
     }
 

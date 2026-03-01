@@ -82,6 +82,25 @@ pub struct ByzantineSafetyAttestation {
     pub evidence_refs: Vec<String>,
 }
 
+impl ByzantineSafetyAttestation {
+    /// Construct a Byzantine safety attestation payload.
+    #[must_use]
+    pub fn new(
+        protocol_id: impl Into<String>,
+        required_capabilities: Vec<CapabilityKey>,
+        capability_snapshot: CapabilitySnapshot,
+        evidence_refs: Vec<String>,
+    ) -> Self {
+        Self {
+            schema_version: BYZANTINE_ATTESTATION_SCHEMA_V1.to_string(),
+            protocol_id: protocol_id.into(),
+            required_capabilities,
+            capability_snapshot,
+            evidence_refs,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,24 +130,5 @@ mod tests {
         assert_eq!(attestation.required_capabilities, required);
         assert_eq!(attestation.evidence_refs.len(), 1);
         assert_eq!(attestation.schema_version, BYZANTINE_ATTESTATION_SCHEMA_V1);
-    }
-}
-
-impl ByzantineSafetyAttestation {
-    /// Construct a Byzantine safety attestation payload.
-    #[must_use]
-    pub fn new(
-        protocol_id: impl Into<String>,
-        required_capabilities: Vec<CapabilityKey>,
-        capability_snapshot: CapabilitySnapshot,
-        evidence_refs: Vec<String>,
-    ) -> Self {
-        Self {
-            schema_version: BYZANTINE_ATTESTATION_SCHEMA_V1.to_string(),
-            protocol_id: protocol_id.into(),
-            required_capabilities,
-            capability_snapshot,
-            evidence_refs,
-        }
     }
 }

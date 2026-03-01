@@ -1645,6 +1645,7 @@ fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::validate_link_annotations;
     use aura_mpst::ast_extraction::extract_aura_annotations;

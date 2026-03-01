@@ -215,6 +215,7 @@ pub fn validate_export_bundle(bundle: &BridgeBundleV1) -> Result<(), BridgeExpor
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

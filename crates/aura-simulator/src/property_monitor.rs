@@ -399,8 +399,7 @@ impl AuraPropertyMonitor {
             "GuardChainOrdering",
             tick,
             format!(
-                "session {session} message {message_id} expected guard stage {:?}, got {:?}",
-                expected_stage, stage
+                "session {session} message {message_id} expected guard stage {expected_stage:?}, got {stage:?}",
             ),
         ));
     }

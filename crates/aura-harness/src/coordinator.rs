@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 
@@ -14,6 +15,7 @@ pub struct HarnessCoordinator {
     events: EventStream,
 }
 
+#[allow(clippy::disallowed_methods)] // Harness timeout enforcement requires wall-clock bounds.
 impl HarnessCoordinator {
     pub fn from_run_config(config: &RunConfig) -> Result<Self> {
         let mut backends = HashMap::new();
@@ -97,9 +99,12 @@ impl HarnessCoordinator {
     ) -> Result<String> {
         let poll_ms: u64 = 20;
         let mut attempts = 0_u64;
-        let max_attempts = (timeout_ms / poll_ms).saturating_add(1);
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
-        while attempts < max_attempts {
+        loop {
+            if Instant::now() >= deadline {
+                break;
+            }
             let screen = self.screen(instance_id)?;
             let normalized = normalize_screen(&screen);
             if normalized.contains(pattern) {
@@ -116,10 +121,15 @@ impl HarnessCoordinator {
                 return Ok(screen);
             }
             attempts = attempts.saturating_add(1);
-            if attempts >= max_attempts {
+            let now = Instant::now();
+            if now >= deadline {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(poll_ms));
+            let remaining = deadline.saturating_duration_since(now);
+            let delay = remaining.min(Duration::from_millis(poll_ms));
+            if !delay.is_zero() {
+                std::thread::sleep(delay);
+            }
         }
 
         self.events.push(

@@ -90,6 +90,7 @@ pub fn map_certificates_to_quint_assertions(certificates: &[ProofCertificateV1])
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::bridge_format::{

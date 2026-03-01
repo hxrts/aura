@@ -2,9 +2,9 @@
 //!
 //! These types are shared by native/wasm parity harnesses and CI conformance checks.
 
+use crate::crypto::hash;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Schema version for [`AuraConformanceArtifactV1`].
@@ -304,9 +304,7 @@ where
 
 fn stable_hash_hex_from_serializable<T: Serialize>(value: &T) -> Result<String, serde_json::Error> {
     let bytes = serde_json::to_vec(value)?;
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    let digest = hasher.finalize();
+    let digest = hash::hash(&bytes);
     Ok(hex::encode(digest))
 }
 
@@ -335,9 +333,10 @@ mod tests {
             AuraConformanceSurfaceV1::new(vec![], None),
         );
 
-        let err = artifact
-            .validate_required_surfaces()
-            .expect_err("missing scheduler_step surface must fail");
+        let err = match artifact.validate_required_surfaces() {
+            Ok(()) => panic!("missing scheduler_step surface must fail"),
+            Err(err) => err,
+        };
         assert!(matches!(
             err,
             ConformanceValidationError::MissingRequiredSurfaces { .. }
@@ -359,15 +358,17 @@ mod tests {
         for surface in ConformanceSurfaceName::REQUIRED {
             artifact.insert_surface(surface, AuraConformanceSurfaceV1::new(vec![], None));
         }
-        artifact
-            .validate_required_surfaces()
-            .expect("all required surfaces should pass");
+        if let Err(err) = artifact.validate_required_surfaces() {
+            panic!("all required surfaces should pass: {err}");
+        }
     }
 
     #[test]
     fn effect_kind_registry_rejects_unknown_kinds() {
-        let err = assert_effect_kinds_classified(["send_decision", "new_kind"])
-            .expect_err("unknown kinds must fail");
+        let err = match assert_effect_kinds_classified(["send_decision", "new_kind"]) {
+            Ok(()) => panic!("unknown kinds must fail"),
+            Err(err) => err,
+        };
         assert!(matches!(
             err,
             ConformanceValidationError::UnclassifiedEnvelopeKinds { .. }
@@ -376,7 +377,7 @@ mod tests {
 
     #[test]
     fn effect_kind_registry_covers_current_core_vm_kinds() {
-        assert_effect_kinds_classified([
+        if let Err(err) = assert_effect_kinds_classified([
             "send_decision",
             "handle_recv",
             "handle_choose",
@@ -384,8 +385,9 @@ mod tests {
             "handle_acquire",
             "handle_release",
             "topology_event",
-        ])
-        .expect("current telltale-vm effect kinds should be classified");
+        ]) {
+            panic!("current telltale-vm effect kinds should be classified: {err}");
+        }
     }
 
     #[test]
@@ -411,12 +413,12 @@ mod tests {
             second.insert_surface(surface, payload);
         }
 
-        first
-            .recompute_digests()
-            .expect("first digest recompute should succeed");
-        second
-            .recompute_digests()
-            .expect("second digest recompute should succeed");
+        if let Err(err) = first.recompute_digests() {
+            panic!("first digest recompute should succeed: {err}");
+        }
+        if let Err(err) = second.recompute_digests() {
+            panic!("second digest recompute should succeed: {err}");
+        }
 
         assert_eq!(first.step_hashes, second.step_hashes);
         assert_eq!(first.run_digest_hex, second.run_digest_hex);
@@ -440,8 +442,10 @@ mod tests {
             "run_digest_hex": null
         });
 
-        let decoded: AuraConformanceArtifactV1 =
-            serde_json::from_value(payload).expect("legacy numeric schema should decode");
+        let decoded: AuraConformanceArtifactV1 = match serde_json::from_value(payload) {
+            Ok(decoded) => decoded,
+            Err(err) => panic!("legacy numeric schema should decode: {err}"),
+        };
         assert_eq!(decoded.schema_version, AURA_CONFORMANCE_SCHEMA_VERSION);
     }
 
@@ -463,8 +467,10 @@ mod tests {
             "run_digest_hex": null
         });
 
-        let decoded: AuraConformanceArtifactV1 =
-            serde_json::from_value(payload).expect("legacy string schema should decode");
+        let decoded: AuraConformanceArtifactV1 = match serde_json::from_value(payload) {
+            Ok(decoded) => decoded,
+            Err(err) => panic!("legacy string schema should decode: {err}"),
+        };
         assert_eq!(decoded.schema_version, AURA_CONFORMANCE_SCHEMA_VERSION);
     }
 }
