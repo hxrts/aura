@@ -6,7 +6,6 @@
 - [Privacy and Information Flow Contract](003_information_flow_contract.md)
 - [Distributed Systems Contract](004_distributed_systems_contract.md)
 - [Aura System Invariants](005_system_invariants.md)
-- [Terms and Notation](006_terms_and_notation.md)
 - [Cryptographic Architecture](100_crypto.md)
 - [Identifiers and Boundaries](101_identifiers_and_boundaries.md)
 - [Authority and Identity](102_authority_and_identity.md)
