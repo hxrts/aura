@@ -1,6 +1,6 @@
 # Verification Coverage Report
 
-This document provides an overview of the formal verification, model checking, and conformance testing infrastructure in Aura. For improvement tasks, see [work/coverage.md](../work/coverage.md).
+This document provides an overview of the formal verification, model checking, and conformance testing infrastructure in Aura.
 
 ## Summary Metrics
 
