@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Validate that markdown-style docs links in crates/ resolve to existing files.
+# Validate docs link integrity.
 #
-# Scope:
-# - Scans all files under crates/
-# - Extracts markdown links: [label](target)
-# - Filters targets that resolve into docs/
-# - Fails if any referenced docs file does not exist
+# Checks:
+# 1. All markdown links in crates/ that reference docs/ resolve to existing files
+# 2. docs/000_project_overview.md contains links to all docs/*.md files
+#    (except itself and SUMMARY.md)
+# 3. No links in docs/ or crates/ reference work/ (scratch directory)
 
 set -euo pipefail
 
@@ -123,3 +123,53 @@ if [[ "$missing" -gt 0 ]]; then
 fi
 
 echo "checked $checked docs link(s); all targets exist"
+
+# Check that docs/000_project_overview.md links to all docs files
+overview="$docs_root/000_project_overview.md"
+if [[ ! -f "$overview" ]]; then
+  echo "error: $overview not found" >&2
+  exit 2
+fi
+
+# Extract all markdown link targets from the overview
+overview_links=$(perl -ne 'while (/\[[^\]]+\]\(([^)#]+)/g) { print "$1\n"; }' "$overview" | sort -u)
+
+overview_missing=0
+while IFS= read -r -d '' doc_file; do
+  doc_name="$(basename "$doc_file")"
+
+  # Skip self and SUMMARY.md
+  case "$doc_name" in
+    000_project_overview.md|SUMMARY.md) continue ;;
+  esac
+
+  # Check if this file is linked in the overview
+  if ! echo "$overview_links" | grep -qF "$doc_name"; then
+    overview_missing=$((overview_missing + 1))
+    echo "missing from 000_project_overview.md: $doc_name"
+  fi
+done < <(find "$docs_root" -maxdepth 1 -name '*.md' -print0 | sort -z)
+
+if [[ "$overview_missing" -gt 0 ]]; then
+  echo ""
+  echo "000_project_overview.md is missing links to $overview_missing doc file(s)"
+  exit 1
+fi
+
+echo "000_project_overview.md links to all docs files"
+
+# Check for links to work/ (scratch directory)
+work_links=0
+while IFS= read -r match; do
+  [[ -z "$match" ]] && continue
+  work_links=$((work_links + 1))
+  echo "link to work/ found: $match"
+done < <(rg --no-heading -n '\[[^\]]+\]\([^)]*work/' docs crates 2>/dev/null || true)
+
+if [[ "$work_links" -gt 0 ]]; then
+  echo ""
+  echo "found $work_links link(s) to work/ directory (scratch files should not be referenced)"
+  exit 1
+fi
+
+echo "no links to work/ directory found"

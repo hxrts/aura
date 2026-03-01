@@ -46,6 +46,8 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 **Core Systems**
 
+[Cryptographic Architecture](100_crypto.md) documents cryptographic primitives, key derivation, and threshold signature schemes.
+
 [Authority and Identity](102_authority_and_identity.md) describes the authority-centric identity model with opaque authorities, relational contexts, and commitment tree structure.
 
 [Identifiers and Boundaries](101_identifiers_and_boundaries.md) documents the identifier system and context isolation.
@@ -78,6 +80,14 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [CLI and Terminal User Interface](116_cli_tui.md) specifies the CLI and iocraft-based TUI for Aura.
 
+[Test Infrastructure Reference](117_testkit.md) documents the testkit crate, fixtures, and mock handlers.
+
+[Simulation Infrastructure Reference](118_simulator.md) covers deterministic simulation architecture and fault injection.
+
+[Conformance and Parity Reference](119_conformance.md) describes conformance testing and cross-platform parity validation.
+
+[Formal Verification Reference](120_verification.md) documents Quint specifications and Lean proofs.
+
 **Developer Guides**
 
 [Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to Aura.
@@ -91,10 +101,23 @@ Additional documentation covers specific aspects of the system. The Foundation c
 [Testing Guide](805_testing_guide.md) describes property testing, simulation harnesses, and validation frameworks.
 
 [Simulation Guide](806_simulation_guide.md) covers deterministic simulation for verification and debugging.
-Verification artifacts live in `verification/` (Quint specs and Lean proofs).
+
+[Verification and MBT Guide](807_verification_guide.md) explains model-based testing workflows with Quint and Lean.
 
 [Maintenance Guide](808_maintenance_guide.md) explains distributed maintenance, snapshots, garbage collection, and system evolution.
 
+[Lean-Quint Bridge Guide](810_lean_quint_bridge.md) documents the bridge between Lean proofs and Quint specifications.
+
+[Reactive Signals Guide](810_reactive_signals_guide.md) covers reactive signal patterns for UI state management.
+
+[Recovery TUI Demo](811_recovery_tui_demo.md) provides a walkthrough of the CLI recovery demo with the simulator.
+
+[Protocol Pipeline Guide](812_protocol_pipeline.md) documents the protocol development pipeline from specification to implementation.
+
+[Runtime Harness Guide](813_runtime_harness_guide.md) covers end-to-end runtime validation with real Aura instances.
+
 **Project Meta**
+
+[Verification Coverage Report](998_verification_coverage.md) summarizes formal verification, model checking, and conformance testing coverage.
 
 [Project Structure](999_project_structure.md) provides a comprehensive crate structure overview with the dependency graph.

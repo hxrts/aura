@@ -395,7 +395,7 @@ ci-dry-run:
 
     # Environment check
     LOCAL_RUST=$(rustc --version | grep -oE '[0-9]+\.[0-9]+' | head -1)
-    printf "[0/9] Rust version... "
+    printf "[0/10] Rust version... "
     if [[ "$LOCAL_RUST" == "{{CI_RUST_VERSION}}" ]]; then
         echo -e "${GREEN}$LOCAL_RUST${NC} (matches CI)"
     elif [[ "$LOCAL_RUST" < "{{CI_RUST_VERSION}}" ]]; then
@@ -406,16 +406,17 @@ ci-dry-run:
     echo ""
 
     # Run CI steps (same as GitHub workflows)
-    run_step "1/9" "Format"          "just ci-format"
-    run_step "2/9" "Clippy"          "just ci-clippy"
-    run_step "3/9" "Build"           "just ci-build"
-    run_step "4/9" "Test"            "just ci-test"
-    run_step "5/9" "Choreo Parity"   "just ci-choreo-parity"
-    run_step "6/9" "Effects"         "just ci-effects"
-    run_step "7/9" "Choreo"          "just ci-choreo"
+    run_step "1/10" "Format"          "just ci-format"
+    run_step "2/10" "Clippy"          "just ci-clippy"
+    run_step "3/10" "Build"           "just ci-build"
+    run_step "4/10" "Test"            "just ci-test"
+    run_step "5/10" "Choreo Parity"   "just ci-choreo-parity"
+    run_step "6/10" "Effects"         "just ci-effects"
+    run_step "7/10" "Choreo"          "just ci-choreo"
+    run_step "8/10" "Doc Links"       "just ci-crates-doc-links"
 
     # Quint (optional - skip if not installed)
-    printf "[8/9] Quint... "
+    printf "[9/10] Quint... "
     if command -v quint &>/dev/null; then
         if just ci-quint-typecheck >/dev/null 2>&1; then
             echo -e "${GREEN}OK${NC}"
@@ -428,7 +429,7 @@ ci-dry-run:
     fi
 
     # Architecture check (warning only)
-    printf "[9/9] Architecture... "
+    printf "[10/10] Architecture... "
     if ./scripts/check-arch.sh --quick >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
     else
