@@ -257,7 +257,7 @@ impl StorageOperation {
             } => {
                 if let Some(entry) = index.entries.get_mut(content_id) {
                     // Update entry with new metadata (simplified)
-                    // In a full implementation, this would properly merge metadata
+                    // This path currently updates indexed terms from "updated_terms" only.
                     if let Some(new_metadata) = metadata.get("updated_terms") {
                         let new_terms: BTreeSet<String> = new_metadata
                             .split_whitespace()

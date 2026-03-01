@@ -896,9 +896,7 @@ impl SessionOperations {
         _session_id: &aura_core::identifiers::SessionId,
     ) -> AgentResult<Option<SessionHandle>> {
         // Lookup session status
-
-        // TODO Session lookup requires persistent storage integration - return None until wired
-        // Real implementation would query effects.retrieve() for session state by ID
+        // Session status lookup is not persisted in this handler yet, so misses return None.
         Ok(None)
     }
 
@@ -968,8 +966,7 @@ impl SessionOperations {
         _max_age_seconds: u64,
     ) -> AgentResult<Vec<String>> {
         // Cleanup sessions
-
-        // Return empty list (no persistent storage yet TODO)
+        // Cleanup is a no-op while this handler has no persisted session catalog.
         Ok(Vec::new())
     }
 }

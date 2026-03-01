@@ -168,10 +168,9 @@ fn apply_rotate_epoch(
         .next()
         .map_err(|e| ReductionNamespaceError::ReductionFailure(e.to_string()))?;
 
-    // In a full implementation, we would:
-    // 1. Iterate through all leaves and recompute their commitments with new epoch
-    // 2. Recompute all branch commitments bottom-up with new epoch
-    // 3. Compute new root commitment
+    // Epoch rotation can be modeled by recomputing leaf and branch commitments
+    // against the new epoch. This reducer instead derives a deterministic
+    // rotated root commitment from summary state inputs.
 
     // Compute a deterministic commitment that reflects the epoch change without
     // re-materializing the full tree topology.

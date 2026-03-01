@@ -564,7 +564,7 @@ mod tests {
             .commit_fact("contact", vec!["alice".to_string(), "Alice".to_string()])
             .await;
 
-        // In a full implementation, bound signals would be re-evaluated
+        // Query-bound signals are validated in `test_query_bound_signal_updates_on_commit`.
     }
 
     #[tokio::test]

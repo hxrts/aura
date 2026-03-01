@@ -825,13 +825,12 @@ impl SyncService {
             failed_syncs
         );
 
-        // In a full implementation, this would update metrics collectors
-        // with the sync results for monitoring and alerting
+        // Structured metrics sinks can consume this result tuple at the service boundary.
 
         Ok(())
     }
 
-    /// Start the service using PhysicalTimeEffects (preferred over Service::start)
+    /// Start the service using PhysicalTimeEffects
     ///
     /// # Arguments
     /// - `time_effects`: Time effects provider

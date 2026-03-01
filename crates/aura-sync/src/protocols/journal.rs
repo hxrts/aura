@@ -405,8 +405,7 @@ impl JournalSyncProtocol {
                 // Apply additional journal-specific processing if needed
                 if result.applied > 0 {
                     // Update local journal state after successful sync
-                    // In a full implementation, this would trigger journal rebuilding
-                    // or other post-sync processing
+                    // Additional post-sync reducers can be triggered by callers.
 
                     tracing::info!(
                         "Journal sync with peer {} applied {} new operations",

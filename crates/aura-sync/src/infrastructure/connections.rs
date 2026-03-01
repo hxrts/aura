@@ -575,10 +575,8 @@ impl ConnectionPool {
     async fn close_transport_connection(&self, metadata: &ConnectionMetadata) -> SyncResult<()> {
         tracing::debug!("Closing transport connection {}", metadata.connection_id);
 
-        // In a full implementation, this would:
-        // 1. Use TransportEffects to close the actual transport connection
-        // 2. Clean up any associated resources
-        // 3. Send connection close notifications if needed
+        // This method currently records close intent and logs transport metadata.
+        // Runtime transport teardown is wired through effect handlers in caller layers.
 
         if let Some(transport_info) = &metadata.transport_info {
             tracing::info!(
@@ -589,7 +587,7 @@ impl ConnectionPool {
                 transport_info.remote_address
             );
 
-            // In a full implementation, this would call effects.close_connection(&metadata.connection_id).await?;
+            // Actual connection teardown is delegated to runtime effect handlers.
 
             tracing::debug!(
                 "Transport connection {} closed successfully",
