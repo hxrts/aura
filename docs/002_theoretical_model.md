@@ -13,6 +13,86 @@ Aura's theoretical foundation rests on four mathematical pillars:
 
 The combination forms a privacy-preserving, spam-resistant, capability-checked distributed λ-calculus. The system enforces a unified information flow budget across all operations.
 
+## Shared Terms and Notation
+
+This section defines shared terminology and notation for core contracts.
+Use this section when writing [Theoretical Model](002_theoretical_model.md), [Privacy and Information Flow Contract](003_information_flow_contract.md), and [Distributed Systems Contract](004_distributed_systems_contract.md).
+
+### Core Entities
+
+Use these symbols in formulas:
+
+- `a`, `b` for `AuthorityId`
+- `\kappa` for `ContextId`
+- `e` for `Epoch`
+
+Use these names in prose:
+
+- `authority` means an account authority
+- `context` means a relational or authority namespace keyed by `ContextId`
+- `peer authority` means a remote authority in a context
+
+### Flow Budget Notation
+
+Use `B[\kappa, a]` for a flow budget for context `\kappa` and peer authority `a`.
+
+Use this data shape:
+
+```text
+FlowBudget { limit, spent, epoch }
+```
+
+`spent` and `epoch` are replicated facts.
+`limit` is derived at runtime from capability evaluation and policy.
+
+### Receipt Notation
+
+Use this receipt schema in all documents:
+
+```text
+Receipt { ctx, src, dst, epoch, cost, nonce, prev_hash, sig }
+```
+
+`src` and `dst` are `AuthorityId` values.
+`prev_hash` links receipts in a per-hop chain.
+
+### Observer Classes
+
+Use one observer taxonomy in all documents:
+
+- `Relationship`
+- `Group`
+- `Neighbor`
+- `External`
+
+Use leakage tuple order `\left(\ell_{rel}, \ell_{grp}, \ell_{ngh}, \ell_{ext}\right)`.
+
+### Time and Delay Symbols
+
+Use these symbols consistently:
+
+- `\delta` for CRDT deltas and local state deltas
+- `\Delta_{net}` for network delay bounds under partial synchrony
+- `GST` for global stabilization time
+
+Do not use `\delta` for network delay.
+
+### Invariant Naming
+
+Use `InvariantXxx` names for implementation and proof references.
+If a prose alias exists, include it once, then reference the invariant name.
+
+### Guard Chain Terms
+
+Use this order in every document:
+
+1. `CapGuard`
+2. `FlowGuard`
+3. `JournalCoupler`
+4. `TransportEffects`
+
+This order defines `ChargeBeforeSend`.
+
 ## 1. Aura Calculus ($`\mathcal{A}`$)
 
 ### 1.1 Syntax
@@ -43,7 +123,7 @@ $$
 \kappa \in \text{Ctx} = \{ \text{ContextId} \}
 $$
 
-Contexts are opaque UUIDs representing authority journals or RelationalContexts. Keys for transport sessions and DKD outputs are scoped to these identifiers. The identifier itself never leaks participants. See [Identifiers and Boundaries](101_identifiers_and_boundaries.md) for canonical definitions.
+Contexts are opaque UUIDs representing authority journals or relational contexts. Keys for transport sessions and DKD outputs are scoped to these identifiers. The identifier itself never leaks participants. See [Identifiers and Boundaries](101_identifiers_and_boundaries.md) for canonical definitions.
 
 Messages:
 
@@ -154,11 +234,11 @@ struct Journal {
   facts: Fact,            // Cv/Δ/CmRDT carrier with ⊔
 }
 
-// Context identifiers are opaque (authority namespace or RelationalContext).
+// Context identifiers are opaque (authority namespace or relational context).
 struct ContextId(Uuid);
 struct Epoch(u64);  // monotone, context-scoped
 struct FlowBudget { limit: u64, spent: u64, epoch: Epoch };
-struct Receipt { ctx: ContextId, src: AuthorityId, dst: AuthorityId, epoch: Epoch, cost: u32, nonce: u64, prev: Hash32, sig: Signature };
+struct Receipt { ctx: ContextId, src: AuthorityId, dst: AuthorityId, epoch: Epoch, cost: u32, nonce: u64, prev_hash: Hash32, sig: Signature };
 
 // Typed messages carry effects and proofs under a context.
 struct Msg<Ctx, Payload, Version> {
@@ -188,7 +268,7 @@ Structures are serialized using canonical CBOR with sorted maps and deterministi
 
 Once a digest is published, the bytes for that artifact cannot change. New content requires a new digest and a new fact in the journal.
 
-Snapshots and upgrade bundles stored outside the journal are referenced solely by their digest. Downloaders verify the digest before accepting the payload. Journal merges compare digests and reject mismatches before updating state. See [Maintenance](115_maintenance.md) for the complete fact-to-state pipeline.
+Snapshots and upgrade bundles stored outside the journal are referenced solely by their digest. Downloaders verify the digest before accepting the payload. Journal merges compare digests and reject mismatches before updating state. See [Distributed Maintenance Architecture](115_maintenance.md) for the complete fact-to-state pipeline.
 
 ### 2.3 Effect Signatures
 
@@ -243,7 +323,7 @@ class TimeEffects (m : Type → Type) where
 class RandEffects (m : Type → Type) where
   sample : Dist → m Val
 
--- Privacy budgets (ext/ngh/group observers)
+-- Privacy budgets (relationship, group, neighbor, external observers)
 class LeakageEffects (m : Type → Type) where
   record_leakage   : ObserverClass → Number → m Unit
   remaining_budget : ObserverClass → m Number
@@ -251,11 +331,11 @@ class LeakageEffects (m : Type → Type) where
 
 The `TimeEffects` and `RandEffects` families support simulation and testing. The `LeakageEffects` family enforces privacy budget constraints.
 
-The `LeakageEffects` implementation is the runtime hook that enforces the $`[\text{leak}: (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})]`$ annotations introduced in the session grammar. The system wires it through the effect system so choreographies cannot exceed configured budgets.
+The `LeakageEffects` implementation is the runtime hook that enforces the $`[\text{leak}: (\ell_{\text{rel}}, \ell_{\text{grp}}, \ell_{\text{ngh}}, \ell_{\text{ext}})]`$ annotations introduced in the session grammar. The system wires it through the effect system so choreographies cannot exceed configured budgets.
 
 ### Information Flow Budgets (Spam + Privacy)
 
-Each context/peer-authority pair $`(\text{Ctx}, \text{Authority})`$ carries a flow budget to couple spam resistance with privacy guarantees. Keys and receipts are authority-scoped; devices are internal to an authority and never appear in flow-budget state.
+Each context and peer authority pair $`(\kappa, a)`$ carries a flow budget to couple spam resistance with privacy guarantees. This pair is written as $`B[\kappa, a]`$. Keys and receipts are authority-scoped. Devices are internal to an authority and never appear in flow-budget state.
 
 ```rust
 struct FlowBudget {
@@ -279,7 +359,7 @@ Budget charge facts (incrementing `spent`) are emitted to the journal during sen
 
 Multi-hop forwarding charges budgets hop-by-hop. Relays attach a signed `Receipt` that proves the previous hop still had headroom. Receipts are scoped to the same context so they never leak to unrelated observers.
 
-### 2.4 Semantic Laws
+### 2.5 Semantic Laws
 
 Join laws apply to facts. These operations are associative, commutative, and idempotent. If $`F_0 = \text{read\_facts}()`$ and after $`\text{merge\_facts}(f)`$ we have $`F_1`$, then $`F_0 \leq F_1`$ with respect to the facts partial order.
 
@@ -344,7 +424,7 @@ $$
 $$
 
 $$
-L ::= \text{leakage tuple}\ (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})
+L ::= \text{leakage tuple}\ (\ell_{\text{rel}}, \ell_{\text{grp}}, \ell_{\text{ngh}}, \ell_{\text{ext}})
 $$
 
 Conventions:
@@ -404,18 +484,18 @@ The projection function $`\pi_r(G)`$ extracts role $`r`$'s local view from globa
 
 By convention, an annotation $`\triangleright \Delta`$ at a global step induces per-side deltas $`\Delta_{\text{send}}`$ and $`\Delta_{\text{recv}}`$. Unless otherwise specified by a protocol, we take $`\Delta_{\text{send}} = \Delta_{\text{recv}} = \Delta`$ (symmetric journal updates applied at both endpoints).
 
-**Point-to-point projection:**
+Point-to-point projection:
 
 - If $`r = r_1`$ (sender): $`\pi_r(r_1 \to r_2 : T[\ldots]) = \text{do merge}(\Delta_{\text{send}}); \text{do check\_caps}(\Gamma); \text{do record\_leak}(L); !T . \pi_r(G)`$
 - If $`r = r_2`$ (receiver): $`\pi_r(r_1 \to r_2 : T[\ldots]) = \text{do merge}(\Delta_{\text{recv}}); \text{do refine\_caps}(\Gamma); \text{do record\_leak}(L); ?T . \pi_r(G)`$
 - Otherwise: $`\pi_r(r_1 \to r_2 : T[\ldots]) = \pi_r(G)`$
 
-**Broadcast projection:**
+Broadcast projection:
 
 - If $`r = s`$ (sender): $`\pi_r(s \to * : T[\ldots]) = \text{do merge}(\Delta_{\text{send}}); \text{do check\_caps}(\Gamma); \text{do record\_leak}(L); !T . \pi_r(G)`$
 - Otherwise (receiver): $`\pi_r(s \to * : T[\ldots]) = \text{do merge}(\Delta_{\text{recv}}); \text{do refine\_caps}(\Gamma); \text{do record\_leak}(L); ?T . \pi_r(G)`$
 
-**Parallel composition:**
+Parallel composition:
 
 $$
 \pi_r(G_1 \parallel G_2) = \pi_r(G_1) \odot \pi_r(G_2)
@@ -423,17 +503,17 @@ $$
 
 where $`\odot`$ is the merge operator (sequential interleaving if no conflicts)
 
-**Choice projection:**
+Choice projection:
 
 - If $`r = r'`$ (decider): $`\pi_r(r' \triangleright \{ \ell_i : G_i \}) = \oplus \{ \ell_i : \pi_r(G_i) \}`$
 - If $`r \neq r'`$ (observer): $`\pi_r(r' \triangleright \{ \ell_i : G_i \}) = \mathbin{\&} \{ \ell_i : \pi_r(G_i) \}`$
 
-**Recursion projection:**
+Recursion projection:
 
 - If $`\pi_r(G) \neq \text{end}`$: $`\pi_r(\mu X. G) = \mu X. \pi_r(G)`$
 - If $`\pi_r(G) = \text{end}`$: $`\pi_r(\mu X. G) = \text{end}`$
 
-**Base cases:**
+Base cases:
 
 $$
 \pi_r(X) = X
@@ -495,7 +575,7 @@ The MPST algebra is Turing complete when recursion ($\text{Rec}/\text{Var}$) is 
 - Deadlock Freedom: No circular waiting on communication
 - Progress: Protocols always advance to next state
 
-Rumpsteak balances expressivity and safety through guarded recursion constructs.
+Telltale-backed session runtimes balance expressivity and safety through guarded recursion constructs.
 
 ### 3.7 Free Algebra View (Choreography as Initial Object)
 
@@ -577,7 +657,7 @@ Meet-CRDT Convergence: All replicas converge to the greatest lower bound of thei
 
 Authority journals use join-semilattice facts for evidence accumulation. Facts include `AttestedOp` records proving commitment tree operations occurred. Multiple attestations of the same operation join to the same fact.
 
-RelationalContext journals use both join operations for shared facts and meet operations for consensus constraints. The prestate model ensures all authorities agree on initial conditions before applying operations.
+Relational context journals use both join operations for shared facts and meet operations for consensus constraints. The prestate model ensures all authorities agree on initial conditions before applying operations.
 
 Biscuit capability evaluation uses meet operations outside the CRDT. Token caveats restrict authority through intersection without affecting replicated state.
 
@@ -602,7 +682,7 @@ pub type FactDigest = Vec<Hash32>;
 pub type MissingFacts = Vec<Fact>;
 ```
 
-These message types support different synchronization strategies. Authority namespaces primarily use delta synchronization for efficiency. RelationalContext namespaces use operation-based synchronization to preserve consensus ordering.
+These message types support different synchronization strategies. Authority namespaces primarily use delta synchronization for efficiency. Relational context namespaces use operation-based synchronization to preserve consensus ordering.
 
 ### 4.5 Authority Synchronization Protocols
 
@@ -613,7 +693,7 @@ $$
 \text{AuthoritySync} := \mu X.\ (A \to B : \text{FactDelta}\langle \Delta \rangle\ .\ X) \parallel (B \to A : \text{FactDelta}\langle \Delta \rangle\ .\ X)
 $$
 
-RelationalContext Consensus:
+Relational context consensus:
 Contexts use operation-based synchronization to preserve consensus ordering.
 
 $$
@@ -627,7 +707,7 @@ $$
 \text{AntiEntropy} := \text{Alice} \to \text{Bob} : \text{FactDigest}\ .\ \text{Bob} \to \text{Alice} : \text{MissingFacts}\ .\ \text{end}
 $$
 
-These protocols ensure eventual consistency across authority boundaries while maintaining context isolation. Facts are scoped to their originating authority or RelationalContext.
+These protocols ensure eventual consistency across authority boundaries while maintaining context isolation. Facts are scoped to their originating authority or relational context.
 
 ### 4.6 Implementation Verification
 
@@ -695,7 +775,7 @@ The unified information-flow budget regulates emission rate/volume and observabl
 Every distributed protocol $`G`$ is defined as a multi-party session type with role projections:
 
 $$
-G ::= \mu X.\ A \to B : m\langle T \rangle\ [\text{guard}\ \text{need}(m) \leq C_A,\ \text{update}\ F_A \sqcup= \Delta F,\ \text{refine}\ C_B \sqcap= \Delta C];\ X
+G ::= \mu X.\ A \to B : m\langle T \rangle\ [\text{guard}\ \text{need}(m) \leq C_A,\ \text{update}\ F_A \sqcup= \Delta F,\ \text{refine}\ C_B \sqcap= \Delta C],\ X
 $$
 
 When executed, each role $`\rho`$ instantiates a handler:
@@ -747,13 +827,13 @@ Together, these form a *privacy-preserving, capability-checked distributed λ-ca
 
 ## System Contracts
 
-- [Privacy and Information Flow](003_information_flow_contract.md) - Unified information-flow budgets, privacy layers, leakage tracking, and adversary analysis
+- [Privacy and Information Flow Contract](003_information_flow_contract.md) - Unified information-flow budgets, privacy layers, leakage tracking, and adversary analysis
 - [Distributed Systems Contract](004_distributed_systems_contract.md) - Safety, liveness, consistency guarantees, synchrony assumptions, and failure handling
 
 ## See Also
 
-- [System Architecture](001_system_architecture.md) - Implementation patterns and runtime layering
+- [Aura System Architecture](001_system_architecture.md) - Implementation patterns and runtime layering
 - [Journal](103_journal.md) - Fact storage and CRDT semantics
 - [Authorization](104_authorization.md) - Biscuit evaluation and guard chaining
 - [Identifiers and Boundaries](101_identifiers_and_boundaries.md) - Canonical identifier definitions
-- [Maintenance](115_maintenance.md) - Reducer pipelines for authorities and contexts
+- [Distributed Maintenance Architecture](115_maintenance.md) - Reducer pipelines for authorities and contexts

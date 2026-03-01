@@ -1,16 +1,30 @@
 # Distributed Systems Contract
 
-This contract specifies Aura's distributed systems model. It defines the safety, liveness, and consistency guarantees provided by the architecture. It also documents the synchrony assumptions, latency expectations, and adversarial capabilities the system tolerates. This contract complements [Privacy and Information Flow](003_information_flow_contract.md), which focuses on metadata and privacy budgets. Together these contracts define the full set of invariants protocol authors must respect.
+This contract specifies Aura's distributed systems model. It defines the safety, liveness, and consistency guarantees provided by the architecture. It also documents the synchrony assumptions, latency expectations, and adversarial capabilities the system tolerates. This contract complements [Privacy and Information Flow Contract](003_information_flow_contract.md), which focuses on metadata and privacy budgets. Together these contracts define the full set of invariants protocol authors must respect.
 
-Formal verification of these properties uses Quint model checking (`verification/quint/`) and Lean 4 theorem proofs (`verification/lean/`). See [Verification Coverage](998_verification_coverage.md) for current status.
+Formal verification of these properties uses Quint model checking (`verification/quint/`) and Lean 4 theorem proofs (`verification/lean/`). See [Verification Coverage Report](998_verification_coverage.md) for current status.
 
 ## 1. Scope
 
 The contract applies to the following aspects of the system.
 
-Effect handlers and protocols operate within the 8-layer architecture described in [System Architecture](001_system_architecture.md). Journals and reducers are covered by this contract. The journal specification appears in [Authority and Identity](102_authority_and_identity.md) and [Journal System](103_journal.md). Aura Consensus is documented in [Consensus](106_consensus.md).
+Effect handlers and protocols operate within the 8-layer architecture described in [Aura System Architecture](001_system_architecture.md). Journals and reducers are covered by this contract. The journal specification appears in [Authority and Identity](102_authority_and_identity.md) and [Journal](103_journal.md). Aura Consensus is documented in [Consensus](106_consensus.md).
 
 Relational contexts and rendezvous flows fall under this contract. Relational contexts are specified in [Relational Contexts](112_relational_contexts.md). Transport semantics appear in [Transport and Information Flow](109_transport_and_information_flow.md). Rendezvous flows are detailed in [Rendezvous Architecture](111_rendezvous.md).
+Shared notation appears in [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation).
+
+### 1.1 Assumptions
+
+- Cryptographic primitives remain secure at configured parameters.
+- Partial synchrony eventually holds after GST, with bounded `Δ_net`.
+- Honest participants execute the guard chain in the required order.
+- Anti-entropy exchange eventually delivers missing facts to connected peers.
+
+### 1.2 Non-goals
+
+- This contract does not provide global linearizability across all operations.
+- This contract does not guarantee progress during permanent partitions.
+- This contract does not guarantee metadata secrecy without privacy controls defined in [Privacy and Information Flow Contract](003_information_flow_contract.md).
 
 ## 2. Safety Guarantees
 
@@ -18,13 +32,13 @@ Relational contexts and rendezvous flows fall under this contract. Relational co
 
 Facts merge via set union and never retract. Journals satisfy the semilattice laws:
 
-- **Commutativity**: `merge(j1, j2) ≡ merge(j2, j1)`
-- **Associativity**: `merge(merge(j1, j2), j3) ≡ merge(j1, merge(j2, j3))`
-- **Idempotence**: `merge(j, j) ≡ j`
+- Commutativity: `merge(j1, j2) ≡ merge(j2, j1)`
+- Associativity: `merge(merge(j1, j2), j3) ≡ merge(j1, merge(j2, j3))`
+- Idempotence: `merge(j, j) ≡ j`
 
 Reduction is deterministic. Identical fact sets produce identical states. No two facts share the same nonce within a namespace (`InvariantNonceUnique`).
 
-**Verified by**: `Aura.Proofs.Journal`, `journal/core.qnt`
+Verified by: `Aura.Proofs.Journal`, `journal/core.qnt`
 
 ### 2.2 Charge-Before-Send
 
@@ -32,7 +46,7 @@ Every transport observable is preceded by `CapGuard`, `FlowGuard`, and `JournalC
 
 Flow budgets satisfy monotonicity: charging never increases available budget (`monotonic_decrease`). Charging the exact remaining amount results in zero budget (`exact_charge`).
 
-**Verified by**: `Aura.Proofs.FlowBudget`, `authorization.qnt`, `transport.qnt`
+Verified by: `Aura.Proofs.FlowBudget`, `authorization.qnt`, `transport.qnt`
 
 ### 2.3 Consensus Agreement
 
@@ -40,7 +54,7 @@ For any pair `(cid, prestate_hash)` there is at most one commit fact (`Invariant
 
 Commits require threshold participation (`InvariantCommitRequiresThreshold`). Equivocating witnesses are excluded from threshold calculations (`InvariantEquivocatorsExcluded`).
 
-**Verified by**: `Aura.Proofs.Consensus.Agreement`, `consensus/core.qnt`
+Verified by: `Aura.Proofs.Consensus.Agreement`, `consensus/core.qnt`
 
 ### 2.3.1 Runtime Byzantine Admission
 
@@ -64,54 +78,62 @@ Category C choreography executions are bounded by deterministic step budgets der
 
 Aura enforces this budget per execution and fails with `BoundExceeded` when the bound is crossed. This removes wall-clock coupling from safety/liveness enforcement and keeps bound checks replay-deterministic across native and wasm conformance lanes.
 
+### 2.3.3 Threshold Parameterization
+
+Consensus parameterization uses `n` participants, threshold `t`, and Byzantine budget `f`.
+Threshold signatures require `t` distinct valid shares.
+Safety requires `f < t`.
+Byzantine quorum-style assumptions additionally require `f < n/3`.
+Profiles must declare which bound is active for a given ceremony.
+
 ### 2.4 Evidence CRDT
 
 The evidence system tracks votes and equivocations as a grow-only CRDT:
 
-- **Monotonicity**: Votes and equivocator sets only grow under merge
-- **Commit preservation**: `merge` preserves existing commit facts
-- **Semilattice laws**: Evidence merge is commutative, associative, and idempotent
+- Monotonicity: Votes and equivocator sets only grow under merge
+- Commit preservation: `merge` preserves existing commit facts
+- Semilattice laws: Evidence merge is commutative, associative, and idempotent
 
-**Verified by**: `Aura.Proofs.Consensus.Evidence`, `consensus/core.qnt`
+Verified by: `Aura.Proofs.Consensus.Evidence`, `consensus/core.qnt`
 
 ### 2.5 Equivocation Detection
 
 The system detects witnesses who vote for conflicting results:
 
-- **Soundness**: Detection only reports actual equivocation (no false positives)
-- **Completeness**: All equivocations are detectable given sufficient evidence
-- **Honest safety**: Honest witnesses are never falsely accused
+- Soundness: Detection only reports actual equivocation (no false positives)
+- Completeness: All equivocations are detectable given sufficient evidence
+- Honest safety: Honest witnesses are never falsely accused
 
 Types like `HasEquivocated` and `HasEquivocatedInSet` exclude conflicting shares from consensus. See [Consensus](106_consensus.md).
 
-**Verified by**: `Aura.Proofs.Consensus.Equivocation`, `consensus/adversary.qnt`
+Verified by: `Aura.Proofs.Consensus.Equivocation`, `consensus/adversary.qnt`
 
 ### 2.6 FROST Threshold Signatures
 
 Threshold signatures satisfy binding and consistency properties:
 
-- **Share binding**: Shares are cryptographically bound to `(consensus_id, result_id, prestate_hash)`
-- **Threshold requirement**: Aggregation requires at least k shares from distinct signers
-- **Session consistency**: All shares in an aggregation have the same session
-- **Determinism**: Same shares always produce the same signature
+- Share binding: Shares are cryptographically bound to `(consensus_id, result_id, prestate_hash)`
+- Threshold requirement: Aggregation requires at least k shares from distinct signers
+- Session consistency: All shares in an aggregation have the same session
+- Determinism: Same shares always produce the same signature
 
-**Verified by**: `Aura.Proofs.Consensus.Frost`, `consensus/frost.qnt`
+Verified by: `Aura.Proofs.Consensus.Frost`, `consensus/frost.qnt`
 
 ### 2.7 Context Isolation
 
 Messages scoped to `ContextId` never leak into other contexts. Contexts may be explicitly bridged through typed protocols only. See [Theoretical Model](002_theoretical_model.md). Each authority maintains separate journals per context to enforce this isolation.
 
-**Verified by**: `transport.qnt` (`InvariantContextIsolation`)
+Verified by: `transport.qnt` (`InvariantContextIsolation`)
 
 ### 2.8 Transport Layer
 
 Beyond context isolation, transport satisfies:
 
-- **Flow budget non-negativity**: Spent never exceeds limit (`InvariantFlowBudgetNonNegative`)
-- **Sequence monotonicity**: Message sequence numbers strictly increase (`InvariantSequenceMonotonic`)
-- **Fact backing**: Every sent message has a corresponding journal fact (`InvariantSentMessagesHaveFacts`)
+- Flow budget non-negativity: Spent never exceeds limit (`InvariantFlowBudgetNonNegative`)
+- Sequence monotonicity: Message sequence numbers strictly increase (`InvariantSequenceMonotonic`)
+- Fact backing: Every sent message has a corresponding journal fact (`InvariantSentMessagesHaveFacts`)
 
-**Verified by**: `transport.qnt`
+Verified by: `transport.qnt`
 
 ### 2.9 Deterministic Reduction Order
 
@@ -127,60 +149,60 @@ Multi-hop forwarding requires signed receipts. Downstream peers reject messages 
 
 Distributed key generation and resharing satisfy:
 
-- **Threshold bounds**: `1 ≤ t ≤ n` where t is threshold and n is participant count
-- **Phase consistency**: Commitment counts match protocol phase
-- **Share timing**: Shares distributed only after commitment verification
+- Threshold bounds: `1 ≤ t ≤ n` where t is threshold and n is participant count
+- Phase consistency: Commitment counts match protocol phase
+- Share timing: Shares distributed only after commitment verification
 
-**Verified by**: `keys/dkg.qnt`, `keys/resharing.qnt`
+Verified by: `keys/dkg.qnt`, `keys/resharing.qnt`
 
 ### 3.2 Invitation Flows
 
 Invitation lifecycle satisfies authorization invariants:
 
-- **Sender authority**: Only sender can cancel an invitation
-- **Receiver authority**: Only receiver can accept or decline
-- **Single resolution**: No invitation resolved twice
-- **Terminal immutability**: Terminal status (accepted/declined/cancelled/expired) is permanent
-- **Fact backing**: Accepted invitations have corresponding journal facts
-- **Ceremony gating**: Ceremonies only initiated for accepted invitations
+- Sender authority: Only sender can cancel an invitation
+- Receiver authority: Only receiver can accept or decline
+- Single resolution: No invitation resolved twice
+- Terminal immutability: Terminal status (accepted/declined/cancelled/expired) is permanent
+- Fact backing: Accepted invitations have corresponding journal facts
+- Ceremony gating: Ceremonies only initiated for accepted invitations
 
-**Verified by**: `invitation.qnt`
+Verified by: `invitation.qnt`
 
 ### 3.3 Epoch Validity
 
 Epochs enforce temporal boundaries:
 
-- **Receipt validity window**: Receipts only valid within their epoch
-- **Replay prevention**: Old epoch receipts cannot be replayed in new epochs
+- Receipt validity window: Receipts only valid within their epoch
+- Replay prevention: Old epoch receipts cannot be replayed in new epochs
 
-**Verified by**: `epochs.qnt`
+Verified by: `epochs.qnt`
 
 ### 3.4 Cross-Protocol Safety
 
 Concurrent protocol execution (e.g., Recovery∥Consensus) satisfies:
 
-- **No deadlock**: Interleaved execution always makes progress
-- **Revocation enforcement**: Revoked devices excluded from all protocols
+- No deadlock: Interleaved execution always makes progress
+- Revocation enforcement: Revoked devices excluded from all protocols
 
-**Verified by**: `interaction.qnt`
+Verified by: `interaction.qnt`
 
 ## 4. Liveness Guarantees
 
 ### 4.1 Fast-Path Consensus
 
-Fast-path consensus completes in 2δ (two message delays) when all witnesses are online. Responses are gathered synchronously before committing.
+Fast-path consensus completes in `2×Δ_net` (two message delays) when all witnesses are online. Responses are gathered synchronously before committing.
 
 ### 4.2 Fallback Consensus
 
-Fallback consensus eventually completes under partial synchrony with bounded message delays. The fallback timeout is `T_fallback = 2×Δ` in formal verification (implementations may use up to `3×Δ` for margin). Gossip ensures progress if a majority of witnesses re-transmit proposals. See [Consensus](106_consensus.md) for timeout configuration.
+Fallback consensus eventually completes under partial synchrony with bounded message delays. The fallback timeout is `T_fallback = 2×Δ_net` in formal verification (implementations may use up to `3×Δ_net` for margin). Gossip ensures progress if a majority of witnesses re-transmit proposals. See [Consensus](106_consensus.md) for timeout configuration.
 
-**Verified by**: `Aura.Proofs.Consensus.Liveness`, `consensus/liveness.qnt`
+Verified by: `Aura.Proofs.Consensus.Liveness`, `consensus/liveness.qnt`
 
 ### 4.3 Anti-Entropy
 
 Journals converge under eventual delivery. Periodic syncs or reorder-resistant CRDT merges reconcile fact sets even after partitions. Vector clocks accurately track causal dependencies (`InvariantVectorClockConsistent`). Authorities exchange their complete fact journals with neighbors to ensure diverged state is healed.
 
-**Verified by**: `journal/anti_entropy.qnt`
+Verified by: `journal/anti_entropy.qnt`
 
 ### 4.4 Rendezvous
 
@@ -188,7 +210,9 @@ Offer and answer envelopes flood gossip neighborhoods. Secure channels can be es
 
 ### 4.5 Flow Budgets
 
-Provided the limit is greater than zero, `FlowGuard` eventually grants headroom. Headroom is available once the epoch rotates or recipients replenish budgets. Budget exhaustion is temporary and recoverable.
+Flow-budget progress is conditional.
+If derived `limit(ctx, peer) > 0` in a future epoch and epoch updates converge, `FlowGuard` eventually grants headroom.
+Budget exhaustion remains temporary only under these assumptions.
 
 Liveness requires that each authority eventually receives messages from its immediate neighbors. This is the eventual delivery assumption. Liveness also requires that clocks do not drift unboundedly. This is necessary for epoch rotation and receipt expiry.
 
@@ -196,21 +220,21 @@ Liveness requires that each authority eventually receives messages from its imme
 
 Aura uses a unified `TimeStamp` with domain-specific comparison:
 
-- **Reflexivity**: `compare(policy, t, t) = eq`
-- **Transitivity**: `compare(policy, a, b) = lt ∧ compare(policy, b, c) = lt → compare(policy, a, c) = lt`
-- **Privacy**: Physical time hidden when `ignorePhysical = true`
+- Reflexivity: `compare(policy, t, t) = eq`
+- Transitivity: `compare(policy, a, b) = lt ∧ compare(policy, b, c) = lt → compare(policy, a, c) = lt`
+- Privacy: Physical time hidden when `ignorePhysical = true`
 
 Time variants include `PhysicalClock` (wall time), `LogicalClock` (vector/Lamport), `OrderClock` (opaque ordering tokens), and `Range` (validity windows).
 
-**Verified by**: `Aura.Proofs.TimeSystem`
+Verified by: `Aura.Proofs.TimeSystem`
 
 ## 6. Synchrony and Timing Model
 
-Aura assumes partial synchrony. There exists a bound Δ on message delay and processing time once the network stabilizes (Global Stabilization Time, GST). This bound is possibly unknown before stabilization occurs.
+Aura assumes partial synchrony. There exists a bound `Δ_net` on message delay and processing time once the network stabilizes (Global Stabilization Time, GST). This bound is possibly unknown before stabilization occurs.
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| `T_fallback` | 2×Δ (verification) / 2-3×Δ (production) | Fallback consensus timeout |
+| `T_fallback` | 2×Δ_net (verification) / 2-3×Δ_net (production) | Fallback consensus timeout |
 | Gossip interval | 250-500ms | Periodic message exchange |
 | GST model | Unknown until stabilization | Partial synchrony assumption |
 
@@ -220,9 +244,9 @@ Epoch rotation relies on loosely synchronized clocks. The journal serves as the 
 
 ## 7. Latency Expectations
 
-| Operation                          | Typical Bound (Δ assumptions) |
+| Operation                          | Typical Bound (Δ_net assumptions) |
 |-----------------------------------|-------------------------------|
-| Threshold tree update (fast path) | ≤ 2δ (two message delays)     |
+| Threshold tree update (fast path) | ≤ 2×Δ_net (two message delays) |
 | Fallback consensus                | ≤ T_fallback after GST        |
 | Rendezvous offer propagation      | O(log N) gossip hops          |
 | FlowGuard charge                  | Single local transaction (<10 ms) |
@@ -234,7 +258,8 @@ Epoch rotation relies on loosely synchronized clocks. The journal serves as the 
 
 A network adversary controls a subset of transport links. It can delay or drop packets but cannot break cryptography. It cannot forge receipts without `FlowGuard` grants. Receipts are protected by signatures and epoch binding.
 
-The network adversary may simultaneously compromise up to `f < t` authorities per consensus instance without violating safety. Here `t` is the consensus threshold. This is the standard Byzantine fault tolerance guarantee (`InvariantByzantineThreshold`).
+The network adversary may compromise up to `f` authorities per consensus instance within the active threshold profile.
+Safety requires the bounds declared in §2.3.3 (`f < t`, and `f < n/3` when that profile is selected).
 
 ### 8.2 Byzantine Witness
 
@@ -242,7 +267,7 @@ A Byzantine witness may equivocate during consensus. The system detects equivoca
 
 A Byzantine witness cannot cause multiple commits. Threshold signature verification rejects tampered results. The `t` of `t`-of-`n` threshold signatures prevents this attack. Honest majority can always commit (`InvariantHonestMajorityCanCommit`).
 
-**Verified by**: `Aura.Proofs.Consensus.Adversary`, `consensus/adversary.qnt`
+Verified by: `Aura.Proofs.Consensus.Adversary`, `consensus/adversary.qnt`
 
 ### 8.3 Malicious Relay
 
@@ -260,9 +285,10 @@ Device compromise is recoverable because the threshold prevents a single device 
 
 Journals eventually converge after replicas exchange all facts. This is eventual consistency. Authorities that have seen the same fact set arrive at identical states.
 
-Operations guarded by Aura Consensus achieve strong consistency. Once a commit fact is accepted, all honest replicas agree on the result. See [Consensus](106_consensus.md).
+Operations guarded by Aura Consensus achieve operation-scoped agreement. Once a commit fact is accepted, all honest replicas agree on that operation result. See [Consensus](106_consensus.md).
+This does not define a single global linearizable log for all operations.
 
-Causal delivery is not enforced at the transport layer. Choreographies enforce ordering via session types instead. See [MPST and Choreography](108_mpst_and_choreography.md).
+Causal delivery is not enforced at the transport layer. Choreographies enforce ordering via session types instead. See [Multi-party Session Types and Choreography](108_mpst_and_choreography.md).
 
 Each authority's view of its own journal is monotone. Once it observes a fact locally, it will never un-see it. This is monotonic read-after-write consistency.
 
@@ -272,21 +298,29 @@ Timeouts trigger fallback consensus. See [Consensus](106_consensus.md) for `T_fa
 
 Partition recovery relies on anti-entropy. Authorities merge fact sets when connectivity returns. The journal is the single source of truth for state.
 
-Budget exhaustion causes local blocking. Protocols must implement backoff or wait for epoch rotation. Budgets are described in [Privacy and Information Flow](003_information_flow_contract.md).
+Budget exhaustion causes local blocking. Protocols must implement backoff or wait for epoch rotation. Budgets are described in [Privacy and Information Flow Contract](003_information_flow_contract.md).
 
 Guard-chain failures return local errors. These errors include `AuthorizationDenied`, `InsufficientBudget`, and `JournalCommitFailed`. Protocol authors must handle these errors without leaking information. Proper error handling is critical for security.
 
+### 10.1 Error-Channel Privacy Requirements
+
+- Runtime errors must use bounded enums and redacted payloads.
+- Error paths must not include plaintext message content, raw capability tokens, or cross-context identifiers.
+- Remote peers may observe protocol-level status outcomes only, not internal guard-stage diagnostics.
+
 ## 11. Deployment Guidance
 
-Configure witness sets such that `t > f`. Here `t` is the consensus threshold and `f` is the maximum number of Byzantine authorities tolerated. This is the standard Byzantine fault tolerance condition.
+Configure witness sets using the parameter bounds declared in §2.3.3 for the active ceremony profile.
 
 Tune gossip fanout and timeout parameters based on observed round-trip times and network topology. Conservative parameters ensure liveness under poor conditions.
 
-Monitor receipt acceptance rates, consensus backlog, and budget utilization. See [Maintenance](115_maintenance.md) for monitoring guidance. Early detection of synchrony violations prevents cascading failures.
+Monitor receipt acceptance rates, consensus backlog, and budget utilization. See [Distributed Maintenance Architecture](115_maintenance.md) for monitoring guidance. Early detection of synchrony violations prevents cascading failures.
 
 ## 12. Verification Coverage
 
 This contract's guarantees are formally verified:
+Canonical invariant names are indexed in [Aura System Invariants](005_system_invariants.md).
+Canonical proof and coverage status are indexed in [Verification Coverage Report](998_verification_coverage.md).
 
 | Layer | Tool | Location |
 |-------|------|----------|
@@ -295,17 +329,17 @@ This contract's guarantees are formally verified:
 | Differential testing | Rust + Lean oracle | `crates/aura-testkit/` |
 | ITF conformance | Quint traces | `verification/quint/traces/` |
 
-See [Verification Coverage Report](998_verification_coverage.md) for metrics and [verification/README.md](../verification/README.md) for the Quint-Lean correspondence map.
+See [Verification Coverage Report](998_verification_coverage.md) for metrics and [Aura Formal Verification](../verification/README.md) for the Quint-Lean correspondence map.
 
 ## 13. References
 
-[System Architecture](001_system_architecture.md) describes runtime layering and the [guard chain](104_authorization.md).
+[Aura System Architecture](001_system_architecture.md) describes runtime layering. [Authorization](104_authorization.md) describes guard chain ordering.
 
 [Theoretical Model](002_theoretical_model.md) covers the formal calculus and semilattice laws.
 
 [Authority and Identity](102_authority_and_identity.md) documents reduction ordering.
 
-[Journal System](103_journal.md) and [Maintenance](115_maintenance.md) cover fact storage and convergence.
+[Journal](103_journal.md) and [Distributed Maintenance Architecture](115_maintenance.md) cover fact storage and convergence.
 
 [Relational Contexts](112_relational_contexts.md) documents cross-authority state.
 
@@ -315,4 +349,4 @@ See [Verification Coverage Report](998_verification_coverage.md) for metrics and
 
 [Authorization](104_authorization.md) covers `CapGuard` and `FlowGuard` sequencing.
 
-[Verification Coverage](998_verification_coverage.md) tracks formal verification status.
+[Verification Coverage Report](998_verification_coverage.md) tracks formal verification status.
