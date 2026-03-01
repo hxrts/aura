@@ -1228,7 +1228,7 @@ check_todos() {
 
   # Incomplete markers
   section "Incomplete/WIP markers"
-  local incomplete_pattern="in production[^\\n]*(would|should|not)|stub|not implemented|unimplemented|temporary|workaround|hacky|\\bWIP\\b|\\bTBD\\b|prototype|future work|to be implemented"
+  local incomplete_pattern="in production[^\\n]*(would|should|not)|in a full implementation|stub|not implemented|unimplemented|temporary|workaround|hacky|\\bWIP\\b|\\bTBD\\b|prototype|future work|to be implemented"
   local stub_allow="biscuit_capability_stub|in production this would be the actual|effects/dispatcher.rs.*[Ss]tub|effects/dispatcher.rs.*[Ii]n production"
   local incomplete_hits
   incomplete_hits=$(rg --no-heading -i "$incomplete_pattern" crates -g "*.rs" \

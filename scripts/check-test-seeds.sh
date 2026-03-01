@@ -23,7 +23,7 @@ if [ -z "$all_seeds" ]; then
 fi
 
 # Extract seeds and check for duplicates
-declare -A seed_map
+seed_records=""
 duplicates_found=0
 
 while IFS= read -r line; do
@@ -37,16 +37,37 @@ while IFS= read -r line; do
         location="${line%%:*}:${line#*:}"
         location="${location%%:*}"  # file:line
 
-        if [ -n "${seed_map[$seed]:-}" ]; then
-            echo -e "${RED}ERROR: Duplicate seed $seed found:${NC}"
-            echo "  - ${seed_map[$seed]}"
-            echo "  - $location"
-            duplicates_found=1
-        else
-            seed_map[$seed]="$location"
-        fi
+        seed_records+="$seed"$'\t'"$location"$'\n'
     fi
 done <<< "$all_seeds"
+
+if [[ -n "$seed_records" ]]; then
+    duplicate_report=$(printf '%s' "$seed_records" \
+        | sort -n -k1,1 \
+        | awk -F '\t' '
+            {
+                count[$1]++
+                lines[$1] = lines[$1] $2 "\n"
+            }
+            END {
+                for (seed in count) {
+                    if (count[seed] > 1) {
+                        printf "ERROR: Duplicate seed %s found:\n", seed
+                        n = split(lines[seed], locs, "\n")
+                        for (i = 1; i <= n; i++) {
+                            if (locs[i] != "") {
+                                printf "  - %s\n", locs[i]
+                            }
+                        }
+                    }
+                }
+            }
+        ')
+    if [[ -n "$duplicate_report" ]]; then
+        echo -e "${RED}${duplicate_report}${NC}"
+        duplicates_found=1
+    fi
+fi
 
 # Also check for AuraEffectSystem::testing() - these should be converted to simulation
 testing_calls=$(grep -rn "AuraEffectSystem::testing" crates --include="*.rs" | grep -E "(tests/|test\.rs|_test\.rs)" || true)
@@ -73,5 +94,10 @@ if [ $duplicates_found -eq 1 ]; then
     exit 1
 fi
 
-echo -e "${GREEN}✓ All test seeds are unique (${#seed_map[@]} unique seeds found)${NC}"
+unique_seed_count=0
+if [[ -n "$seed_records" ]]; then
+    unique_seed_count=$(printf '%s' "$seed_records" | cut -f1 | sort -u | wc -l | tr -d ' ')
+fi
+
+echo -e "${GREEN}✓ All test seeds are unique (${unique_seed_count} unique seeds found)${NC}"
 exit 0

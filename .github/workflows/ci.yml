@@ -238,6 +238,16 @@ jobs:
           cache-name: effects
       - run: nix develop --command just ci-effects
 
+  crates-doc-links:
+    name: Crates Doc Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: crates-doc-links
+      - run: nix develop --command just ci-crates-doc-links
+
   doc-links:
     name: Doc Links
     runs-on: ubuntu-latest
