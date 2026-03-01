@@ -250,6 +250,10 @@ ci-effects:
     fi
     echo "No effects violations found"
 
+# Verify docs links referenced from crates/ resolve to existing files in docs/
+ci-crates-doc-links:
+    scripts/check-crates-doc-links.sh
+
 # Choreography wiring lint
 ci-choreo:
     scripts/check-choreo-wiring.sh
