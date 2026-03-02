@@ -95,6 +95,22 @@ Safety requires `f < t`.
 Byzantine quorum-style assumptions additionally require `f < n/3`.
 Profiles must declare which bound is active for a given ceremony.
 
+### 2.3.4 Runtime Parity Guarantees and Limits
+
+Aura uses telltale parity lanes to compare runtime artifacts under declared conformance envelopes. These checks provide implementation conformance signals. They do not replace domain theorem claims from Quint and Lean.
+
+Guarantees:
+
+- parity lanes use canonical surfaces (`observable`, `scheduler_step`, `effect`)
+- mismatch reports include first mismatch location for deterministic triage
+- strict and envelope-bounded classifications are explicit in report artifacts
+
+Limits:
+
+- parity checks validate observed runtime behavior, not full state-space reachability
+- parity checks depend on scenario and seed coverage
+- parity success does not imply new consensus or CRDT theorem coverage
+
 ### 2.4 Evidence CRDT
 
 The evidence system tracks votes and equivocations as a grow-only CRDT:

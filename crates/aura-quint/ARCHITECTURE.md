@@ -47,3 +47,25 @@ Contract alignment:
 - Runtime simulation lives in aura-simulator.
 - Protocol implementations live in feature crates.
 
+## Bridge Ownership
+- `aura-quint` owns bridge schema types and import/export transforms.
+- `aura-quint` owns bridge cross-validation logic between model checks and certificates.
+- `aura-quint` must not own runtime VM execution or transport-level conformance replay.
+
+### InvariantBridgeOwnershipQuint
+Bridge schema and validation ownership stays centralized in `aura-quint`.
+
+Enforcement locus:
+- `src/bridge_format.rs` defines versioned interchange types.
+- `src/bridge_export.rs`, `src/bridge_import.rs`, and `src/bridge_validate.rs` implement translation and discrepancy checks.
+
+Failure mode:
+- Duplicate bridge transforms appear in runtime crates and drift from schema.
+- Cross-validation results differ across lanes for the same bundle.
+
+Verification hooks:
+- `just test-crate aura-quint`
+
+Contract alignment:
+- [Formal Verification Reference](../../docs/120_verification.md) defines cross-validation boundaries.
+- [Verification Coverage Report](../../docs/998_verification_coverage.md) tracks bridge module inventory.

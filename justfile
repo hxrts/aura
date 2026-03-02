@@ -200,6 +200,12 @@ ci-property-monitor:
     cargo test -p aura-simulator property_monitor_ci_gate -- --nocapture | tee artifacts/property-monitor/property-monitor.log
     cargo test -p aura-simulator report_comparison_detects_new_violations -q
 
+# Simulator telltale parity lane (artifact-driven differential comparison)
+ci-simulator-telltale-parity:
+    mkdir -p artifacts/telltale-parity
+    AURA_TELLTALE_PARITY_ARTIFACT="${PWD}/artifacts/telltale-parity/report.json" \
+    cargo test -p aura-simulator telltale_parity_report_generation_ci -- --nocapture
+
 # Telltale VM parity gates (determinism profile + replay conformance)
 ci-choreo-parity:
     mkdir -p artifacts/choreo-parity
@@ -356,6 +362,7 @@ ci-conformance: ci-conformance-policy
     set -euo pipefail
     just ci-conformance-strict
     just ci-conformance-contracts
+    just ci-simulator-telltale-parity
     cargo test -p aura-testkit --test conformance_golden_fixtures -- --nocapture
     just ci-conformance-itf
     just ci-conformance-diff
@@ -364,11 +371,16 @@ ci-conformance: ci-conformance-policy
 ci-lean-quint-bridge:
     #!/usr/bin/env bash
     set -euo pipefail
-    ARTIFACT_DIR="${AURA_LEAN_QUINT_BRIDGE_ARTIFACT_DIR:-artifacts/lean-quint-bridge}"
+    ARTIFACT_DIR="${AURA_LEAN_QUINT_BRIDGE_ARTIFACT_DIR:-${PWD}/artifacts/lean-quint-bridge}"
     mkdir -p "${ARTIFACT_DIR}"
-    cargo test -p aura-quint bridge_ -- --nocapture | tee "${ARTIFACT_DIR}/bridge.log"
+    AURA_LEAN_QUINT_BRIDGE_ARTIFACT_DIR="${ARTIFACT_DIR}" \
+      cargo test -p aura-quint bridge_ -- --nocapture | tee "${ARTIFACT_DIR}/bridge.log"
+    if [[ ! -f "${ARTIFACT_DIR}/bridge_discrepancy_report.json" ]]; then
+      echo "missing bridge discrepancy report artifact"
+      exit 1
+    fi
     printf '%s\n' \
-      '{"schema_version":"aura.lean-quint-bridge.report.v1","status":"ok","suite":"aura-quint bridge cross-validation","sources":["quint_model_check","lean_certificate"],"discrepancy_detection":"enabled"}' \
+      '{"schema_version":"aura.lean-quint-bridge.report.v2","status":"ok","suite":"aura-quint bridge cross-validation","sources":["quint_model_check","lean_certificate"],"discrepancy_detection":"enabled","artifacts":{"bridge_discrepancy":"bridge_discrepancy_report.json","telltale_parity":"../telltale-parity/report.json"}}' \
       > "${ARTIFACT_DIR}/report.json"
 
 # ═══════════════════════════════════════════════════════════════════════════════

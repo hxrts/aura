@@ -285,6 +285,43 @@ This abstraction enables stable simulation code across effect system changes. On
 
 The `quint` module provides integration with Quint formal specifications. See [Formal Verification Reference](119_verification.md) for complete details.
 
+## Telltale Parity Integration
+
+The simulator exposes telltale parity as an artifact-level boundary. The boundary lives in `aura_simulator::telltale_parity`. Default simulator execution does not run telltale VM directly.
+
+### Entry Points
+
+Use `TelltaleParityInput` and `TelltaleParityRunner` when both baseline and candidate artifacts are already in memory. Use `run_telltale_parity_file_lane` with `TelltaleParityFileRun` for file-driven CI workflows.
+
+The file lane accepts baseline and candidate artifact paths, a comparison profile, and an output report path. It emits one stable JSON report artifact.
+
+### Canonical Surface Mapping
+
+Telltale parity lanes use one canonical mapping:
+
+| Telltale Event Family | Aura Surface | Normalization |
+|-----------------------|-------------|---------------|
+| `observable` | `observable` | identity |
+| `scheduler_step` | `scheduler_step` | tick normalization |
+| `effect` | `effect` | envelope classification |
+
+Reports use schema `aura.telltale-parity.report.v1`.
+
+### Expected Outputs
+
+The simulator telltale parity lane writes:
+
+```text
+artifacts/telltale-parity/report.json
+```
+
+The report includes:
+
+- comparison classification (`strict` or `envelope_bounded`)
+- first mismatch surface
+- first mismatch step index
+- full differential comparison payload
+
 ### ITF Trace Format
 
 ITF (Informal Trace Format) traces come from Quint model checking. Each trace captures a sequence of states and transitions.

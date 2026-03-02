@@ -8,6 +8,46 @@ Aura uses three complementary verification systems. Quint provides executable st
 
 The systems form a trust chain. Quint specifications define correct behavior. Lean proofs verify mathematical properties. Telltale ensures protocol implementations match session type specifications.
 
+## Verification Boundary
+
+Aura separates domain proof ownership from runtime parity checks.
+
+| Verification Surface | Primary Tools | Guarantee Class | Ownership |
+|----------------------|--------------|-----------------|-----------|
+| Consensus and CRDT domain properties | Quint + Lean | model and theorem correctness | `verification/quint/` and `verification/lean/` |
+| Runtime execution conformance | Telltale parity + conformance artifacts | implementation parity under declared envelopes | `aura-agent`, `aura-simulator`, `aura-testkit` |
+| Bridge consistency | `aura-quint` bridge pipeline | cross-validation between model checks and certificates | `aura-quint` |
+
+Telltale runtime parity does not replace domain theorem work. It validates runtime behavior against admitted profiles and artifact envelopes.
+
+## Assurance Summary
+
+This architecture provides five assurance classes.
+
+1. Boundary assurance.
+Domain theorem claims and runtime parity claims are separated.
+This reduces proof-surface ambiguity.
+
+2. Runtime parity assurance.
+Telltale parity lanes compare runtime artifacts with deterministic profiles.
+This provides replayable evidence for conformance under declared envelopes.
+
+3. Bridge consistency assurance.
+Bridge pipelines check model-check outcomes against certificate outcomes.
+This detects drift between proof artifacts and executable checks.
+
+4. CI gate assurance.
+Parity and bridge lanes run as CI gates.
+This prevents silent regression of conformance checks.
+
+5. Coverage drift assurance.
+Coverage documentation is validated against repository state by script checks.
+This prevents long-term drift between claims and implementation.
+
+Limits remain explicit.
+Parity success is not a replacement for new Quint or Lean domain proofs.
+Parity checks are coverage-bounded by scenarios, seeds, and artifact surfaces.
+
 ## Quint Architecture
 
 Quint specifications live in `verification/quint/`. They define protocol state machines and verify properties through model checking with Apalache.

@@ -279,6 +279,30 @@ See [Testing Guide](805_testing_guide.md) for corpus policy details.
 
 The bridge connects Quint model checking with Telltale and Lean proof artifacts. It enables exporting Quint session models to a stable interchange format, importing Telltale and Lean properties back into Quint harnesses, and running cross-validation to detect divergence early in CI.
 
+### Operator Workflow
+
+Run the bridge lane:
+
+```bash
+just ci-lean-quint-bridge
+```
+
+Inspect outputs:
+
+- `artifacts/lean-quint-bridge/bridge.log`
+- `artifacts/lean-quint-bridge/bridge_discrepancy_report.json`
+- `artifacts/lean-quint-bridge/report.json`
+
+Run the simulator telltale parity lane:
+
+```bash
+just ci-simulator-telltale-parity
+```
+
+Inspect output:
+
+- `artifacts/telltale-parity/report.json`
+
 ### Data Contract
 
 `aura-quint` defines a versioned interchange schema for bridge workflows:
@@ -321,6 +345,8 @@ This command produces artifacts under `artifacts/lean-quint-bridge/` including `
 ### Handling Discrepancies
 
 When cross-validation reports discrepancies, follow these steps. First confirm the property identity mapping (`property_id`) between model and proof pipelines. Then re-run the failing property in Quint and capture the trace or counterexample. Next re-check proof certificate assumptions against the current protocol model. Do not merge until the mismatch is resolved or explicitly justified.
+
+For telltale parity mismatches, read `comparison_classification`, `first_mismatch_surface`, and `first_mismatch_step_index` first. Re-run the failing lane with the same scenario and seed. Confirm that required surfaces (`observable`, `scheduler_step`, `effect`) were captured before examining envelope differences.
 
 ## Lean Proof Development
 

@@ -289,6 +289,36 @@ impl ChannelMembershipFact {
             }
         }
     }
+
+    /// Context that scopes this membership event.
+    #[must_use]
+    pub fn context(&self) -> ContextId {
+        self.context
+    }
+
+    /// Channel this membership event applies to.
+    #[must_use]
+    pub fn channel(&self) -> ChannelId {
+        self.channel
+    }
+
+    /// Participant affected by this membership event.
+    #[must_use]
+    pub fn participant(&self) -> AuthorityId {
+        self.participant
+    }
+
+    /// Membership event kind (joined or left).
+    #[must_use]
+    pub fn event(&self) -> ChannelParticipantEvent {
+        self.event
+    }
+
+    /// Logical timestamp captured for this event.
+    #[must_use]
+    pub fn timestamp(&self) -> TimeStamp {
+        self.timestamp.clone()
+    }
 }
 
 fn channel_membership_schema_version() -> u16 {

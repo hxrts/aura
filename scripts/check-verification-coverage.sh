@@ -126,8 +126,14 @@ check_metric "Testkit Tests" "$(get_documented "Testkit Tests")" "$testkit_tests
 bridge_modules=$(find crates/aura-quint/src -name "bridge_*.rs" -type f 2>/dev/null | wc -l | tr -d ' ')
 check_metric "Bridge Modules" "$(get_documented "Bridge Modules")" "$bridge_modules"
 
+telltale_parity_modules=$(find crates/aura-simulator/src -name "telltale_parity.rs" -type f 2>/dev/null | wc -l | tr -d ' ')
+check_metric "Telltale Parity Modules" "$(get_documented "Telltale Parity Modules")" "$telltale_parity_modules"
+
+bridge_pipeline_fixtures=$(find crates/aura-quint/tests/fixtures/bridge -name "*.json" -type f 2>/dev/null | wc -l | tr -d ' ')
+check_metric "Bridge Pipeline Fixtures" "$(get_documented "Bridge Pipeline Fixtures")" "$bridge_pipeline_fixtures"
+
 # Count CI verification gates from justfile
-ci_gates=$(grep -cE "^ci-(property-monitor|choreo-parity|quint-typecheck|conformance-policy|conformance-contracts|lean-build|lean-check-sorry|lean-quint-bridge|kani):" justfile 2>/dev/null || echo "0")
+ci_gates=$(grep -cE "^ci-(property-monitor|simulator-telltale-parity|choreo-parity|quint-typecheck|conformance-policy|conformance-contracts|lean-build|lean-check-sorry|lean-quint-bridge|kani):" justfile 2>/dev/null || echo "0")
 # Add 1 for conformance_golden_fixtures test
 ci_gates=$((ci_gates + 1))
 check_metric "CI Verification Gates" "$(get_documented "CI Verification Gates")" "$ci_gates"
@@ -337,6 +343,43 @@ else
   printf "  ${RED}✗${NC} %d/%d listed CI gates found\n" "$ci_gates_ok" "$((ci_gates_ok + ci_gates_missing))"
   mismatches=$((mismatches + 1))
 fi
+
+echo ""
+echo "Schema Reference Verification"
+echo "-----------------------------"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verify schema identifiers are documented and implemented
+# ─────────────────────────────────────────────────────────────────────────────
+
+check_schema_reference() {
+  local schema="$1"
+  local source_file="$2"
+  local label="$3"
+  checks_run=$((checks_run + 1))
+
+  local in_doc=0
+  local in_source=0
+  rg -q "$schema" "$DOC" && in_doc=1
+  rg -q "$schema" "$source_file" && in_source=1
+
+  if [[ "$in_doc" -eq 1 && "$in_source" -eq 1 ]]; then
+    printf "  ${GREEN}✓${NC} %s\n" "$label"
+  else
+    printf "  ${RED}✗${NC} %s (doc=%s, source=%s)\n" "$label" "$in_doc" "$in_source"
+    mismatches=$((mismatches + 1))
+  fi
+}
+
+check_schema_reference \
+  "aura.telltale-parity.report.v1" \
+  "crates/aura-simulator/src/telltale_parity.rs" \
+  "Telltale parity report schema documented and implemented"
+
+check_schema_reference \
+  "aura.lean-quint-bridge.discrepancy.v1" \
+  "crates/aura-quint/tests/bridge_pipeline.rs" \
+  "Bridge discrepancy schema documented and implemented"
 
 echo ""
 echo "========================================"

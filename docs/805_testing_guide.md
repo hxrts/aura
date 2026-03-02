@@ -346,6 +346,28 @@ just ci-conformance
 
 Any undeclared divergence blocks merge.
 
+### Telltale Parity Lane
+
+The simulator includes a telltale parity lane that compares artifact outputs without executing runtime VM logic inside default simulator paths.
+
+```bash
+just ci-simulator-telltale-parity
+```
+
+This lane writes `artifacts/telltale-parity/report.json`. The report schema is `aura.telltale-parity.report.v1`. The report includes comparison class, first mismatch surface, and first mismatch step index.
+
+### Mismatch Taxonomy
+
+Use the following mismatch taxonomy during triage.
+
+| Type | Description | Typical Fix |
+|------|-------------|-------------|
+| `strict` mismatch | Byte-level difference on strict surfaces | Remove hidden state or ordering-sensitive side effects |
+| `envelope_bounded` mismatch | Difference outside declared commutative or algebraic envelopes | Add or correct envelope classification |
+| `surface_missing` | Required conformance surface not present | Ensure `observable`, `scheduler_step`, and `effect` are emitted |
+
+The simulator parity lane always reports the first mismatch location to keep failure analysis deterministic.
+
 ### Corpus Policy
 
 The conformance corpus defines test inputs for parity checking.

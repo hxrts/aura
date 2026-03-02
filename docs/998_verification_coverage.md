@@ -2,6 +2,13 @@
 
 This document provides an overview of the formal verification, model checking, and conformance testing infrastructure in Aura.
 
+## Verification Boundary Statement
+
+Aura keeps consensus and CRDT domain proof ownership in Quint models and Lean theorems.
+Telltale parity lanes validate runtime conformance behavior from replay artifacts.
+Telltale parity success does not count as new domain theorem coverage.
+See [Formal Verification Reference](119_verification.md#assurance-summary) for the assurance classification and limits.
+
 ## Summary Metrics
 
 | Metric | Count |
@@ -16,7 +23,9 @@ This document provides an overview of the formal verification, model checking, a
 | ITF Trace Harnesses | 8 |
 | Testkit Tests | 111 |
 | Bridge Modules | 4 |
-| CI Verification Gates | 10 |
+| CI Verification Gates | 11 |
+| Telltale Parity Modules | 1 |
+| Bridge Pipeline Fixtures | 3 |
 
 ## Verification Layers
 
@@ -102,6 +111,7 @@ Cross-validation modules for Lean↔Quint correspondence:
 
 #### Differential Verification (`aura-simulator`)
 - `differential_tester.rs` - Cross-implementation parity testing between Quint models and Rust handlers
+- `telltale_parity.rs` - Telltale-backed parity boundary, canonical surface mapping, and report artifact generation
 
 #### Consensus Verification (`aura-consensus`)
 - `core/verification/mod.rs` - Verification module facade
@@ -267,6 +277,7 @@ Automated verification lanes wired into CI pipelines.
 | Gate | Command | Purpose |
 |------|---------|---------|
 | Property Monitor | `just ci-property-monitor` | Runtime property assertion monitoring |
+| Simulator Telltale Parity | `just ci-simulator-telltale-parity` | Artifact-driven telltale vs Aura simulator differential comparison |
 | Choreography Parity | `just ci-choreo-parity` | Session type projection consistency |
 | Quint Typecheck | `just ci-quint-typecheck` | Quint specification type safety |
 
@@ -301,6 +312,33 @@ artifacts/conformance/
 ```
 
 The diff report highlights specific mismatches for investigation.
+
+Telltale parity and bridge lanes emit additional artifacts:
+
+```
+artifacts/telltale-parity/
+└── report.json
+
+artifacts/lean-quint-bridge/
+├── bridge.log
+├── bridge_discrepancy_report.json
+└── report.json
+```
+
+`artifacts/telltale-parity/report.json` uses schema `aura.telltale-parity.report.v1`.
+`artifacts/lean-quint-bridge/bridge_discrepancy_report.json` uses schema `aura.lean-quint-bridge.discrepancy.v1`.
+
+## Bridge Pipeline Fixtures
+
+`aura-quint` bridge pipeline checks use deterministic fixture inputs:
+
+| Fixture | Purpose |
+|---------|---------|
+| `positive_bundle.json` | Expected consistent cross-validation outcome |
+| `negative_bundle.json` | Expected discrepancy detection outcome |
+| `quint_ir_fixture.json` | Export/import pipeline coverage for Quint IR |
+
+Fixtures live in `crates/aura-quint/tests/fixtures/bridge/`.
 
 ## Related Documentation
 

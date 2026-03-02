@@ -1,0 +1,71 @@
+{
+  "schema_version": "aura.lean-quint-bridge.v1",
+  "session_types": [
+    {
+      "session_id": "sid_negative_1",
+      "protocol": "sync_bridge",
+      "roles": ["primary", "replica"],
+      "nodes": [
+        {
+          "id": "m0",
+          "role": "primary",
+          "kind": "send",
+          "label": "delta",
+          "annotations": {}
+        },
+        {
+          "id": "m1",
+          "role": "replica",
+          "kind": "recv",
+          "label": "delta",
+          "annotations": {}
+        },
+        {
+          "id": "m2",
+          "role": "replica",
+          "kind": "end",
+          "label": "receipt",
+          "annotations": {}
+        }
+      ],
+      "edges": [
+        { "from": "m0", "to": "m1", "guard": null, "message": "delta" },
+        { "from": "m1", "to": "m2", "guard": "cap.sync", "message": "receipt" }
+      ],
+      "source": {
+        "fixture": "negative_bundle"
+      }
+    }
+  ],
+  "properties": [
+    {
+      "id": "bridge_violation",
+      "class": "safety",
+      "source_backend": "telltale",
+      "source_expr": "NoReplay",
+      "target_expr": "NoReplay",
+      "assumptions": ["receipt_window"],
+      "metadata": {
+        "suite": "bridge_pipeline"
+      }
+    }
+  ],
+  "certificates": [
+    {
+      "certificate_id": "cert_bridge_violation",
+      "backend": "lean",
+      "property_id": "bridge_violation",
+      "statement_digest_hex": "3333333333333333333333333333333333333333333333333333333333333333",
+      "artifact_digest_hex": "4444444444444444444444444444444444444444444444444444444444444444",
+      "verified": true,
+      "verified_at_ms": 1700000000100,
+      "toolchain": {
+        "lean": "4.8.0"
+      }
+    }
+  ],
+  "metadata": {
+    "fixture": "negative",
+    "owner": "aura-quint"
+  }
+}

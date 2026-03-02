@@ -1,0 +1,71 @@
+{
+  "schema_version": "aura.lean-quint-bridge.v1",
+  "session_types": [
+    {
+      "session_id": "sid_positive_1",
+      "protocol": "consensus_bridge",
+      "roles": ["coordinator", "witness"],
+      "nodes": [
+        {
+          "id": "n0",
+          "role": "coordinator",
+          "kind": "send",
+          "label": "proposal",
+          "annotations": {}
+        },
+        {
+          "id": "n1",
+          "role": "witness",
+          "kind": "recv",
+          "label": "proposal",
+          "annotations": {}
+        },
+        {
+          "id": "n2",
+          "role": "witness",
+          "kind": "end",
+          "label": "commit",
+          "annotations": {}
+        }
+      ],
+      "edges": [
+        { "from": "n0", "to": "n1", "guard": null, "message": "proposal" },
+        { "from": "n1", "to": "n2", "guard": "cap.commit", "message": "commit" }
+      ],
+      "source": {
+        "fixture": "positive_bundle"
+      }
+    }
+  ],
+  "properties": [
+    {
+      "id": "bridge_safe",
+      "class": "safety",
+      "source_backend": "telltale",
+      "source_expr": "BridgeSafe",
+      "target_expr": "BridgeSafe",
+      "assumptions": ["authenticated_channels"],
+      "metadata": {
+        "suite": "bridge_pipeline"
+      }
+    }
+  ],
+  "certificates": [
+    {
+      "certificate_id": "cert_bridge_safe",
+      "backend": "lean",
+      "property_id": "bridge_safe",
+      "statement_digest_hex": "1111111111111111111111111111111111111111111111111111111111111111",
+      "artifact_digest_hex": "2222222222222222222222222222222222222222222222222222222222222222",
+      "verified": true,
+      "verified_at_ms": 1700000000000,
+      "toolchain": {
+        "lean": "4.8.0"
+      }
+    }
+  ],
+  "metadata": {
+    "fixture": "positive",
+    "owner": "aura-quint"
+  }
+}

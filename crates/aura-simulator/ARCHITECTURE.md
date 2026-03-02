@@ -49,3 +49,55 @@ Contract alignment:
 - Composable fault injection combines with production effects.
 - Quint specs live in verification/quint/.
 
+## Telltale VM Parity Boundary
+- `aura-simulator` exposes a boundary entry point through `TelltaleParityRunner`.
+- The boundary takes normalized conformance artifacts as input.
+- The boundary does not execute telltale VM directly in default simulator paths.
+- Runtime telltale execution remains owned by external lanes and adapters.
+
+### InvariantTelltaleParityBoundaryStable
+Telltale parity integration must remain artifact-driven and profile-selectable.
+
+Enforcement locus:
+- `src/telltale_parity.rs` defines boundary input and runner trait.
+- `src/differential_tester.rs` evaluates strict and envelope-bounded profiles.
+
+Failure mode:
+- Simulator paths become tightly coupled to VM execution backends.
+- Default simulation behavior changes when telltale parity is unused.
+
+Verification hooks:
+- `just test-crate aura-simulator`
+
+Contract alignment:
+- [Conformance and Parity Reference](../../docs/119_conformance.md) defines envelope comparison policy.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines runtime conformance constraints.
+
+### Canonical Artifact Mapping
+- `observable` telltale events map to Aura `observable` surface with identity normalization.
+- `scheduler_step` telltale events map to Aura `scheduler_step` surface with tick normalization.
+- `effect` telltale events map to Aura `effect` surface with envelope-class normalization.
+- Mapping schema id: `aura.telltale-parity.report.v1`.
+
+### Bridge Ownership
+- `aura-simulator` owns artifact-level parity entry points and differential comparison invocation.
+- `aura-simulator` consumes bridge schema outputs but does not redefine schema structures.
+- `aura-simulator` does not own runtime VM admission logic.
+
+### InvariantTelltaleArtifactMappingCanonical
+Artifact mapping for telltale parity must be stable and shared across lanes.
+
+Enforcement locus:
+- `src/telltale_parity.rs` publishes `TELLTALE_SURFACE_MAPPINGS_V1`.
+- `src/telltale_parity.rs` validates required Aura conformance surfaces before comparison.
+
+Failure mode:
+- Different lanes compare non-equivalent surfaces and produce false mismatches.
+- Parity reports cannot be replayed or audited consistently.
+
+Verification hooks:
+- `just test-crate aura-simulator`
+
+Contract alignment:
+- [Conformance and Parity Reference](../../docs/119_conformance.md) defines required surfaces and envelope classes.
+- [Verification Coverage Report](../../docs/998_verification_coverage.md) tracks parity coverage lanes and schema references.

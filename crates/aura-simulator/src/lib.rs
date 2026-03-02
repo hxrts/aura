@@ -119,6 +119,8 @@ pub mod liveness;
 pub mod properties;
 /// Per-tick property monitor runtime.
 pub mod property_monitor;
+/// Telltale VM parity boundary and comparison entry points.
+pub mod telltale_parity;
 
 // AMP scenario helpers
 pub mod amp;
@@ -205,6 +207,11 @@ pub use properties::{
 pub use property_monitor::{
     AuraPropertyMonitor, PropertyRegression, PropertyRunReport, PropertyTrendTracker,
     PropertyViolation,
+};
+pub use telltale_parity::{
+    run_telltale_parity_file_lane, validate_telltale_mapping_surfaces, TelltaleParityError,
+    TelltaleParityFileRun, TelltaleParityInput, TelltaleParityReportV1, TelltaleParityRunner,
+    TelltaleSurfaceMappingV1, AURA_TELLTALE_PARITY_REPORT_SCHEMA_V1, TELLTALE_SURFACE_MAPPINGS_V1,
 };
 
 // Re-export Duration for convenience

@@ -1,0 +1,28 @@
+{
+  "modules": [
+    {
+      "name": "consensus_bridge_fixture",
+      "definitions": [
+        { "name": "role_coordinator" },
+        { "name": "role_witness" },
+        { "name": "send_vote" },
+        { "name": "recv_commit" }
+      ],
+      "assumptions": [
+        { "name": "auth_channels" }
+      ]
+    },
+    {
+      "name": "sync_bridge_fixture",
+      "definitions": [
+        { "name": "role_primary" },
+        { "name": "role_replica" },
+        { "name": "propagate_delta" },
+        { "name": "emit_receipt" }
+      ],
+      "assumptions": [
+        { "name": "bounded_latency" }
+      ]
+    }
+  ]
+}

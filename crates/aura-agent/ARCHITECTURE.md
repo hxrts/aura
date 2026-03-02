@@ -62,3 +62,26 @@ Contract alignment:
 - Protocol logic lives in aura-protocol.
 - Application core lives in aura-app.
 
+## Telltale Bridge Ownership
+- `aura-agent` owns runtime admission wiring and choreography backend selection.
+- `aura-agent` owns telltale runtime parity test lanes and scenario contract gates.
+- `aura-agent` must not own bridge schema transformations that belong in `aura-quint`.
+
+### InvariantBridgeOwnershipAgent
+Runtime telltale integration in `aura-agent` must consume bridge artifacts but not redefine bridge schema.
+
+Enforcement locus:
+- `src/runtime/choreo_engine.rs` and `src/runtime/choreography_adapter.rs` enforce runtime capability admission.
+- `tests/telltale_vm_parity.rs` and `tests/telltale_vm_scenario_contracts.rs` run runtime parity and contract lanes.
+
+Failure mode:
+- Runtime layer duplicates schema translation code and drifts from `aura-quint`.
+- Admission and parity behavior diverges across runtime profiles.
+
+Verification hooks:
+- `just ci-choreo-parity`
+- `just ci-conformance-contracts`
+
+Contract alignment:
+- [Conformance and Parity Reference](../../docs/119_conformance.md) defines runtime parity lanes.
+- [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines runtime admission guarantees.
