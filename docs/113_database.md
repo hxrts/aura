@@ -111,19 +111,35 @@ let source = program.to_datalog_source();
 
 ```rust
 pub struct FactPredicate {
+    /// The predicate name to match
     pub name: String,
+    /// Optional positional argument patterns (None = wildcard)
     pub arg_patterns: Vec<Option<String>>,
+    /// Named field constraints for structured facts
+    pub named_constraints: BTreeMap<String, String>,
 }
 
 impl FactPredicate {
     /// Match any fact with the given name
     pub fn named(name: impl Into<String>) -> Self;
 
-    /// Match facts with specific argument constraints
+    /// Match facts with specific named field constraints
     pub fn with_args(name: impl Into<String>, args: Vec<(&str, &str)>) -> Self;
+
+    /// Add a positional argument pattern
+    pub fn with_arg(self, pattern: Option<String>) -> Self;
+
+    /// Add a named field constraint
+    pub fn with_named_constraint(self, name: impl Into<String>, value: impl Into<String>) -> Self;
 
     /// Check if this predicate matches another
     pub fn matches(&self, other: &FactPredicate) -> bool;
+
+    /// Check if this predicate matches a fact with positional arguments
+    pub fn matches_fact(&self, fact_name: &str, fact_args: &[String]) -> bool;
+
+    /// Check if this predicate matches a fact with named fields
+    pub fn matches_named_fact(&self, fact_name: &str, fact_fields: &BTreeMap<String, String>) -> bool;
 }
 ```
 
@@ -265,6 +281,8 @@ pub struct QueryStats {
     pub cache_hit: bool,
     pub isolation_used: QueryIsolation,
     pub consensus_wait_time: Option<Duration>,
+    /// Consistency metadata for matched facts
+    pub consistency: ConsistencyMap,
 }
 ```
 
@@ -411,18 +429,43 @@ impl Query for MessagesQuery {
 
 ### 5.1 IndexedJournalEffects
 
-The `IndexedJournalEffects` trait extends `JournalEffects` with efficient lookups:
+The `IndexedJournalEffects` trait provides efficient indexed lookups:
 
 ```rust
-pub trait IndexedJournalEffects: JournalEffects {
-    async fn facts_by_predicate(&self, predicate: &str) -> AuraResult<Vec<Fact>>;
-    async fn facts_by_authority(&self, authority: &AuthorityId) -> AuraResult<Vec<Fact>>;
-    async fn facts_in_range(&self, start: TimeStamp, end: TimeStamp) -> AuraResult<Vec<Fact>>;
-    fn might_contain(&self, predicate: &str, value: &Value) -> bool;
+pub trait IndexedJournalEffects: Send + Sync {
+    /// Subscribe to journal fact updates as they are added
+    fn watch_facts(&self) -> Box<dyn FactStreamReceiver>;
+
+    /// Get all facts with the given predicate/key
+    async fn facts_by_predicate(&self, predicate: &str) -> Result<Vec<IndexedFact>, AuraError>;
+
+    /// Get all facts created by the given authority
+    async fn facts_by_authority(&self, authority: &AuthorityId) -> Result<Vec<IndexedFact>, AuraError>;
+
+    /// Get all facts within the given time range (inclusive)
+    async fn facts_in_range(&self, start: TimeStamp, end: TimeStamp) -> Result<Vec<IndexedFact>, AuraError>;
+
+    /// Return all indexed facts (append-only view)
+    async fn all_facts(&self) -> Result<Vec<IndexedFact>, AuraError>;
+
+    /// Fast membership test using Bloom filter
+    fn might_contain(&self, predicate: &str, value: &FactValue) -> bool;
+
+    /// Get the Merkle root commitment for the current index state
+    async fn merkle_root(&self) -> Result<[u8; 32], AuraError>;
+
+    /// Verify a fact against the Merkle tree
+    async fn verify_fact_inclusion(&self, fact: &IndexedFact) -> Result<bool, AuraError>;
+
+    /// Get the Bloom filter for fast membership tests
+    async fn get_bloom_filter(&self) -> Result<BloomFilter, AuraError>;
+
+    /// Get statistics about the index
+    async fn index_stats(&self) -> Result<IndexStats, AuraError>;
 }
 ```
 
-The `might_contain` method uses Bloom filters for fast negative answers.
+The `might_contain` method uses Bloom filters for fast negative answers with O(1) lookup and less than 1% false positive rate.
 
 ### 5.2 Index Structure
 
@@ -788,7 +831,7 @@ See [Operation Categories](107_operation_categories.md) for full details on thes
 | `AuraQuery` wrapper | `aura-effects/src/database/query.rs` |
 | `QueryHandler` | `aura-effects/src/query/handler.rs` |
 | Concrete queries | `aura-app/src/queries/` |
-| `IndexedJournalEffects` | `aura-core/src/effects/indexed_journal.rs` |
+| `IndexedJournalEffects` | `aura-core/src/effects/indexed.rs` |
 
 ## See Also
 
