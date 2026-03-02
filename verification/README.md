@@ -6,35 +6,43 @@ This directory contains formal verification artifacts for the Aura protocol usin
 
 ```
 verification/
-├── README.md                 # This file
-├── lean/                     # Lean 4 theorem proofs
-│   ├── README.md             # Detailed Lean documentation
-│   ├── lakefile.lean         # Build configuration
-│   └── Aura/                 # Proof modules
+├── README.md                     # This file
+├── lean/                         # Lean 4 theorem proofs
+│   ├── README.md                 # Detailed Lean documentation
+│   ├── lakefile.lean             # Build configuration
+│   └── Aura/                     # Proof modules
 │       ├── Assumptions.lean      # Cryptographic axioms
 │       ├── Types.lean            # Core type definitions
 │       ├── Types/                # Shared type helpers
-│       ├── Consensus/            # Consensus proofs
-│       ├── Journal.lean          # CRDT semilattice proofs
-│       ├── FlowBudget.lean       # Budget charging monotonicity
-│       ├── GuardChain.lean       # Guard chain cost calculation
-│       ├── Frost.lean            # FROST state machine correctness
-│       ├── KeyDerivation.lean    # Context key isolation
-│       ├── TimeSystem.lean       # Timestamp ordering
+│       ├── Domain/               # Domain types and operations (no proofs)
+│       │   ├── Consensus/        # Consensus data structures
+│       │   ├── Journal/          # Journal types and operations
+│       │   ├── ContextIsolation.lean
+│       │   ├── FlowBudget.lean
+│       │   ├── GuardChain.lean
+│       │   ├── KeyDerivation.lean
+│       │   └── TimeSystem.lean
+│       ├── Proofs/               # All proofs centralized
+│       │   ├── Consensus/        # Consensus proofs (Agreement, Validity, etc.)
+│       │   ├── ContextIsolation.lean
+│       │   ├── FlowBudget.lean
+│       │   ├── GuardChain.lean
+│       │   ├── Journal.lean
+│       │   ├── KeyDerivation.lean
+│       │   └── TimeSystem.lean
+│       ├── Proofs.lean           # Top-level entry point for reviewers
 │       └── Runner.lean           # CLI for differential testing
-├── quint/                    # Quint state machine specs
-│   ├── README.md             # Detailed Quint documentation
-│   ├── STYLE.md              # Quint coding conventions
-│   ├── core.qnt              # Shared runtime utilities
-│   ├── consensus/            # Fast-path/fallback consensus specs
-│   ├── journal/              # Journal and CRDT specs
-│   ├── keys/                 # DKG, DKD, resharing specs
-│   ├── sessions/             # Session and group specs
-│   ├── liveness/             # Liveness analysis specs
-│   ├── harness/              # Simulator harness modules
-│   ├── tui/                  # TUI state machine specs
-│   └── traces/               # Generated ITF traces for testing
-└── lean/                     # Lean 4 theorem proofs (see above)
+└── quint/                        # Quint state machine specs
+    ├── README.md                 # Detailed Quint documentation
+    ├── core.qnt                  # Shared runtime utilities
+    ├── consensus/                # Fast-path/fallback consensus specs
+    ├── journal/                  # Journal and CRDT specs
+    ├── keys/                     # DKG, DKD, resharing specs
+    ├── sessions/                 # Session and group specs
+    ├── liveness/                 # Liveness analysis specs
+    ├── harness/                  # Simulator harness modules
+    ├── tui/                      # TUI state machine specs
+    └── traces/                   # Generated ITF traces for testing
 ```
 
 ## Verification Approach

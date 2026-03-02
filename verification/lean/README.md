@@ -49,6 +49,7 @@ Aura/
 │   ├── Journal/
 │   │   ├── Types.lean        # Fact, Journal structures
 │   │   └── Operations.lean   # merge, reduce, factsEquiv
+│   ├── ContextIsolation.lean # Context isolation types
 │   ├── FlowBudget.lean       # Budget types and charge operation
 │   ├── GuardChain.lean       # Guard types and evaluation
 │   ├── TimeSystem.lean       # Timestamp types and comparison
@@ -63,6 +64,7 @@ Aura/
 │   │   ├── Liveness.lean     # Liveness claims (axiomatized)
 │   │   ├── Adversary.lean    # Byzantine model
 │   │   └── Summary.lean      # Claims bundle aggregation
+│   ├── ContextIsolation.lean # Context isolation proofs
 │   ├── Journal.lean          # CRDT semilattice proofs
 │   ├── FlowBudget.lean       # Budget charging proofs
 │   ├── GuardChain.lean       # Guard evaluation proofs
@@ -84,6 +86,7 @@ Lean proofs correspond to Quint specifications for verification coverage:
 
 | Lean Module | Quint File | What It Proves |
 |-------------|------------|----------------|
+| `Proofs.ContextIsolation` | `authorization.qnt`, `leakage.qnt` | Context separation and bridge authorization |
 | `Proofs.Consensus.Agreement` | `consensus/core.qnt` | Agreement safety (unique commits) |
 | `Proofs.Consensus.Evidence` | `consensus/core.qnt` | CRDT semilattice properties |
 | `Proofs.Consensus.Frost` | `consensus/frost.qnt` | Threshold signature correctness |
@@ -127,6 +130,11 @@ Run `just lean-status` for the authoritative, per-module status.
 - Associativity: `merge (merge j1 j2) j3 ≃ merge j1 (merge j2 j3)`
 - Idempotence: `merge j j ≃ j`
 
+### Context Isolation
+- No Cross-Context Merge: Messages from different contexts cannot be combined
+- Namespace Isolation: Incompatible namespaces cannot merge
+- Bridge Authorization: Cross-context flow requires explicit authorization
+
 ### Flow Budget
 - Monotonic Decrease: Charging never increases available budget
 - Exact Charge: Charging exact amount results in zero budget
@@ -149,6 +157,7 @@ import Aura.Proofs
 #check Aura.Proofs.guardChainClaims
 #check Aura.Proofs.timeSystemClaims
 #check Aura.Proofs.keyDerivationClaims
+#check Aura.Proofs.contextIsolationClaims
 
 -- Consensus claims
 #check Aura.Proofs.agreementClaims
@@ -156,6 +165,7 @@ import Aura.Proofs
 #check Aura.Proofs.evidenceClaims
 #check Aura.Proofs.equivocationClaims
 #check Aura.Proofs.frostClaims
+#check Aura.Proofs.frostOrchestratorClaims
 #check Aura.Proofs.livenessClaims
 #check Aura.Proofs.adversaryClaims
 #check Aura.Proofs.consensusClaims  -- Main bundle

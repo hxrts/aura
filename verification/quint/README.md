@@ -50,6 +50,10 @@ verification/quint/
 ├── transport.qnt               # Transport layer, sessions, guard chain
 ├── sbb.qnt                     # Social Bulletin Board gossip
 ├── interaction.qnt             # Recovery∥Consensus concurrent safety
+├── invitation.qnt              # Invitation lifecycle and ceremonies
+├── leakage.qnt                 # Information leakage tracking
+├── time_system.qnt             # Time system properties
+├── cli_recovery_demo.qnt       # CLI recovery demo
 ├── consensus/                  # Consensus protocol specs
 │   ├── core.qnt                # Fast-path/fallback consensus
 │   ├── frost.qnt               # FROST threshold signatures
@@ -66,7 +70,8 @@ verification/quint/
 ├── sessions/                   # Session and group specs
 │   ├── core.qnt                # Session lifecycle
 │   ├── groups.qnt              # Group membership management
-│   └── locking.qnt             # Distributed locking
+│   ├── locking.qnt             # Distributed locking
+│   └── choreography.qnt        # Choreography session types
 ├── amp/                        # AMP channel lifecycle specs
 │   └── channel.qnt             # Channel invites, membership, messaging, epoch bump
 ├── liveness/                   # Liveness analysis specs
@@ -80,7 +85,9 @@ verification/quint/
 │   └── amp_channel.qnt         # AMP channel lifecycle harness
 └── tui/                        # TUI state machine specs
     ├── flows.qnt               # TUI flow specifications
-    └── cli_recovery_demo.qnt   # CLI recovery demo
+    ├── state.qnt               # TUI state management
+    ├── signals.qnt             # TUI signal handling
+    └── demo_recovery.qnt       # Recovery demo flows
 ```
 
 ### Protocol Specifications
@@ -111,6 +118,10 @@ Core protocol state machines modeling Aura's distributed protocols:
 | `.` | `invitation.qnt` | Invitation lifecycle, ceremonies, authorization invariants | [Relational Contexts](../../docs/112_relational_contexts.md) |
 | `.` | `sbb.qnt` | Social Bulletin Board gossip | [Rendezvous](../../docs/111_rendezvous.md) |
 | `.` | `interaction.qnt` | Recovery∥Consensus concurrent execution safety | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
+| `.` | `leakage.qnt` | Information flow leakage tracking | [Information Flow](../../docs/003_information_flow_contract.md) |
+| `.` | `time_system.qnt` | Time system properties and constraints | [System Architecture](../../docs/001_system_architecture.md) |
+| `.` | `cli_recovery_demo.qnt` | CLI recovery demonstration | - |
+| `sessions/` | `choreography.qnt` | Choreography session type specifications | [MPST Guide](../../docs/108_mpst_and_choreography.md) |
 
 ### Harness Modules
 
@@ -233,7 +244,7 @@ Quint Spec (.qnt)
 
 ### Generated ITF Traces
 
-Model-based testing traces are generated in `verification/quint/traces/`:
+Model-based testing traces are generated in `verification/quint/traces/`. The following traces can be generated from their source specifications:
 
 | Trace File | Source Spec | Description |
 |------------|-------------|-------------|
@@ -318,6 +329,5 @@ See `docs/998_verification_coverage.md` for the current coverage status.
 - [Quint Documentation](https://quint-lang.org/docs)
 - [Verification Coverage](../../docs/998_verification_coverage.md)
 - [Simulation Guide](../../docs/806_simulation_guide.md)
-- [Generative Testing Guide](../../docs/809_generative_testing_guide.md)
+- [Verification Guide](../../docs/807_verification_guide.md)
 - [System Architecture](../../docs/001_system_architecture.md)
-- [Verification Coverage](../../docs/998_verification_coverage.md)
