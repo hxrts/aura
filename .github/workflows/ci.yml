@@ -16,11 +16,39 @@ env:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # Fast checks (run first for quick feedback)
+  # Phase 1: Link checks (run first)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  doc-links:
+    name: Doc Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+          use-verbose-mode: "yes"
+          config-file: ".github/config/markdown-link-check.json"
+          base-branch: "main"
+          folder-path: "docs"
+
+  crates-doc-links:
+    name: Crates Doc Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: crates-doc-links
+      - run: nix develop --command just ci-crates-doc-links
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 2: Book (runs after link checks pass)
   # ─────────────────────────────────────────────────────────────────────────────
 
   book:
     name: Book
+    needs: [doc-links, crates-doc-links]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,8 +58,13 @@ jobs:
       - name: Build documentation
         run: nix develop --command just ci-book
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 3: All other checks (run after book)
+  # ─────────────────────────────────────────────────────────────────────────────
+
   format:
     name: Format
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +75,7 @@ jobs:
 
   text-formatting:
     name: Text Formatting
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +84,7 @@ jobs:
 
   clippy:
     name: Clippy
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +95,7 @@ jobs:
 
   build:
     name: Build
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +106,7 @@ jobs:
 
   harness-build:
     name: Harness Build
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +117,7 @@ jobs:
 
   harness-contract:
     name: Harness Contract
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +128,7 @@ jobs:
 
   harness-nightly-replay:
     name: Harness Nightly Replay
+    needs: [book]
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -101,6 +140,7 @@ jobs:
 
   test:
     name: Test
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -143,6 +183,7 @@ jobs:
 
   property-monitor:
     name: Property Monitor
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -161,6 +202,7 @@ jobs:
 
   choreo-parity:
     name: Choreo Parity
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -181,6 +223,7 @@ jobs:
 
   conformance-gate:
     name: Conformance Gate
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -207,6 +250,7 @@ jobs:
 
   lean-quint-bridge:
     name: Lean-Quint Bridge
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -225,6 +269,7 @@ jobs:
 
   agent-wasm:
     name: Agent WASM Matrix
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -238,6 +283,7 @@ jobs:
 
   effects:
     name: Effects Violations
+    needs: [book]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -246,35 +292,13 @@ jobs:
           cache-name: effects
       - run: nix develop --command just ci-effects
 
-  crates-doc-links:
-    name: Crates Doc Links
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-nix
-        with:
-          cache-name: crates-doc-links
-      - run: nix develop --command just ci-crates-doc-links
-
-  doc-links:
-    name: Doc Links
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: gaurav-nelson/github-action-markdown-link-check@v1
-        with:
-          use-quiet-mode: "yes"
-          use-verbose-mode: "yes"
-          config-file: ".github/config/markdown-link-check.json"
-          base-branch: "main"
-          folder-path: "docs"
-
   # ─────────────────────────────────────────────────────────────────────────────
   # Optional checks (warnings only)
   # ─────────────────────────────────────────────────────────────────────────────
 
   unused-deps:
     name: Unused Deps
+    needs: [book]
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:

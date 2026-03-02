@@ -20,7 +20,40 @@ env:
   AURA_SUPPRESS_NIX_WELCOME: 1
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 1: Link checks
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  doc-links:
+    name: Doc Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+          use-verbose-mode: "yes"
+          config-file: ".github/config/markdown-link-check.json"
+          base-branch: "main"
+          folder-path: "docs"
+
+  crates-doc-links:
+    name: Crates Doc Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-nix
+        with:
+          cache-name: crates-doc-links
+      - run: nix develop --command just ci-crates-doc-links
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Phase 2: Build and deploy (after link checks pass)
+  # ─────────────────────────────────────────────────────────────────────────────
+
   deploy:
+    name: Deploy
+    needs: [doc-links, crates-doc-links]
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
