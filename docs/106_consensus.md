@@ -449,6 +449,8 @@ Consensus uses FROST to produce threshold signatures. Each witness holds a secre
 pub enum ConsensusMessage {
     SignShare {
         consensus_id: ConsensusId,
+        /// The result_id (hash of execution result) this witness computed
+        result_id: Hash32,
         share: PartialSignature,
         /// Optional commitment for the next consensus round (pipelining optimization)
         next_commitment: Option<NonceCommitment>,
@@ -527,14 +529,17 @@ The FROST pipelining optimization improves consensus performance by bundling nex
 
 ```rust
 pub struct WitnessState {
-    /// Precomputed nonce for the next consensus round
-    next_nonce: Option<(NonceCommitment, NonceToken)>,
-    
-    /// Current epoch to detect when cached commitments become stale
-    epoch: Epoch,
-    
     /// Witness identifier
     witness_id: AuthorityId,
+
+    /// Current epoch to detect when cached commitments become stale
+    epoch: Epoch,
+
+    /// Precomputed nonce for the next consensus round
+    next_nonce: Option<(NonceCommitment, NonceToken)>,
+
+    /// Active consensus instances this witness is participating in
+    active_instances: HashMap<ConsensusId, WitnessInstance>,
 }
 ```
 
