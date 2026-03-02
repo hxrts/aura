@@ -328,6 +328,6 @@ See `docs/998_verification_coverage.md` for the current coverage status.
 
 - [Quint Documentation](https://quint-lang.org/docs)
 - [Verification Coverage](../../docs/998_verification_coverage.md)
-- [Simulation Guide](../../docs/806_simulation_guide.md)
-- [Verification Guide](../../docs/807_verification_guide.md)
+- [Simulation Guide](../../docs/805_simulation_guide.md)
+- [Verification Guide](../../docs/806_verification_guide.md)
 - [System Architecture](../../docs/001_system_architecture.md)

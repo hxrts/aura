@@ -1,4 +1,4 @@
-// Clippy allows for new crate integration - see docs/805_development_patterns_guide.md
+// Clippy allows for new crate integration
 #![allow(clippy::clone_on_copy)]
 #![allow(clippy::single_match)]
 #![allow(clippy::let_and_return)]

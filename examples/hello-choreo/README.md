@@ -110,4 +110,4 @@ To build a full choreography implementation:
 4. **Test with simulator** using deterministic effect injection
 5. **Deploy with real handlers** for production communication
 
-See `docs/800_building_on_aura.md` and `docs/003_distributed_applications.md` for complete examples.
+See `docs/803_choreography_guide.md` and `docs/801_hello_world_guide.md` for complete examples.
