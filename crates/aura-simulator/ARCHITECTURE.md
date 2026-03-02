@@ -70,7 +70,7 @@ Verification hooks:
 - `just test-crate aura-simulator`
 
 Contract alignment:
-- [Conformance and Parity Reference](../../docs/119_conformance.md) defines envelope comparison policy.
+- [Formal Verification Reference](../../docs/119_verification.md) defines envelope comparison policy.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines runtime conformance constraints.
 
 ### Canonical Artifact Mapping
@@ -99,5 +99,5 @@ Verification hooks:
 - `just test-crate aura-simulator`
 
 Contract alignment:
-- [Conformance and Parity Reference](../../docs/119_conformance.md) defines required surfaces and envelope classes.
+- [Formal Verification Reference](../../docs/119_verification.md) defines required surfaces and envelope classes.
 - [Verification Coverage Report](../../docs/998_verification_coverage.md) tracks parity coverage lanes and schema references.

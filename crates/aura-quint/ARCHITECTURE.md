@@ -67,5 +67,5 @@ Verification hooks:
 - `just test-crate aura-quint`
 
 Contract alignment:
-- [Formal Verification Reference](../../docs/120_verification.md) defines cross-validation boundaries.
+- [Formal Verification Reference](../../docs/119_verification.md) defines cross-validation boundaries.
 - [Verification Coverage Report](../../docs/998_verification_coverage.md) tracks bridge module inventory.

@@ -83,5 +83,5 @@ Verification hooks:
 - `just ci-conformance-contracts`
 
 Contract alignment:
-- [Conformance and Parity Reference](../../docs/119_conformance.md) defines runtime parity lanes.
+- [Formal Verification Reference](../../docs/119_verification.md) defines runtime parity lanes.
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines runtime admission guarantees.
