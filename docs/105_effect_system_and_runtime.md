@@ -162,7 +162,7 @@ Context propagation uses scoped execution. A task local stores the current conte
 
 The `ReactiveEffects` trait provides type-safe, signal-based state management for UI and inter-component communication. It enables FRP (Functional Reactive Programming) patterns where state changes automatically propagate to subscribers.
 
-### 4.1 Signal<T> Type
+### 4.1 `Signal<T>` Type
 
 Signals are phantom-typed identifiers that reference reactive state:
 
@@ -323,7 +323,7 @@ pub trait QueryEffects: Send + Sync {
 
 `QueryStats` provides execution metrics for debugging and optimization: execution time, facts scanned/matched, cache hit status, and isolation level used. See [Database Architecture](113_database.md) for complete query system documentation.
 
-### 5.3 BoundSignal<Q>
+### 5.3 `BoundSignal<Q>`
 
 A `BoundSignal<Q>` pairs a `Signal<Q::Result>` with its source query. It provides `register()` to register with a reactive handler and `dependencies()` to get fact predicates for invalidation.
 
