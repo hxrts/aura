@@ -437,29 +437,23 @@ This diagram shows dependency flow. Testing crates can depend on any layer for t
 
 ### 9.1 Layer descriptions
 
-**Layer 1 (Foundation)** contains `aura-core` with effect traits, identifiers, cryptographic utilities, and error types. All other crates depend on `aura-core`.
+**Layer 1, Foundation** — `aura-core` with effect traits, identifiers, and cryptographic utilities.
 
-**Layer 2 (Specification)** contains domain crates that define semantics without runtime behavior. These include `aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`, `aura-mpst`, and `aura-macros`.
+**Layer 2, Specification** — domain crates defining semantics without runtime. No OS access, no Tokio. Facts use DAG-CBOR.
 
-**Layer 3 (Implementation)** contains `aura-effects` with production handlers and `aura-composition` with handler composition infrastructure.
+**Layer 3, Implementation** — `aura-effects` for production handlers, `aura-composition` for handler assembly.
 
-**Layer 4 (Orchestration)** contains `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, and `aura-anti-entropy`. These crates coordinate multi-party operations.
+**Layer 4, Orchestration** — multi-party coordination via `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`.
 
-**Layer 5 (Feature)** contains end-to-end protocol crates. These include `aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, and `aura-sync`.
+**Layer 5, Feature** — end-to-end protocols. Each crate declares `OPERATION_CATEGORIES`. Runtime caches live in Layer 6.
 
-**Layer 6 (Runtime)** contains `aura-agent` for effect system assembly, `aura-app` for portable application logic, and `aura-simulator` for deterministic simulation.
+**Layer 6, Runtime** — `aura-agent` for assembly, `aura-app` for portable logic, `aura-simulator` for deterministic simulation.
 
-**Layer 7 (Interface)** contains `aura-terminal` for CLI and TUI entry points. See [CLI and Terminal User Interface](116_cli_tui.md) for command reference.
+**Layer 7, Interface** — `aura-terminal` for CLI and TUI entry points.
 
-**Layer 8 (Testing)** contains `aura-testkit`, `aura-quint`, and `aura-harness` for test infrastructure. See [Testing Guide](805_testing_guide.md) for test patterns.
+**Layer 8, Testing** — `aura-testkit`, `aura-quint`, and `aura-harness` for test infrastructure.
 
-### 9.2 Layer invariants
-
-Layer 2 crates define semantics without runtime behavior. They contain no handler composition or OS access. Domain facts are versioned and encoded with canonical DAG-CBOR. Fact reducers register with `FactRegistry`.
-
-Layer 5 crates include `OPERATION_CATEGORIES` mapping operations to A/B/C classes. Each crate exposes fact types and services. Runtime-owned caches live in Layer 6 handlers.
-
-### 9.3 Code location guidance
+### 9.2 Code location guidance
 
 The layer determines where code belongs. Stateless single-party operations go in Layer 3. Multi-party coordination goes in Layer 4. Complete protocols go in Layer 5. Runtime assembly goes in Layer 6.
 
