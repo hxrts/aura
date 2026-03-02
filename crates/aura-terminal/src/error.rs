@@ -130,7 +130,19 @@ impl From<crate::tui::effects::OpError> for TerminalError {
         match err {
             crate::tui::effects::OpError::NotImplemented(s) => TerminalError::NotImplemented(s),
             crate::tui::effects::OpError::InvalidArgument(s) => TerminalError::Input(s),
-            crate::tui::effects::OpError::Failed(s) => TerminalError::Operation(s),
+            crate::tui::effects::OpError::Failed(s) => {
+                if let Some(message) = s.strip_prefix("Permission denied: ") {
+                    TerminalError::Capability(message.to_string())
+                } else if let Some(message) = s.strip_prefix("Not found: ") {
+                    TerminalError::NotFound(message.to_string())
+                } else if let Some(message) = s.strip_prefix("Invalid: ") {
+                    TerminalError::Input(message.to_string())
+                } else if let Some(message) = s.strip_prefix("Network error: ") {
+                    TerminalError::Network(message.to_string())
+                } else {
+                    TerminalError::Operation(s)
+                }
+            }
         }
     }
 }

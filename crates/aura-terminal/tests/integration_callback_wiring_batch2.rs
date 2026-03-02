@@ -417,7 +417,12 @@ async fn test_set_channel_mode_requires_admin() {
     // We accept either success (if somehow admin) or permission denied error
     match &result {
         Ok(()) => println!("  (Admin access granted)"),
-        Err(e) if e.contains("Permission denied") || e.contains("administrator") => {
+        Err(e)
+            if e.contains("Permission denied")
+                || e.contains("administrator")
+                || e.contains("Capability required")
+                || e.contains("requires a home context") =>
+        {
             println!("  Correctly denied - requires admin privileges");
         }
         Err(e) => panic!("Unexpected error: {e}"),

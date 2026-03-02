@@ -156,10 +156,9 @@ async fn resolve_scope(
                 .collect(),
         )
     } else {
-        let context_id =
-            crate::workflows::context::current_home_context_or_fallback(app_core).await?;
-        let home_id = hinted_channel.unwrap_or_else(|| ChannelRef::parse("home").to_channel_id());
-        (context_id, home_id, true, Vec::new())
+        return Err(AuraError::permission_denied(
+            "Moderation requires a valid home context and steward privileges",
+        ));
     };
 
     Ok(ModerationScope {
