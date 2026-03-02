@@ -6,7 +6,7 @@ This document establishes the complete mathematical foundation for Aura's distri
 
 Aura's theoretical foundation rests on four mathematical pillars:
 
-1. Aura Calculus ($\mathcal{A}$) provides the core computational model unifying communication, state, and trust.
+1. Aura Calculus ($\mathcal{A}$) provides the core computational model for communication, state, and trust.
 2. Algebraic Types structure state as semilattices with monotonic properties.
 3. Multi-Party Session Types specify choreographic protocols with safety guarantees.
 4. CRDT Semantics enable conflict-free replication with convergence proofs.
@@ -217,7 +217,7 @@ $$
 (Recv)\quad \langle \text{recv}\ \kappa, F, C, \kappa \rangle \to \langle m, F \sqcup \text{facts}(m), C \sqcap \text{attn}(\text{token}(m)), \kappa \rangle
 $$
 
-The function $`\text{attn}`$ applies the Biscuit token's caveats to the local frontier. Biscuit attenuation never widens authority. The operation remains meet-monotone even though the token data lives outside the journal.
+The function `attn` applies the Biscuit token's caveats to the local frontier. Biscuit attenuation never widens authority. The operation remains meet-monotone even though the token data lives outside the journal.
 
 Context isolation:
 
@@ -290,7 +290,7 @@ Contexts (`ContextId`) define privacy partitions. Messages never cross partition
 
 All Aura artifacts are identified by the hash of their canonical encoding. This includes facts, snapshot blobs, cache metadata, and upgrade manifests.
 
-Structures are serialized using canonical CBOR with sorted maps and deterministic integer width. The helper function $`\text{hash\_canonical}(\text{bytes})`$ computes digests when needed.
+Structures are serialized using canonical CBOR with sorted maps and deterministic integer width. The helper function `hash_canonical(bytes)` computes digests when needed.
 
 Once a digest is published, the bytes for that artifact cannot change. New content requires a new digest and a new fact in the journal.
 
