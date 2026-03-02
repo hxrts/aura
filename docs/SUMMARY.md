@@ -5,7 +5,6 @@
 - [Theoretical Model](002_theoretical_model.md)
 - [Privacy and Information Flow Contract](003_information_flow_contract.md)
 - [Distributed Systems Contract](004_distributed_systems_contract.md)
-- [System Invariants](005_system_invariants.md)
 - [Cryptography](100_crypto.md)
 - [Identifiers and Boundaries](101_identifiers_and_boundaries.md)
 - [Authority and Identity](102_authority_and_identity.md)

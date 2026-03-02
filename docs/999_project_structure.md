@@ -1339,3 +1339,70 @@ impl MyFact {
 The `just check-arch --serialization` command validates:
 - Wire protocol files use canonical serialization
 - Facts files use versioned serialization
+
+## Invariant Traceability
+
+This section indexes invariants across Aura and maps them to enforcement loci. Invariant specifications live in crate `ARCHITECTURE.md` files. Contracts in [Theoretical Model](002_theoretical_model.md), [Privacy and Information Flow Contract](003_information_flow_contract.md), and [Distributed Systems Contract](004_distributed_systems_contract.md) define the cross-crate safety model.
+
+### Canonical Naming
+
+Use `InvariantXxx` names in proofs and tests. Use prose aliases for readability when needed. When both forms appear, introduce the alias once and then reference the canonical name.
+
+Examples:
+- `Charge-Before-Send` maps to `InvariantSentMessagesHaveFacts` and `InvariantFlowBudgetNonNegative`.
+- `Context Isolation` maps to `InvariantContextIsolation`.
+- `Secure Channel Lifecycle` maps to `InvariantReceiptValidityWindow` and `InvariantCrossEpochReplayPrevention`.
+
+Use shared terminology from [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation):
+- Role terms: `Member`, `Participant`, `Moderator`
+- Access terms: `AccessLevel` with `Full`, `Partial`, `Limited`
+- Storage/pinning terms: `Shared Storage`, `allocation`, and `pinned` facts
+
+### Core Invariant Index
+
+| Alias | Canonical Name(s) | Primary Enforcement | Related Contracts |
+| --- | --- | --- | --- |
+| Charge-Before-Send | `InvariantSentMessagesHaveFacts`, `InvariantFlowBudgetNonNegative` | [crates/aura-guards/ARCHITECTURE.md](../crates/aura-guards/ARCHITECTURE.md) | [Privacy and Information Flow Contract](003_information_flow_contract.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
+| CRDT Convergence | `InvariantCRDTConvergence` | [crates/aura-journal/ARCHITECTURE.md](../crates/aura-journal/ARCHITECTURE.md) | [Theoretical Model](002_theoretical_model.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
+| Context Isolation | `InvariantContextIsolation` | [crates/aura-core/ARCHITECTURE.md](../crates/aura-core/ARCHITECTURE.md) | [Theoretical Model](002_theoretical_model.md), [Privacy and Information Flow Contract](003_information_flow_contract.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
+| Secure Channel Lifecycle | `InvariantSecureChannelLifecycle`, `InvariantReceiptValidityWindow`, `InvariantCrossEpochReplayPrevention` | [crates/aura-rendezvous/ARCHITECTURE.md](../crates/aura-rendezvous/ARCHITECTURE.md) | [Privacy and Information Flow Contract](003_information_flow_contract.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
+| Authority Tree Topology and Commitment Coherence | `InvariantAuthorityTreeTopologyCommitmentCoherence` | [crates/aura-journal/ARCHITECTURE.md](../crates/aura-journal/ARCHITECTURE.md) | [Theoretical Model](002_theoretical_model.md), [Distributed Systems Contract](004_distributed_systems_contract.md) |
+
+### Distributed Contract Invariants
+
+The distributed and privacy contracts define additional canonical names used by proofs and conformance tests:
+
+- `InvariantUniqueCommitPerInstance`
+- `InvariantCommitRequiresThreshold`
+- `InvariantEquivocatorsExcluded`
+- `InvariantNonceUnique`
+- `InvariantSequenceMonotonic`
+- `InvariantReceiptValidityWindow`
+- `InvariantCrossEpochReplayPrevention`
+- `InvariantVectorClockConsistent`
+- `InvariantHonestMajorityCanCommit`
+- `InvariantCompromisedNoncesExcluded`
+
+When a crate enforces one of these invariants, record the same canonical name in that crate's `ARCHITECTURE.md`.
+
+### Traceability Matrix
+
+This matrix provides a single cross-reference for contract names, owning crate docs, and proof/test artifacts.
+
+| Canonical Name | Crate Architecture Spec | Proof/Test Artifact |
+| --- | --- | --- |
+| `InvariantSentMessagesHaveFacts` | [crates/aura-guards/ARCHITECTURE.md](../crates/aura-guards/ARCHITECTURE.md) | `verification/quint/transport.qnt` |
+| `InvariantFlowBudgetNonNegative` | [crates/aura-guards/ARCHITECTURE.md](../crates/aura-guards/ARCHITECTURE.md) | `verification/quint/transport.qnt` |
+| `InvariantContextIsolation` | [crates/aura-core/ARCHITECTURE.md](../crates/aura-core/ARCHITECTURE.md), [crates/aura-transport/ARCHITECTURE.md](../crates/aura-transport/ARCHITECTURE.md) | `verification/quint/transport.qnt` |
+| `InvariantSequenceMonotonic` | [crates/aura-transport/ARCHITECTURE.md](../crates/aura-transport/ARCHITECTURE.md) | `verification/quint/transport.qnt` |
+| `InvariantReceiptValidityWindow` | [crates/aura-rendezvous/ARCHITECTURE.md](../crates/aura-rendezvous/ARCHITECTURE.md) | `verification/quint/epochs.qnt` |
+| `InvariantCrossEpochReplayPrevention` | [crates/aura-rendezvous/ARCHITECTURE.md](../crates/aura-rendezvous/ARCHITECTURE.md) | `verification/quint/epochs.qnt` |
+| `InvariantNonceUnique` | [crates/aura-journal/ARCHITECTURE.md](../crates/aura-journal/ARCHITECTURE.md) | `verification/quint/journal/core.qnt` |
+| `InvariantVectorClockConsistent` | [crates/aura-anti-entropy/ARCHITECTURE.md](../crates/aura-anti-entropy/ARCHITECTURE.md) | `verification/quint/journal/anti_entropy.qnt` |
+| `InvariantUniqueCommitPerInstance` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/core.qnt`, `verification/lean/Aura/Proofs/Consensus/Agreement.lean` |
+| `InvariantCommitRequiresThreshold` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/core.qnt`, `verification/lean/Aura/Proofs/Consensus/Validity.lean` |
+| `InvariantEquivocatorsExcluded` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/core.qnt`, `verification/lean/Aura/Proofs/Consensus/Adversary.lean` |
+| `InvariantHonestMajorityCanCommit` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/adversary.qnt`, `verification/lean/Aura/Proofs/Consensus/Adversary.lean` |
+| `InvariantCompromisedNoncesExcluded` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/adversary.qnt` |
+
+Use `just check-invariants` to validate system invariants across the workspace.

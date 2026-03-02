@@ -226,7 +226,7 @@ As you develop protocols, be aware of Aura's system invariants - properties that
 - **Context Isolation**: Information stays within relational context boundaries
 - **Secure Channel Lifecycle**: Channels are epoch-bound and follow strict state transitions
 
-See [System Invariants](005_system_invariants.md) for details. When developing, ensure your protocols respect these invariants to maintain system integrity.
+See [Project Structure](999_project_structure.md#invariant-traceability) for details. When developing, ensure your protocols respect these invariants to maintain system integrity.
 
 ## Next Steps
 

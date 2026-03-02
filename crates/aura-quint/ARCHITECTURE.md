@@ -41,7 +41,7 @@ Verification hooks:
 
 Contract alignment:
 - [Verification](../../docs/119_verification.md) defines model-checking expectations.
-- [Aura System Invariants](../../docs/005_system_invariants.md) defines canonical invariant naming.
+- [Project Structure](../../docs/999_project_structure.md#invariant-traceability) defines canonical invariant naming.
 ## Boundaries
 - Quint specifications live in verification/quint/.
 - Runtime simulation lives in aura-simulator.

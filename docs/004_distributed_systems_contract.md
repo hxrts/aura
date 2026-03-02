@@ -344,7 +344,7 @@ Monitor receipt acceptance rates, consensus backlog, and budget utilization. See
 ## 12. Verification Coverage
 
 This contract's guarantees are formally verified:
-Canonical invariant names are indexed in [Aura System Invariants](005_system_invariants.md).
+Canonical invariant names are indexed in [Project Structure](999_project_structure.md#invariant-traceability).
 Canonical proof and coverage status are indexed in [Verification Coverage Report](998_verification_coverage.md).
 
 | Layer | Tool | Location |

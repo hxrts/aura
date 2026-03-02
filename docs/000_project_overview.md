@@ -34,8 +34,6 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Distributed Systems Contract](004_distributed_systems_contract.md) defines safety and liveness guarantees, synchrony assumptions, and adversarial tolerance.
 
-[System Invariants](005_system_invariants.md) indexes safety invariants across crates with enforcement loci and verification hooks.
-
 ### 2. Core Systems
 
 [Cryptography](100_crypto.md) documents primitives, key derivation, threshold signatures, and VSS schemes.

@@ -441,6 +441,18 @@ Start with short traces. Debug action mappings with 3-5 step traces before exhau
 
 Isolate properties. Test one property at a time during development. Combine for coverage testing.
 
+## Adding or Updating Invariants
+
+When adding or modifying invariants, follow this workflow to maintain traceability across docs, tests, and proofs.
+
+1. Add or update the invariant under `## Invariants` in the crate's `ARCHITECTURE.md`.
+2. Add a detailed specification section in the same file with invariant name, enforcement locus, failure mode, and verification hooks.
+3. Use canonical `InvariantXxx` naming for traceability across docs, tests, and proofs.
+4. Add or update tests and simulator scenarios that detect violations.
+5. Update the traceability matrix in [Project Structure](999_project_structure.md#traceability-matrix) if the invariant is cross-crate or contract-level.
+
+Formal and model checks should reference the same canonical names listed in the traceability matrix.
+
 ## Related Documentation
 
-See [Formal Verification Reference](119_verification.md) for architecture details. See [Simulation Guide](805_simulation_guide.md) for trace replay. See [Testing Guide](804_testing_guide.md) for conformance testing.
+See [Formal Verification Reference](119_verification.md) for architecture details. See [Simulation Guide](805_simulation_guide.md) for trace replay. See [Testing Guide](804_testing_guide.md) for conformance testing. See [Project Structure](999_project_structure.md#invariant-traceability) for the invariant index and traceability matrix.

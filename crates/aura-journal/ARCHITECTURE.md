@@ -78,7 +78,7 @@ Verification hooks:
 
 Contract alignment:
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines `InvariantNonceUnique`.
-- [Aura System Invariants](../../docs/005_system_invariants.md) indexes canonical naming used by tests and proofs.
+- [Project Structure](../../docs/999_project_structure.md#invariant-traceability) indexes canonical naming used by tests and proofs.
 
 ### InvariantAuthorityTreeTopologyCommitmentCoherence
 Authority tree topology and commitment caches must remain coherent after every mutation.

@@ -55,7 +55,7 @@ Verification hooks:
 
 Contract alignment:
 - [Distributed Systems Contract](../../docs/004_distributed_systems_contract.md) defines reproducibility assumptions for testing.
-- [Aura System Invariants](../../docs/005_system_invariants.md) defines canonical naming.
+- [Project Structure](../../docs/999_project_structure.md#invariant-traceability) defines canonical naming.
 ## Boundaries
 - This crate is tooling and test infrastructure. It is not part of the runtime layer stack.
 - It does not define Aura effect traits, domain semantics, or protocol safety rules.
