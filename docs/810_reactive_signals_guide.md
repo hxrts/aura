@@ -1,5 +1,7 @@
 # Reactive Signals Guide
 
+**Status**: This guide describes the planned reactive architecture pattern. The `ReactiveState` and `ReactiveVec` wrapper types described here are not yet implemented - they represent the target design for TUI state management migration.
+
 ## Overview
 
 The Aura TUI uses `futures-signals` for fine-grained reactive state management. This provides automatic change propagation without manual lock management or explicit notification code.
