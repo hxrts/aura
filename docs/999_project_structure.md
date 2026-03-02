@@ -1,9 +1,8 @@
 # Aura Crate Structure and Dependency Graph
 
-This document provides an overview of the Aura project's crate organization and dependencies.
-The **primary specifications** live in `docs/` (e.g., consensus in `docs/106_consensus.md`,
-ceremony lifecycles in `docs/107_operation_categories.md`). The `work/` directory is
-non-authoritative scratch and may be removed.
+This document provides the authoritative reference for Aura's crate organization, dependencies, and development policies.
+
+The **primary specifications** live in `docs/` (e.g., consensus in `docs/106_consensus.md`, ceremony lifecycles in `docs/107_operation_categories.md`). The `work/` directory is non-authoritative scratch and may be removed.
 
 ## 8-Layer Architecture
 
@@ -275,20 +274,7 @@ impl FactReducer for MyFactReducer {
 - **Layer 4/5 can safely depend on Layer 2**: Higher layers depend on lower layers by design, so feature crates can use the `DomainFact` trait from `aura-journal`.
 - **Registration location differs**: Layer 2 facts are wrapped manually in `RelationalFact::Generic`. Layer 4/5 facts register with `FactRegistry` in `aura-agent/src/fact_registry.rs`.
 
-**Pattern Selection Decision Tree**:
-
-```
-Is this a Layer 2 domain crate?
-├─ Yes → Use aura-core pattern (FactTypeId, try_encode, FactDeltaReducer)
-│         Do NOT depend on aura-journal
-│         Do NOT register in FactRegistry
-│         Create RelationalFact::Generic manually at usage sites
-│
-└─ No (Layer 4/5) → Use DomainFact trait pattern
-                    Depend on aura-journal
-                    Register in FactRegistry
-                    Use #[derive(DomainFact)] macro
-```
+For a quick decision tree on pattern selection, see `CLAUDE.md` under "Agent Decision Aids".
 
 ### Choreography Specification
 
@@ -500,169 +486,244 @@ crates/
 
 ```mermaid
 graph TD
-    %% Foundation Layer
-    types[aura-core]
+    %% Layer 1: Foundation
+    core[aura-core]
 
-    %% Specification Layer
-    verify[aura-signature]
+    %% Layer 2: Specification
+    signature[aura-signature]
     journal[aura-journal]
-    wot[aura-authorization]
+    authorization[aura-authorization]
     store[aura-store]
     transport[aura-transport]
     mpst[aura-mpst]
     macros[aura-macros]
+    maintenance[aura-maintenance]
 
-    %% Implementation Layer
+    %% Layer 3: Implementation
     effects[aura-effects]
-
-    %% Handler Composition Layer
     composition[aura-composition]
 
-    %% Orchestration Layer
-    protocol[aura-protocol]
+    %% Layer 4: Orchestration
     guards[aura-guards]
+    anti_entropy[aura-anti-entropy]
     consensus[aura-consensus]
     amp[aura-amp]
-    anti_entropy[aura-anti-entropy]
+    protocol[aura-protocol]
 
-    %% Feature Layer
-    auth[aura-authentication]
+    %% Layer 5: Feature
+    social[aura-social]
     chat[aura-chat]
-    recovery[aura-recovery]
-    invitation[aura-invitation]
-    frost[aura-core]
     relational[aura-relational]
+    auth[aura-authentication]
     rendezvous[aura-rendezvous]
+    invitation[aura-invitation]
+    recovery[aura-recovery]
     sync[aura-sync]
-    store[aura-store]
 
-    %% Runtime Layer
+    %% Layer 6: Runtime
+    app[aura-app]
     agent[aura-agent]
     simulator[aura-simulator]
-    app[aura-app]
 
-    %% Application Layer
+    %% Layer 7: Application
     terminal[aura-terminal]
 
-    %% Testing Layer
+    %% Layer 8: Testing
     testkit[aura-testkit]
     quint[aura-quint]
     harness[aura-harness]
 
-    %% Dependencies
-    verify --> types
-    effects --> types
-    composition --> types
+    %% Layer 2 dependencies
+    signature --> core
+    journal --> core
+    authorization --> core
+    store --> core
+    transport --> core
+    mpst --> core
+    macros --> core
+    maintenance --> core
+
+    %% Layer 3 dependencies
+    effects --> core
+    composition --> core
     composition --> effects
-    mpst --> types
-    macros --> types
-    journal --> types
-    transport --> types
-    wot --> types
-    store --> types
-    protocol --> types
-    protocol --> journal
-    protocol --> verify
-    protocol --> wot
+    composition --> mpst
+
+    %% Layer 4 dependencies
+    guards --> core
+    guards --> authorization
+    guards --> mpst
+    guards --> journal
+    anti_entropy --> core
+    anti_entropy --> guards
+    anti_entropy --> journal
+    consensus --> core
+    consensus --> macros
+    consensus --> journal
+    consensus --> mpst
+    consensus --> guards
+    amp --> core
+    amp --> effects
+    amp --> journal
+    amp --> transport
+    amp --> consensus
+    amp --> guards
+    protocol --> core
     protocol --> effects
     protocol --> composition
+    protocol --> journal
+    protocol --> guards
+    protocol --> consensus
+    protocol --> amp
+    protocol --> anti_entropy
+    protocol --> authorization
+    protocol --> transport
     protocol --> mpst
-    auth --> types
-    auth --> mpst
-    auth --> verify
-    auth --> wot
-    auth --> composition
-    chat --> types
+    protocol --> store
+
+    %% Layer 5 dependencies
+    social --> core
+    social --> journal
+    chat --> core
     chat --> journal
     chat --> composition
-    chat --> protocol
-    recovery --> auth
-    recovery --> verify
-    recovery --> wot
-    recovery --> mpst
-    recovery --> protocol
-    recovery --> journal
-    recovery --> relational
-    recovery --> composition
-    invitation --> auth
-    invitation --> wot
-    invitation --> mpst
-    invitation --> transport
-    invitation --> composition
-    frost --> types
-    frost --> journal
-    frost --> mpst
-    frost --> composition
-    relational --> types
+    chat --> guards
+    relational --> core
     relational --> journal
-    relational --> protocol
-    relational --> composition
-    rendezvous --> transport
-    rendezvous --> wot
-    rendezvous --> mpst
-    rendezvous --> composition
-    sync --> types
-    sync --> mpst
+    relational --> consensus
+    relational --> effects
+    auth --> core
+    auth --> effects
+    auth --> journal
+    auth --> protocol
+    auth --> guards
+    auth --> relational
+    auth --> signature
+    auth --> authorization
+    rendezvous --> core
+    rendezvous --> journal
+    rendezvous --> guards
+    rendezvous --> social
+    invitation --> core
+    invitation --> effects
+    invitation --> guards
+    invitation --> authorization
+    invitation --> auth
+    invitation --> journal
+    invitation --> composition
+    recovery --> core
+    recovery --> journal
+    recovery --> composition
+    recovery --> signature
+    recovery --> auth
+    recovery --> authorization
+    recovery --> effects
+    recovery --> protocol
+    recovery --> relational
+    sync --> core
+    sync --> protocol
+    sync --> guards
     sync --> journal
-    sync --> composition
-    store --> types
-    store --> journal
-    store --> composition
-    agent --> types
-    agent --> protocol
-    agent --> journal
-    agent --> transport
-    agent --> store
-    agent --> verify
-    agent --> wot
-    agent --> sync
-    agent --> recovery
-    agent --> invitation
+    sync --> authorization
+    sync --> maintenance
+    sync --> rendezvous
+    sync --> effects
+    sync --> anti_entropy
+
+    %% Layer 6 dependencies
+    app --> core
+    app --> effects
+    app --> journal
+    app --> relational
+    app --> chat
+    app --> social
+    app --> maintenance
+    app --> protocol
+    app --> recovery
+    agent --> core
+    agent --> app
     agent --> effects
     agent --> composition
-    app --> types
-    app --> agent
-    app --> protocol
-    app --> composition
+    agent --> protocol
+    agent --> guards
+    agent --> consensus
+    agent --> journal
+    agent --> relational
+    agent --> chat
+    agent --> auth
+    agent --> invitation
+    agent --> rendezvous
+    agent --> social
+    agent --> sync
+    agent --> maintenance
+    agent --> transport
+    agent --> recovery
+    agent --> authorization
+    agent --> signature
+    agent --> store
+    simulator --> core
+    simulator --> agent
+    simulator --> effects
+    simulator --> journal
+    simulator --> amp
+    simulator --> consensus
+    simulator --> protocol
+    simulator --> testkit
+    simulator --> sync
+    simulator --> quint
+    simulator --> guards
+
+    %% Layer 7 dependencies
     terminal --> app
+    terminal --> core
     terminal --> agent
     terminal --> protocol
-    terminal --> types
     terminal --> recovery
-    simulator --> agent
-    simulator --> journal
-    simulator --> transport
-    simulator --> protocol
-    simulator --> types
-    simulator --> composition
-    simulator --> quint
-    testkit --> agent
-    testkit --> composition
+    terminal --> invitation
+    terminal --> auth
+    terminal --> sync
+    terminal --> effects
+    terminal --> authorization
+    terminal --> maintenance
+    terminal --> chat
+    terminal --> journal
+    terminal --> relational
+
+    %% Layer 8 dependencies
+    testkit --> core
+    testkit --> effects
+    testkit --> mpst
     testkit --> journal
+    testkit --> relational
+    testkit --> social
     testkit --> transport
-    testkit --> types
+    testkit --> authorization
+    testkit --> consensus
+    testkit --> anti_entropy
+    testkit --> amp
     testkit --> protocol
-    harness --> types
+    testkit --> app
+    quint --> core
+    quint --> effects
+    harness --> core
 
     %% Styling
     classDef foundation fill:#e1f5fe
     classDef spec fill:#f3e5f5
-    classDef effects fill:#e8f5e9
-    classDef composition fill:#e3f2fd
-    classDef protocol fill:#fff3e0
+    classDef impl fill:#e8f5e9
+    classDef orch fill:#fff3e0
     classDef feature fill:#fce4ec
     classDef runtime fill:#f1f8e9
-    classDef app fill:#e0f2f1
-    classDef test fill:#f3e5f5
+    classDef application fill:#e0f2f1
+    classDef test fill:#ede7f6
 
-    class types foundation
-    class verify,journal,wot,store,transport,mpst,macros spec
-    class effects effects
-    class composition composition
-    class protocol protocol
-    class auth,chat,recovery,invitation,frost,relational,rendezvous,sync,store feature
-    class agent,simulator,app runtime
-    class terminal app
+    class core foundation
+    class signature,journal,authorization,store,transport,mpst,macros,maintenance spec
+    class effects,composition impl
+    class guards,anti_entropy,consensus,amp,protocol orch
+    class social,chat,relational,auth,rendezvous,invitation,recovery,sync feature
+    class app,agent,simulator runtime
+    class terminal application
     class testkit,quint,harness test
 ```
 
@@ -756,7 +817,7 @@ impl<C: CryptoEffects, S: StorageEffects> JournalEffects for JournalHandler<C, S
 Here are examples of incorrect effect placement and how to fix them:
 
 ```rust
-// ❌ WRONG: Domain handler using OS operations directly
+// WRONG: Domain handler using OS operations directly
 // File: aura-journal/src/effects.rs
 impl JournalEffects for BadJournalHandler {
     async fn read_facts(&self, namespace: Namespace) -> Vec<Fact> {
@@ -766,7 +827,7 @@ impl JournalEffects for BadJournalHandler {
     }
 }
 
-// ✅ CORRECT: Inject StorageEffects for OS operations
+// CORRECT: Inject StorageEffects for OS operations
 impl<S: StorageEffects> JournalEffects for GoodJournalHandler<S> {
     async fn read_facts(&self, namespace: Namespace) -> Vec<Fact> {
         // Use injected storage effects
@@ -777,7 +838,7 @@ impl<S: StorageEffects> JournalEffects for GoodJournalHandler<S> {
 ```
 
 ```rust
-// ❌ WRONG: Application effect implementation in aura-effects
+// WRONG: Application effect implementation in aura-effects
 // File: aura-effects/src/journal_handler.rs
 pub struct JournalHandler { }
 
@@ -791,7 +852,7 @@ impl JournalEffects for JournalHandler {
     }
 }
 
-// ✅ CORRECT: Application effects belong in domain crates
+// CORRECT: Application effects belong in domain crates
 // File: aura-journal/src/effects.rs
 impl<C, S> JournalEffects for JournalHandler<C, S> {
     // Domain validation logic belongs here
@@ -799,7 +860,7 @@ impl<C, S> JournalEffects for JournalHandler<C, S> {
 ```
 
 ```rust
-// ❌ WRONG: Infrastructure effect in domain crate
+// WRONG: Infrastructure effect in domain crate
 // File: aura-journal/src/network_handler.rs
 pub struct CustomNetworkHandler { }
 
@@ -810,7 +871,7 @@ impl NetworkEffects for CustomNetworkHandler {
     }
 }
 
-// ✅ CORRECT: Use existing NetworkEffects from aura-effects
+// CORRECT: Use existing NetworkEffects from aura-effects
 impl<N: NetworkEffects> MyDomainHandler<N> {
     async fn send_fact(&self, fact: Fact) -> Result<()> {
         // Compose with injected network effects
@@ -835,18 +896,15 @@ Infrastructure effects sometimes require **fallback implementations** for platfo
 - Graceful degradation is preferable to compile-time feature flags everywhere
 
 **Naming conventions**:
-- ✅ `FallbackBiometricHandler`, `NoOpSecureEnclaveHandler`, `UnsupportedHsmHandler`
-- ❌ `RealBiometricHandler` (misleading - implies real implementation)
+- Good: `FallbackBiometricHandler`, `NoOpSecureEnclaveHandler`, `UnsupportedHsmHandler`
+- Avoid: `RealBiometricHandler` (misleading - implies real implementation)
 
 **Fallback handler behavior**:
 - Return `false` for capability checks (`is_available()`, `supports_feature()`)
 - Return descriptive errors for operations (`Err(NotSupported)`)
 - Never panic or silently succeed when the capability is unavailable
 
-**Before removing a "stub" handler**:
-1. Check if the trait is used anywhere in the codebase
-2. If **trait is unused**: Remove both the trait (aura-core) AND implementation (aura-effects)
-3. If **trait is used**: Keep a properly-named fallback handler in aura-effects
+For a checklist on removing stub handlers, see `CLAUDE.md` under "Agent Decision Aids".
 
 **Why this matters**: A fallback handler is not dead code if its trait is actively used. It's the Null Object Pattern providing safe defaults. The architectural violation is a misleading name, not the existence of the fallback.
 
@@ -867,28 +925,11 @@ Composite effects provide convenience methods that combine multiple lower-level 
 
 **Implementation Location**: Usually implemented as extension traits in `aura-core` or as blanket implementations in domain crates.
 
-### Classification Decision Framework
+### Effect Classification
 
-When deciding which category an effect trait belongs to:
+For quick decision aids (decision matrix, decision tree), see `CLAUDE.md` under "Agent Decision Aids".
 
-1. **Does it require OS integration?** → Infrastructure Effect (aura-effects)
-2. **Does it encode Aura-specific domain knowledge?** → Application Effect (domain crate)
-3. **Is it a convenience wrapper?** → Composite Effect (extension trait)
-
-### Effect Placement Decision Matrix
-
-Use this matrix to determine where to implement an effect:
-
-| Question | Infrastructure Effect | Application Effect |
-|----------|----------------------|-------------------|
-| **OS integration needed?** | ✓ Yes (implement in aura-effects) | ✗ No (inject infrastructure effects) |
-| **Contains domain semantics?** | ✗ No (too generic) | ✓ Yes (implement in domain crate) |
-| **Aura-specific logic?** | ✗ No (universal capability) | ✓ Yes (Aura concepts) |
-| **Multiple implementations likely?** | Maybe (OS variations) | Usually (different strategies) |
-| **Reusable outside Aura?** | ✓ Yes (generic operations) | ✗ No (Aura-specific) |
-| **Example operations** | read(), write(), connect() | validate_fact(), reduce_state() |
-
-**Examples applying the matrix:**
+**Examples:**
 
 - **CryptoEffects** → Infrastructure (OS crypto, no Aura semantics, reusable)
 - **JournalEffects** → Application (Aura facts, domain validation, not reusable)
@@ -911,79 +952,19 @@ Each layer builds on lower layers without reaching back down. This enables indep
 
 The layered architecture means that Layer 1 has no dependencies on any other Aura crate. Layer 2 depends only on Layer 1. Layer 3 depends on Layers 1 and 2. This pattern continues through all 8 layers.
 
-### Code Location Guidance
+### Code Location Policy
 
-Use these principles to classify code and determine the correct crate.
+The 8-layer architecture enforces strict placement rules. Violating these rules creates circular dependencies or breaks architectural invariants.
 
-**Single-Party Operations** (Layer 3: `aura-effects`):
-- Stateless, context-free implementations
-- Examples: `sign(key, msg) → Signature`, `store_chunk(id, data) → Ok(())`, `RealCryptoHandler`
-- Each handler implements one effect trait independently
-- Reusable in any context (unit tests, integration tests, production)
+For a quick reference table of layer rules, see `CLAUDE.md` under "Agent Decision Aids".
 
-**Handler Composition** (Layer 3: `aura-composition`):
-- Assemble individual handlers into cohesive systems
-- Examples: `EffectRegistry`, `HandlerBuilder`, effect system configuration
-- About "how do I assemble handlers?" not "how do I coordinate protocols?"
-- Enables feature crates to compose handlers without runtime overhead
-
-**Multi-Party Coordination** (Layer 4: `aura-protocol` + subcrates):
-- Stateful, context-specific orchestration
-- Examples: `execute_anti_entropy(...)`, `CrdtCoordinator`, `GuardChain`
-- Manages multiple handlers working together across network boundaries
-- The "choreography conductor" that ensures distributed protocols execute correctly
-
-The distinctions are critical for understanding where code belongs. Single-party operations and handler composition both belong in Layer 3. Multi-party coordination goes in Layer 4 orchestration crates (`aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`).
-
-### Composition vs. Orchestration
-
-A common source of confusion is distinguishing **composition** (Layer 3) from **orchestration** (Layer 4). The key distinction is whether code makes **cross-handler coordination decisions**.
-
-| Pattern | Layer | Characteristics |
-|---------|-------|-----------------|
-| **Composition** | Layer 3 | Handler implements one trait, takes other effects as generics, each operation dispatches to one handler |
-| **Orchestration** | Layer 4 | Coordinator makes cross-handler decisions, manages multi-party protocols, handles rollback/compensation |
-
-**Composition example** (Layer 3 - correct):
-```rust
-// Takes multiple effects but each command dispatches to ONE handler
-pub struct EffectInterpreter<J: JournalEffects, S: StorageEffects> {
-    journal: Arc<J>,
-    storage: Arc<S>,
-}
-
-async fn execute(&self, cmd: Command) -> Result<()> {
-    match cmd {
-        Command::AppendFact(f) => self.journal.append(f).await,  // One handler
-        Command::Store(k, v) => self.storage.store(k, v).await,  // One handler
-    }
-}
-```
-
-**Orchestration example** (Layer 4 - requires coordination):
-```rust
-// Makes cross-handler decisions with compensation logic
-async fn transfer(&self, from: Account, to: Account, amount: u64) -> Result<()> {
-    let receipt = self.budget.charge(from, amount).await?;
-
-    if let Err(e) = self.ledger.credit(to, amount).await {
-        self.budget.refund(receipt).await?;  // Cross-handler compensation
-        return Err(e);
-    }
-
-    self.journal.record_transfer(from, to, amount).await  // Coordination
-}
-```
-
-**Rule of thumb**: If removing one effect handler would require changing the logic of how other handlers are called (not just removing calls), it's orchestration.
+For practical guidance on classifying code, see [Development Patterns](805_development_patterns_guide.md).
 
 ### Pure Mathematical Utilities
 
 Some effect traits in aura-core (e.g., `BloomEffects`) represent pure mathematical operations without OS integration. These follow the standard trait/handler pattern for consistency, but are technically not "effects" in the algebraic sense (no side effects).
 
 This is acceptable technical debt - the pattern consistency outweighs the semantic impurity. Future refactoring may move pure math to methods on types in aura-core.
-
-For detailed guidance on code location decisions, see [Development Patterns and Workflows](805_development_patterns_guide.md).
 
 ### Architectural Compliance Checking
 
@@ -1079,19 +1060,19 @@ Aura's effect system ensures **fully deterministic simulation** by requiring all
 
 **FORBIDDEN: Direct impure function usage**
 ```rust
-// ❌ VIOLATION: Direct system calls
+// VIOLATION: Direct system calls
 let now = SystemTime::now();
 let random = thread_rng().gen::<u64>();
 let file = File::open("data.txt")?;
 let socket = TcpStream::connect("127.0.0.1:8080").await?;
 
-// ❌ VIOLATION: Global state
+// VIOLATION: Global state
 static CACHE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
 ```
 
 **REQUIRED: Effect trait usage**
 ```rust
-// ✅ CORRECT: Via effect traits with explicit context
+// CORRECT: Via effect traits with explicit context
 async fn my_operation<T: TimeEffects + RandomEffects + StorageEffects>(
     ctx: &EffectContext,
     effects: &T,
@@ -1111,7 +1092,7 @@ The architectural compliance checker **ONLY** allows direct impure function usag
 
 #### 1. Effect Handler Implementations (`aura-effects`)
 ```rust
-// ✅ ALLOWED: Production effect implementations
+// ALLOWED: Production effect implementations
 impl PhysicalTimeEffects for PhysicalTimeHandler {
     async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
         // OK: This IS the effect implementation
@@ -1131,7 +1112,7 @@ impl RandomCoreEffects for RealRandomHandler {
 
 #### 2. Runtime Effect Assembly (`runtime/effects.rs`)
 ```rust
-// ✅ ALLOWED: Effect system bootstrapping
+// ALLOWED: Effect system bootstrapping
 pub fn create_production_effects() -> AuraEffectSystem {
     AuraEffectSystemBuilder::new()
         .with_handler(Arc::new(PhysicalTimeHandler::new()))
@@ -1142,7 +1123,7 @@ pub fn create_production_effects() -> AuraEffectSystem {
 
 #### 3. Pure Functions (`aura-core::hash`)
 ```rust
-// ✅ ALLOWED: Deterministic, pure operations
+// ALLOWED: Deterministic, pure operations
 pub fn hash(data: &[u8]) -> [u8; 32] {
     blake3::hash(data).into()  // OK: Pure function, no external state
 }
@@ -1163,7 +1144,7 @@ pub fn hash(data: &[u8]) -> [u8; 32] {
 
 ### Effect System Usage Patterns
 
-#### ✅ Correct: Infrastructure Effects in aura-effects
+#### Correct: Infrastructure Effects in aura-effects
 ```rust
 // File: crates/aura-effects/src/transport/tcp.rs
 pub struct TcpTransportHandler {
@@ -1179,7 +1160,7 @@ impl TcpTransportHandler {
 }
 ```
 
-#### ✅ Correct: Domain Effects in Domain Crates
+#### Correct: Domain Effects in Domain Crates
 ```rust
 // File: crates/aura-journal/src/effects.rs
 pub struct JournalHandler<C: CryptoEffects, S: StorageEffects> {
@@ -1201,12 +1182,12 @@ impl<C: CryptoEffects, S: StorageEffects> JournalEffects for JournalHandler<C, S
 }
 ```
 
-#### ❌ Violation: Direct impure access in domain logic
+#### Violation: Direct impure access in domain logic
 ```rust
 // File: crates/aura-core/src/crypto/tree_signing.rs  
 pub async fn start_frost_ceremony() -> Result<()> {
-    let start_time = SystemTime::now(); // ❌ VIOLATION: Should use TimeEffects
-    let session_id = Uuid::new_v4();    // ❌ VIOLATION: Should use RandomEffects
+    let start_time = SystemTime::now(); // VIOLATION: Should use TimeEffects
+    let session_id = Uuid::new_v4();    // VIOLATION: Should use RandomEffects
     
     // This breaks deterministic simulation!
     ceremony_with_timing(start_time, session_id).await
@@ -1217,7 +1198,7 @@ pub async fn start_frost_ceremony() -> Result<()> {
 
 **All async operations must propagate EffectContext**:
 ```rust
-// ✅ CORRECT: Explicit context propagation
+// CORRECT: Explicit context propagation
 async fn process_request<T: AllEffects>(
     ctx: &EffectContext,  // Required for tracing/correlation
     effects: &T,

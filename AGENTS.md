@@ -1,4 +1,4 @@
-# AGENTS.md + CLAUDE.md
+# CLAUDE.md
 
 ## Session Initialization
 
@@ -8,286 +8,252 @@
 
 ## Project Overview
 
-Aura is a threshold identity and encrypted storage platform built on relational security principles. It uses threshold cryptography and social recovery to eliminate the traditional choice between trusting a single device or a centralized entity.
+Aura is a threshold identity and encrypted storage platform using threshold cryptography and social recovery. Choreographic programming with session types coordinates distributed protocols. Algebraic effects provide modular runtime composition.
 
-**Architecture**: Choreographic programming with session types for coordinating distributed protocols. Uses algebraic effects for modular runtime composition. The `docs/` directory is the **primary, authoritative spec**; `work/` is non-authoritative scratch and may be removed.
-See `docs/001_system_architecture.md` and `docs/999_project_structure.md` for the latest crate breakdown.
+- **Primary specs**: `docs/` directory (authoritative)
+- **Architecture**: `docs/001_system_architecture.md`, `docs/999_project_structure.md`
+- **Scratch**: `work/` is non-authoritative and may be removed
 
-## Development Setup
+## Development Commands
 
-**Required**: Nix with flakes enabled
+**Required**: Nix with flakes enabled. Run `nix develop` first.
 
-```bash
-nix develop                           # Enter development shell
-# OR
-echo "use flake" > .envrc && direnv allow  # Auto-activate with direnv
-```
+| Category | Command | Purpose |
+|----------|---------|---------|
+| Build | `just build` | Build all crates |
+| Build | `just check` | Check without building |
+| Build | `just clippy` | Lint (warnings as errors) |
+| Format | `just fmt` | Format code |
+| Format | `just fmt-check` | Check formatting |
+| Test | `just test` | Run all tests |
+| Test | `just test-crate <name>` | Test specific crate |
+| Test | `just ci-dry-run` | Local CI checks |
+| Nix | `nix build` | Hermetic build |
+| Nix | `nix flake check` | Hermetic tests |
+| Nix | `crate2nix generate` | Regenerate after dep changes |
+| Dev | `just watch` | Rebuild on changes |
+| Dev | `just clean` | Clean artifacts |
+| Arch | `just check-arch` | Verify architecture compliance |
 
-All commands below must be run within `nix develop`.
+## Architecture Overview
 
-## Common Commands
+### 8-Layer Structure
 
-### Build & Check
-- `just build` - Build all crates
-- `just check` - Check without building
-- `just fmt` - Format code
-- `just fmt-check` - Check formatting
-- `just clippy` - Lint (warnings as errors)
+| Layer | Crates | Purpose |
+|-------|--------|---------|
+| L1 Foundation | `aura-core` | Effect traits, domain types, crypto utilities |
+| L2 Specification | `aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`, `aura-mpst`, `aura-macros` | Domain semantics, no runtime |
+| L3 Implementation | `aura-effects`, `aura-composition` | Stateless handlers, composition |
+| L4 Orchestration | `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy` | Multi-party coordination |
+| L5 Features | `aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync` | End-to-end protocols |
+| L6 Runtime | `aura-agent`, `aura-simulator`, `aura-app` | System assembly |
+| L7 Interface | `aura-terminal` | CLI/TUI entry points |
+| L8 Testing | `aura-testkit`, `aura-quint`, `aura-harness` | Test infrastructure |
 
-### Hermetic Builds (crate2nix)
-- `nix build` - Build with hermetic Nix (reproducible)
-- `nix build .#aura-terminal` - Build specific package
-- `nix run` - Run aura CLI hermetically
-- `nix flake check` - Run hermetic tests
-- `crate2nix generate` - Regenerate Cargo.nix after dependency changes
+### Key Invariants
 
-### Testing
-- `just test` - Run all tests (preferred)
-- `just test-crate <name>` - Test specific crate
-- `just ci-dry-run` - Local CI checks (format, lint, test)
-- `just smoke-test` - Phase 0 integration tests
-- `cargo test --workspace -- --nocapture` - Tests with output
+- **Dependencies flow downward only** — no circular dependencies
+- **Effect traits defined in `aura-core` only** — all trait definitions, nowhere else
+- **Guard chain sequence**: AuthorizationEffects (Biscuit/capabilities) → FlowBudgetEffects (charge-before-send) → LeakageEffects → JournalEffects (fact commit) → TransportEffects
+- **Consensus is NOT linearizable** — use session types for operation sequencing
+- **Hybrid journal**: fact journal (join) + capability frontier (meet) combined as `JournalState`
+- **Flow budgets**: only `spent` counters are facts; limits derived at runtime from Biscuit + policy
+- **No direct impure functions** outside effect implementations — no `SystemTime::now()`, `thread_rng()`, `std::fs` in application code
+- **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects`; no ad-hoc storage encryption
 
-### Development Workflow
-- `just watch` - Rebuild on changes
-- `just watch-test` - Retest on changes
-- `just clean` - Clean artifacts
-- `just docs` - Generate documentation
+### Authority Model
 
-### Phase 0 Demo
-- `just init-account` - Initialize 2-of-3 threshold account
-- `just status` - Show account status
-
-## Architecture Essentials
-
-### 8-Layer Architecture
-
-The codebase follows a strict 8-layer architecture with zero circular dependencies:
-
-1. **Foundation** (`aura-core`): Effect traits (crypto, network, storage, unified time system, journal, console, random, transport), domain types (`AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`), cryptographic utilities (FROST, merkle trees), semilattice traits, unified errors (`AuraError`), and reliability utilities. Other crates depend on `aura-core`, but it depends on none of them.
-
-2. **Specification** (Domain Crates + `aura-mpst` + `aura-macros`):
-   - Domain crates (`aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`): CRDT domains, capability systems, transport semantics. `aura-journal` now exposes fact-based journals and reduction pipelines (`docs/103_journal.md`, `docs/115_maintenance.md`).
-   - `aura-mpst`: Session type runtime with guard extensions and leakage tracking (`LeakageTracker`).
-   - `aura-macros`: Choreography DSL parser/annotation extractor (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) that emits Telltale projections.
-
-3. **Implementation** (`aura-effects` + `aura-composition`): Stateless, single-party handlers (`aura-effects`) and handler composition infrastructure (`aura-composition`). Production handlers implement core effect traits (crypto, network, storage, randomness, console, etc.). Mock/test handlers are in `aura-testkit`.
-   - **Unified encryption-at-rest**: `aura-effects::EncryptedStorage` wraps `StorageEffects` and persists the master key via `SecureStorageEffects` (Keychain/TPM/Keystore; filesystem fallback during bring-up). Application code should not implement ad-hoc storage encryption (e.g., `LocalStore`).
-
-4. **Orchestration** (`aura-protocol` + `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`): Multi-party coordination and guard infrastructure: handler adapters, CrdtCoordinator, GuardChain (CapGuard → FlowGuard → JournalCoupler), Consensus runtime, AMP orchestration, anti-entropy/snapshot helpers.
-
-5. **Feature/Protocol** (`aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates (auth, secure messaging, guardian recovery, rendezvous, social topology, storage, etc.) built atop the orchestration layer. `aura-frost` is deprecated; FROST primitives live in `aura-core::crypto::tree_signing`.
-
-6. **Runtime Composition** (`aura-agent`, `aura-simulator`, `aura-app`): Runtime assembly of effect systems (agent), deterministic simulation (simulator), and portable application core (app). `aura-agent` now owns the effect registry/builder infrastructure; `aura-protocol` no longer exports the legacy registry. `aura-app` provides the platform-agnostic business logic consumed by all frontends.
-
-7. **User Interface** (`aura-terminal`): Terminal-based CLI and TUI entry points. Imports only from `aura-app` (never `aura-agent` directly). Uses `AppCore` as the unified backend interface for all operations. Exposes scenario/admin/recovery/invitation flows plus authority/context inspection commands.
-
-8. **Testing & Tools** (`aura-testkit`, `aura-quint`): Shared fixtures, simulation harnesses, property tests, Quint interop.
+- Identity via opaque `AuthorityId` and relational `ContextId`
+- Commitment trees expressed as fact-based `AttestedOps` (`aura-journal/src/fact.rs`)
+- Relational contexts (guardian bindings, recovery grants) live in their own journals
+- Aura Consensus is the sole strong-agreement mechanism
+- **Transaction Model**: (1) Authority Scope (single vs cross-authority) × (2) Agreement Level (monotone/CRDT vs consensus). Monotone = 0 RTT, consensus = 1-3 RTT.
 
 ### Layer 5 Conventions
-- Each Layer 5 crate includes `ARCHITECTURE.md` describing facts, invariants, and operation categories.
-- Each Layer 5 crate exposes `OPERATION_CATEGORIES` mapping operations to A/B/C classes.
-- Runtime-owned caches (e.g., invitation/rendezvous descriptors) must live in Layer 6 handlers.
-- Layer 5 facts use versioned binary encoding (bincode) with JSON fallback for debug; bump per-crate schema constants on breaking changes.
-- FactKey helper types are required for reducers/views to avoid ad-hoc key drift.
-- Ceremony facts include optional `trace_id` for correlation (typically set to the ceremony id).
 
-**Where does my code go?** See the docs under `docs/001_system_architecture.md` and `docs/102_authority_and_identity.md` for the latest authority-centric guidance.
+- Each crate includes `ARCHITECTURE.md` with facts, invariants, operation categories
+- Each crate exposes `OPERATION_CATEGORIES` mapping operations to A/B/C classes
+- Runtime-owned caches (invitation/rendezvous descriptors) live in L6 handlers, not L5
+- Facts use versioned binary encoding with JSON fallback; bump schema constants on breaking changes
+- FactKey helper types required for reducers/views to avoid key drift
+- Ceremony facts include optional `trace_id` for correlation
 
-## Architecture Essentials (Authority Model)
+## Agent Decision Aids
 
-Aura now models identity via opaque authorities (`AuthorityId`) and relational contexts (`ContextId`). Key points:
+### Code Location Decision Tree
 
-- commitment tree updates and device membership are expressed as fact-based AttestedOps (`aura-journal/src/fact.rs`). No graph-based `journal_ops` remain.
-- Relational contexts (guardian bindings, recovery grants, rendezvous receipts) live in their own journals (`docs/112_relational_contexts.md`).
-- Aura Consensus is the sole strong-agreement mechanism (`docs/106_consensus.md`). Fast path + fallback gossip integrate with the guard chain.
-- Guard chain sequence: `AuthorizationEffects` (Biscuit/capabilities) → `FlowBudgetEffects` (charge-before-send) → `LeakageEffects` (`docs/003_information_flow_contract.md`) → `JournalEffects` (fact commit) → `TransportEffects`.
-- Flow budgets: only the `spent` counters are facts; limits are derived at runtime from Biscuit + policy.
-- **Hybrid journal model**: fact journal (join) + capability frontier (meet) combined as `JournalState` for effects/runtime use.
-- **Transaction Model**: Database operations coordinate via two orthogonal dimensions: (1) Authority Scope (Single vs Cross-authority) and (2) Agreement Level (Monotone/CRDT vs Consensus). Monotone operations use CRDT merge (0 RTT). Non-monotone operations use consensus (1-3 RTT). Cross-authority operations work with both. Consensus is NOT linearizable - use session types for operation sequencing. See `docs/113_database.md` §8.
+```
+What am I implementing?
+├─ Effect trait definition → aura-core (L1)
+├─ Single-party stateless handler → aura-effects (L3)
+├─ Multi-party coordination → aura-protocol + L4 subcrates
+├─ Domain-specific logic → Domain crate (L2)
+├─ Complete end-to-end protocol → Feature crate (L5)
+├─ Runtime assembly → aura-agent (L6)
+├─ CLI/TUI command → aura-terminal (L7)
+└─ Mock/test handler → aura-testkit (L8)
+```
 
-## Terminology Baseline
+### Effect Classification
 
-Use canonical terms from `docs/002_theoretical_model.md#shared-terms-and-notation`:
+| Question | Infrastructure (aura-effects) | Application (domain crate) |
+|----------|------------------------------|---------------------------|
+| OS integration needed? | ✓ Yes | ✗ No (inject effects) |
+| Contains domain semantics? | ✗ No | ✓ Yes |
+| Aura-specific logic? | ✗ No | ✓ Yes |
+| Reusable outside Aura? | ✓ Yes | ✗ No |
 
-- Roles: `Member`, `Participant`, `Moderator` (moderator is a member designation)
-- Access levels: `Full`, `Partial`, `Limited`
-- Social topology: `1-hop` / `n-hop` links
-- Storage/pinning: `Shared Storage`, `allocation`, `pinned`
+**Quick test**: OS integration? → Infrastructure. Aura domain knowledge? → Application. Convenience wrapper? → Composite/extension trait.
 
-## Threshold Lifecycle Taxonomy
+### Fact Pattern Selection
 
-Aura separates **key generation** from **agreement/finality**:
-- **K1**: Local/Single‑Signer (no DKG)
-- **K2**: Dealer‑Based DKG (trusted coordinator)
-- **K3**: Quorum/BFT‑DKG (consensus‑finalized transcript)
+```
+Is this a Layer 2 domain crate?
+├─ Yes → Use aura-core pattern (FactTypeId, try_encode, FactDeltaReducer)
+│         Do NOT depend on aura-journal
+│
+└─ No (Layer 4/5) → Use DomainFact trait pattern
+                    Depend on aura-journal, register in FactRegistry
+```
 
-Agreement modes are orthogonal:
-- **A1**: Provisional (usable immediately, not final)
-- **A2**: Coordinator Soft‑Safe (bounded divergence + convergence cert)
-- **A3**: Consensus‑Finalized (unique, durable, non‑forkable)
+### Layer Rules
 
-Leader selection and pipelining are **orthogonal optimizations**, not agreement modes. Fast paths (A1/A2) must be explicitly marked provisional and superseded by A3 for durable shared state.
+| Layer | What Goes Here | What Doesn't |
+|-------|----------------|--------------|
+| L1 (`aura-core`) | Effect trait definitions, domain types, crypto utilities, Arc blankets, extension traits | Implementations, business logic, handlers |
+| L2 (Domain) | Pure domain semantics, CRDT logic, fact types, validation rules | OS access, Tokio, handler composition, runtime state |
+| L3 (`aura-effects`) | Stateless single-party handlers, OS integration | Multi-handler coordination, stateful impls, mock handlers |
+| L4 (Orchestration) | Multi-party coordination, guard chain, consensus runtime, cross-handler decisions | Effect definitions, single-party handlers, runtime assembly |
+| L5 (Features) | End-to-end protocols, OPERATION_CATEGORIES, domain facts | Runtime caches (those go in L6), UI concerns |
+| L6 (Runtime) | Lifecycle management, effect system assembly, runtime-owned caches | Handler implementations, protocol coordination |
+| L7 (`aura-terminal`) | CLI/TUI entry points, main() | Business logic (import from `aura-app` only) |
+| L8 (Testing) | Mock handlers, test fixtures, stateful test handlers | Production code |
 
-## Distributed Systems Contract
+### Crate Selection by Implementation
 
-See `docs/004_distributed_systems_contract.md` for the distributed-systems guarantees (safety, liveness, partial synchrony assumptions, latency expectations, adversarial models, and monitoring guidance).
+| Implementing... | Crate |
+|-----------------|-------|
+| Hash function (pure) | `aura-core` |
+| Cryptographic operations | Effect traits; see `docs/100_crypto.md` |
+| FROST primitives | `aura-core::crypto::tree_signing` |
+| Guardian recovery | `aura-recovery` |
+| Journal fact validation | `aura-journal` |
+| Network transport | `aura-transport` (abstractions) + `aura-effects` (TCP) |
+| CLI command | `aura-terminal` |
+| Test scenario | `aura-testkit` |
+| Choreography protocol | Feature crate + `aura-mpst` |
+| Authorization logic | `aura-authorization` |
+| Social topology | `aura-social` |
+| Quint specification | `verification/quint/` |
 
-## Information Flow / Privacy
+### Before Removing a Stub Handler
 
-Reference `docs/003_information_flow_contract.md` for the unified flow-budget/metadata-leakage contract. Key notes:
-- Charge-before-send invariant enforced by FlowGuard + JournalCoupler.
-- Receipts propagate via relational contexts (`docs/109_transport_and_information_flow.md`).
-- Leakage budgets tracked via `LeakageEffects` and choreography annotations.
+1. Check if the trait is used anywhere
+2. If **unused**: Remove both trait (aura-core) AND implementation (aura-effects)
+3. If **used**: Keep a properly-named fallback handler
 
-## Authorization Systems
+### Compliance Checklist
 
-1. **Traditional Capability Semantics** (`aura-authorization`): Meet-semilattice capability evaluation for local checks.
-2. **Biscuit Tokens** (`aura-authorization/src/biscuit/`, `aura-guards/src/authorization.rs`): Cryptographically verifiable, attenuated tokens.
-3. **Guard Integration**: `aura-guards::{CapGuard, FlowGuard, JournalCoupler, LeakageTracker}` enforce Biscuit/policy requirements, flow budgets, journal commits, and leakage budgets per message.
+- [ ] Layer dependencies flow downward only
+- [ ] Effect traits in `aura-core` only
+- [ ] Infrastructure effects in `aura-effects`, application effects in domain crates
+- [ ] No direct impure functions outside effect implementations
+- [ ] Production handlers are stateless
 
-## Unified Time System
+## Documentation Lookup
 
-Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects`/chrono use is forbidden in application code.
+### By Task
 
-1. **PhysicalTimeEffects** (`aura-core/src/effects/time.rs`): Wall-clock time for timestamps, expiration, cooldowns, receipts.
-2. **LogicalClockEffects**: Vector + Lamport clocks for causal ordering (CRDT/session happens-before).
-3. **OrderClockEffects**: Privacy-preserving total ordering tokens with no temporal meaning.
-4. **TimeAttestationEffects**: Optional provenance/consensus proof wrapper around `TimeStamp` when attested time is required.
+| Task | Doc | Code |
+|------|-----|------|
+| Adding effect trait | `docs/105_effect_system_and_runtime.md` | `aura-core/src/effects/` |
+| Building choreography | `docs/108_mpst_and_choreography.md` | Feature crate + `aura-mpst` |
+| Understanding authorities | `docs/102_authority_and_identity.md` | `aura-core/src/authority.rs` |
+| Implementing consensus | `docs/106_consensus.md` | `aura-consensus/` |
+| Working with journals | `docs/103_journal.md` | `aura-journal/` |
+| Recovery flows | `docs/112_relational_contexts.md` | `aura-recovery/` |
+| Architecture debugging | `docs/999_project_structure.md` | `just check-arch` |
 
-**TimeStamp Variants** (`aura-core/src/time.rs`):
-- `PhysicalClock(PhysicalTime)`: ms since UNIX epoch + optional uncertainty
-- `LogicalClock(LogicalTime)`: vector + Lamport clocks for causality  
-- `OrderClock(OrderTime)`: Opaque 32-byte tokens for deterministic ordering without leakage
-- `Range(RangeTime)`: Validity windows/constraints (compose with PhysicalClock)
+### By Concept
 
-**Key Principles**:
-- Domain separation: choose Physical/Logical/Order/Range based on semantics
-- Privacy: OrderClock leaks no timing; provenance is orthogonal via attestation
-- Effect integration: all time access via traits; no direct `SystemTime::now()`/chrono outside handlers
-- Explicit ordering: use `TimeStamp::compare(policy)` for cross-domain comparisons
+| Concept | Documentation |
+|---------|---------------|
+| Authorities & identity | `docs/102_authority_and_identity.md` |
+| Commitment trees | `docs/102_authority_and_identity.md` |
+| Consensus | `docs/106_consensus.md` |
+| Effect system | `docs/105_effect_system_and_runtime.md` |
+| Protocols & choreography | `docs/108_mpst_and_choreography.md` |
+| Guard chain | `docs/001_system_architecture.md` §5 |
+| Journals & facts | `docs/103_journal.md` |
+| State reduction | `docs/103_journal.md` |
+| Privacy & flow budgets | `docs/003_information_flow_contract.md` |
+| Relational contexts | `docs/112_relational_contexts.md` |
+| Transport & receipts | `docs/109_transport_and_information_flow.md` |
+| Rendezvous | `docs/111_rendezvous.md` |
+| Social topology | `docs/114_social_architecture.md` |
+| Cryptography | `docs/100_crypto.md` |
+| Authorization & Biscuit | `docs/104_authorization.md` |
+| Identifiers & boundaries | `docs/101_identifiers_and_boundaries.md` |
+| Operation categories | `docs/107_operation_categories.md` |
+| Database & queries | `docs/113_database.md` |
+| Distributed systems | `docs/004_distributed_systems_contract.md` |
+| Theoretical model | `docs/002_theoretical_model.md` |
+| Testing | `docs/805_testing_guide.md` |
+| Simulation | `docs/806_simulation_guide.md` |
+| Verification (Quint/Lean) | `docs/807_verification_guide.md` |
+| Maintenance & OTA | `docs/115_maintenance.md`, `docs/808_maintenance_guide.md` |
+| Development patterns | `docs/805_development_patterns_guide.md` |
+| Getting started | `docs/801_hello_world_guide.md` |
 
-## Documentation Map
+## Domain Concepts
 
-- Core overview: `docs/000_project_overview.md`
-- Theoretical model: `docs/002_theoretical_model.md`
-- Architecture: `docs/001_system_architecture.md`
-- Privacy: `docs/003_information_flow_contract.md`
-- Distributed systems contract: `docs/004_distributed_systems_contract.md`
-- Authority/Relational identity: `docs/102_authority_and_identity.md`, `docs/112_relational_contexts.md`
-- Consensus & BFT-DKG: `docs/106_consensus.md`
-- Transport/receipts: `docs/109_transport_and_information_flow.md`, `docs/111_rendezvous.md`
-- AMP messaging: `docs/110_amp.md`
-- Developer guides: `docs/108_mpst_and_choreography.md`, `docs/105_effect_system_and_runtime.md`
-- Cryptography & VSS: `docs/100_crypto.md`
-- Operation categories and ceremonies: `docs/107_operation_categories.md`
-- Test infrastructure: `docs/117_testkit.md`
-- Simulation infrastructure: `docs/118_simulator.md`
-- Formal verification: `docs/119_verification.md`
-- Reference: `docs/999_project_structure.md`
+### Terminology
 
-## Agent Quick Reference
+From `docs/002_theoretical_model.md#shared-terms-and-notation`:
+- **Roles**: `Member`, `Participant`, `Moderator`
+- **Access levels**: `Full`, `Partial`, `Limited`
+- **Topology**: `1-hop` / `n-hop` links
 
-### "Where does my code go?" Decision Tree
-- **Single-party stateless operation** → `aura-effects`
-- **Multi-party coordination** → `aura-protocol` + Layer 4 subcrates (`aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`)
-- **Domain-specific logic** → Domain crate (`aura-journal`, etc.)
-- **Domain service handler (stateless)** → Domain crate `*FactService` (e.g., `aura-chat::ChatFactService`)
-- **RwLock wrapper service** → `aura-agent/src/handlers/*_service.rs`
-- **Complete end-to-end protocol** → Feature crate (e.g., `aura-authentication`; `aura-frost` deprecated)
-- **Effect trait definition** → `aura-core`
-- **Mock/test handlers** → `aura-testkit`
+### Threshold Lifecycle (K/A Modes)
 
-### Common Development Tasks → Docs
-- **Adding new effect trait**: `docs/105_effect_system_and_runtime.md` → `docs/805_development_patterns_guide.md`
-- **Building choreography**: `docs/108_mpst_and_choreography.md` → `docs/803_coordination_guide.md`
-- **Understanding authorities**: `docs/102_authority_and_identity.md` → `docs/103_journal.md`
-- **Debugging architecture**: `docs/999_project_structure.md` + `just check-arch`
-- **Implementing consensus**: `docs/106_consensus.md` → `crates/aura-consensus/src/consensus/`
-- **Working with journals**: `docs/103_journal.md` → `aura-journal/src/`
-- **Creating recovery flows**: `docs/112_relational_contexts.md` → `aura-recovery/`
+Key generation and agreement are orthogonal:
 
-### Architecture Compliance Checklist
-- [ ] Layer dependencies flow downward only (see dependency graph in `docs/999_project_structure.md`)
-- [ ] Effect traits defined in `aura-core` only
-- [ ] Infrastructure effects implemented in `aura-effects`
-- [ ] Application effects in domain crates
-- [ ] No direct impure function usage outside effect implementations
-- [ ] All async functions propagate `EffectContext`
-- [ ] Production handlers are stateless, test handlers in `aura-testkit`
+| Mode | Key Generation | Agreement |
+|------|---------------|-----------|
+| K1 | Local/Single-signer | A1: Provisional |
+| K2 | Dealer-based DKG | A2: Coordinator soft-safe |
+| K3 | Quorum/BFT-DKG | A3: Consensus-finalized |
 
-### Layer-Based Development Workflow
-- **Working on Layer 1 (Foundation)?** Read: `docs/105_effect_system_and_runtime.md`
-- **Working on Layer 2 (Domains)?** Read: Domain-specific docs (`docs/100-112`)
-- **Working on Layer 3 (Effects)?** Read: `docs/805_development_patterns_guide.md`
-- **Working on Layer 4 (Protocols)?** Read: `docs/108_mpst_and_choreography.md`
-- **Working on Layer 5 (Features)?** Read: `docs/803_coordination_guide.md`
-- **Working on Layer 6 (Runtime)?** Read: `aura-agent/` and `aura-simulator/`
-- **Working on Layer 7 (Terminal)?** Read: `aura-terminal/` + `aura-app/` + scenario docs
-- **Working on Layer 8 (Testing)?** Read: `docs/805_testing_guide.md`
+Fast paths (A1/A2) must be superseded by A3 for durable shared state.
 
-### Task-Oriented Crate Selection
+### Time System
 
-#### "I'm implementing..."
-- **A new hash function** → `aura-core` (pure function) + `aura-effects` (if OS integration needed)
-- **Cryptographic operations** → Use effect traits; see `docs/100_crypto.md` for layer rules
-- **FROST primitives** → `aura-core::crypto::tree_signing`; `aura-frost` deprecated
-- **Guardian recovery flow** → `aura-recovery`
-- **Journal fact validation** → `aura-journal`
-- **Network transport** → `aura-transport` (abstractions) + `aura-effects` (TCP implementation)
-- **CLI command** → `aura-terminal`
-- **Test scenario** → `aura-testkit`
-- **Choreography protocol** → Feature crate + `aura-mpst`
-- **Authorization logic** → `aura-authorization`
-- **Social topology/relay selection** → `aura-social`
-- **Quint specification** → `verification/quint/` + `docs/807_verification_guide.md`
-- **Generative test** → `aura-simulator/src/quint/` + `docs/807_verification_guide.md`
+Four domains via effect traits (no direct `SystemTime::now()` or chrono):
 
-#### "I need to understand..."
-- **How authorities work** → `docs/102_authority_and_identity.md`
-- **How consensus works** → `docs/106_consensus.md`
-- **How effects compose** → `docs/105_effect_system_and_runtime.md`
-- **How protocols are designed** → `docs/108_mpst_and_choreography.md`
-- **How the guard chain works** → `docs/001_system_architecture.md` (sections 2.1-2.3)
-- **How crypto architecture works** → `docs/100_crypto.md` + `just check-arch --crypto`
-- **How journals work** → `docs/103_journal.md`
-- **How the query system works** → `docs/113_database.md` (Datalog queries, isolation levels, statistics)
-- **How testing works** → `docs/805_testing_guide.md` + `docs/806_simulation_guide.md`
-- **How to write tests** → `docs/805_testing_guide.md`
-- **How privacy and flow budgets work** → `docs/003_information_flow_contract.md`
-- **How distributed system guarantees work** → `docs/004_distributed_systems_contract.md`
-- **How commitment trees work** → `docs/102_authority_and_identity.md`
-- **How relational contexts work** → `docs/112_relational_contexts.md`
-- **How transport and receipts work** → `docs/109_transport_and_information_flow.md`
-- **How rendezvous and peer discovery work** → `docs/111_rendezvous.md`
-- **How social topology and homes work** → `docs/114_social_architecture.md`
-- **How state reduction works** → `docs/103_journal.md`
-- **How the mathematical model works** → `docs/002_theoretical_model.md`
-- **How identifiers and boundaries work** → `docs/101_identifiers_and_boundaries.md`
-- **How authorization and capabilities work** → `docs/104_authorization.md`
-- **How Biscuit tokens work** → `docs/104_authorization.md` + `aura-authorization/src/biscuit/`
-- **How to get started as a new developer** → `docs/801_hello_world_guide.md`
-- **How core systems work together** → `docs/805_development_patterns_guide.md`
-- **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`
-- **How simulation works** → `docs/806_simulation_guide.md`
-- **How verification works** → `docs/807_verification_guide.md` (Quint specs + Lean proofs)
-- **How generative testing works** → `docs/807_verification_guide.md`
-- **How maintenance and OTA updates work** → `docs/808_maintenance_guide.md` + `docs/115_maintenance.md`
-- **How development patterns work** → `docs/805_development_patterns_guide.md`
-- **The project's goals and constraints** → `docs/000_project_overview.md`
+| Effect Trait | TimeStamp Variant | Use Case |
+|--------------|-------------------|----------|
+| `PhysicalTimeEffects` | `PhysicalClock(PhysicalTime)` | Wall-clock, expiration, receipts |
+| `LogicalClockEffects` | `LogicalClock(LogicalTime)` | Vector/Lamport for causality |
+| `OrderClockEffects` | `OrderClock(OrderTime)` | Privacy-preserving ordering (no timing leakage) |
+| `TimeAttestationEffects` | `Range(RangeTime)` | Validity windows, provenance proofs |
 
-## Legacy Cleanup Status
+**Key principles**: Domain separation based on semantics. OrderClock leaks no timing. All time access via traits.
 
-- Graph-based `journal_ops` directory removed; guard/tests now track fact deltas.
-- `DeviceMetadata`/`DeviceType`/`DeviceRegistry` removed - device information now derived from `LeafNode` in commitment tree (`aura-core/src/tree/types.rs`). Device views are obtained via `TreeEffects::get_current_state()`.
+### Authorization
 
-## Usage Efficiency Guidelines
+1. **Capability semantics** (`aura-authorization`): Meet-semilattice evaluation
+2. **Biscuit tokens**: Cryptographically verifiable, attenuated
+3. **Guard chain**: CapGuard → FlowGuard → JournalCoupler → LeakageTracker
 
-To conserve agent usage, prefer:
-- Specific file paths over broad searches when known
-- Targeted grep patterns over reading entire files
-- Architecture compliance (`just check-arch`) before complex refactoring
-- Quick reference skills over re-reading documentation
-- Batch operations and parallel tool calls when possible
+## Usage Efficiency
+
+- Prefer specific file paths over broad searches
+- Use `just check-arch` before complex refactoring
 - Use `.claude/skills/` for project-specific knowledge
-- Note: `work/` is non-authoritative scratch and may be removed
+- Batch operations and parallel tool calls when possible
+
+## Legacy Notes
+
+- `aura-frost` deprecated → use `aura-core::crypto::tree_signing`
+- Graph-based `journal_ops` removed → use fact-based `AttestedOps`
+- `DeviceMetadata`/`DeviceRegistry` removed → derive from `LeafNode`
