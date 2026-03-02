@@ -16,6 +16,7 @@ pub struct HarnessCoordinator {
     backends: HashMap<String, BackendHandle>,
     clipboard_files: HashMap<String, PathBuf>,
     instance_modes: HashMap<String, InstanceMode>,
+    instance_data_dirs: HashMap<String, PathBuf>,
     events: EventStream,
 }
 
@@ -25,6 +26,7 @@ impl HarnessCoordinator {
         let mut backends = HashMap::new();
         let mut clipboard_files = HashMap::new();
         let mut instance_modes = HashMap::new();
+        let mut instance_data_dirs = HashMap::new();
         let pty_rows = config.run.pty_rows;
         let pty_cols = config.run.pty_cols;
         for instance in &config.instances {
@@ -32,6 +34,7 @@ impl HarnessCoordinator {
             let backend = BackendHandle::from_config(instance.clone(), pty_rows, pty_cols)?;
             clipboard_files.insert(id.clone(), clipboard_file_for_instance(instance));
             instance_modes.insert(id.clone(), instance.mode.clone());
+            instance_data_dirs.insert(id.clone(), absolutize_path(instance.data_dir.clone()));
             backends.insert(id, backend);
         }
 
@@ -39,6 +42,7 @@ impl HarnessCoordinator {
             backends,
             clipboard_files,
             instance_modes,
+            instance_data_dirs,
             events: EventStream::new(),
         })
     }
@@ -239,6 +243,63 @@ impl HarnessCoordinator {
     pub fn event_snapshot(&self) -> Vec<crate::events::HarnessEvent> {
         self.events.snapshot()
     }
+
+    pub fn resolve_authority_id_from_local_state(&mut self, instance_id: &str) -> Result<String> {
+        let mode = self
+            .instance_modes
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        if !matches!(mode, InstanceMode::Local) {
+            bail!("get_authority_id fallback is only supported for local instances");
+        }
+
+        let data_dir = self
+            .instance_data_dirs
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("missing data_dir for instance_id: {instance_id}"))?;
+        let epoch_dir = data_dir.join("secure_store").join("epoch_state");
+        let entries = fs::read_dir(&epoch_dir).map_err(|error| {
+            anyhow!(
+                "failed reading local authority state {}: {error}",
+                epoch_dir.display()
+            )
+        })?;
+
+        let mut authority_ids = entries
+            .filter_map(std::result::Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| name.starts_with("authority-"))
+            .collect::<Vec<_>>();
+        authority_ids.sort();
+        authority_ids.dedup();
+
+        match authority_ids.len() {
+            1 => {
+                let authority_id = authority_ids.remove(0);
+                self.events.push(
+                    "observation",
+                    "resolve_authority_id_local_state",
+                    Some(instance_id.to_string()),
+                    serde_json::json!({
+                        "source": epoch_dir.display().to_string(),
+                        "authority_id": authority_id
+                    }),
+                );
+                Ok(authority_id)
+            }
+            0 => bail!(
+                "no local authority ids found in {} for instance {}",
+                epoch_dir.display(),
+                instance_id
+            ),
+            _ => bail!(
+                "multiple local authority ids found in {} for instance {}: {:?}",
+                epoch_dir.display(),
+                instance_id,
+                authority_ids
+            ),
+        }
+    }
 }
 
 fn key_sequence(key: ToolKey) -> &'static str {
@@ -316,9 +377,13 @@ impl Drop for HarnessCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_file_for_instance, normalize_key_stream, wait_pattern_matches};
+    use super::{
+        clipboard_file_for_instance, normalize_key_stream, wait_pattern_matches, HarnessCoordinator,
+    };
     use crate::config::InstanceConfig;
     use crate::config::InstanceMode;
+    use crate::config::RunConfig;
+    use crate::config::RunSection;
     use crate::config::TunnelConfig;
     use std::path::PathBuf;
 
@@ -394,5 +459,62 @@ mod tests {
             .unwrap_or_else(|error| panic!("current_dir failed: {error}"))
             .join("tmp/custom-clip.txt");
         assert_eq!(clipboard_file_for_instance(&instance), expected);
+    }
+
+    #[test]
+    fn resolve_authority_id_from_local_state_reads_epoch_directory() {
+        let temp = tempfile::tempdir().unwrap_or_else(|error| panic!("{error}"));
+        let data_dir = temp.path().join("alice");
+        let epoch_dir = data_dir.join("secure_store").join("epoch_state");
+        std::fs::create_dir_all(&epoch_dir).unwrap_or_else(|error| panic!("{error}"));
+        let authority_id = "authority-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        std::fs::create_dir(epoch_dir.join(authority_id)).unwrap_or_else(|error| panic!("{error}"));
+
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "authority-id-test".to_string(),
+                pty_rows: Some(10),
+                pty_cols: Some(40),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: None,
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+            },
+            instances: vec![InstanceConfig {
+                id: "alice".to_string(),
+                mode: InstanceMode::Local,
+                data_dir,
+                device_id: None,
+                bind_address: "127.0.0.1:45001".to_string(),
+                demo_mode: false,
+                command: Some("bash".to_string()),
+                args: vec!["-lc".to_string(), "cat".to_string()],
+                env: vec![],
+                log_path: None,
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None::<TunnelConfig>,
+            }],
+        };
+
+        let mut coordinator =
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}"));
+        let resolved = coordinator
+            .resolve_authority_id_from_local_state("alice")
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(resolved, authority_id);
     }
 }

@@ -2,9 +2,11 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{ScenarioConfig, ScenarioStep};
+use crate::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
+use crate::introspection::{extract_command_consistency, extract_toast, ToastLevel};
 use crate::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
@@ -42,6 +44,66 @@ pub struct ExecutionBudgets {
     pub default_step_budget_ms: u64,
     pub scenario_seed: u64,
     pub fault_seed: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScreenField {
+    Screen,
+    RawScreen,
+    AuthoritativeScreen,
+    NormalizedScreen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpectedConsistency {
+    Accepted,
+    Replicated,
+    Enforced,
+    PartialTimeout,
+}
+
+impl ExpectedConsistency {
+    fn parse(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "accepted" => Ok(Self::Accepted),
+            "replicated" => Ok(Self::Replicated),
+            "enforced" => Ok(Self::Enforced),
+            "partial-timeout" | "partial_timeout" | "partialtimeout" => Ok(Self::PartialTimeout),
+            other => bail!("unsupported consistency value: {other}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeniedReason {
+    Permission,
+    Banned,
+    Muted,
+}
+
+impl DeniedReason {
+    fn parse(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "permission" => Ok(Self::Permission),
+            "banned" => Ok(Self::Banned),
+            "muted" => Ok(Self::Muted),
+            other => bail!("unsupported denied reason: {other}"),
+        }
+    }
+
+    fn patterns(self) -> &'static [&'static str] {
+        match self {
+            Self::Permission => &["permission", "denied", "auth"],
+            Self::Banned => &["ban", "banned", "denied"],
+            Self::Muted => &["mute", "muted", "denied"],
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+struct ScenarioContext {
+    vars: BTreeMap<String, String>,
+    last_request_id: Option<u64>,
 }
 
 impl Default for ExecutionBudgets {
@@ -92,6 +154,7 @@ impl ScenarioExecutor {
         let mut global_remaining = budgets.global_budget_ms;
         let mut scenario_rng = DeterministicRng::new(budgets.scenario_seed);
         let mut fault_rng = DeterministicRng::new(budgets.fault_seed);
+        let mut context = ScenarioContext::default();
 
         loop {
             let state = machine
@@ -120,6 +183,7 @@ impl ScenarioExecutor {
                 step_budget,
                 &mut scenario_rng,
                 &mut fault_rng,
+                &mut context,
             )?;
 
             let next = match self.mode {
@@ -193,37 +257,91 @@ fn execute_step(
     step_budget_ms: u64,
     scenario_rng: &mut DeterministicRng,
     fault_rng: &mut DeterministicRng,
+    context: &mut ScenarioContext,
 ) -> Result<()> {
-    match step.action.as_str() {
-        "launch_instances" | "noop" => Ok(()),
-        "send_keys" => {
-            let instance_id = step
-                .instance
+    enforce_request_order(step, context)?;
+    match step.action {
+        ScenarioAction::LaunchInstances | ScenarioAction::Noop => Ok(()),
+        ScenarioAction::SetVar => {
+            let var = step
+                .var
                 .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
-            let keys = step.expect.clone().unwrap_or_else(|| "\n".to_string());
+                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
+            let raw_value = step
+                .value
+                .as_deref()
+                .or(step.expect.as_deref())
+                .ok_or_else(|| anyhow!("step {} missing value", step.id))?;
+            let value = resolve_template(raw_value, context)?;
+            context.vars.insert(var.to_string(), value);
+            Ok(())
+        }
+        ScenarioAction::ExtractVar => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let var = step
+                .var
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
+            let regex_pattern = resolve_required_field(
+                step,
+                "regex",
+                step.regex.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            let field = parse_screen_field(step.from.as_deref().unwrap_or("screen"))?;
+            let payload = dispatch_payload(
+                tool_api,
+                ToolRequest::Screen {
+                    instance_id: instance_id.clone(),
+                },
+            )?;
+            let source = screen_field_value(&payload, field);
+            let regex = Regex::new(&regex_pattern)
+                .map_err(|error| anyhow!("step {} invalid regex: {error}", step.id))?;
+            let captures = regex.captures(source).ok_or_else(|| {
+                anyhow!(
+                    "step {} extract_var pattern did not match source field {}",
+                    step.id,
+                    screen_field_label(field)
+                )
+            })?;
+            let group = step.group.unwrap_or(1);
+            let capture = captures.get(group).ok_or_else(|| {
+                anyhow!(
+                    "step {} extract_var missing capture group {}",
+                    step.id,
+                    group
+                )
+            })?;
+            context.vars.insert(var.to_string(), capture.as_str().to_string());
+            Ok(())
+        }
+        ScenarioAction::SendKeys => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let keys = resolve_optional_field(
+                step.keys.as_deref().or(step.expect.as_deref()),
+                context,
+            )?
+            .unwrap_or_else(|| "\n".to_string());
             dispatch(
                 tool_api,
                 ToolRequest::SendKeys {
-                    instance_id: instance_id.to_string(),
+                    instance_id,
                     keys,
                 },
             )?;
             Ok(())
         }
-        "send_chat_command" => {
-            let instance_id = step
-                .instance
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
-            let command = step
-                .expect
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| anyhow!("step {} missing expect command", step.id))?;
+        ScenarioAction::SendChatCommand => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let command = resolve_required_field(
+                step,
+                "command",
+                step.command.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
             let command = if command.starts_with('/') {
-                command.to_string()
+                command
             } else {
                 format!("/{command}")
             };
@@ -232,36 +350,51 @@ fn execute_step(
             dispatch(
                 tool_api,
                 ToolRequest::SendKey {
-                    instance_id: instance_id.to_string(),
+                    instance_id: instance_id.clone(),
                     key: ToolKey::Esc,
                     repeat: 1,
                 },
             )?;
+            // Force chat context before entering insert mode to avoid cross-screen dispatch flakiness.
             dispatch(
                 tool_api,
                 ToolRequest::SendKeys {
-                    instance_id: instance_id.to_string(),
+                    instance_id: instance_id.clone(),
+                    keys: "2".to_string(),
+                },
+            )?;
+            let _ = dispatch(
+                tool_api,
+                ToolRequest::WaitFor {
+                    instance_id: instance_id.clone(),
+                    pattern: "Channels".to_string(),
+                    timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms).min(1500),
+                },
+            );
+            dispatch(
+                tool_api,
+                ToolRequest::SendKeys {
+                    instance_id,
                     keys: format!("i{command}\n"),
                 },
             )?;
             Ok(())
         }
-        "send_clipboard" => {
-            let target_instance_id = step
-                .instance
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing target instance", step.id))?;
-            let source_instance_id = step
-                .expect
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing source instance in expect", step.id))?;
+        ScenarioAction::SendClipboard => {
+            let target_instance_id = resolve_required_instance(step, context)?;
+            let source_instance_id = resolve_required_field(
+                step,
+                "source_instance",
+                step.source_instance.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
             let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             let clipboard_text = loop {
                 let attempt_error = match dispatch_payload(
                     tool_api,
                     ToolRequest::ReadClipboard {
-                        instance_id: source_instance_id.to_string(),
+                        instance_id: source_instance_id.clone(),
                     },
                 ) {
                     Ok(payload) => {
@@ -293,91 +426,598 @@ fn execute_step(
             dispatch(
                 tool_api,
                 ToolRequest::SendKeys {
-                    instance_id: target_instance_id.to_string(),
+                    instance_id: target_instance_id,
                     keys: clipboard_text,
                 },
             )?;
             Ok(())
         }
-        "send_key" => {
-            let instance_id = step
-                .instance
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
-            let key_name = step
-                .expect
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing expect key", step.id))?;
-            let key = parse_tool_key(key_name)?;
+        ScenarioAction::SendKey => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let key_name = resolve_required_field(
+                step,
+                "key",
+                step.key.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            let key = parse_tool_key(&key_name)?;
             dispatch(
                 tool_api,
                 ToolRequest::SendKey {
-                    instance_id: instance_id.to_string(),
+                    instance_id,
                     key,
-                    repeat: 1,
+                    repeat: step.repeat.unwrap_or(1),
                 },
             )?;
             Ok(())
         }
-        "wait_for" => {
-            let instance_id = step
-                .instance
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
-            let pattern = step
-                .expect
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing expect pattern", step.id))?;
+        ScenarioAction::WaitFor => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let pattern = resolve_required_field(
+                step,
+                "pattern",
+                step.pattern.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
             dispatch(
                 tool_api,
                 ToolRequest::WaitFor {
-                    instance_id: instance_id.to_string(),
-                    pattern: pattern.to_string(),
+                    instance_id,
+                    pattern,
                     timeout_ms: step.timeout_ms.unwrap_or(step_budget_ms),
                 },
             )?;
             Ok(())
         }
-        "restart" => {
-            let instance_id = step
-                .instance
+        ScenarioAction::ExpectToast => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let expected_contains = resolve_required_field(
+                step,
+                "contains",
+                step.contains.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            let expected_level = step
+                .level
                 .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
+                .map(parse_toast_level)
+                .transpose()?;
+            assert_toast(step, tool_api, &instance_id, step.timeout_ms.unwrap_or(step_budget_ms), |toast| {
+                if let Some(level) = expected_level {
+                    if toast.level != level {
+                        return false;
+                    }
+                }
+                toast.message.contains(&expected_contains)
+            })
+        }
+        ScenarioAction::ExpectCommandResult => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let expected_contains = resolve_optional_field(
+                step.contains.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            let expected_level = step
+                .level
+                .as_deref()
+                .map(parse_toast_level)
+                .transpose()?;
+            let expected_consistency = step
+                .consistency
+                .as_deref()
+                .map(ExpectedConsistency::parse)
+                .transpose()?;
+            assert_toast(step, tool_api, &instance_id, step.timeout_ms.unwrap_or(step_budget_ms), |toast| {
+                if let Some(level) = expected_level {
+                    if toast.level != level {
+                        return false;
+                    }
+                }
+                if let Some(ref contains) = expected_contains {
+                    if !toast.message.contains(contains) {
+                        return false;
+                    }
+                }
+                if let Some(consistency) = expected_consistency {
+                    let Some(found) = extract_command_consistency(&toast.message) else {
+                        return false;
+                    };
+                    let Ok(found) = ExpectedConsistency::parse(&found) else {
+                        return false;
+                    };
+                    if found != consistency {
+                        return false;
+                    }
+                }
+                true
+            })
+        }
+        ScenarioAction::ExpectMembership => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let channel = resolve_required_field(
+                step,
+                "channel",
+                step.channel.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            let expected_present = step.present.unwrap_or(true);
+            let expected_selected = step.selected;
+            assert_membership(
+                step,
+                tool_api,
+                &instance_id,
+                &channel,
+                expected_present,
+                expected_selected,
+                step.timeout_ms.unwrap_or(step_budget_ms),
+            )
+        }
+        ScenarioAction::ExpectDenied => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let reason = step
+                .reason
+                .as_deref()
+                .map(DeniedReason::parse)
+                .transpose()?;
+            let mut contains_any = step.contains_any.clone().unwrap_or_default();
+            if let Some(value) = resolve_optional_field(step.contains.as_deref(), context)? {
+                contains_any.push(value);
+            }
+            assert_toast(step, tool_api, &instance_id, step.timeout_ms.unwrap_or(step_budget_ms), |toast| {
+                if toast.level != ToastLevel::Error {
+                    return false;
+                }
+                let lowered = toast.message.to_ascii_lowercase();
+                if let Some(reason) = reason {
+                    if !reason.patterns().iter().any(|pattern| lowered.contains(pattern)) {
+                        return false;
+                    }
+                }
+                if contains_any.is_empty() {
+                    return true;
+                }
+                contains_any
+                    .iter()
+                    .any(|pattern| lowered.contains(&pattern.to_ascii_lowercase()))
+            })
+        }
+        ScenarioAction::GetAuthorityId => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let var = step
+                .var
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing var", step.id))?;
+            let payload = dispatch_payload(
+                tool_api,
+                ToolRequest::GetAuthorityId {
+                    instance_id: instance_id.clone(),
+                },
+            )?;
+            let authority_id = payload
+                .get("authority_id")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| anyhow!("step {} get_authority_id missing authority_id", step.id))?;
+            context.vars.insert(var.to_string(), authority_id.to_string());
+            Ok(())
+        }
+        ScenarioAction::ListChannels => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let payload = dispatch_payload(
+                tool_api,
+                ToolRequest::ListChannels {
+                    instance_id: instance_id.clone(),
+                },
+            )?;
+            if let Some(var) = step.var.as_deref() {
+                let channels = payload
+                    .get("channels")
+                    .and_then(serde_json::Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let names = channels
+                    .into_iter()
+                    .filter_map(|entry| entry.get("name").and_then(serde_json::Value::as_str).map(str::to_string))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                context.vars.insert(var.to_string(), names);
+            }
+            Ok(())
+        }
+        ScenarioAction::CurrentSelection => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let payload = dispatch_payload(
+                tool_api,
+                ToolRequest::CurrentSelection {
+                    instance_id: instance_id.clone(),
+                },
+            )?;
+            if let Some(var) = step.var.as_deref() {
+                let value = payload
+                    .get("selection")
+                    .and_then(serde_json::Value::as_object)
+                    .and_then(|selection| selection.get("value"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                context.vars.insert(var.to_string(), value);
+            }
+            Ok(())
+        }
+        ScenarioAction::ListContacts => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let payload = dispatch_payload(
+                tool_api,
+                ToolRequest::ListContacts {
+                    instance_id: instance_id.clone(),
+                },
+            )?;
+            if let Some(var) = step.var.as_deref() {
+                let contacts = payload
+                    .get("contacts")
+                    .and_then(serde_json::Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let names = contacts
+                    .into_iter()
+                    .filter_map(|entry| entry.get("name").and_then(serde_json::Value::as_str).map(str::to_string))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                context.vars.insert(var.to_string(), names);
+            }
+            Ok(())
+        }
+        ScenarioAction::SelectChannel => {
+            let instance_id = resolve_required_instance(step, context)?;
+            let channel = resolve_required_field(
+                step,
+                "channel",
+                step.channel.as_deref().or(step.expect.as_deref()),
+                context,
+            )?;
+            select_channel(
+                step,
+                tool_api,
+                &instance_id,
+                &channel,
+                step.timeout_ms.unwrap_or(step_budget_ms),
+            )
+        }
+        ScenarioAction::Restart => {
+            let instance_id = resolve_required_instance(step, context)?;
             dispatch(
                 tool_api,
                 ToolRequest::Restart {
-                    instance_id: instance_id.to_string(),
+                    instance_id,
                 },
             )?;
             Ok(())
         }
-        "kill" => {
-            let instance_id = step
-                .instance
-                .as_deref()
-                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
+        ScenarioAction::Kill => {
+            let instance_id = resolve_required_instance(step, context)?;
             dispatch(
                 tool_api,
                 ToolRequest::Kill {
-                    instance_id: instance_id.to_string(),
+                    instance_id,
                 },
             )?;
             Ok(())
         }
-        "fault_delay" => {
+        ScenarioAction::FaultDelay => {
             let delay_ms = step
                 .timeout_ms
                 .unwrap_or_else(|| 25 + fault_rng.range_u64(0, 25));
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
             Ok(())
         }
-        "fault_loss" | "fault_tunnel_drop" => {
+        ScenarioAction::FaultLoss | ScenarioAction::FaultTunnelDrop => {
             // Consume deterministic RNG state so replay and injected faults are seed-driven.
             let _decision = scenario_rng.range_u64(0, 2);
             Ok(())
         }
-        action => bail!("unsupported scenario action: {action}"),
     }
+}
+
+fn enforce_request_order(step: &ScenarioStep, context: &mut ScenarioContext) -> Result<()> {
+    let Some(request_id) = step.request_id else {
+        return Ok(());
+    };
+    if let Some(last) = context.last_request_id {
+        if request_id <= last {
+            bail!(
+                "step {} request_id={} is not strictly greater than prior request_id={}",
+                step.id,
+                request_id,
+                last
+            );
+        }
+    }
+    context.last_request_id = Some(request_id);
+    Ok(())
+}
+
+fn resolve_required_instance(step: &ScenarioStep, context: &ScenarioContext) -> Result<String> {
+    let instance = step
+        .instance
+        .as_deref()
+        .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
+    resolve_template(instance, context)
+}
+
+fn resolve_required_field(
+    step: &ScenarioStep,
+    field_name: &str,
+    raw_value: Option<&str>,
+    context: &ScenarioContext,
+) -> Result<String> {
+    let raw_value = raw_value.ok_or_else(|| anyhow!("step {} missing {}", step.id, field_name))?;
+    resolve_template(raw_value, context)
+}
+
+fn resolve_optional_field(raw_value: Option<&str>, context: &ScenarioContext) -> Result<Option<String>> {
+    raw_value
+        .map(|value| resolve_template(value, context))
+        .transpose()
+}
+
+fn resolve_template(raw: &str, context: &ScenarioContext) -> Result<String> {
+    let mut rendered = String::new();
+    let chars: Vec<char> = raw.chars().collect();
+    let mut index = 0usize;
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '$' && index + 1 < chars.len() && chars[index + 1] == '{' {
+            let mut end = index + 2;
+            while end < chars.len() && chars[end] != '}' {
+                end += 1;
+            }
+            if end >= chars.len() {
+                bail!("unclosed variable expression in template: {raw}");
+            }
+            let var_name = chars[index + 2..end].iter().collect::<String>();
+            let value = context
+                .vars
+                .get(&var_name)
+                .ok_or_else(|| anyhow!("unknown template variable: {var_name}"))?;
+            rendered.push_str(value);
+            index = end + 1;
+            continue;
+        }
+        rendered.push(ch);
+        index += 1;
+    }
+    Ok(rendered)
+}
+
+fn parse_toast_level(value: &str) -> Result<ToastLevel> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "success" => Ok(ToastLevel::Success),
+        "info" => Ok(ToastLevel::Info),
+        "error" => Ok(ToastLevel::Error),
+        other => bail!("unsupported toast level: {other}"),
+    }
+}
+
+fn parse_screen_field(value: &str) -> Result<ScreenField> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "screen" => Ok(ScreenField::Screen),
+        "raw_screen" => Ok(ScreenField::RawScreen),
+        "authoritative_screen" => Ok(ScreenField::AuthoritativeScreen),
+        "normalized_screen" => Ok(ScreenField::NormalizedScreen),
+        other => bail!("unsupported extract_var from field: {other}"),
+    }
+}
+
+fn screen_field_label(value: ScreenField) -> &'static str {
+    match value {
+        ScreenField::Screen => "screen",
+        ScreenField::RawScreen => "raw_screen",
+        ScreenField::AuthoritativeScreen => "authoritative_screen",
+        ScreenField::NormalizedScreen => "normalized_screen",
+    }
+}
+
+fn screen_field_value<'a>(payload: &'a serde_json::Value, field: ScreenField) -> &'a str {
+    let fallback = payload
+        .get("screen")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    match field {
+        ScreenField::Screen => fallback,
+        ScreenField::RawScreen => payload
+            .get("raw_screen")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(fallback),
+        ScreenField::AuthoritativeScreen => payload
+            .get("authoritative_screen")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(fallback),
+        ScreenField::NormalizedScreen => payload
+            .get("normalized_screen")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(fallback),
+    }
+}
+
+fn assert_toast<F>(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    timeout_ms: u64,
+    predicate: F,
+) -> Result<()>
+where
+    F: Fn(&crate::introspection::ToastSnapshot) -> bool,
+{
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut last_toast = None;
+    loop {
+        let payload = dispatch_payload(
+            tool_api,
+            ToolRequest::Screen {
+                instance_id: instance_id.to_string(),
+            },
+        )?;
+        let screen = payload
+            .get("authoritative_screen")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| payload.get("screen").and_then(serde_json::Value::as_str))
+            .unwrap_or_default();
+        if let Some(toast) = extract_toast(screen) {
+            if predicate(&toast) {
+                return Ok(());
+            }
+            last_toast = Some(toast.message);
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    let details = last_toast.unwrap_or_else(|| "none".to_string());
+    bail!(
+        "step {} toast assertion timed out on instance {} (last_toast={})",
+        step.id,
+        instance_id,
+        details
+    )
+}
+
+fn assert_membership(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    channel: &str,
+    expected_present: bool,
+    expected_selected: Option<bool>,
+    timeout_ms: u64,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let payload = dispatch_payload(
+            tool_api,
+            ToolRequest::ListChannels {
+                instance_id: instance_id.to_string(),
+            },
+        )?;
+        let channels = payload
+            .get("channels")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let channel_entry = channels.into_iter().find(|entry| {
+            entry
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|name| name.eq_ignore_ascii_case(channel))
+        });
+
+        let present = channel_entry.is_some();
+        let selected = channel_entry
+            .as_ref()
+            .and_then(|entry| entry.get("selected"))
+            .and_then(serde_json::Value::as_bool);
+        let selected_ok = expected_selected.is_none_or(|want| selected == Some(want));
+        if present == expected_present && selected_ok {
+            return Ok(());
+        }
+
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    bail!(
+        "step {} membership assertion timed out for channel {} on instance {}",
+        step.id,
+        channel,
+        instance_id
+    )
+}
+
+fn select_channel(
+    step: &ScenarioStep,
+    tool_api: &mut ToolApi,
+    instance_id: &str,
+    channel: &str,
+    timeout_ms: u64,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let target = channel.trim().trim_start_matches('#').to_string();
+    let mut last_channels: Vec<String> = Vec::new();
+    loop {
+        let payload = dispatch_payload(
+            tool_api,
+            ToolRequest::ListChannels {
+                instance_id: instance_id.to_string(),
+            },
+        )?;
+        let channels = payload
+            .get("channels")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut parsed = Vec::new();
+        for entry in channels {
+            let name = entry
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .trim_start_matches('#')
+                .to_string();
+            let selected = entry
+                .get("selected")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            if !name.is_empty() {
+                parsed.push((name, selected));
+            }
+        }
+        last_channels.clear();
+        last_channels.extend(parsed.iter().map(|(name, _)| name.clone()));
+        let target_idx = parsed
+            .iter()
+            .position(|(name, _)| name.eq_ignore_ascii_case(&target));
+        let selected_idx = parsed.iter().position(|(_, selected)| *selected);
+        if let (Some(target_idx), Some(selected_idx)) = (target_idx, selected_idx) {
+            if target_idx == selected_idx {
+                return Ok(());
+            }
+            let (key, distance) = if target_idx > selected_idx {
+                (ToolKey::Down, target_idx - selected_idx)
+            } else {
+                (ToolKey::Up, selected_idx - target_idx)
+            };
+            dispatch(
+                tool_api,
+                ToolRequest::SendKey {
+                    instance_id: instance_id.to_string(),
+                    key: ToolKey::Esc,
+                    repeat: 1,
+                },
+            )?;
+            dispatch(
+                tool_api,
+                ToolRequest::SendKey {
+                    instance_id: instance_id.to_string(),
+                    key,
+                    repeat: distance as u16,
+                },
+            )?;
+        }
+
+        if Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(80));
+    }
+    bail!(
+        "step {} select_channel timed out for instance {} channel {} (visible_channels={:?})",
+        step.id,
+        instance_id,
+        channel,
+        last_channels
+    )
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -448,7 +1088,7 @@ fn dispatch_payload(tool_api: &mut ToolApi, request: ToolRequest) -> Result<serd
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection};
+    use crate::config::{InstanceConfig, InstanceMode, RunConfig, RunSection, ScenarioAction};
     use crate::coordinator::HarnessCoordinator;
 
     #[test]
@@ -504,10 +1144,11 @@ mod tests {
             required_capabilities: vec![],
             steps: vec![ScenarioStep {
                 id: "step-1".to_string(),
-                action: "noop".to_string(),
+                action: ScenarioAction::Noop,
                 instance: None,
                 expect: None,
                 timeout_ms: None,
+                ..Default::default()
             }],
         };
 
@@ -538,85 +1179,6 @@ mod tests {
         }
 
         assert_eq!(scripted.states_visited, agent.states_visited);
-    }
-
-    #[test]
-    fn state_machine_rejects_unknown_action() {
-        let temp_root = std::env::temp_dir().join("aura-harness-executor-test-2");
-        let _ = std::fs::create_dir_all(&temp_root);
-
-        let run = RunConfig {
-            schema_version: 1,
-            run: RunSection {
-                name: "executor-test-2".to_string(),
-                pty_rows: Some(40),
-                pty_cols: Some(120),
-                artifact_dir: None,
-                global_budget_ms: None,
-                step_budget_ms: None,
-                seed: Some(6),
-                max_cpu_percent: None,
-                max_memory_bytes: None,
-                max_open_files: None,
-                require_remote_artifact_sync: false,
-            },
-            instances: vec![InstanceConfig {
-                id: "alice".to_string(),
-                mode: InstanceMode::Local,
-                data_dir: temp_root,
-                device_id: None,
-                bind_address: "127.0.0.1:45002".to_string(),
-                demo_mode: false,
-                command: Some("bash".to_string()),
-                args: vec!["-lc".to_string(), "cat".to_string()],
-                env: vec![],
-                log_path: None,
-                ssh_host: None,
-                ssh_user: None,
-                ssh_port: None,
-                ssh_strict_host_key_checking: true,
-                ssh_known_hosts_file: None,
-                ssh_fingerprint: None,
-                ssh_require_fingerprint: false,
-                ssh_dry_run: true,
-                remote_workdir: None,
-                lan_discovery: None,
-                tunnel: None,
-            }],
-        };
-
-        let scenario = ScenarioConfig {
-            schema_version: 1,
-            id: "executor-invalid".to_string(),
-            goal: "verify action validation".to_string(),
-            execution_mode: Some("scripted".to_string()),
-            required_capabilities: vec![],
-            steps: vec![ScenarioStep {
-                id: "step-1".to_string(),
-                action: "unsupported_action".to_string(),
-                instance: None,
-                expect: None,
-                timeout_ms: None,
-            }],
-        };
-
-        let mut api = ToolApi::new(
-            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
-        );
-        if let Err(error) = api.start_all() {
-            panic!("start_all failed: {error}");
-        }
-
-        let error =
-            match ScenarioExecutor::new(ExecutionMode::Scripted).execute(&scenario, &mut api) {
-                Ok(_) => panic!("unsupported actions must fail"),
-                Err(error) => error,
-            };
-        if let Err(error) = api.stop_all() {
-            panic!("stop_all failed: {error}");
-        }
-
-        assert!(error.to_string().contains("unsupported scenario action"));
     }
 
     #[test]
@@ -672,10 +1234,11 @@ mod tests {
             required_capabilities: vec![],
             steps: vec![ScenarioStep {
                 id: "step-1".to_string(),
-                action: "send_chat_command".to_string(),
+                action: ScenarioAction::SendChatCommand,
                 instance: Some("alice".to_string()),
                 expect: Some("join slash-lab".to_string()),
                 timeout_ms: None,
+                ..Default::default()
             }],
         };
 
@@ -697,7 +1260,7 @@ mod tests {
         }
 
         let action_log = api.action_log();
-        assert!(action_log.len() >= 2, "expected at least two tool actions");
+        assert!(action_log.len() >= 4, "expected at least four tool actions");
 
         match &action_log[0].request {
             ToolRequest::SendKey {
@@ -714,9 +1277,29 @@ mod tests {
         match &action_log[1].request {
             ToolRequest::SendKeys { instance_id, keys } => {
                 assert_eq!(instance_id, "alice");
-                assert_eq!(keys, "i/join slash-lab\n");
+                assert_eq!(keys, "2");
             }
             other => panic!("expected SendKeys second, got {other:?}"),
+        }
+
+        match &action_log[2].request {
+            ToolRequest::WaitFor {
+                instance_id,
+                pattern,
+                timeout_ms: _,
+            } => {
+                assert_eq!(instance_id, "alice");
+                assert_eq!(pattern, "Channels");
+            }
+            other => panic!("expected WaitFor third, got {other:?}"),
+        }
+
+        match &action_log[3].request {
+            ToolRequest::SendKeys { instance_id, keys } => {
+                assert_eq!(instance_id, "alice");
+                assert_eq!(keys, "i/join slash-lab\n");
+            }
+            other => panic!("expected SendKeys fourth, got {other:?}"),
         }
     }
 
@@ -802,10 +1385,11 @@ mod tests {
             required_capabilities: vec![],
             steps: vec![ScenarioStep {
                 id: "step-1".to_string(),
-                action: "send_clipboard".to_string(),
+                action: ScenarioAction::SendClipboard,
                 instance: Some("bob".to_string()),
                 expect: Some("alice".to_string()),
                 timeout_ms: Some(2000),
+                ..Default::default()
             }],
         };
 

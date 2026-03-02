@@ -6,6 +6,7 @@ The runtime harness executes one or more real Aura instances in PTYs.
 It provides deterministic control over input, screen capture, restart, and replay.
 Use it for end-to-end runtime validation, UI-level evidence, and replay bundles.
 The harness complements the [simulator](118_simulator.md), which remains primary for protocol correctness.
+It supports local and SSH-backed instances in the same run config.
 
 The harness supports two execution modes:
 
@@ -96,10 +97,35 @@ command = "join slash-lab"
 timeout_ms = 2000
 ```
 
-Scenario lint rejects unknown instance references and unsupported action names.
+Scenario step actions are now a typed enum at parse time.
+Unknown action names fail TOML parsing before lint or execution.
 `expect` still works for backward compatibility, but prefer action-specific fields:
-`keys`, `pattern`, `command`, `key`, and `source_instance`.
-`send_chat_command` sends `Esc` before typing `i/<command>` to reduce stale-toast flakiness.
+`keys`, `pattern`, `command`, `key`, `source_instance`, and typed assertion fields.
+`send_chat_command` now sends `Esc`, switches to Chat (`2`), performs a best-effort chat-pane wait, then types `i/<command>`.
+This reduces cross-screen command flakiness without extra scenario boilerplate.
+
+Use `request_id` to enforce strict scenario ordering.
+Each present `request_id` must be strictly greater than prior `request_id`.
+
+Typed action fields:
+
+| Action | Preferred fields |
+| --- | --- |
+| `send_keys` | `keys` |
+| `send_chat_command` | `command` |
+| `wait_for` | `pattern` |
+| `send_key` | `key`, `repeat` |
+| `send_clipboard` | `source_instance` |
+| `set_var` | `var`, `value` |
+| `extract_var` | `var`, `regex`, `group`, `from` |
+| `expect_toast` | `contains`, `level` |
+| `expect_command_result` | `contains`, `level`, `consistency` |
+| `expect_membership` | `channel`, `present`, `selected` |
+| `expect_denied` | `reason`, `contains`, `contains_any` |
+| `get_authority_id` | `var` |
+| `list_channels` | optional `var` |
+| `current_selection` | optional `var` |
+| `list_contacts` | optional `var` |
 
 ## Slash Command Consistency
 
@@ -129,7 +155,8 @@ just harness-lint -- --config configs/harness/local-loopback.toml --scenario sce
 ```
 
 This command validates run and scenario semantics.
-It fails on schema errors, unknown instances, and unsupported step actions.
+It fails on schema errors and unknown instances.
+Invalid step action names fail earlier during TOML parsing.
 
 ```bash
 just harness-run -- --config configs/harness/local-loopback.toml --scenario scenarios/harness/local-discovery-smoke.toml
@@ -146,6 +173,12 @@ just harness-replay -- --bundle artifacts/harness/local-loopback-smoke/replay_bu
 This command replays the recorded action log without planner decisions.
 Use it to reproduce deterministic failures and verify regression fixes.
 Replay checks bundle and tool API compatibility.
+
+```bash
+just scenario3-e2e
+```
+
+This command generates an isolated temporary run config, lints `scenarios/harness/scenario3-e2e.toml`, and runs it end to end.
 
 ## Interactive LLM Workflow
 
@@ -183,26 +216,40 @@ The process emits `prelude_complete scenario_id=<id>` to stderr before accepting
 `tool_repl` enforces an idle timeout by default (`--idle-timeout-ms 600000`).
 If no requests arrive before the timeout, it automatically stops all instances and exits.
 Set `--idle-timeout-ms 0` to disable idle shutdown.
+Use `--require-request-id --strict-request-id-order` to enforce ordered request envelopes.
 
 ```json
-{"method":"negotiate","params":{"client_versions":["1.0","0.2"]}}
-{"method":"screen","params":{"instance_id":"alice"}}
-{"method":"send_keys","params":{"instance_id":"alice","keys":"3n"}}
-{"method":"wait_for","params":{"instance_id":"alice","pattern":"Create Invitation","timeout_ms":4000}}
+{"id":1,"method":"negotiate","params":{"client_versions":["1.0","0.2"]}}
+{"id":2,"method":"screen","params":{"instance_id":"alice"}}
+{"id":3,"method":"send_keys","params":{"instance_id":"alice","keys":"3n"}}
+{"id":4,"method":"wait_for","params":{"instance_id":"alice","pattern":"Create Invitation","timeout_ms":4000}}
 ```
 
 Send one JSON request per line.
 The current supported API versions are `1.0`, `0.2`, and `0.1`.
 `wait_for` matches against normalized screen text.
+When an input request includes `id`, responses include the same `id`.
+`get_authority_id` first parses the active screen and then falls back to local secure-store state for local instances.
 
 ```json
-{"method":"send_key","params":{"instance_id":"alice","key":"enter"}}
-{"method":"tail_log","params":{"instance_id":"alice","lines":50}}
-{"method":"restart","params":{"instance_id":"bob"}}
-{"method":"kill","params":{"instance_id":"bob"}}
+{"id":5,"method":"send_key","params":{"instance_id":"alice","key":"enter"}}
+{"id":6,"method":"get_authority_id","params":{"instance_id":"alice"}}
+{"id":7,"method":"list_channels","params":{"instance_id":"alice"}}
+{"id":8,"method":"current_selection","params":{"instance_id":"alice"}}
+{"id":9,"method":"list_contacts","params":{"instance_id":"alice"}}
 ```
 
 Use `send_key` for named keys such as `enter`, `esc`, `tab`, and arrows.
+Use introspection methods to avoid brittle screen scraping in interactive runs.
+Use these typed methods instead of ad-hoc external parsing scripts.
+`get_authority_id` responses include a `source` field (`screen` or `local_state`).
+
+```json
+{"id":10,"method":"tail_log","params":{"instance_id":"alice","lines":50}}
+{"id":11,"method":"restart","params":{"instance_id":"bob"}}
+{"id":12,"method":"kill","params":{"instance_id":"bob"}}
+```
+
 Use `tail_log` for runtime diagnostics.
 Set `log_path` in the run config if you need non-empty `tail_log` output.
 

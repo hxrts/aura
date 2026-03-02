@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use crate::api_version::{negotiate, TOOL_API_DEFAULT_VERSION, TOOL_API_VERSIONS};
 use crate::config::RunConfig;
 use crate::coordinator::HarnessCoordinator;
+use crate::introspection::{
+    extract_authority_id, extract_channels, extract_contacts, extract_current_selection,
+    extract_toast,
+};
 use crate::screen_normalization::{authoritative_screen, normalize_screen};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +80,18 @@ pub enum ToolRequest {
         lines: u64,
     },
     ReadClipboard {
+        instance_id: String,
+    },
+    GetAuthorityId {
+        instance_id: String,
+    },
+    ListChannels {
+        instance_id: String,
+    },
+    CurrentSelection {
+        instance_id: String,
+    },
+    ListContacts {
         instance_id: String,
     },
     Restart {
@@ -216,6 +232,44 @@ impl ToolApi {
                 .coordinator
                 .read_clipboard(&instance_id)
                 .map(|text| serde_json::json!({ "text": text })),
+            ToolRequest::GetAuthorityId { instance_id } => {
+                self.coordinator.screen(&instance_id).and_then(|screen| {
+                    if let Some(authority_id) = extract_authority_id(&screen) {
+                        return Ok(serde_json::json!({
+                            "authority_id": authority_id,
+                            "source": "screen"
+                        }));
+                    }
+
+                    self.coordinator
+                        .resolve_authority_id_from_local_state(&instance_id)
+                        .map(|authority_id| {
+                            serde_json::json!({
+                                "authority_id": authority_id,
+                                "source": "local_state"
+                            })
+                        })
+                })
+            }
+            ToolRequest::ListChannels { instance_id } => {
+                self.coordinator.screen(&instance_id).map(|screen| {
+                    let channels = extract_channels(&screen);
+                    serde_json::json!({ "channels": channels })
+                })
+            }
+            ToolRequest::CurrentSelection { instance_id } => {
+                self.coordinator.screen(&instance_id).map(|screen| {
+                    let selection = extract_current_selection(&screen);
+                    serde_json::json!({ "selection": selection })
+                })
+            }
+            ToolRequest::ListContacts { instance_id } => {
+                self.coordinator.screen(&instance_id).map(|screen| {
+                    let contacts = extract_contacts(&screen);
+                    let toast = extract_toast(&screen);
+                    serde_json::json!({ "contacts": contacts, "toast": toast })
+                })
+            }
             ToolRequest::Restart { instance_id } => self
                 .coordinator
                 .restart(&instance_id)
