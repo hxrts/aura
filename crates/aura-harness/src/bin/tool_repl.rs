@@ -2,6 +2,11 @@
 
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use aura_harness::config::require_existing_file;
@@ -16,6 +21,10 @@ use clap::Parser;
 struct Cli {
     #[arg(long)]
     config: PathBuf,
+    /// Auto-shutdown after this many milliseconds without incoming requests.
+    /// Set to 0 to disable idle timeout.
+    #[arg(long, default_value_t = 600_000)]
+    idle_timeout_ms: u64,
 }
 
 fn main() -> Result<()> {
@@ -27,11 +36,59 @@ fn main() -> Result<()> {
     let mut tool_api = ToolApi::new(coordinator);
     tool_api.start_all()?;
 
-    let stdin = io::stdin();
     let mut stdout = io::stdout();
+    let idle_timeout = if cli.idle_timeout_ms == 0 {
+        None
+    } else {
+        Some(Duration::from_millis(cli.idle_timeout_ms))
+    };
+    let poll_interval = Duration::from_millis(250);
+    let mut last_activity = Instant::now();
+    let shutdown_requested = Arc::new(AtomicBool::new(false));
 
-    for line in stdin.lock().lines() {
-        let line = line.with_context(|| "failed to read stdin line")?;
+    {
+        let shutdown_requested = Arc::clone(&shutdown_requested);
+        ctrlc::set_handler(move || {
+            shutdown_requested.store(true, Ordering::SeqCst);
+        })
+        .with_context(|| "failed to install signal handler")?;
+    }
+
+    let (tx, rx) = mpsc::channel::<Result<String, io::Error>>();
+    thread::spawn(move || {
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    loop {
+        if shutdown_requested.load(Ordering::SeqCst) {
+            eprintln!("shutdown signal received; stopping harness instances");
+            break;
+        }
+
+        let line = match rx.recv_timeout(poll_interval) {
+            Ok(line) => {
+                last_activity = Instant::now();
+                line.with_context(|| "failed to read stdin line")?
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Some(timeout) = idle_timeout {
+                    if last_activity.elapsed() >= timeout {
+                        eprintln!(
+                            "idle timeout reached ({} ms); shutting down harness instances",
+                            cli.idle_timeout_ms
+                        );
+                        break;
+                    }
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;

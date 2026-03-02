@@ -37,6 +37,7 @@ rand = { workspace = true }
 rand_chacha = { workspace = true }
 sysinfo = { workspace = true }
 aura-core = { path = "../aura-core" }
+ctrlc = "3.4"
 
 [dev-dependencies]
 tempfile = { workspace = true }

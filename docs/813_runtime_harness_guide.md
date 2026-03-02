@@ -172,7 +172,14 @@ In phase two, create a channel on Alice. Verify that member selection shows one 
 
 In phase three, exchange messages using tokens `msg-a-1`, `msg-b-1`, `msg-a-2`, and `msg-b-2`. Confirm each token appears on both screens before sending the next token.
 
-To isolate harness clipboard actions from your system clipboard, set per-instance clipboard env values:
+Harness local instances now default to clipboard isolation:
+
+- `AURA_CLIPBOARD_MODE=file_only`
+- `AURA_CLIPBOARD_FILE=<data_dir>/.harness-clipboard.txt`
+
+That default prevents harness-driven copy actions from writing to your system clipboard.
+
+To customize paths or override behavior, set per-instance clipboard env values:
 
 - `AURA_CLIPBOARD_MODE=file_only`
 - `AURA_CLIPBOARD_FILE=<instance-specific path>`

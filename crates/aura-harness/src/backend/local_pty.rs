@@ -72,6 +72,17 @@ impl LocalPtyBackend {
         parser.screen().contents()
     }
 
+    fn env_value(key: &str, env_entries: &[String]) -> Option<String> {
+        env_entries.iter().find_map(|item| {
+            let (entry_key, entry_value) = item.split_once('=')?;
+            if entry_key.trim() == key {
+                Some(entry_value.trim().to_string())
+            } else {
+                None
+            }
+        })
+    }
+
     fn select_authoritative_screen(&self, current_screen: String) -> String {
         let current_authoritative = authoritative_screen(&current_screen);
         let mut cached = self.last_authoritative_screen.blocking_lock();
@@ -119,6 +130,20 @@ impl InstanceBackend for LocalPtyBackend {
         command.cwd(&self.config.data_dir);
         command.env("TERM", "xterm-256color");
         command.env("LANG", "C.UTF-8");
+
+        // Harness runs default to clipboard isolation so local user clipboard is not mutated
+        // by agent-driven TUI interactions. Per-instance env can explicitly override this.
+        if Self::env_value("AURA_CLIPBOARD_MODE", &self.config.env).is_none() {
+            command.env("AURA_CLIPBOARD_MODE", "file_only");
+        }
+        if Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env).is_none() {
+            let clipboard_file = self.config.data_dir.join(".harness-clipboard.txt");
+            command.env(
+                "AURA_CLIPBOARD_FILE",
+                clipboard_file.to_string_lossy().to_string(),
+            );
+        }
+
         for item in &self.config.env {
             if let Some((key, value)) = item.split_once('=') {
                 command.env(key.trim(), value.trim());
@@ -350,6 +375,79 @@ mod tests {
             remote_workdir: None,
             lan_discovery: None,
             tunnel: None,
+        }
+    }
+
+    #[test]
+    fn local_backend_injects_default_clipboard_isolation_env() {
+        let mut config = test_config();
+        config.id = "local-test-clipboard-default".to_string();
+        config.data_dir = std::env::temp_dir().join("aura-harness-local-clipboard-default");
+        config.command = Some("bash".to_string());
+        config.args = vec![
+            "-lc".to_string(),
+            "printf \"mode=%s file=%s\\n\" \"$AURA_CLIPBOARD_MODE\" \"$AURA_CLIPBOARD_FILE\"; cat"
+                .to_string(),
+        ];
+        config.env = vec![];
+
+        let mut backend = LocalPtyBackend::new(config, Some(20), Some(120));
+        if let Err(error) = backend.start() {
+            panic!("backend must start: {error}");
+        }
+        thread::sleep(Duration::from_millis(120));
+        let screen = match backend.snapshot() {
+            Ok(screen) => screen,
+            Err(error) => panic!("snapshot failed: {error}"),
+        };
+        assert!(
+            screen.contains("mode=file_only"),
+            "expected default clipboard mode to be file_only, got: {screen:?}"
+        );
+        assert!(
+            screen.contains("file="),
+            "expected clipboard file to be present, got: {screen:?}"
+        );
+        if let Err(error) = backend.stop() {
+            panic!("backend must stop: {error}");
+        }
+    }
+
+    #[test]
+    fn local_backend_respects_clipboard_env_override() {
+        let mut config = test_config();
+        config.id = "local-test-clipboard-override".to_string();
+        config.data_dir = std::env::temp_dir().join("aura-harness-local-clipboard-override");
+        config.command = Some("bash".to_string());
+        config.args = vec![
+            "-lc".to_string(),
+            "printf \"mode=%s file=%s\\n\" \"$AURA_CLIPBOARD_MODE\" \"$AURA_CLIPBOARD_FILE\"; cat"
+                .to_string(),
+        ];
+        config.env = vec![
+            "AURA_CLIPBOARD_MODE=system".to_string(),
+            "AURA_CLIPBOARD_FILE=/tmp/custom-harness-clipboard.txt".to_string(),
+        ];
+
+        let mut backend = LocalPtyBackend::new(config, Some(20), Some(120));
+        if let Err(error) = backend.start() {
+            panic!("backend must start: {error}");
+        }
+        thread::sleep(Duration::from_millis(120));
+        let screen = match backend.snapshot() {
+            Ok(screen) => screen,
+            Err(error) => panic!("snapshot failed: {error}"),
+        };
+        assert!(
+            screen.contains("mode=system"),
+            "expected custom clipboard mode override, got: {screen:?}"
+        );
+        assert!(
+            screen.contains("file=/tmp/custom-harness-clipboard.txt"),
+            "expected custom clipboard file override, got: {screen:?}"
+        );
+        if let Err(error) = backend.stop() {
+            panic!("backend must stop: {error}");
         }
     }
 
