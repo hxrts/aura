@@ -22,17 +22,17 @@ pub async fn handle_steward(
     app_core: &Arc<RwLock<AppCore>>,
 ) -> Option<OpResult> {
     match command {
-        EffectCommand::GrantSteward { target } => {
+        EffectCommand::GrantSteward { channel, target } => {
             // Delegate to workflow
-            match grant_steward(app_core, target).await {
+            match grant_steward(app_core, channel.as_deref(), target).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }
         }
 
-        EffectCommand::RevokeSteward { target } => {
+        EffectCommand::RevokeSteward { channel, target } => {
             // Delegate to workflow
-            match revoke_steward(app_core, target).await {
+            match revoke_steward(app_core, channel.as_deref(), target).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(e.to_string()))),
             }

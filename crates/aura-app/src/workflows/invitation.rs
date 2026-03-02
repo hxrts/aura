@@ -626,14 +626,50 @@ pub async fn accept_pending_home_invitation(
 
     match home_invitation {
         Some(inv) => {
-            runtime
-                .accept_invitation(inv.invitation_id.as_str())
-                .await
-                .map_err(|e| AuraError::agent(format!("Failed to accept invitation: {e}")))?;
-            Ok(inv.invitation_id.clone())
+            match runtime.accept_invitation(inv.invitation_id.as_str()).await {
+                Ok(()) => return Ok(inv.invitation_id.clone()),
+                Err(e) => {
+                    let message = e.to_string();
+                    let lowered = message.to_lowercase();
+                    // Channel invites may be auto-accepted by the inbound envelope pipeline.
+                    // Treat these races as idempotent success for `/homeaccept`.
+                    if lowered.contains("already accepted") || lowered.contains("not pending") {
+                        return Ok(inv.invitation_id.clone());
+                    }
+                    return Err(AuraError::agent(format!(
+                        "Failed to accept invitation: {message}"
+                    )));
+                }
+            }
         }
-        None => Err(AuraError::agent("No pending home invitation found")),
+        None => {}
     }
+
+    #[cfg(feature = "signals")]
+    {
+        let invitations = read_signal(
+            app_core,
+            &*crate::signal_defs::INVITATIONS_SIGNAL,
+            crate::signal_defs::INVITATIONS_SIGNAL_NAME,
+        )
+        .await
+        .unwrap_or_default();
+
+        if let Some(accepted) = invitations.all_history().iter().rev().find(|inv| {
+            inv.direction == crate::views::invitations::InvitationDirection::Received
+                && inv.from_id != our_authority
+                && inv.status == crate::views::invitations::InvitationStatus::Accepted
+                && matches!(
+                    inv.invitation_type,
+                    crate::views::invitations::InvitationType::Home
+                        | crate::views::invitations::InvitationType::Chat
+                )
+        }) {
+            return Ok(InvitationId::new(accepted.id.clone()));
+        }
+    }
+
+    Err(AuraError::agent("No pending home invitation found"))
 }
 
 #[cfg(test)]

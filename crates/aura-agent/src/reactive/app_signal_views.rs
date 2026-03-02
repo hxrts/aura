@@ -15,7 +15,10 @@ use aura_app::signal_defs::{
 use aura_app::views::{
     chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
     contacts::{Contact, ContactError, ContactsState},
-    home::{BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
+    home::{
+        BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta, Resident,
+        ResidentRole,
+    },
     invitations::{
         Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
     },
@@ -580,13 +583,44 @@ impl HomeSignalView {
         }
     }
 
-    fn home_for_context<'a>(
+    fn synthetic_home_id_for_context(context_id: &ContextId) -> ChannelId {
+        let mut bytes = [0u8; 32];
+        bytes[..16].copy_from_slice(context_id.as_bytes());
+        ChannelId::from_bytes(bytes)
+    }
+
+    fn home_for_context_mut<'a>(
+        &self,
         homes: &'a mut HomesState,
         context_id: &ContextId,
-    ) -> Option<&'a mut HomeState> {
+    ) -> &'a mut HomeState {
+        let existing_home_id = homes
+            .iter()
+            .find_map(|(home_id, home)| (home.context_id == Some(*context_id)).then_some(*home_id));
+        if let Some(home_id) = existing_home_id {
+            return homes
+                .home_mut(&home_id)
+                .expect("home id from iter() must exist in map");
+        }
+
+        let mut placeholder = HomeState::new(
+            Self::synthetic_home_id_for_context(context_id),
+            Some("Shared Home".to_string()),
+            self.own_authority,
+            0,
+            *context_id,
+        );
+        // Placeholder state exists to host moderation facts for shared contexts
+        // that have not been materialized as local homes yet.
+        placeholder.my_role = ResidentRole::Resident;
+        placeholder.residents.clear();
+        placeholder.online_count = 0;
+        placeholder.resident_count = 0;
+        let placeholder_id = placeholder.id;
+        let _ = homes.add_home(placeholder);
         homes
-            .all_homes_mut()
-            .find(|home_state| home_state.context_id.as_ref() == Some(context_id))
+            .home_mut(&placeholder_id)
+            .expect("placeholder home should exist immediately after insertion")
     }
 }
 
@@ -612,9 +646,7 @@ impl ReactiveView for HomeSignalView {
                 continue;
             };
 
-            let Some(home_state) = Self::home_for_context(&mut homes, context_id) else {
-                continue;
-            };
+            let home_state = self.home_for_context_mut(&mut homes, context_id);
 
             match envelope.type_id.as_str() {
                 HOME_BAN_FACT_TYPE_ID => {
@@ -691,27 +723,45 @@ impl ReactiveView for HomeSignalView {
                 HOME_GRANT_STEWARD_FACT_TYPE_ID => {
                     if let Some(grant) = HomeGrantStewardFact::from_envelope(envelope) {
                         if let Some(resident) = home_state.resident_mut(&grant.target_authority) {
-                            resident.role = aura_app::views::home::ResidentRole::Admin;
-                            if grant.target_authority == self.own_authority {
-                                home_state.my_role = aura_app::views::home::ResidentRole::Admin;
-                            }
-                            changed = true;
+                            resident.role = ResidentRole::Admin;
+                        } else {
+                            home_state.add_resident(Resident {
+                                id: grant.target_authority,
+                                name: grant.target_authority.to_string(),
+                                role: ResidentRole::Admin,
+                                is_online: true,
+                                joined_at: grant.granted_at.ts_ms,
+                                last_seen: Some(grant.granted_at.ts_ms),
+                                storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                            });
                         }
+                        if grant.target_authority == self.own_authority {
+                            home_state.my_role = ResidentRole::Admin;
+                        }
+                        changed = true;
                     }
                 }
                 HOME_REVOKE_STEWARD_FACT_TYPE_ID => {
                     if let Some(revoke) = HomeRevokeStewardFact::from_envelope(envelope) {
                         if let Some(resident) = home_state.resident_mut(&revoke.target_authority) {
-                            if !matches!(resident.role, aura_app::views::home::ResidentRole::Owner)
-                            {
-                                resident.role = aura_app::views::home::ResidentRole::Resident;
-                                if revoke.target_authority == self.own_authority {
-                                    home_state.my_role =
-                                        aura_app::views::home::ResidentRole::Resident;
-                                }
-                                changed = true;
+                            if !matches!(resident.role, ResidentRole::Owner) {
+                                resident.role = ResidentRole::Resident;
                             }
+                        } else {
+                            home_state.add_resident(Resident {
+                                id: revoke.target_authority,
+                                name: revoke.target_authority.to_string(),
+                                role: ResidentRole::Resident,
+                                is_online: true,
+                                joined_at: revoke.revoked_at.ts_ms,
+                                last_seen: Some(revoke.revoked_at.ts_ms),
+                                storage_allocated: HomeState::RESIDENT_ALLOCATION,
+                            });
                         }
+                        if revoke.target_authority == self.own_authority {
+                            home_state.my_role = ResidentRole::Resident;
+                        }
+                        changed = true;
                     }
                 }
                 _ => {}
@@ -826,6 +876,40 @@ impl ChatSignalView {
                 );
             }
         }
+    }
+
+    async fn sender_allowed_for_context(
+        &self,
+        context_id: ContextId,
+        sender_id: AuthorityId,
+        sent_at_ms: u64,
+    ) -> bool {
+        if sender_id == self.own_authority {
+            return true;
+        }
+
+        let homes = match self.reactive.read(&*HOMES_SIGNAL).await {
+            Ok(homes) => homes,
+            Err(_) => return true,
+        };
+        let Some(home) = homes
+            .iter()
+            .find_map(|(_, home)| (home.context_id == Some(context_id)).then_some(home))
+        else {
+            return true;
+        };
+
+        if home.is_banned(&sender_id) {
+            return false;
+        }
+        if home.is_muted(&sender_id, sent_at_ms) {
+            return false;
+        }
+        if !home.residents.is_empty() && home.resident(&sender_id).is_none() {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -965,6 +1049,20 @@ impl ReactiveView for ChatSignalView {
                             let payload_bytes = payload.clone();
                             let context = context_id;
                             drop(state);
+                            if !self
+                                .sender_allowed_for_context(context, sender_id, sent_at.ts_ms)
+                                .await
+                            {
+                                tracing::debug!(
+                                    context_id = %context,
+                                    channel_id = %channel_id,
+                                    message_id = %message_id,
+                                    sender_id = %sender_id,
+                                    "Dropping message due to moderation policy"
+                                );
+                                state = self.state.lock().await;
+                                continue;
+                            }
                             let content =
                                 match amp_recv(self.effects.as_ref(), context, payload_bytes).await
                                 {
@@ -1285,5 +1383,48 @@ mod tests {
             home_state.my_role,
             aura_app::views::home::ResidentRole::Resident
         ));
+    }
+
+    #[tokio::test]
+    async fn home_signal_view_materializes_unknown_context_for_mutes() {
+        let reactive = ReactiveHandler::new();
+        let known_context = ContextId::new_from_entropy([2u8; 32]);
+        let unknown_context = ContextId::new_from_entropy([4u8; 32]);
+        let actor = AuthorityId::new_from_entropy([1u8; 32]);
+        let target = AuthorityId::new_from_entropy([9u8; 32]);
+        let _ = setup_homes(&reactive, known_context).await;
+
+        let view = HomeSignalView::new(actor, reactive.clone());
+
+        let mute = HomeMuteFact::new_ms(
+            unknown_context,
+            None,
+            target,
+            actor,
+            Some(60),
+            100,
+            Some(160_000),
+        )
+        .to_generic();
+        view.update(&[fact_from_relational(mute)]).await;
+
+        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home_state = updated
+            .iter()
+            .find_map(|(_, home)| (home.context_id == Some(unknown_context)).then_some(home))
+            .expect("unknown context home should be materialized");
+        assert!(home_state.mute_list.contains_key(&target));
+        assert!(home_state.residents.is_empty());
+        assert!(matches!(home_state.my_role, ResidentRole::Resident));
+
+        let unmute = HomeUnmuteFact::new_ms(unknown_context, None, target, actor, 200).to_generic();
+        view.update(&[fact_from_relational(unmute)]).await;
+
+        let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
+        let home_state = updated
+            .iter()
+            .find_map(|(_, home)| (home.context_id == Some(unknown_context)).then_some(home))
+            .expect("unknown context home should still exist");
+        assert!(!home_state.mute_list.contains_key(&target));
     }
 }

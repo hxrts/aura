@@ -244,6 +244,7 @@ async fn test_home_resident_operations() {
     println!("\nPhase 2: Test GrantSteward command");
     let result = ctx
         .dispatch(EffectCommand::GrantSteward {
+            channel: None,
             target: "test-user-id".to_string(),
         })
         .await;
@@ -264,6 +265,7 @@ async fn test_home_resident_operations() {
     println!("\nPhase 3: Test RevokeSteward command");
     let result = ctx
         .dispatch(EffectCommand::RevokeSteward {
+            channel: None,
             target: "test-user-id".to_string(),
         })
         .await;
@@ -979,6 +981,7 @@ async fn test_moderation_commands() {
     println!("\nPhase 2: BanUser");
     let result = ctx
         .dispatch(EffectCommand::BanUser {
+            channel: None,
             target: target_user.to_string(),
             reason: Some("Testing ban".to_string()),
         })
@@ -1000,6 +1003,7 @@ async fn test_moderation_commands() {
     println!("\nPhase 3: MuteUser");
     let result = ctx
         .dispatch(EffectCommand::MuteUser {
+            channel: None,
             target: target_user.to_string(),
             duration_secs: Some(300), // 5 minutes
         })
@@ -1021,6 +1025,7 @@ async fn test_moderation_commands() {
     println!("\nPhase 4: UnmuteUser");
     let result = ctx
         .dispatch(EffectCommand::UnmuteUser {
+            channel: None,
             target: target_user.to_string(),
         })
         .await;
@@ -1041,6 +1046,7 @@ async fn test_moderation_commands() {
     println!("\nPhase 5: UnbanUser");
     let result = ctx
         .dispatch(EffectCommand::UnbanUser {
+            channel: None,
             target: target_user.to_string(),
         })
         .await;

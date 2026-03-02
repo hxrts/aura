@@ -1063,6 +1063,11 @@ impl IoContext {
     pub fn check_authorization(&self, command: &EffectCommand) -> Result<(), String> {
         // Delegate to portable authorization logic in aura-app
         let level = command.authorization_level();
+        if matches!(level, crate::tui::effects::CommandAuthorizationLevel::Admin)
+            && has_explicit_admin_scope(command)
+        {
+            return Ok(());
+        }
         aura_app::ui::authorization::check_authorization_level(
             level,
             self.get_current_role(),
@@ -1081,6 +1086,26 @@ fn command_name(command: &EffectCommand) -> &'static str {
         EffectCommand::SetChannelMode { .. } => "Set channel mode",
         EffectCommand::Shutdown => "Shutdown",
         _ => "This operation",
+    }
+}
+
+fn has_explicit_admin_scope(command: &EffectCommand) -> bool {
+    match command {
+        EffectCommand::KickUser { channel, .. } => !channel.trim().is_empty(),
+        EffectCommand::BanUser { channel, .. } => channel
+            .as_deref()
+            .is_some_and(|channel| !channel.trim().is_empty()),
+        EffectCommand::UnbanUser { channel, .. } => channel
+            .as_deref()
+            .is_some_and(|channel| !channel.trim().is_empty()),
+        EffectCommand::GrantSteward { channel, .. } => channel
+            .as_deref()
+            .is_some_and(|channel| !channel.trim().is_empty()),
+        EffectCommand::RevokeSteward { channel, .. } => channel
+            .as_deref()
+            .is_some_and(|channel| !channel.trim().is_empty()),
+        EffectCommand::SetChannelMode { channel, .. } => !channel.trim().is_empty(),
+        _ => false,
     }
 }
 

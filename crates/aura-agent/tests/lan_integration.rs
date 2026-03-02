@@ -515,6 +515,60 @@ async fn test_lan_invitation_dm_message_e2e() -> TestResult {
 }
 
 #[tokio::test]
+async fn test_lan_invitation_dm_message_e2e_without_descriptor_wait() -> TestResult {
+    let discovery_port = next_lan_port();
+    let bind_port_a = next_lan_port();
+    let bind_port_b = next_lan_port();
+
+    let agent_a = create_production_lan_agent_with_bind(61, discovery_port, bind_port_a).await?;
+    let agent_b = create_production_lan_agent_with_bind(62, discovery_port, bind_port_b).await?;
+
+    wait_for_lan_peer(&agent_a, agent_b.authority_id()).await?;
+    wait_for_lan_peer(&agent_b, agent_a.authority_id()).await?;
+
+    let app_a = create_runtime_app(agent_a.clone()).await?;
+    let app_b = create_runtime_app(agent_b.clone()).await?;
+
+    let invite = invitation_workflow::create_contact_invitation(
+        &app_a,
+        agent_b.authority_id(),
+        None,
+        Some("e2e lan invite without descriptor wait".to_string()),
+        None,
+    )
+    .await?;
+    let invite_code = invitation_workflow::export_invitation(&app_a, &invite.invitation_id).await?;
+
+    invitation_workflow::import_invitation(&app_b, &invite_code).await?;
+    invitation_workflow::accept_invitation(&app_b, &invite.invitation_id).await?;
+
+    // Intentionally do not wait for sender-side descriptor cache.
+    // The workflow should still bootstrap DM channel delivery robustly.
+    let dm_name = messaging_workflow::start_direct_chat(
+        &app_a,
+        &agent_b.authority_id().to_string(),
+        1_700_000_100_001,
+    )
+    .await?;
+
+    let msg_text = "lan-e2e-no-wait-message";
+    let _message_id =
+        messaging_workflow::send_message_by_name(&app_a, &dm_name, msg_text, 1_700_000_100_010)
+            .await?;
+
+    wait_for_chat_signal_message(&app_b, agent_a.authority_id(), msg_text).await?;
+
+    let reply_text = "lan-e2e-no-wait-reply";
+    let _reply_id =
+        messaging_workflow::send_message_by_name(&app_b, &dm_name, reply_text, 1_700_000_100_020)
+            .await?;
+
+    wait_for_chat_signal_message(&app_a, agent_b.authority_id(), reply_text).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
     let discovery_port = next_lan_port();
     let bind_port_a = next_lan_port();

@@ -239,16 +239,26 @@ pub async fn handle_invitations(
 
                 let core = app_core.read().await;
 
-                if let Ok(homes) = core.read(&*aura_app::ui::signals::HOMES_SIGNAL).await {
-                    choose_channel_invitation_home_id(
-                        homes.current_home_id().cloned(),
-                        homes.first_home_id(),
-                        None,
-                        None,
-                    )
-                } else {
-                    None
-                }
+                let homes_state = core.read(&*aura_app::ui::signals::HOMES_SIGNAL).await.ok();
+                let neighborhood_home_id = core
+                    .read(&*aura_app::ui::signals::NEIGHBORHOOD_SIGNAL)
+                    .await
+                    .ok()
+                    .map(|state| state.home_home_id);
+                let chat_channel_id = core
+                    .read(&*aura_app::ui::signals::CHAT_SIGNAL)
+                    .await
+                    .ok()
+                    .and_then(|chat| chat.all_channels().next().map(|channel| channel.id));
+
+                choose_channel_invitation_home_id(
+                    homes_state
+                        .as_ref()
+                        .and_then(|homes| homes.current_home_id().cloned()),
+                    homes_state.as_ref().and_then(|homes| homes.first_home_id()),
+                    chat_channel_id,
+                    neighborhood_home_id,
+                )
             };
 
             let Some(home_id) = home_id else {

@@ -891,6 +891,7 @@ async fn test_moderation_commands_dispatch() {
     println!("\nPhase 1: Testing BanUser command");
     let ban_result = ctx
         .dispatch(EffectCommand::BanUser {
+            channel: None,
             target: test_target.to_string(),
             reason: Some("Test ban reason".to_string()),
         })
@@ -906,6 +907,7 @@ async fn test_moderation_commands_dispatch() {
     println!("\nPhase 2: Testing MuteUser command");
     let mute_result = ctx
         .dispatch(EffectCommand::MuteUser {
+            channel: None,
             target: test_target.to_string(),
             duration_secs: Some(300), // 5 minutes
         })
@@ -1722,6 +1724,7 @@ async fn test_steward_role_flow() {
 
     let result = ctx
         .dispatch(EffectCommand::GrantSteward {
+            channel: None,
             target: resident1_id.to_string(),
         })
         .await;
@@ -1747,6 +1750,7 @@ async fn test_steward_role_flow() {
 
     let result = ctx
         .dispatch(EffectCommand::RevokeSteward {
+            channel: None,
             target: resident1_id.to_string(),
         })
         .await;
@@ -1773,6 +1777,7 @@ async fn test_steward_role_flow() {
     // Can't modify Owner
     let result = ctx
         .dispatch(EffectCommand::GrantSteward {
+            channel: None,
             target: owner_id.to_string(),
         })
         .await;
@@ -1789,6 +1794,7 @@ async fn test_steward_role_flow() {
     // Can't revoke non-Admin
     let result = ctx
         .dispatch(EffectCommand::RevokeSteward {
+            channel: None,
             target: resident2_id.to_string(), // Still a Resident, not Admin
         })
         .await;
@@ -1805,6 +1811,7 @@ async fn test_steward_role_flow() {
     // Can't find non-existent resident
     let result = ctx
         .dispatch(EffectCommand::GrantSteward {
+            channel: None,
             target: missing_id.to_string(),
         })
         .await;
@@ -2785,6 +2792,7 @@ async fn test_authorization_checking() {
 
     // Admin commands
     let ban_cmd = EffectCommand::BanUser {
+        channel: None,
         target: "spammer".to_string(),
         reason: Some("spam".to_string()),
     };
@@ -2808,6 +2816,7 @@ async fn test_authorization_checking() {
     println!("  ✓ KickUser is Admin level");
 
     let grant_cmd = EffectCommand::GrantSteward {
+        channel: None,
         target: "user".to_string(),
     };
     assert_eq!(
@@ -2864,6 +2873,7 @@ async fn test_authorization_checking() {
     // Test that Admin commands are denied for non-Steward users
     // Default role is Resident (not Steward), so Admin commands should fail
     let ban_result = ctx.check_authorization(&EffectCommand::BanUser {
+        channel: None,
         target: "spammer".to_string(),
         reason: None,
     });
@@ -2897,6 +2907,7 @@ async fn test_authorization_checking() {
     );
 
     let grant_result = ctx.check_authorization(&EffectCommand::GrantSteward {
+        channel: None,
         target: "user".to_string(),
     });
     assert!(
@@ -2914,6 +2925,7 @@ async fn test_authorization_checking() {
     // Try to dispatch an Admin command - should return permission denied error
     let dispatch_result = ctx
         .dispatch(EffectCommand::BanUser {
+            channel: None,
             target: "spammer".to_string(),
             reason: Some("testing".to_string()),
         })

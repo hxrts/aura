@@ -306,6 +306,9 @@ impl DispatchHelper {
             | CommandAuthorizationLevel::Basic
             | CommandAuthorizationLevel::Sensitive => Ok(()),
             CommandAuthorizationLevel::Admin => {
+                if has_explicit_admin_scope(command) {
+                    return Ok(());
+                }
                 let snapshot = self.snapshots.try_state_snapshot();
                 aura_app::ui::authorization::require_admin(snapshot.as_ref(), command_name(command))
                     .map_err(|e| e.to_string())
@@ -339,6 +342,26 @@ fn command_name(command: &EffectCommand) -> &'static str {
         EffectCommand::SetChannelMode { .. } => "Set channel mode",
         EffectCommand::Shutdown => "Shutdown",
         _ => "This operation",
+    }
+}
+
+fn has_explicit_admin_scope(command: &EffectCommand) -> bool {
+    match command {
+        EffectCommand::KickUser { channel, .. } => !channel.trim().is_empty(),
+        EffectCommand::BanUser { channel, .. } => channel
+            .as_deref()
+            .is_some_and(|channel| !channel.trim().is_empty()),
+        EffectCommand::UnbanUser { channel, .. } => channel
+            .as_deref()
+            .is_some_and(|channel| !channel.trim().is_empty()),
+        EffectCommand::GrantSteward { channel, .. } => channel
+            .as_deref()
+            .is_some_and(|channel| !channel.trim().is_empty()),
+        EffectCommand::RevokeSteward { channel, .. } => channel
+            .as_deref()
+            .is_some_and(|channel| !channel.trim().is_empty()),
+        EffectCommand::SetChannelMode { channel, .. } => !channel.trim().is_empty(),
+        _ => false,
     }
 }
 

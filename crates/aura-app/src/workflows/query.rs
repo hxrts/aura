@@ -170,7 +170,11 @@ pub async fn resolve_contact(
 /// This function reads from CONTACTS_SIGNAL first, which is populated by the agent's
 /// reactive pipeline. Falls back to ViewState snapshot if the signal is not available.
 pub async fn list_contacts(app_core: &Arc<RwLock<AppCore>>) -> Vec<Contact> {
-    contacts_snapshot(app_core).await.all_contacts().cloned().collect()
+    contacts_snapshot(app_core)
+        .await
+        .all_contacts()
+        .cloned()
+        .collect()
 }
 
 /// Helper function to get effective name from contact

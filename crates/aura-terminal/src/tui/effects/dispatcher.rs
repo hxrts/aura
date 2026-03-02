@@ -352,16 +352,27 @@ impl CommandDispatcher {
                 })
             }
 
-            IrcCommand::Ban { target, reason } => Ok(EffectCommand::BanUser { target, reason }),
+            IrcCommand::Ban { target, reason } => Ok(EffectCommand::BanUser {
+                channel: self.current_channel.clone(),
+                target,
+                reason,
+            }),
 
-            IrcCommand::Unban { target } => Ok(EffectCommand::UnbanUser { target }),
+            IrcCommand::Unban { target } => Ok(EffectCommand::UnbanUser {
+                channel: self.current_channel.clone(),
+                target,
+            }),
 
             IrcCommand::Mute { target, duration } => Ok(EffectCommand::MuteUser {
+                channel: self.current_channel.clone(),
                 target,
                 duration_secs: duration.map(|d| d.as_secs()),
             }),
 
-            IrcCommand::Unmute { target } => Ok(EffectCommand::UnmuteUser { target }),
+            IrcCommand::Unmute { target } => Ok(EffectCommand::UnmuteUser {
+                channel: self.current_channel.clone(),
+                target,
+            }),
 
             IrcCommand::Invite { target } => {
                 let channel =
@@ -388,9 +399,15 @@ impl CommandDispatcher {
 
             IrcCommand::Unpin { message_id } => Ok(EffectCommand::UnpinMessage { message_id }),
 
-            IrcCommand::Op { target } => Ok(EffectCommand::GrantSteward { target }),
+            IrcCommand::Op { target } => Ok(EffectCommand::GrantSteward {
+                channel: self.current_channel.clone(),
+                target,
+            }),
 
-            IrcCommand::Deop { target } => Ok(EffectCommand::RevokeSteward { target }),
+            IrcCommand::Deop { target } => Ok(EffectCommand::RevokeSteward {
+                channel: self.current_channel.clone(),
+                target,
+            }),
 
             IrcCommand::Mode { channel, flags } => {
                 Ok(EffectCommand::SetChannelMode { channel, flags })
@@ -525,9 +542,11 @@ mod tests {
         assert!(result.is_ok());
         match result.unwrap() {
             EffectCommand::MuteUser {
+                channel,
                 target,
                 duration_secs,
             } => {
+                assert_eq!(channel, None);
                 assert_eq!(target, "alice");
                 assert_eq!(duration_secs, Some(300));
             }
@@ -562,6 +581,26 @@ mod tests {
         match result.unwrap() {
             EffectCommand::AcceptPendingHomeInvitation => {}
             _ => panic!("Wrong effect command type"),
+        }
+    }
+
+    #[test]
+    fn test_dispatch_op_includes_channel_hint() {
+        let mut dispatcher = CommandDispatcher::new();
+        dispatcher.set_current_channel("general");
+
+        let cmd = IrcCommand::Op {
+            target: "alice".to_string(),
+        };
+        let result = dispatcher
+            .dispatch_unchecked(cmd)
+            .expect("dispatch must succeed");
+        match result {
+            EffectCommand::GrantSteward { channel, target } => {
+                assert_eq!(channel.as_deref(), Some("general"));
+                assert_eq!(target, "alice");
+            }
+            other => panic!("unexpected effect command: {other:?}"),
         }
     }
 

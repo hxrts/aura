@@ -198,6 +198,9 @@ pub enum EffectCommand {
     },
     /// Ban user from home
     BanUser {
+        /// Optional channel hint for scope resolution
+        channel: Option<String>,
+
         /// Target user
         target: String,
 
@@ -206,11 +209,17 @@ pub enum EffectCommand {
     },
     /// Unban user from home
     UnbanUser {
+        /// Optional channel hint for scope resolution
+        channel: Option<String>,
+
         /// Target user
         target: String,
     },
     /// Mute user temporarily
     MuteUser {
+        /// Optional channel hint for scope resolution
+        channel: Option<String>,
+
         /// Target user
         target: String,
 
@@ -219,6 +228,9 @@ pub enum EffectCommand {
     },
     /// Unmute user
     UnmuteUser {
+        /// Optional channel hint for scope resolution
+        channel: Option<String>,
+
         /// Target user
         target: String,
     },
@@ -322,11 +334,17 @@ pub enum EffectCommand {
     },
     /// Grant steward capabilities
     GrantSteward {
+        /// Optional channel hint for scope resolution
+        channel: Option<String>,
+
         /// Target user
         target: String,
     },
     /// Revoke steward capabilities
     RevokeSteward {
+        /// Optional channel hint for scope resolution
+        channel: Option<String>,
+
         /// Target user
         target: String,
     },

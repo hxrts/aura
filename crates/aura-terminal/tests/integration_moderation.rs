@@ -47,17 +47,21 @@ async fn moderation_commands_are_handled() {
             reason: None,
         },
         EffectCommand::BanUser {
+            channel: None,
             target: "user1".to_string(),
             reason: Some("spam".to_string()),
         },
         EffectCommand::UnbanUser {
+            channel: None,
             target: "user1".to_string(),
         },
         EffectCommand::MuteUser {
+            channel: None,
             target: "user1".to_string(),
             duration_secs: Some(30),
         },
         EffectCommand::UnmuteUser {
+            channel: None,
             target: "user1".to_string(),
         },
         EffectCommand::PinMessage {

@@ -11,9 +11,13 @@ use crate::workflows::signals::read_signal;
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::workflows::state_helpers::with_chat_state;
 use crate::{
+    runtime_bridge::{InvitationBridgeType, InvitationInfo, RuntimeBridge},
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     thresholds::{default_channel_threshold, normalize_channel_threshold},
-    views::chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
+    views::{
+        chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
+        home::{HomeState, Resident, ResidentRole},
+    },
     AppCore,
 };
 use async_lock::RwLock;
@@ -27,14 +31,17 @@ use aura_core::{
     identifiers::{AuthorityId, ChannelId, ContextId, InvitationId},
     AuraError,
 };
-use aura_journal::fact::FactOptions;
+use aura_journal::fact::{FactOptions, RelationalFact};
 use aura_journal::DomainFact;
 use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::task::yield_now;
 
 static MESSAGE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
+const CHAT_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 
 /// Messaging backend policy (runtime-backed vs UI-local).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,15 +108,119 @@ fn next_message_id(
 ) -> String {
     // Include a monotonic per-process counter to avoid same-millisecond collisions.
     let local_nonce = MESSAGE_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let digest = hash(
-        format!("{channel_id}:{sender_id}:{timestamp_ms}:{local_nonce}:{content}").as_bytes(),
-    );
+    let digest =
+        hash(format!("{channel_id}:{sender_id}:{timestamp_ms}:{local_nonce}:{content}").as_bytes());
     let suffix = hex_prefix(&digest, 8);
     format!("msg-{channel_id}-{timestamp_ms}-{suffix}")
 }
 
 fn is_invitation_capability_missing(error: &AuraError) -> bool {
     error.to_string().contains("invitation:capability-missing")
+}
+
+async fn send_chat_fact_with_retry(
+    runtime: &Arc<dyn RuntimeBridge>,
+    peer: AuthorityId,
+    context: ContextId,
+    fact: &RelationalFact,
+) -> Result<(), AuraError> {
+    let mut last_error: Option<String> = None;
+
+    for attempt in 0..CHAT_FACT_SEND_MAX_ATTEMPTS {
+        match runtime.send_chat_fact(peer, context, fact).await {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error.to_string()),
+        }
+
+        if attempt + 1 < CHAT_FACT_SEND_MAX_ATTEMPTS {
+            let _ = runtime.trigger_discovery().await;
+            let _ = runtime.trigger_sync().await;
+            for _ in 0..CHAT_FACT_SEND_YIELDS_PER_RETRY {
+                yield_now().await;
+            }
+        }
+    }
+
+    let message = last_error.unwrap_or_else(|| "unknown transport error".to_string());
+    Err(AuraError::agent(format!(
+        "Failed to deliver chat fact to {peer} after {CHAT_FACT_SEND_MAX_ATTEMPTS} attempts: {message}"
+    )))
+}
+
+fn bootstrap_required_for_recipients(recipient_count: usize) -> bool {
+    recipient_count > 0
+}
+
+fn channel_id_from_pending_channel_invitation(invitation: &InvitationInfo) -> Option<ChannelId> {
+    match &invitation.invitation_type {
+        InvitationBridgeType::Channel { home_id, .. } => home_id.parse().ok(),
+        _ => None,
+    }
+}
+
+fn select_pending_channel_invitation(
+    pending: &[InvitationInfo],
+    local_authority: AuthorityId,
+    requested_channel_id: ChannelId,
+) -> Option<(InvitationId, ChannelId)> {
+    let candidates: Vec<(InvitationId, ChannelId)> = pending
+        .iter()
+        .filter(|invitation| invitation.sender_id != local_authority)
+        .filter_map(|invitation| {
+            channel_id_from_pending_channel_invitation(invitation)
+                .map(|channel_id| (invitation.invitation_id.clone(), channel_id))
+        })
+        .collect();
+
+    if let Some(exact) = candidates
+        .iter()
+        .find(|(_, channel_id)| *channel_id == requested_channel_id)
+    {
+        return Some(exact.clone());
+    }
+
+    if candidates.len() == 1 {
+        return candidates.first().cloned();
+    }
+
+    None
+}
+
+async fn try_join_via_pending_channel_invitation(
+    app_core: &Arc<RwLock<AppCore>>,
+    requested_channel_id: ChannelId,
+) -> Result<bool, AuraError> {
+    let runtime = require_runtime(app_core).await?;
+    let pending = runtime.list_pending_invitations().await;
+    let Some((invitation_id, invited_channel_id)) =
+        select_pending_channel_invitation(&pending, runtime.authority_id(), requested_channel_id)
+    else {
+        return Ok(false);
+    };
+
+    if let Err(error) = runtime.accept_invitation(invitation_id.as_str()).await {
+        let message = error.to_string();
+        let lowered = message.to_lowercase();
+        if !lowered.contains("already accepted") && !lowered.contains("not pending") {
+            return Err(AuraError::agent(format!(
+                "Failed to accept pending channel invitation: {message}"
+            )));
+        }
+    }
+
+    // Joining by invited channel id is best-effort; some runtimes auto-join on accept.
+    let _ = join_channel(app_core, invited_channel_id).await;
+    Ok(true)
+}
+
+async fn resolve_target_authority_for_invite(
+    app_core: &Arc<RwLock<AppCore>>,
+    target_user_id: &str,
+) -> Result<AuthorityId, AuraError> {
+    if let Ok(contact) = crate::workflows::query::resolve_contact(app_core, target_user_id).await {
+        return Ok(contact.id);
+    }
+    parse_authority_id(target_user_id)
 }
 
 /// Get current home channel id as a typed ChannelId.
@@ -183,6 +294,194 @@ async fn context_id_for_channel(
     // (e.g. AMP-created channels in demos/tests). Fall back to the currently
     // selected home context (or per-authority demo context).
     current_home_context_or_fallback(app_core).await
+}
+
+fn find_home_for_context(
+    homes: &crate::views::home::HomesState,
+    context_id: ContextId,
+) -> Option<(ChannelId, crate::views::home::HomeState)> {
+    homes
+        .iter()
+        .filter(|(_, home)| home.context_id == Some(context_id))
+        .map(|(home_id, home)| (*home_id, home.clone()))
+        .max_by_key(|(_, home)| {
+            (
+                u8::from(home.is_admin()),
+                u8::from(!home.residents.is_empty()),
+                home.resident_count,
+            )
+        })
+}
+
+async fn enforce_home_moderation_for_sender(
+    app_core: &Arc<RwLock<AppCore>>,
+    context_id: ContextId,
+    sender_id: AuthorityId,
+    timestamp_ms: u64,
+) -> Result<(), AuraError> {
+    let home = {
+        let core = app_core.read().await;
+        let homes = core.views().get_homes();
+        find_home_for_context(&homes, context_id).map(|(_, home)| home)
+    };
+
+    let Some(home) = home else {
+        return Ok(());
+    };
+
+    if home.is_banned(&sender_id) {
+        return Err(AuraError::permission_denied(
+            "You are banned from this home and cannot send messages",
+        ));
+    }
+
+    if home.is_muted(&sender_id, timestamp_ms) {
+        return Err(AuraError::permission_denied(
+            "You are muted in this home and cannot send messages",
+        ));
+    }
+
+    if !home.residents.is_empty() && home.resident(&sender_id).is_none() {
+        return Err(AuraError::permission_denied(
+            "You are not a resident of this home",
+        ));
+    }
+
+    Ok(())
+}
+
+async fn enforce_home_join_allowed(
+    app_core: &Arc<RwLock<AppCore>>,
+    context_id: ContextId,
+    authority_id: AuthorityId,
+) -> Result<(), AuraError> {
+    let home = {
+        let core = app_core.read().await;
+        let homes = core.views().get_homes();
+        find_home_for_context(&homes, context_id).map(|(_, home)| home)
+    };
+
+    let Some(home) = home else {
+        return Ok(());
+    };
+
+    if home.is_banned(&authority_id) {
+        return Err(AuraError::permission_denied(
+            "You are banned from this home and cannot join channels",
+        ));
+    }
+
+    Ok(())
+}
+
+async fn restore_home_resident_membership(
+    app_core: &Arc<RwLock<AppCore>>,
+    context_id: ContextId,
+    authority_id: AuthorityId,
+    joined_at_ms: u64,
+) -> Result<(), AuraError> {
+    let mut core = app_core.write().await;
+    let mut homes = core.views().get_homes();
+
+    let target_home_id = homes
+        .iter()
+        .find_map(|(home_id, home)| (home.context_id == Some(context_id)).then_some(*home_id));
+
+    if let Some(home_id) = target_home_id {
+        if let Some(home) = homes.home_mut(&home_id) {
+            if home.resident(&authority_id).is_none() {
+                home.add_resident(Resident {
+                    id: authority_id,
+                    name: authority_id.to_string(),
+                    role: ResidentRole::Resident,
+                    is_online: true,
+                    joined_at: joined_at_ms,
+                    last_seen: Some(joined_at_ms),
+                    storage_allocated: crate::views::home::HomeState::RESIDENT_ALLOCATION,
+                });
+            }
+        }
+        core.views_mut().set_homes(homes);
+    }
+
+    Ok(())
+}
+
+async fn ensure_home_state_for_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_id: ContextId,
+    owner_id: AuthorityId,
+    channel_name: &str,
+    members: &[AuthorityId],
+    now_ms: u64,
+) -> Result<(), AuraError> {
+    let mut core = app_core.write().await;
+    let mut homes = core.views().get_homes();
+
+    if let Some(home) = homes.home_mut(&channel_id) {
+        if home.context_id.is_none() {
+            home.context_id = Some(context_id);
+        }
+        if let Some(owner) = home.resident_mut(&owner_id) {
+            owner.role = ResidentRole::Owner;
+        } else {
+            home.add_resident(Resident {
+                id: owner_id,
+                name: owner_id.to_string(),
+                role: ResidentRole::Owner,
+                is_online: true,
+                joined_at: now_ms,
+                last_seen: Some(now_ms),
+                storage_allocated: HomeState::RESIDENT_ALLOCATION,
+            });
+        }
+
+        for member in members {
+            if *member == owner_id || home.resident(member).is_some() {
+                continue;
+            }
+            home.add_resident(Resident {
+                id: *member,
+                name: member.to_string(),
+                role: ResidentRole::Resident,
+                is_online: true,
+                joined_at: now_ms,
+                last_seen: Some(now_ms),
+                storage_allocated: HomeState::RESIDENT_ALLOCATION,
+            });
+        }
+    } else {
+        let mut home = HomeState::new(
+            channel_id,
+            Some(channel_name.to_string()),
+            owner_id,
+            now_ms,
+            context_id,
+        );
+        for member in members {
+            if *member == owner_id || home.resident(member).is_some() {
+                continue;
+            }
+            home.add_resident(Resident {
+                id: *member,
+                name: member.to_string(),
+                role: ResidentRole::Resident,
+                is_online: true,
+                joined_at: now_ms,
+                last_seen: Some(now_ms),
+                storage_allocated: HomeState::RESIDENT_ALLOCATION,
+            });
+        }
+        homes.add_home_with_auto_select(home);
+    }
+
+    if homes.current_home_id().is_none() {
+        homes.select_home(Some(channel_id));
+    }
+
+    core.views_mut().set_homes(homes);
+    Ok(())
 }
 
 async fn recipient_peers_for_channel(
@@ -291,9 +590,11 @@ pub async fn create_channel(
         .collect::<Result<Vec<_>, AuraError>>()?;
     let mut channel_id = ChannelId::from_bytes(hash(format!("local:{timestamp_ms}").as_bytes()));
     let mut channel_context: Option<ContextId> = None;
+    let mut channel_owner: Option<AuthorityId> = None;
 
     if backend == MessagingBackend::Runtime {
         let runtime = require_runtime(app_core).await?;
+        channel_owner = Some(runtime.authority_id());
         let context_id = current_home_context_or_fallback(app_core).await?;
         channel_context = Some(context_id);
         let channel_hint = (!name.trim().is_empty()).then(|| channel_id_from_input(name));
@@ -379,6 +680,21 @@ pub async fn create_channel(
     })
     .await?;
 
+    if backend == MessagingBackend::Runtime {
+        if let (Some(context_id), Some(owner_id)) = (channel_context, channel_owner) {
+            ensure_home_state_for_channel(
+                app_core,
+                channel_id,
+                context_id,
+                owner_id,
+                name,
+                &member_ids,
+                timestamp_ms,
+            )
+            .await?;
+        }
+    }
+
     // Create channel invitations for selected members (if any).
     if backend == MessagingBackend::Runtime && !member_ids.is_empty() {
         let runtime = require_runtime(app_core).await?;
@@ -395,10 +711,10 @@ pub async fn create_channel(
             "Group threshold: {threshold_k}-of-{total_n} (keys rotate after everyone accepts)"
         ));
 
-        // Two-party groups can operate without explicit bootstrap handoff.
-        // This keeps delivery/decryption functional when invitation capability
-        // grants are unavailable for bootstrap exchange.
-        let bootstrap = if member_ids.len() > 1 {
+        // Always include bootstrap key material when issuing channel invitations.
+        // Without this, recipients can join by name/context but fail to decrypt
+        // channel payloads (rendered as "[sealed: N bytes]").
+        let bootstrap = if bootstrap_required_for_recipients(member_ids.len()) {
             Some(
                 runtime
                     .amp_create_channel_bootstrap(context_id, channel_id, member_ids.clone())
@@ -460,7 +776,9 @@ pub async fn join_channel(
     channel_id: ChannelId,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
-    let context_id = current_home_context_or_fallback(app_core).await?;
+    let context_id =
+        context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
+    enforce_home_join_allowed(app_core, context_id, runtime.authority_id()).await?;
 
     runtime
         .amp_join_channel(ChannelJoinParams {
@@ -470,6 +788,14 @@ pub async fn join_channel(
         })
         .await
         .map_err(|e| AuraError::agent(format!("Failed to join channel: {e}")))?;
+
+    restore_home_resident_membership(
+        app_core,
+        context_id,
+        runtime.authority_id(),
+        crate::workflows::time::current_time_ms(app_core).await?,
+    )
+    .await?;
 
     Ok(())
 }
@@ -515,6 +841,10 @@ pub async fn join_channel_by_name(
                 return Err(join_error);
             }
 
+            if try_join_via_pending_channel_invitation(app_core, channel_id).await? {
+                return Ok(());
+            }
+
             let timestamp_ms = crate::workflows::time::current_time_ms(app_core).await?;
             create_channel(
                 app_core,
@@ -541,7 +871,8 @@ pub async fn leave_channel(
     channel_id: ChannelId,
 ) -> Result<(), AuraError> {
     let runtime = { require_runtime(app_core).await? };
-    let context_id = current_home_context_or_fallback(app_core).await?;
+    let context_id =
+        context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
 
     runtime
         .amp_leave_channel(ChannelLeaveParams {
@@ -702,6 +1033,7 @@ pub async fn send_message_ref(
         let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
         let context_id =
             context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
+        enforce_home_moderation_for_sender(app_core, context_id, sender_id, timestamp_ms).await?;
         channel_context = Some(context_id);
 
         let cipher = runtime
@@ -748,13 +1080,12 @@ pub async fn send_message_ref(
             .await
             .map_err(|e| AuraError::agent(format!("Failed to persist message: {e}")))?;
 
-        let recipients =
-            recipient_peers_for_channel(app_core, channel_id, sender_id).await;
+        let recipients = recipient_peers_for_channel(app_core, channel_id, sender_id).await;
         let mut attempted_fanout = 0usize;
         let mut failed_fanout = Vec::new();
         for peer in recipients {
             attempted_fanout = attempted_fanout.saturating_add(1);
-            if let Err(error) = runtime.send_chat_fact(peer, context_id, &fact).await {
+            if let Err(error) = send_chat_fact_with_retry(&runtime, peer, context_id, &fact).await {
                 failed_fanout.push(format!("{peer}: {error}"));
             }
         }
@@ -923,14 +1254,7 @@ pub async fn start_direct_chat(
                 AuraError::agent(format!("Failed to persist direct channel: {error}"))
             })?;
 
-        runtime
-            .send_chat_fact(contact_authority, context_id, &fact)
-            .await
-            .map_err(|error| {
-                AuraError::agent(format!(
-                    "Failed to deliver direct channel fact to {contact_authority}: {error}"
-                ))
-            })?;
+        send_chat_fact_with_retry(&runtime, contact_authority, context_id, &fact).await?;
 
         with_chat_state(app_core, |chat_state| {
             chat_state.upsert_channel(Channel {
@@ -1050,15 +1374,26 @@ pub async fn invite_user_to_channel(
     message: Option<String>,
     ttl_ms: Option<u64>,
 ) -> Result<InvitationId, AuraError> {
-    // Parse target user ID as AuthorityId
-    let receiver = parse_authority_id(target_user_id)?;
+    // Resolve via contacts first so command targets can use IDs or contact names.
+    let receiver = resolve_target_authority_for_invite(app_core, target_user_id).await?;
+    let runtime = require_runtime(app_core).await?;
+    let channel_id = channel_id_from_input(channel_id);
+    let context_id =
+        context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
 
-    // Delegate to invitation workflow
+    // Channel invitations must carry bootstrap key material so recipients can
+    // decrypt channel traffic immediately after acceptance.
+    let bootstrap = runtime
+        .amp_create_channel_bootstrap(context_id, channel_id, vec![receiver])
+        .await
+        .map_err(|e| AuraError::agent(format!("Failed to bootstrap channel invitation: {e}")))?;
+
+    // Delegate to invitation workflow.
     let invitation = crate::workflows::invitation::create_channel_invitation(
         app_core,
         receiver,
         channel_id.to_string(),
-        None,
+        Some(bootstrap),
         message,
         ttl_ms,
     )
@@ -1071,6 +1406,11 @@ pub async fn invite_user_to_channel(
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::runtime_bridge::InvitationBridgeStatus;
+    use crate::signal_defs::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
+    use crate::views::contacts::{Contact, ContactsState};
+    use crate::views::home::{HomeState, HomesState, MuteRecord, ResidentRole};
+    use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
 
     #[tokio::test]
@@ -1103,6 +1443,65 @@ mod tests {
         assert_ne!(first, second);
         assert!(first.starts_with(&format!("msg-{channel_id}-{ts}-")));
         assert!(second.starts_with(&format!("msg-{channel_id}-{ts}-")));
+    }
+
+    #[test]
+    fn test_bootstrap_required_for_recipients() {
+        assert!(!bootstrap_required_for_recipients(0));
+        assert!(bootstrap_required_for_recipients(1));
+        assert!(bootstrap_required_for_recipients(2));
+    }
+
+    fn pending_channel_invitation(
+        invitation_suffix: &str,
+        sender: AuthorityId,
+        channel_id: ChannelId,
+    ) -> InvitationInfo {
+        InvitationInfo {
+            invitation_id: InvitationId::new(format!("inv-{invitation_suffix}")),
+            sender_id: sender,
+            receiver_id: AuthorityId::new_from_entropy([99u8; 32]),
+            invitation_type: InvitationBridgeType::Channel {
+                home_id: channel_id.to_string(),
+                nickname_suggestion: None,
+            },
+            status: InvitationBridgeStatus::Pending,
+            created_at_ms: 0,
+            expires_at_ms: None,
+            message: None,
+        }
+    }
+
+    #[test]
+    fn test_select_pending_channel_invitation_prefers_requested_channel_id() {
+        let local = AuthorityId::new_from_entropy([1u8; 32]);
+        let sender = AuthorityId::new_from_entropy([2u8; 32]);
+        let requested = ChannelId::from_bytes(hash(b"join-target"));
+        let other = ChannelId::from_bytes(hash(b"join-other"));
+
+        let pending = vec![
+            pending_channel_invitation("other", sender, other),
+            pending_channel_invitation("target", sender, requested),
+        ];
+
+        let selected = select_pending_channel_invitation(&pending, local, requested)
+            .expect("expected a matching invitation");
+        assert_eq!(selected.1, requested);
+        assert_eq!(selected.0.as_str(), "inv-target");
+    }
+
+    #[test]
+    fn test_select_pending_channel_invitation_uses_single_candidate_fallback() {
+        let local = AuthorityId::new_from_entropy([3u8; 32]);
+        let sender = AuthorityId::new_from_entropy([4u8; 32]);
+        let requested = ChannelId::from_bytes(hash(b"requested-channel"));
+        let invited = ChannelId::from_bytes(hash(b"invited-channel"));
+
+        let pending = vec![pending_channel_invitation("single", sender, invited)];
+        let selected = select_pending_channel_invitation(&pending, local, requested)
+            .expect("expected single candidate fallback");
+        assert_eq!(selected.1, invited);
+        assert_eq!(selected.0.as_str(), "inv-single");
     }
 
     #[tokio::test]
@@ -1143,5 +1542,118 @@ mod tests {
             .filter(|channel| channel.name.eq_ignore_ascii_case("porch"))
             .count();
         assert_eq!(count, 1, "join should not duplicate channels");
+    }
+
+    #[tokio::test]
+    async fn test_enforce_home_moderation_allows_when_resident_list_is_empty() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let context_id = ContextId::new_from_entropy([5u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let sender = AuthorityId::new_from_entropy([9u8; 32]);
+        let home_id = ChannelId::from_bytes(hash(b"messaging-empty-residents-home"));
+
+        let mut home = HomeState::new(home_id, Some("shared".to_string()), owner, 0, context_id);
+        home.my_role = ResidentRole::Resident;
+        home.residents.clear();
+        home.resident_count = 0;
+        home.online_count = 0;
+
+        let mut homes = HomesState::new();
+        homes.add_home_with_auto_select(home);
+        {
+            let mut core = app_core.write().await;
+            core.views_mut().set_homes(homes);
+        }
+
+        let result = enforce_home_moderation_for_sender(&app_core, context_id, sender, 1_000).await;
+        assert!(
+            result.is_ok(),
+            "empty resident list should not block sender"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_enforce_home_moderation_blocks_muted_sender_with_empty_residents() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let context_id = ContextId::new_from_entropy([6u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let sender = AuthorityId::new_from_entropy([9u8; 32]);
+        let actor = AuthorityId::new_from_entropy([2u8; 32]);
+        let home_id = ChannelId::from_bytes(hash(b"messaging-muted-home"));
+
+        let mut home = HomeState::new(home_id, Some("shared".to_string()), owner, 0, context_id);
+        home.my_role = ResidentRole::Resident;
+        home.residents.clear();
+        home.resident_count = 0;
+        home.online_count = 0;
+        home.add_mute(MuteRecord {
+            authority_id: sender,
+            duration_secs: Some(300),
+            muted_at: 1_000,
+            expires_at: Some(301_000),
+            actor,
+        });
+
+        let mut homes = HomesState::new();
+        homes.add_home_with_auto_select(home);
+        {
+            let mut core = app_core.write().await;
+            core.views_mut().set_homes(homes);
+        }
+
+        let result = enforce_home_moderation_for_sender(&app_core, context_id, sender, 2_000).await;
+        assert!(result.is_err(), "muted sender should be blocked");
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("muted"),
+            "expected muted error, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_authority_for_invite_uses_contact_resolution() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let bob_id = AuthorityId::new_from_entropy([11u8; 32]);
+        let bob_contact = Contact {
+            id: bob_id,
+            nickname: "Bob".to_string(),
+            nickname_suggestion: Some("Bobby".to_string()),
+            is_guardian: false,
+            is_resident: false,
+            last_interaction: None,
+            is_online: true,
+            read_receipt_policy: Default::default(),
+        };
+
+        emit_signal(
+            &app_core,
+            &*CONTACTS_SIGNAL,
+            ContactsState::from_contacts(vec![bob_contact]),
+            CONTACTS_SIGNAL_NAME,
+        )
+        .await
+        .unwrap();
+
+        let by_name = resolve_target_authority_for_invite(&app_core, "bob")
+            .await
+            .expect("expected contact nickname to resolve");
+        assert_eq!(by_name, bob_id);
+
+        let by_id = resolve_target_authority_for_invite(&app_core, &bob_id.to_string())
+            .await
+            .expect("expected contact id string to resolve");
+        assert_eq!(by_id, bob_id);
     }
 }

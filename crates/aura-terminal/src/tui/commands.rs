@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(
             cmd,
             IrcCommand::Mode {
-                channel: "#general".to_string(),
+                channel: "general".to_string(),
                 flags: "+i".to_string()
             }
         );

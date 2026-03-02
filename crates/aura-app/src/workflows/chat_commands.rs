@@ -740,6 +740,8 @@ pub fn parse_chat_command(input: &str) -> Result<ChatCommand, CommandError> {
                     argument: "flags".to_string(),
                 })?
                 .to_string();
+            // Keep channel argument normalization consistent with `/join`.
+            let channel = normalize_channel_name(&channel);
             Ok(ChatCommand::Mode { channel, flags })
         }
 
@@ -1305,7 +1307,7 @@ mod tests {
         assert_eq!(
             cmd,
             ChatCommand::Mode {
-                channel: "#general".to_string(),
+                channel: "general".to_string(),
                 flags: "+i".to_string()
             }
         );

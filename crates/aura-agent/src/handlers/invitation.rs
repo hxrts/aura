@@ -25,6 +25,7 @@ use aura_core::effects::{SecureStorageCapability, SecureStorageEffects, SecureSt
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, InvitationId};
 use aura_core::time::PhysicalTime;
+use aura_core::Hash32;
 use aura_core::FlowCost;
 use aura_core::Receipt;
 use aura_guards::types::CapabilityId;
@@ -64,14 +65,14 @@ use aura_journal::fact::{FactContent, RelationalFact};
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use std::sync::Arc;
 use aura_journal::DomainFact;
+use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::EffectApiEffects;
 use aura_protocol::effects::ChoreographyError;
 use aura_core::effects::TransportError;
 use aura_core::util::serialization::from_slice;
 use crate::runtime::choreography_adapter::AuraProtocolAdapter;
 use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
-use std::collections::HashSet;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -690,6 +691,13 @@ impl InvitationHandler {
                     .map_err(|e| {
                         crate::core::AgentError::effects(format!("store AMP bootstrap key: {e}"))
                     })?;
+
+                self.materialize_channel_bootstrap_acceptance(
+                    effects.as_ref(),
+                    &channel_invite,
+                    bootstrap_id,
+                )
+                .await?;
             }
 
             self.materialize_channel_invitation_acceptance(effects.as_ref(), &channel_invite)
@@ -1636,6 +1644,58 @@ impl InvitationHandler {
 
         self.materialize_home_signal_for_channel_invitation(effects, invite)
             .await?;
+
+        Ok(())
+    }
+
+    async fn materialize_channel_bootstrap_acceptance(
+        &self,
+        effects: &AuraEffectSystem,
+        invite: &ChannelInviteDetails,
+        bootstrap_id: Hash32,
+    ) -> AgentResult<()> {
+        if let Ok(state) =
+            aura_protocol::amp::get_channel_state(effects, invite.context_id, invite.channel_id)
+                .await
+        {
+            if let Some(existing) = state.bootstrap {
+                if existing.bootstrap_id != bootstrap_id {
+                    tracing::warn!(
+                        context_id = %invite.context_id,
+                        channel_id = %invite.channel_id,
+                        existing_bootstrap_id = %existing.bootstrap_id,
+                        incoming_bootstrap_id = %bootstrap_id,
+                        "Received channel invitation bootstrap that conflicts with existing channel bootstrap"
+                    );
+                }
+                return Ok(());
+            }
+        }
+
+        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+        let own_id = self.context.authority.authority_id();
+        let recipients: Vec<_> = BTreeSet::from([invite.sender_id, own_id])
+            .into_iter()
+            .collect();
+        let bootstrap_fact = aura_journal::fact::ChannelBootstrap {
+            context: invite.context_id,
+            channel: invite.channel_id,
+            bootstrap_id,
+            dealer: invite.sender_id,
+            recipients,
+            created_at: PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            },
+            expires_at: None,
+        };
+
+        effects
+            .insert_relational_fact(RelationalFact::Protocol(
+                aura_journal::ProtocolRelationalFact::AmpChannelBootstrap(bootstrap_fact),
+            ))
+            .await
+            .map_err(|e| AgentError::effects(format!("insert AMP bootstrap fact: {e}")))?;
 
         Ok(())
     }
@@ -3705,6 +3765,75 @@ mod tests {
         assert_eq!(home.context_id, Some(expected_context));
         assert!(home.resident(&receiver_id).is_some());
         assert_eq!(home.my_role, ResidentRole::Resident);
+    }
+
+    #[tokio::test]
+    async fn accepting_channel_invitation_materializes_amp_bootstrap_state() {
+        let sender_id = AuthorityId::new_from_entropy([217u8; 32]);
+        let receiver_id = AuthorityId::new_from_entropy([218u8; 32]);
+        let config = AgentConfig::default();
+        let effects =
+            Arc::new(AuraEffectSystem::testing_for_authority(&config, receiver_id).unwrap());
+        let handler = InvitationHandler::new(AuthorityContext::new(receiver_id)).unwrap();
+
+        let invitation_id = InvitationId::new("inv-materialize-bootstrap-1");
+        let bootstrap_key = [7u8; 32];
+        let bootstrap_id = Hash32::from_bytes(&bootstrap_key);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: invitation_id.clone(),
+            sender_id,
+            context_id: None,
+            invitation_type: InvitationType::Channel {
+                home_id: "elm-house".to_string(),
+                nickname_suggestion: Some("Elm House".to_string()),
+                bootstrap: Some(ChannelBootstrapPackage {
+                    bootstrap_id,
+                    key: bootstrap_key.to_vec(),
+                }),
+            },
+            expires_at: None,
+            message: Some("Join Elm House".to_string()),
+        };
+
+        let imported = handler
+            .import_invitation_code(effects.as_ref(), &shareable.to_code())
+            .await
+            .unwrap();
+
+        handler
+            .accept_invitation(effects.clone(), &imported.invitation_id)
+            .await
+            .unwrap();
+
+        let expected_context = default_context_id_for_authority(sender_id);
+        let expected_channel = channel_id_from_home_id("elm-house");
+
+        let state = aura_protocol::amp::get_channel_state(
+            effects.as_ref(),
+            expected_context,
+            expected_channel,
+        )
+        .await
+        .expect("accepted invitation should materialize AMP channel state");
+        let bootstrap = state
+            .bootstrap
+            .expect("accepted invitation should materialize bootstrap metadata");
+        assert_eq!(bootstrap.bootstrap_id, bootstrap_id);
+        assert_eq!(bootstrap.dealer, sender_id);
+        assert!(bootstrap.recipients.contains(&sender_id));
+        assert!(bootstrap.recipients.contains(&receiver_id));
+
+        let location = SecureStorageLocation::amp_bootstrap_key(
+            &expected_context,
+            &expected_channel,
+            &bootstrap_id,
+        );
+        let stored_key = effects
+            .secure_retrieve(&location, &[SecureStorageCapability::Read])
+            .await
+            .expect("bootstrap key should be persisted");
+        assert_eq!(stored_key, bootstrap_key.to_vec());
     }
 
     #[tokio::test]

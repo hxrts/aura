@@ -662,6 +662,7 @@ async fn test_steward_grant_revoke_operations() {
     println!("Phase 1: Try to grant steward role");
     let result = ctx
         .dispatch(EffectCommand::GrantSteward {
+            channel: None,
             target: "user-to-promote".to_string(),
         })
         .await;
@@ -672,6 +673,7 @@ async fn test_steward_grant_revoke_operations() {
     println!("\nPhase 2: Try to revoke steward role");
     let result = ctx
         .dispatch(EffectCommand::RevokeSteward {
+            channel: None,
             target: "user-to-demote".to_string(),
         })
         .await;

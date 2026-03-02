@@ -92,12 +92,10 @@ impl ChatCallbacks {
                                         format!("{} — {}", help.syntax, help.description),
                                     )));
                                 } else {
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(
-                                        ToastMessage::error(
-                                            "help",
-                                            format!("Unknown command: /{normalized}"),
-                                        ),
-                                    ));
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                        "help",
+                                        format!("Unknown command: /{normalized}"),
+                                    )));
                                 }
                             } else {
                                 let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::info(

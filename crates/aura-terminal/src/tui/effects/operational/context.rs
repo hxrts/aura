@@ -60,9 +60,18 @@ pub async fn handle_context(
                 Ok(invitation_id) => Some(Ok(OpResponse::Data(format!(
                     "Accepted home invitation: {invitation_id}"
                 )))),
-                Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to accept home invitation: {e}"
-                )))),
+                Err(e) => {
+                    let message = format!("Failed to accept home invitation: {e}");
+                    let lowered = message.to_lowercase();
+                    if lowered.contains("no pending home invitation")
+                        || lowered.contains("invalid invitation")
+                        || lowered.contains("already accepted")
+                    {
+                        Some(Err(super::types::OpError::InvalidArgument(message)))
+                    } else {
+                        Some(Err(super::types::OpError::Failed(message)))
+                    }
+                }
             }
         }
 
