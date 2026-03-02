@@ -560,12 +560,8 @@ summary:
     echo "Wrote $out"
 
 # Build the book after regenerating the summary
+# Build and serve documentation locally with live reload
 book: summary
-    AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c \
-        'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook build && rm -f mermaid-init.js mermaid.min.js'
-
-# Serve locally with live reload
-serve-book: summary
     #!/usr/bin/env bash
     set -euo pipefail
     pgrep -x mdbook > /dev/null && { echo "Stopping existing mdbook server..."; pkill mdbook; sleep 1; }
@@ -573,8 +569,8 @@ serve-book: summary
     AURA_SUPPRESS_NIX_WELCOME=1 nix develop --quiet --command bash -c \
         'mdbook-mermaid install . > /dev/null 2>&1 || true && mdbook serve --open'
 
-# Serve documentation with live reload (alias)
-serve: serve-book
+# Alias for book
+serve: book
 
 # Generate rustdoc documentation
 docs:
