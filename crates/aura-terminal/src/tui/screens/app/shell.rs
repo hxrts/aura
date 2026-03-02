@@ -214,6 +214,19 @@ impl TuiStateHandle {
     fn replace(&mut self, new_state: TuiState) {
         self.with_mut(|state| *state = new_state);
     }
+
+    /// Advance the active toast timer without forcing a full re-render on every tick.
+    ///
+    /// We only bump the render version when a toast is actually dismissed.
+    fn tick_active_toast_timer(&mut self) {
+        let dismissed = {
+            let mut guard = self.state.write();
+            guard.toast_queue.tick()
+        };
+        if dismissed {
+            self.bump();
+        }
+    }
 }
 
 /// A render-time state snapshot that can only be created via `TuiStateHandle::read_for_render()`.
@@ -568,12 +581,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
             loop {
                 interval.tick().await;
-                // Only tick if there's an active toast to avoid unnecessary re-renders
-                let has_active_toast = tui.state.read().toast_queue.is_active();
-                if has_active_toast {
-                    tui.with_mut(|state| {
-                        state.toast_queue.tick();
-                    });
+                // Only tick auto-dismissing toasts. Keep error toasts static and avoid
+                // forcing a full re-render unless dismissal actually occurred.
+                let should_tick = tui
+                    .state
+                    .read()
+                    .toast_queue
+                    .current()
+                    .is_some_and(|toast| toast.auto_dismisses());
+                if should_tick {
+                    tui.tick_active_toast_timer();
                 }
             }
         }
@@ -1257,20 +1274,31 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         // Contacts
                         // =========================================================================
                         UiUpdate::ContactCountChanged(count) => {
-                            // Update contact count for keyboard navigation (navigate_list)
-                            tui.with_mut(|state| {
-                                state.contacts.contact_count = count;
-                            });
+                            let needs_update = tui.state.read().contacts.contact_count != count;
+                            if needs_update {
+                                // Update contact count for keyboard navigation (navigate_list)
+                                tui.with_mut(|state| {
+                                    state.contacts.contact_count = count;
+                                });
+                            }
                         }
                         UiUpdate::NotificationsCountChanged(count) => {
-                            tui.with_mut(|state| {
-                                state.notifications.item_count = count;
-                                if count == 0 {
-                                    state.notifications.selected_index = 0;
-                                } else if state.notifications.selected_index >= count {
-                                    state.notifications.selected_index = count.saturating_sub(1);
-                                }
-                            });
+                            let needs_update = {
+                                let state = tui.state.read();
+                                state.notifications.item_count != count
+                                    || (count == 0 && state.notifications.selected_index != 0)
+                                    || (count > 0 && state.notifications.selected_index >= count)
+                            };
+                            if needs_update {
+                                tui.with_mut(|state| {
+                                    state.notifications.item_count = count;
+                                    if count == 0 {
+                                        state.notifications.selected_index = 0;
+                                    } else if state.notifications.selected_index >= count {
+                                        state.notifications.selected_index = count.saturating_sub(1);
+                                    }
+                                });
+                            }
                         }
                         UiUpdate::NicknameUpdated {
                             contact_id: _,
@@ -1292,16 +1320,29 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             );
                         }
                         UiUpdate::LanPeersCountChanged(count) => {
-                            tui.with_mut(|state| {
-                                state.contacts.lan_peer_count = count;
-                                if count == 0 {
-                                    state.contacts.lan_selected_index = 0;
-                                    state.contacts.list_focus =
-                                        crate::tui::state_machine::ContactsListFocus::Contacts;
-                                } else if state.contacts.lan_selected_index >= count {
-                                    state.contacts.lan_selected_index = count.saturating_sub(1);
-                                }
-                            });
+                            let needs_update = {
+                                let state = tui.state.read();
+                                state.contacts.lan_peer_count != count
+                                    || (count == 0
+                                        && (state.contacts.lan_selected_index != 0
+                                            || !matches!(
+                                                state.contacts.list_focus,
+                                                crate::tui::state_machine::ContactsListFocus::Contacts
+                                            )))
+                                    || (count > 0 && state.contacts.lan_selected_index >= count)
+                            };
+                            if needs_update {
+                                tui.with_mut(|state| {
+                                    state.contacts.lan_peer_count = count;
+                                    if count == 0 {
+                                        state.contacts.lan_selected_index = 0;
+                                        state.contacts.list_focus =
+                                            crate::tui::state_machine::ContactsListFocus::Contacts;
+                                    } else if state.contacts.lan_selected_index >= count {
+                                        state.contacts.lan_selected_index = count.saturating_sub(1);
+                                    }
+                                });
+                            }
                         }
 
                         // =========================================================================

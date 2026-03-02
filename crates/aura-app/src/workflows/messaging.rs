@@ -6,7 +6,7 @@
 use crate::workflows::channel_ref::ChannelRef;
 use crate::workflows::context::current_home_context_or_fallback;
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::require_runtime;
+use crate::workflows::runtime::{cooperative_yield, require_runtime};
 use crate::workflows::signals::read_signal;
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::workflows::state_helpers::with_chat_state;
@@ -38,7 +38,6 @@ use aura_protocol::amp::{serialize_amp_message, AmpMessage};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::task::yield_now;
 
 static MESSAGE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 const CHAT_FACT_SEND_MAX_ATTEMPTS: usize = 4;
@@ -202,7 +201,7 @@ async fn send_chat_fact_with_retry(
             let _ = runtime.trigger_discovery().await;
             let _ = runtime.trigger_sync().await;
             for _ in 0..CHAT_FACT_SEND_YIELDS_PER_RETRY {
-                yield_now().await;
+                cooperative_yield().await;
             }
         }
     }
@@ -362,21 +361,39 @@ async fn context_id_for_channel(
     current_home_context_or_fallback(app_core).await
 }
 
-fn find_home_for_context(
+fn collect_home_candidates(
     homes: &crate::views::home::HomesState,
     context_id: ContextId,
-) -> Option<(ChannelId, crate::views::home::HomeState)> {
-    homes
-        .iter()
-        .filter(|(_, home)| home.context_id == Some(context_id))
-        .map(|(home_id, home)| (*home_id, home.clone()))
-        .max_by_key(|(_, home)| {
-            (
-                u8::from(home.is_admin()),
-                u8::from(!home.residents.is_empty()),
-                home.resident_count,
-            )
-        })
+    channel_id: ChannelId,
+) -> Vec<crate::views::home::HomeState> {
+    let mut candidates = Vec::new();
+
+    for (_, home) in homes.iter() {
+        if home.context_id == Some(context_id) {
+            let known = candidates
+                .iter()
+                .any(|candidate: &crate::views::home::HomeState| candidate.id == home.id);
+            if !known {
+                candidates.push(home.clone());
+            }
+        }
+    }
+
+    if let Some(home) = homes.home_state(&channel_id) {
+        let known = candidates.iter().any(|candidate| candidate.id == home.id);
+        if !known {
+            candidates.push(home.clone());
+        }
+    }
+
+    if let Some(home) = homes.current_home() {
+        let known = candidates.iter().any(|candidate| candidate.id == home.id);
+        if !known {
+            candidates.push(home.clone());
+        }
+    }
+
+    candidates
 }
 
 fn join_error_is_not_found(error: &AuraError) -> bool {
@@ -404,32 +421,39 @@ fn intent_error_is_not_found(error: &IntentError) -> bool {
 async fn enforce_home_moderation_for_sender(
     app_core: &Arc<RwLock<AppCore>>,
     context_id: ContextId,
+    channel_id: ChannelId,
     sender_id: AuthorityId,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let home = {
+    let candidates = {
         let core = app_core.read().await;
-        let homes = core.views().get_homes();
-        find_home_for_context(&homes, context_id).map(|(_, home)| home)
+        collect_home_candidates(&core.views().get_homes(), context_id, channel_id)
     };
 
-    let Some(home) = home else {
+    if candidates.is_empty() {
         return Ok(());
-    };
+    }
 
-    if home.is_banned(&sender_id) {
+    if candidates.iter().any(|home| home.is_banned(&sender_id)) {
         return Err(AuraError::permission_denied(
             "You are banned from this home and cannot send messages",
         ));
     }
 
-    if home.is_muted(&sender_id, timestamp_ms) {
+    if candidates
+        .iter()
+        .any(|home| home.is_muted(&sender_id, timestamp_ms))
+    {
         return Err(AuraError::permission_denied(
             "You are muted in this home and cannot send messages",
         ));
     }
 
-    if !home.residents.is_empty() && home.resident(&sender_id).is_none() {
+    let has_resident_roster = candidates.iter().any(|home| !home.residents.is_empty());
+    let sender_is_resident = candidates
+        .iter()
+        .any(|home| home.resident(&sender_id).is_some());
+    if has_resident_roster && !sender_is_resident {
         return Err(AuraError::permission_denied(
             "You are not a resident of this home",
         ));
@@ -441,25 +465,69 @@ async fn enforce_home_moderation_for_sender(
 async fn enforce_home_join_allowed(
     app_core: &Arc<RwLock<AppCore>>,
     context_id: ContextId,
+    channel_id: ChannelId,
     authority_id: AuthorityId,
 ) -> Result<(), AuraError> {
-    let home = {
+    let candidates = {
         let core = app_core.read().await;
-        let homes = core.views().get_homes();
-        find_home_for_context(&homes, context_id).map(|(_, home)| home)
+        collect_home_candidates(&core.views().get_homes(), context_id, channel_id)
     };
 
-    let Some(home) = home else {
+    if candidates.is_empty() {
         return Ok(());
-    };
+    }
 
-    if home.is_banned(&authority_id) {
+    if candidates.iter().any(|home| home.is_banned(&authority_id)) {
         return Err(AuraError::permission_denied(
             "You are banned from this home and cannot join channels",
         ));
     }
 
     Ok(())
+}
+
+async fn ensure_channel_visible_after_join(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_id: ContextId,
+    name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    let normalized_name = name_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.trim_start_matches('#'))
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| channel_id.to_string());
+
+    with_chat_state(app_core, |chat| {
+        if let Some(channel) = chat.channel_mut(&channel_id) {
+            if channel.context_id.is_none() {
+                channel.context_id = Some(context_id);
+            }
+            if name_hint.is_some() && channel.name != normalized_name {
+                channel.name = normalized_name.clone();
+            }
+            return;
+        }
+
+        chat.upsert_channel(Channel {
+            id: channel_id,
+            context_id: Some(context_id),
+            name: normalized_name.clone(),
+            topic: None,
+            channel_type: ChannelType::Home,
+            unread_count: 0,
+            is_dm: false,
+            member_ids: Vec::new(),
+            member_count: 1,
+            last_message: None,
+            last_message_time: None,
+            last_activity: 0,
+            last_finalized_epoch: 0,
+        });
+    })
+    .await
 }
 
 async fn restore_home_resident_membership(
@@ -866,7 +934,7 @@ pub async fn join_channel(
     let runtime = { require_runtime(app_core).await? };
     let context_id =
         context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
-    enforce_home_join_allowed(app_core, context_id, runtime.authority_id()).await?;
+    enforce_home_join_allowed(app_core, context_id, channel_id, runtime.authority_id()).await?;
 
     runtime
         .amp_join_channel(ChannelJoinParams {
@@ -890,6 +958,7 @@ pub async fn join_channel(
         crate::workflows::time::current_time_ms(app_core).await?,
     )
     .await?;
+    ensure_channel_visible_after_join(app_core, channel_id, context_id, None).await?;
 
     Ok(())
 }
@@ -904,7 +973,7 @@ pub async fn join_channel_by_name(
         return Err(AuraError::invalid("Channel name cannot be empty"));
     }
 
-    let channel_id = channel_id_from_input(channel_name);
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await;
     let channel_exists_locally = {
         let chat = chat_snapshot(app_core).await;
         chat.channel(&channel_id).is_some()
@@ -927,13 +996,35 @@ pub async fn join_channel_by_name(
     }
 
     match join_channel(app_core, channel_id).await {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            let context_id =
+                context_id_for_channel(app_core, channel_id, Some(require_runtime(app_core).await?.authority_id()))
+                    .await?;
+            ensure_channel_visible_after_join(
+                app_core,
+                channel_id,
+                context_id,
+                Some(channel_name),
+            )
+            .await?;
+            Ok(())
+        }
         Err(join_error) => {
             // "/join" is "join or create". If the channel is unknown locally,
             // create it in the current context as a fallback.
             if channel_exists_locally || !join_error_is_not_found(&join_error) {
                 return Err(join_error);
             }
+
+            let runtime = require_runtime(app_core).await?;
+            let fallback_context = current_home_context_or_fallback(app_core).await?;
+            enforce_home_join_allowed(
+                app_core,
+                fallback_context,
+                channel_id,
+                runtime.authority_id(),
+            )
+            .await?;
 
             if try_join_via_pending_channel_invitation(app_core, channel_id).await? {
                 return Ok(());
@@ -985,11 +1076,17 @@ pub async fn leave_channel(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to leave channel: {e}")))?;
 
-    // Keep UI state authoritative immediately after a successful leave so
-    // slash-command behavior is deterministic while reactive updates converge.
-    let removed_channel =
-        with_chat_state(app_core, |chat| chat.remove_channel(&channel_id)).await?;
-    if removed_channel.is_none() {
+    // Preserve the channel entry so `/join <name>` can reuse the authoritative
+    // channel ID instead of falling back to a hash-derived placeholder.
+    let updated_channel = with_chat_state(app_core, |chat| {
+        if let Some(channel) = chat.channel_mut(&channel_id) {
+            channel.member_count = 0;
+            return true;
+        }
+        false
+    })
+    .await?;
+    if !updated_channel {
         let available_channels = chat_snapshot(app_core)
             .await
             .all_channels()
@@ -1014,18 +1111,30 @@ pub async fn leave_channel_by_name(
         candidate_ids.push(resolve_channel_id_from_state_or_input(app_core, channel_name).await);
     }
 
+    // Channel views can transiently carry duplicate IDs for the same display name
+    // (for example hash-derived and runtime-derived identifiers). Expand the leave
+    // set to all channels sharing the resolved display name(s) so `/leave` is
+    // semantically idempotent for a named channel.
+    let snapshot = chat_snapshot(app_core).await;
+    let mut candidate_names = BTreeSet::new();
+    for channel_id in &candidate_ids {
+        if let Some(channel) = snapshot.channel(channel_id) {
+            candidate_names.insert(channel.name.to_ascii_lowercase());
+        }
+    }
+    if !candidate_names.is_empty() {
+        for channel in snapshot.all_channels() {
+            if candidate_names.contains(&channel.name.to_ascii_lowercase())
+                && !candidate_ids.contains(&channel.id)
+            {
+                candidate_ids.push(channel.id);
+            }
+        }
+    }
+
     for channel_id in &candidate_ids {
         leave_channel(app_core, *channel_id).await?;
     }
-
-    // Defensive UI convergence: ensure all matched channels are removed from the
-    // local chat view even if runtime reductions lag membership updates.
-    with_chat_state(app_core, |chat| {
-        for channel_id in &candidate_ids {
-            let _ = chat.remove_channel(channel_id);
-        }
-    })
-    .await?;
 
     Ok(())
 }
@@ -1169,7 +1278,14 @@ pub async fn send_message_ref(
         let message_id = next_message_id(channel_id, sender_id, timestamp_ms, content);
         let context_id =
             context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
-        enforce_home_moderation_for_sender(app_core, context_id, sender_id, timestamp_ms).await?;
+        enforce_home_moderation_for_sender(
+            app_core,
+            context_id,
+            channel_id,
+            sender_id,
+            timestamp_ms,
+        )
+        .await?;
         channel_context = Some(context_id);
 
         let cipher = runtime
@@ -1545,7 +1661,7 @@ mod tests {
     use crate::runtime_bridge::InvitationBridgeStatus;
     use crate::signal_defs::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
     use crate::views::contacts::{Contact, ContactsState};
-    use crate::views::home::{HomeState, HomesState, MuteRecord, ResidentRole};
+    use crate::views::home::{BanRecord, HomeState, HomesState, MuteRecord, ResidentRole};
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
 
@@ -1681,6 +1797,109 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_join_channel_by_name_local_reuses_existing_channel_id() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let existing_id = ChannelId::from_bytes(hash(b"join-existing-id"));
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: existing_id,
+                context_id: None,
+                name: "slash-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        join_channel_by_name(&app_core, "#slash-lab")
+            .await
+            .expect("join should reuse existing channel");
+
+        let state = get_chat_state(&app_core).await.unwrap();
+        let count = state
+            .all_channels()
+            .filter(|channel| channel.name.eq_ignore_ascii_case("slash-lab"))
+            .count();
+        assert_eq!(count, 1, "join should not duplicate named channels");
+        assert!(state.channel(&existing_id).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_ensure_channel_visible_after_join_inserts_missing_channel() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let context_id = ContextId::new_from_entropy([12u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"join-visible-missing"));
+        ensure_channel_visible_after_join(&app_core, channel_id, context_id, Some("slash-lab"))
+            .await
+            .expect("join visibility should succeed");
+
+        let chat = chat_snapshot(&app_core).await;
+        let channel = chat
+            .channel(&channel_id)
+            .expect("channel should be inserted");
+        assert_eq!(channel.context_id, Some(context_id));
+        assert_eq!(channel.name, "slash-lab");
+    }
+
+    #[tokio::test]
+    async fn test_ensure_channel_visible_after_join_updates_existing_name_with_hint() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let context_id = ContextId::new_from_entropy([13u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"join-visible-existing"));
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: None,
+                name: channel_id.to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        ensure_channel_visible_after_join(&app_core, channel_id, context_id, Some("#slash-lab"))
+            .await
+            .expect("join visibility should succeed");
+
+        let chat = chat_snapshot(&app_core).await;
+        let channel = chat
+            .channel(&channel_id)
+            .expect("channel should exist");
+        assert_eq!(channel.context_id, Some(context_id));
+        assert_eq!(channel.name, "slash-lab");
+    }
+
+    #[tokio::test]
     async fn test_resolve_channel_id_from_state_matches_name_variants() {
         let config = AppConfig::default();
         let core = AppCore::new(config).unwrap();
@@ -1806,7 +2025,8 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let result = enforce_home_moderation_for_sender(&app_core, context_id, sender, 1_000).await;
+        let result =
+            enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 1_000).await;
         assert!(
             result.is_ok(),
             "empty resident list should not block sender"
@@ -1846,13 +2066,166 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let result = enforce_home_moderation_for_sender(&app_core, context_id, sender, 2_000).await;
+        let result =
+            enforce_home_moderation_for_sender(&app_core, context_id, home_id, sender, 2_000).await;
         assert!(result.is_err(), "muted sender should be blocked");
         let error = result.unwrap_err().to_string();
         assert!(
             error.contains("muted"),
             "expected muted error, got: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_enforce_home_join_blocks_banned_sender_when_context_mismatched() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let banned = AuthorityId::new_from_entropy([3u8; 32]);
+        let actor = AuthorityId::new_from_entropy([4u8; 32]);
+        let owner = AuthorityId::new_from_entropy([5u8; 32]);
+        let home_context = ContextId::new_from_entropy([7u8; 32]);
+        let mismatched_context = ContextId::new_from_entropy([8u8; 32]);
+        let home_id = ChannelId::from_bytes(hash(b"join-ban-home"));
+
+        let mut home = HomeState::new(
+            home_id,
+            Some("slash-lab".to_string()),
+            owner,
+            0,
+            home_context,
+        );
+        home.add_ban(BanRecord {
+            authority_id: banned,
+            reason: "scenario-ban".to_string(),
+            actor,
+            banned_at: 1_000,
+        });
+
+        let mut homes = HomesState::new();
+        homes.add_home_with_auto_select(home);
+        {
+            let mut core = app_core.write().await;
+            core.views_mut().set_homes(homes);
+        }
+
+        let result =
+            enforce_home_join_allowed(&app_core, mismatched_context, home_id, banned).await;
+        assert!(result.is_err(), "banned sender must be blocked");
+        assert!(result.unwrap_err().to_string().contains("banned"));
+    }
+
+    #[tokio::test]
+    async fn test_enforce_home_moderation_blocks_muted_sender_across_context_homes() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let context_id = ContextId::new_from_entropy([14u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let sender = AuthorityId::new_from_entropy([9u8; 32]);
+        let actor = AuthorityId::new_from_entropy([2u8; 32]);
+        let channel_home_id = ChannelId::from_bytes(hash(b"messaging-context-primary-home"));
+        let moderation_home_id =
+            ChannelId::from_bytes(hash(b"messaging-context-moderation-home"));
+
+        let primary_home = HomeState::new(
+            channel_home_id,
+            Some("primary".to_string()),
+            owner,
+            0,
+            context_id,
+        );
+
+        let mut moderation_home = HomeState::new(
+            moderation_home_id,
+            Some("shared".to_string()),
+            owner,
+            0,
+            context_id,
+        );
+        moderation_home.my_role = ResidentRole::Resident;
+        moderation_home.residents.clear();
+        moderation_home.resident_count = 0;
+        moderation_home.online_count = 0;
+        moderation_home.add_mute(MuteRecord {
+            authority_id: sender,
+            duration_secs: Some(300),
+            muted_at: 1_000,
+            expires_at: Some(301_000),
+            actor,
+        });
+
+        let mut homes = HomesState::new();
+        homes.add_home_with_auto_select(primary_home);
+        homes.add_home(moderation_home);
+        {
+            let mut core = app_core.write().await;
+            core.views_mut().set_homes(homes);
+        }
+
+        let result = enforce_home_moderation_for_sender(
+            &app_core,
+            context_id,
+            channel_home_id,
+            sender,
+            2_000,
+        )
+        .await;
+        assert!(result.is_err(), "muted sender should be blocked");
+        assert!(result.unwrap_err().to_string().contains("muted"));
+    }
+
+    #[tokio::test]
+    async fn test_enforce_home_join_blocks_banned_sender_across_context_homes() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let banned = AuthorityId::new_from_entropy([31u8; 32]);
+        let actor = AuthorityId::new_from_entropy([4u8; 32]);
+        let owner = AuthorityId::new_from_entropy([5u8; 32]);
+        let context_id = ContextId::new_from_entropy([17u8; 32]);
+        let channel_home_id = ChannelId::from_bytes(hash(b"join-ban-context-primary-home"));
+        let moderation_home_id = ChannelId::from_bytes(hash(b"join-ban-context-other-home"));
+
+        let primary_home = HomeState::new(
+            channel_home_id,
+            Some("primary".to_string()),
+            owner,
+            0,
+            context_id,
+        );
+
+        let mut moderation_home = HomeState::new(
+            moderation_home_id,
+            Some("secondary".to_string()),
+            owner,
+            0,
+            context_id,
+        );
+        moderation_home.add_ban(BanRecord {
+            authority_id: banned,
+            reason: "scenario-ban".to_string(),
+            actor,
+            banned_at: 1_000,
+        });
+
+        let mut homes = HomesState::new();
+        homes.add_home_with_auto_select(primary_home);
+        homes.add_home(moderation_home);
+        {
+            let mut core = app_core.write().await;
+            core.views_mut().set_homes(homes);
+        }
+
+        let result = enforce_home_join_allowed(&app_core, context_id, channel_home_id, banned).await;
+        assert!(result.is_err(), "banned sender must be blocked");
+        assert!(result.unwrap_err().to_string().contains("banned"));
     }
 
     #[tokio::test]

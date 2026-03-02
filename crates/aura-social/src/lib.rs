@@ -45,6 +45,7 @@
 //! let home_peers = topology.home_peers();
 //! ```
 
+pub mod access;
 pub mod availability;
 pub mod error;
 pub mod facts;
@@ -55,7 +56,6 @@ pub mod neighborhood;
 pub mod relay;
 pub mod storage;
 pub mod topology;
-pub mod access;
 
 /// Operation category map (A/B/C) for protocol gating and review.
 pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
@@ -78,6 +78,7 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 }
 
 // Re-export primary types
+pub use access::TraversalService;
 pub use availability::{HomeAvailability, NeighborhoodAvailability};
 pub use error::SocialError;
 pub use facts::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
@@ -91,7 +92,6 @@ pub use neighborhood::Neighborhood;
 pub use relay::{ReachabilityChecker, RelayCandidateBuilder};
 pub use storage::StorageService;
 pub use topology::{DiscoveryLayer, SocialTopology};
-pub use access::TraversalService;
 
 // Re-export fact types for convenience
 pub use crate::facts::{

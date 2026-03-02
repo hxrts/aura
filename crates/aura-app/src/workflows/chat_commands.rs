@@ -412,16 +412,27 @@ impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotACommand => write!(f, "Not a command"),
-            Self::UnknownCommand(cmd) => write!(f, "Unknown command: /{cmd}"),
+            Self::UnknownCommand(cmd) => {
+                write!(
+                    f,
+                    "Unknown command: /{cmd}. Run /help for available commands"
+                )
+            }
             Self::MissingArgument { command, argument } => {
-                write!(f, "/{command} requires <{argument}>")
+                write!(
+                    f,
+                    "Missing required argument: /{command} requires <{argument}>"
+                )
             }
             Self::InvalidArgument {
                 command,
                 argument,
                 reason,
             } => {
-                write!(f, "/{command}: invalid {argument}: {reason}")
+                write!(
+                    f,
+                    "Invalid argument: /{command}: invalid {argument}: {reason}"
+                )
             }
         }
     }
@@ -1526,5 +1537,18 @@ mod tests {
         assert!(parse_chat_command("/MSG alice hi").is_ok());
         assert!(parse_chat_command("/Msg alice hi").is_ok());
         assert!(parse_chat_command("/KICK bob").is_ok());
+    }
+
+    #[test]
+    fn test_command_error_display_has_stable_prefixes() {
+        let missing = parse_chat_command("/msg alice").expect_err("missing text must fail");
+        assert!(missing.to_string().contains("Missing required argument"));
+
+        let invalid =
+            parse_chat_command("/mute alice notaduration").expect_err("invalid duration must fail");
+        assert!(invalid.to_string().contains("Invalid argument"));
+
+        let unknown = parse_chat_command("/totally-unknown").expect_err("unknown must fail");
+        assert!(unknown.to_string().contains("Unknown command"));
     }
 }

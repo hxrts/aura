@@ -112,6 +112,16 @@ pub struct ScenarioStep {
     pub id: String,
     pub action: String,
     pub instance: Option<String>,
+    // Backward-compatible overloaded field used by scripted actions.
+    // Prefer action-specific aliases in TOML (`keys`, `command`, `pattern`, `key`,
+    // `source_instance`) to keep scenarios readable.
+    #[serde(
+        alias = "keys",
+        alias = "command",
+        alias = "pattern",
+        alias = "key",
+        alias = "source_instance"
+    )]
     pub expect: Option<String>,
     pub timeout_ms: Option<u64>,
 }
@@ -421,5 +431,64 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("at least one step"));
+    }
+
+    #[test]
+    fn scenario_step_expect_aliases_parse_from_toml() {
+        let body = r#"
+            schema_version = 1
+            id = "aliases"
+            goal = "exercise aliases"
+            execution_mode = "scripted"
+            required_capabilities = []
+
+            [[steps]]
+            id = "send"
+            action = "send_keys"
+            instance = "alice"
+            keys = "hello\n"
+
+            [[steps]]
+            id = "command"
+            action = "send_chat_command"
+            instance = "alice"
+            command = "join slash-lab"
+
+            [[steps]]
+            id = "wait"
+            action = "wait_for"
+            instance = "alice"
+            pattern = "slash-lab"
+
+            [[steps]]
+            id = "key"
+            action = "send_key"
+            instance = "alice"
+            key = "esc"
+
+            [[steps]]
+            id = "clipboard"
+            action = "send_clipboard"
+            instance = "bob"
+            source_instance = "alice"
+        "#;
+
+        let parsed: ScenarioConfig =
+            toml::from_str(body).unwrap_or_else(|error| panic!("parse failed: {error}"));
+        let values: Vec<Option<String>> = parsed
+            .steps
+            .iter()
+            .map(|step| step.expect.clone())
+            .collect();
+        assert_eq!(
+            values,
+            vec![
+                Some("hello\n".to_string()),
+                Some("join slash-lab".to_string()),
+                Some("slash-lab".to_string()),
+                Some("esc".to_string()),
+                Some("alice".to_string())
+            ]
+        );
     }
 }

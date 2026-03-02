@@ -210,6 +210,41 @@ fn execute_step(
             )?;
             Ok(())
         }
+        "send_chat_command" => {
+            let instance_id = step
+                .instance
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing instance", step.id))?;
+            let command = step
+                .expect
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| anyhow!("step {} missing expect command", step.id))?;
+            let command = if command.starts_with('/') {
+                command.to_string()
+            } else {
+                format!("/{command}")
+            };
+
+            // Clear any active toast/modal so command-result waits do not match stale UI.
+            dispatch(
+                tool_api,
+                ToolRequest::SendKey {
+                    instance_id: instance_id.to_string(),
+                    key: ToolKey::Esc,
+                    repeat: 1,
+                },
+            )?;
+            dispatch(
+                tool_api,
+                ToolRequest::SendKeys {
+                    instance_id: instance_id.to_string(),
+                    keys: format!("i{command}\n"),
+                },
+            )?;
+            Ok(())
+        }
         "send_clipboard" => {
             let target_instance_id = step
                 .instance
@@ -556,5 +591,106 @@ mod tests {
         }
 
         assert!(error.to_string().contains("unsupported scenario action"));
+    }
+
+    #[test]
+    fn send_chat_command_dismisses_toast_then_sends_slash_command() {
+        let temp_root = std::env::temp_dir().join("aura-harness-executor-chat-command");
+        let _ = std::fs::create_dir_all(&temp_root);
+
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "executor-chat-command".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(7),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+            },
+            instances: vec![InstanceConfig {
+                id: "alice".to_string(),
+                mode: InstanceMode::Local,
+                data_dir: temp_root,
+                device_id: None,
+                bind_address: "127.0.0.1:45003".to_string(),
+                demo_mode: false,
+                command: Some("bash".to_string()),
+                args: vec!["-lc".to_string(), "cat".to_string()],
+                env: vec![],
+                log_path: None,
+                ssh_host: None,
+                ssh_user: None,
+                ssh_port: None,
+                ssh_strict_host_key_checking: true,
+                ssh_known_hosts_file: None,
+                ssh_fingerprint: None,
+                ssh_require_fingerprint: false,
+                ssh_dry_run: true,
+                remote_workdir: None,
+                lan_discovery: None,
+                tunnel: None,
+            }],
+        };
+
+        let scenario = ScenarioConfig {
+            schema_version: 1,
+            id: "executor-chat-command".to_string(),
+            goal: "verify chat command action".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: vec![],
+            steps: vec![ScenarioStep {
+                id: "step-1".to_string(),
+                action: "send_chat_command".to_string(),
+                instance: Some("alice".to_string()),
+                expect: Some("join slash-lab".to_string()),
+                timeout_ms: None,
+            }],
+        };
+
+        let mut api = ToolApi::new(
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
+        );
+        if let Err(error) = api.start_all() {
+            panic!("start_all failed: {error}");
+        }
+
+        if let Err(error) =
+            ScenarioExecutor::new(ExecutionMode::Scripted).execute(&scenario, &mut api)
+        {
+            panic!("send_chat_command execute failed: {error}");
+        }
+
+        if let Err(error) = api.stop_all() {
+            panic!("stop_all failed: {error}");
+        }
+
+        let action_log = api.action_log();
+        assert!(action_log.len() >= 2, "expected at least two tool actions");
+
+        match &action_log[0].request {
+            ToolRequest::SendKey {
+                instance_id,
+                key: ToolKey::Esc,
+                repeat,
+            } => {
+                assert_eq!(instance_id, "alice");
+                assert_eq!(*repeat, 1);
+            }
+            other => panic!("expected SendKey(Esc) first, got {other:?}"),
+        }
+
+        match &action_log[1].request {
+            ToolRequest::SendKeys { instance_id, keys } => {
+                assert_eq!(instance_id, "alice");
+                assert_eq!(keys, "i/join slash-lab\n");
+            }
+            other => panic!("expected SendKeys second, got {other:?}"),
+        }
     }
 }

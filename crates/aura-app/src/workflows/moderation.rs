@@ -7,7 +7,7 @@
 //! UI state is updated by reactive views driven from the journal.
 
 use crate::workflows::parse::parse_authority_id;
-use crate::workflows::runtime::require_runtime;
+use crate::workflows::runtime::{cooperative_yield, require_runtime};
 use crate::workflows::{channel_ref::ChannelRef, snapshot_policy::chat_snapshot};
 use crate::AppCore;
 use async_lock::RwLock;
@@ -23,7 +23,6 @@ use aura_social::moderation::facts::{
 };
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use tokio::task::yield_now;
 
 const MODERATION_FACT_SEND_MAX_ATTEMPTS: usize = 4;
 const MODERATION_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
@@ -85,12 +84,11 @@ async fn resolve_scope(
         core.views().get_homes()
     };
 
-    let hinted_channel = channel_hint.map(parse_channel_hint).or_else(|| {
-        channel_hint.and_then(|hint| {
-            chat.all_channels()
-                .find(|entry| entry.name.eq_ignore_ascii_case(hint))
-                .map(|entry| entry.id)
-        })
+    let hinted_channel = channel_hint.map(|hint| {
+        chat.all_channels()
+            .find(|entry| entry.name.eq_ignore_ascii_case(hint))
+            .map(|entry| entry.id)
+            .unwrap_or_else(|| parse_channel_hint(hint))
     });
 
     let context_from_channel = hinted_channel.and_then(|channel_id| {
@@ -221,7 +219,7 @@ async fn send_moderation_fact_with_retry(
             let _ = runtime.trigger_discovery().await;
             let _ = runtime.trigger_sync().await;
             for _ in 0..MODERATION_FACT_SEND_YIELDS_PER_RETRY {
-                yield_now().await;
+                cooperative_yield().await;
             }
         }
     }
@@ -485,9 +483,13 @@ pub async fn unpin_message(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::views::{Contact, ContactsState};
+    use crate::views::{
+        chat::{Channel, ChannelType, ChatState},
+        home::HomeState,
+        Contact, ContactsState,
+    };
     use crate::AppConfig;
-    use aura_core::identifiers::AuthorityId;
+    use aura_core::{crypto::hash::hash, identifiers::AuthorityId};
 
     #[tokio::test]
     async fn moderation_requires_home() {
@@ -557,5 +559,63 @@ mod tests {
             .await
             .expect("resolve by authority prefix");
         assert_eq!(resolved_by_prefix, bob_id);
+    }
+
+    #[tokio::test]
+    async fn resolve_scope_uses_named_channel_context_before_fallback_home() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+
+        let fallback_context = ContextId::new_from_entropy([21u8; 32]);
+        let channel_context = ContextId::new_from_entropy([22u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+        let fallback_home_id = ChannelId::from_bytes(hash(b"moderation-fallback-home"));
+        let channel_home_id = ChannelId::from_bytes(hash(b"moderation-channel-home"));
+
+        {
+            let mut core = app_core.write().await;
+
+            let mut chat = ChatState::new();
+            chat.upsert_channel(Channel {
+                id: channel_home_id,
+                context_id: Some(channel_context),
+                name: "slash-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: vec![owner],
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+            core.views_mut().set_chat(chat);
+
+            let mut homes = core.views().get_homes();
+            homes.add_home(HomeState::new(
+                fallback_home_id,
+                Some("fallback".to_string()),
+                owner,
+                0,
+                fallback_context,
+            ));
+            homes.add_home(HomeState::new(
+                channel_home_id,
+                Some("slash-lab".to_string()),
+                owner,
+                0,
+                channel_context,
+            ));
+            homes.select_home(Some(fallback_home_id));
+            core.views_mut().set_homes(homes);
+        }
+
+        let scope = resolve_scope(&app_core, Some("slash-lab"))
+            .await
+            .expect("scope should resolve");
+        assert_eq!(scope.context_id, channel_context);
+        assert_eq!(scope.home_id, channel_home_id);
     }
 }

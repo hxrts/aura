@@ -107,7 +107,7 @@ impl HarnessCoordinator {
         pattern: &str,
         timeout_ms: u64,
     ) -> Result<String> {
-        let poll_ms: u64 = 20;
+        let poll_ms: u64 = 40;
         let mut attempts = 0_u64;
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
 
@@ -117,13 +117,14 @@ impl HarnessCoordinator {
             }
             let screen = self.screen(instance_id)?;
             let normalized = normalize_screen(&screen);
-            if normalized.contains(pattern) {
+            if wait_pattern_matches(&normalized, pattern) {
                 self.events.push(
                     "observation",
                     "wait_for",
                     Some(instance_id.to_string()),
                     serde_json::json!({
                         "pattern": pattern,
+                        "normalized_pattern": normalize_screen(pattern),
                         "attempts": attempts + 1,
                         "matched_view": "normalized"
                     }),
@@ -146,7 +147,11 @@ impl HarnessCoordinator {
             "error",
             "wait_for_timeout",
             Some(instance_id.to_string()),
-            serde_json::json!({ "pattern": pattern, "timeout_ms": timeout_ms }),
+            serde_json::json!({
+                "pattern": pattern,
+                "normalized_pattern": normalize_screen(pattern),
+                "timeout_ms": timeout_ms
+            }),
         );
         bail!(
             "wait_for timed out for instance {instance_id} pattern {pattern:?} timeout_ms={timeout_ms}"
@@ -263,6 +268,18 @@ fn normalize_key_stream(keys: &str) -> Cow<'_, str> {
     }
 }
 
+fn wait_pattern_matches(normalized_screen: &str, pattern: &str) -> bool {
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return false;
+    }
+    if normalized_screen.contains(pattern) {
+        return true;
+    }
+    let normalized_pattern = normalize_screen(pattern);
+    normalized_pattern != pattern && normalized_screen.contains(&normalized_pattern)
+}
+
 fn env_value(key: &str, env_entries: &[String]) -> Option<String> {
     env_entries.iter().find_map(|item| {
         let (entry_key, entry_value) = item.split_once('=')?;
@@ -289,7 +306,7 @@ impl Drop for HarnessCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_file_for_instance, normalize_key_stream};
+    use super::{clipboard_file_for_instance, normalize_key_stream, wait_pattern_matches};
     use crate::config::InstanceConfig;
     use crate::config::InstanceMode;
     use crate::config::TunnelConfig;
@@ -332,6 +349,20 @@ mod tests {
     #[test]
     fn normalize_key_stream_keeps_plain_text() {
         assert_eq!(normalize_key_stream("abc123").as_ref(), "abc123");
+    }
+
+    #[test]
+    fn wait_pattern_matches_normalized_dynamic_tokens() {
+        let screen = "message id #<n> at <time>";
+        assert!(wait_pattern_matches(screen, "#123"));
+        assert!(wait_pattern_matches(screen, "12:34:56"));
+    }
+
+    #[test]
+    fn wait_pattern_matches_exact_literals() {
+        let screen = "Neighborhood Chat Contacts Notifications Settings";
+        assert!(wait_pattern_matches(screen, "Chat Contacts"));
+        assert!(!wait_pattern_matches(screen, "Missing Token"));
     }
 
     #[test]

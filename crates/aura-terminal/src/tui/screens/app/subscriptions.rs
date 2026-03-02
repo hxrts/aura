@@ -92,7 +92,9 @@ pub fn use_nav_status_signals(
         let mut network_status = network_status.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NETWORK_STATUS_SIGNAL, move |status| {
-                network_status.set(status);
+                if network_status.get() != status {
+                    network_status.set(status);
+                }
             })
             .await;
         }
@@ -108,7 +110,9 @@ pub fn use_nav_status_signals(
                     ConnectionStatus::Online { peer_count } => peer_count,
                     _ => 0,
                 };
-                known_online.set(count);
+                if known_online.get() != count {
+                    known_online.set(count);
+                }
             })
             .await;
         }
@@ -120,7 +124,9 @@ pub fn use_nav_status_signals(
         let mut transport_peers = transport_peers.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*TRANSPORT_PEERS_SIGNAL, move |count| {
-                transport_peers.set(count);
+                if transport_peers.get() != count {
+                    transport_peers.set(count);
+                }
             })
             .await;
         }
@@ -136,7 +142,10 @@ pub fn use_nav_status_signals(
                 let runtime = app_core.raw().read().await.runtime().cloned();
                 if let Some(runtime) = runtime {
                     if let Ok(ts) = runtime.current_time_ms().await {
-                        now_ms.set(Some(ts));
+                        let next = Some(ts);
+                        if now_ms.get() != next {
+                            now_ms.set(next);
+                        }
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -212,10 +221,13 @@ pub fn use_discovered_peers_subscription(
 ) -> SharedDiscoveredPeers {
     let shared_ref = hooks.use_ref(SharedDiscoveredPeers::new);
     let shared: SharedDiscoveredPeers = shared_ref.read().clone();
+    let last_lan_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
+    let last_lan_count = last_lan_count_ref.read().clone();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let peers = shared.clone();
+        let last_lan_count = last_lan_count.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
                 let lan_peers: Vec<_> = peers_state
@@ -232,7 +244,10 @@ pub fn use_discovered_peers_subscription(
                 }
 
                 if let Some(ref tx) = update_tx {
-                    let _ = tx.try_send(UiUpdate::LanPeersCountChanged(new_count));
+                    let previous = last_lan_count.swap(new_count, Ordering::Relaxed);
+                    if previous != new_count {
+                        let _ = tx.try_send(UiUpdate::LanPeersCountChanged(new_count));
+                    }
                 }
             })
             .await;
@@ -259,10 +274,13 @@ pub fn use_contacts_subscription(
     // Create the shared contacts holder - use_ref ensures it persists across renders.
     let shared_contacts_ref = hooks.use_ref(SharedContacts::new);
     let shared_contacts: SharedContacts = shared_contacts_ref.read().clone();
+    let last_contact_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
+    let last_contact_count = last_contact_count_ref.read().clone();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
+        let last_contact_count = last_contact_count.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
@@ -275,7 +293,10 @@ pub fn use_contacts_subscription(
 
                 // Send contact count update for keyboard navigation
                 if let Some(ref tx) = update_tx {
-                    let _ = tx.try_send(UiUpdate::ContactCountChanged(new_count));
+                    let previous = last_contact_count.swap(new_count, Ordering::Relaxed);
+                    if previous != new_count {
+                        let _ = tx.try_send(UiUpdate::ContactCountChanged(new_count));
+                    }
                 }
             })
             .await;
@@ -462,6 +483,8 @@ fn scoped_channel_snapshot(
 fn publish_scoped_channels(
     channels: &SharedChannels,
     update_tx: &Option<UiUpdateSender>,
+    last_channel_count: &Arc<AtomicUsize>,
+    last_message_count: &Arc<AtomicUsize>,
     chat_state: &ChatState,
     active_scope: Option<&str>,
 ) {
@@ -473,6 +496,13 @@ fn publish_scoped_channels(
     }
 
     if let Some(tx) = update_tx {
+        let channel_changed =
+            last_channel_count.swap(channel_count, Ordering::Relaxed) != channel_count;
+        let message_changed =
+            last_message_count.swap(message_count, Ordering::Relaxed) != message_count;
+        if !(channel_changed || message_changed) {
+            return;
+        }
         let _ = tx.try_send(UiUpdate::ChatStateUpdated {
             channel_count,
             message_count,
@@ -493,6 +523,10 @@ pub fn use_channels_subscription(
     let active_scope: Arc<RwLock<Option<String>>> = active_scope_ref.read().clone();
     let latest_chat_state_ref = hooks.use_ref(|| Arc::new(RwLock::new(ChatState::default())));
     let latest_chat_state: Arc<RwLock<ChatState>> = latest_chat_state_ref.read().clone();
+    let last_channel_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
+    let last_channel_count = last_channel_count_ref.read().clone();
+    let last_message_count_ref = hooks.use_ref(|| Arc::new(AtomicUsize::new(usize::MAX)));
+    let last_message_count = last_message_count_ref.read().clone();
 
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
@@ -500,6 +534,8 @@ pub fn use_channels_subscription(
         let active_scope = active_scope.clone();
         let latest_chat_state = latest_chat_state.clone();
         let update_tx = update_tx.clone();
+        let last_channel_count = last_channel_count.clone();
+        let last_message_count = last_message_count.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CHAT_SIGNAL, move |chat_state| {
                 let stabilized = latest_chat_state
@@ -532,7 +568,14 @@ pub fn use_channels_subscription(
                 }
 
                 let scope = active_scope.read().ok().and_then(|g| g.clone());
-                publish_scoped_channels(&channels, &update_tx, &stabilized, scope.as_deref());
+                publish_scoped_channels(
+                    &channels,
+                    &update_tx,
+                    &last_channel_count,
+                    &last_message_count,
+                    &stabilized,
+                    scope.as_deref(),
+                );
             })
             .await;
         }
@@ -541,6 +584,8 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
+        let last_channel_count = last_channel_count.clone();
+        let last_message_count = last_message_count.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
@@ -553,7 +598,14 @@ pub fn use_channels_subscription(
                     .ok()
                     .map(|g| g.clone())
                     .unwrap_or_default();
-                publish_scoped_channels(&channels, &update_tx, &chat_state, Some(scope.as_str()));
+                publish_scoped_channels(
+                    &channels,
+                    &update_tx,
+                    &last_channel_count,
+                    &last_message_count,
+                    &chat_state,
+                    Some(scope.as_str()),
+                );
             })
             .await;
         }
@@ -717,25 +769,32 @@ pub fn use_notifications_subscription(
 ) {
     let invite_count = Arc::new(AtomicUsize::new(0));
     let recovery_count = Arc::new(AtomicUsize::new(0));
+    let last_total = Arc::new(AtomicUsize::new(usize::MAX));
 
-    let send_total =
-        |tx: &Option<UiUpdateSender>, invites: &Arc<AtomicUsize>, recovery: &Arc<AtomicUsize>| {
-            if let Some(ref tx) = tx {
-                let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
+    let send_total = |tx: &Option<UiUpdateSender>,
+                      invites: &Arc<AtomicUsize>,
+                      recovery: &Arc<AtomicUsize>,
+                      last_total: &Arc<AtomicUsize>| {
+        if let Some(ref tx) = tx {
+            let total = invites.load(Ordering::Relaxed) + recovery.load(Ordering::Relaxed);
+            let previous = last_total.swap(total, Ordering::Relaxed);
+            if previous != total {
                 let _ = tx.try_send(UiUpdate::NotificationsCountChanged(total));
             }
-        };
+        }
+    };
 
     // Invitations
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let invite_count = invite_count.clone();
         let recovery_count = recovery_count.clone();
+        let last_total = last_total.clone();
         let update_tx = update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*INVITATIONS_SIGNAL, move |state| {
                 invite_count.store(state.pending_received_count(), Ordering::Relaxed);
-                send_total(&update_tx, &invite_count, &recovery_count);
+                send_total(&update_tx, &invite_count, &recovery_count, &last_total);
             })
             .await;
         }
@@ -744,10 +803,14 @@ pub fn use_notifications_subscription(
     // Recovery requests
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
+        let invite_count = invite_count.clone();
+        let recovery_count = recovery_count.clone();
+        let last_total = last_total.clone();
+        let update_tx = update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |state| {
                 recovery_count.store(state.pending_requests().len(), Ordering::Relaxed);
-                send_total(&update_tx, &invite_count, &recovery_count);
+                send_total(&update_tx, &invite_count, &recovery_count, &last_total);
             })
             .await;
         }
