@@ -38,7 +38,9 @@ pub fn execute_with_run_budgets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{InstanceConfig, InstanceMode, RunSection, ScenarioStep};
+    use crate::config::{
+        InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioStep,
+    };
     use crate::coordinator::HarnessCoordinator;
     use std::path::PathBuf;
 
@@ -96,10 +98,11 @@ mod tests {
             required_capabilities: vec![],
             steps: vec![ScenarioStep {
                 id: "step-1".to_string(),
-                action: "send_keys".to_string(),
+                action: ScenarioAction::SendKeys,
                 instance: Some("bob".to_string()),
                 expect: Some("hello".to_string()),
                 timeout_ms: Some(250),
+                ..Default::default()
             }],
         };
 
@@ -124,10 +127,11 @@ mod tests {
             required_capabilities: vec![],
             steps: vec![ScenarioStep {
                 id: "step-1".to_string(),
-                action: "noop".to_string(),
+                action: ScenarioAction::Noop,
                 instance: None,
                 expect: None,
                 timeout_ms: Some(100),
+                ..Default::default()
             }],
         };
 

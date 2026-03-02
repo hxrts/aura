@@ -14,8 +14,9 @@ use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::load_and_validate_run_config;
 use aura_harness::scenario::ScenarioRunner;
 use aura_harness::scenario_execution::execute_with_run_budgets;
-use aura_harness::tool_api::{ToolApi, ToolRequest};
+use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Parser)]
 #[command(name = "aura-harness-tool-repl")]
@@ -30,6 +31,30 @@ struct Cli {
     /// Set to 0 to disable idle timeout.
     #[arg(long, default_value_t = 600_000)]
     idle_timeout_ms: u64,
+    /// Require every request line to include an `id` field.
+    #[arg(long, default_value_t = false)]
+    require_request_id: bool,
+    /// Enforce strictly increasing numeric request ids.
+    #[arg(long, default_value_t = false)]
+    strict_request_id_order: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReplRequestEnvelope {
+    #[serde(default)]
+    id: Option<serde_json::Value>,
+    #[serde(flatten)]
+    request: ToolRequest,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ReplResponseEnvelope {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<serde_json::Value>,
+    #[serde(flatten)]
+    response: ToolResponse,
 }
 
 fn main() -> Result<()> {
@@ -62,6 +87,7 @@ fn main() -> Result<()> {
     };
     let poll_interval = Duration::from_millis(250);
     let mut last_activity = Instant::now();
+    let mut last_request_id: Option<u64> = None;
     let shutdown_requested = Arc::new(AtomicBool::new(false));
 
     {
@@ -115,11 +141,69 @@ fn main() -> Result<()> {
             break;
         }
 
-        let response = match serde_json::from_str::<ToolRequest>(trimmed) {
-            Ok(request) => tool_api.handle_request(request),
-            Err(error) => aura_harness::tool_api::ToolResponse::Error {
-                message: format!("invalid ToolRequest JSON: {error}"),
-            },
+        let (request_id, response) = match serde_json::from_str::<ReplRequestEnvelope>(trimmed) {
+            Ok(envelope) => {
+                if cli.require_request_id && envelope.id.is_none() {
+                    (
+                        None,
+                        ToolResponse::Error {
+                            message: "request id is required by --require-request-id".to_string(),
+                        },
+                    )
+                } else if cli.strict_request_id_order {
+                    if let Some(raw_id) = envelope.id.clone() {
+                        match raw_id.as_u64() {
+                            Some(value) => {
+                                if last_request_id.is_some_and(|previous| value <= previous) {
+                                    (
+                                        envelope.id,
+                                        ToolResponse::Error {
+                                            message: format!(
+                                                "request id {value} is not strictly greater than previous id {}",
+                                                last_request_id.unwrap_or(0)
+                                            ),
+                                        },
+                                    )
+                                } else {
+                                    last_request_id = Some(value);
+                                    let response = tool_api.handle_request(envelope.request);
+                                    (envelope.id, response)
+                                }
+                            }
+                            None => (
+                                envelope.id,
+                                ToolResponse::Error {
+                                    message:
+                                        "strict request id order requires numeric u64 ids"
+                                            .to_string(),
+                                },
+                            ),
+                        }
+                    } else {
+                        (
+                            None,
+                            ToolResponse::Error {
+                                message: "request id is required by --strict-request-id-order"
+                                    .to_string(),
+                            },
+                        )
+                    }
+                } else {
+                    let response = tool_api.handle_request(envelope.request);
+                    (envelope.id, response)
+                }
+            }
+            Err(error) => (
+                None,
+                ToolResponse::Error {
+                    message: format!("invalid ToolRequest JSON: {error}"),
+                },
+            ),
+        };
+
+        let response = ReplResponseEnvelope {
+            id: request_id,
+            response,
         };
 
         writeln!(stdout, "{}", serde_json::to_string(&response)?)?;

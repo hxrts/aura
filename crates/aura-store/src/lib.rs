@@ -8,14 +8,14 @@
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
-//! - ✅ Storage domain types and semantics
-//! - ✅ Fact types for journal integration (`StorageFact`)
-//! - ✅ Content-addressed storage abstraction
-//! - ✅ CRDT types for distributed storage state
-//! - ✅ Capability metadata types (not authorization logic)
-//! - ❌ NO effect handler implementations (use StorageEffects from aura-effects)
-//! - ❌ NO handler composition (that's aura-composition)
-//! - ❌ NO multi-party protocol logic (that's aura-protocol)
+//! - ✓ Storage domain types and semantics
+//! - ✓ Fact types for journal integration (`StorageFact`)
+//! - ✓ Content-addressed storage abstraction
+//! - ✓ CRDT types for distributed storage state
+//! - ✓ Capability metadata types (not authorization logic)
+//! - ✗ NO effect handler implementations (use StorageEffects from aura-effects)
+//! - ✗ NO handler composition (that's aura-composition)
+//! - ✗ NO multi-party protocol logic (that's aura-protocol)
 //!
 //! ## Core Concepts
 //!

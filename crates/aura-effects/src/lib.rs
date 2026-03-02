@@ -49,10 +49,10 @@
 //!
 //! # What Does NOT Belong Here
 //!
-//! ❌ Multi-handler coordination (→ aura-protocol)
-//! ❌ Choreographic bridges (→ aura-protocol)
-//! ❌ Stateful orchestration (→ aura-protocol)
-//! ❌ Complete protocols (→ feature crates)
+//! ✗ Multi-handler coordination (→ aura-protocol)
+//! ✗ Choreographic bridges (→ aura-protocol)
+//! ✗ Stateful orchestration (→ aura-protocol)
+//! ✗ Complete protocols (→ feature crates)
 //!
 //! # Usage
 //!

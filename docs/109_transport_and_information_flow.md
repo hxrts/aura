@@ -182,14 +182,14 @@ let selection = criteria.select_peers(&available_peers);
 
 ### 8.4 Common Privacy Pitfalls
 
-**❌ Avoid**:
+**✗ Avoid**:
 - Logging detailed capability requirements
 - Exposing relationship membership in error messages
 - Reusing connection state across contexts
 - Sending capability names in clear text
 - Correlating message sizes with content types
 
-**✅ Do**:
+**✓ Do**:
 - Use generic error messages ("authorization failed" not "missing capability: admin")
 - Pad messages to fixed sizes when possible
 - Rotate connection identifiers on epoch changes

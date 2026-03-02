@@ -10,12 +10,12 @@
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
-//! - ✅ Capability refinement logic (meet-semilattice `⊓`)
-//! - ✅ Biscuit token helpers and semantics (no cryptographic operations)
-//! - ✅ Authorization domain types and policies
-//! - ❌ NO cryptographic signing (that's aura-effects via CryptoEffects)
-//! - ❌ NO handler composition (that's aura-composition)
-//! - ❌ NO multi-party protocol logic (that's aura-protocol)
+//! - ✓ Capability refinement logic (meet-semilattice `⊓`)
+//! - ✓ Biscuit token helpers and semantics (no cryptographic operations)
+//! - ✓ Authorization domain types and policies
+//! - ✗ NO cryptographic signing (that's aura-effects via CryptoEffects)
+//! - ✗ NO handler composition (that's aura-composition)
+//! - ✗ NO multi-party protocol logic (that's aura-protocol)
 //!
 //! # Authorization System
 //!

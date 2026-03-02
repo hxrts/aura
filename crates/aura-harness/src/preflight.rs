@@ -227,7 +227,9 @@ fn require_binary(binary: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{InstanceConfig, InstanceMode, RunSection, ScenarioConfig, ScenarioStep};
+    use crate::config::{
+        InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioConfig, ScenarioStep,
+    };
 
     #[test]
     fn preflight_rejects_missing_required_capability() {
@@ -240,10 +242,11 @@ mod tests {
             required_capabilities: vec!["ssh".to_string()],
             steps: vec![ScenarioStep {
                 id: "step-1".to_string(),
-                action: "noop".to_string(),
+                action: ScenarioAction::Noop,
                 instance: None,
                 expect: None,
                 timeout_ms: None,
+                ..Default::default()
             }],
         };
 

@@ -6,7 +6,7 @@ This document describes the guard chain integration for the aura-consensus proto
 
 ## Current State (2026-01-18)
 
-### ✅ Completed
+### ✓ Completed
 
 1. **Guard Helper Infrastructure** (`protocol/guards.rs`):
    - Created typed guard helpers for all 5 message types
@@ -15,16 +15,16 @@ This document describes the guard chain integration for the aura-consensus proto
    - Leakage budgets implemented for privacy-sensitive operations
 
 2. **Message Coverage**:
-   - ✅ Execute (Coordinator → Witness): `guard_capability="initiate_consensus"`, `flow_cost=100`
-   - ✅ NonceCommit (Witness → Coordinator): `guard_capability="witness_nonce"`, `flow_cost=50`
-   - ✅ SignRequest (Coordinator → Witness): `guard_capability="aggregate_nonces"`, `flow_cost=75`
-   - ✅ SignShare (Witness → Coordinator): `guard_capability="witness_sign"`, `flow_cost=50`, `leak="pipelined_commitment"`
-   - ✅ ConsensusResult (Coordinator → Witness): `guard_capability="finalize_consensus"`, `flow_cost=100`, `journal_facts="consensus_complete"`
+   - ✓ Execute (Coordinator → Witness): `guard_capability="initiate_consensus"`, `flow_cost=100`
+   - ✓ NonceCommit (Witness → Coordinator): `guard_capability="witness_nonce"`, `flow_cost=50`
+   - ✓ SignRequest (Coordinator → Witness): `guard_capability="aggregate_nonces"`, `flow_cost=75`
+   - ✓ SignShare (Witness → Coordinator): `guard_capability="witness_sign"`, `flow_cost=50`, `leak="pipelined_commitment"`
+   - ✓ ConsensusResult (Coordinator → Witness): `guard_capability="finalize_consensus"`, `flow_cost=100`, `journal_facts="consensus_complete"`
 
 3. **Testing**:
-   - ✅ Unit tests validate guard configurations match annotations
-   - ✅ All 5 guard types have passing tests
-   - ✅ Flow cost conversion tests pass
+   - ✓ Unit tests validate guard configurations match annotations
+   - ✓ All 5 guard types have passing tests
+   - ✓ Flow cost conversion tests pass
 
 ### ⏳ Remaining Work
 
@@ -132,10 +132,10 @@ Per `docs/001_system_architecture.md`:
 
 ## Architecture Compliance
 
-- ✅ Layer 4 (Orchestration): Guards belong here
-- ✅ No direct runtime coupling: Uses effect traits, not tokio directly
-- ✅ Pure guard chain: `SendGuardChain` is pure, execution via interpreter
-- ✅ Annotation-driven: Guards derived from choreography annotations
+- ✓ Layer 4 (Orchestration): Guards belong here
+- ✓ No direct runtime coupling: Uses effect traits, not tokio directly
+- ✓ Pure guard chain: `SendGuardChain` is pure, execution via interpreter
+- ✓ Annotation-driven: Guards derived from choreography annotations
 
 ## Next Steps
 

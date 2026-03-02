@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -106,24 +107,122 @@ pub struct ScenarioConfig {
     pub steps: Vec<ScenarioStep>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ScenarioAction {
+    LaunchInstances,
+    Noop,
+    SetVar,
+    ExtractVar,
+    SendKeys,
+    SendChatCommand,
+    SendClipboard,
+    SendKey,
+    WaitFor,
+    ExpectToast,
+    ExpectCommandResult,
+    ExpectMembership,
+    ExpectDenied,
+    GetAuthorityId,
+    ListChannels,
+    CurrentSelection,
+    ListContacts,
+    SelectChannel,
+    Restart,
+    Kill,
+    FaultDelay,
+    FaultLoss,
+    FaultTunnelDrop,
+}
+
+impl fmt::Display for ScenarioAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::LaunchInstances => "launch_instances",
+            Self::Noop => "noop",
+            Self::SetVar => "set_var",
+            Self::ExtractVar => "extract_var",
+            Self::SendKeys => "send_keys",
+            Self::SendChatCommand => "send_chat_command",
+            Self::SendClipboard => "send_clipboard",
+            Self::SendKey => "send_key",
+            Self::WaitFor => "wait_for",
+            Self::ExpectToast => "expect_toast",
+            Self::ExpectCommandResult => "expect_command_result",
+            Self::ExpectMembership => "expect_membership",
+            Self::ExpectDenied => "expect_denied",
+            Self::GetAuthorityId => "get_authority_id",
+            Self::ListChannels => "list_channels",
+            Self::CurrentSelection => "current_selection",
+            Self::ListContacts => "list_contacts",
+            Self::SelectChannel => "select_channel",
+            Self::Restart => "restart",
+            Self::Kill => "kill",
+            Self::FaultDelay => "fault_delay",
+            Self::FaultLoss => "fault_loss",
+            Self::FaultTunnelDrop => "fault_tunnel_drop",
+        };
+        f.write_str(value)
+    }
+}
+
+impl Default for ScenarioAction {
+    fn default() -> Self {
+        Self::Noop
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScenarioStep {
     pub id: String,
-    pub action: String,
+    pub action: ScenarioAction,
     pub instance: Option<String>,
     // Backward-compatible overloaded field used by scripted actions.
-    // Prefer action-specific aliases in TOML (`keys`, `command`, `pattern`, `key`,
-    // `source_instance`) to keep scenarios readable.
-    #[serde(
-        alias = "keys",
-        alias = "command",
-        alias = "pattern",
-        alias = "key",
-        alias = "source_instance"
-    )]
+    // Prefer action-specific fields (`keys`, `command`, `pattern`, `key`,
+    // `source_instance`) in new scenarios to keep intent explicit.
     pub expect: Option<String>,
     pub timeout_ms: Option<u64>,
+    /// Optional pipeline request id used by strict scenario execution ordering.
+    pub request_id: Option<u64>,
+    /// Explicit key stream for `send_keys`.
+    pub keys: Option<String>,
+    /// Explicit slash-command body for `send_chat_command`.
+    pub command: Option<String>,
+    /// Explicit screen pattern for `wait_for`.
+    pub pattern: Option<String>,
+    /// Explicit named key for `send_key`.
+    pub key: Option<String>,
+    /// Repeat count for `send_key` actions.
+    pub repeat: Option<u16>,
+    /// Explicit source instance for `send_clipboard`.
+    pub source_instance: Option<String>,
+    /// Variable identifier for set/extract/introspection actions.
+    pub var: Option<String>,
+    /// Static or templated value for `set_var`.
+    pub value: Option<String>,
+    /// Regular expression for `extract_var`.
+    pub regex: Option<String>,
+    /// Capture group index for `extract_var`.
+    pub group: Option<usize>,
+    /// Source field for `extract_var`: `screen`, `raw_screen`, `authoritative_screen`, or `normalized_screen`.
+    pub from: Option<String>,
+    /// Substring expectation for typed assertion actions.
+    pub contains: Option<String>,
+    /// Toast/assertion level (`success`, `info`, `error`) for typed assertions.
+    pub level: Option<String>,
+    /// Consistency label (`accepted`, `replicated`, `enforced`, `partial-timeout`) for command-result assertions.
+    pub consistency: Option<String>,
+    /// Channel display name for membership assertions.
+    pub channel: Option<String>,
+    /// Expected selected state for membership assertions.
+    pub selected: Option<bool>,
+    /// Expected present state for membership assertions (defaults to true when omitted).
+    pub present: Option<bool>,
+    /// Denial reason discriminator for `expect_denied` (`permission`, `banned`, `muted`).
+    pub reason: Option<String>,
+    /// Additional allowed denial substrings for `expect_denied`.
+    pub contains_any: Option<Vec<String>>,
 }
 
 pub fn load_run_config(path: &Path) -> Result<RunConfig> {
@@ -295,8 +394,8 @@ impl ScenarioConfig {
             if !step_ids.insert(step.id.clone()) {
                 bail!("duplicate scenario step id: {}", step.id);
             }
-            if step.action.trim().is_empty() {
-                bail!("scenario step {} has empty action", step.id);
+            if step.request_id == Some(0) {
+                bail!("scenario step {} request_id must be >= 1", step.id);
             }
         }
 
@@ -434,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn scenario_step_expect_aliases_parse_from_toml() {
+    fn scenario_step_explicit_fields_parse_from_toml() {
         let body = r#"
             schema_version = 1
             id = "aliases"
@@ -475,20 +574,28 @@ mod tests {
 
         let parsed: ScenarioConfig =
             toml::from_str(body).unwrap_or_else(|error| panic!("parse failed: {error}"));
-        let values: Vec<Option<String>> = parsed
-            .steps
-            .iter()
-            .map(|step| step.expect.clone())
-            .collect();
-        assert_eq!(
-            values,
-            vec![
-                Some("hello\n".to_string()),
-                Some("join slash-lab".to_string()),
-                Some("slash-lab".to_string()),
-                Some("esc".to_string()),
-                Some("alice".to_string())
-            ]
-        );
+        assert_eq!(parsed.steps[0].keys.as_deref(), Some("hello\n"));
+        assert_eq!(parsed.steps[1].command.as_deref(), Some("join slash-lab"));
+        assert_eq!(parsed.steps[2].pattern.as_deref(), Some("slash-lab"));
+        assert_eq!(parsed.steps[3].key.as_deref(), Some("esc"));
+        assert_eq!(parsed.steps[4].source_instance.as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn scenario_step_unknown_action_is_rejected_during_parse() {
+        let body = r#"
+            schema_version = 1
+            id = "invalid-action"
+            goal = "invalid action should fail parsing"
+            execution_mode = "scripted"
+            required_capabilities = []
+
+            [[steps]]
+            id = "bad"
+            action = "not_a_real_action"
+        "#;
+
+        let parsed: Result<ScenarioConfig, _> = toml::from_str(body);
+        assert!(parsed.is_err());
     }
 }

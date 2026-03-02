@@ -467,11 +467,11 @@ Layer 5 crates include `OPERATION_CATEGORIES` mapping operations to A/B/C classe
 
 ### 9.3 Code location guidance
 
-Single-party stateless operations belong in `aura-effects`. Handler composition belongs in `aura-composition` or `aura-agent`. Multi-party coordination belongs in Layer 4 crates. Domain-specific logic belongs in domain crates.
+The layer determines where code belongs. Stateless single-party operations go in Layer 3. Multi-party coordination goes in Layer 4. Complete protocols go in Layer 5. Runtime assembly goes in Layer 6.
 
 Effect traits are defined only in `aura-core`. Infrastructure handlers live in `aura-effects`. Mock handlers live in `aura-testkit`. This separation keeps the dependency graph clean.
 
-See [Project Structure](999_project_structure.md) for the complete crate breakdown and dependency graph.
+For practical guidance on classifying code and choosing the right crate, see [Development Patterns](805_development_patterns_guide.md). For complete crate breakdown and dependency graph, see [Project Structure](999_project_structure.md).
 
 ## 10. Security Model
 

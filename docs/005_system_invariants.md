@@ -8,7 +8,6 @@ Contracts in [Theoretical Model](002_theoretical_model.md), [Privacy and Informa
 
 This index tracks invariants that protect safety, consistency, and privacy.
 Every invariant must include a canonical name, enforcement locus, failure mode, and verification hooks.
-Standalone `INVARIANTS.md` files are not used.
 
 ## Canonical Naming
 
@@ -79,12 +78,9 @@ This matrix provides a single cross-reference for contract names, owning crate d
 | `InvariantHonestMajorityCanCommit` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/adversary.qnt`, `verification/lean/Aura/Proofs/Consensus/Adversary.lean` |
 | `InvariantCompromisedNoncesExcluded` | [crates/aura-consensus/ARCHITECTURE.md](../crates/aura-consensus/ARCHITECTURE.md) | `verification/quint/consensus/adversary.qnt` |
 
-## Validation and Verification
+## Checking Invariants
 
-Use `just check-arch` to validate architecture and layering constraints.
-Use `just test` for workspace-wide regression checks.
-Use `just test-crate <crate>` for focused enforcement checks in a crate.
-Use `nix flake check` for hermetic conformance.
+Use `just check-invariants` to validate system invariants across the workspace.
 
 Formal and model checks should reference the same canonical names listed here and in contracts.
 
@@ -96,18 +92,9 @@ Formal and model checks should reference the same canonical names listed here an
 4. Add or update tests and simulator scenarios that detect violations.
 5. Update this index if the invariant is cross-crate or contract-level.
 
-## Incident Handling for Invariant Violations
-
-1. Stop release or deployment for the affected path.
-2. File a critical issue with invariant name, impact, and reproduction steps.
-3. Add a failing regression test that captures the violation.
-4. Implement the fix and reference the canonical invariant name in the change.
-5. Verify conformance and update documentation links if enforcement moved.
-
 ## Related Documentation
 
 - [Aura System Architecture](001_system_architecture.md)
 - [Theoretical Model](002_theoretical_model.md)
 - [Privacy and Information Flow Contract](003_information_flow_contract.md)
 - [Distributed Systems Contract](004_distributed_systems_contract.md)
-- [Effect System and Runtime](105_effect_system_and_runtime.md)

@@ -184,7 +184,7 @@ impl ReactiveViewModel {
 Delta application should be **synchronous** (not async):
 
 ```rust
-// ✅ GOOD: Synchronous
+// ✓ GOOD: Synchronous
 pub fn apply_delta(&self, delta: ChatDelta) {
     match delta {
         ChatDelta::ChannelAdded { channel } => {
@@ -193,7 +193,7 @@ pub fn apply_delta(&self, delta: ChatDelta) {
     }
 }
 
-// ❌ BAD: Async (unnecessary)
+// ✗ BAD: Async (unnecessary)
 pub async fn apply_delta(&self, delta: ChatDelta) {
     // No awaits needed!
 }
@@ -271,13 +271,13 @@ impl ChatView {
 Never hold a lock guard across an await point or for extended periods:
 
 ```rust
-// ❌ BAD: Holding lock across operations
+// ✗ BAD: Holding lock across operations
 let mut items = vec.as_mutable_vec().lock_mut();
 items.push_cloned(item1);
 expensive_computation();  // Lock still held!
 items.push_cloned(item2);
 
-// ✅ GOOD: Short-lived lock scopes
+// ✓ GOOD: Short-lived lock scopes
 vec.push(item1);
 expensive_computation();
 vec.push(item2);

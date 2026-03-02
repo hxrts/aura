@@ -10,6 +10,7 @@ pub mod coordinator;
 pub mod determinism;
 pub mod events;
 pub mod executor;
+pub mod introspection;
 pub mod preflight;
 pub mod replay;
 pub mod resource_guards;

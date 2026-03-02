@@ -2,35 +2,27 @@
 
 [Aura](https://github.com/hxrts/aura) is a fully peer-to-peer, private communication system that operates without dedicated servers. It uses a web-of-trust architecture to provide discovery, data availability, account recovery, and graceful async protocol evolution.
 
-To accomplish this, Aura uses a careful combination of technologies. [FROST](102_authority_and_identity.md) threshold signatures, [Telltale](108_mpst_and_choreography.md) for building protocols with multiparty session types, a CRDT-based [journal](103_journal.md) for replicated state, and [authorized effects](104_authorization.md) to enforce capability and privacy boundaries.
+To accomplish this, Aura uses threshold cryptography so no single device holds complete keys. Network topology reflects social relationships, forming a web of trust that provides discovery, availability, and recovery. State converges through CRDT journals without central coordination. Session-typed choreographic protocols ensure safe multi-party execution.
 
-## Implementation
+## How Aura Works
 
-These three pillars combine into an 8-layer architecture. The layers progress from interface definitions through user-facing applications. See [System Architecture](001_system_architecture.md) for the complete layer breakdown.
+In Aura, all actors are authorities. An authority is an opaque cryptographic actor that may represent a person, a device group, or a shared context. External observers see only public keys and signed operations. This enables unlinkable participation across contexts.
 
-The layers are as follows:
+State is append-only facts in journals. Each authority maintains its own journal. Shared contexts have journals written by multiple participants. Facts accumulate through CRDT merge and views are derived by reduction.
 
-1. Foundation (`aura-core`): Effect traits, domain types, cryptographic utilities, and error types.
+Side effects flow through explicit traits. Cryptography, storage, networking, and time are accessed only through effect handlers. This enables deterministic simulation and cross-platform portability.
 
-2. Specification (`aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`, `aura-mpst`, `aura-macros`): CRDT domains, capability systems, transport semantics, session type runtime, and choreography DSL.
+Multi-party coordination uses session-typed choreographies. A global protocol specifies message flow. Each party's local behavior is projected from the global view.
 
-3. Implementation (`aura-effects`, `aura-composition`): Stateless production handlers and handler composition infrastructure.
+Authorization passes through a layered guard chain. Before any message leaves, capabilities are verified, flow budgets are charged, and facts are committed atomically.
 
-4. Orchestration (`aura-protocol` + `aura-guards`, `aura-consensus`, `aura-amp`, `aura-anti-entropy`): Multi-party coordination, guard chain, consensus, AMP, and anti-entropy.
+Aura separates key generation from agreement. Fast paths provide immediate usability while durable shared state is always consensus-finalized.
 
-5. Feature implementation (`aura-authentication`, `aura-chat`, `aura-invitation`, `aura-maintenance`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates for authentication, secure messaging, recovery, maintenance, relational contexts, rendezvous, social topology, and synchronization.
-
-6. Runtime composition (`aura-agent`, `aura-simulator`, `aura-app`): Complete system assembly, deterministic simulation, and portable application core.
-
-7. User interface (`aura-terminal`): Terminal-based CLI and TUI entry points.
-
-8. Testing and tools (`aura-testkit`, `aura-quint`, `aura-harness`): Test fixtures, mock effect handlers, simulation harnesses, and multi-instance runtime harness.
-
-Aura separates key generation (K1/K2/K3) from agreement and finality (A1/A2/A3). Fast paths using provisional or coordinator modes provide immediate usability. Durable shared state is always consensus-finalized.
+For the complete architecture, see [System Architecture](001_system_architecture.md).
 
 ## Documentation Index
 
-Additional documentation covers specific aspects of the system. The Foundation category covers mathematical and architectural foundations. The Core Systems category covers each major component. The Developer Guides category provides practical guides for implementation. The Project Meta category covers project structure.
+The documents below cover theory, technical components, implementation guidance, and project organization.
 
 **Foundation**
 

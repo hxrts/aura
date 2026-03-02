@@ -39,26 +39,22 @@ impl ScenarioRunner {
                 }
             }
 
-            if !matches!(
-                step.action.as_str(),
-                "launch_instances"
-                    | "noop"
-                    | "send_keys"
-                    | "send_chat_command"
-                    | "send_clipboard"
-                    | "send_key"
-                    | "wait_for"
-                    | "restart"
-                    | "kill"
-                    | "fault_delay"
-                    | "fault_loss"
-                    | "fault_tunnel_drop"
-            ) {
+        }
+
+        let mut previous_request_id: Option<u64> = None;
+        for step in &scenario.steps {
+            let Some(request_id) = step.request_id else {
+                continue;
+            };
+            if previous_request_id.is_some_and(|previous| request_id <= previous) {
                 errors.push(format!(
-                    "step {} uses unsupported action {}",
-                    step.id, step.action
+                    "step {} request_id={} must be strictly greater than previous request_id={}",
+                    step.id,
+                    request_id,
+                    previous_request_id.unwrap_or(0)
                 ));
             }
+            previous_request_id = Some(request_id);
         }
 
         if scenario.steps.len() > 100 {

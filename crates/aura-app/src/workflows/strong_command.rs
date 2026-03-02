@@ -1307,9 +1307,13 @@ async fn execute_membership(
     plan: &CommandPlan<MembershipPlan>,
 ) -> Result<Option<String>, AuraError> {
     match &plan.operation.command {
-        ResolvedCommand::Join { channel_id, .. } => messaging::join_channel(app_core, channel_id.0)
-            .await
-            .map(|_| ()),
+        ResolvedCommand::Join { channel_name, .. } => {
+            // Preserve `/join` semantics as "join or create" by going through the
+            // name-based workflow that handles unknown-channel fallback.
+            messaging::join_channel_by_name(app_core, channel_name)
+                .await
+                .map(|_| ())
+        }
         ResolvedCommand::Leave => {
             let channel_id = scope_channel_id(&plan.scope, "leave")?;
             messaging::leave_channel(app_core, channel_id.0)

@@ -1,104 +1,67 @@
 # Development Patterns and Workflows
 
-This document covers practical patterns and workflows for developing Aura systems.
+This document covers practical patterns and workflows for building choreographic protocols and high-level applications with Aura.
 
-## Effects vs Coordination
+## 1. Code Location
+
+### Effects vs Coordination
 
 A critical distinction guides where code belongs in the architecture.
 
-### Single-Party Operations
-
-`aura-effects` implements single-party operations that are stateless and context-free. Each operation takes input and produces output without maintaining state or coordinating with other handlers.
+**Single-party operations** in `aura-effects` are stateless and context-free. Each operation takes input and produces output without maintaining state or coordinating with other handlers.
 
 Examples:
 - `sign(key, msg) → Signature` - One device, one cryptographic operation
 - `store_chunk(id, data) → Ok(())` - One device, one write
 - `RealCryptoHandler` - Self-contained cryptographic operations
-- `MockNetworkHandler` - Simulated peer communication for testing
 
-Single-party operations are reusable in any context. They work in unit tests, integration tests, and production equally well.
-
-### Multi-Party Coordination
-
-`aura-protocol` implements multi-party coordination where multiple handlers orchestrate together. Operations are stateful and context-specific.
+**Multi-party coordination** in `aura-protocol` orchestrates multiple handlers together. Operations are stateful and context-specific.
 
 Examples:
 - `execute_anti_entropy(...)` - Orchestrates sync across multiple parties
 - `CrdtCoordinator` - Manages state of multiple CRDT handlers
 - `GuardChain` - Coordinates authorization checks across sequential operations
 
-Multi-party coordination requires a context. It assumes multiple handlers are involved and state is maintained across operations.
+The distinction determines layer placement. Single-party operations go in `aura-effects` (Layer 3). Multi-party coordination goes in `aura-protocol` (Layer 4).
 
-The distinction is critical for understanding where code belongs. Single-party operations go in `aura-effects`. Multi-party coordination goes in `aura-protocol`.
+**Rule of thumb**: If removing one effect handler requires changing the logic of how other handlers are called (not just removing calls), it's orchestration and belongs in Layer 4.
 
-## Code Location Decision Matrix
+### Decision Matrix
 
-Use these questions to classify code and determine the correct crate.
+| Pattern | Characteristics | Location |
+|---------|-----------------|----------|
+| Single effect trait method | Stateless, single operation | `aura-effects` |
+| Multiple effects/handlers | Stateful, multi-handler | `aura-protocol` |
+| Multi-party coordination | Distributed state, orchestration | `aura-protocol` |
+| Domain types and semantics | Pure logic, no handlers | Domain crate |
+| Complete reusable protocol | End-to-end, no UI | Feature crate |
+| Handler/protocol assembly | Runtime composition | `aura-agent` |
+| User-facing application | Has main() entry point | `aura-terminal` |
 
-| Pattern | Answer | Location |
-|---------|--------|----------|
-| Implements single effect trait method | Stateless and single operation | `aura-effects` |
-| Coordinates multiple effects or handlers | Stateful and multi-handler | `aura-protocol` |
-| Multi-party coordination logic | Distributed state and orchestration | `aura-protocol` |
-| Domain-specific types and semantics | Pure logic without handlers | Domain crate or `aura-mpst` |
-| Complete reusable protocol | End-to-end without UI | Feature/protocol crate |
-| Assembles handlers and protocols | Runtime composition | `aura-agent` or `aura-simulator` |
-| User-facing application | Has main() entry point | `aura-terminal` or `app-*` |
+**Boundary questions for edge cases:**
 
-### Boundary Questions for Edge Cases
+- **Stateless or stateful?** Stateless goes in `aura-effects`. Stateful goes in `aura-protocol`.
+- **One party or multiple?** Single-party goes in `aura-effects`. Multi-party goes in `aura-protocol`.
+- **Context-free or context-specific?** Context-free goes in `aura-effects`. Context-specific goes in `aura-protocol`.
 
-**Is it stateless or stateful?**
+## 2. Development Workflows
 
-Stateless and single operation go in `aura-effects`. Stateful and coordinating go in `aura-protocol`.
-
-**Does it work for one party or multiple?**
-
-Single-party code goes in `aura-effects`. Multi-party code goes in `aura-protocol`.
-
-**Is it context-free or context-specific?**
-
-Context-free code (works anywhere) goes in `aura-effects`. Context-specific code (requires orchestration) goes in `aura-protocol`.
-
-**Does it coordinate multiple handlers?**
-
-No coordination goes in `aura-effects`. Multiple handlers being orchestrated goes in `aura-protocol`.
-
-## Typical Workflows
-
-### Adding a New Cryptographic Primitive
+### Adding a Cryptographic Primitive
 
 1. Define the type in `aura-core` crypto module
 2. Implement `aura-core` traits for the type's semantics
 3. Add a single-operation handler in `aura-effects` that implements the primitive
 4. Use the handler in feature crates or protocols through the effect system
 
-### Adding a New Distributed Protocol
+### Adding a Distributed Protocol
 
-This pipeline applies to all Layer 4/5 choreographies and all Category C ceremonies. Follow each phase in order.
+This pipeline applies to all Layer 4/5 choreographies and all Category C ceremonies.
 
 **Phase 1: Classification and Facts**
 
-Classify the operation as Category A, B, or C using the decision tree in [Operation Categories](107_operation_categories.md). Define fact types with schema versioning. Implement view reducers and define the status model for the operation category.
+Classify the operation as Category A, B, or C using the decision tree in [Operation Categories](107_operation_categories.md). Define fact types with schema versioning. Implement view reducers and define the status model.
 
-**Phase 2: Choreography Specification**
-
-Write the choreography in a `.choreo` file and load it through `aura-macros::choreography!` (Telltale parse/projection/codegen). Use annotation syntax for security: `Role[guard_capability = "...", flow_cost = N] -> Target: Message`. Select the narrowest `TimeStamp` domain for each time field.
-
-See [Multi-party Session Types and Choreography](108_mpst_and_choreography.md) for the DSL and projection rules.
-
-**Phase 3: Runtime Wiring**
-
-Create the protocol implementation in `aura-protocol` or a feature crate. Implement role runners in the choreography runtime and wire execution through `AuraProtocolAdapter` or `AuraChoreoEngine`. Register the protocol with the runtime. Integrate with the guard chain (CapGuard, FlowGuard, JournalCoupler).
-
-Category C operations must follow the ceremony contract in [Operation Categories](107_operation_categories.md). This includes prestate binding, pending epoch management, response collection, and commit/abort semantics with supersession handling.
-
-**Phase 4: Status and Testing**
-
-Implement `CeremonyStatus` (for Category C) or protocol-specific status views. Ensure status is queryable for UI consumption. Add shared bus integration tests, simulation tests covering partitions and delays, and choreography parity/replay checks.
-
-### Ceremony Facts Macro
-
-Use the `#[ceremony_facts]` macro from `aura-macros` to attach standard ceremony helpers onto ceremony fact enums:
+Use the `#[ceremony_facts]` macro from `aura-macros` for ceremony fact enums:
 
 ```rust
 use aura_macros::ceremony_facts;
@@ -127,11 +90,25 @@ pub enum InvitationFact {
 }
 ```
 
-The macro provides canonical `ceremony_id()` and `ceremony_timestamp_ms()` accessors for all ceremony fact variants. This ensures consistent ceremony fact handling across protocols.
+The macro provides canonical `ceremony_id()` and `ceremony_timestamp_ms()` accessors.
 
-### Protocol Definition of Done
+**Phase 2: Choreography Specification**
 
-Before merging a new protocol implementation, verify these requirements are met:
+Write the choreography in a `.choreo` file and load it through `aura-macros::choreography!`. Use annotation syntax for security: `Role[guard_capability = "...", flow_cost = N] -> Target: Message`. Select the narrowest `TimeStamp` domain for each time field.
+
+See [MPST and Choreography](108_mpst_and_choreography.md) for the DSL and projection rules.
+
+**Phase 3: Runtime Wiring**
+
+Create the protocol implementation in `aura-protocol` or a feature crate. Implement role runners and wire execution through `AuraProtocolAdapter` or `AuraChoreoEngine`. Register the protocol with the runtime. Integrate with the guard chain.
+
+Category C operations must follow the ceremony contract in [Operation Categories](107_operation_categories.md).
+
+**Phase 4: Status and Testing**
+
+Implement `CeremonyStatus` (for Category C) or protocol-specific status views. Add shared bus integration tests, simulation tests covering partitions and delays, and choreography parity/replay checks.
+
+**Definition of Done:**
 
 - [ ] Operation category declared (A/B/C)
 - [ ] Facts defined with reducer and schema version
@@ -141,131 +118,19 @@ Before merging a new protocol implementation, verify these requirements are met:
 - [ ] Status output implemented
 - [ ] Shared-bus integration test added
 - [ ] Simulation test added
-- [ ] Choreography parity/replay tests added when protocol is Category C
+- [ ] Choreography parity/replay tests added (Category C)
 
-See `crates/aura-consensus/src/protocol/` and `crates/aura-consensus/src/dkg/ceremony.rs` for canonical implementation examples.
+See `crates/aura-consensus/src/protocol/` for canonical examples.
 
-### Writing a New Test
-
-1. Create test fixtures in `aura-testkit`
-2. Use mock handlers from `aura-effects` for reproducibility
-3. Configure appropriate leakage budget policies for the test scenarios
-4. Drive the agent from the test harness
-5. Compose protocols using `aura-simulator` for deterministic execution
-
-## Type Consolidation and Single Source of Truth
-
-### ProtocolType
-
-The canonical definition of `ProtocolType` lives in `aura-core`. All other crates re-export and use this canonical definition.
-
-Variants:
-- `Dkd` - Deterministic Key Derivation
-- `Counter` - Counter reservation protocol
-- `Resharing` - Key resharing for threshold updates
-- `Locking` - Resource locking protocol
-- `Recovery` - Account recovery protocol
-- `Compaction` - Ledger compaction protocol
-
-Usage is consistent across `aura-protocol` and `aura-simulator`.
-
-### SessionStatus
-
-The canonical definition of `SessionStatus` lives in `aura-core`. Variants represent the session lifecycle.
-
-Lifecycle order:
-1. `Initializing` - Session initializing before execution
-2. `Active` - Session currently executing
-3. `Waiting` - Session waiting for participant responses
-4. `Completed` - Session completed successfully
-5. `Failed` - Session failed with error
-6. `Expired` - Session expired due to timeout
-7. `TimedOut` - Session timed out during execution
-8. `Cancelled` - Session was cancelled
-
-All crates that track session state use the canonical definition from `aura-core`.
-
-### TimeStamp Domain Selection
-
-`TimeStamp` in `aura-core` is the only time type for new facts and public APIs.
-
-| Domain | Effect Trait | Primary Use |
-|--------|--------------|-------------|
-| `PhysicalClock` | `PhysicalTimeEffects` | Wall time semantics such as cooldowns, receipt timestamps, and liveness checks |
-| `LogicalClock` | `LogicalClockEffects` | Causal ordering for CRDT merge and happens-before checks |
-| `OrderClock` | `OrderClockEffects` | Deterministic ordering without leaking timing or causality |
-| `Range` | `PhysicalTimeEffects` + policy | Validity windows and dispute windows with bounded skew |
-| `ProvenancedTime` | `TimeAttestationEffects` | Attested timestamps for consensus commits and cross-party evidence |
-
-Use effect traits for all time reads. Do not call `SystemTime::now()` or chrono APIs in application logic.
-
-Use the narrowest domain that satisfies the requirement. Compare mixed domains with `TimeStamp::compare(policy)`.
-
-Persist `TimeStamp` values directly in facts. Do not add raw `u64` timestamps or legacy ordering IDs to new schemas.
-
-In deterministic tests, use handlers from `aura-testkit` or `aura-simulator` for all time domains.
-
-### Time Domain Anti-Patterns
-
-- Mixing `PhysicalClock`, `LogicalClock`, and `OrderClock` in one sort path without an explicit policy
-- Using `PhysicalClock` for privacy-sensitive ordering that should use `OrderClock`
-- Using UUID order or fact insertion order as a proxy for time
-- Exposing `SystemTime` or chrono types in domain interfaces
-
-### Capability System Layering
-
-The capability system intentionally uses multiple architectural layers. Each layer serves legitimate purposes.
-
-- **Canonical types** in `aura-core` provide lightweight references
-- **Authorization layer** (`aura-authorization`) adds policy enforcement features
-- **Storage layer** (`aura-store`) implements capability-based access control
-
-Clear conversion paths enable inter-layer communication without confusion.
-
-## Effect Handler Patterns
-
-### Stateless Handler Pattern
-
-Effect handlers follow a consistent pattern. Each handler implements one or more effect traits from `aura-core`.
-
-A handler is stateless. It receives input, performs a single operation, and returns output. No state is maintained between calls. Production handlers (`RealCryptoHandler`) use real crypto libraries. Mock handlers (`MockCryptoHandler`) use deterministic implementations for testing. See [Cryptographic Architecture](100_crypto.md) for implementation details.
-
-### Multi-Party Coordination Pattern
-
-Coordination logic in `aura-protocol` manages multiple handlers working together.
-
-Coordination functions are async and stateful. They orchestrate handlers to accomplish multi-party goals. For example, `execute_anti_entropy(coordinator, adapter, guards)` accepts multiple handlers (CrdtCoordinator, AuraProtocolAdapter, GuardChain), maintains state across multiple operations, coordinates between authorization/storage/transport, and returns results depending on combined state.
-
-### Guard Chain Execution Pattern
-
-The guard chain coordinates authorization, flow budgets, and journal effects in strict sequence. Guards themselves are pure: evaluation runs synchronously over a prepared `GuardSnapshot` and yields `EffectCommand` items that an async interpreter executes. This keeps guard logic deterministic and prevents observable side effects from failed authorization attempts.
-
-The three-phase pattern: (1) Authorization via Biscuit + policy (async, cached), (2) Prepare snapshot (async) and evaluate guards (sync), (3) Execute commands (async) - charge, record leakage, commit journal, send transport.
-
-This implements the guard chain guarantee: snapshot preparation happens before synchronous guard evaluation, and no transport observable occurs until the interpreter executes the resulting commands in order. See [Authorization](104_authorization.md) for detailed examples.
-
-## Security-First Design Philosophy
-
-### Privacy Budget Enforcement
-
-The leakage tracking system implements security by default with backward compatibility. `LeakageTracker::new()` denies undefined budgets (secure default). `LeakageTracker::legacy_permissive()` allows undefined budgets for backward compatibility. `LeakageTracker::with_undefined_policy(DefaultBudget(1000))` provides a configurable default. This prevents accidental privacy violations while supporting legacy code.
-
-### Annotation Parsing
-
-Robust syn-based validation prevents malformed choreographies from compiling. Proper error messages guide developers toward secure patterns. All placeholders have been replaced with complete implementations for deployment readiness.
-
-The choreography compiler validates annotations at compile time. Invalid or missing annotations are rejected with helpful error messages that explain the requirement.
-
-## Creating a New Domain Service
+### Creating a Domain Service
 
 Domain crates define stateless handlers that take effect references per-call. The agent layer wraps these with services that manage RwLock access.
 
-### Step 1: Create the Domain Handler
+**Step 1: Create the Domain Handler**
 
 In the domain crate (e.g., `aura-chat/src/service.rs`):
 
 ```rust
-/// Stateless handler - takes effect reference per-call
 pub struct MyHandler;
 
 impl MyHandler {
@@ -273,20 +138,19 @@ impl MyHandler {
 
     pub async fn my_operation<E>(
         &self,
-        effects: &E,  // <-- Per-call reference
+        effects: &E,
         param: SomeType,
     ) -> Result<Output>
     where
         E: StorageEffects + RandomEffects + PhysicalTimeEffects
     {
-        // Use effects for side effects
         let uuid = effects.random_uuid().await;
         // ... domain logic
     }
 }
 ```
 
-### Step 2: Create the Agent Service Wrapper
+**Step 2: Create the Agent Service Wrapper**
 
 In `aura-agent/src/handlers/my_service.rs`:
 
@@ -298,23 +162,17 @@ pub struct MyService {
 
 impl MyService {
     pub fn new(effects: Arc<RwLock<AuraEffectSystem>>) -> Self {
-        Self {
-            handler: MyHandler::new(),
-            effects,
-        }
+        Self { handler: MyHandler::new(), effects }
     }
 
     pub async fn my_operation(&self, param: SomeType) -> AgentResult<Output> {
-        let effects = self.effects.read().await;  // <-- Acquire lock
-        self.handler
-            .my_operation(&*effects, param)
-            .await
-            .map_err(Into::into)
+        let effects = self.effects.read().await;
+        self.handler.my_operation(&*effects, param).await.map_err(Into::into)
     }
 }
 ```
 
-### Step 3: Expose via Agent API
+**Step 3: Expose via Agent API**
 
 In `aura-agent/src/core/api.rs`:
 
@@ -326,22 +184,21 @@ impl AuraAgent {
 }
 ```
 
-### Benefits
+Benefits: Domain crate stays pure (no tokio/RwLock), testable with mock effects, consistent pattern across crates.
 
-- **Domain crate stays pure**: No tokio/RwLock dependency
-- **Testable**: Pass mock effects directly in unit tests
-- **Consistent**: Same pattern across all domain crates
-- **Safe**: RwLock managed automatically at agent layer
+### Writing Tests
 
-See `docs/105_effect_system_and_runtime.md` section 13 for more details.
+1. Create test fixtures in `aura-testkit`
+2. Use mock handlers from `aura-testkit` for reproducibility
+3. Configure appropriate leakage budget policies for test scenarios
+4. Drive the agent from the test harness
+5. Compose protocols using `aura-simulator` for deterministic execution
 
-## Implementing Aura in a New Environment
+### Implementing for New Platforms
 
-When building an Aura application for a new platform (mobile, web, embedded, or custom infrastructure), use the `AgentBuilder` API to assemble the runtime with appropriate effect handlers.
+Use the `AgentBuilder` API to assemble the runtime with appropriate effect handlers.
 
-### Choosing a Builder Strategy
-
-Aura provides three paths for creating agents:
+**Builder Strategies:**
 
 | Strategy | Use Case | Compile-Time Safety |
 |----------|----------|---------------------|
@@ -349,42 +206,19 @@ Aura provides three paths for creating agents:
 | Custom preset | Full control over all effects | Typestate enforcement |
 | Effect overrides | Preset with specific customizations | Mixed |
 
-### Using Platform Presets
-
-Platform presets provide sensible defaults for common environments.
-
-#### CLI Preset
-
-The CLI preset is the simplest path for terminal applications:
+**Platform Presets:**
 
 ```rust
-use aura_agent::AgentBuilder;
-
+// CLI
 let agent = AgentBuilder::cli()
     .data_dir("~/.aura")
-    .testing_mode()
     .build()
     .await?;
-```
 
-The CLI preset wires:
-- `RealCryptoHandler` for cryptographic operations
-- `FilesystemStorageHandler` for persistent storage
-- `PhysicalTimeHandler` for wall-clock time
-- `RealRandomHandler` for secure randomness
-- `RealConsoleHandler` for terminal output
-- `TcpTransportHandler` for network transport
-
-#### Mobile Presets
-
-Mobile presets require platform-specific feature flags:
-
-```rust
 // iOS (requires --features ios)
 let agent = AgentBuilder::ios()
     .app_group("group.com.example.aura")
     .keychain_access_group("com.example.aura")
-    .data_protection(DataProtectionClass::CompleteProtection)
     .build()
     .await?;
 
@@ -392,63 +226,32 @@ let agent = AgentBuilder::ios()
 let agent = AgentBuilder::android()
     .application_id("com.example.aura")
     .use_strongbox(true)
-    .require_user_authentication(Some(300)) // 5 minutes
     .build()
     .await?;
-```
 
-#### Web Preset
-
-The web preset targets browser environments:
-
-```rust
 // Web/WASM (requires --features web)
 let agent = AgentBuilder::web()
     .storage_prefix("aura_")
-    .use_session_storage(false)
     .build()
     .await?;
 ```
 
-### Custom Preset with Typestate
-
-When you need explicit control over all effects, use the custom preset. The Rust type system enforces that all required effects are provided before `build()` is available.
+**Custom Preset with Typestate:**
 
 ```rust
-use std::sync::Arc;
-use aura_agent::AgentBuilder;
-use aura_effects::{
-    RealCryptoHandler, FilesystemStorageHandler,
-    PhysicalTimeHandler, RealRandomHandler, RealConsoleHandler,
-};
-
-// All five required effects must be provided
 let agent = AgentBuilder::custom()
     .with_crypto(Arc::new(RealCryptoHandler::new()))
     .with_storage(Arc::new(FilesystemStorageHandler::new("~/.aura".into())))
     .with_time(Arc::new(PhysicalTimeHandler::new()))
     .with_random(Arc::new(RealRandomHandler::new()))
     .with_console(Arc::new(RealConsoleHandler::new()))
-    .testing_mode()
     .build()
     .await?;
 ```
 
-Attempting to call `build()` without providing all required effects results in a compile error:
+All five required effects must be provided or the code won't compile.
 
-```rust
-// This will not compile - missing effects
-let agent = AgentBuilder::custom()
-    .with_crypto(Arc::new(RealCryptoHandler::new()))
-    .build()  // Error: method not found for this type
-    .await?;
-```
-
-### Required vs Optional Effects
-
-#### Core Required Effects
-
-Every agent requires these five effects:
+**Required Effects:**
 
 | Effect | Purpose | Trait |
 |--------|---------|-------|
@@ -458,106 +261,134 @@ Every agent requires these five effects:
 | Random | Cryptographically secure randomness | `RandomEffects` |
 | Console | Logging and output | `ConsoleEffects` |
 
-`PhysicalTimeEffects` is required for wall time. Use [TimeStamp Domain Selection](#timestamp-domain-selection) to choose other time domains.
-
-#### Optional Effects
-
-These effects have defaults or are derived from required effects:
+**Optional Effects** (have defaults):
 
 | Effect | Default Behavior |
 |--------|-----------------|
-| `TransportEffects` | TCP transport (can be customized) |
+| `TransportEffects` | TCP transport |
 | `LogicalClockEffects` | Derived from storage |
 | `OrderClockEffects` | Derived from random |
 | `ReactiveEffects` | Default reactive handler |
 | `JournalEffects` | Derived from storage + crypto |
 | `BiometricEffects` | Fallback no-op handler |
 
-### Implementing Custom Effect Handlers
+**Platform Implementation Checklist:**
 
-To support a new platform, implement the core effect traits:
-
-```rust
-use aura_core::effects::{CryptoEffects, Signature, SecretKey, PublicKey};
-
-pub struct MyPlatformCrypto {
-    // Platform-specific state
-}
-
-#[async_trait]
-impl CryptoEffects for MyPlatformCrypto {
-    async fn sign(&self, key: &SecretKey, msg: &[u8]) -> Result<Signature> {
-        // Platform-specific signing implementation
-    }
-
-    async fn verify(&self, key: &PublicKey, msg: &[u8], sig: &Signature) -> Result<bool> {
-        // Platform-specific verification
-    }
-
-    // ... other required methods
-}
-```
-
-Then use it with the custom builder:
-
-```rust
-let agent = AgentBuilder::custom()
-    .with_crypto(Arc::new(MyPlatformCrypto::new()))
-    .with_storage(Arc::new(MyPlatformStorage::new()))
-    .with_time(Arc::new(MyPlatformTime::new()))
-    .with_random(Arc::new(MyPlatformRandom::new()))
-    .with_console(Arc::new(MyPlatformConsole::new()))
-    .build()
-    .await?;
-```
-
-### Testing Custom Implementations
-
-Use mock handlers from `aura-testkit` for testing:
-
-```rust
-use aura_testkit::{MockCryptoHandler, MemoryStorageHandler, SimulatedTimeHandler, MockRandomHandler, MockConsoleHandler};
-
-#[tokio::test]
-async fn test_custom_agent() {
-    let agent = AgentBuilder::custom()
-        .with_crypto(Arc::new(MockCryptoHandler::new()))
-        .with_storage(Arc::new(MemoryStorageHandler::new()))
-        .with_time(Arc::new(SimulatedTimeHandler::new()))
-        .with_random(Arc::new(MockRandomHandler::seeded(42)))
-        .with_console(Arc::new(MockConsoleHandler::new()))
-        .testing_mode()
-        .build()
-        .await
-        .expect("Agent should build");
-
-    // Test agent operations
-}
-```
-
-### Feature Flags
-
-Platform-specific presets require feature flags:
-
-```toml
-[dependencies]
-aura-agent = { version = "0.1", features = ["ios"] }
-# or
-aura-agent = { version = "0.1", features = ["android"] }
-# or
-aura-agent = { version = "0.1", features = ["web"] }
-```
-
-The default feature set includes CLI support. Multiple platform features can be enabled simultaneously for cross-platform codebases.
-
-### Platform Implementation Checklist
-
-When implementing Aura for a new platform:
-
-- [ ] Identify platform-specific APIs for crypto, storage, time, random, and console
-- [ ] Implement the five core effect traits using platform APIs
-- [ ] Create a preset builder (optional but recommended)
+- [ ] Identify platform-specific APIs for crypto, storage, time, random, console
+- [ ] Implement the five core effect traits
+- [ ] Create a preset builder (optional)
 - [ ] Add feature flags for platform-specific dependencies
 - [ ] Write integration tests using mock handlers
 - [ ] Document platform-specific security considerations
-- [ ] Consider transport layer requirements (WebSocket, BLE, etc.)
+- [ ] Consider transport requirements (WebSocket, BLE, etc.)
+
+## 3. Implementation Patterns
+
+### Effect Handler Pattern
+
+Effect handlers are stateless. Each handler implements one or more effect traits from `aura-core`. It receives input, performs a single operation, and returns output. No state is maintained between calls.
+
+Production handlers (`RealCryptoHandler`) use real libraries. Mock handlers (`MockCryptoHandler`) use deterministic implementations for testing. See [Cryptographic Architecture](100_crypto.md) for details.
+
+### Multi-Party Coordination Pattern
+
+Coordination logic in `aura-protocol` manages multiple handlers working together.
+
+Coordination functions are async and stateful. For example, `execute_anti_entropy(coordinator, adapter, guards)` accepts multiple handlers, maintains state across operations, coordinates between authorization/storage/transport, and returns results depending on combined state.
+
+### Guard Chain Pattern
+
+The guard chain coordinates authorization, flow budgets, and journal effects in strict sequence. Guards are pure: evaluation runs synchronously over a prepared `GuardSnapshot` and yields `EffectCommand` items that an async interpreter executes.
+
+Three-phase pattern:
+1. Authorization via Biscuit + policy (async, cached)
+2. Prepare snapshot (async) and evaluate guards (sync)
+3. Execute commands (async) - charge, record leakage, commit journal, send transport
+
+No transport observable occurs until the interpreter executes commands in order. See [Authorization](104_authorization.md) for examples.
+
+### Security Patterns
+
+**Privacy Budget Enforcement:**
+
+The leakage tracking system implements security by default. `LeakageTracker::new()` denies undefined budgets (secure default). `LeakageTracker::legacy_permissive()` allows undefined budgets for backward compatibility. `LeakageTracker::with_undefined_policy(DefaultBudget(1000))` provides a configurable default.
+
+**Annotation Validation:**
+
+The choreography compiler validates annotations at compile time. Invalid or missing annotations are rejected with helpful error messages.
+
+## 4. Type Reference
+
+### ProtocolType
+
+Canonical definition in `aura-core`. All crates re-export this definition.
+
+Variants:
+- `Dkd` - Deterministic Key Derivation
+- `Counter` - Counter reservation protocol
+- `Resharing` - Key resharing for threshold updates
+- `Locking` - Resource locking protocol
+- `Recovery` - Account recovery protocol
+- `Compaction` - Ledger compaction protocol
+
+### SessionStatus
+
+Canonical definition in `aura-core`. Represents session lifecycle.
+
+Lifecycle order:
+1. `Initializing` - Session initializing
+2. `Active` - Session executing
+3. `Waiting` - Waiting for participant responses
+4. `Completed` - Completed successfully
+5. `Failed` - Failed with error
+6. `Expired` - Expired due to timeout
+7. `TimedOut` - Timed out during execution
+8. `Cancelled` - Was cancelled
+
+### TimeStamp Domains
+
+`TimeStamp` in `aura-core` is the only time type for new facts and public APIs.
+
+| Domain | Effect Trait | Primary Use |
+|--------|--------------|-------------|
+| `PhysicalClock` | `PhysicalTimeEffects` | Wall time: cooldowns, receipt timestamps, liveness |
+| `LogicalClock` | `LogicalClockEffects` | Causal ordering: CRDT merge, happens-before |
+| `OrderClock` | `OrderClockEffects` | Deterministic ordering without timing leakage |
+| `Range` | `PhysicalTimeEffects` + policy | Validity windows with bounded skew |
+| `ProvenancedTime` | `TimeAttestationEffects` | Attested timestamps for consensus |
+
+Use effect traits for all time reads. Do not call `SystemTime::now()` or chrono APIs.
+
+Use the narrowest domain that satisfies the requirement. Compare mixed domains with `TimeStamp::compare(policy)`. Persist `TimeStamp` values directly in facts.
+
+**Anti-patterns:**
+- Mixing clock domains in one sort path without explicit policy
+- Using `PhysicalClock` for privacy-sensitive ordering
+- Using UUID or insertion order as time proxy
+- Exposing `SystemTime` or chrono types in interfaces
+
+### Capability System Layering
+
+The capability system uses multiple layers intentionally:
+
+- **Canonical types** in `aura-core` provide lightweight references
+- **Authorization layer** (`aura-authorization`) adds policy enforcement
+- **Storage layer** (`aura-store`) implements capability-based access control
+
+Clear conversion paths enable inter-layer communication.
+
+## 5. Policy Compliance
+
+Application code must follow policies defined in [Project Structure](999_project_structure.md).
+
+### Impure Function Usage
+
+All time, randomness, filesystem, and network operations must flow through effect traits. Direct calls to `SystemTime::now()`, `thread_rng()`, or `std::fs` break simulation determinism and WASM compatibility.
+
+### Serialization
+
+Wire protocols and facts use DAG-CBOR encoding via `aura_core::util::serialization`. JSON is allowed for user-facing config files and debug output.
+
+### Architectural Validation
+
+Run `just check-arch` before submitting changes. The checker validates layer boundaries, effect trait placement, impure function routing, and guard chain integrity.
