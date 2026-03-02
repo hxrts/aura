@@ -7,14 +7,14 @@ This document provides an overview of the formal verification, model checking, a
 | Metric | Count |
 |--------|-------|
 | Quint Specifications | 41 |
-| Quint Invariants | 233 |
-| Quint Temporal Properties | 12 |
-| Quint Type Definitions | 362 |
+| Quint Invariants | 191 |
+| Quint Temporal Properties | 11 |
+| Quint Type Definitions | 366 |
 | Lean Source Files | 38 |
 | Lean Theorems | 118 |
 | Conformance Fixtures | 4 |
-| ITF Traces | 0 |
-| Testkit Tests | 147 |
+| ITF Trace Harnesses | 8 |
+| Testkit Tests | 111 |
 
 ## Verification Layers
 
@@ -24,7 +24,7 @@ Formal protocol specifications in `verification/quint/` organized by subsystem.
 
 | Subsystem | Files | Contents |
 |-----------|-------|----------|
-| Root | 10 | core, authorization, recovery, invitation, interaction, leakage, sbb, time_system, transport, epochs |
+| Root | 11 | core, authorization, recovery, invitation, interaction, leakage, sbb, time_system, transport, epochs, cli_recovery_demo |
 | consensus/ | 4 | core, liveness, adversary, frost |
 | journal/ | 3 | core, counter, anti_entropy |
 | keys/ | 3 | dkg, dkd, resharing |
@@ -33,7 +33,8 @@ Formal protocol specifications in `verification/quint/` organized by subsystem.
 | liveness/ | 3 | connectivity, timing, properties |
 | harness/ | 8 | amp_channel, counter, dkg, flows, groups, locking, recovery, resharing |
 | tui/ | 4 | demo_recovery, flows, signals, state |
-| cli/ | 1 | cli_recovery_demo |
+
+Harness modules generate ITF traces on demand via `just quint-generate-traces`. Traces are not checked into the repository. CI runs `just ci-conformance-itf` to generate traces and replay them through Rust handlers.
 
 #### Key Specifications
 
@@ -64,7 +65,7 @@ Files implementing Quint-Rust correspondence and model-based testing.
 
 #### Simulator Integration (`aura-simulator/src/quint/`)
 
-15 modules (~15,300 lines) implementing generative simulation:
+17 modules implementing generative simulation:
 
 | Module | Purpose |
 |--------|---------|
@@ -83,6 +84,8 @@ Files implementing Quint-Rust correspondence and model-based testing.
 | `aura_state_extractors.rs` | Aura-specific state extraction |
 | `cli_runner.rs` | CLI integration for Quint verification |
 | `ast_parser.rs` | Quint AST parsing for analysis |
+| `mod.rs` | Module exports and re-exports |
+| `types.rs` | Shared type definitions |
 
 #### Consensus Verification (`aura-consensus`)
 - `core/verification/mod.rs` - Verification module facade
@@ -121,7 +124,7 @@ Lean 4 mathematical proofs in `verification/lean/` providing formal guarantees.
 | `Domain/KeyDerivation.lean` | Key derivation types |
 | `Domain/ContextIsolation.lean` | Context isolation model |
 
-#### Proof Modules (15 files, 118 theorems)
+#### Proof Modules (14 files, 118 theorems)
 
 **Consensus Proofs:**
 
@@ -227,9 +230,17 @@ Deterministic parity validation infrastructure in `aura-testkit`.
 
 | Property | Location |
 |----------|----------|
-| `TemporalEventualCommit` | consensus/liveness.qnt |
-| `TemporalEventualConvergence` | journal/anti_entropy.qnt |
-| `TemporalProgressUnderSynchrony` | consensus/liveness.qnt |
+| `livenessEventualCommit` | consensus/core.qnt |
+| `safetyImmutableCommit` | consensus/core.qnt |
+| `authorizationSoundness` | authorization.qnt |
+| `budgetMonotonicity` | authorization.qnt |
+| `flowBudgetFairness` | authorization.qnt |
+| `canAlwaysExit` | tui/state.qnt |
+| `modalEventuallyCloses` | tui/state.qnt |
+| `insertModeEventuallyExits` | tui/state.qnt |
+| `InvariantLeakageBounded` | leakage.qnt |
+| `InvariantObserverHierarchyMaintained` | leakage.qnt |
+| `InvariantBudgetsPositive` | leakage.qnt |
 
 ## Related Commands
 

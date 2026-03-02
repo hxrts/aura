@@ -254,6 +254,10 @@ ci-effects:
 ci-crates-doc-links:
     scripts/check-crates-doc-links.sh
 
+# Verify docs/998_verification_coverage.md metrics match actual codebase
+ci-verification-coverage:
+    scripts/check-verification-coverage.sh
+
 # Choreography wiring lint
 ci-choreo:
     scripts/check-choreo-wiring.sh
@@ -406,17 +410,18 @@ ci-dry-run:
     echo ""
 
     # Run CI steps (same as GitHub workflows)
-    run_step "1/10" "Format"          "just ci-format"
-    run_step "2/10" "Clippy"          "just ci-clippy"
-    run_step "3/10" "Build"           "just ci-build"
-    run_step "4/10" "Test"            "just ci-test"
-    run_step "5/10" "Choreo Parity"   "just ci-choreo-parity"
-    run_step "6/10" "Effects"         "just ci-effects"
-    run_step "7/10" "Choreo"          "just ci-choreo"
-    run_step "8/10" "Doc Links"       "just ci-crates-doc-links"
+    run_step "1/11" "Format"          "just ci-format"
+    run_step "2/11" "Clippy"          "just ci-clippy"
+    run_step "3/11" "Build"           "just ci-build"
+    run_step "4/11" "Test"            "just ci-test"
+    run_step "5/11" "Choreo Parity"   "just ci-choreo-parity"
+    run_step "6/11" "Effects"         "just ci-effects"
+    run_step "7/11" "Choreo"          "just ci-choreo"
+    run_step "8/11" "Doc Links"       "just ci-crates-doc-links"
+    run_step "9/11" "Verify Coverage" "just ci-verification-coverage"
 
     # Quint (optional - skip if not installed)
-    printf "[9/10] Quint... "
+    printf "[10/11] Quint... "
     if command -v quint &>/dev/null; then
         if just ci-quint-typecheck >/dev/null 2>&1; then
             echo -e "${GREEN}OK${NC}"
@@ -429,7 +434,7 @@ ci-dry-run:
     fi
 
     # Architecture check (warning only)
-    printf "[10/10] Architecture... "
+    printf "[11/11] Architecture... "
     if ./scripts/check-arch.sh --quick >/dev/null 2>&1; then
         echo -e "${GREEN}OK${NC}"
     else
