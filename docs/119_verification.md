@@ -188,20 +188,24 @@ The `aura-quint` crate provides Rust integration with Quint specifications.
 
 ### QuintRunner
 
-The runner executes Quint commands and parses results.
+The runner executes Quint verification and parses results.
 
 ```rust
 use aura_quint::runner::{QuintRunner, RunnerConfig};
+use aura_quint::PropertySpec;
 
 let config = RunnerConfig {
-    spec_path: "verification/quint/consensus/core.qnt".into(),
-    timeout: Duration::from_secs(60),
+    default_timeout: Duration::from_secs(60),
+    max_steps: 1000,
+    generate_counterexamples: true,
+    ..Default::default()
 };
-let runner = QuintRunner::new(config)?;
-let result = runner.check_invariant("UniqueCommitPerInstance").await?;
+let mut runner = QuintRunner::with_config(config)?;
+let spec = PropertySpec::invariant("UniqueCommitPerInstance");
+let result = runner.verify_property(&spec).await?;
 ```
 
-The runner invokes Quint CLI tools and captures output.
+The runner provides `verify_property` for invariant checking and `simulate` for trace-based testing. It caches results and can generate counterexamples.
 
 ### Property Evaluator
 
