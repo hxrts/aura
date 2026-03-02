@@ -323,6 +323,31 @@ The `DemoSignalCoordinator` in `crates/aura-terminal/src/demo/signal_coordinator
 
 Demo mode supports convenience shortcuts. Invite code entry supports `Ctrl+a` and `Ctrl+l` when demo codes are present.
 
+### Recovery scenario walkthrough
+
+The CLI can run a complete guardian recovery demo through the simulator. This scenario shows Bob onboarding with guardians, losing his device, and recovering with help from Alice and Carol.
+
+Run the recovery demo from the repository root:
+
+```bash
+cargo run -p aura-terminal -- scenarios run --directory scenarios/integration --pattern cli_recovery_demo
+```
+
+This command uses the CLI scenario runner plus the simulator to execute the guardian setup and recovery choreography. Logs are written to `work/scenario_logs/cli_recovery_demo.log`.
+
+The scenario executes in eight phases:
+
+1. `alice_carol_setup` creates Alice and Carol authorities using Ed25519 single-signer mode for initial key generation.
+2. `bob_onboarding` creates Bob authority (Ed25519 initially), sends guardian requests, and configures threshold 2 (switching to FROST).
+3. `group_chat_setup` has Alice create a group chat and invite Bob and Carol. Context keys are derived for the chat.
+4. `group_messaging` sends normal chat messages among all three participants. History is persisted.
+5. `bob_account_loss` simulates total device loss for Bob. He cannot access his authority.
+6. `recovery_initiation` has Bob initiate recovery. Alice and Carol validate and approve the request. Guardian approval threshold (2) is met.
+7. `account_restoration` runs threshold key recovery. Bob's chat history is synchronized back.
+8. `post_recovery_messaging` has Bob send messages again and see full history. The group remains functional.
+
+New accounts use standard Ed25519 signatures because FROST requires at least 2 signers. Once Bob adds guardians and configures threshold 2, subsequent signing operations use the full FROST threshold protocol. See [Cryptographic Architecture](100_crypto.md) for details on signing modes.
+
 ## Testing
 
 Run tests inside the development shell.

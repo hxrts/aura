@@ -2,7 +2,7 @@
 
 [Aura](https://github.com/hxrts/aura) is a fully peer-to-peer, private communication system that operates without dedicated servers. It uses a web-of-trust architecture to provide discovery, data availability, account recovery, and graceful async protocol evolution.
 
-Aura achieves this by using [threshold cryptography](102_authority_and_identity.md) to distribute trust, [session typed protocols](108_mpst_and_choreography.md) to coordinate peers safely, a CRDT-based [distributed journal](103_journal.md), and [authorized effects](104_authorization.md) to enforce capability and privacy boundaries.
+To accomplish this, Aura uses a careful combination of technologies. [FROST](102_authority_and_identity.md) threshold signatures, [Telltale](108_mpst_and_choreography.md) for building protocols with multiparty session types, a CRDT-based [journal](103_journal.md) for replicated state, and [authorized effects](104_authorization.md) to enforce capability and privacy boundaries.
 
 ## Implementation
 
@@ -107,13 +107,7 @@ Canonical role/access terminology lives in [Theoretical Model](002_theoretical_m
 
 [Maintenance Guide](808_maintenance_guide.md) explains distributed maintenance, snapshots, garbage collection, and system evolution.
 
-[Lean-Quint Bridge Guide](810_lean_quint_bridge.md) documents the bridge between Lean proofs and Quint specifications.
-
 [Reactive Signals Guide](810_reactive_signals_guide.md) covers reactive signal patterns for UI state management.
-
-[Recovery TUI Demo](811_recovery_tui_demo.md) provides a walkthrough of the CLI recovery demo with the simulator.
-
-[Protocol Pipeline Guide](812_protocol_pipeline.md) documents the protocol development pipeline from specification to implementation.
 
 [Runtime Harness Guide](813_runtime_harness_guide.md) covers end-to-end runtime validation with real Aura instances.
 

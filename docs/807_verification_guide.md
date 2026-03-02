@@ -275,9 +275,13 @@ just ci-conformance
 
 See [Conformance and Parity Reference](119_conformance.md) for corpus policy details.
 
-## Lean-Quint Bridge Format
+## Lean-Quint Bridge
 
-`aura-quint` now defines a versioned interchange schema for bridge workflows:
+The bridge connects Quint model checking with Telltale and Lean proof artifacts. It enables exporting Quint session models to a stable interchange format, importing Telltale and Lean properties back into Quint harnesses, and running cross-validation to detect divergence early in CI.
+
+### Data Contract
+
+`aura-quint` defines a versioned interchange schema for bridge workflows:
 
 - `BridgeBundleV1` (`schema_version = "aura.lean-quint-bridge.v1"`)
 - `SessionTypeInterchangeV1` for session graph exchange
@@ -286,12 +290,37 @@ See [Conformance and Parity Reference](119_conformance.md) for corpus policy det
 
 Use this schema as the canonical data contract when exporting Quint sessions to Telltale formats or importing Telltale/Lean properties into Quint harnesses.
 
-Exporter entry points in `aura-quint`:
-- `parse_quint_modules(...)`
-- `export_quint_to_telltale_bundle(...)`
-- `validate_export_bundle(...)`
+### Export Workflow
 
-For end-to-end bridge workflow details, see [Lean-Quint Bridge Guide](810_lean_quint_bridge.md).
+Export moves session models from Quint to Telltale format.
+
+1. Parse Quint JSON IR with `parse_quint_modules(...)`
+2. Build the bridge bundle with `export_quint_to_telltale_bundle(...)`
+3. Validate structural correctness with `validate_export_bundle(...)`
+
+### Import Workflow
+
+Import brings Telltale and Lean properties back into Quint harnesses.
+
+1. Select importable properties with `parse_telltale_properties(...)`
+2. Generate Quint invariant module text with `generate_quint_invariant_module(...)`
+3. Map certificates into Quint assertion comments with `map_certificates_to_quint_assertions(...)`
+
+### Cross-Validation Workflow
+
+Cross-validation detects proof and model divergence. Use `run_cross_validation(...)` from `aura-quint` to execute Quint checks through a `QuintModelCheckExecutor`, compare outcomes to bridge proof certificates, and emit a `CrossValidationReport` with explicit discrepancy entries.
+
+Run cross-validation in CI:
+
+```bash
+just ci-lean-quint-bridge
+```
+
+This command produces artifacts under `artifacts/lean-quint-bridge/` including `bridge.log` and `report.json`.
+
+### Handling Discrepancies
+
+When cross-validation reports discrepancies, follow these steps. First confirm the property identity mapping (`property_id`) between model and proof pipelines. Then re-run the failing property in Quint and capture the trace or counterexample. Next re-check proof certificate assumptions against the current protocol model. Do not merge until the mismatch is resolved or explicitly justified.
 
 ## Lean Proof Development
 

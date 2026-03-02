@@ -74,13 +74,76 @@ No coordination goes in `aura-effects`. Multiple handlers being orchestrated goe
 
 ### Adding a New Distributed Protocol
 
-1. Write the choreography in a `.choreo` file and load it through `aura-macros::choreography!` (Telltale parse/projection/codegen)
-2. Use annotation syntax for security: `Role[guard_capability = "...", flow_cost = N] -> Target: Message`
-3. Select the narrowest `TimeStamp` domain for each time field and compare mixed domains with `TimeStamp::compare(policy)`
-4. Create the protocol implementation in `aura-protocol` or a feature crate
-5. Implement the coordination logic using handlers from `aura-effects`
-6. Wire the protocol into `aura-agent` runtime (`AuraProtocolAdapter` and/or `AuraChoreoEngine`) with appropriate leakage budget policies
-7. Expose the protocol through CLI or application interfaces
+This pipeline applies to all Layer 4/5 choreographies and all Category C ceremonies. Follow each phase in order.
+
+**Phase 1: Classification and Facts**
+
+Classify the operation as Category A, B, or C using the decision tree in [Operation Categories](107_operation_categories.md). Define fact types with schema versioning. Implement view reducers and define the status model for the operation category.
+
+**Phase 2: Choreography Specification**
+
+Write the choreography in a `.choreo` file and load it through `aura-macros::choreography!` (Telltale parse/projection/codegen). Use annotation syntax for security: `Role[guard_capability = "...", flow_cost = N] -> Target: Message`. Select the narrowest `TimeStamp` domain for each time field.
+
+See [Multi-party Session Types and Choreography](108_mpst_and_choreography.md) for the DSL and projection rules.
+
+**Phase 3: Runtime Wiring**
+
+Create the protocol implementation in `aura-protocol` or a feature crate. Implement role runners in the choreography runtime and wire execution through `AuraProtocolAdapter` or `AuraChoreoEngine`. Register the protocol with the runtime. Integrate with the guard chain (CapGuard, FlowGuard, JournalCoupler).
+
+Category C operations must follow the ceremony contract in [Operation Categories](107_operation_categories.md). This includes prestate binding, pending epoch management, response collection, and commit/abort semantics with supersession handling.
+
+**Phase 4: Status and Testing**
+
+Implement `CeremonyStatus` (for Category C) or protocol-specific status views. Ensure status is queryable for UI consumption. Add shared bus integration tests, simulation tests covering partitions and delays, and choreography parity/replay checks.
+
+### Ceremony Facts Macro
+
+Use the `#[ceremony_facts]` macro from `aura-macros` to attach standard ceremony helpers onto ceremony fact enums:
+
+```rust
+use aura_macros::ceremony_facts;
+
+#[ceremony_facts]
+pub enum InvitationFact {
+    CeremonyInitiated {
+        ceremony_id: CeremonyId,
+        agreement_mode: Option<AgreementMode>,
+        trace_id: Option<String>,
+        timestamp_ms: u64,
+    },
+    CeremonyCommitted {
+        ceremony_id: CeremonyId,
+        relationship_id: String,
+        agreement_mode: Option<AgreementMode>,
+        trace_id: Option<String>,
+        timestamp_ms: u64,
+    },
+    CeremonyAborted {
+        ceremony_id: CeremonyId,
+        reason: String,
+        trace_id: Option<String>,
+        timestamp_ms: u64,
+    },
+}
+```
+
+The macro provides canonical `ceremony_id()` and `ceremony_timestamp_ms()` accessors for all ceremony fact variants. This ensures consistent ceremony fact handling across protocols.
+
+### Protocol Definition of Done
+
+Before merging a new protocol implementation, verify these requirements are met:
+
+- [ ] Operation category declared (A/B/C)
+- [ ] Facts defined with reducer and schema version
+- [ ] Choreography specified with roles/messages documented
+- [ ] Runtime wiring added (role runners + registration)
+- [ ] Category C uses ceremony runner and emits standard facts
+- [ ] Status output implemented
+- [ ] Shared-bus integration test added
+- [ ] Simulation test added
+- [ ] Choreography parity/replay tests added when protocol is Category C
+
+See `crates/aura-consensus/src/protocol/` and `crates/aura-consensus/src/dkg/ceremony.rs` for canonical implementation examples.
 
 ### Writing a New Test
 

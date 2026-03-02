@@ -2,15 +2,22 @@
 # Validate docs link integrity.
 #
 # Checks:
-# 1. All markdown links in crates/ that reference docs/ resolve to existing files
+# 1. All markdown links in crates/, AGENTS.md, CLAUDE.md, and .claude/skills/
+#    that reference docs/ resolve to existing files
 # 2. docs/000_project_overview.md contains links to all docs/*.md files
 #    (except itself and SUMMARY.md)
 # 3. No links in docs/ or crates/ reference work/ (scratch directory)
+#
+# Note: .claude/skills/ is skipped in CI (detected via CI or GITHUB_ACTIONS env vars)
+# because .claude/ is gitignored.
 
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$ROOT"
+
+# Detect CI environment
+IN_CI="${CI:-${GITHUB_ACTIONS:-}}"
 
 if ! command -v rg >/dev/null 2>&1; then
   echo "error: ripgrep (rg) is required" >&2
@@ -111,9 +118,26 @@ while IFS= read -r record; do
     echo "missing docs link: $src_file:$src_line -> $target (resolved: ${resolved#$ROOT/})"
   fi
 done < <(
+  # Check crates/
   while IFS= read -r -d '' file; do
     perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV\t$.\t$1\n"; }' "$file"
   done < <(rg -l -0 --pcre2 '\[[^\]]+\]\([^)]*docs/' crates)
+
+  # Check AGENTS.md and CLAUDE.md at root (use relative paths)
+  for root_file in AGENTS.md CLAUDE.md; do
+    if [[ -f "$ROOT/$root_file" ]]; then
+      perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV\t$.\t$1\n"; }' "$root_file"
+    fi
+  done
+
+  # Check .claude/skills/ (skip in CI since .claude/ is gitignored)
+  # Use relative paths by stripping ROOT prefix
+  if [[ -z "$IN_CI" && -d "$ROOT/.claude/skills" ]]; then
+    while IFS= read -r -d '' file; do
+      rel_file="${file#$ROOT/}"
+      perl -ne 'while (/\[[^\]]+\]\(([^)]+)\)/g) { print "$ARGV\t$.\t$1\n"; }' "$rel_file"
+    done < <(find "$ROOT/.claude/skills" -name '*.md' -print0 2>/dev/null)
+  fi
 )
 
 if [[ "$missing" -gt 0 ]]; then
@@ -160,11 +184,21 @@ echo "000_project_overview.md links to all docs files"
 
 # Check for links to work/ (scratch directory)
 work_links=0
+
+# Build search paths
+search_paths=(docs crates)
+for root_file in AGENTS.md CLAUDE.md; do
+  [[ -f "$ROOT/$root_file" ]] && search_paths+=("$root_file")
+done
+if [[ -z "$IN_CI" && -d "$ROOT/.claude/skills" ]]; then
+  search_paths+=(.claude/skills)
+fi
+
 while IFS= read -r match; do
   [[ -z "$match" ]] && continue
   work_links=$((work_links + 1))
   echo "link to work/ found: $match"
-done < <(rg --no-heading -n '\[[^\]]+\]\([^)]*work/' docs crates 2>/dev/null || true)
+done < <(rg --no-heading -n '\[[^\]]+\]\([^)]*work/' "${search_paths[@]}" 2>/dev/null || true)
 
 if [[ "$work_links" -gt 0 ]]; then
   echo ""

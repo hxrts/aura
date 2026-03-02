@@ -134,6 +134,10 @@ This starts a long-lived JSON-line REPL.
 The process keeps instances alive until `quit` or `exit`.
 This is the correct mode for full manual end-to-end flows.
 
+`tool_repl` enforces an idle timeout by default (`--idle-timeout-ms 600000`).
+If no requests arrive before the timeout, it automatically stops all instances and exits.
+Set `--idle-timeout-ms 0` to disable idle shutdown.
+
 ```json
 {"method":"negotiate","params":{"client_versions":["1.0","0.2"]}}
 {"method":"screen","params":{"instance_id":"alice"}}
@@ -168,7 +172,28 @@ In phase two, create a channel on Alice. Verify that member selection shows one 
 
 In phase three, exchange messages using tokens `msg-a-1`, `msg-b-1`, `msg-a-2`, and `msg-b-2`. Confirm each token appears on both screens before sending the next token.
 
-For headless capture of copied invitation text, set `AURA_CLIPBOARD_FILE` in each instance `env`. Read the file after pressing `c` to get the full out-of-band payload.
+To isolate harness clipboard actions from your system clipboard, set per-instance clipboard env values:
+
+- `AURA_CLIPBOARD_MODE=file_only`
+- `AURA_CLIPBOARD_FILE=<instance-specific path>`
+
+With `file_only`, TUI copy actions never write to the system clipboard. Read the configured file after pressing `c` to get the out-of-band payload.
+
+```toml
+[[instances]]
+id = "alice"
+env = [
+  "AURA_CLIPBOARD_MODE=file_only",
+  "AURA_CLIPBOARD_FILE=.tmp/harness/alice-clipboard.txt",
+]
+
+[[instances]]
+id = "bob"
+env = [
+  "AURA_CLIPBOARD_MODE=file_only",
+  "AURA_CLIPBOARD_FILE=.tmp/harness/bob-clipboard.txt",
+]
+```
 
 ## Artifacts
 
@@ -211,6 +236,10 @@ If needed, rerun from `replay_bundle.json` to confirm determinism.
 If `tail_log` returns an empty list, set `log_path` per instance.
 `tail_log` reads from configured log files only.
 It does not scrape PTY output directly.
+
+If you observe many `aura tui` processes, inspect parent `tool_repl` sessions first.
+Use process listings to identify long-idle REPL parents and terminate those parents.
+With current lifecycle handling, stopping a `tool_repl` parent stops the instances it owns.
 
 ## Related Docs
 
