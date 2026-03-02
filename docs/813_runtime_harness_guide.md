@@ -78,18 +78,28 @@ timeout_ms = 5000
 id = "local-send"
 action = "send_keys"
 instance = "alice"
-expect = "mixed-topology-msg\n"  # key payload to send
+keys = "mixed-topology-msg\n"  # key payload to send
 timeout_ms = 2000
 
 [[steps]]
 id = "local-wait"
 action = "wait_for"
 instance = "alice"
-expect = "mixed-topology-msg"    # required match pattern
+pattern = "mixed-topology-msg"   # required match pattern
+timeout_ms = 2000
+
+[[steps]]
+id = "join-channel"
+action = "send_chat_command"
+instance = "alice"
+command = "join slash-lab"
 timeout_ms = 2000
 ```
 
 Scenario lint rejects unknown instance references and unsupported action names.
+`expect` still works for backward compatibility, but prefer action-specific fields:
+`keys`, `pattern`, `command`, `key`, and `source_instance`.
+`send_chat_command` sends `Esc` before typing `i/<command>` to reduce stale-toast flakiness.
 
 ## Common Commands
 

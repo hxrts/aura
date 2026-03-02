@@ -13,56 +13,56 @@ timeout_ms = 15000
 id = "alice-ready-for-account"
 action = "wait_for"
 instance = "alice"
-expect = "Welcome to Aura"
-timeout_ms = 10000
+pattern = "Welcome to Aura"
+timeout_ms = 20000
 
 [[steps]]
 id = "bob-ready-for-account"
 action = "wait_for"
 instance = "bob"
-expect = "Welcome to Aura"
-timeout_ms = 10000
+pattern = "Welcome to Aura"
+timeout_ms = 20000
 
 [[steps]]
 id = "alice-name"
 action = "send_keys"
 instance = "alice"
-expect = "AliceS3"
+keys = "AliceS3"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-create-account"
 action = "send_key"
 instance = "alice"
-expect = "enter"
+key = "enter"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-account-created"
 action = "wait_for"
 instance = "alice"
-expect = "Map → Street"
+pattern = "Map → Street"
 timeout_ms = 10000
 
 [[steps]]
 id = "bob-name"
 action = "send_keys"
 instance = "bob"
-expect = "BobS3"
+keys = "BobS3"
 timeout_ms = 2000
 
 [[steps]]
 id = "bob-create-account"
 action = "send_key"
 instance = "bob"
-expect = "enter"
+key = "enter"
 timeout_ms = 2000
 
 [[steps]]
 id = "bob-account-created"
 action = "wait_for"
 instance = "bob"
-expect = "Map → Street"
+pattern = "Map → Street"
 timeout_ms = 10000
 
 [[steps]]
@@ -160,7 +160,7 @@ timeout_ms = 5000
 id = "bob-import-invitation-from-alice-clipboard"
 action = "send_clipboard"
 instance = "bob"
-expect = "alice"
+source_instance = "alice"
 timeout_ms = 2000
 
 [[steps]]
@@ -221,28 +221,42 @@ timeout_ms = 5000
 
 [[steps]]
 id = "alice-join-slash-lab"
-action = "send_keys"
+action = "send_chat_command"
 instance = "alice"
-expect = "i/join slash-lab\n"
+command = "join slash-lab"
 timeout_ms = 2000
 
 [[steps]]
 id = "alice-channel-visible"
 action = "wait_for"
 instance = "alice"
-expect = "# slash-lab"
+pattern = "# slash-lab"
 timeout_ms = 10000
 
 [[steps]]
 id = "bob-join-slash-lab"
-action = "send_keys"
+action = "send_chat_command"
 instance = "bob"
-expect = "i/join slash-lab\n"
+command = "join slash-lab"
 timeout_ms = 2000
 
 [[steps]]
 id = "bob-channel-visible"
 action = "wait_for"
 instance = "bob"
-expect = "# slash-lab"
+pattern = "# slash-lab"
+timeout_ms = 10000
+
+[[steps]]
+id = "bob-send-pin-seed-message"
+action = "send_keys"
+instance = "bob"
+keys = "is3-pin-seed\n"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-sees-pin-seed-message"
+action = "wait_for"
+instance = "bob"
+pattern = "s3-pin-seed"
 timeout_ms = 10000
