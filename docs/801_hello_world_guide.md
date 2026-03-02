@@ -39,52 +39,9 @@ let agent = AgentBuilder::cli()
 
 The CLI preset provides sensible defaults for command-line tools. It uses file-based storage, real cryptographic operations, and TCP transport.
 
-For custom environments that need explicit control over effect handlers, use the custom preset with typestate enforcement.
+For custom environments that need explicit control over effect handlers, use `AgentBuilder::custom()` with typestate enforcement. This requires providing all five core effects (crypto, storage, time, random, console) before `build()` is available.
 
-```rust
-use std::sync::Arc;
-use aura_agent::AgentBuilder;
-use aura_effects::{
-    RealCryptoHandler, FilesystemStorageHandler,
-    PhysicalTimeHandler, RealRandomHandler, RealConsoleHandler,
-};
-
-// Custom preset - all effects must be provided
-let agent = AgentBuilder::custom()
-    .with_crypto(Arc::new(RealCryptoHandler::new()))
-    .with_storage(Arc::new(FilesystemStorageHandler::new("~/.aura".into())))
-    .with_time(Arc::new(PhysicalTimeHandler::new()))
-    .with_random(Arc::new(RealRandomHandler::new()))
-    .with_console(Arc::new(RealConsoleHandler::new()))
-    .testing_mode()
-    .build()
-    .await?;
-```
-
-The custom preset uses Rust's type system to enforce that all required effects are provided before building. Attempting to call `build()` without providing all five required effects results in a compile error.
-
-Platform-specific presets are available for iOS, Android, and Web/WASM. These require feature flags to enable.
-
-```rust
-// iOS preset (requires --features ios)
-let agent = AgentBuilder::ios()
-    .app_group("group.com.example.aura")
-    .build()
-    .await?;
-
-// Android preset (requires --features android)
-let agent = AgentBuilder::android()
-    .application_id("com.example.aura")
-    .use_strongbox(true)
-    .build()
-    .await?;
-
-// Web preset (requires --features web)
-let agent = AgentBuilder::web()
-    .storage_prefix("aura_")
-    .build()
-    .await?;
-```
+Platform-specific presets are available for iOS (`AgentBuilder::ios()`), Android (`AgentBuilder::android()`), and Web/WASM (`AgentBuilder::web()`). These require feature flags to enable. See [Development Patterns and Workflows](805_development_patterns_guide.md) for detailed builder examples.
 
 See [Project Structure](999_project_structure.md) for details on the 8-layer architecture and effect handler organization.
 

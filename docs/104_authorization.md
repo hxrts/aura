@@ -92,38 +92,12 @@ Aura implements cryptographically secure authorization using Biscuit tokens. Thi
 
 ### Biscuit Token Implementation
 
-Biscuit tokens provide cryptographically verifiable, attenuated delegation chains. The following code shows a typical implementation workflow:
+Biscuit tokens provide cryptographically verifiable, attenuated delegation chains. The typical workflow:
 
-```rust
-use aura_authorization::{AccountAuthority, BiscuitTokenManager, ResourceScope, AuthorityOp};
-use aura_protocol::authorization::BiscuitAuthorizationBridge;
-use biscuit_auth::{Biscuit, Authorizer, macros::*};
-use aura_core::{AuthorityId, DeviceId};
-
-// 1. Create root authority
-let authority = AccountAuthority::new(account_id);
-
-// 2. Issue device token
-let device_token = authority.create_device_token(device_id)?;
-// Contains: account({id}), device({id}), role("member"), capability("read"), ...
-
-// 3. Attenuate for delegation
-let manager = BiscuitTokenManager::new(device_id, device_token);
-let read_only_token = manager.attenuate_read("storage/public/*")?;
-// Adds: check if operation("read"), check if resource($res), $res.starts_with("storage/public/")
-
-// 4. Authorization via Bridge
-let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), device_id);
-let resource_scope = ResourceScope::Storage {
-    authority_id: AuthorityId::new_from_entropy([1u8; 32]),
-    path: "public/file.txt".to_string(),
-};
-
-let result = bridge.authorize(&read_only_token, "read", &resource_scope)?;
-if result.authorized {
-    // Cryptographically verified authorization with delegation depth tracking
-}
-```
+1. Create root authority via `AccountAuthority::new(account_id)`
+2. Issue device token via `authority.create_device_token(device_id)` (includes account/device/role/capability facts)
+3. Attenuate for delegation via `BiscuitTokenManager::attenuate_read()` (appends restriction checks)
+4. Authorize via `BiscuitAuthorizationBridge::authorize(&token, operation, &resource_scope)`
 
 Tokens follow an attenuation chain where each block adds restrictions. The sequence is:
 
@@ -148,40 +122,13 @@ Typical use cases for Biscuit tokens include cross-authority delegation where on
 
 ### Guard Chain Integration
 
-Biscuit authorization integrates seamlessly with the guard chain:
+Biscuit authorization integrates with the guard chain in three phases:
 
-```rust
-async fn authorize_and_send(
-    bridge: &BiscuitAuthorizationBridge,
-    interpreter: &dyn EffectInterpreter,
-    guards: &GuardChain,
-    ctx: ContextId,
-    peer: AuthorityId,
-    token: &Biscuit, // Required Biscuit token
-    operation: Operation,
-    resource_scope: &ResourceScope,
-) -> Result<()> {
-    // Phase 1: Cryptographic token verification and Datalog evaluation
-    let auth_result = bridge.authorize(token, operation.name(), resource_scope)?;
-    if !auth_result.authorized {
-        return Err(AuraError::permission_denied("Token authorization failed"));
-    }
+1. **Cryptographic verification**: `bridge.authorize(token, operation, resource_scope)` performs Datalog evaluation
+2. **Guard evaluation**: Prepare `GuardSnapshot` (async), then `guards.evaluate(&snapshot, &request)` (sync)
+3. **Effect execution**: Execute `EffectCommand` items from the guard outcome via the interpreter
 
-    // Phase 2: Prepare snapshot (async) and evaluate guards (sync)
-    let snapshot = prepare_guard_snapshot(ctx, peer, &auth_result.cap_frontier).await?;
-    let outcome = guards.evaluate(&snapshot, &operation.request());
-    if outcome.decision.is_denied() {
-        return Err(AuraError::permission_denied("Guard evaluation denied"));
-    }
-
-    // Phase 3: Execute effect commands (async)
-    for cmd in outcome.effects {
-        interpreter.exec(cmd).await?;
-    }
-
-    Ok(())
-}
-```
+If any phase fails, the operation returns an error without observable side effects.
 
 ### Authorization Scenarios
 

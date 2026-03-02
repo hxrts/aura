@@ -245,18 +245,7 @@ The handler is thread-safe via `Arc` and `RwLock`. Multiple handlers can share t
 
 ### 4.5 Error Handling
 
-`ReactiveError` covers common failure modes:
-
-```rust
-pub enum ReactiveError {
-    SignalNotFound { id: String },
-    TypeMismatch { id: String, expected: String, actual: String },
-    SubscriptionClosed { id: String },
-    Internal { reason: String },
-}
-```
-
-Signal operations return `Result<T, ReactiveError>` for explicit error handling.
+`ReactiveError` covers common failure modes: `SignalNotFound`, `TypeMismatch` (with expected/actual types), `SubscriptionClosed`, and `Internal` errors. Signal operations return `Result<T, ReactiveError>` for explicit error handling.
 
 ## 5. QueryEffects and Unified Handler
 
@@ -332,71 +321,15 @@ pub trait QueryEffects: Send + Sync {
 
 ### 5.2.2 Query Statistics
 
-`QueryStats` provides execution metrics for debugging and optimization:
-
-```rust
-pub struct QueryStats {
-    pub execution_time: Duration,
-    pub facts_scanned: usize,
-    pub facts_matched: usize,
-    pub cache_hit: bool,
-    pub isolation_used: QueryIsolation,
-}
-```
-
-See [Database Architecture](113_database.md) for complete query system documentation.
+`QueryStats` provides execution metrics for debugging and optimization: execution time, facts scanned/matched, cache hit status, and isolation level used. See [Database Architecture](113_database.md) for complete query system documentation.
 
 ### 5.3 BoundSignal<Q>
 
-A `BoundSignal` pairs a signal with its source query:
-
-```rust
-pub struct BoundSignal<Q: Query> {
-    signal: Signal<Q::Result>,
-    query: Q,
-}
-
-impl<Q: Query> BoundSignal<Q> {
-    /// Register with a reactive handler
-    pub async fn register<R: ReactiveEffects>(&self, handler: &R) -> Result<(), ReactiveError> {
-        handler.register_query(&self.signal, self.query.clone()).await
-    }
-
-    /// Get fact dependencies for invalidation
-    pub fn dependencies(&self) -> Vec<FactPredicate> {
-        self.query.dependencies()
-    }
-}
-```
+A `BoundSignal<Q>` pairs a `Signal<Q::Result>` with its source query. It provides `register()` to register with a reactive handler and `dependencies()` to get fact predicates for invalidation.
 
 ### 5.4 UnifiedHandler
 
-The `UnifiedHandler` composes Query + Reactive effects into a single cohesive handler:
-
-```rust
-pub struct UnifiedHandler {
-    query: QueryHandler,
-    reactive: Arc<ReactiveHandler>,
-    capability_context: Option<Vec<u8>>,
-}
-
-impl UnifiedHandler {
-    /// Commit a fact and invalidate affected queries
-    pub async fn commit_fact(&self, predicate: &str, args: Vec<String>) {
-        self.query.add_fact(predicate, args).await;
-        let fact_pred = FactPredicate::new(predicate);
-        self.query.invalidate(&fact_pred).await;
-    }
-
-    /// Execute authorized query
-    pub async fn query<Q: Query>(&self, query: &Q) -> Result<Q::Result, QueryError> {
-        if self.capability_context.is_some() {
-            self.query.check_capabilities(&query.required_capabilities()).await?;
-        }
-        self.query.query(query).await
-    }
-}
-```
+The `UnifiedHandler` composes Query + Reactive effects into a single cohesive handler. It holds a `QueryHandler`, a shared `ReactiveHandler`, and an optional capability context. Key methods: `commit_fact()` adds a fact and invalidates affected queries; `query()` checks capabilities (if context is set) and executes the query.
 
 ### 5.5 Query-Signal Integration
 
@@ -449,15 +382,7 @@ while let Ok(state) = stream.recv().await {
 
 ## 6. Lifecycle Management
 
-Aura defines a lightweight lifecycle manager for initialization and shutdown. The current implementation primarily coordinates session cleanup timeouts and shutdown behavior.
-
-```rust
-pub struct LifecycleManager {
-    session_cleanup_timeout: u64,
-}
-```
-
-If richer component-aware lifecycle orchestration becomes necessary (init ordering, explicit phase transitions), it should be introduced via a dedicated design pass rather than assuming a more complex manager by default.
+Aura defines a lightweight `LifecycleManager` for initialization and shutdown that primarily coordinates session cleanup timeouts and shutdown behavior. If richer component-aware lifecycle orchestration becomes necessary (init ordering, explicit phase transitions), it should be introduced via a dedicated design pass rather than assuming a more complex manager by default.
 
 ### 6.1 Runtime Maintenance Tasks
 
@@ -620,18 +545,7 @@ This code shows the service accessor pattern. Each service provides domain-speci
 
 ### 11.1 Service Registry
 
-The `ServiceRegistry` initializes all services during agent startup. It holds references to each service and wires shared runtime dependencies.
-
-```rust
-pub struct ServiceRegistry {
-    sessions: Arc<SessionServiceApi>,
-    auth: Arc<AuthServiceApi>,
-    invitations: Arc<InvitationServiceApi>,
-    recovery: Arc<RecoveryServiceApi>,
-}
-```
-
-If lifecycle coordination is required, the runtime system owns it; services themselves remain simple wrappers around pure handler logic plus effect interpretation.
+The `ServiceRegistry` initializes all services during agent startup, holding `Arc` references to each service (`sessions`, `auth`, `invitations`, `recovery`) and wiring shared runtime dependencies. If lifecycle coordination is required, the runtime system owns it; services themselves remain simple wrappers around pure handler logic plus effect interpretation.
 
 ### 11.2 Guard Chain Integration
 
@@ -736,21 +650,7 @@ The `FactRegistry` provides domain-specific fact type registration and reduction
 
 ### 13.1 Architecture
 
-The `FactRegistry` lives in `aura-journal` and allows domain crates to register their fact types along with custom reducers. The registry is built during effect system initialization. It is made accessible through the effect system.
-
-```rust
-pub struct AuraEffectSystem {
-    fact_registry: Arc<FactRegistry>,
-}
-
-impl AuraEffectSystem {
-    pub fn fact_registry(&self) -> &FactRegistry {
-        &self.fact_registry
-    }
-}
-```
-
-This code shows how `AuraEffectSystem` holds the registry. The `fact_registry()` method provides access to registered reducers.
+The `FactRegistry` lives in `aura-journal` and allows domain crates to register their fact types along with custom reducers. The registry is built during effect system initialization and made accessible through `AuraEffectSystem::fact_registry()`.
 
 ### 13.2 Fact Registration
 
@@ -774,22 +674,7 @@ Production code obtains the registry via `effect_system.fact_registry()`. Tests 
 
 ### 13.4 Handler-Level Access
 
-The `JournalHandler` holds an optional `FactRegistry` reference. This enables fact reduction during journal operations.
-
-```rust
-impl JournalHandler {
-    pub fn with_fact_registry(mut self, registry: FactRegistry) -> Self {
-        self.fact_registry = Some(registry);
-        self
-    }
-
-    pub fn fact_registry(&self) -> Option<&FactRegistry> {
-        self.fact_registry.as_ref()
-    }
-}
-```
-
-This code shows the handler-level integration. Journal operations can trigger domain-specific reductions when facts are committed.
+The `JournalHandler` holds an optional `FactRegistry` reference via `with_fact_registry()` builder and `fact_registry()` accessor. This enables domain-specific reductions when facts are committed.
 
 ### 13.5 Design Rationale
 
@@ -803,46 +688,11 @@ The `DeliveryPolicy` trait enables domain crates to define custom acknowledgment
 
 ### 14.1 DeliveryPolicy Trait
 
-Domain crates implement the `DeliveryPolicy` trait to control acknowledgment lifecycle:
-
-```rust
-pub trait DeliveryPolicy: Send + Sync {
-    /// Minimum time to retain acks after all expected peers have acked
-    fn min_retention(&self) -> Duration;
-
-    /// Maximum time to retain acks regardless of peer count
-    fn max_retention(&self) -> Duration;
-
-    /// Whether this fact type requires ack tracking
-    fn requires_ack(&self, fact: &Fact) -> bool;
-
-    /// Expected peers for acknowledgment (domain-specific)
-    fn expected_peers(&self, fact: &Fact) -> Vec<AuthorityId>;
-
-    /// Whether acks can be garbage collected
-    fn can_gc(&self, fact_id: &str, acks: &Acknowledgment, now: PhysicalTime) -> bool;
-}
-```
+Domain crates implement the `DeliveryPolicy` trait to control acknowledgment lifecycle. Key methods: `min_retention()` and `max_retention()` for time bounds, `requires_ack()` to check if a fact needs tracking, `expected_peers()` for domain-specific peer lists, and `can_gc()` to determine GC eligibility.
 
 ### 14.2 Default Policies
 
-The journal provides sensible defaults that domains can override:
-
-```rust
-pub struct DefaultDeliveryPolicy {
-    min_retention: Duration,
-    max_retention: Duration,
-}
-
-impl Default for DefaultDeliveryPolicy {
-    fn default() -> Self {
-        Self {
-            min_retention: Duration::from_secs(24 * 60 * 60),  // 24 hours
-            max_retention: Duration::from_secs(7 * 24 * 60 * 60),  // 7 days
-        }
-    }
-}
-```
+`DefaultDeliveryPolicy` provides sensible defaults (24 hours min, 7 days max retention) that domains can override.
 
 ### 14.3 Domain-Specific Policies
 

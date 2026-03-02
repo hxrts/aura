@@ -90,27 +90,7 @@ Pure functions in `crates/aura-core/src/crypto/` implement hash functions, signa
 
 The `aura-effects` crate contains the only production implementations that directly use cryptographic libraries.
 
-The production handler lives in `crates/aura-effects/src/crypto.rs`.
-
-```rust
-pub struct RealCryptoHandler {
-    seed: Option<[u8; 32]>,
-}
-
-impl RealCryptoHandler {
-    pub fn new() -> Self { Self { seed: None } }
-    pub fn seeded(seed: [u8; 32]) -> Self { Self { seed: Some(seed) } }
-}
-
-impl CryptoCoreEffects for RealCryptoHandler {
-    async fn ed25519_sign(&self, message: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        // Uses ed25519_dalek directly
-    }
-    // ... other methods
-}
-```
-
-The handler can operate with OS entropy for production or with a seed for deterministic testing. It implements all methods from `CryptoCoreEffects` and `RandomCoreEffects`.
+The production handler lives in `crates/aura-effects/src/crypto.rs`. `RealCryptoHandler` can operate with OS entropy (production) or with a seed (deterministic testing). It implements all methods from `CryptoCoreEffects` and `RandomCoreEffects`.
 
 The following direct imports are allowed in Layer 3:
 
@@ -150,27 +130,7 @@ BFT‑DKG (K3) follows these rules:
 
 The `aura-testkit` crate provides mock implementations for deterministic testing.
 
-The mock handler lives in `crates/aura-testkit/src/stateful_effects/crypto.rs`.
-
-```rust
-pub struct MockCryptoHandler {
-    seed: u64,
-    counter: Arc<Mutex<u64>>,
-}
-
-impl MockCryptoHandler {
-    pub fn new() -> Self { Self { seed: 42, counter: Arc::new(Mutex::new(0)) } }
-    pub fn with_seed(seed: u64) -> Self { Self { seed, counter: Arc::new(Mutex::new(0)) } }
-}
-
-impl CryptoCoreEffects for MockCryptoHandler {
-    async fn ed25519_sign(&self, message: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        // Deterministic signing for reproducible tests
-    }
-}
-```
-
-The mock handler uses a seed and counter for deterministic behavior. This enables reproducible test results, simulation of edge cases, and faster test execution.
+The mock handler lives in `crates/aura-testkit/src/stateful_effects/crypto.rs`. `MockCryptoHandler` uses a seed and counter for deterministic behavior, enabling reproducible test results, simulation of edge cases, and faster test execution.
 
 ## 3. Code Organization Patterns
 
@@ -362,16 +322,7 @@ pub enum ApprovalContext {
 
 The `SignableOperation` enum defines what is being signed. The `ApprovalContext` enum provides context for audit and display purposes.
 
-The service implementation lives in `aura-agent/src/runtime/services/threshold_signing.rs`.
-
-```rust
-pub struct ThresholdSigningService {
-    effects: Arc<RwLock<AuraEffectSystem>>,
-    contexts: RwLock<HashMap<AuthorityId, SigningContextState>>,
-}
-```
-
-The service manages per-authority signing state and key storage. It uses `SecureStorageEffects` for key material persistence.
+The service implementation lives in `aura-agent/src/runtime/services/threshold_signing.rs`. `ThresholdSigningService` manages per-authority signing state and key storage using `SecureStorageEffects` for key material persistence.
 
 Low-level primitives live in `aura-core/src/crypto/tree_signing.rs`. This module defines FROST types and pure coordination logic. It re-exports `frost_ed25519` types for type safety.
 

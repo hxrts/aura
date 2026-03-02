@@ -228,118 +228,27 @@ Clear conversion paths enable inter-layer communication without confusion.
 
 Effect handlers follow a consistent pattern. Each handler implements one or more effect traits from `aura-core`.
 
-A handler is stateless. It receives input, performs a single operation, and returns output. No state is maintained between calls.
-
-Example:
-
-```rust
-pub struct RealCryptoHandler;
-
-impl CryptoEffects for RealCryptoHandler {
-    async fn sign(&self, key: &SecretKey, msg: &[u8]) -> Signature {
-        // Single operation: sign the message
-    }
-    
-    async fn verify(&self, key: &PublicKey, msg: &[u8], sig: &Signature) -> bool {
-        // Single operation: verify the signature
-    }
-}
-```
-
-Mock handlers follow the same pattern but use deterministic or simulated implementations:
-
-```rust
-pub struct MockCryptoHandler;
-
-impl CryptoEffects for MockCryptoHandler {
-    async fn sign(&self, key: &SecretKey, msg: &[u8]) -> Signature {
-        // Deterministic mock signature for testing
-    }
-    
-    async fn verify(&self, key: &PublicKey, msg: &[u8], sig: &Signature) -> bool {
-        // Always returns true in testing mode
-    }
-}
-```
+A handler is stateless. It receives input, performs a single operation, and returns output. No state is maintained between calls. Production handlers (`RealCryptoHandler`) use real crypto libraries. Mock handlers (`MockCryptoHandler`) use deterministic implementations for testing. See [Cryptographic Architecture](100_crypto.md) for implementation details.
 
 ### Multi-Party Coordination Pattern
 
 Coordination logic in `aura-protocol` manages multiple handlers working together.
 
-Coordination functions are async and stateful. They orchestrate handlers to accomplish multi-party goals.
-
-Example:
-
-```rust
-pub async fn execute_anti_entropy(
-    coordinator: CrdtCoordinator,      // Coordinates multiple CRDT handlers
-    adapter: AuraProtocolAdapter,      // Coordinates choreography and effects
-    guards: GuardChain,                // Coordinates authorization
-) -> Result<SyncResult> {
-    // Orchestrates distributed sync across parties
-}
-```
-
-Coordination functions typically accept multiple handlers or a composed system. They maintain state across multiple operations. They coordinate between different concerns like authorization, storage, and transport. They return results that depend on the combined state.
+Coordination functions are async and stateful. They orchestrate handlers to accomplish multi-party goals. For example, `execute_anti_entropy(coordinator, adapter, guards)` accepts multiple handlers (CrdtCoordinator, AuraProtocolAdapter, GuardChain), maintains state across multiple operations, coordinates between authorization/storage/transport, and returns results depending on combined state.
 
 ### Guard Chain Execution Pattern
 
 The guard chain coordinates authorization, flow budgets, and journal effects in strict sequence. Guards themselves are pure: evaluation runs synchronously over a prepared `GuardSnapshot` and yields `EffectCommand` items that an async interpreter executes. This keeps guard logic deterministic and prevents observable side effects from failed authorization attempts.
 
-```rust
-async fn send_storage_put(
-    bridge: &BiscuitAuthorizationBridge,
-    guards: &GuardChain,
-    interpreter: &dyn EffectInterpreter,
-    ctx: ContextId,
-    peer: AuthorityId,
-    token: Biscuit,
-    payload: PutRequest,
-) -> Result<()> {
-    // Phase 1: Authorization via Biscuit + policy (async, cached)
-    let auth_result = bridge.authorize(&token, "storage_write", &payload.scope())?;
-    if !auth_result.authorized {
-        return Err(AuraError::permission_denied("Token authorization failed"));
-    }
+The three-phase pattern: (1) Authorization via Biscuit + policy (async, cached), (2) Prepare snapshot (async) and evaluate guards (sync), (3) Execute commands (async) - charge, record leakage, commit journal, send transport.
 
-    // Phase 2: Prepare snapshot (async) and evaluate guards (sync)
-    let snapshot = prepare_guard_snapshot(ctx, peer, &auth_result.cap_frontier).await?;
-    let outcome = guards.evaluate(&snapshot, &payload.guard_request());
-    if outcome.decision.is_denied() {
-        return Err(AuraError::permission_denied("Guard evaluation denied"));
-    }
-
-    // Phase 3: Execute commands (async) - charge, record leakage, commit journal, send transport
-    for cmd in outcome.effects {
-        interpreter.exec(cmd).await?;
-    }
-
-    Ok(())
-}
-```
-
-This pattern implements the guard chain guarantee: snapshot preparation happens before synchronous guard evaluation, and no transport observable occurs until the interpreter executes the resulting commands in order.
+This implements the guard chain guarantee: snapshot preparation happens before synchronous guard evaluation, and no transport observable occurs until the interpreter executes the resulting commands in order. See [Authorization](104_authorization.md) for detailed examples.
 
 ## Security-First Design Philosophy
 
 ### Privacy Budget Enforcement
 
-The leakage tracking system implements security by default with backward compatibility.
-
-```rust
-// Secure by default - denies undefined budgets
-let tracker = LeakageTracker::new(); // UndefinedBudgetPolicy::Deny
-
-// Legacy compatibility mode
-let tracker = LeakageTracker::legacy_permissive(); // UndefinedBudgetPolicy::Allow
-
-// Configurable policy
-let tracker = LeakageTracker::with_undefined_policy(
-    UndefinedBudgetPolicy::DefaultBudget(1000)
-);
-```
-
-The default policy is to deny access to undefined budgets. This prevents accidental privacy violations. Legacy mode is available for existing code that needs to operate without strict budget enforcement.
+The leakage tracking system implements security by default with backward compatibility. `LeakageTracker::new()` denies undefined budgets (secure default). `LeakageTracker::legacy_permissive()` allows undefined budgets for backward compatibility. `LeakageTracker::with_undefined_policy(DefaultBudget(1000))` provides a configurable default. This prevents accidental privacy violations while supporting legacy code.
 
 ### Annotation Parsing
 

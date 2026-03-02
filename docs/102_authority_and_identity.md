@@ -24,11 +24,7 @@ Home membership terminology is:
 - `Participant`: authority granted access to the home without threshold membership
 - `Moderator`: optional designation granted to a member for moderation operations
 
-```rust
-pub struct AuthorityId(Uuid);
-```
-
-This identifier selects the journal namespace associated with the authority. The identifier does not encode structure or membership. The authority publishes its current public key and root commitment inside its own journal.
+`AuthorityId` (see [Identifiers and Boundaries](101_identifiers_and_boundaries.md)) selects the journal namespace associated with the authority. The identifier does not encode structure or membership. The authority publishes its current public key and root commitment inside its own journal.
 
 Authorities can interact with other authorities through [Relational Contexts](112_relational_contexts.md). These interactions do not change the authority's internal structure. The authority remains isolated except where relational state is explicitly shared.
 
@@ -305,54 +301,17 @@ The binding message contains a domain separator, parent epoch and commitment for
 
 ### 8.5 Error Types
 
-```rust
-pub enum VerificationError {
-    MissingSigningKey(NodeIndex),
-    InsufficientSigners { required: u16, provided: u16 },
-    SignatureFailed(String),
-    InvalidSignature(String),
-    EpochMismatch { op_epoch: Epoch, current_epoch: Epoch },
-    ParentCommitmentMismatch,
-}
-
-pub enum CheckError {
-    VerificationFailed(VerificationError),
-    KeyEpochMismatch { key_epoch: Epoch, current_epoch: Epoch },
-    NodeNotFound(NodeIndex),
-    PolicyNotFound(NodeIndex),
-}
-```
-
-These errors provide precise information about verification failures. `VerificationError` covers cryptographic issues. `CheckError` covers state consistency issues.
+Verification produces two error categories. `VerificationError` covers cryptographic issues: missing signing keys, insufficient signers, signature failures, epoch mismatches, and parent commitment mismatches. `CheckError` covers state consistency issues: verification failures, key epoch mismatches, and missing nodes or policies.
 
 ## 9. Reduction and Conflict Resolution
 
 The account journal is a join semilattice. It stores `AttestedOp` facts. All replicas merge fact sets using set union. The commitment tree state is recovered using deterministic reduction.
 
-Reduction applies the following rules. Group operations by parent state using `ParentKey`. Select a single winner using a deterministic ordering based on operation hash. Discard superseded operations. Apply winners in parent epoch order.
-
-```rust
-pub struct ParentKey {
-    pub epoch: Epoch,
-    pub commitment: TreeHash32,
-}
-```
-
-The `ParentKey` structure provides a hashable key for grouping operations by their parent state.
+Reduction applies the following rules. Group operations by parent state using `ParentKey` (epoch + commitment tuple). Select a single winner using a deterministic ordering based on operation hash. Discard superseded operations. Apply winners in parent epoch order.
 
 Conflicts arise when multiple operations reference the same parent epoch and commitment. The reduction algorithm resolves conflicts using a total order on operations. The winning operation applies. Losing operations are ignored.
 
-```rust
-pub fn reduce(ops: &[AttestedOp]) -> Result<TreeState, ReductionError> {
-    let dag = build_dag(ops)?;
-    let sorted_ops = topological_sort_with_tiebreak(&dag, ops)?;
-    let mut state = TreeState::new();
-    for op in sorted_ops {
-        apply_operation(&mut state, op)?;
-    }
-    Ok(state)
-}
-```
+The reduction algorithm builds a DAG from operations, performs topological sort with tie-breaking, and applies operations sequentially to build the final TreeState.
 
 Conflict resolution uses operation hash as the tie-breaker. When multiple operations share the same parent, they are sorted by hash and the maximum hash wins. This ensures deterministic winner selection across all replicas.
 
@@ -396,11 +355,7 @@ Aura defines identity as contextual and relational. Identity exists only inside 
 
 A shared context exists inside a relational context. A relational context stores relational facts that define how two authorities relate. Profile data may appear in a relational context if both authorities choose to share it. This profile data is scoped to that context.
 
-```rust
-pub struct ContextId(Uuid);
-```
-
-A `ContextId` identifies a relational context. It does not encode membership. It does not reveal which authorities participate. The context stores only the relational facts required by the participants.
+`ContextId` (see [Identifiers and Boundaries](101_identifiers_and_boundaries.md)) identifies a relational context. It does not encode membership. It does not reveal which authorities participate. The context stores only the relational facts required by the participants.
 
 Identity inside a context may include nickname suggestions or other profile attributes. These values are private to that context. See [Identifiers and Boundaries](101_identifiers_and_boundaries.md) for context isolation mechanisms. Nicknames (local mappings) allow a device to associate multiple authorities with a single local contact.
 

@@ -95,21 +95,7 @@ Journals use a join semilattice. The semilattice uses set union as the join oper
 
 The join semilattice ensures convergence across replicas. Any two replicas that exchange facts eventually converge to identical fact sets. All replicas reduce the same fact set to the same state.
 
-```rust
-impl JoinSemilattice for Journal {
-    fn join(&self, other: &Self) -> Self {
-        assert_eq!(self.namespace, other.namespace);
-        let mut merged_facts = self.facts.clone();
-        merged_facts.extend(other.facts.clone());
-        Self {
-            namespace: self.namespace.clone(),
-            facts: merged_facts,
-        }
-    }
-}
-```
-
-This merge function demonstrates set union across two fact sets. The namespace assertion ensures only compatible journals merge. The result is monotonic and convergent.
+The merge operation asserts namespace equality, unions the fact sets, and returns the combined journal. The result is monotonic and convergent.
 
 ## 4. Reduction Pipeline
 
@@ -143,18 +129,7 @@ These properties are verified by `test_reduction_determinism()` which confirms a
 
 ## 5. Account Journal Reduction
 
-Account journals store attested operations for commitment tree updates. Reduction computes a `TreeStateSummary` from the fact set. Reduction applies only valid operations and resolves conflicts deterministically.
-
-```rust
-pub struct TreeStateSummary {
-    epoch: Epoch,
-    commitment: Hash32,
-    threshold: u16,
-    device_count: u32,
-}
-```
-
-The `TreeStateSummary` is a lightweight public view that hides internal device structure. For the full internal representation with branches, leaves, and topology, see `TreeState` in `aura-journal::commitment_tree`.
+Account journals store attested operations for commitment tree updates. Reduction computes a `TreeStateSummary` (epoch, commitment, threshold, device count) from the fact set. See [Authority and Identity](102_authority_and_identity.md) for structure details. The summary is a lightweight public view that hides internal device structure. For the full internal representation with branches, leaves, and topology, see `TreeState` in `aura-journal::commitment_tree`.
 
 Internally, `AuthorityTreeState` materializes explicit branch topology to support incremental commitment updates. It keeps ordered branch children, branch/leaf parent pointers, and branch depth metadata. The topology is deterministic: active leaves are sorted by `LeafId`, paired in stable order, and materialized with `NodeIndex(0)` as root followed by breadth-first branch assignment. This guarantees identical branch structure for identical active leaf sets across replicas.
 
@@ -170,23 +145,7 @@ Reduction follows these steps:
 4. Apply winners in topological order respecting parent dependencies.
 5. Recompute commitments bottom-up after each operation.
 
-The max hash conflict resolution ensures determinism:
-
-```rust
-fn resolve_conflict(ops: &[AttestedOp]) -> &AttestedOp {
-    // Sort by hash of operation, take maximum
-    ops.iter().max_by_key(|op| hash_op(op)).unwrap()
-}
-```
-
-The result is a single `TreeStateSummary` for the account:
-
-```rust
-pub fn reduce_authority(journal: &Journal) -> Result<AuthorityState, ReductionError> {
-    // Extract AttestedOp facts, apply in deterministic order
-    // Returns AuthorityState { tree_state, facts }
-}
-```
+The max hash conflict resolution (`max_by_key(hash_op)`) ensures determinism by selecting a single winner from concurrent operations. The result is a single `TreeStateSummary` for the account derived by extracting `AttestedOp` facts and applying them in deterministic order.
 
 ## 6. RelationalContext Journal Reduction
 
@@ -222,13 +181,7 @@ Reduction processes the following protocol fact types wrapped in `Protocol(...)`
 9. `ReversionFact` tracks explicit reversion events
 10. `RotateFact` marks lifecycle rotation or upgrade events
 
-Domain-specific facts use `Generic { context_id, binding_type, binding_data }` and are reduced by registered `FactReducer` implementations
-
-```rust
-pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionError> {
-    // Process relational facts, build bindings and channel state
-}
-```
+Domain-specific facts use `Generic { context_id, binding_type, binding_data }` and are reduced by registered `FactReducer` implementations.
 
 Reduction verifies that relational facts reference valid authority commitments and applies them in dependency order.
 
@@ -260,18 +213,7 @@ Flow budget tracking operates at the runtime layer via `FlowBudgetManager`. The 
 
 ## 8. Receipts and Accountability
 
-Receipts reference the current epoch commitment so reducers can reject stale receipts automatically. The `RendezvousReceipt` fact type stores accountability proofs:
-
-```rust
-RendezvousReceipt {
-    envelope_id: [u8; 32],
-    authority_id: AuthorityId,
-    timestamp: TimeStamp,
-    signature: Vec<u8>,
-}
-```
-
-Receipts are stored as relational facts scoped to the emitting context. This coupling ensures that receipt validity follows commitment tree epochs.
+Receipts reference the current epoch commitment so reducers can reject stale receipts automatically. The `RendezvousReceipt` variant in `FactContent` stores accountability proofs (envelope ID, authority, timestamp, signature). Receipts are stored as relational facts scoped to the emitting context. This coupling ensures that receipt validity follows commitment tree epochs.
 
 ## 9. Snapshots and Garbage Collection
 
@@ -291,13 +233,7 @@ Garbage collection removes pruned facts while preserving logical meaning. Prunin
 - **Safety margin**: `skip_window / 2`
 - **Pruning boundary**: `max_generation - (2 * skip_window) - safety_margin`
 
-Helper functions determine what can be pruned:
-
-```rust
-pub fn compute_checkpoint_pruning_boundary(max_gen: u64, skip_window: Option<u64>) -> u64;
-pub fn can_prune_checkpoint(checkpoint: &AmpCheckpoint, boundary: u64) -> bool;
-pub fn can_prune_proposed_bump(bump: &ProposedBump, committed_gen: u64) -> bool;
-```
+Helper functions (`compute_checkpoint_pruning_boundary`, `can_prune_checkpoint`, `can_prune_proposed_bump`) determine what can be safely pruned based on generation boundaries.
 
 ## 10. Journal Effects Integration
 
@@ -430,25 +366,13 @@ Facts carry consistency metadata for tracking agreement level, propagation statu
 
 ### 14.1 Fact Schema Fields
 
-```rust
-pub struct Fact {
-    pub order: OrderTime,
-    pub timestamp: TimeStamp,
-    pub content: FactContent,
+The base `Fact` structure (section 2) is extended with consistency metadata fields (added via serde defaults for backwards compatibility):
 
-    // Consistency metadata (added via serde defaults for backwards compat)
-    #[serde(default)]
-    pub agreement: Agreement,      // Provisional, SoftSafe, or Finalized
-    #[serde(default)]
-    pub propagation: Propagation,  // Local, Syncing, Complete, or Failed
-    #[serde(default)]
-    pub ack_tracked: bool,         // Whether this fact requests acknowledgments
-}
-```
-
-- `agreement`: Tracks finalization level (A1/A2/A3 taxonomy)
-- `propagation`: Tracks anti-entropy sync status
-- `ack_tracked`: Opt-in flag for per-peer acknowledgment tracking
+| Field | Type | Purpose |
+|-------|------|---------|
+| `agreement` | `Agreement` | Finalization level (A1 Provisional, A2 SoftSafe, A3 Finalized) |
+| `propagation` | `Propagation` | Anti-entropy sync status (Local, Syncing, Complete, Failed) |
+| `ack_tracked` | `bool` | Opt-in flag for per-peer acknowledgment tracking |
 
 ### 14.2 Ack Storage Table
 
@@ -467,18 +391,7 @@ For facts with `ack_tracked = true`, acknowledgments are stored in a separate ta
 
 ### 14.3 Journal API for Consistency
 
-```rust
-impl Journal {
-    // Record an acknowledgment from a peer
-    pub fn record_ack(&mut self, fact_id: &str, peer: AuthorityId, acked_at: PhysicalTime);
-
-    // Get all acks for a fact
-    pub fn get_acks(&self, fact_id: &str) -> Option<&Acknowledgment>;
-
-    // Garbage collect ack tracking based on policy
-    pub fn gc_ack_tracking(&mut self, policies: &PolicyRegistry);
-}
-```
+The Journal API provides methods for acknowledgment tracking: `record_ack` records an acknowledgment from a peer, `get_acks` retrieves all acknowledgments for a fact, and `gc_ack_tracking` garbage collects acknowledgment data based on policy.
 
 ## See Also
 
