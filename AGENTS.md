@@ -106,6 +106,15 @@ Aura now models identity via opaque authorities (`AuthorityId`) and relational c
 - **Hybrid journal model**: fact journal (join) + capability frontier (meet) combined as `JournalState` for effects/runtime use.
 - **Transaction Model**: Database operations coordinate via two orthogonal dimensions: (1) Authority Scope (Single vs Cross-authority) and (2) Agreement Level (Monotone/CRDT vs Consensus). Monotone operations use CRDT merge (0 RTT). Non-monotone operations use consensus (1-3 RTT). Cross-authority operations work with both. Consensus is NOT linearizable - use session types for operation sequencing. See `docs/113_database.md` §8.
 
+## Terminology Baseline
+
+Use canonical terms from `docs/002_theoretical_model.md#shared-terms-and-notation`:
+
+- Roles: `Member`, `Participant`, `Moderator` (moderator is a member designation)
+- Access levels: `Full`, `Partial`, `Limited`
+- Social topology: `1-hop` / `n-hop` links
+- Storage/pinning: `Shared Storage`, `allocation`, `pinned`
+
 ## Threshold Lifecycle Taxonomy
 
 Aura separates **key generation** from **agreement/finality**:
