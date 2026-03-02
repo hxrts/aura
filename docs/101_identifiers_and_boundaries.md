@@ -45,7 +45,7 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 |------------|------|---------|
 | `FactId` | `u64` | Lightweight reference to journal facts. Enables efficient queries without cloning fact content. Internal to journal layer. |
 | `EventId` | `Uuid` | Event identifier within the effect API system. Used in audit logs and debugging. |
-| `OperationId` | `Uuid` or `{ actor: ActorId, sequence: u64 }` | Operation tracking. Core version uses UUID; journal version uses actor+sequence for CRDT dependency tracking. |
+| `OperationId` | `Uuid` | Operation tracking identifier. |
 
 ## 6. Consensus Identifiers
 
@@ -74,7 +74,7 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 
 `Receipt` is the accountability record emitted by `FlowGuard`. It contains context, source authority, destination authority, epoch, cost, nonce, chained hash, and signature. Receipts prove that upstream participants charged their budget before forwarding. No receipt includes device identifiers or user handles.
 
-Fields: `ctx: ContextId`, `src: AuthorityId`, `dst: AuthorityId`, `epoch: Epoch`, `cost: u32`, `nonce: u64`, `prev: Hash32`, `sig: Vec<u8>`.
+Fields: `ctx: ContextId`, `src: AuthorityId`, `dst: AuthorityId`, `epoch: Epoch`, `cost: FlowCost`, `nonce: FlowNonce`, `prev: Hash32`, `sig: ReceiptSig`.
 
 See [Transport and Information Flow](109_transport_and_information_flow.md) for receipt propagation.
 
