@@ -194,14 +194,16 @@ pub async fn set_channel_mode(
     }
 
     let Some(home_id) = target_home_id else {
-        return Err(AuraError::not_found(format!(
-            "No home found for channel: {channel_id}"
+        return Err(AuraError::permission_denied(format!(
+            "Set channel mode requires a home context (channel: {channel_id})"
         )));
     };
 
     let home = homes
         .home_mut(&home_id)
-        .ok_or_else(|| AuraError::not_found("No home found for resolved channel"))?;
+        .ok_or_else(|| {
+            AuraError::permission_denied("Set channel mode requires a valid home context")
+        })?;
     if !home.is_admin() {
         return Err(AuraError::permission_denied(
             "Only stewards can set channel mode",
