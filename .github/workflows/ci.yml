@@ -40,6 +40,14 @@ jobs:
           cache-name: format
       - run: nix develop --command just ci-format
 
+  text-formatting:
+    name: Text Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for emojis
+        run: ./scripts/check-text-formatting.sh
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
