@@ -106,8 +106,8 @@ pub struct LeafNode {
     pub leaf_id: LeafId,
     pub device_id: DeviceId,
     pub role: LeafRole,
-    pub public_key: Vec<u8>,
-    pub meta: Vec<u8>,
+    pub public_key: LeafPublicKey,
+    pub meta: LeafMetadata,
 }
 
 pub enum LeafRole {
@@ -192,17 +192,22 @@ Policies form a meet semilattice where the meet operation selects the stricter o
 
 ```rust
 impl Policy {
-    pub fn required_signers(&self, child_count: usize) -> u16 {
+    pub fn required_signers(&self, child_count: usize) -> Result<u16, PolicyError> {
         match self {
-            Policy::Any => 1,
-            Policy::All => child_count as u16,
-            Policy::Threshold { m, .. } => *m,
+            Policy::Any => Ok(1),
+            Policy::All => Ok(child_count as u16),
+            Policy::Threshold { m, n } => {
+                if child_count as u16 != *n {
+                    return Err(PolicyError::ChildCountMismatch { expected: *n, actual: child_count as u16 });
+                }
+                Ok(*m)
+            }
         }
     }
 }
 ```
 
-The `required_signers` method derives the concrete threshold from the policy given the current child count. This is used during signature verification to determine how many signers must have participated.
+The `required_signers` method derives the concrete threshold from the policy given the current child count. It returns an error if the child count does not match the policy's expected total. This is used during signature verification to determine how many signers must have participated.
 
 ## 7. Tree Operations
 
