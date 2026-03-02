@@ -305,7 +305,7 @@ Is this a Layer 2 domain crate?
 **Purpose**: Stateless, single-party effect implementations. **Architectural Decision**: `aura-effects` is the designated singular point of interaction with non-deterministic operating system services (entropy, wall-clock time, network I/O, file system). This design choice makes the architectural boundary explicit and centralizes impure operations.
 
 **Contains**:
-- **Production handlers**: `RealCryptoHandler`, `TcpNetworkHandler`, `FilesystemStorageHandler`, `RealTimeHandler`
+- **Production handlers**: `RealCryptoHandler`, `TcpTransportHandler`, `FilesystemStorageHandler`, `PhysicalTimeHandler`
 - OS integration adapters that delegate to system services
 - Pure functions that transform inputs to outputs without state
 
@@ -439,7 +439,7 @@ Is this a Layer 2 domain crate?
 **`aura-testkit`**: Comprehensive testing infrastructure including:
 - Shared test fixtures and scenario builders
 - Property test helpers and deterministic utilities
-- **Mock effect handlers**: `MockCryptoHandler`, `MockTimeHandler`, `InMemoryStorageHandler`, etc.
+- **Mock effect handlers**: `MockCryptoHandler`, `SimulatedTimeHandler`, `MemoryStorageHandler`, etc.
 - Stateful test handlers that maintain controllable state for deterministic testing
 
 **`aura-quint`**: Formal verification bridge to Quint model checker including:
@@ -478,6 +478,7 @@ crates/
 ├── aura-invitation      Invitation choreographies
 ├── aura-journal         Fact-based journal domain
 ├── aura-macros          Choreography DSL compiler
+├── aura-maintenance     Maintenance facts and reducers
 ├── aura-mpst            Session types and choreography specs
 ├── aura-protocol        Orchestration and coordination
 ├── aura-quint           Quint formal verification
@@ -1111,16 +1112,19 @@ The architectural compliance checker **ONLY** allows direct impure function usag
 #### 1. Effect Handler Implementations (`aura-effects`)
 ```rust
 // ✅ ALLOWED: Production effect implementations
-impl TimeEffects for RealTimeHandler {
-    async fn current_time(&self) -> SystemTime {
-        SystemTime::now() // OK: This IS the effect implementation
+impl PhysicalTimeEffects for PhysicalTimeHandler {
+    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+        // OK: This IS the effect implementation
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
+        Ok(PhysicalTime::from_ms(now.as_millis() as u64))
     }
 }
 
-impl RandomEffects for RealRandomHandler {
+impl RandomCoreEffects for RealRandomHandler {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut rng = OsRng;  // OK: Legitimate OS randomness source
-        (0..len).map(|_| rng.gen()).collect()
+        let mut bytes = vec![0u8; len];
+        rand::thread_rng().fill_bytes(&mut bytes);  // OK: Legitimate OS randomness source
+        bytes
     }
 }
 ```
@@ -1130,8 +1134,8 @@ impl RandomEffects for RealRandomHandler {
 // ✅ ALLOWED: Effect system bootstrapping
 pub fn create_production_effects() -> AuraEffectSystem {
     AuraEffectSystemBuilder::new()
-        .with_handler(Arc::new(RealTimeHandler::new()))
-        .with_handler(Arc::new(OsRandomHandler::new())) // OK: Assembly point
+        .with_handler(Arc::new(PhysicalTimeHandler::new()))
+        .with_handler(Arc::new(RealRandomHandler::new())) // OK: Assembly point
         .build()
 }
 ```
@@ -1161,14 +1165,16 @@ pub fn hash(data: &[u8]) -> [u8; 32] {
 
 #### ✅ Correct: Infrastructure Effects in aura-effects
 ```rust
-// File: crates/aura-effects/src/network.rs
-pub struct TcpNetworkHandler;
+// File: crates/aura-effects/src/transport/tcp.rs
+pub struct TcpTransportHandler {
+    config: TransportConfig,
+}
 
-impl NetworkEffects for TcpNetworkHandler {
-    async fn send(&self, endpoint: &Endpoint, data: Vec<u8>) -> Result<()> {
-        let stream = TcpStream::connect(&endpoint.address).await?; // OK: Implementation
-        stream.write_all(&data).await?;
-        Ok(())
+impl TcpTransportHandler {
+    pub async fn connect(&self, addr: TransportSocketAddr) -> TransportResult<TransportConnection> {
+        let stream = TcpStream::connect(*addr.as_socket_addr()).await?; // OK: Implementation
+        // ... connection setup
+        Ok(connection)
     }
 }
 ```
@@ -1241,16 +1247,16 @@ async fn process_request<T: AllEffects>(
 #[tokio::test]
 async fn test_frost_ceremony_timing() {
     // Controllable time for deterministic tests
-    let mock_time = MockTimeHandler::new();
-    mock_time.set_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1000));
-    
+    let mock_time = SimulatedTimeHandler::new();
+    mock_time.set_time(PhysicalTime::from_ms(1000_000));
+
     let effects = TestEffectSystem::new()
         .with_time(mock_time)
         .with_random(MockRandomHandler::deterministic())
         .build();
-    
+
     let ctx = EffectContext::test();
-    
+
     // Test runs deterministically regardless of wall-clock time
     let result = start_frost_ceremony(&ctx, &effects).await;
     assert!(result.is_ok());
