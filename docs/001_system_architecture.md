@@ -227,7 +227,7 @@ enum TimeStamp {
 }
 ```
 
-Time access happens through `PhysicalTimeEffects`, `LogicalClockEffects`, and `OrderClockEffects`. Application code does not call system time directly. See [Effect System and Runtime](105_effect_system_and_runtime.md) for handler implementation patterns.
+Time access happens through `PhysicalTimeEffects`, `LogicalClockEffects`, and `OrderClockEffects`. Application code does not call system time directly. See [Effect System](105_effect_system.md) for handler implementation patterns.
 
 ### 4.3 Context propagation
 

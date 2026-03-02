@@ -461,7 +461,7 @@ check_effects() {
     emit_hits "Wall-clock access in parity-critical paths" "$parity_clock_filtered"
     hint "Inject wall-clock through PhysicalTimeEffects/TimeEffects; do not call Instant::now/SystemTime::now in parity-critical code."
     hint "Persist start/deadline as PhysicalTime/TimeStamp and compare using effect-provided time."
-    hint "Reference: docs/105_effect_system_and_runtime.md (time effects) and docs/806_simulation_guide.md (deterministic simulation constraints)."
+    hint "Reference: docs/105_effect_system.md (time effects) and docs/806_simulation_guide.md (deterministic simulation constraints)."
   else
     info "Wall-clock access in parity-critical paths: none"
   fi
@@ -475,7 +475,7 @@ check_effects() {
     emit_hits "Runtime timer primitives in parity-critical paths" "$parity_timer_filtered"
     hint "Replace runtime timers with effect-injected scheduling: PhysicalTimeEffects::sleep_ms plus logical step/weighted-budget progress."
     hint "Use timeout handles/wake conditions through effects instead of tokio/futures wall-clock timers."
-    hint "Reference: docs/105_effect_system_and_runtime.md (effect boundary rules), docs/806_simulation_guide.md (no wall-clock in simulation)."
+    hint "Reference: docs/105_effect_system.md (effect boundary rules), docs/806_simulation_guide.md (no wall-clock in simulation)."
   else
     info "Runtime timer primitives in parity-critical paths: none"
   fi
@@ -489,7 +489,7 @@ check_effects() {
     emit_hits "Nondeterministic randomness/ID generation in parity-critical paths" "$parity_random_filtered"
     hint "Route randomness through RandomEffects and derive values from explicit run seed + deterministic context."
     hint "Use XxxId::new_from_entropy([...]) / from_uuid(Uuid::from_bytes([...])) in parity lanes; avoid entropy-consuming constructors."
-    hint "Reference: docs/105_effect_system_and_runtime.md (effect boundaries) and docs/805_testing_guide.md (strict conformance lanes)."
+    hint "Reference: docs/105_effect_system.md (effect boundaries) and docs/805_testing_guide.md (strict conformance lanes)."
   else
     info "Nondeterministic randomness/ID generation in parity-critical paths: none"
   fi

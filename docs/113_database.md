@@ -838,4 +838,4 @@ See [Operation Categories](107_operation_categories.md) for full details on thes
 - [Journal System](103_journal.md) - Fact storage, reduction, and flow budgets
 - [Operation Categories](107_operation_categories.md) - Agreement, propagation, acknowledgment, and ceremony contract
 - [Authorization](104_authorization.md) - Biscuit token evaluation
-- [Effect System](105_effect_system_and_runtime.md) - Effect implementation patterns
+- [Effect System](105_effect_system.md) - Effect implementation patterns

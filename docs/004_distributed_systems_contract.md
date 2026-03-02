@@ -51,7 +51,7 @@ Verified by: `Aura.Proofs.Journal`, `journal/core.qnt`
 
 ### 2.2 Charge-Before-Send
 
-Every transport observable is preceded by `CapGuard`, `FlowGuard`, and `JournalCoupler`. See [Effect System and Runtime](105_effect_system_and_runtime.md) and [Authorization](104_authorization.md). No packet is emitted without a successful charge. Guard evaluation is pure over a prepared snapshot and yields commands that an interpreter executes, so the chain never blocks on embedded I/O.
+Every transport observable is preceded by `CapGuard`, `FlowGuard`, and `JournalCoupler`. See [Runtime](120_runtime.md) and [Authorization](104_authorization.md). No packet is emitted without a successful charge. Guard evaluation is pure over a prepared snapshot and yields commands that an interpreter executes, so the chain never blocks on embedded I/O.
 
 Flow budgets satisfy monotonicity: charging never increases available budget (`monotonic_decrease`). Charging the exact remaining amount results in zero budget (`exact_charge`).
 

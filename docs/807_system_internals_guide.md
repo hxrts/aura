@@ -334,7 +334,8 @@ Run `just check-arch` before submitting changes. The checker validates:
 
 ## Related Documentation
 
-- [Effect System and Runtime](105_effect_system_and_runtime.md) - Effect specification
+- [Effect System](105_effect_system.md) - Effect specification
+- [Runtime](120_runtime.md) - Runtime specification
 - [Authorization](104_authorization.md) - Guard chain specification
 - [System Architecture](001_system_architecture.md) - Layer boundaries
 - [CLI and TUI](116_cli_tui.md) - Terminal specification

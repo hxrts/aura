@@ -239,7 +239,7 @@ Writing to stderr while iocraft is in fullscreen can corrupt the terminal buffer
 
 The policy is enforced with type-level stdio tokens in `crates/aura-terminal/src/handlers/tui_stdio.rs`. The token used before fullscreen is consumed while iocraft is running. This prevents accidental `println!` and `eprintln!` calls in the fullscreen scope.
 
-This policy aligns with [Privacy and Information Flow](003_information_flow_contract.md) and [Effect System and Runtime](105_effect_system_and_runtime.md).
+This policy aligns with [Privacy and Information Flow](003_information_flow_contract.md) and [Effect System](105_effect_system.md).
 
 ## Errors and user feedback
 
@@ -451,6 +451,7 @@ See [Operation Categories](107_operation_categories.md) for the full consistency
 
 - [Aura System Architecture](001_system_architecture.md)
 - [Privacy and Information Flow](003_information_flow_contract.md)
-- [Effect System and Runtime](105_effect_system_and_runtime.md)
+- [Effect System](105_effect_system.md)
+- [Runtime](120_runtime.md)
 - [AMP Protocol](110_amp.md) for message delivery acknowledgments
 - [Operation Categories](107_operation_categories.md) for status tracking patterns

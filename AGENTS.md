@@ -166,7 +166,7 @@ Is this a Layer 2 domain crate?
 
 | Task | Doc | Code |
 |------|-----|------|
-| Adding effect trait | `docs/105_effect_system_and_runtime.md` | `aura-core/src/effects/` |
+| Adding effect trait | `docs/105_effect_system.md` | `aura-core/src/effects/` |
 | Building choreography | `docs/108_mpst_and_choreography.md` | Feature crate + `aura-mpst` |
 | Understanding authorities | `docs/102_authority_and_identity.md` | `aura-core/src/authority.rs` |
 | Implementing consensus | `docs/106_consensus.md` | `aura-consensus/` |
@@ -181,7 +181,8 @@ Is this a Layer 2 domain crate?
 | Authorities & identity | `docs/102_authority_and_identity.md` |
 | Commitment trees | `docs/102_authority_and_identity.md` |
 | Consensus | `docs/106_consensus.md` |
-| Effect system | `docs/105_effect_system_and_runtime.md` |
+| Effect system | `docs/105_effect_system.md` |
+| Runtime | `docs/120_runtime.md` |
 | Protocols & choreography | `docs/108_mpst_and_choreography.md` |
 | Guard chain | `docs/001_system_architecture.md` §5 |
 | Journals & facts | `docs/103_journal.md` |

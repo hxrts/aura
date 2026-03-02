@@ -76,7 +76,7 @@
 //! - All time access goes through `PhysicalTimeEffects` trait, never direct `SystemTime` calls
 //! - Time is passed explicitly to methods, enabling deterministic testing
 //!
-//! See `docs/105_effect_system_and_runtime.md` for the unified time architecture.
+//! See `docs/105_effect_system.md` for the unified time architecture.
 
 // Allow disallowed methods/types in protocol implementations that coordinate effects
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]

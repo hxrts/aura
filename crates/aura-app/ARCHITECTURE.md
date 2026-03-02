@@ -41,7 +41,7 @@ Verification hooks:
 
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines dependency inversion.
-- [Effect System and Runtime](../../docs/105_effect_system_and_runtime.md) defines purity boundaries.
+- [Effect System and Runtime](../../docs/105_effect_system.md) defines purity boundaries.
 ## Boundaries
 - No aura-agent imports (uses RuntimeBridge trait instead).
 - No direct effect implementations.

@@ -110,7 +110,7 @@ pub async fn execute_alice_session<E: PingPongEffects>(
 }
 ```
 
-Alice serializes the ping message and sends it to Bob. She then waits for Bob's response and deserializes the pong message. See [Effect System and Runtime](105_effect_system_and_runtime.md) for details on effect-based execution.
+Alice serializes the ping message and sends it to Bob. She then waits for Bob's response and deserializes the pong message. See [Effect System](105_effect_system.md) for details on effect-based execution.
 
 ## Local Deployment
 

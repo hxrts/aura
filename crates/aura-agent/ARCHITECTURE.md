@@ -56,7 +56,7 @@ Verification hooks:
 
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines layer boundaries.
-- [Effect System and Runtime](../../docs/105_effect_system_and_runtime.md) defines composition constraints.
+- [Effect System and Runtime](../../docs/105_effect_system.md) defines composition constraints.
 ## Boundaries
 - Stateless handlers live in aura-effects.
 - Protocol logic lives in aura-protocol.

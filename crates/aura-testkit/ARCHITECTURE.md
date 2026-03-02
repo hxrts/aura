@@ -41,7 +41,7 @@ Verification hooks:
 
 Contract alignment:
 - [Theoretical Model](../../docs/002_theoretical_model.md) defines expected observable semantics.
-- [Testing Guide](../../docs/805_testing_guide.md) defines mock fidelity requirements.
+- [Testing Guide](../../docs/804_testing_guide.md) defines mock fidelity requirements.
 ## Boundaries
 - Foundation layers should create internal test utilities instead.
 - Production handlers live in aura-effects (stateless).

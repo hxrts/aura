@@ -39,7 +39,7 @@ Verification hooks:
 
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines handler placement.
-- [Effect System and Runtime](../../docs/105_effect_system_and_runtime.md) defines stateless handler rules.
+- [Effect System and Runtime](../../docs/105_effect_system.md) defines stateless handler rules.
 ## Boundaries
 - Stateful caches belong in Layer 6 services.
 - Multi-party coordination belongs in aura-protocol.

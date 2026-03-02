@@ -40,7 +40,7 @@ Verification hooks:
 
 Contract alignment:
 - [Aura System Architecture](../../docs/001_system_architecture.md) defines interface layer boundaries.
-- [Effect System and Runtime](../../docs/105_effect_system_and_runtime.md) defines signal and workflow integration.
+- [Effect System and Runtime](../../docs/105_effect_system.md) defines signal and workflow integration.
 ## Boundaries
 - Business logic lives in aura-app.
 - Effect implementations live in aura-effects.
