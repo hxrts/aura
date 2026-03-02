@@ -177,7 +177,19 @@ Effect traits define async capabilities with explicit context. Handlers implemen
 
 ```mermaid
 flowchart TB
-    subgraph "Layer 1: Infrastructure"
+    subgraph L3["Composite"]
+        TRE[TreeEffects]
+        CHE[ChoreographyExt]
+    end
+
+    subgraph L2["Application"]
+        JE[JournalEffects]
+        AE[AuthorizationEffects]
+        FE[FlowBudgetEffects]
+        LE[LeakageEffects]
+    end
+
+    subgraph L1["Infrastructure"]
         CE[CryptoEffects]
         NE[NetworkEffects]
         SE[StorageEffects]
@@ -185,20 +197,7 @@ flowchart TB
         RE[RandomEffects]
     end
 
-    subgraph "Layer 2: Application"
-        JE[JournalEffects]
-        AE[AuthorizationEffects]
-        FE[FlowBudgetEffects]
-        LE[LeakageEffects]
-    end
-
-    subgraph "Layer 3: Composite"
-        TRE[TreeEffects]
-        CHE[ChoreographyExt]
-    end
-
-    CE & NE & SE & TE & RE --> JE & AE & FE & LE
-    JE & AE & FE & LE --> TRE & CHE
+    L1 --> L2 --> L3
 ```
 
 This diagram shows effect layering. Infrastructure effects wrap OS primitives. Application effects encode domain logic. Composite effects combine lower layers for convenience.
