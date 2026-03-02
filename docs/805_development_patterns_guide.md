@@ -516,14 +516,14 @@ let agent = AgentBuilder::custom()
 Use mock handlers from `aura-testkit` for testing:
 
 ```rust
-use aura_testkit::{MockCryptoHandler, MockStorageHandler};
+use aura_testkit::{MockCryptoHandler, MemoryStorageHandler, SimulatedTimeHandler, MockRandomHandler, MockConsoleHandler};
 
 #[tokio::test]
 async fn test_custom_agent() {
     let agent = AgentBuilder::custom()
         .with_crypto(Arc::new(MockCryptoHandler::new()))
-        .with_storage(Arc::new(MockStorageHandler::new()))
-        .with_time(Arc::new(MockTimeHandler::new()))
+        .with_storage(Arc::new(MemoryStorageHandler::new()))
+        .with_time(Arc::new(SimulatedTimeHandler::new()))
         .with_random(Arc::new(MockRandomHandler::seeded(42)))
         .with_console(Arc::new(MockConsoleHandler::new()))
         .testing_mode()
