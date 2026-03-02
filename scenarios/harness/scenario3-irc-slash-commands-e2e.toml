@@ -1,5 +1,5 @@
 schema_version = 1
-id = "scenario3-e2e"
+id = "scenario3-irc-slash-commands-e2e"
 goal = "Run the full scenario3 IRC slash-command validation with typed harness assertions."
 execution_mode = "scripted"
 required_capabilities = ["local"]

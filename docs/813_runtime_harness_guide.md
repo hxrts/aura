@@ -178,7 +178,7 @@ Replay checks bundle and tool API compatibility.
 just scenario3-e2e
 ```
 
-This command generates an isolated temporary run config, lints `scenarios/harness/scenario3-e2e.toml`, and runs it end to end.
+This command generates an isolated temporary run config, lints `scenarios/harness/scenario3-irc-slash-commands-e2e.toml`, and runs it end to end.
 
 ## Interactive LLM Workflow
 
@@ -200,18 +200,13 @@ This is the fastest way to automate repeatable setup and keep manual validation 
 ```bash
 cargo run -p aura-harness --bin tool_repl -- \
   --config configs/harness/local-loopback.toml \
-  --prelude scenarios/harness/scenario3-prelude.toml
+  --prelude scenarios/harness/<your-prelude>.toml
 ```
 
-For `scenario3-prelude.toml`, reset local instance data first so account setup is deterministic:
-
-```bash
-rm -rf .tmp/harness/alice .tmp/harness/bob
-```
+Use fresh per-run data directories in the run config (or a temporary generated config) so prelude account setup is deterministic.
 
 When the prelude completes, the REPL stays active with the same instances and data directories.
 The process emits `prelude_complete scenario_id=<id>` to stderr before accepting JSON requests.
-`scenarios/harness/scenario3-prelude.toml` expects fresh local instance stores and creates accounts for both peers.
 
 `tool_repl` enforces an idle timeout by default (`--idle-timeout-ms 600000`).
 If no requests arrive before the timeout, it automatically stops all instances and exits.
