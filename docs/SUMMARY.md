@@ -36,5 +36,5 @@
 - [Maintenance and OTA Guide](808_maintenance_guide.md)
 - [Reactive Signals Guide](810_reactive_signals_guide.md)
 - [Runtime Harness Guide](813_runtime_harness_guide.md)
-- [Verification Coverage Report](998_verification_coverage.md)
-- [Crate Structure and Dependency Graph](999_project_structure.md)
+- [Verification Coverage](998_verification_coverage.md)
+- [Project Structure](999_project_structure.md)
