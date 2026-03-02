@@ -494,7 +494,7 @@ The effect system spans several crates. Each crate defines a specific role in th
 
 The effect system supports deterministic testing. Mock handlers implement predictable behavior. A simulated runtime provides control over time and network behavior. The simulator exposes primitives to inject delays or failures.
 
-Tests use deterministic time control, in-memory storage, and mock networking. These components allow protocol execution without side effects. Effect boundaries also determine native/WASM conformance parity. See [Conformance and Parity Reference](119_conformance.md) for determinism rules and artifact format.
+Tests use deterministic time control, in-memory storage, and mock networking. These components allow protocol execution without side effects.
 
 ```rust
 let system = TestRuntime::new()
@@ -504,6 +504,20 @@ let system = TestRuntime::new()
 ```
 
 This snippet creates a test runtime. The runtime uses mock handlers for all effects. It provides deterministic time and network control.
+
+### 8.1 Determinism Rules
+
+Effect boundaries determine native/WASM conformance parity. Protocol code must follow these rules to ensure deterministic execution.
+
+**Pure transition core**: Given the same input stream, protocol transitions must produce identical outputs. No hidden state may affect observable behavior. All state must flow through explicit effect calls.
+
+**Effect boundary discipline**: Non-determinism is permitted only through explicit algebraic effects. Time comes from `PhysicalTimeEffects`. Randomness comes from `RandomEffects`. Storage comes from `StorageEffects`. No direct system calls are allowed.
+
+**No wall-clock dependence**: Conformance lanes compare logical steps, not wall-clock timing. Tests must not depend on execution speed. Time-dependent behavior uses simulated time through effect handlers.
+
+**Stable serialization**: Conformance artifacts use canonical encoding. Binary formats use deterministic field ordering. JSON uses sorted keys. No floating-point values appear in serialized state.
+
+**No undeclared divergence**: Any difference outside declared commutative or algebraic envelopes is a failure. New effect kinds must be explicitly classified before use.
 
 ## 9. Performance Considerations
 

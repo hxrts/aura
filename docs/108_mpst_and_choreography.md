@@ -240,7 +240,7 @@ let result = execute_guarded_choreography(
 
 Aura supports multiple execution modes for choreographies. In-memory execution uses mock handlers. Production execution uses real network and storage effects. Simulation execution uses deterministic time and fault injection.
 
-Each mode implements the same handler interface. This ensures that protocol behavior remains consistent across environments. Choreography execution also captures conformance artifacts for native/WASM parity testing. See [Conformance and Parity Reference](119_conformance.md) for artifact surfaces and diff workflows.
+Each mode implements the same handler interface. This ensures that protocol behavior remains consistent across environments. Choreography execution also captures conformance artifacts for native/WASM parity testing. See [Test Infrastructure Reference](117_testkit.md) for artifact surfaces and effect classification.
 
 ```rust
 let mut adapter = AuraProtocolAdapter::for_testing(...)?;

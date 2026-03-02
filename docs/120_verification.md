@@ -438,4 +438,4 @@ just verify-all             # Run all verification
 
 ## Related Documentation
 
-See [Verification and MBT Guide](807_verification_guide.md) for verification workflows. See [Conformance and Parity Reference](119_conformance.md) for ITF trace format. See [Simulation Infrastructure Reference](118_simulator.md) for generative simulation.
+See [Verification and MBT Guide](807_verification_guide.md) for verification workflows. See [Simulation Infrastructure Reference](118_simulator.md) for ITF trace format and generative simulation.

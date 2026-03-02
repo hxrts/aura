@@ -134,6 +134,19 @@ This starts a long-lived JSON-line REPL.
 The process keeps instances alive until `quit` or `exit`.
 This is the correct mode for full manual end-to-end flows.
 
+Use `--prelude` to run a scripted scenario before entering interactive control.
+This is the fastest way to automate repeatable setup and keep manual validation for variable parts.
+
+```bash
+cargo run -p aura-harness --bin tool_repl -- \
+  --config configs/harness/local-loopback.toml \
+  --prelude scenarios/harness/scenario3-prelude.toml
+```
+
+When the prelude completes, the REPL stays active with the same instances and data directories.
+The process emits `prelude_complete scenario_id=<id>` to stderr before accepting JSON requests.
+`scenarios/harness/scenario3-prelude.toml` expects fresh local instance stores and creates accounts for both peers.
+
 `tool_repl` enforces an idle timeout by default (`--idle-timeout-ms 600000`).
 If no requests arrive before the timeout, it automatically stops all instances and exits.
 Set `--idle-timeout-ms 0` to disable idle shutdown.

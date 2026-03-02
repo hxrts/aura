@@ -85,7 +85,7 @@ Canonical role/access terminology lives in [Theoretical Model](002_theoretical_m
 
 [Simulation Infrastructure Reference](118_simulator.md) covers deterministic simulation architecture and fault injection.
 
-[Conformance and Parity Reference](119_conformance.md) describes conformance testing and cross-platform parity validation.
+[Testing Guide](805_testing_guide.md) describes conformance testing and cross-platform parity validation.
 
 [Formal Verification Reference](120_verification.md) documents Quint specifications and Lean proofs.
 

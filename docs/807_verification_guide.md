@@ -273,7 +273,7 @@ quint run --out-itf=traces/new_trace.itf.json verification/quint/updated_spec.qn
 just ci-conformance
 ```
 
-See [Conformance and Parity Reference](119_conformance.md) for corpus policy details.
+See [Testing Guide](805_testing_guide.md) for corpus policy details.
 
 ## Lean-Quint Bridge
 
@@ -417,4 +417,4 @@ Isolate properties. Test one property at a time during development. Combine for 
 
 ## Related Documentation
 
-See [Formal Verification Reference](120_verification.md) for architecture details. See [Simulation Guide](806_simulation_guide.md) for trace replay. See [Conformance and Parity Reference](119_conformance.md) for parity testing.
+See [Formal Verification Reference](120_verification.md) for architecture details. See [Simulation Guide](806_simulation_guide.md) for trace replay. See [Testing Guide](805_testing_guide.md) for conformance testing.

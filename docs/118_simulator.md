@@ -273,15 +273,64 @@ This abstraction enables stable simulation code across effect system changes. On
 
 The `quint` module provides integration with Quint formal specifications. See [Formal Verification Reference](120_verification.md) for complete details.
 
+### ITF Trace Format
+
+ITF (Informal Trace Format) traces come from Quint model checking. Each trace captures a sequence of states and transitions.
+
+```json
+{
+  "#meta": {
+    "format": "ITF",
+    "source": "quint",
+    "version": "1.0"
+  },
+  "vars": ["phase", "participants", "messages"],
+  "states": [
+    {
+      "#meta": { "index": 0 },
+      "phase": "Setup",
+      "participants": [],
+      "messages": []
+    },
+    {
+      "#meta": { "index": 1, "action": "addParticipant" },
+      "phase": "Setup",
+      "participants": ["alice"],
+      "messages": []
+    }
+  ]
+}
+```
+
+Each state represents a model state. Transitions between states correspond to actions.
+
+ITF traces capture non-deterministic choices for replay:
+
+```json
+{
+  "#meta": {
+    "index": 3,
+    "action": "selectLeader",
+    "nondet_picks": { "leader": "bob" }
+  }
+}
+```
+
+The `nondet_picks` field records choices made by Quint. Replay uses these values to seed `RandomEffects`.
+
 ### ITFLoader
 
 ```rust
 use aura_simulator::quint::itf_loader::ITFLoader;
 
 let trace = ITFLoader::load("trace.itf.json")?;
+for (i, state) in trace.states.iter().enumerate() {
+    let action = state.meta.action.as_deref();
+    let picks = &state.meta.nondet_picks;
+}
 ```
 
-The loader parses ITF traces from Quint into Rust types.
+The loader validates trace format and extracts typed state.
 
 ### GenerativeSimulator
 
@@ -319,4 +368,4 @@ aura-simulator/
 
 ## Related Documentation
 
-See [Simulation Guide](806_simulation_guide.md) for how to write simulations. See [Conformance and Parity Reference](119_conformance.md) for native/WASM testing. See [Formal Verification Reference](120_verification.md) for Quint integration details.
+See [Simulation Guide](806_simulation_guide.md) for how to write simulations. See [Testing Guide](805_testing_guide.md) for conformance testing. See [Formal Verification Reference](120_verification.md) for Quint integration details.

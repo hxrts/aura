@@ -225,16 +225,76 @@ This bridge injects signals that would normally come from the reactive pipeline.
 
 ## Conformance Framework
 
-The `conformance` module provides artifact validation for native/WASM parity testing. See [Conformance and Parity Reference](119_conformance.md) for the complete specification.
+The `conformance` module provides artifact validation for native/WASM parity testing.
+
+### Artifact Format
+
+The `AuraConformanceArtifactV1` captures execution state for comparison:
 
 ```rust
 use aura_testkit::conformance::AuraConformanceArtifactV1;
 
-let artifact = AuraConformanceArtifactV1::capture(&execution)?;
+let artifact = AuraConformanceArtifactV1 {
+    observable: observable_outputs,
+    scheduler_step: scheduler_state,
+    effect: effect_trace,
+    metadata: execution_metadata,
+};
 artifact.validate()?;
 ```
 
-Conformance artifacts capture execution traces for comparison across platforms.
+Every conformance artifact must capture three surfaces:
+
+| Surface | Purpose | Content |
+|---------|---------|---------|
+| `observable` | Protocol-visible outputs | Normalized message contents |
+| `scheduler_step` | Logical progression | Step index, session state, role progression |
+| `effect` | Effect envelope trace | Sequence of effect calls with arguments |
+
+Missing surfaces cause validation failure.
+
+Metadata aids debugging but does not affect comparison:
+
+```rust
+pub struct ConformanceMetadata {
+    pub scenario_name: String,
+    pub seed: u64,
+    pub platform: Platform,
+    pub timestamp: u64,
+    pub version: String,
+}
+```
+
+### Effect Envelope Classification
+
+Each effect kind has a comparison class that determines how differences are evaluated:
+
+| Effect Kind | Class | Comparison Rule |
+|-------------|-------|-----------------|
+| `send_decision` | `commutative` | Order-insensitive under normalization |
+| `invoke_step` | `commutative` | Scheduler interleavings normalized |
+| `handle_recv` | `strict` | Byte-exact match required |
+| `handle_choose` | `strict` | Branch choice must match |
+| `handle_acquire` | `strict` | Guard semantics must match |
+| `handle_release` | `strict` | Guard semantics must match |
+| `topology_event` | `algebraic` | Reduced via topology-normal form |
+
+The `strict` class requires exact matches. The `commutative` class normalizes order before comparison. The `algebraic` class applies domain-specific reduction before comparison.
+
+New effect kinds must be classified before use:
+
+```rust
+use aura_core::conformance::AURA_EFFECT_ENVELOPE_CLASSIFICATIONS;
+
+AURA_EFFECT_ENVELOPE_CLASSIFICATIONS.insert(
+    "new_effect_kind",
+    ComparisonClass::Strict,
+);
+
+aura_core::assert_effect_kinds_classified(&effect_trace)?;
+```
+
+Unclassified effect kinds cause conformance checks to fail.
 
 ## Module Structure
 

@@ -1076,7 +1076,7 @@ Aura's effect system ensures **fully deterministic simulation** by requiring all
 
 ### Impure Function Classification
 
-**🚫 FORBIDDEN: Direct impure function usage**
+**FORBIDDEN: Direct impure function usage**
 ```rust
 // ❌ VIOLATION: Direct system calls
 let now = SystemTime::now();
@@ -1088,7 +1088,7 @@ let socket = TcpStream::connect("127.0.0.1:8080").await?;
 static CACHE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
 ```
 
-**✅ REQUIRED: Effect trait usage**
+**REQUIRED: Effect trait usage**
 ```rust
 // ✅ CORRECT: Via effect traits with explicit context
 async fn my_operation<T: TimeEffects + RandomEffects + StorageEffects>(

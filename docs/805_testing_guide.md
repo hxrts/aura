@@ -315,26 +315,87 @@ The `CliOutput` type collects output lines for later rendering. This separates l
 
 ## Conformance Testing
 
-Conformance tests validate native/WASM parity. See [Conformance and Parity Reference](119_conformance.md) for the complete specification.
+Conformance tests validate that protocol implementations produce identical results across execution environments. The primary focus is native/WASM parity. All protocol transitions must be deterministic given the same inputs.
 
-### Running Conformance
+### Conformance Lanes
+
+CI runs two conformance lanes with different comparison strategies.
+
+The strict lane compares native cooperative and WASM cooperative execution:
 
 ```bash
-just ci-conformance-strict   # Strict lane
-just ci-conformance          # Full gate
+just ci-conformance-strict
 ```
 
-Conformance failures indicate platform-specific behavior that breaks determinism.
+This lane uses the `native_coop` and `wasm_coop` executors. Both use cooperative scheduling. Differences indicate platform-specific behavior.
+
+The differential lane compares native threaded and native cooperative execution:
+
+```bash
+just ci-conformance-diff
+```
+
+This lane detects scheduling-dependent behavior. It also runs model-level differential test suites.
+
+Run both lanes together:
+
+```bash
+just ci-conformance
+```
+
+Any undeclared divergence blocks merge.
+
+### Corpus Policy
+
+The conformance corpus defines test inputs for parity checking.
+
+Fixed seeds provide stable regression coverage:
+
+```bash
+AURA_CONFORMANCE_SEED=42 cargo test conformance
+```
+
+Rotating seeds provide broader coverage over time:
+
+```bash
+AURA_CONFORMANCE_ROTATING_WINDOW=100 cargo test conformance
+```
+
+CI uses a window of recent seeds that advances with each run.
+
+Seeds can derive from Quint ITF traces:
+
+```bash
+AURA_CONFORMANCE_ITF_TRACE=trace.itf.json cargo test conformance
+```
+
+This couples conformance coverage to formal model coverage.
 
 ### Reproducing Failures
+
+Native reproduction:
 
 ```bash
 AURA_CONFORMANCE_SCENARIO=scenario_name \
 AURA_CONFORMANCE_SEED=42 \
-cargo test -p aura-agent --test telltale_vm_parity test_name
+cargo test -p aura-agent \
+  --features choreo-backend-telltale-vm \
+  --test telltale_vm_parity test_name \
+  -- --nocapture
 ```
 
-Environment variables select specific scenarios and seeds for reproduction.
+WASM reproduction:
+
+```bash
+AURA_CONFORMANCE_SCENARIO=scenario_name \
+AURA_CONFORMANCE_SEED=42 \
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+cargo test -p aura-agent \
+  --target wasm32-unknown-unknown \
+  --features web,choreo-backend-telltale-vm \
+  --test telltale_vm_parity test_name \
+  -- --nocapture
+```
 
 ### Replay Debugging
 
@@ -345,6 +406,16 @@ aura replay --trace-file artifacts/choreo-parity/native_replay/<scenario>__seed_
 ```
 
 For automated lane comparison in simulator/test workflows, use `aura-simulator::DifferentialTester` with `strict` or `envelope_bounded` profiles.
+
+### Troubleshooting Conformance
+
+**Unclassified envelope kind**: Add the kind to `AURA_EFFECT_ENVELOPE_CLASSIFICATIONS` with appropriate class.
+
+**Missing required surface**: Ensure runtime captures all three surfaces (observable, scheduler_step, effect) before computing digest.
+
+**Native/Threaded mismatch**: Remove ordering-sensitive hidden state. Normalize only declared commutative or algebraic envelopes.
+
+**WASM runner schema mismatch**: Align `wasm-bindgen-test-runner` version with workspace `wasm-bindgen` version.
 
 ## Test Organization
 
@@ -407,4 +478,4 @@ Avoid testing implementation details. Focus on observable behavior. Keep tests f
 
 ## Related Documentation
 
-See [Test Infrastructure Reference](117_testkit.md) for infrastructure details. See [Simulation Guide](806_simulation_guide.md) for fault injection testing. See [Conformance and Parity Reference](119_conformance.md) for native/WASM parity.
+See [Test Infrastructure Reference](117_testkit.md) for infrastructure details. See [Simulation Guide](806_simulation_guide.md) for fault injection testing.

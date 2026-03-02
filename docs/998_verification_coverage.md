@@ -287,49 +287,24 @@ Automated verification lanes wired into CI pipelines.
 | Lean-Quint Bridge | `just ci-lean-quint-bridge` | Cross-validation between Lean and Quint |
 | Kani BMC | `just ci-kani` | Bounded model checking for unsafe code |
 
-## Related Commands
+### CI Artifacts
 
-### Quint Verification
+Conformance artifacts upload to CI for failure triage:
 
-```bash
-just quint-typecheck-all        # Typecheck all specifications
-just quint-verify-models        # Model check with Apalache (CI)
-just quint-generate-traces      # Generate ITF traces
-just quint-check-types          # Check Quint-Rust type drift
-just quint-verify spec invs     # Verify specific spec/invariants
+```
+artifacts/conformance/
+├── native_coop/
+│   └── scenario_seed_artifact.json
+├── wasm_coop/
+│   └── scenario_seed_artifact.json
+└── diff_report.json
 ```
 
-### Lean Verification
-
-```bash
-just lean-build                 # Build Lean proofs
-just lean-status                # Show proof status summary
-just lean-oracle-build          # Build differential testing oracle
-just lean-check                 # Check for incomplete proofs
-```
-
-### Conformance Testing
-
-```bash
-just verify-conformance         # Run ITF conformance tests
-just ci-conformance             # Full conformance gate (CI)
-just ci-conformance-strict      # Native/WASM parity lane
-just ci-conformance-diff        # Threaded/cooperative differential lane
-```
-
-### Combined Verification
-
-```bash
-just verify-all                 # Run all verification (Lean + Quint + conformance)
-just ci-quint-typecheck         # CI: Quint typecheck gate
-just ci-quint-verify            # CI: Model checking gate
-just ci-lean-build              # CI: Lean build gate
-```
+The diff report highlights specific mismatches for investigation.
 
 ## Related Documentation
 
 - [Formal Verification Reference](120_verification.md) - Architecture and specification patterns
-- [Conformance and Parity Reference](119_conformance.md) - Conformance testing infrastructure
 - [Verification and MBT Guide](807_verification_guide.md) - Practical verification workflows
 - [Simulation Infrastructure Reference](118_simulator.md) - Generative simulation details
-- [Testing Guide](805_testing_guide.md) - Testing infrastructure overview
+- [Testing Guide](805_testing_guide.md) - Testing infrastructure and conformance testing
