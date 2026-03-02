@@ -20,96 +20,102 @@ Use this section when writing [Theoretical Model](002_theoretical_model.md), [Pr
 
 ### Core Entities
 
-Use these symbols in formulas:
+#### Formula Symbols
 
-- `a`, `b` for `AuthorityId`
-- `\kappa` for `ContextId`
-- `e` for `Epoch`
+| Symbol | Type | Description |
+|--------|------|-------------|
+| $`a`$, $`b`$ | `AuthorityId` | Authority identifiers |
+| $`\kappa`$ | `ContextId` | Context identifier |
+| $`e`$ | `Epoch` | Epoch number |
 
-Use these names in prose:
+#### Prose Terms
 
-- `authority` means an account authority
-- `context` means a relational or authority namespace keyed by `ContextId`
-- `peer authority` means a remote authority in a context
-- `member` means an authority in a home's threshold authority set
-- `participant` means an authority granted home access but not in the threshold set
-- `moderator` means a member with moderation designation for a home
+| Term | Definition |
+|------|------------|
+| authority | An account authority |
+| context | A relational or authority namespace keyed by `ContextId` |
+| peer authority | A remote authority in a context |
+| member | An authority in a home's threshold authority set |
+| participant | An authority granted home access but not in the threshold set |
+| moderator | A member with moderation designation for a home |
 
-For home access semantics, use:
+#### Home Access Levels
 
-- `AccessLevel ∈ {Full, Partial, Limited}`
-- `Full` for same-home access (0-hop)
-- `Partial` for 1-hop neighborhood access
-- `Limited` for 2-hop-or-greater and disconnected access
+| Level | Hops | Description |
+|-------|------|-------------|
+| `Full` | 0 | Same-home access |
+| `Partial` | 1 | 1-hop neighborhood access |
+| `Limited` | 2+ | 2-hop-or-greater and disconnected access |
 
-For topology prose, use:
+#### Topology Terms
 
-- `1-hop link` for direct home-to-home neighborhood edges
-- `2-hop` or `n-hop` for multi-edge paths
+| Term | Description |
+|------|-------------|
+| 1-hop link | Direct home-to-home neighborhood edge |
+| n-hop | Multi-edge path (2-hop, 3-hop, etc.) |
 
-For storage and pinning prose, use:
+#### Storage Terms
 
-- `Shared Storage`
-- `pinned` as a fact attribute
+| Term | Description |
+|------|-------------|
+| Shared Storage | Community storage pool |
+| pinned | Fact attribute for retained content |
 
 ### Flow Budget Notation
 
-Use `B[\kappa, a]` for a flow budget for context `\kappa` and peer authority `a`.
+Use $`B[\kappa, a]`$ for a flow budget for context $`\kappa`$ and peer authority $`a`$.
 
-Use this data shape:
-
-```text
-FlowBudget { limit, spent, epoch }
-```
-
-`spent` and `epoch` are replicated facts.
-`limit` is derived at runtime from capability evaluation and policy.
+| Field | Storage | Description |
+|-------|---------|-------------|
+| `spent` | Replicated fact | Monotone counter of consumed budget |
+| `epoch` | Replicated fact | Current epoch identifier |
+| `limit` | Derived at runtime | From capability evaluation and policy |
 
 ### Receipt Notation
 
-Use this receipt schema in all documents:
-
-```text
-Receipt { ctx, src, dst, epoch, cost, nonce, prev_hash, sig }
-```
-
-`src` and `dst` are `AuthorityId` values.
-`prev_hash` links receipts in a per-hop chain.
+| Field | Type | Description |
+|-------|------|-------------|
+| `ctx` | `ContextId` | Context scope |
+| `src` | `AuthorityId` | Sending authority |
+| `dst` | `AuthorityId` | Receiving authority |
+| `epoch` | `Epoch` | Validity window |
+| `cost` | `u32` | Budget charge |
+| `nonce` | `u64` | Replay prevention |
+| `prev_hash` | `Hash32` | Links receipts in per-hop chain |
+| `sig` | `Signature` | Cryptographic proof |
 
 ### Observer Classes
 
-Use one observer taxonomy in all documents:
+| Class | Symbol | Description |
+|-------|--------|-------------|
+| Relationship | $`\ell_{\text{rel}}`$ | Direct relationship observer |
+| Group | $`\ell_{\text{grp}}`$ | Group member observer |
+| Neighbor | $`\ell_{\text{ngh}}`$ | Neighborhood observer |
+| External | $`\ell_{\text{ext}}`$ | External/network observer |
 
-- `Relationship`
-- `Group`
-- `Neighbor`
-- `External`
-
-Use leakage tuple order `\left(\ell_{rel}, \ell_{grp}, \ell_{ngh}, \ell_{ext}\right)`.
+Leakage tuple order: $`(\ell_{\text{rel}}, \ell_{\text{grp}}, \ell_{\text{ngh}}, \ell_{\text{ext}})`$
 
 ### Time and Delay Symbols
 
-Use these symbols consistently:
-
-- `\delta` for CRDT deltas and local state deltas
-- `\Delta_{net}` for network delay bounds under partial synchrony
-- `GST` for global stabilization time
-
-Do not use `\delta` for network delay.
+| Symbol | Usage | Description |
+|--------|-------|-------------|
+| $`\delta`$ | CRDT/state | Local state deltas (NOT network delay) |
+| $`\Delta_{\text{net}}`$ | Network | Network delay bounds under partial synchrony |
+| $`\text{GST}`$ | Timing | Global Stabilization Time |
 
 ### Invariant Naming
 
 Use `InvariantXxx` names for implementation and proof references.
 If a prose alias exists, include it once, then reference the invariant name.
 
-### Guard Chain Terms
+### Guard Chain Order
 
-Use this order in every document:
-
-1. `CapGuard`
-2. `FlowGuard`
-3. `JournalCoupler`
-4. `TransportEffects`
+| Order | Component | Role |
+|-------|-----------|------|
+| 1 | `CapGuard` | Capability verification |
+| 2 | `FlowGuard` | Budget enforcement |
+| 3 | `JournalCoupler` | Fact commitment |
+| 4 | `TransportEffects` | Message transmission |
 
 This order defines `ChargeBeforeSend`.
 
