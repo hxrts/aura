@@ -2,6 +2,8 @@
 
 This document describes the architecture of relational contexts in Aura. It explains how cross-authority relationships are represented using dedicated context namespaces. It defines the structure of relational facts and the role of [Aura Consensus](106_consensus.md) in producing agreed relational state. It also describes privacy boundaries and the interpretation of relational data by participating authorities.
 
+Relational contexts are distinct from authority types. In particular, `Neighborhood` is modeled as an authority type (see [Social Architecture](114_social_architecture.md)), not as a relational-context type.
+
 ## 1. RelationalContext Abstraction
 
 A relational context is shared state linking two or more authorities. A relational context has its own [journal](103_journal.md) namespace. A relational context does not expose internal authority structure. A relational context contains only the facts that the participating authorities choose to share.
@@ -45,6 +47,8 @@ This hash represents the commitments of the authorities and the current context.
 ## 4. Types of Relational Contexts
 
 Several categories of relational contexts appear in Aura. Each fact type carries a well-defined schema to ensure deterministic reduction.
+
+Neighborhood governance and home-membership state are recorded in neighborhood authority journals, not in relational context journals. Relational contexts are still used for pairwise and small-group cross-authority relationships such as guardian bindings, recovery grants, and application-specific collaboration contexts.
 
 ### GuardianConfigContext
 

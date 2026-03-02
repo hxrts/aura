@@ -31,6 +31,25 @@ Use these names in prose:
 - `authority` means an account authority
 - `context` means a relational or authority namespace keyed by `ContextId`
 - `peer authority` means a remote authority in a context
+- `member` means an authority in a home's threshold authority set
+- `participant` means an authority granted home access but not in the threshold set
+
+For home access semantics, use:
+
+- `AccessLevel ∈ {Full, Partial, Limited}`
+- `Full` for same-home access (0-hop)
+- `Partial` for 1-hop neighborhood access
+- `Limited` for 2-hop-or-greater and disconnected access
+
+For topology prose, use:
+
+- `1-hop link` for direct home-to-home neighborhood edges
+- `2-hop` or `n-hop` for multi-edge paths
+
+For storage and pinning prose, use:
+
+- `Shared Storage`
+- `pinned` as a fact attribute
 
 ### Flow Budget Notation
 

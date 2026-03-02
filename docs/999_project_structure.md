@@ -380,7 +380,7 @@ Is this a Layer 2 domain crate?
 | `aura-recovery` | Guardian recovery | Recovery grants and dispute escalation |
 | `aura-relational` | Cross-authority relationships | RelationalContext protocols (domain types in aura-core) |
 | `aura-rendezvous` | Peer discovery | Context-scoped rendezvous and routing |
-| `aura-social` | Social topology | Block/neighborhood materialized views, relay selection, progressive discovery layers |
+| `aura-social` | Social topology | Block/neighborhood materialized views, relay selection, progressive discovery layers, role/access semantics (`Member`/`Participant`, `Full`/`Partial`/`Limited`) |
 | `aura-sync` | Synchronization | Journal sync and anti-entropy protocols |
 
 **Key characteristics**: Reusable building blocks with no UI or binary entry points.

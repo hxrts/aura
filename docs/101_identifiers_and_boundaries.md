@@ -268,7 +268,7 @@ This identifier enables home membership management. See [Social Architecture](11
 
 ### 7.2 NeighborhoodId
 
-`NeighborhoodId` uniquely identifies a neighborhood. Neighborhoods are collections of homes with adjacency relationships. The identifier is a 32-byte array.
+`NeighborhoodId` uniquely identifies a neighborhood. Neighborhoods are collections of homes with 1-hop link relationships. The identifier is a 32-byte array.
 
 ```rust
 pub struct NeighborhoodId([u8; 32]);

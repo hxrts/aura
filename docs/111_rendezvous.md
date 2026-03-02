@@ -218,8 +218,8 @@ let stale_peers = adapter.peers_needing_refresh(context_id, now_ms);
 Aura uses a progressive disclosure model for peer discovery. The `aura-social` crate provides `SocialTopology` which determines the appropriate discovery layer based on the caller's social relationships. The four layers in priority order:
 
 1. **Direct** (priority 0): Target is a known peer with existing relationship. Directly accessible with minimal cost.
-2. **Home** (priority 1): Target is unknown but reachable through home peers. Home peers can relay messages.
-3. **Neighborhood** (priority 2): Target is unknown but reachable through neighborhood traversal. Multiple hops across adjacent homes.
+2. **Home** (priority 1): Target is unknown but reachable through 0-hop home relays. Home relays can forward messages.
+3. **Neighborhood** (priority 2): Target is unknown but reachable through neighborhood traversal. Multiple hops across 1-hop linked homes.
 4. **Rendezvous** (priority 3): No social presence - requires global flooding through rendezvous infrastructure.
 
 ```rust
@@ -233,8 +233,8 @@ match topology.discovery_layer(&target) {
         // Direct connection, minimal cost
     }
     DiscoveryLayer::Home => {
-        // Relay through home peers
-        let relays = topology.home_peers();
+        // Relay through available 0-hop relays
+        let (_, relays) = topology.discovery_context(&target);
     }
     DiscoveryLayer::Neighborhood => {
         // Multi-hop through neighborhood

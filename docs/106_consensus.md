@@ -12,6 +12,15 @@ A consensus instance uses a context-scoped committee. The committee contains wit
 
 Consensus finalization is the single source of durable shared state. Fast-path coordination (provisional or soft-safe) may run in parallel for liveness, but its outputs must be superseded by commit facts. For BFT-DKG, consensus finalizes a transcript and emits `DkgTranscriptCommit` facts.
 
+### 1.2 Witness Terminology
+
+Aura uses `witness` (not `validator`) for consensus attestation participants.
+
+- `witness`: attests that an operation is valid for a specific prestate and contributes consensus evidence.
+- `signer`: contributes threshold signature shares in FROST.
+
+Keeping `witness` and `signer` distinct avoids conflating consensus attestation responsibilities with cryptographic share-generation roles.
+
 ### 1.3 Consensus is NOT Linearizable by Default
 
 Aura Consensus is single-shot agreement, not log-based linearization.

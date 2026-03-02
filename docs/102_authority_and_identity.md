@@ -10,6 +10,20 @@ An authority has an internal journal namespace. The journal namespace stores fac
 
 Devices are not exclusive to a single authority. A single device may hold threshold shares for multiple authorities at the same time. Joining a new authority adds signing capability for that authority without removing any existing authority memberships.
 
+### 1.1 Authority Types and Membership Terms
+
+Aura uses three authority types:
+
+- `User`: individual authority
+- `Home`: group authority that accepts `User` authorities as members
+- `Neighborhood`: group authority that accepts `Home` authorities as members
+
+Home membership terminology is:
+
+- `Member`: authority in the home's threshold authority set
+- `Participant`: authority granted access to the home without threshold membership
+- `Moderator`: optional designation granted to a member for moderation operations
+
 ```rust
 pub struct AuthorityId(Uuid);
 ```

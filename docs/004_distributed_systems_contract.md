@@ -13,14 +13,23 @@ Effect handlers and protocols operate within the 8-layer architecture described 
 Relational contexts and rendezvous flows fall under this contract. Relational contexts are specified in [Relational Contexts](112_relational_contexts.md). Transport semantics appear in [Transport and Information Flow](109_transport_and_information_flow.md). Rendezvous flows are detailed in [Rendezvous Architecture](111_rendezvous.md).
 Shared notation appears in [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation).
 
-### 1.1 Assumptions
+### 1.1 Terminology Alignment
+
+This contract uses shared terminology from [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation).
+
+- Consensus role terms: `witness` for consensus attestation, `signer` for FROST share holders
+- Social-role terms: `Member`, `Participant`, `Moderator`
+- Access terms: `AccessLevel` (`Full`, `Partial`, `Limited`)
+- Topology terms: `1-hop` and `n-hop` paths
+
+### 1.2 Assumptions
 
 - Cryptographic primitives remain secure at configured parameters.
 - Partial synchrony eventually holds after GST, with bounded `Δ_net`.
 - Honest participants execute the guard chain in the required order.
 - Anti-entropy exchange eventually delivers missing facts to connected peers.
 
-### 1.2 Non-goals
+### 1.3 Non-goals
 
 - This contract does not provide global linearizability across all operations.
 - This contract does not guarantee progress during permanent partitions.

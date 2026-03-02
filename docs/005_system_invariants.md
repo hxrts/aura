@@ -21,6 +21,16 @@ Examples:
 - `Context Isolation` maps to `InvariantContextIsolation`.
 - `Secure Channel Lifecycle` maps to `InvariantReceiptValidityWindow` and `InvariantCrossEpochReplayPrevention`.
 
+## Terminology Alignment
+
+Use shared terminology from [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation):
+
+- Role terms: `Member`, `Participant`, `Moderator`
+- Access terms: `AccessLevel` with `Full`, `Partial`, `Limited`
+- Storage/pinning terms: `Shared Storage`, `allocation`, and `pinned` facts
+
+When crate-level invariants describe social or access behavior, use these canonical terms in `ARCHITECTURE.md` invariant sections.
+
 ## Core Invariant Index
 
 | Alias | Canonical Name(s) | Primary Enforcement | Related Contracts |

@@ -105,7 +105,7 @@ let authority = AccountAuthority::new(account_id);
 
 // 2. Issue device token
 let device_token = authority.create_device_token(device_id)?;
-// Contains: account({id}), device({id}), role("owner"), capability("read"), ...
+// Contains: account({id}), device({id}), role("member"), capability("read"), ...
 
 // 3. Attenuate for delegation
 let manager = BiscuitTokenManager::new(device_id, device_token);

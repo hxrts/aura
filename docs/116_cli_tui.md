@@ -19,6 +19,7 @@ Both frontends must respect the guard chain, journaling, and effect system bound
 - Toast. A transient notification. Toasts are queued and only one can be visible at a time.
 - Signal. A reactive stream of domain values from `aura-app`.
 - Intent. A journaled application command dispatched through `AppCore.dispatch` (legacy in the TUI). Most TUI actions are runtime-backed workflows via `IoContext`.
+- Role/access labels. UI copy should use canonical terms from [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation): `Member`, `Participant`, `Moderator`, and access levels `Full`/`Partial`/`Limited`.
 
 ## Running
 

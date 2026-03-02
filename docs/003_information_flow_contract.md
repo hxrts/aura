@@ -19,14 +19,23 @@ The contract applies to information flows across privacy boundaries:
 Related specifications: [Authorization](104_authorization.md), [Transport and Information Flow](109_transport_and_information_flow.md), and [Theoretical Model](002_theoretical_model.md).
 Shared notation appears in [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation).
 
-### 1.1 Assumptions
+### 1.1 Terminology Alignment
+
+This contract uses shared terminology from [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation).
+
+- Home role terms: `Member`, `Participant`, `Moderator` (only members can be moderators)
+- Access-level terms: `Full`, `Partial`, `Limited`
+- Storage terms: `Shared Storage` and `allocation`
+- Pinning term: `pinned` as a fact attribute
+
+### 1.2 Assumptions
 
 - Cryptographic primitives are secure at configured key sizes.
 - Local runtimes enforce guard-chain ordering before transport sends.
 - Epoch updates and budget facts eventually propagate through anti-entropy.
 - Optional privacy enhancements such as Tor and cover traffic are correctly configured when enabled.
 
-### 1.2 Non-goals
+### 1.3 Non-goals
 
 - This contract does not guarantee traffic-analysis resistance against global passive adversaries without optional privacy overlays.
 - This contract does not define social policy decisions such as who should trust whom.

@@ -77,6 +77,7 @@ Additional documentation covers specific aspects of the system. The Foundation c
 [Database Architecture](113_database.md) specifies the distributed database layer using journals, Biscuit queries, and CRDTs.
 
 [Social Architecture](114_social_architecture.md) defines the social organization model using messages, homes, and neighborhoods.
+Canonical role/access terminology lives in [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation): `Member`, `Participant`, `Moderator`, and `Full`/`Partial`/`Limited`.
 
 [CLI and Terminal User Interface](116_cli_tui.md) specifies the CLI and iocraft-based TUI for Aura.
 
