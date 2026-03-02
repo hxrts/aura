@@ -91,6 +91,8 @@ pub struct RendezvousDescriptor {
     pub transport_hints: Vec<TransportHint>,
     /// Handshake PSK commitment (hash of PSK derived from context)
     pub handshake_psk_commitment: [u8; 32],
+    /// Public key for Noise IK handshake (Ed25519 public key)
+    pub public_key: [u8; 32],
     /// Validity window start (ms since epoch)
     pub valid_from: u64,
     /// Validity window end (ms since epoch)
@@ -108,13 +110,13 @@ pub struct RendezvousDescriptor {
 /// Transport endpoint hint
 pub enum TransportHint {
     /// Direct QUIC connection
-    QuicDirect { addr: String },
+    QuicDirect { addr: TransportAddress },
     /// QUIC via STUN-discovered reflexive address
-    QuicReflexive { addr: String, stun_server: String },
+    QuicReflexive { addr: TransportAddress, stun_server: TransportAddress },
     /// WebSocket relay through a relay authority
     WebSocketRelay { relay_authority: AuthorityId },
     /// TCP direct connection
-    TcpDirect { addr: String },
+    TcpDirect { addr: TransportAddress },
 }
 ```
 
@@ -488,7 +490,7 @@ pub enum EffectCommand {
     /// Append fact to journal
     JournalAppend { fact: RendezvousFact },
     /// Charge flow budget
-    ChargeFlowBudget { cost: u32 },
+    ChargeFlowBudget { cost: FlowCost },
     /// Send handshake init message
     SendHandshake { peer: AuthorityId, message: HandshakeInit },
     /// Send handshake response
