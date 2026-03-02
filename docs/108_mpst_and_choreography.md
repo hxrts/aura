@@ -397,14 +397,21 @@ This section lists all choreographies in the codebase with their locations and p
 
 | Protocol | Location | Purpose |
 |----------|----------|---------|
-| InvitationExchange | `aura-invitation/src/protocol.invitation_exchange.choreo` | Contact/channel/device invitation |
+| InvitationExchange | `aura-invitation/src/protocol.invitation_exchange.choreo` | Contact/channel invitation |
 | GuardianInvitation | `aura-invitation/src/protocol.guardian_invitation.choreo` | Guardian invitation |
+| DeviceEnrollment | `aura-invitation/src/protocol.device_enrollment.choreo` | Device enrollment |
 
 ### 9.6 Sync Protocols
 
 | Protocol | Location | Purpose |
 |----------|----------|---------|
 | EpochRotationProtocol | `aura-sync/src/protocols/epochs.choreo` | Epoch rotation sync |
+
+### 9.7 Runtime Protocols
+
+| Protocol | Location | Purpose |
+|----------|----------|---------|
+| SessionCoordination | `aura-agent/src/handlers/sessions/coordination.choreo` | Session creation coordination |
 
 ## 10. Runtime Infrastructure
 
