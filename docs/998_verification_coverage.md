@@ -15,6 +15,8 @@ This document provides an overview of the formal verification, model checking, a
 | Conformance Fixtures | 4 |
 | ITF Trace Harnesses | 8 |
 | Testkit Tests | 111 |
+| Bridge Modules | 4 |
+| CI Verification Gates | 10 |
 
 ## Verification Layers
 
@@ -63,6 +65,17 @@ Files implementing Quint-Rust correspondence and model-based testing.
 - `evaluator.rs` - `QuintEvaluator` subprocess wrapper for Quint CLI
 - `handler.rs` - Effect handler integration
 
+#### Lean-Quint Bridge (`aura-quint`)
+
+Cross-validation modules for Lean↔Quint correspondence:
+
+| Module | Purpose |
+|--------|---------|
+| `bridge_export.rs` | Export Quint state to Lean-readable format |
+| `bridge_import.rs` | Import Lean outputs back to Quint structures |
+| `bridge_format.rs` | Shared serialization format definitions |
+| `bridge_validate.rs` | Cross-validation assertions and checks |
+
 #### Simulator Integration (`aura-simulator/src/quint/`)
 
 17 modules implementing generative simulation:
@@ -86,6 +99,9 @@ Files implementing Quint-Rust correspondence and model-based testing.
 | `ast_parser.rs` | Quint AST parsing for analysis |
 | `mod.rs` | Module exports and re-exports |
 | `types.rs` | Shared type definitions |
+
+#### Differential Verification (`aura-simulator`)
+- `differential_tester.rs` - Cross-implementation parity testing between Quint models and Rust handlers
 
 #### Consensus Verification (`aura-consensus`)
 - `core/verification/mod.rs` - Verification module facade
@@ -241,6 +257,35 @@ Deterministic parity validation infrastructure in `aura-testkit`.
 | `InvariantLeakageBounded` | leakage.qnt |
 | `InvariantObserverHierarchyMaintained` | leakage.qnt |
 | `InvariantBudgetsPositive` | leakage.qnt |
+
+## CI Verification Gates
+
+Automated verification lanes wired into CI pipelines.
+
+### Core Verification
+
+| Gate | Command | Purpose |
+|------|---------|---------|
+| Property Monitor | `just ci-property-monitor` | Runtime property assertion monitoring |
+| Choreography Parity | `just ci-choreo-parity` | Session type projection consistency |
+| Quint Typecheck | `just ci-quint-typecheck` | Quint specification type safety |
+
+### Conformance Gates
+
+| Gate | Command | Purpose |
+|------|---------|---------|
+| Conformance Policy | `just ci-conformance-policy` | Policy rule validation |
+| Conformance Contracts | `just ci-conformance-contracts` | Contract satisfaction checks |
+| Golden Fixtures | `conformance_golden_fixtures` | Deterministic replay against known-good traces |
+
+### Formal Methods
+
+| Gate | Command | Purpose |
+|------|---------|---------|
+| Lean Build | `just ci-lean-build` | Compile Lean proofs |
+| Lean Completeness | `just ci-lean-check-sorry` | Check for incomplete proofs (sorry) |
+| Lean-Quint Bridge | `just ci-lean-quint-bridge` | Cross-validation between Lean and Quint |
+| Kani BMC | `just ci-kani` | Bounded model checking for unsafe code |
 
 ## Related Commands
 

@@ -123,6 +123,15 @@ check_metric "ITF Trace Harnesses" "$(get_documented "ITF Trace Harnesses")" "$i
 testkit_tests=$(grep -rh "^#\[test\]" crates/aura-testkit/src/ crates/aura-testkit/tests/ 2>/dev/null | wc -l | tr -d ' ')
 check_metric "Testkit Tests" "$(get_documented "Testkit Tests")" "$testkit_tests"
 
+bridge_modules=$(find crates/aura-quint/src -name "bridge_*.rs" -type f 2>/dev/null | wc -l | tr -d ' ')
+check_metric "Bridge Modules" "$(get_documented "Bridge Modules")" "$bridge_modules"
+
+# Count CI verification gates from justfile
+ci_gates=$(grep -cE "^ci-(property-monitor|choreo-parity|quint-typecheck|conformance-policy|conformance-contracts|lean-build|lean-check-sorry|lean-quint-bridge|kani):" justfile 2>/dev/null || echo "0")
+# Add 1 for conformance_golden_fixtures test
+ci_gates=$((ci_gates + 1))
+check_metric "CI Verification Gates" "$(get_documented "CI Verification Gates")" "$ci_gates"
+
 echo ""
 echo "Quint Subsystem Breakdown"
 echo "-------------------------"
@@ -191,6 +200,39 @@ sim_modules=$(find crates/aura-simulator/src/quint -name "*.rs" -type f 2>/dev/n
 doc_sim_modules=$(get_prose_count "[0-9]+ modules implementing generative simulation")
 check_metric "Simulator Quint Modules" "$doc_sim_modules" "$sim_modules"
 
+# Check differential tester exists (mentioned in doc)
+checks_run=$((checks_run + 1))
+if [[ -f "crates/aura-simulator/src/differential_tester.rs" ]]; then
+  printf "  ${GREEN}✓${NC} Differential tester exists\n"
+else
+  printf "  ${RED}✗${NC} Differential tester missing\n"
+  mismatches=$((mismatches + 1))
+fi
+
+echo ""
+echo "Bridge Verification"
+echo "-------------------"
+
+# Check bridge modules exist
+bridge_ok=0
+bridge_missing=0
+for mod in bridge_export bridge_import bridge_format bridge_validate; do
+  if [[ -f "crates/aura-quint/src/${mod}.rs" ]]; then
+    bridge_ok=$((bridge_ok + 1))
+  else
+    echo "  missing: ${mod}.rs"
+    bridge_missing=$((bridge_missing + 1))
+  fi
+done
+
+checks_run=$((checks_run + 1))
+if [[ "$bridge_missing" -eq 0 ]]; then
+  printf "  ${GREEN}✓${NC} All %d bridge modules found\n" "$bridge_ok"
+else
+  printf "  ${RED}✗${NC} %d/%d bridge modules found\n" "$bridge_ok" "$((bridge_ok + bridge_missing))"
+  mismatches=$((mismatches + 1))
+fi
+
 echo ""
 echo "Listed Invariants Verification"
 echo "------------------------------"
@@ -252,6 +294,47 @@ elif [[ "$temporal_ok" -eq 0 ]]; then
   printf "  ${YELLOW}?${NC} No temporal properties listed in document tables\n"
 else
   printf "  ${RED}✗${NC} %d/%d listed temporal properties found\n" "$temporal_ok" "$((temporal_ok + temporal_missing))"
+  mismatches=$((mismatches + 1))
+fi
+
+echo ""
+echo "Listed CI Gates Verification"
+echo "----------------------------"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verify listed CI gates exist in justfile
+# ─────────────────────────────────────────────────────────────────────────────
+
+ci_gates_ok=0
+ci_gates_missing=0
+
+# Extract CI gate commands from the document tables
+while IFS= read -r cmd; do
+  [[ -z "$cmd" ]] && continue
+  # Strip backticks and "just " prefix
+  cmd="${cmd#\`}"
+  cmd="${cmd%\`}"
+  cmd="${cmd#just }"
+
+  # Check if task exists in justfile (as a recipe definition)
+  if grep -qE "^${cmd}:" justfile 2>/dev/null; then
+    ci_gates_ok=$((ci_gates_ok + 1))
+  # Special case: conformance_golden_fixtures is a cargo test, not a just task
+  elif [[ "$cmd" == "conformance_golden_fixtures" ]] && grep -q "conformance_golden_fixtures" justfile 2>/dev/null; then
+    ci_gates_ok=$((ci_gates_ok + 1))
+  else
+    echo "  missing in justfile: $cmd"
+    ci_gates_missing=$((ci_gates_missing + 1))
+  fi
+done < <(awk '/^## CI Verification Gates/{found=1; next} found && /^## /{exit} found' "$DOC" | grep -oE '`just [^`]+`|`conformance_golden_fixtures`' | sort -u)
+
+checks_run=$((checks_run + 1))
+if [[ "$ci_gates_missing" -eq 0 && "$ci_gates_ok" -gt 0 ]]; then
+  printf "  ${GREEN}✓${NC} All %d listed CI gates found in justfile\n" "$ci_gates_ok"
+elif [[ "$ci_gates_ok" -eq 0 ]]; then
+  printf "  ${YELLOW}?${NC} No CI gates listed in document\n"
+else
+  printf "  ${RED}✗${NC} %d/%d listed CI gates found\n" "$ci_gates_ok" "$((ci_gates_ok + ci_gates_missing))"
   mismatches=$((mismatches + 1))
 fi
 
