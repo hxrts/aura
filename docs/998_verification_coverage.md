@@ -304,7 +304,7 @@ The diff report highlights specific mismatches for investigation.
 
 ## Related Documentation
 
-- [Formal Verification Reference](120_verification.md) - Architecture and specification patterns
+- [Formal Verification Reference](119_verification.md) - Architecture and specification patterns
 - [Verification and MBT Guide](807_verification_guide.md) - Practical verification workflows
 - [Simulation Infrastructure Reference](118_simulator.md) - Generative simulation details
 - [Testing Guide](805_testing_guide.md) - Testing infrastructure and conformance testing

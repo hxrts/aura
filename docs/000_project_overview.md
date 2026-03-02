@@ -87,7 +87,7 @@ Canonical role/access terminology lives in [Theoretical Model](002_theoretical_m
 
 [Testing Guide](805_testing_guide.md) describes conformance testing and cross-platform parity validation.
 
-[Formal Verification Reference](120_verification.md) documents Quint specifications and Lean proofs.
+[Formal Verification Reference](119_verification.md) documents Quint specifications and Lean proofs.
 
 **Developer Guides**
 

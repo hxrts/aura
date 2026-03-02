@@ -183,7 +183,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - Operation categories and ceremonies: `docs/107_operation_categories.md`
 - Test infrastructure: `docs/117_testkit.md`
 - Simulation infrastructure: `docs/118_simulator.md`
-- Formal verification: `docs/120_verification.md`
+- Formal verification: `docs/119_verification.md`
 - Reference: `docs/999_project_structure.md`
 
 ## Agent Quick Reference

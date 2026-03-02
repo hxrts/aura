@@ -271,7 +271,7 @@ This abstraction enables stable simulation code across effect system changes. On
 
 ## Quint Integration
 
-The `quint` module provides integration with Quint formal specifications. See [Formal Verification Reference](120_verification.md) for complete details.
+The `quint` module provides integration with Quint formal specifications. See [Formal Verification Reference](119_verification.md) for complete details.
 
 ### ITF Trace Format
 
@@ -368,4 +368,4 @@ aura-simulator/
 
 ## Related Documentation
 
-See [Simulation Guide](806_simulation_guide.md) for how to write simulations. See [Testing Guide](805_testing_guide.md) for conformance testing. See [Formal Verification Reference](120_verification.md) for Quint integration details.
+See [Simulation Guide](806_simulation_guide.md) for how to write simulations. See [Testing Guide](805_testing_guide.md) for conformance testing. See [Formal Verification Reference](119_verification.md) for Quint integration details.

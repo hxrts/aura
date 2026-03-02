@@ -8,7 +8,7 @@ Verification suits protocols with complex state machines or security-critical pr
 
 Unit tests suffice for simple, well-understood behavior. Do not over-invest in verification for straightforward code.
 
-See [Formal Verification Reference](120_verification.md) for the complete architecture documentation.
+See [Formal Verification Reference](119_verification.md) for the complete architecture documentation.
 
 ## Writing Quint Specifications
 
@@ -417,4 +417,4 @@ Isolate properties. Test one property at a time during development. Combine for 
 
 ## Related Documentation
 
-See [Formal Verification Reference](120_verification.md) for architecture details. See [Simulation Guide](806_simulation_guide.md) for trace replay. See [Testing Guide](805_testing_guide.md) for conformance testing.
+See [Formal Verification Reference](119_verification.md) for architecture details. See [Simulation Guide](806_simulation_guide.md) for trace replay. See [Testing Guide](805_testing_guide.md) for conformance testing.

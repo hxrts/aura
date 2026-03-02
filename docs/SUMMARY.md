@@ -25,7 +25,7 @@
 - [CLI and Terminal User Interface](116_cli_tui.md)
 - [Test Infrastructure Reference](117_testkit.md)
 - [Simulation Infrastructure Reference](118_simulator.md)
-- [Formal Verification Reference](120_verification.md)
+- [Formal Verification Reference](119_verification.md)
 - [Hello World Guide](801_hello_world_guide.md)
 - [Coordination Systems Guide](803_coordination_guide.md)
 - [Advanced Choreography Guide](804_advanced_coordination_guide.md)
