@@ -182,8 +182,8 @@ async fn test_hello_world_protocol() -> aura_core::AuraResult<()> {
     let fixture = create_test_fixture().await?;
 
     // Create simple effect systems for testing
-    let alice_effects = AuraEffectSystem::testing(&AgentConfig::default());
-    let bob_effects = AuraEffectSystem::testing(&AgentConfig::default());
+    let alice_effects = AuraEffectSystem::testing(&AgentConfig::default())?;
+    let bob_effects = AuraEffectSystem::testing(&AgentConfig::default())?;
 
     // Get device IDs for routing
     let alice_device = fixture.create_device_id();
