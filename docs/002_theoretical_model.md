@@ -11,7 +11,7 @@ Aura's theoretical foundation rests on four mathematical pillars:
 3. Multi-Party Session Types specify choreographic protocols with safety guarantees.
 4. CRDT Semantics enable conflict-free replication with convergence proofs.
 
-The combination forms a privacy-preserving, spam-resistant, capability-checked distributed λ-calculus. The system enforces a unified information flow budget across all operations.
+The combination forms a privacy-preserving, spam-resistant, capability-checked distributed λ-calculus that enforces information flow budget across all operations.
 
 ## Shared Terms and Notation
 
