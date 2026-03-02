@@ -1,52 +1,268 @@
 # Aura System Architecture
 
-This document describes the current architecture and implementation patterns for Aura. It focuses on the effect system, authority model, guard chain enforcement, choreographic protocols, consensus integration, and crate layering. Formal definitions live in [Theoretical Model](002_theoretical_model.md) and domain specifications such as [Authority and Identity](102_authority_and_identity.md), [Journal](103_journal.md), and [Consensus](106_consensus.md).
+This document describes the architecture of Aura. It covers the core abstractions, data flow patterns, and component interactions that define the system. Formal definitions live in [Theoretical Model](002_theoretical_model.md). Domain specifications are in the 100-series documents.
 
 ## Overview
 
-Aura is built around authorities, journals, and relational contexts. Each authority has its own journal namespace, and each relational context has its own journal namespace for shared state. Aura Consensus provides single operation agreement when monotone CRDT facts are not sufficient.
+Aura is a peer-to-peer identity and communication system built on three pillars. Threshold cryptography distributes trust across multiple devices. Session-typed protocols ensure safe multi-party coordination. CRDT journals provide conflict-free replicated state.
 
-The journal is a product of two semilattices. Facts grow by join, and capability frontiers shrink by meet. The `Journal` type keeps these dimensions separate so runtime code can reason about them explicitly.
+The system operates without dedicated servers. Discovery, availability, and recovery are provided by the web of trust. Peers relay messages for each other based on social relationships. No single party can observe all communication or deny service.
 
-The architecture uses layered crates and an explicit guard chain for all network sends. The effect system provides explicit context propagation across async tasks. The guard chain enforces authorization, flow budgets, journal coupling, and leakage tracking before transport effects.
+Aura separates key generation from agreement. Key generation modes (K1/K2/K3) determine how shares are created. Agreement modes (A1/A2/A3) determine when operations become final. Fast paths provide immediate usability. Durable shared state is always consensus-finalized.
 
-## 1. Authority and Relational Identity System
+```mermaid
+flowchart TB
+    subgraph Authorities
+        A1[Authority A]
+        A2[Authority B]
+    end
 
-### 1.1 Authority model
+    subgraph State
+        J1[Journal A]
+        J2[Journal B]
+        JC[Context Journal]
+    end
 
-An authority is an opaque cryptographic actor that can sign operations and hold state. It can contain multiple devices, but external parties only see authority public keys and journal facts.
+    subgraph Enforcement
+        GC[Guard Chain]
+        FB[Flow Budget]
+    end
+
+    subgraph Effects
+        EF[Effect System]
+        TR[Transport]
+    end
+
+    A1 --> J1
+    A2 --> J2
+    A1 & A2 --> JC
+    J1 & J2 & JC --> GC
+    GC --> FB
+    FB --> EF
+    EF --> TR
+```
+
+This diagram shows the primary data flow. Authorities own journals that store facts. The guard chain enforces authorization before any transport effect. The effect system provides the abstraction layer for all operations.
+
+Every operation flows through the effect system. Every state change is replicated through journals. Every external action is authorized through guards. These three invariants define the architectural contract.
+
+## 1. Dual Semilattice Model
+
+Aura state consists of two complementary semilattices. Facts form a join-semilattice where information accumulates through the join operation. Capabilities form a meet-semilattice where authority restricts through the meet operation.
+
+```rust
+// Facts grow by join (⊔)
+struct Journal {
+    facts: FactSet,        // join-semilattice
+    frontier: CapFrontier, // meet-semilattice
+}
+```
+
+The `Journal` type keeps these dimensions separate. Facts can only grow. Capabilities can only shrink. This dual monotonicity provides convergence guarantees for replicated state.
+
+Facts represent evidence that accumulates over time. Examples include signed operations, attestations, flow budget charges, and consensus commits. Once a fact is added, it cannot be removed. Garbage collection uses tombstones and reduction rather than deletion.
+
+Capabilities represent authority that restricts over time. The system evaluates Biscuit tokens against policy to derive the current capability frontier. Delegation can only attenuate. No operation can widen capability scope. See [Theoretical Model](002_theoretical_model.md) for formal definitions of these lattices.
+
+## 2. Authority and Identity Architecture
+
+An authority is an opaque cryptographic actor. External parties see only public keys and signed facts. Internal device structure is hidden. This abstraction provides unlinkability across contexts.
+
+```mermaid
+flowchart TB
+    subgraph Authority
+        CT[Commitment Tree]
+        CT --> D1[Device 1]
+        CT --> D2[Device 2]
+        CT --> D3[Device 3]
+    end
+
+    D1 --> K1[Signing Key]
+    D2 --> K2[Signing Key]
+    D3 --> K3[Signing Key]
+
+    Authority --> TK[Threshold Key]
+```
+
+This diagram shows account authority structure. The commitment tree tracks device membership. Each device holds a signing key. The threshold key requires multiple devices to sign.
+
+### 2.1 Account authorities
+
+Account authorities maintain device membership using commitment trees. The journal stores signed tree operations as facts. Reduction reconstructs the canonical tree state from accumulated facts.
 
 ```rust
 pub struct AuthorityId(Uuid);
 ```
 
-`AuthorityId` is an opaque UUID based identifier used to select the authority journal namespace. It does not encode membership or device structure.
+`AuthorityId` is an opaque identifier for the authority namespace. It does not encode membership or reveal device count. Key derivation utilities provide context-scoped keys without exposing internal structure.
 
-### 1.2 Account authority structure
+### 2.2 Relational contexts
 
-Account authorities maintain device membership using the commitment tree described in [Authority and Identity](102_authority_and_identity.md). The journal stores signed tree operations as facts. Reduction reconstructs the canonical tree state from these facts.
-
-Account state uses `Policy` and `LeafNode` types from `aura-core`. Deterministic key derivation utilities provide context scoped keys without exposing the internal device set.
-
-### 1.3 Relational context architecture
-
-Relational contexts are shared journals for cross authority state. Each context has its own namespace and does not reveal participants.
+Relational contexts are shared journals for cross-authority state. Each context has its own namespace and does not reveal participants to external observers.
 
 ```rust
 pub struct ContextId(Uuid);
 ```
 
-`ContextId` is an opaque UUID based identifier for that namespace. Participation is expressed by writing relational facts to the context journal.
+`ContextId` identifies the shared namespace. Participation is expressed by writing relational facts. Profile data, nicknames, and relationship state live in context journals. See [Authority and Identity](102_authority_and_identity.md) for commitment tree details and [Relational Contexts](112_relational_contexts.md) for context patterns.
 
-### 1.4 Contextual identity properties
+### 2.3 Contextual identity
 
-Identity is scoped to contexts. A device can participate in many contexts without linking them. Profile data and nickname suggestions live in the context journal.
+Identity is scoped to contexts. A device can participate in many contexts without linking them. Each context derives independent keys through deterministic key derivation. This prevents cross-context correlation by external observers.
 
-## 2. Guard Chain and Flow Budget System
+## 3. Journal and State Reduction
 
-### 2.1 Guard chain architecture
+The journal is the canonical state mechanism. All durable state is represented as facts in journals. Views are derived by reducing accumulated facts.
 
-All transport sends pass through a guard chain before any network effect. Guard evaluation uses a `GuardSnapshot` prepared from effect system state. Evaluation is pure and returns `EffectCommand` values.
+### 3.1 Journal namespaces
+
+Journals are partitioned into namespaces. Authority namespaces store facts owned by a single authority. Context namespaces store facts shared across authorities participating in a relational context.
+
+```rust
+enum JournalNamespace {
+    Authority(AuthorityId),
+    Context(ContextId),
+}
+```
+
+Namespace scoping provides isolation. Facts in one namespace cannot reference or affect facts in another namespace. Cross-namespace coordination requires explicit protocols.
+
+### 3.2 Fact model
+
+Facts are content-addressed immutable records. Each fact includes a type identifier, payload, attestation, and metadata. Facts are validated against type-specific rules before acceptance.
+
+```rust
+pub struct Fact {
+    pub type_id: FactTypeId,
+    pub payload: FactPayload,
+    pub attestation: Attestation,
+    pub metadata: FactMetadata,
+}
+```
+
+Facts accumulate through CRDT merge. Duplicate facts are deduplicated by content hash. Conflicting facts are resolved by type-specific merge rules. The journal guarantees eventual consistency across replicas.
+
+Attestations prove that an authority endorsed the fact. Threshold signatures require multiple devices to attest. Single-device signatures are used for local facts. The attestation type determines validation requirements.
+
+### 3.3 State reduction
+
+State reduction computes views from accumulated facts. Reducers are pure functions that transform fact sets into derived state. Reduction is deterministic and reproducible.
+
+```rust
+trait FactReducer {
+    type State;
+    fn reduce(facts: &FactSet) -> Self::State;
+}
+```
+
+Reduction runs on demand or is cached for performance. Cached views are invalidated when new facts arrive. The reduction pipeline supports incremental updates for large fact sets. See [Journal](103_journal.md) for the complete reduction architecture.
+
+### 3.4 Flow budget facts
+
+Flow budgets track message emission per context and peer. Only `spent` and `epoch` values are stored as facts. The `limit` is computed at runtime from capability evaluation.
+
+```rust
+pub struct FlowBudget {
+    limit: u64,   // derived from capabilities
+    spent: u64,   // stored as facts
+    epoch: Epoch, // stored as facts
+}
+```
+
+Budget charges are facts that increment `spent`. Epoch rotation resets counters through new epoch facts. This design keeps replicated state minimal while enabling runtime limit computation.
+
+## 4. Effect System Architecture
+
+Effect traits define async capabilities with explicit context. Handlers implement these traits for specific environments. The effect system provides the abstraction layer between application logic and runtime behavior.
+
+```mermaid
+flowchart TB
+    subgraph "Layer 1: Infrastructure"
+        CE[CryptoEffects]
+        NE[NetworkEffects]
+        SE[StorageEffects]
+        TE[TimeEffects]
+        RE[RandomEffects]
+    end
+
+    subgraph "Layer 2: Application"
+        JE[JournalEffects]
+        AE[AuthorizationEffects]
+        FE[FlowBudgetEffects]
+        LE[LeakageEffects]
+    end
+
+    subgraph "Layer 3: Composite"
+        TRE[TreeEffects]
+        CHE[ChoreographyExt]
+    end
+
+    CE & NE & SE & TE & RE --> JE & AE & FE & LE
+    JE & AE & FE & LE --> TRE & CHE
+```
+
+This diagram shows effect layering. Infrastructure effects wrap OS primitives. Application effects encode domain logic. Composite effects combine lower layers for convenience.
+
+### 4.1 Effect trait classification
+
+Infrastructure effects are implemented in `aura-effects`. These include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `PhysicalTimeEffects`, `RandomEffects`, and `TraceEffects`.
+
+Application effects encode domain logic in domain crates. These include `JournalEffects`, `AuthorizationEffects`, `FlowBudgetEffects`, and `LeakageEffects`. Application effects compose infrastructure effects.
+
+Composite effects are extension traits that combine multiple lower-level effects. These include `TreeEffects` for commitment tree operations and choreography extension traits for protocol execution.
+
+### 4.2 Unified time system
+
+The time system provides four domains for different use cases. `PhysicalClock` uses wall-clock time with optional uncertainty bounds. `LogicalClock` uses vector and Lamport clocks for causal ordering.
+
+`OrderClock` uses opaque 32-byte tokens for deterministic ordering without temporal leakage. `Range` uses earliest and latest bounds for validity windows.
+
+```rust
+enum TimeStamp {
+    PhysicalClock(PhysicalTime),
+    LogicalClock(LogicalTime),
+    OrderClock(OrderTime),
+    Range(RangeTime),
+}
+```
+
+Time access happens through `PhysicalTimeEffects`, `LogicalClockEffects`, and `OrderClockEffects`. Application code does not call system time directly. See [Effect System and Runtime](105_effect_system_and_runtime.md) for handler implementation patterns.
+
+### 4.3 Context propagation
+
+`EffectContext` is the operation scope that flows through async call chains. It carries authority id, context id, session id, execution mode, and metadata.
+
+```rust
+pub struct EffectContext {
+    pub authority: AuthorityId,
+    pub context: Option<ContextId>,
+    pub session: SessionId,
+    pub mode: ExecutionMode,
+    pub metadata: ContextMetadata,
+}
+```
+
+Context propagation ensures that all operations within a call chain share the same scope. Guards access context to make authorization decisions. Handlers access context to route operations to the correct namespace.
+
+### 4.4 Impure function control
+
+Application code must not call system time, randomness, or IO directly. These operations must flow through effect traits. This constraint enables deterministic testing and simulation.
+
+```rust
+async fn operation<E: PhysicalTimeEffects + RandomEffects>(
+    effects: &E
+) -> Result<Nonce> {
+    let now = effects.current_time().await;
+    let bytes = effects.random_bytes(32).await?;
+    Ok(Nonce { now, bytes })
+}
+```
+
+The type signature makes dependencies explicit. Tests can inject mock handlers with controlled behavior. Simulations can replay exact sequences for debugging.
+
+## 5. Guard Chain and Authorization
+
+All transport sends pass through a guard chain before any network effect. The chain enforces authorization, budget accounting, journal coupling, and leakage tracking.
 
 ```mermaid
 flowchart LR
@@ -57,32 +273,21 @@ flowchart LR
     E --> F[TransportEffects]
 ```
 
-The chain order matches the implementation in `aura-guards::GuardChain::standard()`. Each guard must succeed before effects are interpreted. This order enforces charge before send.
+This chain order is fixed. Each guard must succeed before the next executes. Failure at any guard blocks the send. This order enforces the charge-before-send invariant.
 
-Guard responsibilities are listed below.
+### 5.1 Guard responsibilities
 
-- CapabilityGuard evaluates Biscuit capabilities.
-- FlowBudgetGuard charges flow budgets and emits receipts.
-- JournalCouplingGuard commits facts alongside budget changes.
-- LeakageTrackingGuard records privacy budget usage.
+CapabilityGuard evaluates Biscuit tokens against required capabilities. It verifies that the sender has authority to perform the requested operation. Biscuit caveats can restrict scope, time, or target.
 
-### 2.2 Flow budget system
+FlowBudgetGuard charges flow budgets and emits receipts. It verifies that the sender has sufficient budget for the message cost. Budget charges are atomic with receipt generation.
 
-Flow budgets limit send volume per context and peer. Only `spent` and `epoch` values are persisted as facts. The `limit` is computed at runtime from capabilities and policy.
+JournalCouplingGuard commits facts alongside budget changes. It ensures that budget charges and other facts are durably recorded before the message leaves. This coupling provides atomicity.
 
-```rust
-pub struct FlowBudget {
-    limit: u64,
-    spent: u64,
-    epoch: Epoch,
-}
-```
+LeakageTrackingGuard records privacy budget usage. It tracks information flow to different observer classes. Operations that exceed leakage budgets are blocked.
 
-`FlowBudget` is a runtime view that combines derived limits with replicated counters. The journal only stores `spent` and `epoch` values.
+### 5.2 Receipts and accountability
 
-### 2.3 Receipts and accountability
-
-Flow budget charges emit receipts that can be verified by relays. Receipts include context, sender, receiver, epoch, and a hash chain link.
+Flow budget charges emit receipts. Receipts include context, sender, receiver, epoch, cost, and a hash chain link. Relays can verify that prior hops paid their budget cost.
 
 ```rust
 pub struct Receipt {
@@ -97,221 +302,298 @@ pub struct Receipt {
 }
 ```
 
-Receipts allow forwarders to validate that prior hops paid their budget cost. `FlowCost`, `FlowNonce`, and `ReceiptSig` are validated newtypes wrapping `u32`, `u64`, and `Vec<u8>` respectively.
+The `prev` field links receipts in a per-hop chain. This chain provides accountability for multi-hop message forwarding. See [Transport and Information Flow](109_transport_and_information_flow.md) for receipt verification and [Authorization](104_authorization.md) for Biscuit integration.
 
-## 3. Async Effect System Architecture
+## 6. Choreographic Protocols
 
-### 3.1 Core principles
+Choreographies define global protocols using multi-party session types. The `choreography!` macro generates local session types and effect bridge helpers. Guard requirements are expressed through annotations.
 
-Effect traits live in `aura-core` and define async capabilities with explicit context. Handlers implement these traits for specific environments and compose into runtimes.
+### 6.1 Global protocol specification
 
-```rust
-#[async_trait]
-pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
-    async fn hkdf_derive(&self, ikm: &[u8], salt: &[u8], info: &[u8], output_len: u32) -> Result<Vec<u8>, CryptoError>;
-    async fn derive_key(&self, master_key: &[u8], context: &KeyDerivationContext) -> Result<Vec<u8>, CryptoError>;
-    async fn ed25519_sign(&self, message: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError>;
-    async fn ed25519_verify(&self, message: &[u8], signature: &[u8], public_key: &[u8]) -> Result<bool, CryptoError>;
-}
-```
-
-This trait defines key derivation and signing operations. Hashing is a pure operation via `aura_core::hash::hash()`, not an effect. The handler is chosen by the runtime and can be swapped for testing.
-
-### 3.2 Effect trait classification
-
-Effects are grouped by how they are implemented and composed.
-
-- Infrastructure effects are implemented in `aura-effects`. Examples include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `PhysicalTimeEffects`, `RandomEffects`, and `TraceEffects`.
-- Application effects encode domain logic in domain crates. Examples include `JournalEffects`, `AuthorizationEffects`, `FlowBudgetEffects`, and `LeakageEffects`.
-- Composite effects are extension traits that combine lower level effects. Examples include `TreeEffects` and `LeakageChoreographyExt`.
-
-`ReactiveEffects` is defined in `aura-core`. `ReactiveHandler` implements it in `aura-effects`. `AppCore` and `UnifiedHandler` in `aura-app` also implement it to integrate signals with application workflows.
-
-### 3.3 Handler registration and interoperability
-
-Handler composition uses `aura-composition` types such as `CompositeHandler`, `HandlerContext`, and `EffectRegistry`. `aura-protocol` re-exports `EffectRegistry` for convenience, and `aura-agent` uses it to assemble production effect systems.
-
-`aura-effects` supplies concrete handlers such as `RealCryptoHandler`, `EncryptedStorage`, and `ReactiveHandler`. `aura-agent` wires these handlers with domain handlers to produce `AuraEffectSystem`. Feature crates depend on these abstractions without owning runtime assembly.
-
-### 3.4 Unified time system
-
-`TimeStamp` has four domains. `PhysicalClock` uses `PhysicalTime` with milliseconds since the Unix epoch and optional uncertainty. `LogicalClock` uses vector and Lamport clocks.
-
-`OrderClock` uses a 32 byte token for opaque ordering. `Range` uses earliest and latest bounds with a confidence value.
-
-`ProvenancedTime` wraps `TimeStamp` with optional proofs and origin. Ordering is explicit through `TimeStamp::compare` with an `OrderingPolicy`, and `sort_compare` is used for deterministic sorting. Time access happens through `PhysicalTimeEffects`, `LogicalClockEffects`, and `OrderClockEffects`.
-
-### 3.5 Context propagation and guard integration
-
-`EffectContext` is the operation scope and lives in `aura-core`. It carries authority id, context id, session id, execution mode, and metadata. `ContextSnapshot` provides a lighter view for handlers that do not need metadata.
-
-Guard evaluators build `GuardSnapshot` from effect system state. They produce `EffectCommand` values that an interpreter executes. This separation keeps guard evaluation pure.
-
-### 3.6 Impure function control
-
-Application code must not call system time, randomness, or IO directly. These operations must flow through effect traits so tests and simulations can control them.
-
-```rust
-async fn op<E: PhysicalTimeEffects + RandomEffects>(effects: &E) -> Result<Nonce> {
-    let now = effects.current_time().await;
-    let bytes = effects.random_bytes(32).await?;
-    Ok(Nonce { now, bytes })
-}
-```
-
-This pattern keeps nondeterminism inside effect handlers and makes tests reproducible.
-
-## 4. Choreographic System
-
-### 4.1 Global protocol specification
-
-Choreographies define global protocols using multi party session types. The `choreography!` macro in `aura-macros` generates local session types and effect bridge helpers.
+A global type describes the entire protocol from a bird's-eye view. Each message specifies sender, receiver, payload type, and guard annotations.
 
 ```rust
 choreography! {
-    #[namespace = "ping_pong"]
-    protocol PingPong {
-        roles: Alice, Bob;
-        Alice[guard_capability = "send_ping", flow_cost = 5] -> Bob: Ping(data: Vec<u8>);
-        Bob[guard_capability = "send_pong", flow_cost = 5] -> Alice: Pong(response: Vec<u8>);
+    #[namespace = "key_rotation"]
+    protocol KeyRotation {
+        roles: Initiator, Witness1, Witness2;
+        Initiator[guard_capability = "rotate", flow_cost = 10]
+            -> Witness1, Witness2: Proposal(data: RotationData);
+        Witness1[flow_cost = 5] -> Initiator: Vote(vote: bool);
+        Witness2[flow_cost = 5] -> Initiator: Vote(vote: bool);
     }
 }
 ```
 
-The namespace attribute is required and must be unique within a compilation unit. Annotation fields compile into `EffectCommand` sequences that the guard chain enforces.
+The namespace attribute scopes the protocol. Annotations compile into guard requirements. The macro validates that the protocol is well-formed before generating code.
 
-### 4.2 Session type integration
+### 6.2 Projection and execution
 
-Projection yields `LocalSessionType` values executed through Telltale-backed runtime paths in Layer 6. Adapter mode uses `AuraProtocolAdapter` with generated `execute_as` runners. VM mode uses `AuraChoreoEngine` + `AuraVmEffectHandler`. Guard evaluation runs before transport sends for each message in both modes.
+Projection extracts each role's local view from the global type. The local view specifies what messages the role sends and receives. Execution interprets the local view against the effect system.
 
-### 4.3 Extension effects and annotations
+Adapter mode uses `AuraProtocolAdapter` with generated runners. VM mode uses `AuraChoreoEngine` with effect handlers. Both modes enforce guards before each message send. See [MPST and Choreography](108_mpst_and_choreography.md) for projection rules and execution models.
 
-Annotations such as `guard_capability`, `flow_cost`, `journal_facts`, and `leak` are interpreted by extension effects. The guard chain combines these commands with runtime checks. This keeps policy declarative and uniform across protocols.
+### 6.3 Annotation effects
 
-## 5. Consensus Integration Architecture
+Annotations drive guard chain behavior. `guard_capability` specifies required Biscuit capabilities. `flow_cost` specifies budget charges. `journal_facts` specifies facts to commit. `leak` specifies leakage budget allocation.
 
-### 5.1 Single shot agreement model
+The guard chain interprets these annotations before each send. Annotation values are validated at compile time where possible. Runtime checks handle dynamic values.
 
-Aura Consensus produces `CommitFact` entries that are inserted into journals. `CommitFact` includes prestate hash, operation hash, participant set, threshold signature, and a `ProvenancedTime` timestamp. The protocol is scoped to a single operation and does not maintain a global log.
+## 7. Consensus and Agreement
 
-### 5.2 Fast path and fallback
+Aura Consensus provides single-shot agreement for non-monotone operations. It produces `CommitFact` entries that are inserted into journals. The protocol is scoped to individual operations.
 
-The fast path completes in one round trip when witnesses agree on prestate. The fallback path uses bounded gossip when witnesses disagree or initiators stall. Both paths yield the same `CommitFact` format.
+### 7.1 When consensus is needed
 
-### 5.3 Prestate binding
+Monotone operations use CRDT merge without consensus. Facts accumulate through join. Capabilities restrict through meet. These operations converge without coordination.
 
-`ConsensusId` is derived from prestate hash, operation hash, and a nonce. This binding prevents reusing signatures across unrelated operations. See [Consensus](106_consensus.md) for protocol details.
+Non-monotone operations require consensus. Examples include key rotation, membership changes, and authoritative state transitions. These operations cannot be safely executed with CRDT merge alone.
 
-## 6. 8 Layer Crate Architecture
+### 7.2 Operation categories
 
-### 6.1 Architectural layering
+Operations are classified into categories A, B, and C. Category A uses CRDTs with immediate local effect. Category B shows pending state until agreement. Category C blocks until consensus completes.
 
-Aura uses eight layers with no cyclic dependencies.
+```rust
+enum OperationCategory {
+    A, // CRDT, immediate
+    B, // Pending until agreement
+    C, // Blocking consensus
+}
+```
 
-- Layer 1 Foundation uses `aura-core` for effect traits, identifiers, and cryptography.
-- Layer 2 Specification uses domain crates plus `aura-macros` and `aura-mpst`.
-- `aura-mpst` re-exports Telltale choreography/runtime surfaces used by Aura crates.
-- Layer 3 Implementation uses `aura-effects` and `aura-composition`.
-- Layer 4 Orchestration uses `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, and `aura-anti-entropy`.
-- Layer 5 Feature uses crates such as `aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, and `aura-sync`.
-- Layer 6 Runtime uses `aura-agent`, `aura-app`, and `aura-simulator`.
-- Layer 7 Interface uses `aura-terminal` for CLI and TUI entry points.
-- Layer 8 Testing uses `aura-testkit`, `aura-quint`, and `aura-harness`.
+The category determines user experience and system behavior. See [Operation Categories](107_operation_categories.md) for classification rules and ceremony contracts.
 
-FROST primitives live in `aura-core::crypto::tree_signing`. The legacy `aura-frost` crate is removed from the workspace.
+### 7.3 Fast path and fallback
 
-### 6.2 Layer 2 invariants
+The fast path completes in one round trip when witnesses agree on prestate. Witnesses validate the operation, sign their shares, and return them to the initiator. The initiator aggregates shares into a threshold signature.
 
-Layer 2 defines semantics without runtime behavior.
+The fallback path activates when witnesses disagree or the initiator stalls. Bounded gossip propagates evidence until a quorum forms. Both paths yield the same `CommitFact` format.
 
-- No handler composition or OS access.
-- Domain facts are versioned and encoded with canonical DAG-CBOR.
-- Fact reducers register with `FactRegistry`.
-- Authorization uses typed operations and `ResourceScope` from `aura-core`.
+### 7.4 CommitFact and journal integration
 
-### 6.3 Code location decision framework
+`CommitFact` represents a consensus decision. It includes prestate hash, operation hash, participant set, threshold signature, and timestamp.
 
-The following guidance keeps logic in the correct layer.
+```rust
+pub struct CommitFact {
+    pub consensus_id: ConsensusId,
+    pub prestate: Hash32,
+    pub operation: Hash32,
+    pub participants: ParticipantSet,
+    pub signature: ThresholdSignature,
+    pub timestamp: ProvenancedTime,
+}
+```
 
-- Single party stateless operations belong in `aura-effects`.
-- Handler composition belongs in `aura-composition` or `aura-agent`.
-- Multi party coordination belongs in `aura-protocol` and its Layer 4 subcrates.
-- Domain specific logic belongs in domain crates.
+CommitFacts are inserted into the relevant journal namespace. Reducers process CommitFacts to update derived state. The signature proves that a threshold of participants agreed.
 
-### 6.4 Dependency management
+The `consensus_id` binds the decision to a specific prestate and operation. This binding prevents reusing signatures across unrelated operations. Prestate binding ensures that consensus decisions apply to the expected state. See [Consensus](106_consensus.md) for protocol details.
 
-Dependencies flow downward. `aura-core` depends on no other Aura crates. Domain crates depend only on `aura-core`. Higher layers depend on lower layers and do not reach upward.
+## 8. Transport and Networking
 
-## 7. Implementation Guidelines
+Transport abstractions provide secure channels between authorities. The system does not assume persistent connections. Messages may be relayed through multiple hops.
 
-### 7.1 Effect handler development
+### 8.1 SecureChannel abstraction
 
-New effect traits live in `aura-core`. Infrastructure handlers live in `aura-effects`. Domain handlers live in domain crates and compose lower level effects.
+`SecureChannel` provides encrypted, authenticated communication between two authorities. Channels use context-scoped keys derived through DKD. Channel state is not stored in journals.
 
-### 7.2 Protocol design patterns
+```rust
+trait SecureChannel {
+    async fn send(&self, msg: &[u8]) -> Result<()>;
+    async fn recv(&self) -> Result<Vec<u8>>;
+    fn peer(&self) -> AuthorityId;
+}
+```
 
-Use choreographies for multi party protocols. Express guard requirements through annotations and avoid manual guard calls. Keep context isolation by scoping all operations to `ContextId`.
+Channels are established through rendezvous or direct connection. The abstraction hides transport details from application code. See [Rendezvous Architecture](111_rendezvous.md) for channel establishment.
 
-### 7.3 Testing and simulation
+### 8.2 Rendezvous and peer discovery
 
-`aura-testkit` provides mock handlers with deterministic behavior. `aura-simulator` provides controlled time and failure injection. Both use the same effect traits as production.
+Rendezvous enables authorities to find each other without centralized directories. Rendezvous servers are untrusted relays that cannot read message content. Authorities publish encrypted envelopes that peers can retrieve.
 
-## 8. Database System
+The social topology provides routing hints. Home and neighborhood membership influences relay selection. Authorities prefer relays operated by trusted peers. Fallback uses public rendezvous servers when social relays are unavailable.
 
-### 8.1 Journal and query mapping
+Envelope encryption ensures that rendezvous servers learn nothing about message content or recipients. The sender encrypts to the recipient's public key. The server sees only opaque blobs with timing metadata. See [Social Architecture](114_social_architecture.md) for topology details.
 
-The journal is the database, and CRDT merge provides replication. Biscuit Datalog is used as the query engine. Journal reduction views act like tables.
+### 8.3 Asynchronous message patterns
 
-### 8.2 Query architecture
+AMP provides patterns for reliable asynchronous messaging. Messages may arrive out of order. Delivery may be delayed by offline peers. AMP handles acknowledgment, retry, and ordering.
 
-`AuraQuery` lives in `aura-effects` and wraps Biscuit authorizers. `QueryHandler` composes `JournalEffects`, `AuthorizationEffects`, and `ReactiveEffects`. Queries can inject an authority context and optional context facts.
+Channels support both synchronous request-response and asynchronous fire-and-forget patterns. The pattern choice depends on operation requirements. See [Asynchronous Message Patterns](110_amp.md) for implementation details.
 
-### 8.3 Indexing layer
+## 9. Crate Architecture
 
-`IndexedJournalEffects` defines indexed lookups, Bloom filters, and Merkle proof support. The production implementation is `IndexedJournalHandler` in `aura-agent`. `AuraEffectSystem` implements `IndexedJournalEffects` by delegating to this handler.
+Aura uses eight layers with strict dependency ordering. Dependencies flow downward. No crate imports from a higher layer.
 
-## 9. Social Topology
+```mermaid
+flowchart TB
+    L1[Layer 1: Foundation<br/>aura-core]
+    L2[Layer 2: Specification<br/>aura-journal, aura-authorization, aura-mpst]
+    L3[Layer 3: Implementation<br/>aura-effects, aura-composition]
+    L4[Layer 4: Orchestration<br/>aura-protocol, aura-guards, aura-consensus]
+    L5[Layer 5: Feature<br/>aura-chat, aura-recovery, aura-social]
+    L6[Layer 6: Runtime<br/>aura-agent, aura-app, aura-simulator]
+    L7[Layer 7: Interface<br/>aura-terminal]
+    L8[Layer 8: Testing<br/>aura-testkit, aura-harness]
 
-Social topology models messages, homes, and neighborhoods and is defined in [Social Architecture](114_social_architecture.md). The app layer includes `HomeFlowBudget` constants for storage limits such as 10 MB per home, 200 KB per resident, and 1 MB per neighborhood. Moderation facts live in `aura-social` and are stored as relational facts.
+    L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
+    L8 -.-> L1 & L2 & L3 & L4 & L5 & L6
+```
 
-## 10. Terminal User Interface
+This diagram shows dependency flow. Testing crates can depend on any layer for test support.
 
-### 10.1 Architecture principles
+### 9.1 Layer descriptions
 
-`aura-terminal` provides CLI and TUI entry points. It uses `aura-app` for portable workflows and `aura-agent` for runtime effects. The TUI dispatches commands asynchronously and renders state derived from signals and views.
+Layer 1 (Foundation) contains `aura-core` with effect traits, identifiers, cryptographic utilities, and error types. All other crates depend on `aura-core`.
 
-### 10.2 Reactive system
+Layer 2 (Specification) contains domain crates that define semantics without runtime behavior. These include `aura-journal`, `aura-authorization`, `aura-signature`, `aura-store`, `aura-transport`, `aura-mpst`, and `aura-macros`.
 
-`ReactiveScheduler` in `aura-agent` batches journal fact processing with a default 5 ms window. It updates signal views that emit state into signals defined in `aura-app`. Dynamic values in `aura-agent` use a broadcast channel and an async `RwLock` to notify subscribers.
+Layer 3 (Implementation) contains `aura-effects` with production handlers and `aura-composition` with handler composition infrastructure.
 
-### 10.3 Effect bridge
+Layer 4 (Orchestration) contains `aura-protocol`, `aura-guards`, `aura-consensus`, `aura-amp`, and `aura-anti-entropy`. These crates coordinate multi-party operations.
 
-The TUI uses bridge modules in `aura-app` to forward state to UI observers. Demo commands are compiled only with the development feature flag. Demo mode uses the simulator to run automated peers while the user controls the local agent.
+Layer 5 (Feature) contains end-to-end protocol crates. These include `aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, and `aura-sync`.
 
-## 11. Operation Categories
+Layer 6 (Runtime) contains `aura-agent` for effect system assembly, `aura-app` for portable application logic, and `aura-simulator` for deterministic simulation.
 
-Aura classifies operations into categories A, B, and C to decide when consensus is required. Category A uses CRDTs with immediate local effect, Category B shows pending state until agreement, and Category C blocks until consensus completes. Agreement modes are orthogonal to these categories and are defined in [Operation Categories](107_operation_categories.md).
+Layer 7 (Interface) contains `aura-terminal` for CLI and TUI entry points.
+
+Layer 8 (Testing) contains `aura-testkit`, `aura-quint`, and `aura-harness` for test infrastructure.
+
+### 9.2 Layer invariants
+
+Layer 2 crates define semantics without runtime behavior. They contain no handler composition or OS access. Domain facts are versioned and encoded with canonical DAG-CBOR. Fact reducers register with `FactRegistry`.
+
+Layer 5 crates include `OPERATION_CATEGORIES` mapping operations to A/B/C classes. Each crate exposes fact types and services. Runtime-owned caches live in Layer 6 handlers.
+
+### 9.3 Code location guidance
+
+Single-party stateless operations belong in `aura-effects`. Handler composition belongs in `aura-composition` or `aura-agent`. Multi-party coordination belongs in Layer 4 crates. Domain-specific logic belongs in domain crates.
+
+Effect traits are defined only in `aura-core`. Infrastructure handlers live in `aura-effects`. Mock handlers live in `aura-testkit`. This separation keeps the dependency graph clean.
+
+See [Project Structure](999_project_structure.md) for the complete crate breakdown and dependency graph.
+
+## 10. Security Model
+
+Aura's security model eliminates single points of trust. No central server holds keys or can read messages. Trust is distributed across devices and social relationships.
+
+### 10.1 Threshold cryptography
+
+Account authorities use threshold signatures. Key operations require a threshold of devices to participate. Compromising fewer than the threshold reveals nothing about the key.
+
+FROST provides the threshold signature scheme. DKG distributes key shares without a trusted dealer. Key rotation and resharing maintain security as devices join or leave.
+
+The threshold is configurable per authority. A 2-of-3 threshold balances security and availability for typical users. Higher thresholds provide stronger security at the cost of requiring more devices to be online.
+
+### 10.2 Capability-based authorization
+
+Authorization uses Biscuit tokens with cryptographic attenuation. Capabilities can only be restricted, never expanded. Delegation chains are verifiable without contacting the issuer.
+
+The guard chain enforces capabilities at runtime. Biscuit Datalog queries check predicates against facts. See [Authorization](104_authorization.md) for token structure and evaluation.
+
+### 10.3 Context isolation
+
+Contexts provide information flow boundaries. Keys are derived per-context. Facts are scoped to namespaces. Cross-context flow requires explicit bridge protocols.
+
+Leakage tracking monitors information flow to observer classes. Operations that exceed privacy budgets are blocked. See [Privacy and Information Flow](003_information_flow_contract.md) for the leakage model.
+
+## 11. Reactive State Management
+
+The system uses reactive signals for state propagation. Journal changes trigger signal updates. UI components subscribe to signals. This pattern decouples state producers from consumers.
+
+### 11.1 Signal architecture
+
+`ReactiveEffects` defines the signal interface. `ReactiveHandler` implements batched processing with configurable windows. Signals carry typed state that observers can query.
+
+```rust
+trait ReactiveEffects {
+    async fn emit<T: Signal>(&self, signal: T);
+    async fn subscribe<T: Signal>(&self) -> Receiver<T>;
+}
+```
+
+Signal emission is non-blocking. Handlers batch rapid updates to reduce overhead. Subscribers receive the latest state when they poll.
+
+### 11.2 Journal to UI flow
+
+Journal fact changes flow through reducers to signals. Reducers compute derived state from facts. Signals expose that state to UI observers. The flow is unidirectional and predictable.
+
+The `aura-app` crate defines application signals. The `aura-terminal` crate consumes these signals for rendering. This separation keeps UI concerns out of core logic.
+
+## 12. Error Handling
+
+Errors are unified through the `AuraError` type in `aura-core`. Domain crates define specific error variants. Effects propagate errors through `Result` types.
+
+### 11.1 Error classification
+
+Errors are classified by recoverability. Transient errors may succeed on retry. Permanent errors indicate invalid operations. System errors indicate infrastructure failures.
+
+```rust
+pub enum ErrorKind {
+    Transient,  // Retry may succeed
+    Permanent,  // Invalid operation
+    System,     // Infrastructure failure
+}
+```
+
+Error classification guides retry behavior and user feedback. Transient errors trigger automatic retry with backoff. Permanent errors are reported to the user. System errors may require recovery procedures.
+
+### 11.2 Error propagation
+
+Effects propagate errors through `Result` types. Handlers convert low-level errors to domain errors. The error chain preserves context for debugging. Logging captures error details without exposing sensitive data.
+
+```rust
+async fn operation<E: JournalEffects>(effects: &E) -> Result<(), AuraError> {
+    effects.merge_facts(facts)
+        .await
+        .map_err(|e| AuraError::journal(e, "merge failed"))?;
+    Ok(())
+}
+```
+
+Error context includes the operation name and relevant identifiers. Stack traces are available in debug builds. Production builds log structured error data for monitoring.
+
+### 11.3 Consensus and recovery
+
+Consensus failures have specific handling. Fast path failures fall back to gossip. Network partitions delay but do not corrupt state. Recovery procedures restore operation after failures.
+
+The journal provides durability. Uncommitted facts are replayed after restart. Committed facts are immutable. This design simplifies recovery logic.
+
+Device recovery uses guardian protocols. Guardians hold encrypted recovery shares. A threshold of guardians can restore account access. See [Relational Contexts](112_relational_contexts.md) for recovery patterns.
 
 ## Related Documents
 
+**Foundation**
+
 - [Project Overview](000_project_overview.md)
 - [Theoretical Model](002_theoretical_model.md)
+- [Privacy and Information Flow](003_information_flow_contract.md)
+- [Distributed Systems Contract](004_distributed_systems_contract.md)
+- [System Invariants](005_system_invariants.md)
+
+**Core Systems**
+
+- [Cryptographic Architecture](100_crypto.md)
+- [Identifiers and Boundaries](101_identifiers_and_boundaries.md)
 - [Authority and Identity](102_authority_and_identity.md)
 - [Journal](103_journal.md)
-- [Relational Contexts](112_relational_contexts.md)
-- [Privacy and Information Flow](003_information_flow_contract.md)
-- [Transport and Information Flow](109_transport_and_information_flow.md)
 - [Authorization](104_authorization.md)
-- [Multi-party Session Types and Choreography](108_mpst_and_choreography.md)
 - [Effect System and Runtime](105_effect_system_and_runtime.md)
 - [Consensus](106_consensus.md)
+- [Operation Categories](107_operation_categories.md)
+- [MPST and Choreography](108_mpst_and_choreography.md)
+- [Transport and Information Flow](109_transport_and_information_flow.md)
+- [Asynchronous Message Patterns](110_amp.md)
+- [Rendezvous Architecture](111_rendezvous.md)
+- [Relational Contexts](112_relational_contexts.md)
 - [Database Architecture](113_database.md)
 - [Social Architecture](114_social_architecture.md)
+- [Maintenance](115_maintenance.md)
 - [CLI and Terminal User Interface](116_cli_tui.md)
-- [Operation Categories](107_operation_categories.md)
-- [Aura Crate Structure and Dependency Graph](999_project_structure.md)
-- [Coordination Systems Guide](803_coordination_guide.md)
-- [Development Patterns and Workflows](805_development_patterns_guide.md)
+
+**Guides**
+
+- [Coordination Guide](803_coordination_guide.md)
+- [Development Patterns](805_development_patterns_guide.md)
 - [Testing Guide](805_testing_guide.md)
-- [Distributed Systems Contract](004_distributed_systems_contract.md)
-- [Aura System Invariants](005_system_invariants.md)
+- [Project Structure](999_project_structure.md)
