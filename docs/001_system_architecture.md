@@ -178,23 +178,18 @@ Effect traits define async capabilities with explicit context. Handlers implemen
 ```mermaid
 flowchart TB
     subgraph L3["Composite"]
-        TRE[TreeEffects]
-        CHE[ChoreographyExt]
+        direction LR
+        TRE[TreeEffects] ~~~ CHE[ChoreographyExt]
     end
 
     subgraph L2["Application"]
-        JE[JournalEffects]
-        AE[AuthorizationEffects]
-        FE[FlowBudgetEffects]
-        LE[LeakageEffects]
+        direction LR
+        JE[JournalEffects] ~~~ AE[AuthorizationEffects] ~~~ FE[FlowBudgetEffects] ~~~ LE[LeakageEffects]
     end
 
     subgraph L1["Infrastructure"]
-        CE[CryptoEffects]
-        NE[NetworkEffects]
-        SE[StorageEffects]
-        TE[TimeEffects]
-        RE[RandomEffects]
+        direction LR
+        CE[CryptoEffects] ~~~ NE[NetworkEffects] ~~~ SE[StorageEffects] ~~~ TE[TimeEffects] ~~~ RE[RandomEffects]
     end
 
     L1 --> L2 --> L3
