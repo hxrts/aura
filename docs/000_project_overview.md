@@ -30,7 +30,7 @@ The documents below cover theory, technical components, implementation guidance,
 
 [System Architecture](001_system_architecture.md) describes the 8-layer architecture, effect patterns, and choreographic protocol structure.
 
-[Privacy and Information Flow](003_information_flow_contract.md) specifies consent-based privacy with trust boundaries, flow budgets, and leakage tracking.
+[Privacy and Information Flow Contract](003_information_flow_contract.md) specifies consent-based privacy with trust boundaries, flow budgets, and leakage tracking.
 
 [Distributed Systems Contract](004_distributed_systems_contract.md) defines safety and liveness guarantees, synchrony assumptions, and adversarial tolerance.
 
@@ -38,13 +38,13 @@ The documents below cover theory, technical components, implementation guidance,
 
 ### 2. Core Systems
 
-[Cryptographic Architecture](100_crypto.md) documents primitives, key derivation, threshold signatures, and VSS schemes.
+[Cryptography](100_crypto.md) documents primitives, key derivation, threshold signatures, and VSS schemes.
 
 [Identifiers and Boundaries](101_identifiers_and_boundaries.md) defines the identifier types and their privacy-preserving properties.
 
 [Authority and Identity](102_authority_and_identity.md) describes opaque authorities, commitment trees, and relational context structure.
 
-[Journal System](103_journal.md) specifies fact-based journals, validation rules, and deterministic reduction flows.
+[Journal](103_journal.md) specifies fact-based journals, validation rules, and deterministic reduction flows.
 
 [Authorization](104_authorization.md) covers capability semantics, Biscuit token integration, and guard chain authorization.
 
@@ -58,7 +58,7 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Transport and Information Flow](109_transport_and_information_flow.md) specifies guard chain enforcement, secure channels, and flow receipts.
 
-[Asynchronous Message Patterns](110_amp.md) documents reliable async messaging with acknowledgment and ordering patterns.
+[Aura Messaging Protocol (AMP)](110_amp.md) documents reliable async messaging with acknowledgment and ordering patterns.
 
 [Rendezvous Architecture](111_rendezvous.md) covers context-scoped peer discovery and encrypted envelope exchange.
 
@@ -68,7 +68,7 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Social Architecture](114_social_architecture.md) describes the three-tier model of messages, homes, and neighborhoods.
 
-[Maintenance](115_maintenance.md) covers snapshots, garbage collection, and distributed system evolution.
+[Distributed Maintenance Architecture](115_maintenance.md) covers snapshots, garbage collection, and system evolution.
 
 [CLI and Terminal User Interface](116_cli_tui.md) specifies command-line and TUI interfaces for Aura operations.
 
@@ -82,19 +82,19 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to the codebase.
 
-[Coordination Guide](803_coordination_guide.md) explains choreographic protocol design and implementation patterns.
+[Coordination Systems Guide](803_coordination_guide.md) explains choreographic protocol design and implementation patterns.
 
-[Advanced Coordination Guide](804_advanced_coordination_guide.md) covers complex coordination techniques including nested protocols and recovery.
+[Advanced Choreography Guide](804_advanced_coordination_guide.md) covers complex coordination techniques including nested protocols and recovery.
 
-[Development Patterns Guide](805_development_patterns_guide.md) describes code organization, time domains, and common implementation workflows.
+[Development Patterns and Workflows](805_development_patterns_guide.md) describes code organization, time domains, and common workflows.
 
 [Testing Guide](805_testing_guide.md) covers test patterns, fixtures, and effect-based testing strategies.
 
 [Simulation Guide](806_simulation_guide.md) explains deterministic simulation for debugging and property verification.
 
-[Verification Guide](807_verification_guide.md) documents Quint model checking and Lean proof workflows.
+[Verification and MBT Guide](807_verification_guide.md) documents Quint model checking and Lean proof workflows.
 
-[Maintenance Guide](808_maintenance_guide.md) covers operational concerns including snapshots and system evolution.
+[Maintenance and OTA Guide](808_maintenance_guide.md) covers operational concerns including snapshots and system evolution.
 
 [Reactive Signals Guide](810_reactive_signals_guide.md) describes reactive state propagation patterns for UI integration.
 
