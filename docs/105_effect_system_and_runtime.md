@@ -494,7 +494,7 @@ pub enum EffectCommand {
         context: ContextId,
         authority: AuthorityId,
         peer: AuthorityId,
-        amount: u32
+        amount: FlowCost,
     },
     AppendJournal { entry: JournalEntry },
     RecordLeakage { bits: u32 },
