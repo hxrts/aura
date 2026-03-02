@@ -101,7 +101,7 @@ Leakage tuple order: $`(\ell_{\text{rel}}, \ell_{\text{grp}}, \ell_{\text{ngh}},
 |--------|-------|-------------|
 | $`\delta`$ | CRDT/state | Local state deltas (NOT network delay) |
 | $`\Delta_{\text{net}}`$ | Network | Network delay bounds under partial synchrony |
-| $`\text{GST}`$ | Timing | Global Stabilization Time |
+| `GST` | Timing | Global Stabilization Time |
 
 ### Invariant Naming
 
@@ -233,7 +233,7 @@ $$
 \text{headroom}(\kappa, \text{cost}, F, C) \triangleq \text{spent}_\kappa(F) + \text{cost} \leq \text{limit}_\kappa(\text{policy} \sqcap C)
 $$
 
-Implementations realize this by merging a $`\text{FlowBudget}`$ charge fact before $`\text{send}`$ (see §2.3 and §5.3) while evaluating Biscuit caveats inside the guard chain. The side condition is enforced by the same monotone laws as other effects even though capability data itself is not stored in the CRDT.
+Implementations realize this by merging a `FlowBudget` charge fact before `send` (see §2.3 and §5.3) while evaluating Biscuit caveats inside the guard chain. The side condition is enforced by the same monotone laws as other effects even though capability data itself is not stored in the CRDT.
 
 ### 1.4 Algebraic Laws (Invariants)
 
@@ -332,13 +332,13 @@ These effect signatures define the interface between protocols and the runtime. 
 Every observable side effect is mediated by a guard chain fully described in [Authorization](104_authorization.md):
 
 1. CapGuard: $`\text{need}(\sigma) \leq \text{Caps}(\text{ctx})`$
-2. FlowGuard: $`\text{headroom}(\text{ctx}, \text{cost})`$ where $`\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})`$ succeeds and yields a $`\text{Receipt}`$
+2. FlowGuard: `headroom(ctx, cost)` where `charge(ctx, peer, cost, epoch)` succeeds and yields a `Receipt`
 3. JournalCoupler: commit of attested facts is atomic with the send
 
 Named invariants used across documents:
 - Charge-Before-Send: FlowGuard must succeed before any transport send.
 - No-Observable-Without-Charge: there is no $`\text{send}(\text{ctx}, \text{peer}, \ldots)`$ event without a preceding successful $`\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})`$.
-- Deterministic-Replenishment: $`\text{limit}(\text{ctx})`$ is computed deterministically from capability evaluation. The value $`\text{spent}`$ (stored as journal facts) is join-monotone. Epochs gate resets.
+- Deterministic-Replenishment: `limit(ctx)` is computed deterministically from capability evaluation. The value `spent` (stored as journal facts) is join-monotone. Epochs gate resets.
 
 ```lean
 -- Time & randomness for simulation/proofs
@@ -460,7 +460,7 @@ Conventions:
 - $`r \triangleright \{ \ell_i : G_i \}`$ means "role $`r`$ decides which branch $`\ell_i`$ to take, affecting all participants."
 - $`\mu X.\ G`$ binds recursion variable $`X`$ in $`G`$.
 
-Note on $`\Delta`$: the journal delta may include budget-charge updates (incrementing $`\text{spent}`$ for the active epoch) and receipt acknowledgments. Projection ensures these updates occur before any transport effect so "no observable without charge" holds operationally.
+Note on $`\Delta`$: the journal delta may include budget-charge updates (incrementing `spent` for the active epoch) and receipt acknowledgments. Projection ensures these updates occur before any transport effect so "no observable without charge" holds operationally.
 
 Note on $`\Gamma`$: `check_caps` and `refine_caps` are implemented via `AuthorizationEffects`. Sends verify Biscuit chains (with optional cached evaluations) before touching transport. Receives cache new tokens by refining the local capability frontier. Neither operation mutates the journal. All capability semantics stay outside the CRDT.
 
@@ -615,7 +615,7 @@ Generators:
 - $\text{Rec}(X, G)$ and $\text{Var}(X)$
 - $\text{End}$
 
-Taken together, these moves form a "free algebra": the language carries just enough structure to compose protocols, but no extra operational behavior. The effect runtime is the target algebra that gives these moves concrete meaning.
+Taken together, these moves form a free algebra: the language carries just enough structure to compose protocols, but no extra operational behavior. The effect runtime is the target algebra that gives these moves concrete meaning.
 
 Projection (from a global protocol to each role) followed by interpretation (running it against the effect runtime) yields one canonical way to execute any choreography.
 
@@ -625,14 +625,14 @@ The system treats computation and communication symmetrically. A step is the sam
 
 ### 3.8 Algebraic Effects and the Interpreter
 
-Aura treats protocol execution as interpretation over an algebraic effect interface. After projecting a global choreography to each role, a polymorphic interpreter walks the role's AST and dispatches each operation to `AuraEffectSystem` via explicit effect handlers. The core actions are exactly the ones defined by the calculus and effect signatures in this document: $`\text{merge}`$ (facts grow by $`\sqcup`$), $`\text{refine}`$ (caps shrink by $`\sqcap`$), $`\text{send}/\text{recv}`$ (context-scoped communication), and leakage/budget metering. The interpreter enforces the lattice laws and guard predicates while executing these actions in the order dictated by the session type.
+Aura treats protocol execution as interpretation over an algebraic effect interface. After projecting a global choreography to each role, a polymorphic interpreter walks the role's AST and dispatches each operation to `AuraEffectSystem` via explicit effect handlers. The core actions are exactly the ones defined by the calculus and effect signatures in this document: `merge` (facts grow by $`\sqcup`$), `refine` (caps shrink by $`\sqcap`$), `send`/`recv` (context-scoped communication), and leakage/budget metering. The interpreter enforces the lattice laws and guard predicates while executing these actions in the order dictated by the session type.
 
 Because the interface is algebraic, there is a single semantics regardless of execution strategy. This enables two interchangeable modes:
 
 - Static compilation: choreographies lower to direct effect calls with zero runtime overhead.
 - Dynamic interpretation: choreographies execute through the runtime interpreter for flexibility and tooling.
 
-Both preserve the same program structure and checks. The choice becomes an implementation detail. This also captures the computation/communication symmetry. A choreographic step describes a typed transform. If the sender and receiver are the same role, projection collapses the step to a local effect invocation. If they differ, the interpreter performs a network send/receive with the same surrounding $`\text{merge}/\text{check\_caps}/\text{refine}/\text{record\_leak}`$ sequence. Protocol authors reason about transforms. The interpreter decides locality at projection time.
+Both preserve the same program structure and checks. The choice becomes an implementation detail. This also captures the computation/communication symmetry. A choreographic step describes a typed transform. If the sender and receiver are the same role, projection collapses the step to a local effect invocation. If they differ, the interpreter performs a network send/receive with the same surrounding `merge`/`check_caps`/`refine`/`record_leak` sequence. Protocol authors reason about transforms. The interpreter decides locality at projection time.
 
 ## 4. CRDT Semantic Foundations
 
@@ -790,7 +790,7 @@ The unified information-flow budget regulates emission rate/volume and observabl
 
 1. Charge-Before-Send: A send or forward is permitted only if a budget charge succeeds first. If charging fails, the step blocks locally and emits no network observable.
 2. No-Observable-Without-Charge: For any trace $`\tau`$, there is no event labeled $`\text{send}(\kappa, p, \ldots)`$ without a preceding successful charge for $`(\kappa, p)`$ in the same epoch.
-3. Receipt soundness: A relay accepts a packet only with a valid per-hop $`\text{Receipt}`$ (context-scoped, epoch-bound, signed) and sufficient local headroom. Otherwise it drops locally.
+3. Receipt soundness: A relay accepts a packet only with a valid per-hop `Receipt` (context-scoped, epoch-bound, signed) and sufficient local headroom. Otherwise it drops locally.
 4. Deterministic limit computation: $`\text{limit}_\kappa`$ is computed deterministically from Biscuit tokens and local policy via meet operations. $`\text{spent}_\kappa`$ is stored as journal facts and is join-monotone. Upon epoch rotation, $`\text{spent}_\kappa`$ resets through new epoch facts.
 5. Context scope: Budget facts and receipts are scoped to $`\kappa`$. They neither leak nor apply across distinct contexts (non-interference).
 6. Composition with caps: A transport effect requires both $`\text{need}(m) \leq C`$ and $`\text{headroom}(\kappa, \text{cost}, F, C)`$ (see §1.3). Either guard failing blocks the effect.
@@ -823,7 +823,7 @@ Under this calculus, we can make the following interpretation:
 
 ### The Semilattice Layer
 
-The join-semilattice (Facts) captures evidence and observations (trust and information flow). Examples: delegations/attestations, quorum proofs, ceremony transcripts, flow receipts, and monotone $`\text{spent}`$ counters.
+The join-semilattice (Facts) captures evidence and observations (trust and information flow). Examples: delegations/attestations, quorum proofs, ceremony transcripts, flow receipts, and monotone `spent` counters.
 
 The meet-semilattice (Capabilities) captures enforcement limits and constraints (trust and information flow). Examples: the sovereign policy lattice, Biscuit token caveats, leak bounds, and consent gates. See [Authorization](104_authorization.md) for implementation details. Flow budget limits are derived from capability evaluation, not stored as facts. This lattice is evaluated locally rather than stored in the journal, but it obeys the same algebra.
 
@@ -843,7 +843,7 @@ This layer guarantees *communication safety* and *progress*. It projects global 
 
 ### The Effect Handler Layer
 
-The Effect Handler system provides *operational semantics and composability*. It realizes $`\text{merge}/\text{refine}/\text{send}/\text{recv}`$ as algebraic effects, enforces lattice monotonicity ($`\sqcup`$ facts, $`\sqcap`$ caps), guard predicates, and budget/leakage metering, and composes via explicit dependency injection across crypto, storage, and transport layers.
+The Effect Handler system provides *operational semantics and composability*. It realizes `merge`/`refine`/`send`/`recv` as algebraic effects, enforces lattice monotonicity ($`\sqcup`$ facts, $`\sqcap`$ caps), guard predicates, and budget/leakage metering, and composes via explicit dependency injection across crypto, storage, and transport layers.
 
 ### The Privacy Contract
 
