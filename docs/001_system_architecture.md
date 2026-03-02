@@ -69,22 +69,29 @@ Capabilities represent authority that restricts over time. The system evaluates 
 An authority is an opaque cryptographic actor. External parties see only public keys and signed facts. Internal device structure is hidden. This abstraction provides unlinkability across contexts.
 
 ```mermaid
-flowchart TB
-    subgraph Authority
-        CT[Commitment Tree]
-        CT --> D1[Device 1]
-        CT --> D2[Device 2]
-        CT --> D3[Device 3]
+flowchart LR
+    subgraph External View
+        PK[Threshold Public Key]
     end
 
-    D1 --> K1[Signing Key]
-    D2 --> K2[Signing Key]
-    D3 --> K3[Signing Key]
+    subgraph Authority [Internal Structure]
+        direction TB
+        CT[Commitment Tree]
+        subgraph Devices
+            direction LR
+            D1[Device 1<br/>Share 1]
+            D2[Device 2<br/>Share 2]
+            D3[Device 3<br/>Share 3]
+        end
+        CT --> Devices
+    end
 
-    Authority --> TK[Threshold Key]
+    Devices -.->|2-of-3 signing| PK
+
+    style Authority fill:transparent,stroke:#888,stroke-dasharray: 5 5
 ```
 
-This diagram shows account authority structure. The commitment tree tracks device membership. Each device holds a signing key. The threshold key requires multiple devices to sign.
+This diagram shows authority structure. Externally, observers see only the threshold public key. Internally, the commitment tree tracks device membership. Each device holds a key share. Threshold signing combines shares without exposing internal structure.
 
 ### 2.1 Account authorities
 
