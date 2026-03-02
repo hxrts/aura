@@ -33,14 +33,15 @@ This handler provides deterministic time control.
 
 ```rust
 use aura_simulator::handlers::SimulationTimeHandler;
+use aura_core::effects::PhysicalTimeEffects;
 use std::time::Duration;
 
-let time = SimulationTimeHandler::new();
-time.advance(Duration::from_secs(10));
-let now = time.current_timestamp().await?;
+let mut time = SimulationTimeHandler::new();
+time.jump_to_time(Duration::from_secs(10));
+let now = time.physical_time().await?;
 ```
 
-Time starts at zero and advances only through explicit calls. The `sleep_ms` method returns immediately after advancing simulated time. This enables testing timeout behavior without wall-clock delays.
+Time starts at zero and advances only through explicit `jump_to_time` calls or `sleep_ms` invocations. The `sleep_ms` method returns immediately after advancing simulated time by the scaled duration. This enables testing timeout behavior without wall-clock delays. Use `set_acceleration` to adjust time scaling.
 
 ### SimulationFaultHandler
 
@@ -48,19 +49,27 @@ This handler injects faults into protocol execution.
 
 ```rust
 use aura_simulator::handlers::SimulationFaultHandler;
-use aura_simulator::middleware::FaultType;
+use aura_core::{AuraFault, AuraFaultKind, FaultEdge};
+use std::time::Duration;
 
-let mut faults = SimulationFaultHandler::new();
-faults.inject_fault(FaultType::NetworkDelay {
-    min_ms: 100,
-    max_ms: 500,
-});
-faults.inject_fault(FaultType::PacketDrop {
-    probability: 0.1,
-});
+let faults = SimulationFaultHandler::new(42); // seed for determinism
+
+// Inject a message delay fault
+let delay_fault = AuraFault {
+    fault: AuraFaultKind::MessageDelay { delay_ms: 200 },
+    edge: FaultEdge::new("*", "*"),
+};
+faults.inject_fault(delay_fault, Some(Duration::from_secs(60)))?;
+
+// Inject a message drop fault
+let drop_fault = AuraFault {
+    fault: AuraFaultKind::MessageDrop { probability: 0.1 },
+    edge: FaultEdge::new("*", "*"),
+};
+faults.inject_fault(drop_fault, None)?; // permanent
 ```
 
-Fault types include network delays, packet drops, message corruption, and Byzantine behavior. Faults apply probabilistically based on configuration.
+Fault types include `MessageDelay`, `MessageDrop`, `MessageCorruption`, `NodeCrash`, `NetworkPartition`, `FlowBudgetExhaustion`, and `JournalCorruption`. Faults can be temporary (with duration) or permanent. The handler implements `ChaosEffects` for async fault injection.
 
 ### SimulationScenarioHandler
 
@@ -171,29 +180,28 @@ assert!(result.all_properties_passed());
 
 Execution proceeds phase by phase. Failures stop execution and report the failing action.
 
-## Middleware System
+## Configuration System
 
-The middleware system intercepts effect calls for monitoring and modification.
+The simulator uses configuration types from `aura_simulator::types`.
 
-### SimulatorMiddleware
+### SimulatorConfig
 
 ```rust
-use aura_simulator::middleware::{SimulatorMiddleware, SimulatorConfig, NetworkConfig};
+use aura_simulator::types::{SimulatorConfig, NetworkConfig};
+use aura_core::DeviceId;
 
 let config = SimulatorConfig {
-    device_id: DeviceId::new_from_entropy([1u8; 32]),
-    network: NetworkConfig {
-        latency_ms: (10, 100),
+    seed: 42,
+    deterministic: true,
+    time_scale: 1.0,
+    network: Some(NetworkConfig {
+        latency: std::time::Duration::from_millis(50),
         packet_loss_rate: 0.02,
-        bandwidth_limit: Some(1_000_000),
-    },
-    enable_fault_injection: true,
-    deterministic_time: true,
+        bandwidth_bps: Some(1_000_000),
+    }),
+    ..Default::default()
 };
-let middleware = SimulatorMiddleware::new(config)?;
 ```
-
-Middleware wraps effect handlers to inject delays, drop messages, and record metrics.
 
 ### NetworkConfig
 
@@ -201,23 +209,27 @@ Network configuration controls simulated network conditions.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `latency_ms` | `(u64, u64)` | Min and max latency range |
+| `latency` | `Duration` | Base network latency |
 | `packet_loss_rate` | `f64` | Probability of dropping messages |
-| `bandwidth_limit` | `Option<u64>` | Bytes per second limit |
-| `partition_groups` | `Vec<Vec<DeviceId>>` | Network partition configuration |
+| `bandwidth_bps` | `Option<u64>` | Bytes per second limit |
 
-### PerformanceMetrics
+### SimulatorContext
 
-Middleware collects execution metrics.
+The `SimulatorContext` tracks execution state during simulation runs.
 
 ```rust
-let metrics = middleware.get_metrics();
-println!("Messages: {}", metrics.messages_sent);
-println!("Faults: {}", metrics.faults_injected);
-println!("Duration: {:?}", metrics.simulation_duration);
+use aura_simulator::types::SimulatorContext;
+
+let context = SimulatorContext::new("scenario_id".into(), "run_123".into())
+    .with_seed(42)
+    .with_participants(3, 2)
+    .with_debug(true);
+
+println!("Tick: {}", context.tick);
+println!("Timestamp: {:?}", context.timestamp);
 ```
 
-Metrics help identify performance issues and verify fault injection behavior.
+The context advances through `advance_tick` and `advance_time` methods.
 
 ## Async Host Boundary
 
