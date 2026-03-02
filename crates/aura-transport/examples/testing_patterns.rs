@@ -38,7 +38,7 @@ fn main() {
 /// Example 1: Basic envelope testing
 /// Shows how to test envelope creation and privacy properties
 fn envelope_testing_patterns() {
-    println!("🧪 Example 1: Envelope Testing Patterns\n");
+    println!("Example 1: Envelope Testing Patterns\n");
 
     let test_message = b"Test message for privacy verification".to_vec();
     let context_id = ContextId::new_from_entropy([1u8; 32]);
@@ -92,7 +92,7 @@ fn envelope_testing_patterns() {
 /// Example 2: Configuration validation testing
 /// Shows how to test transport configuration validation
 fn configuration_validation_testing() {
-    println!("⚙️ Example 2: Configuration Validation Testing\n");
+    println!("Example 2: Configuration Validation Testing\n");
 
     // Test default configuration
     let default_config = TransportConfig::default();
@@ -147,7 +147,7 @@ fn configuration_validation_testing() {
 /// Example 3: Peer selection testing
 /// Shows how to test privacy-preserving peer selection
 fn peer_selection_testing() {
-    println!("👥 Example 3: Peer Selection Testing\n");
+    println!("Example 3: Peer Selection Testing\n");
 
     // Create test peers
     let mut peers = Vec::new();
@@ -207,7 +207,7 @@ fn peer_selection_testing() {
 /// Example 4: Protocol message testing
 /// Shows how to test protocol message creation and properties
 fn protocol_message_testing() {
-    println!("📡 Example 4: Protocol Message Testing\n");
+    println!("Example 4: Protocol Message Testing\n");
 
     // Test STUN message creation
     let _stun_message = StunMessage::binding_request();
@@ -239,7 +239,7 @@ fn protocol_message_testing() {
 /// Example 5: Integration testing patterns
 /// Shows how to test transport components integration
 fn integration_testing_patterns() {
-    println!("🔧 Example 5: Integration Testing Patterns\n");
+    println!("Example 5: Integration Testing Patterns\n");
 
     // Test connection ID generation
     let connection_id = ConnectionId::new();
@@ -279,6 +279,6 @@ fn integration_testing_patterns() {
     ));
     println!("End-to-end envelope integration test passed");
 
-    println!("\n🎉 All integration tests passed!");
+    println!("\nAll integration tests passed!");
     println!("Transport layer components work together correctly");
 }

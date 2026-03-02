@@ -37,7 +37,7 @@ fn main() {
 /// Example 1: Privacy-aware envelope creation
 /// Shows how privacy is integrated into the core Envelope type
 fn privacy_aware_envelope_example() {
-    println!("📧 Example 1: Privacy-Aware Envelope Creation\n");
+    println!("Example 1: Privacy-Aware Envelope Creation\n");
 
     let context_id = ContextId::new_from_entropy([1u8; 32]);
     let message = b"Hello, private world!".to_vec();
@@ -74,7 +74,7 @@ fn privacy_aware_envelope_example() {
 /// Example 2: Transport configuration with privacy levels
 /// Shows how privacy levels are integrated into transport configuration
 fn transport_configuration_example() {
-    println!("⚙️  Example 2: Transport Configuration with Privacy Levels\n");
+    println!("Example 2: Transport Configuration with Privacy Levels\n");
 
     // Maximum privacy configuration - context scoped
     let max_privacy_config = TransportConfig {
@@ -123,14 +123,14 @@ fn transport_configuration_example() {
 
     println!("\nClear Config (Testing Only):");
     println!("  Privacy Level: {:?}", clear_config.privacy_level);
-    println!("  ⚠️  Only for testing - no privacy protection");
+    println!("  ⚠  Only for testing - no privacy protection");
     println!("Privacy levels are explicit and built into configuration\n");
 }
 
 /// Example 3: Privacy-preserving peer selection
 /// Shows how peer discovery and selection preserve privacy by default
 fn peer_selection_example() {
-    println!("👥 Example 3: Privacy-Preserving Peer Selection\n");
+    println!("Example 3: Privacy-Preserving Peer Selection\n");
 
     // Create some sample peers with privacy-aware information
     let mut peers = Vec::new();
@@ -177,7 +177,7 @@ fn peer_selection_example() {
 /// Example 4: Context-scoped connections
 /// Shows how connections are scoped to specific contexts
 fn context_scoped_connections_example() {
-    println!("🔗 Example 4: Context-Scoped Connections\n");
+    println!("Example 4: Context-Scoped Connections\n");
 
     let _authority_id = AuthorityId::new_from_entropy([0u8; 32]);
     let peer_authority = AuthorityId::new_from_entropy([1u8; 32]);
@@ -226,7 +226,7 @@ fn context_scoped_connections_example() {
 /// Example 5: Protocol messages with built-in privacy
 /// Shows how protocol messages integrate privacy mechanisms
 fn protocol_privacy_example() {
-    println!("📡 Example 5: Protocol Messages with Built-in Privacy\n");
+    println!("Example 5: Protocol Messages with Built-in Privacy\n");
 
     // STUN message with privacy-aware construction
     let _stun_message = StunMessage::binding_request();

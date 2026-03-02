@@ -90,7 +90,7 @@ impl SessionPatternExample {
 
     /// OLD: Manual session handling (what we're replacing)
     pub async fn manual_session_handling(&mut self) {
-        println!("❌ MANUAL PATTERN (replaced by choreography):");
+        println!("✗ MANUAL PATTERN (replaced by choreography):");
         
         // Manual session creation
         println!("   1. Manually creating session...");
@@ -115,7 +115,7 @@ impl SessionPatternExample {
 
     /// NEW: Choreographic session handling (what we use now)
     pub async fn choreographic_session_handling(&mut self) {
-        println!("✅ CHOREOGRAPHIC PATTERN (new approach):");
+        println!("✓ CHOREOGRAPHIC PATTERN (new approach):");
         
         println!("   1. Choreography automatically handles message flows");
         println!("   2. Guard capabilities ensure authorization");
@@ -130,7 +130,7 @@ impl SessionPatternExample {
 
     /// Demonstrate the architecture benefits
     pub fn show_benefits() {
-        println!("🏗️  ARCHITECTURE BENEFITS:");
+        println!("ARCHITECTURE BENEFITS:");
         println!("   • Consistency: All sessions follow the same pattern");
         println!("   • Reliability: Built-in guard capabilities and flow control");
         println!("   • Maintainability: Declarative protocol definitions");
@@ -143,7 +143,7 @@ impl SessionPatternExample {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::init();
     
-    println!("🎭 Session Pattern Conversion Example");
+    println!("Session Pattern Conversion Example");
     println!("=====================================");
     println!();
     
@@ -161,7 +161,7 @@ async fn main() -> anyhow::Result<()> {
     SessionPatternExample::show_benefits();
     println!();
     
-    println!("📊 IMPACT SUMMARY:");
+    println!("IMPACT SUMMARY:");
     println!("   • 76 manual session patterns → choreography macros");
     println!("   • Consistent protocol implementation across codebase");
     println!("   • Reduced maintenance burden and improved reliability");

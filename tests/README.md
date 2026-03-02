@@ -36,11 +36,11 @@ Cross-component interaction testing (planned):
 ## Architecture Compliance
 
 All tests in this suite:
-- ✅ Use **AuthorityId** (not legacy DeviceId)
-- ✅ Integrate with **aura-agent** effect system
-- ✅ Follow **8-layer architecture** boundaries  
-- ✅ Use **current APIs** (no deprecated functions)
-- ✅ Test **real functionality** (minimal mocking)
+- ✓ Use **AuthorityId** (not legacy DeviceId)
+- ✓ Integrate with **aura-agent** effect system
+- ✓ Follow **8-layer architecture** boundaries  
+- ✓ Use **current APIs** (no deprecated functions)
+- ✓ Test **real functionality** (minimal mocking)
 
 **Purpose:**
 - Quick validation that the system is working
@@ -91,7 +91,7 @@ just test
 **Expected Output:**
 
 ```
-🔬 Running Smoke Tests
+Running Smoke Tests
 ======================
 Scenarios directory: /path/to/scenarios
 Found 22 scenario files
@@ -117,12 +117,12 @@ Testing: core_protocols/dkd_basic.toml
 ...
 
 ======================
-📊 Smoke Test Summary
+Smoke Test Summary
 ======================
   Passed:  20
-  ❌ Failed:  0
-  ⏭️  Skipped: 2
-  📝 Total:   22
+  ✗ Failed:  0
+  ⏭ Skipped: 2
+  Total:   22
 ```
 
 **Common Failure Reasons:**

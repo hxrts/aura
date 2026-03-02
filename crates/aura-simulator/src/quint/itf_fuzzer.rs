@@ -1334,27 +1334,27 @@ impl ITFBasedFuzzer {
         let mut performance_monitor = PerformanceMonitor::new();
 
         println!(
-            "🚀 Starting ITF fuzzing campaign for {}",
+            "Starting ITF fuzzing campaign for {}",
             spec_file.display()
         );
 
         // Phase 1: Model Checking (optional)
         let model_checking_result = if campaign_config.enable_model_checking {
             performance_monitor.start_phase("model_checking");
-            println!("📋 Phase 1: Model checking...");
+            println!("[1/4] Model checking...");
 
             match self.run_model_checking(spec_file).await {
                 Ok(result) => {
                     performance_monitor.end_phase("model_checking");
                     println!(
-                        "✅ Model checking completed: {} properties checked",
+                        "✓ Model checking completed: {} properties checked",
                         result.model_check_result.checked_properties.len()
                     );
                     Some(result)
                 }
                 Err(e) => {
                     performance_monitor.end_phase("model_checking");
-                    println!("⚠️ Model checking failed: {e}");
+                    println!("⚠ Model checking failed: {e}");
                     return Err(e);
                 }
             }
@@ -1365,17 +1365,17 @@ impl ITFBasedFuzzer {
         // Phase 2: Simulation-based Testing (optional)
         let simulation_result = if campaign_config.enable_simulation_testing {
             performance_monitor.start_phase("simulation");
-            println!("🎲 Phase 2: Simulation-based testing...");
+            println!("[2/4] Simulation-based testing...");
 
             match self.generate_test_suite(spec_file).await {
                 Ok(suite) => {
                     performance_monitor.end_phase("simulation");
-                    println!("✅ Generated {} test cases", suite.test_cases.len());
+                    println!("✓ Generated {} test cases", suite.test_cases.len());
                     Some(suite)
                 }
                 Err(e) => {
                     performance_monitor.end_phase("simulation");
-                    println!("⚠️ Simulation testing failed: {e}");
+                    println!("⚠ Simulation testing failed: {e}");
                     return Err(e);
                 }
             }
@@ -1386,7 +1386,7 @@ impl ITFBasedFuzzer {
         // Phase 3: Mutation Testing (optional)
         let all_violations = if campaign_config.enable_mutation && model_checking_result.is_some() {
             performance_monitor.start_phase("mutation");
-            println!("🧬 Phase 3: Mutation testing...");
+            println!("[3/4] Mutation testing...");
 
             let mut violations = Vec::new();
             if let Some(ref mc_result) = model_checking_result {
@@ -1394,7 +1394,7 @@ impl ITFBasedFuzzer {
             }
 
             performance_monitor.end_phase("mutation");
-            println!("🔍 Found {} property violations", violations.len());
+            println!("Found {} property violations", violations.len());
             violations
         } else {
             Vec::new()
@@ -1402,7 +1402,7 @@ impl ITFBasedFuzzer {
 
         // Phase 4: Analysis and Reporting
         performance_monitor.start_phase("analysis");
-        println!("📊 Phase 4: Analysis and reporting...");
+        println!("[4/4] Analysis and reporting...");
 
         let campaign_duration = std::time::Duration::ZERO;
         let performance_report = performance_monitor.generate_report();
@@ -1453,7 +1453,7 @@ impl ITFBasedFuzzer {
         }
 
         println!(
-            "🎯 Campaign completed in {:.2}s (Success: {})",
+            "Campaign completed in {:.2}s (Success: {})",
             campaign_duration.as_secs_f64(),
             success
         );
@@ -1751,15 +1751,15 @@ Details:
 - Mutations: {} violations detected
 "#,
             result.campaign_duration.as_secs_f64(),
-            if result.success { "✅ Yes" } else { "❌ No" },
+            if result.success { "✓ Yes" } else { "✗ No" },
             result.coverage_summary.property_coverage,
             result.coverage_summary.state_coverage,
             result.coverage_summary.total_test_cases,
             result.coverage_summary.violation_count,
             if result.coverage_summary.goals_achieved {
-                "✅ Yes"
+                "✓ Yes"
             } else {
-                "❌ No"
+                "✗ No"
             },
             result
                 .performance_report

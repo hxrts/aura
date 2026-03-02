@@ -234,12 +234,12 @@ fn test_layer_boundaries() {
                 // Check if this is an allowed exception
                 if is_allowed_exception(&crate_info.name, dep) {
                     eprintln!(
-                        "⚠️  {} (Layer {:?}) depends on {} (Layer {:?}) - ALLOWED EXCEPTION",
+                        "⚠  {} (Layer {:?}) depends on {} (Layer {:?}) - ALLOWED EXCEPTION",
                         crate_info.name, crate_layer, dep, dep_layer
                     );
                 } else {
                     violations.push(format!(
-                        "❌ {} (Layer {:?}) depends on {} (Layer {:?}) - UPWARD DEPENDENCY VIOLATION",
+                        "✗ {} (Layer {:?}) depends on {} (Layer {:?}) - UPWARD DEPENDENCY VIOLATION",
                         crate_info.name, crate_layer, dep, dep_layer
                     ));
                 }

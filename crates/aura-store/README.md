@@ -8,15 +8,15 @@ This crate provides pure storage domain logic for the Aura platform, including c
 
 **Layer 2** - Domain specification crate that depends only on `aura-core`.
 
-- ✅ Storage domain types and semantics
-- ✅ Content-addressed chunk management
-- ✅ Search query types and filtering
-- ✅ Storage CRDT operations
-- ❌ NO effect handlers (use `StorageEffects` from `aura-effects`)
-- ❌ NO handler composition (that's `aura-composition`)
-- ❌ NO multi-party coordination (that's `aura-protocol`)
+- ✓ Storage domain types and semantics
+- ✓ Content-addressed chunk management
+- ✓ Search query types and filtering
+- ✓ Storage CRDT operations
+- ✗ NO effect handlers (use `StorageEffects` from `aura-effects`)
+- ✗ NO handler composition (that's `aura-composition`)
+- ✗ NO multi-party coordination (that's `aura-protocol`)
 
-## Storage Authorization - MOVED ⚠️
+## Storage Authorization - MOVED ⚠
 
 **Storage authorization has moved to `aura-authorization`** as part of the authorization unification effort.
 

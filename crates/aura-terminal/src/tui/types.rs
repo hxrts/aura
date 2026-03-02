@@ -1477,12 +1477,12 @@ impl ConflictOperationType {
     /// Icon for the operation type
     pub fn icon(self) -> &'static str {
         match self {
-            Self::PermissionChange => "🔒",
-            Self::MemberRemoval => "👤",
-            Self::ChannelRename => "✏️",
-            Self::TopicChange => "📝",
-            Self::OwnershipTransfer => "👑",
-            Self::ModeChange => "⚙️",
+            Self::PermissionChange => "⚿",
+            Self::MemberRemoval => "−",
+            Self::ChannelRename => "✎",
+            Self::TopicChange => "✎",
+            Self::OwnershipTransfer => "★",
+            Self::ModeChange => "⚙",
         }
     }
 }

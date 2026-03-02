@@ -308,11 +308,11 @@ fn run_smoke_tests(scenarios_dir: &Path) -> (usize, usize, usize) {
     let scenarios = discover_scenarios(scenarios_dir);
 
     if scenarios.is_empty() {
-        println!("⚠️  No scenarios found in {}", scenarios_dir.display());
+        println!("Warning: No scenarios found in {}", scenarios_dir.display());
         return (0, 0, 0);
     }
 
-    println!("\n🔬 Running Smoke Tests");
+    println!("\nRunning Smoke Tests");
     println!("======================");
     println!("Scenarios directory: {}", scenarios_dir.display());
     println!("Found {} scenario files\n", scenarios.len());
@@ -335,20 +335,20 @@ fn run_smoke_tests(scenarios_dir: &Path) -> (usize, usize, usize) {
                     passed += 1;
                 }
                 Ok(SmokeTestResult::Failed { reason }) => {
-                    println!("  ❌ FAILED: {}\n", reason);
+                    println!("  ✗ FAILED: {}\n", reason);
                     failed += 1;
                 }
                 Ok(SmokeTestResult::Skipped { reason }) => {
-                    println!("  ⏭️  SKIPPED: {}\n", reason);
+                    println!("  ⏭ SKIPPED: {}\n", reason);
                     skipped += 1;
                 }
                 Err(e) => {
-                    println!("  ❌ ERROR: {}\n", e);
+                    println!("  ✗ ERROR: {}\n", e);
                     failed += 1;
                 }
             },
             Err(e) => {
-                println!("  ❌ PARSE ERROR: {}\n", e);
+                println!("  ✗ PARSE ERROR: {}\n", e);
                 failed += 1;
             }
         }
@@ -375,12 +375,12 @@ fn smoke_test_all_scenarios() {
     let (passed, failed, skipped) = run_smoke_tests(&scenarios_dir);
 
     println!("======================");
-    println!("📊 Smoke Test Summary");
+    println!("Smoke Test Summary");
     println!("======================");
     println!("  Passed:  {}", passed);
-    println!("  ❌ Failed:  {}", failed);
-    println!("  ⏭️  Skipped: {}", skipped);
-    println!("  📝 Total:   {}", passed + failed + skipped);
+    println!("  ✗ Failed:  {}", failed);
+    println!("  ⏭ Skipped: {}", skipped);
+    println!("  Total:   {}", passed + failed + skipped);
     println!();
 
     if failed > 0 {
@@ -388,7 +388,7 @@ fn smoke_test_all_scenarios() {
     }
 
     if passed == 0 && skipped > 0 {
-        println!("⚠️  Warning: All tests were skipped");
+        println!("Warning: All tests were skipped");
     }
 }
 
@@ -403,11 +403,11 @@ fn smoke_test_dkd_basic() {
     let scenario_path = workspace_root.join("scenarios/core_protocols/dkd_basic.toml");
 
     if !scenario_path.exists() {
-        println!("⏭️  Skipping: scenario file not found");
+        println!("Skipping: scenario file not found");
         return;
     }
 
-    println!("\n🔬 Testing DKD Basic Scenario");
+    println!("\nTesting DKD Basic Scenario");
     println!("============================");
 
     let scenario = load_scenario(&scenario_path).expect("Failed to load DKD basic scenario");
@@ -422,7 +422,7 @@ fn smoke_test_dkd_basic() {
             panic!("DKD basic scenario failed: {}", reason);
         }
         SmokeTestResult::Skipped { reason } => {
-            println!("⏭️  Skipped: {}", reason);
+            println!("Skipped: {}", reason);
         }
     }
 }
@@ -438,11 +438,11 @@ fn smoke_test_crdt_convergence() {
     let scenario_path = workspace_root.join("scenarios/invariants/crdt_convergence.toml");
 
     if !scenario_path.exists() {
-        println!("⏭️  Skipping: scenario file not found");
+        println!("Skipping: scenario file not found");
         return;
     }
 
-    println!("\n🔬 Testing CRDT Convergence Scenario");
+    println!("\nTesting CRDT Convergence Scenario");
     println!("===================================");
 
     let scenario = load_scenario(&scenario_path).expect("Failed to load CRDT convergence scenario");
@@ -457,7 +457,7 @@ fn smoke_test_crdt_convergence() {
             panic!("CRDT convergence scenario failed: {}", reason);
         }
         SmokeTestResult::Skipped { reason } => {
-            println!("⏭️  Skipped: {}", reason);
+            println!("Skipped: {}", reason);
         }
     }
 }
@@ -474,11 +474,11 @@ fn smoke_test_threshold_key_generation() {
         workspace_root.join("scenarios/core_protocols/threshold_key_generation.toml");
 
     if !scenario_path.exists() {
-        println!("⏭️  Skipping: scenario file not found");
+        println!("Skipping: scenario file not found");
         return;
     }
 
-    println!("\n🔬 Testing Threshold Key Generation Scenario");
+    println!("\nTesting Threshold Key Generation Scenario");
     println!("===========================================");
 
     let scenario =
@@ -494,7 +494,7 @@ fn smoke_test_threshold_key_generation() {
             panic!("Threshold key generation scenario failed: {}", reason);
         }
         SmokeTestResult::Skipped { reason } => {
-            println!("⏭️  Skipped: {}", reason);
+            println!("Skipped: {}", reason);
         }
     }
 }

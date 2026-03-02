@@ -546,9 +546,9 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
 
     // Add warnings if capacity is high
     if usage_percent > 95 {
-        output.push_str("\n⚠️  CRITICAL: Storage is nearly full!\n");
+        output.push_str("\n⚠  CRITICAL: Storage is nearly full!\n");
     } else if usage_percent > 80 {
-        output.push_str("\n⚠️  WARNING: Storage is running low\n");
+        output.push_str("\n⚠  WARNING: Storage is running low\n");
     }
 
     output

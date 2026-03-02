@@ -288,7 +288,7 @@ async fn test_cli_authority_workflow() -> AuraResult<()> {
     
     if let Ok(create_result) = create_output {
         if create_result.status.success() {
-            println!("✅ Authority creation successful");
+            println!("✓ Authority creation successful");
             
             // Step 2: List authorities (should include new authority)
             let list_output = Command::new("cargo")
@@ -303,9 +303,9 @@ async fn test_cli_authority_workflow() -> AuraResult<()> {
                     
                     // Should find our created authority
                     if stdout.contains(authority_name) {
-                        println!("✅ Authority appears in list");
+                        println!("✓ Authority appears in list");
                     } else {
-                        println!("⚠️ Authority not found in list (may be expected)");
+                        println!("⚠ Authority not found in list (may be expected)");
                     }
                 }
             }
@@ -319,9 +319,9 @@ async fn test_cli_authority_workflow() -> AuraResult<()> {
             
             if let Ok(status_result) = status_output {
                 if status_result.status.success() {
-                    println!("✅ Authority status check successful");
+                    println!("✓ Authority status check successful");
                 } else {
-                    println!("⚠️ Authority status check failed");
+                    println!("⚠ Authority status check failed");
                 }
             }
             

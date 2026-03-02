@@ -225,9 +225,9 @@ impl DkdTestHarness {
         match status_output {
             Ok(result) => {
                 if result.status.success() {
-                    println!("✅ CLI authority status command works");
+                    println!("✓ CLI authority status command works");
                 } else {
-                    println!("⚠️ CLI authority status failed (may be expected in test environment)");
+                    println!("⚠ CLI authority status failed (may be expected in test environment)");
                 }
             }
             Err(_) => {
@@ -245,9 +245,9 @@ impl DkdTestHarness {
         match context_output {
             Ok(result) => {
                 if result.status.success() {
-                    println!("✅ CLI context list command works");
+                    println!("✓ CLI context list command works");
                 } else {
-                    println!("⚠️ CLI context list failed (may be expected in test environment)");
+                    println!("⚠ CLI context list failed (may be expected in test environment)");
                 }
             }
             Err(_) => {
@@ -276,7 +276,7 @@ async fn test_dkd_workflow_two_authorities() -> AuraResult<()> {
     // Test CLI integration
     harness.test_cli_integration().await?;
     
-    println!("✅ DKD workflow test with 2 authorities passed");
+    println!("✓ DKD workflow test with 2 authorities passed");
     println!("   Keys derived: {}", results.derived_keys.len());
     println!("   Keys match: {}", results.keys_match);
     println!("   Execution time: {}ms", results.execution_time_ms);
@@ -301,7 +301,7 @@ async fn test_dkd_workflow_multiple_authorities() -> AuraResult<()> {
     assert_eq!(results.derived_keys.len(), 5);
     assert!(results.keys_match, "All authorities should derive the same key");
     
-    println!("✅ DKD workflow test with 5 authorities passed");
+    println!("✓ DKD workflow test with 5 authorities passed");
     println!("   All {} authorities derived matching keys", results.derived_keys.len());
     
     Ok(())
@@ -341,7 +341,7 @@ async fn test_dkd_different_contexts() -> AuraResult<()> {
     let key_b = results_b.derived_keys.values().next().unwrap();
     assert_ne!(key_a, key_b, "Keys derived in different contexts should differ");
     
-    println!("✅ DKD different contexts test passed");
+    println!("✓ DKD different contexts test passed");
     println!("   Context A and B produced different keys as expected");
     
     Ok(())
@@ -412,7 +412,7 @@ async fn test_dkd_journal_integration() -> AuraResult<()> {
         println!("Has derivation: {}, Has completion: {}", has_derivation, has_completion);
     }
     
-    println!("✅ DKD journal integration test passed");
+    println!("✓ DKD journal integration test passed");
     println!("   All authorities properly recorded DKD workflow in journals");
     
     Ok(())
@@ -434,9 +434,9 @@ async fn test_cli_command_integration() -> AuraResult<()> {
             if result.status.success() {
                 let stdout = String::from_utf8_lossy(&result.stdout);
                 assert!(stdout.contains("authority") || stdout.contains("Commands"));
-                println!("✅ CLI help command works");
+                println!("✓ CLI help command works");
             } else {
-                println!("⚠️ CLI help failed");
+                println!("⚠ CLI help failed");
             }
         }
         Err(_) => {
@@ -456,7 +456,7 @@ async fn test_cli_command_integration() -> AuraResult<()> {
     match create_output {
         Ok(result) => {
             if result.status.success() {
-                println!("✅ CLI authority creation works");
+                println!("✓ CLI authority creation works");
                 
                 // Test listing authorities
                 let list_output = Command::new("cargo")
@@ -467,11 +467,11 @@ async fn test_cli_command_integration() -> AuraResult<()> {
                 
                 if let Ok(list_result) = list_output {
                     if list_result.status.success() {
-                        println!("✅ CLI authority listing works");
+                        println!("✓ CLI authority listing works");
                     }
                 }
             } else {
-                println!("⚠️ CLI authority creation failed (may be expected in test environment)");
+                println!("⚠ CLI authority creation failed (may be expected in test environment)");
             }
         }
         Err(_) => {
