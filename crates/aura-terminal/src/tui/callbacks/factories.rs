@@ -9,11 +9,9 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use crate::tui::commands::{parse_command, IrcCommand};
 use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
-use crate::tui::effects::{CapabilityPolicy, CommandDispatcher};
 use crate::tui::types::{MfaPolicy, TraversalDepth};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
@@ -61,9 +59,12 @@ impl ChatCallbacks {
         }
     }
     fn make_send(ctx: Arc<IoContext>, tx: UiUpdateSender) -> SendCallback {
+        let strong_resolver =
+            Arc::new(aura_app::ui::workflows::strong_command::CommandResolver::default());
         Arc::new(move |channel_id: String, content: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
+            let strong_resolver = strong_resolver.clone();
             let channel_id_clone = channel_id;
             let content_clone = content;
 
@@ -74,8 +75,29 @@ impl ChatCallbacks {
                 let trimmed = content_clone.trim_start();
                 if trimmed.starts_with("/") {
                     // IRC-style command path
-                    match parse_command(trimmed) {
-                        Ok(IrcCommand::Help { command }) => {
+                    let parsed = match aura_app::ui::workflows::strong_command::ParsedCommand::parse(
+                        trimmed,
+                    ) {
+                        Ok(command) => command,
+                        Err(e) => {
+                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                "command",
+                                e.to_string(),
+                            )));
+                            return;
+                        }
+                    };
+                    let irc_name = trimmed
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("/command")
+                        .trim_start_matches('/')
+                        .to_string();
+
+                    match parsed {
+                        aura_app::ui::workflows::strong_command::ParsedCommand::Help {
+                            command,
+                        } => {
                             if let Some(raw_name) = command
                                 .as_deref()
                                 .map(str::trim)
@@ -105,14 +127,33 @@ impl ChatCallbacks {
                             }
                             return;
                         }
-                        Ok(irc) => {
-                            let irc_name = irc.name().to_string();
-                            let mut dispatcher =
-                                CommandDispatcher::with_policy(CapabilityPolicy::AllowAll);
-                            dispatcher.set_current_channel(channel_id_clone.clone());
+                        parsed => {
+                            let actor = {
+                                let core = ctx.app_core_raw().read().await;
+                                core.runtime()
+                                    .map(|runtime| runtime.authority_id())
+                                    .or_else(|| core.authority().copied())
+                            };
 
-                            let effect = match dispatcher.dispatch(irc) {
-                                Ok(cmd) => cmd,
+                            let snapshot =
+                                strong_resolver.capture_snapshot(ctx.app_core_raw()).await;
+                            let resolved = match strong_resolver.resolve(parsed, &snapshot) {
+                                Ok(value) => value,
+                                Err(e) => {
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                        "command",
+                                        e.to_string(),
+                                    )));
+                                    return;
+                                }
+                            };
+                            let plan = match strong_resolver.plan(
+                                resolved,
+                                &snapshot,
+                                Some(&channel_id_clone),
+                                actor,
+                            ) {
+                                Ok(value) => value,
                                 Err(e) => {
                                     let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                                         "command",
@@ -122,84 +163,56 @@ impl ChatCallbacks {
                                 }
                             };
 
-                            match effect {
-                                EffectCommand::ListParticipants { channel } => {
-                                    match aura_app::ui::workflows::query::list_participants(
-                                        ctx.app_core_raw(),
-                                        &channel,
-                                    )
-                                    .await
-                                    {
-                                        Ok(list) => {
-                                            let msg = if list.is_empty() {
-                                                "No participants".to_string()
-                                            } else {
-                                                list.join(", ")
-                                            };
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(
-                                                ToastMessage::info("participants", msg),
-                                            ));
-                                        }
-                                        Err(e) => {
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(
-                                                ToastMessage::error("participants", e.to_string()),
-                                            ));
-                                        }
-                                    }
-                                }
-                                EffectCommand::GetUserInfo { target } => {
-                                    match aura_app::ui::workflows::query::get_user_info(
-                                        ctx.app_core_raw(),
-                                        &target,
-                                    )
-                                    .await
-                                    {
-                                        Ok(contact) => {
-                                            let id = contact.id.to_string();
-                                            let name = if !contact.nickname.is_empty() {
-                                                contact.nickname
-                                            } else if let Some(s) = &contact.nickname_suggestion {
-                                                s.clone()
-                                            } else {
-                                                id.chars().take(8).collect::<String>() + "..."
-                                            };
-                                            let msg = format!("User: {name} ({id})");
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(
-                                                ToastMessage::info("whois", msg),
-                                            ));
-                                        }
-                                        Err(e) => {
-                                            let _ = tx.try_send(UiUpdate::ToastAdded(
-                                                ToastMessage::error("whois", e.to_string()),
-                                            ));
-                                        }
-                                    }
-                                }
-                                _ => match ctx.dispatch(effect).await {
-                                    Ok(_) => {
+                            match aura_app::ui::workflows::strong_command::execute_planned(
+                                ctx.app_core_raw(),
+                                plan,
+                            )
+                            .await
+                            {
+                                Ok(result) => {
+                                    let state_label = match result.consistency_state {
+                                        aura_app::ui::workflows::strong_command::ConsistencyState::Accepted => "accepted",
+                                        aura_app::ui::workflows::strong_command::ConsistencyState::Replicated => "replicated",
+                                        aura_app::ui::workflows::strong_command::ConsistencyState::Enforced => "enforced",
+                                        aura_app::ui::workflows::strong_command::ConsistencyState::TimedOutPartial => "partial-timeout",
+                                    };
+
+                                    if matches!(
+                                        result.consistency_state,
+                                        aura_app::ui::workflows::strong_command::ConsistencyState::TimedOutPartial
+                                    ) {
+                                        let details = result
+                                            .details
+                                            .unwrap_or_else(|| "consistency barrier timed out".to_string());
+                                        let _ = tx.try_send(UiUpdate::ToastAdded(
+                                            ToastMessage::error(
+                                                "command",
+                                                format!("/{irc_name}: {details} ({state_label})"),
+                                            ),
+                                        ));
+                                    } else if let Some(details) = result.details {
+                                        let _ = tx.try_send(UiUpdate::ToastAdded(
+                                            ToastMessage::info(
+                                                "command",
+                                                format!("{details} ({state_label})"),
+                                            ),
+                                        ));
+                                    } else {
                                         let _ = tx.try_send(UiUpdate::ToastAdded(
                                             ToastMessage::success(
                                                 "command",
-                                                format!("/{irc_name} succeeded"),
+                                                format!("/{irc_name} {state_label}"),
                                             ),
                                         ));
                                     }
-                                    Err(e) => {
-                                        let _ =
-                                            tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                                "command",
-                                                format!("/{irc_name}: {e}"),
-                                            )));
-                                    }
-                                },
+                                }
+                                Err(e) => {
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                        "command",
+                                        format!("/{irc_name}: {e}"),
+                                    )));
+                                }
                             }
-                            return;
-                        }
-                        Err(e) => {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                "command",
-                                e.to_string(),
-                            )));
                             return;
                         }
                     }

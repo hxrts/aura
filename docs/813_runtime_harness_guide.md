@@ -101,6 +101,23 @@ Scenario lint rejects unknown instance references and unsupported action names.
 `keys`, `pattern`, `command`, `key`, and `source_instance`.
 `send_chat_command` sends `Esc` before typing `i/<command>` to reduce stale-toast flakiness.
 
+## Slash Command Consistency
+
+Slash commands now execute through a typed strong-command pipeline:
+`ParsedCommand` -> `ResolvedCommand` -> `CommandPlan` -> `execute_planned`.
+
+Completion semantics are explicit:
+
+| Command class | Commands | Required consistency |
+| --- | --- | --- |
+| Membership | `/join`, `/leave`, `/part`, `/quit`, `/j` | `replicated` |
+| Moderation | `/kick`, `/ban`, `/unban`, `/mute`, `/unmute` | `enforced` |
+| Steward | `/op`, `/deop`, `/mode` | `enforced` |
+| Other | `/msg`, `/me`, `/nick`, `/who`, `/whois`, `/topic`, `/invite`, `/pin`, `/unpin`, `/homeinvite`, `/homeaccept`, `/neighborhood`, `/nhadd`, `/nhlink` | `accepted` |
+
+When a required stage is not reached before timeout, the command returns an explicit error instead of a success toast.
+Harness waits should match the staged labels (`accepted`, `replicated`, `enforced`) or the explicit timeout error text.
+
 ## Common Commands
 
 Use lint before long runs.
@@ -151,6 +168,12 @@ This is the fastest way to automate repeatable setup and keep manual validation 
 cargo run -p aura-harness --bin tool_repl -- \
   --config configs/harness/local-loopback.toml \
   --prelude scenarios/harness/scenario3-prelude.toml
+```
+
+For `scenario3-prelude.toml`, reset local instance data first so account setup is deterministic:
+
+```bash
+rm -rf .tmp/harness/alice .tmp/harness/bob
 ```
 
 When the prelude completes, the REPL stays active with the same instances and data directories.

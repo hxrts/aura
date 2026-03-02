@@ -9,10 +9,18 @@ use aura_harness::tool_api::ToolApi;
 #[test]
 fn mixed_local_and_ssh_config_starts_with_dry_run_ssh_backend() {
     let config_path = sample_mixed_config_path();
-    let run_config = match aura_harness::load_and_validate_run_config(config_path) {
+    let mut run_config = match aura_harness::load_and_validate_run_config(config_path) {
         Ok(config) => config,
         Err(error) => panic!("mixed config must validate: {error}"),
     };
+    for instance in &mut run_config.instances {
+        if matches!(instance.mode, aura_harness::config::InstanceMode::Local)
+            && instance.command.is_none()
+        {
+            instance.command = Some("bash".to_string());
+            instance.args = vec!["-lc".to_string(), "cat".to_string()];
+        }
+    }
 
     let coordinator = match HarnessCoordinator::from_run_config(&run_config) {
         Ok(coordinator) => coordinator,

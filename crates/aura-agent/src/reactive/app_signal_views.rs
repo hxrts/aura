@@ -883,28 +883,39 @@ impl ChatSignalView {
         }
     }
 
-    fn select_moderation_home(
+    fn collect_moderation_homes(
         homes: &HomesState,
         context_id: ContextId,
         channel_id: ChannelId,
-    ) -> Option<HomeState> {
+    ) -> Vec<HomeState> {
+        let mut candidates = Vec::new();
+
         if let Some(home) = homes.home_state(&channel_id) {
             if home.context_id == Some(context_id) {
-                return Some(home.clone());
+                candidates.push(home.clone());
             }
         }
 
-        let mut context_homes = homes
-            .iter()
-            .filter_map(|(_, home)| (home.context_id == Some(context_id)).then_some(home));
-        let first = context_homes.next()?;
-        if context_homes.next().is_some() {
-            // Multiple homes share the context and none are channel-authoritative.
-            // Fail open to avoid dropping messages using non-authoritative moderation state.
-            return None;
+        for (_, home) in homes.iter() {
+            if home.context_id == Some(context_id)
+                && !candidates
+                    .iter()
+                    .any(|candidate: &HomeState| candidate.id == home.id)
+            {
+                candidates.push(home.clone());
+            }
         }
 
-        Some(first.clone())
+        if let Some(home) = homes.current_home() {
+            if !candidates
+                .iter()
+                .any(|candidate: &HomeState| candidate.id == home.id)
+            {
+                candidates.push(home.clone());
+            }
+        }
+
+        candidates
     }
 
     async fn sender_allowed_for_context(
@@ -922,17 +933,25 @@ impl ChatSignalView {
             Ok(homes) => homes,
             Err(_) => return true,
         };
-        let Some(home) = Self::select_moderation_home(&homes, context_id, channel_id) else {
+        let candidates = Self::collect_moderation_homes(&homes, context_id, channel_id);
+        if candidates.is_empty() {
             return true;
-        };
+        }
 
-        if home.is_banned(&sender_id) {
+        if candidates.iter().any(|home| home.is_banned(&sender_id)) {
             return false;
         }
-        if home.is_muted(&sender_id, sent_at_ms) {
+        if candidates
+            .iter()
+            .any(|home| home.is_muted(&sender_id, sent_at_ms))
+        {
             return false;
         }
-        if !home.residents.is_empty() && home.resident(&sender_id).is_none() {
+        let has_resident_roster = candidates.iter().any(|home| !home.residents.is_empty());
+        let sender_is_resident = candidates
+            .iter()
+            .any(|home| home.resident(&sender_id).is_some());
+        if has_resident_roster && !sender_is_resident {
             return false;
         }
 

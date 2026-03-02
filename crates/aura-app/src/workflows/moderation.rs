@@ -74,6 +74,7 @@ async fn resolve_channel_id(app_core: &Arc<RwLock<AppCore>>, channel: &str) -> C
     resolved
 }
 
+#[cfg(test)]
 async fn resolve_scope(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<&str>,
@@ -170,6 +171,66 @@ async fn resolve_scope(
     })
 }
 
+async fn resolve_scope_by_channel_id(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_hint: Option<ChannelId>,
+) -> Result<ModerationScope, AuraError> {
+    let chat = chat_snapshot(app_core).await;
+    let homes = {
+        let core = app_core.read().await;
+        core.views().get_homes()
+    };
+
+    let from_home = |home_id: ChannelId, home: &crate::views::home::HomeState| {
+        let context_id = home
+            .context_id
+            .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
+        let peers = home.residents.iter().map(|resident| resident.id).collect();
+        Ok(ModerationScope {
+            context_id,
+            home_id,
+            is_admin: home.is_admin(),
+            peers,
+        })
+    };
+
+    if let Some(channel_id) = channel_hint {
+        if let Some(home) = homes.home_state(&channel_id) {
+            if let Some(context_id) = home.context_id {
+                if !home.is_admin() {
+                    if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
+                        if best_home.is_admin() {
+                            return from_home(best_id, &best_home);
+                        }
+                    }
+                }
+            }
+            return from_home(channel_id, home);
+        }
+
+        let context_id = chat
+            .channel(&channel_id)
+            .and_then(|channel| channel.context_id)
+            .ok_or_else(|| AuraError::not_found(format!("Unknown channel scope: {channel_id}")))?;
+
+        if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
+            return from_home(best_id, &best_home);
+        }
+
+        return Err(AuraError::permission_denied(format!(
+            "Moderation requires a steward home for context {context_id}"
+        )));
+    }
+
+    if let Some(current_home) = homes.current_home() {
+        return from_home(current_home.id, current_home);
+    }
+
+    Err(AuraError::permission_denied(
+        "Moderation requires a valid home context and steward privileges",
+    ))
+}
+
 async fn commit_and_fanout(
     runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
     scope: &ModerationScope,
@@ -230,6 +291,39 @@ async fn send_moderation_fact_with_retry(
     )))
 }
 
+async fn apply_local_home_projection<F>(
+    app_core: &Arc<RwLock<AppCore>>,
+    scope: &ModerationScope,
+    actor: aura_core::identifiers::AuthorityId,
+    timestamp_ms: u64,
+    update: F,
+) -> Result<(), AuraError>
+where
+    F: FnOnce(&mut crate::views::home::HomeState),
+{
+    let mut core = app_core.write().await;
+    let mut homes = core.views().get_homes();
+    if homes.home_state(&scope.home_id).is_none() {
+        homes.add_home(crate::views::home::HomeState::new(
+            scope.home_id,
+            None,
+            actor,
+            timestamp_ms,
+            scope.context_id,
+        ));
+    }
+
+    let Some(home) = homes.home_mut(&scope.home_id) else {
+        return Err(AuraError::not_found(format!(
+            "Moderation scope home {} not found",
+            scope.home_id
+        )));
+    };
+    update(home);
+    core.views_mut().set_homes(homes);
+    Ok(())
+}
+
 async fn resolve_target_authority(
     app_core: &Arc<RwLock<AppCore>>,
     target: &str,
@@ -248,7 +342,20 @@ pub async fn kick_user(
     reason: Option<&str>,
     kicked_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope(app_core, Some(channel)).await?;
+    let channel_id = resolve_channel_id(app_core, channel).await;
+    let target_id = resolve_target_authority(app_core, target).await?;
+    kick_user_resolved(app_core, channel_id, target_id, reason, kicked_at_ms).await
+}
+
+/// Kick a canonical authority from a canonical channel.
+pub async fn kick_user_resolved(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    target_id: aura_core::identifiers::AuthorityId,
+    reason: Option<&str>,
+    kicked_at_ms: u64,
+) -> Result<(), AuraError> {
+    let scope = resolve_scope_by_channel_id(app_core, Some(channel_id)).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can kick residents",
@@ -256,8 +363,6 @@ pub async fn kick_user(
     }
 
     let runtime = { require_runtime(app_core).await? };
-    let channel_id = resolve_channel_id(app_core, channel).await;
-    let target_id = resolve_target_authority(app_core, target).await?;
     let fact = HomeKickFact::new_ms(
         scope.context_id,
         channel_id,
@@ -289,7 +394,20 @@ pub async fn ban_user(
     reason: Option<&str>,
     banned_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope(app_core, channel_hint).await?;
+    let target_id = resolve_target_authority(app_core, target).await?;
+    let channel_id = channel_hint.map(parse_channel_hint);
+    ban_user_resolved(app_core, channel_id, target_id, reason, banned_at_ms).await
+}
+
+/// Ban a canonical authority, optionally scoped by canonical channel.
+pub async fn ban_user_resolved(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_hint: Option<ChannelId>,
+    target_id: aura_core::identifiers::AuthorityId,
+    reason: Option<&str>,
+    banned_at_ms: u64,
+) -> Result<(), AuraError> {
+    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can ban residents",
@@ -297,7 +415,6 @@ pub async fn ban_user(
     }
 
     let runtime = { require_runtime(app_core).await? };
-    let target_id = resolve_target_authority(app_core, target).await?;
     let fact = HomeBanFact::new_ms(
         scope.context_id,
         None,
@@ -309,6 +426,21 @@ pub async fn ban_user(
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
+    apply_local_home_projection(
+        app_core,
+        &scope,
+        runtime.authority_id(),
+        banned_at_ms,
+        |home| {
+            home.add_ban(crate::views::home::BanRecord {
+                authority_id: target_id,
+                reason: reason.unwrap_or_default().to_string(),
+                actor: runtime.authority_id(),
+                banned_at: banned_at_ms,
+            });
+        },
+    )
+    .await?;
 
     Ok(())
 }
@@ -319,7 +451,18 @@ pub async fn unban_user(
     channel_hint: Option<&str>,
     target: &str,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope(app_core, channel_hint).await?;
+    let target_id = resolve_target_authority(app_core, target).await?;
+    let channel_id = channel_hint.map(parse_channel_hint);
+    unban_user_resolved(app_core, channel_id, target_id).await
+}
+
+/// Unban a canonical authority, optionally scoped by canonical channel.
+pub async fn unban_user_resolved(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_hint: Option<ChannelId>,
+    target_id: aura_core::identifiers::AuthorityId,
+) -> Result<(), AuraError> {
+    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can unban residents",
@@ -327,8 +470,6 @@ pub async fn unban_user(
     }
 
     let runtime = { require_runtime(app_core).await? };
-
-    let target_id = resolve_target_authority(app_core, target).await?;
     let now_ms = runtime.current_time_ms().await.map_err(|e| {
         AuraError::agent(format!("Failed to read timestamp for unban operation: {e}"))
     })?;
@@ -341,6 +482,10 @@ pub async fn unban_user(
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
+    apply_local_home_projection(app_core, &scope, runtime.authority_id(), now_ms, |home| {
+        home.remove_ban(&target_id);
+    })
+    .await?;
 
     Ok(())
 }
@@ -353,7 +498,20 @@ pub async fn mute_user(
     duration_secs: Option<u64>,
     muted_at_ms: u64,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope(app_core, channel_hint).await?;
+    let target_id = resolve_target_authority(app_core, target).await?;
+    let channel_id = channel_hint.map(parse_channel_hint);
+    mute_user_resolved(app_core, channel_id, target_id, duration_secs, muted_at_ms).await
+}
+
+/// Mute a canonical authority, optionally scoped by canonical channel.
+pub async fn mute_user_resolved(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_hint: Option<ChannelId>,
+    target_id: aura_core::identifiers::AuthorityId,
+    duration_secs: Option<u64>,
+    muted_at_ms: u64,
+) -> Result<(), AuraError> {
+    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can mute residents",
@@ -361,7 +519,6 @@ pub async fn mute_user(
     }
 
     let runtime = { require_runtime(app_core).await? };
-    let target_id = resolve_target_authority(app_core, target).await?;
     let expires_at_ms =
         duration_secs.map(|seconds| muted_at_ms.saturating_add(seconds.saturating_mul(1000)));
     let fact = HomeMuteFact::new_ms(
@@ -375,6 +532,22 @@ pub async fn mute_user(
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
+    apply_local_home_projection(
+        app_core,
+        &scope,
+        runtime.authority_id(),
+        muted_at_ms,
+        |home| {
+            home.add_mute(crate::views::home::MuteRecord {
+                authority_id: target_id,
+                duration_secs,
+                muted_at: muted_at_ms,
+                expires_at: expires_at_ms,
+                actor: runtime.authority_id(),
+            });
+        },
+    )
+    .await?;
 
     Ok(())
 }
@@ -385,7 +558,18 @@ pub async fn unmute_user(
     channel_hint: Option<&str>,
     target: &str,
 ) -> Result<(), AuraError> {
-    let scope = resolve_scope(app_core, channel_hint).await?;
+    let target_id = resolve_target_authority(app_core, target).await?;
+    let channel_id = channel_hint.map(parse_channel_hint);
+    unmute_user_resolved(app_core, channel_id, target_id).await
+}
+
+/// Unmute a canonical authority, optionally scoped by canonical channel.
+pub async fn unmute_user_resolved(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_hint: Option<ChannelId>,
+    target_id: aura_core::identifiers::AuthorityId,
+) -> Result<(), AuraError> {
+    let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
             "Only stewards can unmute residents",
@@ -393,8 +577,6 @@ pub async fn unmute_user(
     }
 
     let runtime = { require_runtime(app_core).await? };
-
-    let target_id = resolve_target_authority(app_core, target).await?;
     let now_ms = runtime.current_time_ms().await.map_err(|e| {
         AuraError::agent(format!(
             "Failed to read timestamp for unmute operation: {e}"
@@ -409,6 +591,10 @@ pub async fn unmute_user(
     )
     .to_generic();
     commit_and_fanout(&runtime, &scope, fact, &[target_id]).await?;
+    apply_local_home_projection(app_core, &scope, runtime.authority_id(), now_ms, |home| {
+        home.remove_mute(&target_id);
+    })
+    .await?;
 
     Ok(())
 }
@@ -418,10 +604,9 @@ async fn scope_for_message(
     message_id: &str,
 ) -> Result<ModerationScope, AuraError> {
     if let Some(channel_id) = parse_channel_id_from_message_id(message_id) {
-        let channel = channel_id.to_string();
-        return resolve_scope(app_core, Some(&channel)).await;
+        return resolve_scope_by_channel_id(app_core, Some(channel_id)).await;
     }
-    resolve_scope(app_core, None).await
+    resolve_scope_by_channel_id(app_core, None).await
 }
 
 /// Pin a message in the current home.
@@ -617,5 +802,17 @@ mod tests {
             .expect("scope should resolve");
         assert_eq!(scope.context_id, channel_context);
         assert_eq!(scope.home_id, channel_home_id);
+    }
+
+    #[tokio::test]
+    async fn resolve_scope_by_channel_id_rejects_unknown_channel_scope() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let unknown = ChannelId::from_bytes(hash(b"moderation-unknown-scope"));
+
+        let error = resolve_scope_by_channel_id(&app_core, Some(unknown))
+            .await
+            .expect_err("unknown channel scope must fail");
+        assert!(error.to_string().contains("Unknown channel scope"));
     }
 }

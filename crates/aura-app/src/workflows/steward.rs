@@ -105,6 +105,7 @@ fn best_home_for_context(
         })
 }
 
+#[cfg(test)]
 async fn resolve_scope(
     app_core: &Arc<RwLock<AppCore>>,
     channel_hint: Option<&str>,
@@ -186,6 +187,70 @@ async fn resolve_scope(
     })
 }
 
+async fn resolve_scope_by_channel_id(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_hint: Option<ChannelId>,
+) -> Result<StewardScope, AuraError> {
+    let chat = chat_snapshot(app_core).await;
+    let homes = {
+        let core = app_core.read().await;
+        core.views().get_homes()
+    };
+
+    let from_home = |home_id: ChannelId, home_state: &crate::views::home::HomeState| {
+        let context_id = home_state
+            .context_id
+            .ok_or_else(|| AuraError::not_found("Home has no context ID"))?;
+        let peers = home_state
+            .residents
+            .iter()
+            .map(|resident| resident.id)
+            .collect();
+        Ok(StewardScope {
+            home_id,
+            context_id,
+            home_state: home_state.clone(),
+            peers,
+        })
+    };
+
+    if let Some(channel_id) = channel_hint {
+        if let Some(home_state) = homes.home_state(&channel_id) {
+            if let Some(context_id) = home_state.context_id {
+                if !home_state.is_admin() {
+                    if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
+                        if best_home.is_admin() {
+                            return from_home(best_id, &best_home);
+                        }
+                    }
+                }
+            }
+            return from_home(channel_id, home_state);
+        }
+
+        let context_id = chat
+            .channel(&channel_id)
+            .and_then(|channel| channel.context_id)
+            .ok_or_else(|| AuraError::not_found(format!("Unknown channel scope: {channel_id}")))?;
+
+        if let Some((best_id, best_home)) = best_home_for_context(&homes, context_id) {
+            return from_home(best_id, &best_home);
+        }
+
+        return Err(AuraError::permission_denied(format!(
+            "Steward operation requires a steward home for context {context_id}"
+        )));
+    }
+
+    if let Some(current_home) = homes.current_home() {
+        return from_home(current_home.id, current_home);
+    }
+
+    Err(AuraError::permission_denied(
+        "Steward operation requires an active home scope",
+    ))
+}
+
 /// Grant steward (Admin) role to a resident.
 ///
 /// Authorization: Only Owner or Admin can grant steward role.
@@ -196,9 +261,18 @@ pub async fn grant_steward(
     target: &str,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
+    let channel_id = channel_hint.map(parse_channel_hint);
+    grant_steward_resolved(app_core, channel_id, target_id).await
+}
 
+/// Grant steward role to a canonical authority.
+pub async fn grant_steward_resolved(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_hint: Option<ChannelId>,
+    target_id: AuthorityId,
+) -> Result<(), AuraError> {
     // Validate current view and collect context/peer fanout.
-    let mut scope = resolve_scope(app_core, channel_hint).await?;
+    let mut scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
 
     if !scope.home_state.is_admin() {
         return Err(AuraError::permission_denied(
@@ -261,7 +335,7 @@ pub async fn grant_steward(
 
     let resident = home_state
         .resident_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {target}")))?;
+        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {target_id}")))?;
 
     if matches!(resident.role, ResidentRole::Owner) {
         return Err(AuraError::invalid("Cannot modify Owner role"));
@@ -283,8 +357,17 @@ pub async fn revoke_steward(
     target: &str,
 ) -> Result<(), AuraError> {
     let target_id = resolve_target_authority(app_core, target).await?;
+    let channel_id = channel_hint.map(parse_channel_hint);
+    revoke_steward_resolved(app_core, channel_id, target_id).await
+}
 
-    let mut scope = resolve_scope(app_core, channel_hint).await?;
+/// Revoke steward role from a canonical authority.
+pub async fn revoke_steward_resolved(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_hint: Option<ChannelId>,
+    target_id: AuthorityId,
+) -> Result<(), AuraError> {
+    let mut scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
 
     if !scope.home_state.is_admin() {
         return Err(AuraError::permission_denied(
@@ -350,7 +433,7 @@ pub async fn revoke_steward(
 
     let resident = home_state
         .resident_mut(&target_id)
-        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {target}")))?;
+        .ok_or_else(|| AuraError::not_found(format!("Resident not found: {target_id}")))?;
 
     if !matches!(resident.role, ResidentRole::Admin) {
         return Err(AuraError::invalid(
@@ -576,5 +659,17 @@ mod tests {
             .expect("scope should resolve");
         assert_eq!(scope.context_id, channel_context);
         assert_eq!(scope.home_id, channel_home_id);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_scope_by_channel_id_rejects_unknown_channel_scope() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let unknown = ChannelId::from_bytes(hash(b"steward-unknown-scope"));
+
+        let error = resolve_scope_by_channel_id(&app_core, Some(unknown))
+            .await
+            .expect_err("unknown channel scope must fail");
+        assert!(error.to_string().contains("Unknown channel scope"));
     }
 }

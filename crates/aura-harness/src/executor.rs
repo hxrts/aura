@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
@@ -254,21 +255,46 @@ fn execute_step(
                 .expect
                 .as_deref()
                 .ok_or_else(|| anyhow!("step {} missing source instance in expect", step.id))?;
-            let payload = dispatch_payload(
-                tool_api,
-                ToolRequest::ReadClipboard {
-                    instance_id: source_instance_id.to_string(),
-                },
-            )?;
-            let clipboard_text = payload
-                .get("text")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| anyhow!("read_clipboard response missing text"))?;
+            let timeout_ms = step.timeout_ms.unwrap_or(step_budget_ms);
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+            let clipboard_text = loop {
+                let attempt_error = match dispatch_payload(
+                    tool_api,
+                    ToolRequest::ReadClipboard {
+                        instance_id: source_instance_id.to_string(),
+                    },
+                ) {
+                    Ok(payload) => {
+                        if let Some(text) = payload.get("text").and_then(serde_json::Value::as_str)
+                        {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                break text.to_string();
+                            }
+                            "read_clipboard returned empty text".to_string()
+                        } else {
+                            "read_clipboard response missing text".to_string()
+                        }
+                    }
+                    Err(error) => error.to_string(),
+                };
+
+                if Instant::now() >= deadline {
+                    bail!(
+                        "send_clipboard timed out for source={} target={} timeout_ms={} last_error={}",
+                        source_instance_id,
+                        target_instance_id,
+                        timeout_ms,
+                        attempt_error
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            };
             dispatch(
                 tool_api,
                 ToolRequest::SendKeys {
                     instance_id: target_instance_id.to_string(),
-                    keys: clipboard_text.to_string(),
+                    keys: clipboard_text,
                 },
             )?;
             Ok(())
@@ -692,5 +718,132 @@ mod tests {
             }
             other => panic!("expected SendKeys second, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn send_clipboard_retries_until_clipboard_file_is_written() {
+        let temp_root = std::env::temp_dir().join("aura-harness-executor-send-clipboard");
+        let _ = std::fs::create_dir_all(&temp_root);
+        let alice_data = temp_root.join("alice");
+        let bob_data = temp_root.join("bob");
+        let _ = std::fs::create_dir_all(&alice_data);
+        let _ = std::fs::create_dir_all(&bob_data);
+
+        let run = RunConfig {
+            schema_version: 1,
+            run: RunSection {
+                name: "executor-send-clipboard".to_string(),
+                pty_rows: Some(40),
+                pty_cols: Some(120),
+                artifact_dir: None,
+                global_budget_ms: None,
+                step_budget_ms: None,
+                seed: Some(8),
+                max_cpu_percent: None,
+                max_memory_bytes: None,
+                max_open_files: None,
+                require_remote_artifact_sync: false,
+            },
+            instances: vec![
+                InstanceConfig {
+                    id: "alice".to_string(),
+                    mode: InstanceMode::Local,
+                    data_dir: alice_data.clone(),
+                    device_id: None,
+                    bind_address: "127.0.0.1:45011".to_string(),
+                    demo_mode: false,
+                    command: Some("bash".to_string()),
+                    args: vec!["-lc".to_string(), "cat".to_string()],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: None,
+                    ssh_user: None,
+                    ssh_port: None,
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: None,
+                    ssh_fingerprint: None,
+                    ssh_require_fingerprint: false,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+                InstanceConfig {
+                    id: "bob".to_string(),
+                    mode: InstanceMode::Local,
+                    data_dir: bob_data,
+                    device_id: None,
+                    bind_address: "127.0.0.1:45012".to_string(),
+                    demo_mode: false,
+                    command: Some("bash".to_string()),
+                    args: vec!["-lc".to_string(), "cat".to_string()],
+                    env: vec![],
+                    log_path: None,
+                    ssh_host: None,
+                    ssh_user: None,
+                    ssh_port: None,
+                    ssh_strict_host_key_checking: true,
+                    ssh_known_hosts_file: None,
+                    ssh_fingerprint: None,
+                    ssh_require_fingerprint: false,
+                    ssh_dry_run: true,
+                    remote_workdir: None,
+                    lan_discovery: None,
+                    tunnel: None,
+                },
+            ],
+        };
+
+        let scenario = ScenarioConfig {
+            schema_version: 1,
+            id: "executor-send-clipboard".to_string(),
+            goal: "verify send_clipboard retry".to_string(),
+            execution_mode: Some("scripted".to_string()),
+            required_capabilities: vec![],
+            steps: vec![ScenarioStep {
+                id: "step-1".to_string(),
+                action: "send_clipboard".to_string(),
+                instance: Some("bob".to_string()),
+                expect: Some("alice".to_string()),
+                timeout_ms: Some(2000),
+            }],
+        };
+
+        let mut api = ToolApi::new(
+            HarnessCoordinator::from_run_config(&run).unwrap_or_else(|error| panic!("{error}")),
+        );
+        if let Err(error) = api.start_all() {
+            panic!("start_all failed: {error}");
+        }
+
+        let clipboard_path = alice_data.join(".harness-clipboard.txt");
+        let writer_thread = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let _ = std::fs::write(&clipboard_path, "invite-code-123\n");
+        });
+
+        if let Err(error) =
+            ScenarioExecutor::new(ExecutionMode::Scripted).execute(&scenario, &mut api)
+        {
+            panic!("send_clipboard execute failed: {error}");
+        }
+
+        let _ = writer_thread.join();
+        if let Err(error) = api.stop_all() {
+            panic!("stop_all failed: {error}");
+        }
+
+        let action_log = api.action_log();
+        let sent_to_bob = action_log.iter().any(|entry| {
+            matches!(
+                &entry.request,
+                ToolRequest::SendKeys { instance_id, keys }
+                if instance_id == "bob" && keys.contains("invite-code-123")
+            )
+        });
+        assert!(
+            sent_to_bob,
+            "send_clipboard should eventually send copied text to bob"
+        );
     }
 }

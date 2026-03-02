@@ -122,7 +122,7 @@ audit:
 
 # Check architectural layer compliance (all checks)
 check-arch *FLAGS:
-    scripts/check-arch.sh {{FLAGS}} || true
+    scripts/check-arch.sh {{FLAGS}}
 
 # Quick architecture checks by category
 check-arch-layers:

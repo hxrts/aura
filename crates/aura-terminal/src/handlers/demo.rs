@@ -91,6 +91,7 @@ impl DemoHandler {
         let tui_args = TuiArgs {
             data_dir: None,
             device_id: Some(device_id.to_string()),
+            bind_address: None,
             demo: true,
         };
 

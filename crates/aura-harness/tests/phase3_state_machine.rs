@@ -83,7 +83,17 @@ fn execute_mode(
 
 fn load_run_config(path: &Path) -> aura_harness::config::RunConfig {
     match aura_harness::load_and_validate_run_config(path) {
-        Ok(config) => config,
+        Ok(mut config) => {
+            for instance in &mut config.instances {
+                if matches!(instance.mode, aura_harness::config::InstanceMode::Local)
+                    && instance.command.is_none()
+                {
+                    instance.command = Some("bash".to_string());
+                    instance.args = vec!["-lc".to_string(), "cat".to_string()];
+                }
+            }
+            config
+        }
         Err(error) => panic!("run config load failed: {error}"),
     }
 }

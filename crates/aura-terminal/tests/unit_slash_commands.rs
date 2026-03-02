@@ -70,7 +70,15 @@ async fn slash_who_emits_participants_toast() {
     on_send("channel:general".to_string(), "/who".to_string());
 
     let toast = next_toast(&mut rx).await;
-    assert_eq!(toast.id, "participants");
+    assert_eq!(toast.id, "command");
+    assert!(
+        toast.message.contains("No participants")
+            || toast.message.contains("accepted")
+            || toast.message.contains("replicated")
+            || toast.message.contains("enforced"),
+        "unexpected /who toast payload: {:?}",
+        toast.message
+    );
 }
 
 #[tokio::test]
@@ -86,5 +94,10 @@ async fn slash_whois_emits_whois_toast() {
     );
 
     let toast = next_toast(&mut rx).await;
-    assert_eq!(toast.id, "whois");
+    assert_eq!(toast.id, "command");
+    assert!(
+        toast.message.contains("unknown authority target"),
+        "unexpected /whois toast payload: {:?}",
+        toast.message
+    );
 }

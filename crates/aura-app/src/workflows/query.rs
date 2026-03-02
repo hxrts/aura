@@ -8,6 +8,7 @@ use crate::workflows::parse::parse_authority_id;
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::{views::Contact, AppCore};
 use async_lock::RwLock;
+use aura_core::identifiers::{AuthorityId, ChannelId};
 use aura_core::AuraError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -83,6 +84,14 @@ pub async fn list_participants(
     Ok(participants)
 }
 
+/// List participants in a channel by canonical channel ID.
+pub async fn list_participants_by_channel_id(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+) -> Result<Vec<String>, AuraError> {
+    list_participants(app_core, &channel_id.to_string()).await
+}
+
 /// Get user information by ID or name
 ///
 /// **What it does**: Queries contact information
@@ -97,6 +106,18 @@ pub async fn get_user_info(
     target: &str,
 ) -> Result<Contact, AuraError> {
     resolve_contact(app_core, target).await
+}
+
+/// Get user information by canonical authority ID.
+pub async fn get_user_info_by_authority_id(
+    app_core: &Arc<RwLock<AppCore>>,
+    authority_id: AuthorityId,
+) -> Result<Contact, AuraError> {
+    let contacts = contacts_snapshot(app_core).await;
+    contacts
+        .contact(&authority_id)
+        .cloned()
+        .ok_or_else(|| AuraError::not_found(format!("User '{authority_id}' not found")))
 }
 
 /// Resolve a user target string to a contact.

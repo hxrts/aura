@@ -49,17 +49,45 @@ impl LocalPtyBackend {
         }
     }
 
-    fn default_command() -> (String, Vec<String>) {
-        (
-            "bash".to_string(),
-            vec!["-lc".to_string(), "cat".to_string()],
-        )
+    fn default_command(&self) -> (String, Vec<String>) {
+        let program = std::env::var("AURA_HARNESS_AURA_BIN")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+            .map(Self::absolutize_path)
+            .or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|cwd| cwd.join("target/debug/aura"))
+            })
+            .filter(|candidate| candidate.exists())
+            .unwrap_or_else(|| PathBuf::from("aura"))
+            .to_string_lossy()
+            .to_string();
+
+        let mut args = vec![
+            "tui".to_string(),
+            "--data-dir".to_string(),
+            Self::absolutize_path(self.config.data_dir.clone())
+                .to_string_lossy()
+                .to_string(),
+            "--bind-address".to_string(),
+            self.config.bind_address.clone(),
+        ];
+        if let Some(device_id) = self.config.device_id.as_deref() {
+            args.push("--device-id".to_string());
+            args.push(device_id.to_string());
+        }
+        if self.config.demo_mode {
+            args.push("--demo".to_string());
+        }
+        (program, args)
     }
 
     fn command_spec(&self) -> (String, Vec<String>) {
         match &self.config.command {
             Some(command) => (command.clone(), self.config.args.clone()),
-            None => Self::default_command(),
+            None => self.default_command(),
         }
     }
 
@@ -81,6 +109,16 @@ impl LocalPtyBackend {
                 None
             }
         })
+    }
+
+    fn absolutize_path(path: PathBuf) -> PathBuf {
+        if path.is_absolute() {
+            return path;
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            return cwd.join(path);
+        }
+        path
     }
 
     fn select_authoritative_screen(&self, current_screen: String) -> String {
@@ -137,7 +175,8 @@ impl InstanceBackend for LocalPtyBackend {
             command.env("AURA_CLIPBOARD_MODE", "file_only");
         }
         if Self::env_value("AURA_CLIPBOARD_FILE", &self.config.env).is_none() {
-            let clipboard_file = self.config.data_dir.join(".harness-clipboard.txt");
+            let clipboard_file =
+                Self::absolutize_path(self.config.data_dir.join(".harness-clipboard.txt"));
             command.env(
                 "AURA_CLIPBOARD_FILE",
                 clipboard_file.to_string_lossy().to_string(),
@@ -146,6 +185,14 @@ impl InstanceBackend for LocalPtyBackend {
 
         for item in &self.config.env {
             if let Some((key, value)) = item.split_once('=') {
+                if key.trim() == "AURA_CLIPBOARD_FILE" {
+                    let resolved = Self::absolutize_path(PathBuf::from(value.trim()));
+                    command.env(
+                        "AURA_CLIPBOARD_FILE",
+                        resolved.to_string_lossy().to_string(),
+                    );
+                    continue;
+                }
                 command.env(key.trim(), value.trim());
             }
         }
@@ -411,6 +458,42 @@ mod tests {
         if let Err(error) = backend.stop() {
             panic!("backend must stop: {error}");
         }
+    }
+
+    #[test]
+    fn local_backend_default_command_targets_aura_tui() {
+        let mut config = test_config();
+        config.command = None;
+        config.args.clear();
+        config.data_dir = std::env::temp_dir().join("aura-harness-local-default-cmd");
+        config.device_id = Some("local-test-device".to_string());
+        config.bind_address = "127.0.0.1:49999".to_string();
+
+        let backend = LocalPtyBackend::new(config, Some(20), Some(120));
+        let (program, args) = backend.command_spec();
+
+        assert!(
+            program.ends_with("aura"),
+            "default program must target aura binary, got: {program}"
+        );
+        assert!(
+            args.iter().any(|arg| arg == "tui"),
+            "default args must include tui subcommand: {args:?}"
+        );
+        assert!(
+            args.windows(2)
+                .any(|window| window == ["--bind-address", "127.0.0.1:49999"]),
+            "default args must include bind address: {args:?}"
+        );
+        assert!(
+            args.windows(2)
+                .any(|window| window == ["--device-id", "local-test-device"]),
+            "default args must include device id: {args:?}"
+        );
+        assert!(
+            args.windows(2).any(|window| window[0] == "--data-dir"),
+            "default args must include data dir: {args:?}"
+        );
     }
 
     #[test]

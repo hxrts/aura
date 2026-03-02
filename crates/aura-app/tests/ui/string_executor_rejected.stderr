@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+ --> tests/ui/string_executor_rejected.rs:3:1
+  |
+3 | / strong_command_executor!(
+4 | |     fn bad_executor(_app: (), _cmd: String) -> () {}
+5 | | );
+  | | ^
+  | | |
+  | |_expected fn pointer, found closure
+  |   expected due to this
+  |
+  = note: expected fn pointer `fn(std::string::String)`
+                found closure `{closure@$DIR/src/workflows/strong_command.rs:1616:17: 1616:84}`
+  = note: closure has signature: `fn(ResolvedCommand)`
+  = note: this error originates in the macro `strong_command_executor` (in Nightly builds, run with -Z macro-backtrace for more info)

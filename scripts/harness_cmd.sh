@@ -13,4 +13,4 @@ if [ "${1:-}" = "--" ]; then
   shift
 fi
 
-cargo run -p aura-harness -- "$subcommand" "$@"
+cargo run -p aura-harness --bin aura-harness -- "$subcommand" "$@"

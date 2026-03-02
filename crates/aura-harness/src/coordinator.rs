@@ -291,11 +291,21 @@ fn env_value(key: &str, env_entries: &[String]) -> Option<String> {
     })
 }
 
+fn absolutize_path(path: PathBuf) -> PathBuf {
+    if path.is_absolute() {
+        return path;
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        return cwd.join(path);
+    }
+    path
+}
+
 fn clipboard_file_for_instance(instance: &InstanceConfig) -> PathBuf {
     if let Some(path) = env_value("AURA_CLIPBOARD_FILE", &instance.env) {
-        return PathBuf::from(path);
+        return absolutize_path(PathBuf::from(path));
     }
-    instance.data_dir.join(".harness-clipboard.txt")
+    absolutize_path(instance.data_dir.join(".harness-clipboard.txt"))
 }
 
 impl Drop for HarnessCoordinator {
@@ -368,21 +378,21 @@ mod tests {
     #[test]
     fn clipboard_file_uses_instance_default_path() {
         let instance = test_instance(vec![]);
-        assert_eq!(
-            clipboard_file_for_instance(&instance),
-            PathBuf::from(".tmp/test/alice/.harness-clipboard.txt")
-        );
+        let expected = std::env::current_dir()
+            .unwrap_or_else(|error| panic!("current_dir failed: {error}"))
+            .join(".tmp/test/alice/.harness-clipboard.txt");
+        assert_eq!(clipboard_file_for_instance(&instance), expected);
     }
 
     #[test]
     fn clipboard_file_uses_env_override() {
         let instance = test_instance(vec![
             "AURA_CLIPBOARD_MODE=file_only".to_string(),
-            "AURA_CLIPBOARD_FILE=/tmp/custom-clip.txt".to_string(),
+            "AURA_CLIPBOARD_FILE=tmp/custom-clip.txt".to_string(),
         ]);
-        assert_eq!(
-            clipboard_file_for_instance(&instance),
-            PathBuf::from("/tmp/custom-clip.txt")
-        );
+        let expected = std::env::current_dir()
+            .unwrap_or_else(|error| panic!("current_dir failed: {error}"))
+            .join("tmp/custom-clip.txt");
+        assert_eq!(clipboard_file_for_instance(&instance), expected);
     }
 }

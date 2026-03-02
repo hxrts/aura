@@ -563,6 +563,7 @@ check_effects() {
     | grep -v "$ALLOW_TUI_BOOTSTRAP" \
     | grep -Ev "/tests/" \
     | grep -v "///" | grep -v "//!" | grep -v "//" || true)
+  filtered_sim=$(filter_test_modules "$filtered_sim")
   emit_hits "Non-injected randomness/IO/spawn" "$filtered_sim"
 
   # ─── Pure interpreter alignment ───
@@ -983,6 +984,48 @@ check_workflows() {
   init_calls=$(rg --no-heading "init_signals\\(" crates/aura-app/src -g "*.rs" \
     | grep -v "crates/aura-app/src/core/app.rs" | grep -v "init_signals_with_hooks" || true)
   emit_hits "Direct init_signals calls" "$init_calls"
+
+  # Strong command pipeline enforcement in TUI slash command path.
+  local legacy_slash_dispatch
+  legacy_slash_dispatch=$(rg --no-heading "CommandDispatcher::|CapabilityPolicy::|dispatcher\\.dispatch\\(" \
+    crates/aura-terminal/src/tui/callbacks/factories.rs -g "*.rs" || true)
+  emit_hits "Legacy slash command dispatcher usage" "$legacy_slash_dispatch"
+
+  local legacy_slash_parse
+  legacy_slash_parse=$(rg --no-heading "parse_command\\(" \
+    crates/aura-terminal/src/tui/callbacks/factories.rs -g "*.rs" || true)
+  emit_hits "Legacy slash parse helper usage" "$legacy_slash_parse"
+
+  local legacy_input_parse
+  legacy_input_parse=$(rg --no-heading "parse_command\\(" \
+    crates/aura-terminal/src/tui/state/handlers/input.rs -g "*.rs" || true)
+  emit_hits "Legacy slash parse helper usage in input handler" "$legacy_input_parse"
+
+  local legacy_dispatch_refs
+  legacy_dispatch_refs=$(rg --no-heading "CommandDispatcher|CapabilityPolicy" \
+    crates/aura-terminal/src -g "*.rs" \
+    | grep -v "crates/aura-terminal/src/tui/effects/dispatcher.rs" \
+    | grep -v "crates/aura-terminal/src/tui/effects/mod.rs" || true)
+  emit_hits "Legacy dispatcher references outside compatibility module" "$legacy_dispatch_refs"
+
+  local legacy_parse_refs
+  legacy_parse_refs=$(rg --no-heading "parse_command\\(" \
+    crates/aura-terminal/src -g "*.rs" \
+    | grep -v "crates/aura-terminal/src/tui/commands.rs" || true)
+  emit_hits "Legacy parse helper references outside compatibility module" "$legacy_parse_refs"
+
+  local missing_strong=false
+  if ! rg -q "workflows::strong_command::execute_planned" \
+    crates/aura-terminal/src/tui/callbacks/factories.rs; then
+    violation "[L7] Strong command pipeline missing: callbacks/factories.rs must call strong_command::execute_planned"
+    missing_strong=true
+  fi
+  if ! rg -q "strong_resolver\\.plan\\(" \
+    crates/aura-terminal/src/tui/callbacks/factories.rs; then
+    violation "[L7] Strong command planning missing: callbacks/factories.rs must plan resolved commands before execution"
+    missing_strong=true
+  fi
+  $missing_strong || info "Strong command pipeline: enforced"
 }
 
 

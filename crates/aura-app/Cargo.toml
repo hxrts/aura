@@ -159,6 +159,7 @@ uniffi = { version = "0.25", features = ["build"], optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+trybuild = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros"] }

@@ -95,6 +95,7 @@ pub mod snapshot;
 pub(crate) mod snapshot_policy;
 pub(crate) mod state_helpers;
 pub mod steward;
+pub mod strong_command;
 pub mod sync;
 pub mod system;
 pub(crate) mod time;

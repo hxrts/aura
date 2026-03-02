@@ -1,6 +1,6 @@
 schema_version = 1
 id = "scenario3-prelude"
-goal = "Prepare two fresh local instances for manual IRC slash-command validation."
+goal = "Prepare two local instances with contact pairing for manual IRC slash-command validation."
 execution_mode = "scripted"
 required_capabilities = ["local"]
 
@@ -10,60 +10,46 @@ action = "launch_instances"
 timeout_ms = 15000
 
 [[steps]]
-id = "alice-ready-for-account"
+id = "alice-ready"
 action = "wait_for"
 instance = "alice"
 pattern = "Welcome to Aura"
-timeout_ms = 20000
+timeout_ms = 30000
 
 [[steps]]
-id = "bob-ready-for-account"
+id = "bob-ready"
 action = "wait_for"
 instance = "bob"
 pattern = "Welcome to Aura"
-timeout_ms = 20000
-
-[[steps]]
-id = "alice-name"
-action = "send_keys"
-instance = "alice"
-keys = "AliceS3"
-timeout_ms = 2000
+timeout_ms = 30000
 
 [[steps]]
 id = "alice-create-account"
-action = "send_key"
-instance = "alice"
-key = "enter"
-timeout_ms = 2000
-
-[[steps]]
-id = "alice-account-created"
-action = "wait_for"
-instance = "alice"
-pattern = "Map → Street"
-timeout_ms = 10000
-
-[[steps]]
-id = "bob-name"
 action = "send_keys"
-instance = "bob"
-keys = "BobS3"
-timeout_ms = 2000
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
 
 [[steps]]
 id = "bob-create-account"
-action = "send_key"
+action = "send_keys"
 instance = "bob"
-key = "enter"
-timeout_ms = 2000
+keys = "Bob\n"
+timeout_ms = 3000
 
 [[steps]]
-id = "bob-account-created"
+id = "alice-map-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Map → Street"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-map-ready"
 action = "wait_for"
 instance = "bob"
 pattern = "Map → Street"
-timeout_ms = 10000
+timeout_ms = 30000
 
 [[steps]]
 id = "alice-open-contacts"
@@ -218,45 +204,3 @@ action = "wait_for"
 instance = "bob"
 expect = "Chat"
 timeout_ms = 5000
-
-[[steps]]
-id = "alice-join-slash-lab"
-action = "send_chat_command"
-instance = "alice"
-command = "join slash-lab"
-timeout_ms = 2000
-
-[[steps]]
-id = "alice-channel-visible"
-action = "wait_for"
-instance = "alice"
-pattern = "# slash-lab"
-timeout_ms = 10000
-
-[[steps]]
-id = "bob-join-slash-lab"
-action = "send_chat_command"
-instance = "bob"
-command = "join slash-lab"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-channel-visible"
-action = "wait_for"
-instance = "bob"
-pattern = "# slash-lab"
-timeout_ms = 10000
-
-[[steps]]
-id = "bob-send-pin-seed-message"
-action = "send_keys"
-instance = "bob"
-keys = "is3-pin-seed\n"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-sees-pin-seed-message"
-action = "wait_for"
-instance = "bob"
-pattern = "s3-pin-seed"
-timeout_ms = 10000

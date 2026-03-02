@@ -5,8 +5,11 @@ use aura_agent::{
     AgentBuilder, AgentConfig, AuraAgent, EffectContext, ExecutionMode, RendezvousManagerConfig,
     SyncManagerConfig,
 };
-use aura_app::ui::signals::CHAT_SIGNAL;
-use aura_app::ui::workflows::{invitation as invitation_workflow, messaging as messaging_workflow};
+use aura_app::ui::signals::{CHAT_SIGNAL, CONTACTS_SIGNAL};
+use aura_app::ui::workflows::{
+    invitation as invitation_workflow, messaging as messaging_workflow,
+    strong_command as strong_command_workflow,
+};
 use aura_app::{AppConfig, AppCore};
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::domain::journal::FactValue;
@@ -14,7 +17,7 @@ use aura_core::effects::{
     JournalEffects, ReactiveEffects, ThresholdSigningEffects, TransportEffects,
 };
 use aura_core::hash::hash;
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, DeviceId};
 use aura_core::threshold::ParticipantIdentity;
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::DomainFact;
@@ -282,6 +285,190 @@ async fn wait_for_chat_signal_message(
     })
     .await
     .map_err(|_| "timed out waiting for chat signal message".into())
+}
+
+async fn ensure_chat_signal_message_absent(
+    app: &Arc<RwLock<AppCore>>,
+    sender_id: AuthorityId,
+    forbidden_content: &str,
+    duration: Duration,
+) -> TestResult {
+    let deadline = tokio::time::Instant::now() + duration;
+    loop {
+        let state: aura_app::views::ChatState = {
+            let core = app.read().await;
+            core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
+        };
+
+        if state
+            .all_messages()
+            .into_iter()
+            .any(|message| message.sender_id == sender_id && message.content == forbidden_content)
+        {
+            return Err(format!(
+                "unexpected message delivery for muted sender: '{forbidden_content}'"
+            )
+            .into());
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            return Ok(());
+        }
+
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn wait_for_contact_signal(app: &Arc<RwLock<AppCore>>, target: AuthorityId) -> TestResult {
+    timeout(Duration::from_secs(8), async {
+        loop {
+            let state: aura_app::views::ContactsState = {
+                let core = app.read().await;
+                core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
+            };
+
+            if state.all_contacts().any(|contact| contact.id == target) {
+                break;
+            }
+
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .map_err(|_| "timed out waiting for contact signal".into())
+}
+
+async fn wait_for_channel_signal(app: &Arc<RwLock<AppCore>>, channel_id: ChannelId) -> TestResult {
+    timeout(Duration::from_secs(8), async {
+        loop {
+            let state: aura_app::views::ChatState = {
+                let core = app.read().await;
+                core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
+            };
+
+            if state.channel(&channel_id).is_some() {
+                break;
+            }
+
+            sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .map_err(|_| "timed out waiting for channel in chat signal".into())
+}
+
+async fn setup_lan_group_channel_pair(
+    seed_a: u8,
+    seed_b: u8,
+    channel_name: &str,
+) -> TestResult<(
+    Arc<AuraAgent>,
+    Arc<AuraAgent>,
+    Arc<RwLock<AppCore>>,
+    Arc<RwLock<AppCore>>,
+    ChannelId,
+)> {
+    let discovery_port = next_lan_port();
+    let bind_port_a = next_lan_port();
+    let bind_port_b = next_lan_port();
+
+    let agent_a =
+        create_production_lan_agent_with_bind(seed_a, discovery_port, bind_port_a).await?;
+    let agent_b =
+        create_production_lan_agent_with_bind(seed_b, discovery_port, bind_port_b).await?;
+
+    wait_for_lan_peer(&agent_a, agent_b.authority_id()).await?;
+    wait_for_lan_peer(&agent_b, agent_a.authority_id()).await?;
+
+    let app_a = create_runtime_app(agent_a.clone()).await?;
+    let app_b = create_runtime_app(agent_b.clone()).await?;
+
+    let invite = invitation_workflow::create_contact_invitation(
+        &app_a,
+        agent_b.authority_id(),
+        None,
+        Some("lan strong-command coverage".to_string()),
+        None,
+    )
+    .await?;
+    let invite_code = invitation_workflow::export_invitation(&app_a, &invite.invitation_id).await?;
+    invitation_workflow::import_invitation(&app_b, &invite_code).await?;
+    invitation_workflow::accept_invitation(&app_b, &invite.invitation_id).await?;
+
+    let effects_a = agent_a.runtime().effects();
+    timeout(Duration::from_secs(8), async {
+        loop {
+            if effects_a
+                .is_channel_established(
+                    aura_agent::core::default_context_id_for_authority(agent_b.authority_id()),
+                    agent_b.authority_id(),
+                )
+                .await
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .map_err(|_| "timed out waiting for descriptor cache")?;
+
+    wait_for_contact_signal(&app_a, agent_b.authority_id()).await?;
+    wait_for_contact_signal(&app_b, agent_a.authority_id()).await?;
+
+    let members = vec![agent_b.authority_id().to_string()];
+    let channel_id = messaging_workflow::create_channel(
+        &app_a,
+        channel_name,
+        None,
+        &members,
+        1,
+        1_700_000_300_000,
+    )
+    .await?;
+
+    let effects_b = agent_b.runtime().effects();
+    wait_for_matching_chat_fact(&effects_b, agent_b.authority_id(), |fact| {
+        matches!(
+            fact,
+            ChatFact::ChannelCreated {
+                channel_id: seen,
+                creator_id,
+                ..
+            } if *seen == channel_id && *creator_id == agent_a.authority_id()
+        )
+    })
+    .await?;
+
+    wait_for_channel_signal(&app_a, channel_id).await?;
+    wait_for_channel_signal(&app_b, channel_id).await?;
+
+    Ok((agent_a, agent_b, app_a, app_b, channel_id))
+}
+
+async fn execute_strong_command(
+    app: &Arc<RwLock<AppCore>>,
+    actor: AuthorityId,
+    channel_id: ChannelId,
+    parsed: strong_command_workflow::ParsedCommand,
+) -> TestResult<strong_command_workflow::CommandExecutionResult> {
+    let resolver = strong_command_workflow::CommandResolver::default();
+    let snapshot = resolver.capture_snapshot(app).await;
+    let resolved = resolver
+        .resolve(parsed, &snapshot)
+        .map_err(|error| format!("resolve failed: {error}"))?;
+    let channel_hint = channel_id.to_string();
+    let plan = resolver
+        .plan(
+            resolved,
+            &snapshot,
+            Some(channel_hint.as_str()),
+            Some(actor),
+        )
+        .map_err(|error| format!("plan failed: {error}"))?;
+    strong_command_workflow::execute_planned(app, plan)
+        .await
+        .map_err(|error| format!("execute failed: {error}").into())
 }
 
 #[tokio::test]
@@ -670,6 +857,93 @@ async fn test_lan_group_channel_invitation_roundtrip_plaintext() -> TestResult {
         .into());
     }
     wait_for_chat_signal_message(&app_a, agent_b.authority_id(), reply_text).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_lan_strong_command_mute_blocks_cross_instance_delivery_until_unmute() -> TestResult {
+    let (agent_a, agent_b, app_a, app_b, channel_id) =
+        setup_lan_group_channel_pair(70, 71, "lan-strong").await?;
+    let bob_target = {
+        let contacts: aura_app::views::ContactsState = {
+            let core = app_a.read().await;
+            core.read(&*CONTACTS_SIGNAL).await.unwrap_or_default()
+        };
+        let Some(contact) = contacts.all_contacts().next() else {
+            return Err(
+                "expected at least one contact for strong-command target resolution".into(),
+            );
+        };
+        contact.id.to_string()
+    };
+
+    let mute = execute_strong_command(
+        &app_a,
+        agent_a.authority_id(),
+        channel_id,
+        strong_command_workflow::ParsedCommand::Mute {
+            target: bob_target.clone(),
+            duration: Some(Duration::from_secs(300)),
+        },
+    )
+    .await?;
+    assert_eq!(
+        mute.consistency_state,
+        strong_command_workflow::ConsistencyState::Enforced
+    );
+
+    let muted_payload = "blocked-by-mute";
+    let _ = messaging_workflow::send_message(&app_b, channel_id, muted_payload, 1_700_000_300_010)
+        .await;
+    ensure_chat_signal_message_absent(
+        &app_a,
+        agent_b.authority_id(),
+        muted_payload,
+        Duration::from_secs(2),
+    )
+    .await?;
+
+    let unmute = execute_strong_command(
+        &app_a,
+        agent_a.authority_id(),
+        channel_id,
+        strong_command_workflow::ParsedCommand::Unmute { target: bob_target },
+    )
+    .await?;
+    assert_eq!(
+        unmute.consistency_state,
+        strong_command_workflow::ConsistencyState::Enforced
+    );
+
+    let after = "after-unmute-cross-instance";
+    messaging_workflow::send_message(&app_b, channel_id, after, 1_700_000_300_020).await?;
+    wait_for_chat_signal_message(&app_a, agent_b.authority_id(), after).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_lan_leave_then_join_reuses_channel_id_cross_instance() -> TestResult {
+    let (_agent_a, agent_b, app_a, app_b, channel_id) =
+        setup_lan_group_channel_pair(72, 73, "lan-rejoin").await?;
+
+    messaging_workflow::leave_channel(&app_b, channel_id).await?;
+    messaging_workflow::join_channel_by_name(&app_b, "#lan-rejoin").await?;
+    wait_for_channel_signal(&app_b, channel_id).await?;
+
+    let state_b: aura_app::views::ChatState = {
+        let core = app_b.read().await;
+        core.read(&*CHAT_SIGNAL).await.unwrap_or_default()
+    };
+    assert!(
+        state_b.channel(&channel_id).is_some(),
+        "leave/join must preserve canonical channel id visibility"
+    );
+
+    let message = "rejoin-channel-id-stable";
+    messaging_workflow::send_message(&app_b, channel_id, message, 1_700_000_300_030).await?;
+    wait_for_chat_signal_message(&app_a, agent_b.authority_id(), message).await?;
 
     Ok(())
 }

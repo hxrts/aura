@@ -7,7 +7,6 @@
 
 use aura_core::effects::terminal::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
-use crate::tui::commands::{parse_command, IrcCommand};
 use crate::tui::layout::dim;
 use crate::tui::screens::Screen;
 
@@ -223,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn enter_parses_neighborhood_slash_command() {
+    fn enter_routes_neighborhood_slash_command_through_chat_send() {
         let mut state = TuiState::new();
         state.router.go_to(Screen::Chat);
         state.chat.focus = ChatFocus::Input;
@@ -235,8 +234,8 @@ mod tests {
 
         assert!(matches!(
             commands.first(),
-            Some(TuiCommand::Dispatch(DispatchCommand::AddHomeToNeighborhood { home_id }))
-                if home_id == "home-123"
+            Some(TuiCommand::Dispatch(DispatchCommand::SendChatMessage { content }))
+                if content == "/nhadd home-123"
         ));
     }
 
@@ -330,36 +329,11 @@ pub fn handle_insert_mode_key(state: &mut TuiState, commands: &mut Vec<TuiComman
                     let content = state.chat.input_buffer.clone();
                     state.chat.input_buffer.clear();
                     if content.starts_with('/') {
-                        match parse_command(&content) {
-                            Ok(IrcCommand::Neighborhood { name }) => {
-                                commands.push(TuiCommand::Dispatch(
-                                    DispatchCommand::CreateNeighborhood { name },
-                                ));
-                            }
-                            Ok(IrcCommand::NhAdd { home_id }) => {
-                                commands.push(TuiCommand::Dispatch(
-                                    DispatchCommand::AddHomeToNeighborhood { home_id },
-                                ));
-                            }
-                            Ok(IrcCommand::NhLink { home_id }) => {
-                                commands.push(TuiCommand::Dispatch(
-                                    DispatchCommand::LinkHomeAdjacency { home_id },
-                                ));
-                            }
-                            Ok(_other) => {
-                                // Route all other slash commands through the existing chat
-                                // send path so callbacks can parse and dispatch them.
-                                commands.push(TuiCommand::Dispatch(
-                                    DispatchCommand::SendChatMessage { content },
-                                ));
-                            }
-                            Err(error) => {
-                                commands.push(TuiCommand::ShowToast {
-                                    message: error.to_string(),
-                                    level: super::super::toast::ToastLevel::Error,
-                                });
-                            }
-                        }
+                        // Route all slash commands through the chat callback strong-command
+                        // pipeline (`ParsedCommand -> ResolvedCommand -> CommandPlan`).
+                        commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
+                            content,
+                        }));
                     } else {
                         commands.push(TuiCommand::Dispatch(DispatchCommand::SendChatMessage {
                             content,

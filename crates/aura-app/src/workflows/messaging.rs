@@ -4,6 +4,7 @@
 //! Uses typed reactive signals for state reads/writes.
 
 use crate::workflows::channel_ref::ChannelRef;
+use crate::workflows::chat_commands::normalize_channel_name;
 use crate::workflows::context::current_home_context_or_fallback;
 use crate::workflows::parse::parse_authority_id;
 use crate::workflows::runtime::{cooperative_yield, require_runtime};
@@ -118,6 +119,27 @@ async fn resolve_channel_id_from_state_or_input(
         return existing.id;
     }
 
+    let homes = {
+        let core = app_core.read().await;
+        core.views().get_homes()
+    };
+    if let Some(home_id) = homes
+        .iter()
+        .filter_map(|(home_id, home)| {
+            let home_name = home.name.trim();
+            let is_match = home_id.to_string().eq_ignore_ascii_case(raw)
+                || format!("home:{home_id}").eq_ignore_ascii_case(raw)
+                || (!home_name.is_empty() && home_name.eq_ignore_ascii_case(normalized_name))
+                || (!home_name.is_empty() && format!("#{}", home_name).eq_ignore_ascii_case(raw))
+                || (!home_name.is_empty() && format!("# {}", home_name).eq_ignore_ascii_case(raw));
+            is_match.then_some((*home_id, home.is_admin(), home.resident_count))
+        })
+        .max_by_key(|(_, is_admin, resident_count)| (u8::from(*is_admin), *resident_count))
+        .map(|(home_id, _, _)| home_id)
+    {
+        return home_id;
+    }
+
     channel_id_from_input(channel_input)
 }
 
@@ -149,6 +171,22 @@ async fn matching_channel_ids(
 
         if is_match {
             matches.push(channel.id);
+        }
+    }
+
+    let homes = {
+        let core = app_core.read().await;
+        core.views().get_homes()
+    };
+    for (home_id, home) in homes.iter() {
+        let home_name = home.name.trim();
+        let is_match = home_id.to_string().eq_ignore_ascii_case(raw)
+            || format!("home:{home_id}").eq_ignore_ascii_case(raw)
+            || (!home_name.is_empty() && home_name.eq_ignore_ascii_case(normalized_name))
+            || (!home_name.is_empty() && format!("#{}", home_name).eq_ignore_ascii_case(raw))
+            || (!home_name.is_empty() && format!("# {}", home_name).eq_ignore_ascii_case(raw));
+        if is_match && !matches.contains(home_id) {
+            matches.push(*home_id);
         }
     }
 
@@ -530,6 +568,66 @@ async fn ensure_channel_visible_after_join(
     .await
 }
 
+async fn apply_authoritative_membership_projection(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_id: ChannelId,
+    context_id: ContextId,
+    joined: bool,
+    name_hint: Option<&str>,
+) -> Result<(), AuraError> {
+    if joined {
+        ensure_channel_visible_after_join(app_core, channel_id, context_id, name_hint).await?;
+        let chat = chat_snapshot(app_core).await;
+        if chat.channel(&channel_id).is_none() {
+            return Err(AuraError::agent(format!(
+                "join projection missing canonical channel {channel_id}"
+            )));
+        }
+        return Ok(());
+    }
+
+    let updated = with_chat_state(app_core, |chat| {
+        if let Some(channel) = chat.channel_mut(&channel_id) {
+            channel.context_id = Some(context_id);
+            channel.member_count = 0;
+            return true;
+        }
+        false
+    })
+    .await?;
+
+    if !updated {
+        // Channel projections can be pruned transiently during reactive churn.
+        // Preserve canonical identity by materializing a placeholder entry so
+        // subsequent `/join` reuses the same ChannelId.
+        let fallback_name = name_hint
+            .map(normalize_channel_name)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| channel_id.to_string());
+
+        with_chat_state(app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: fallback_name.clone(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 0,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await?;
+    }
+
+    Ok(())
+}
+
 async fn restore_home_resident_membership(
     app_core: &Arc<RwLock<AppCore>>,
     context_id: ContextId,
@@ -701,21 +799,27 @@ pub async fn send_direct_message(
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
     let contact = crate::workflows::query::resolve_contact(app_core, target).await?;
-    let target_id = contact.id;
+    let channel_id =
+        send_direct_message_to_authority(app_core, contact.id, content, timestamp_ms).await?;
+    Ok(channel_id.to_string())
+}
 
+/// Send a direct message to a canonical authority ID.
+pub async fn send_direct_message_to_authority(
+    app_core: &Arc<RwLock<AppCore>>,
+    target: AuthorityId,
+    content: &str,
+    timestamp_ms: u64,
+) -> Result<ChannelId, AuraError> {
     if let Ok(runtime) = require_runtime(app_core).await {
-        if target_id == runtime.authority_id() {
+        if target == runtime.authority_id() {
             return Err(AuraError::invalid("Cannot send direct message to yourself"));
         }
     }
 
-    let channel_id = start_direct_chat(app_core, &target_id.to_string(), timestamp_ms)
-        .await?
-        .parse::<ChannelId>()
-        .map_err(|e| AuraError::agent(format!("Invalid direct channel ID: {e}")))?;
-
+    let channel_id = start_direct_chat_with_authority(app_core, target, timestamp_ms).await?;
     let _message_id = send_message(app_core, channel_id, content, timestamp_ms).await?;
-    Ok(channel_id.to_string())
+    Ok(channel_id)
 }
 
 /// Create a group channel (home channel) in chat state.
@@ -958,7 +1062,7 @@ pub async fn join_channel(
         crate::workflows::time::current_time_ms(app_core).await?,
     )
     .await?;
-    ensure_channel_visible_after_join(app_core, channel_id, context_id, None).await?;
+    apply_authoritative_membership_projection(app_core, channel_id, context_id, true, None).await?;
 
     Ok(())
 }
@@ -997,13 +1101,17 @@ pub async fn join_channel_by_name(
 
     match join_channel(app_core, channel_id).await {
         Ok(()) => {
-            let context_id =
-                context_id_for_channel(app_core, channel_id, Some(require_runtime(app_core).await?.authority_id()))
-                    .await?;
-            ensure_channel_visible_after_join(
+            let context_id = context_id_for_channel(
+                app_core,
+                channel_id,
+                Some(require_runtime(app_core).await?.authority_id()),
+            )
+            .await?;
+            apply_authoritative_membership_projection(
                 app_core,
                 channel_id,
                 context_id,
+                true,
                 Some(channel_name),
             )
             .await?;
@@ -1076,27 +1184,9 @@ pub async fn leave_channel(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to leave channel: {e}")))?;
 
-    // Preserve the channel entry so `/join <name>` can reuse the authoritative
-    // channel ID instead of falling back to a hash-derived placeholder.
-    let updated_channel = with_chat_state(app_core, |chat| {
-        if let Some(channel) = chat.channel_mut(&channel_id) {
-            channel.member_count = 0;
-            return true;
-        }
-        false
-    })
-    .await?;
-    if !updated_channel {
-        let available_channels = chat_snapshot(app_core)
-            .await
-            .all_channels()
-            .map(|channel| channel.id.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(AuraError::not_found(format!(
-            "leave targeted unknown local channel {channel_id}; available=[{available_channels}]"
-        )));
-    }
+    // Preserve canonical channel identity for future join operations.
+    apply_authoritative_membership_projection(app_core, channel_id, context_id, false, None)
+        .await?;
 
     Ok(())
 }
@@ -1424,22 +1514,31 @@ pub async fn start_direct_chat(
     contact_id: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
+    let contact_authority = parse_authority_id(contact_id)?;
+    let channel_id =
+        start_direct_chat_with_authority(app_core, contact_authority, timestamp_ms).await?;
+    Ok(channel_id.to_string())
+}
+
+/// Start a direct chat with a canonical authority ID.
+pub async fn start_direct_chat_with_authority(
+    app_core: &Arc<RwLock<AppCore>>,
+    contact_authority: AuthorityId,
+    timestamp_ms: u64,
+) -> Result<ChannelId, AuraError> {
     let backend = messaging_backend(app_core).await;
     let contacts = contacts_snapshot(app_core).await;
+    let contact_id = contact_authority.to_string();
 
     // Get contact name from ViewState for the channel name
     let contact_name = contacts
-        .contact(
-            &parse_authority_id(contact_id)
-                .unwrap_or_else(|_| AuthorityId::new_from_entropy([1u8; 32])),
-        )
+        .contact(&contact_authority)
         .map(|c| c.nickname.clone())
         .unwrap_or_else(|| format!("DM with {}", &contact_id[..8.min(contact_id.len())]));
 
     if backend == MessagingBackend::Runtime {
         // Runtime mode provisions a deterministic two-party channel without requiring
         // invitation capabilities in the active runtime profile.
-        let contact_authority = parse_authority_id(contact_id)?;
         let runtime = require_runtime(app_core).await?;
         // Use a pairwise deterministic context so both peers converge on the same
         // transport/journal scope instead of each side's current home context.
@@ -1526,12 +1625,10 @@ pub async fn start_direct_chat(
             });
         })
         .await?;
-        return Ok(channel_id.to_string());
+        return Ok(channel_id);
     }
 
-    let channel_id = dm_channel_id(contact_id);
-    let authority_id =
-        parse_authority_id(contact_id).unwrap_or_else(|_| AuthorityId::new_from_entropy([1u8; 32]));
+    let channel_id = dm_channel_id(&contact_id);
     let now = timestamp_ms;
 
     // Create the DM channel
@@ -1543,7 +1640,7 @@ pub async fn start_direct_chat(
         channel_type: ChannelType::DirectMessage,
         unread_count: 0,
         is_dm: true,
-        member_ids: vec![authority_id],
+        member_ids: vec![contact_authority],
         member_count: 2, // Self + contact
         last_message: None,
         last_message_time: None,
@@ -1557,7 +1654,7 @@ pub async fn start_direct_chat(
     })
     .await?;
 
-    Ok(channel_id.to_string())
+    Ok(channel_id)
 }
 
 /// Get current chat state
@@ -1628,8 +1725,20 @@ pub async fn invite_user_to_channel(
 ) -> Result<InvitationId, AuraError> {
     // Resolve via contacts first so command targets can use IDs or contact names.
     let receiver = resolve_target_authority_for_invite(app_core, target_user_id).await?;
-    let runtime = require_runtime(app_core).await?;
     let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_id).await;
+
+    invite_authority_to_channel(app_core, receiver, channel_id, message, ttl_ms).await
+}
+
+/// Invite a canonical authority to a canonical channel.
+pub async fn invite_authority_to_channel(
+    app_core: &Arc<RwLock<AppCore>>,
+    receiver: AuthorityId,
+    channel_id: ChannelId,
+    message: Option<String>,
+    ttl_ms: Option<u64>,
+) -> Result<InvitationId, AuraError> {
+    let runtime = require_runtime(app_core).await?;
     let context_id =
         context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
 
@@ -1892,9 +2001,7 @@ mod tests {
             .expect("join visibility should succeed");
 
         let chat = chat_snapshot(&app_core).await;
-        let channel = chat
-            .channel(&channel_id)
-            .expect("channel should exist");
+        let channel = chat.channel(&channel_id).expect("channel should exist");
         assert_eq!(channel.context_id, Some(context_id));
         assert_eq!(channel.name, "slash-lab");
     }
@@ -1934,6 +2041,78 @@ mod tests {
         assert_eq!(by_name, channel_id);
         assert_eq!(by_hash, channel_id);
         assert_eq!(by_spaced_hash, channel_id);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_channel_id_uses_home_projection_when_chat_missing() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let home_id = ChannelId::from_bytes(hash(b"resolve-home-projection"));
+        let owner = AuthorityId::new_from_entropy([17u8; 32]);
+        let context_id = ContextId::new_from_entropy([18u8; 32]);
+
+        {
+            let mut core = app_core.write().await;
+            let mut homes = core.views().get_homes();
+            homes.add_home(HomeState::new(
+                home_id,
+                Some("slash-lab".to_string()),
+                owner,
+                0,
+                context_id,
+            ));
+            homes.select_home(Some(home_id));
+            core.views_mut().set_homes(homes);
+        }
+
+        let resolved = resolve_channel_id_from_state_or_input(&app_core, "#slash-lab").await;
+        assert_eq!(resolved, home_id);
+    }
+
+    #[tokio::test]
+    async fn test_leave_then_join_name_reuses_canonical_channel_id() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let context_id = ContextId::new_from_entropy([19u8; 32]);
+        let channel_id = ChannelId::from_bytes(hash(b"leave-join-canonical-reuse"));
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: Some(context_id),
+                name: "slash-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 2,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        apply_authoritative_membership_projection(&app_core, channel_id, context_id, false, None)
+            .await
+            .expect("leave projection should preserve canonical channel entry");
+
+        let resolved = resolve_channel_id_from_state_or_input(&app_core, "slash-lab").await;
+        assert_eq!(resolved, channel_id);
+
+        let chat = chat_snapshot(&app_core).await;
+        let channel = chat
+            .channel(&channel_id)
+            .expect("channel entry should remain");
+        assert_eq!(channel.member_count, 0);
     }
 
     #[tokio::test]
@@ -2129,8 +2308,7 @@ mod tests {
         let sender = AuthorityId::new_from_entropy([9u8; 32]);
         let actor = AuthorityId::new_from_entropy([2u8; 32]);
         let channel_home_id = ChannelId::from_bytes(hash(b"messaging-context-primary-home"));
-        let moderation_home_id =
-            ChannelId::from_bytes(hash(b"messaging-context-moderation-home"));
+        let moderation_home_id = ChannelId::from_bytes(hash(b"messaging-context-moderation-home"));
 
         let primary_home = HomeState::new(
             channel_home_id,
@@ -2223,7 +2401,8 @@ mod tests {
             core.views_mut().set_homes(homes);
         }
 
-        let result = enforce_home_join_allowed(&app_core, context_id, channel_home_id, banned).await;
+        let result =
+            enforce_home_join_allowed(&app_core, context_id, channel_home_id, banned).await;
         assert!(result.is_err(), "banned sender must be blocked");
         assert!(result.unwrap_err().to_string().contains("banned"));
     }

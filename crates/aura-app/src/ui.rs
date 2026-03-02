@@ -68,6 +68,7 @@ pub mod workflows {
     pub use crate::workflows::signals;
     pub use crate::workflows::snapshot;
     pub use crate::workflows::steward;
+    pub use crate::workflows::strong_command;
     pub use crate::workflows::sync;
     pub use crate::workflows::system;
 

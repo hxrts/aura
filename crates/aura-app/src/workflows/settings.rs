@@ -13,6 +13,7 @@ use crate::{
     AppCore,
 };
 use async_lock::RwLock;
+use aura_core::identifiers::ChannelId;
 use aura_core::AuraError;
 use std::sync::Arc;
 
@@ -131,6 +132,20 @@ pub async fn set_channel_mode(
             .unwrap_or(parsed)
     };
 
+    set_channel_mode_resolved(app_core, resolved_channel, flags).await
+}
+
+/// Set channel mode flags using a canonical channel ID.
+pub async fn set_channel_mode_resolved(
+    app_core: &Arc<RwLock<AppCore>>,
+    resolved_channel: ChannelId,
+    flags: String,
+) -> Result<(), AuraError> {
+    let chat = chat_snapshot(app_core).await;
+    let resolved_channel_name = chat
+        .channel(&resolved_channel)
+        .map(|channel| channel.name.clone())
+        .unwrap_or_else(|| resolved_channel.to_string());
     let context_hint = chat
         .channel(&resolved_channel)
         .and_then(|channel| channel.context_id);
@@ -179,7 +194,7 @@ pub async fn set_channel_mode(
 
             let mut placeholder = crate::views::home::HomeState::new(
                 resolved_channel,
-                Some(normalized_channel.clone()),
+                Some(resolved_channel_name.clone()),
                 owner,
                 0,
                 context_id,
@@ -195,7 +210,7 @@ pub async fn set_channel_mode(
 
     let Some(home_id) = target_home_id else {
         return Err(AuraError::permission_denied(format!(
-            "Set channel mode requires a home context (channel: {channel_id})"
+            "Set channel mode requires a home context (channel: {resolved_channel})"
         )));
     };
 
