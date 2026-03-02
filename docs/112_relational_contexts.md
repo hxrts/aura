@@ -26,13 +26,21 @@ pub enum RelationalFact {
     /// Protocol-level facts with core reduction semantics
     Protocol(ProtocolRelationalFact),
     /// Domain-level extensibility facts
-    Generic { context_id: ContextId, binding_type: String, binding_data: Vec<u8> },
+    Generic { context_id: ContextId, envelope: FactEnvelope },
+}
+
+/// Typed fact envelope (from aura-core/src/types/facts.rs)
+pub struct FactEnvelope {
+    pub type_id: FactTypeId,
+    pub schema_version: u16,
+    pub encoding: FactEncoding,
+    pub payload: Vec<u8>,
 }
 ```
 
-The `Protocol` variant wraps core protocol facts that have specialized reduction logic in `reduce_context()`. These include `GuardianBinding`, `RecoveryGrant`, `Consensus`, AMP channel facts, DKG transcript commits, and lifecycle markers. The `Generic` variant provides extensibility for domain-specific facts.
+The `Protocol` variant wraps core protocol facts that have specialized reduction logic in `reduce_context()`. These include `GuardianBinding`, `RecoveryGrant`, `Consensus`, AMP channel facts, DKG transcript commits, and lifecycle markers. The `Generic` variant provides extensibility for domain-specific facts using `FactEnvelope` which contains a typed payload with schema versioning.
 
-Domain crates implement the `DomainFact` trait from `aura-journal/src/extensibility.rs`. They store facts via `DomainFact::to_generic()`. The runtime registers reducers in `crates/aura-agent/src/fact_registry.rs` so `reduce_context()` can process Generic facts into `RelationalBinding` values.
+Domain crates implement the `DomainFact` trait from `aura-journal/src/extensibility.rs`. They store facts via `DomainFact::to_generic()` which produces a `FactEnvelope`. The runtime registers reducers in `crates/aura-agent/src/fact_registry.rs` so `reduce_context()` can process Generic facts into `RelationalBinding` values.
 
 ## 3. Prestate Model
 
@@ -289,19 +297,23 @@ for grant in grants {
 
 ```rust
 use aura_core::relational::{GenericBinding, RelationalFact};
+use aura_core::types::facts::{FactEnvelope, FactTypeId, FactEncoding};
 
 // Application-specific binding (e.g., project collaboration)
-let binding_data = serde_json::to_vec(&ProjectMetadata {
+let payload = serde_json::to_vec(&ProjectMetadata {
     name: "Alpha Project",
     role: "Reviewer",
     permissions: vec!["read", "comment"],
 })?;
 
-let generic = GenericBinding {
-    binding_type: "project_collaboration".to_string(),
-    binding_data,
-    consensus_proof: None,
+let envelope = FactEnvelope {
+    type_id: FactTypeId::new("project_collaboration"),
+    schema_version: 1,
+    encoding: FactEncoding::Json,
+    payload,
 };
+
+let generic = GenericBinding::new(envelope, None); // No consensus proof
 
 context.add_fact(RelationalFact::Generic(generic))?;
 ```
@@ -420,10 +432,10 @@ if recovery_op.is_emergency() {
 - Emergency operations should be rare and logged prominently
 
 **Generic Bindings:**
-- Document binding_type schema externally
-- Version your binding_data format
+- Document your FactTypeId schemas externally
+- Use schema_version field to version your payload format
 - Include consensus_proof for critical application bindings
-- Keep binding_data size reasonable for sync performance
+- Keep payload size reasonable for sync performance
 
 **Context Management:**
 - Use opaque ContextId - never encode participant info
