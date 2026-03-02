@@ -35,10 +35,10 @@ pub struct Receipt {
     pub src: AuthorityId,
     pub dst: AuthorityId,
     pub epoch: Epoch,
-    pub cost: u32,
-    pub nonce: u64,
+    pub cost: FlowCost,
+    pub nonce: FlowNonce,
     pub prev: Hash32,
-    pub sig: Vec<u8>,
+    pub sig: ReceiptSig,
 }
 ```
 
