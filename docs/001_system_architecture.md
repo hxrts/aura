@@ -256,18 +256,11 @@ The type signature makes dependencies explicit. Tests can inject mock handlers w
 
 ## 5. Guard Chain and Authorization
 
-All transport sends pass through a guard chain before any network effect. The chain enforces authorization, budget accounting, journal coupling, and leakage tracking.
+All transport sends pass through a guard chain before any network effect. The chain enforces authorization, budget accounting, journal coupling, and leakage tracking in a fixed sequence:
 
-```mermaid
-flowchart LR
-    A[Send Request] --> B[CapabilityGuard]
-    B --> C[FlowBudgetGuard]
-    C --> D[JournalCouplingGuard]
-    D --> E[LeakageTrackingGuard]
-    E --> F[TransportEffects]
-```
+`CapabilityGuard` → `FlowBudgetGuard` → `JournalCouplingGuard` → `LeakageTrackingGuard` → `TransportEffects`
 
-This chain order is fixed. Each guard must succeed before the next executes. Failure at any guard blocks the send. This order enforces the charge-before-send invariant.
+Each guard must succeed before the next executes. Failure at any guard blocks the send. This order enforces the charge-before-send invariant.
 
 ### 5.1 Guard responsibilities
 
