@@ -118,13 +118,13 @@ The composer builds a complete effect environment from handler components.
 ```rust
 use aura_simulator::handlers::SimulationTimeHandler;
 
-let time = SimulationTimeHandler::new();
-let start = time.current_timestamp().await?;
-time.advance(Duration::from_secs(60));
-let later = time.current_timestamp().await?;
+let mut time = SimulationTimeHandler::new();
+let start = time.physical_time().await?;
+time.jump_to_time(Duration::from_secs(60));
+let later = time.physical_time().await?;
 ```
 
-Simulated time advances only through explicit calls. This enables testing timeout behavior without delays.
+Simulated time advances only through explicit calls (`jump_to_time`) or sleep operations. This enables testing timeout behavior without delays.
 
 ### Fault Injection
 
