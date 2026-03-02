@@ -415,7 +415,7 @@ fn delivery_icon(status: &OptimisticStatus, expected_peers: &[AuthorityId]) -> &
             // Check if all expected peers have acked
             let delivered = status.acknowledgment
                 .as_ref()
-                .map(|ack| expected_peers.iter().all(|p| ack.acked_by.contains(p)))
+                .map(|ack| expected_peers.iter().all(|p| ack.contains(p)))
                 .unwrap_or(false);
             if delivered { "✓✓" } else { "✓" }
         }
