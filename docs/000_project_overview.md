@@ -24,87 +24,84 @@ For the complete architecture, see [System Architecture](001_system_architecture
 
 The documents below cover theory, technical components, implementation guidance, and project organization.
 
-### Foundation
+### 1. Foundation
 
-[Theoretical Model](002_theoretical_model.md) provides mathematical foundations including formal calculus, algebraic types, and semilattice semantics.
+[Theoretical Model](002_theoretical_model.md) establishes the formal calculus, algebraic types, and semilattice semantics underlying the system.
 
-[System Architecture](001_system_architecture.md) describes implementation architecture including effect system patterns, CRDT implementations, and choreographic protocols.
+[System Architecture](001_system_architecture.md) describes the 8-layer architecture, effect patterns, and choreographic protocol structure.
 
-[Privacy and Information Flow](003_information_flow_contract.md) documents the consent-based privacy framework with trust boundaries, flow budgets, and leakage tracking.
+[Privacy and Information Flow](003_information_flow_contract.md) specifies consent-based privacy with trust boundaries, flow budgets, and leakage tracking.
 
-[Distributed Systems Contract](004_distributed_systems_contract.md) specifies safety and liveness guarantees, the synchrony model, latency bounds, and adversarial assumptions.
+[Distributed Systems Contract](004_distributed_systems_contract.md) defines safety and liveness guarantees, synchrony assumptions, and adversarial tolerance.
 
-[System Invariants](005_system_invariants.md) documents safety invariants and verification properties across the system.
+[System Invariants](005_system_invariants.md) indexes safety invariants across crates with enforcement loci and verification hooks.
 
-### Core Systems
+### 2. Core Systems
 
-[Cryptographic Architecture](100_crypto.md) documents cryptographic primitives, key derivation, and threshold signature schemes.
+[Cryptographic Architecture](100_crypto.md) documents primitives, key derivation, threshold signatures, and VSS schemes.
 
-[Authority and Identity](102_authority_and_identity.md) describes the authority-centric identity model with opaque authorities, relational contexts, and commitment tree structure.
+[Identifiers and Boundaries](101_identifiers_and_boundaries.md) defines the identifier types and their privacy-preserving properties.
 
-[Identifiers and Boundaries](101_identifiers_and_boundaries.md) documents the identifier system and context isolation.
+[Authority and Identity](102_authority_and_identity.md) describes opaque authorities, commitment trees, and relational context structure.
 
-[Operation Categories](107_operation_categories.md) defines the A/B/C operation classification, ceremony contract for key rotations and membership changes, and how ceremonies relate to optimistic CRDT operations.
+[Journal System](103_journal.md) specifies fact-based journals, validation rules, and deterministic reduction flows.
 
-[Journal System](103_journal.md) documents the fact-based journal, validation rules, deterministic reduction flows, and flow budgets.
+[Authorization](104_authorization.md) covers capability semantics, Biscuit token integration, and guard chain authorization.
 
-[Relational Contexts](112_relational_contexts.md) covers guardian bindings, recovery grants, and context-scoped journals.
+[Effect System and Runtime](105_effect_system_and_runtime.md) documents effect traits, handler composition, and runtime assembly.
 
-[Consensus](106_consensus.md) describes the Aura Consensus protocol for strong agreement.
+[Consensus](106_consensus.md) specifies single-shot agreement for non-monotone operations with witness attestation.
 
-[Effect System and Runtime](105_effect_system_and_runtime.md) covers effect system architecture and runtime composition.
+[Operation Categories](107_operation_categories.md) defines A/B/C operation tiers, K1/K2/K3 key generation, and agreement levels.
 
-[MPST and Choreography](108_mpst_and_choreography.md) documents multi-party session types and choreographic programming.
+[MPST and Choreography](108_mpst_and_choreography.md) covers multi-party session types and choreographic protocol projection.
 
-[Transport and Information Flow](109_transport_and_information_flow.md) covers guard chain enforcement, secure channel lifecycle, and FlowBudget receipts.
+[Transport and Information Flow](109_transport_and_information_flow.md) specifies guard chain enforcement, secure channels, and flow receipts.
 
-[Authorization](104_authorization.md) describes the authorization flow from capabilities to Biscuit tokens.
+[Asynchronous Message Patterns](110_amp.md) documents reliable async messaging with acknowledgment and ordering patterns.
 
-[Rendezvous Architecture](111_rendezvous.md) covers context-scoped rendezvous envelopes and channel establishment.
+[Rendezvous Architecture](111_rendezvous.md) covers context-scoped peer discovery and encrypted envelope exchange.
 
-[Maintenance](115_maintenance.md) covers the distributed maintenance stack including snapshots and garbage collection.
+[Relational Contexts](112_relational_contexts.md) specifies guardian bindings, recovery grants, and cross-authority journals.
 
-[Asynchronous Message Patterns](110_amp.md) documents patterns for reliable asynchronous message coordination.
+[Database Architecture](113_database.md) defines the query layer using journals, Biscuit predicates, and CRDT views.
 
-[Database Architecture](113_database.md) specifies the distributed database layer using journals, Biscuit queries, and CRDTs.
+[Social Architecture](114_social_architecture.md) describes the three-tier model of messages, homes, and neighborhoods.
 
-[Social Architecture](114_social_architecture.md) defines the social organization model using messages, homes, and neighborhoods.
-Canonical role/access terminology lives in [Theoretical Model](002_theoretical_model.md#shared-terms-and-notation): `Member`, `Participant`, `Moderator`, and `Full`/`Partial`/`Limited`.
+[Maintenance](115_maintenance.md) covers snapshots, garbage collection, and distributed system evolution.
 
-[CLI and Terminal User Interface](116_cli_tui.md) specifies the CLI and iocraft-based TUI for Aura.
+[CLI and Terminal User Interface](116_cli_tui.md) specifies command-line and TUI interfaces for Aura operations.
 
-[Test Infrastructure Reference](117_testkit.md) documents the testkit crate, fixtures, and mock handlers.
+[Test Infrastructure Reference](117_testkit.md) documents test fixtures, mock handlers, and scenario builders.
 
-[Simulation Infrastructure Reference](118_simulator.md) covers deterministic simulation architecture and fault injection.
+[Simulation Infrastructure Reference](118_simulator.md) covers deterministic simulation with virtual time and fault injection.
 
-[Testing Guide](805_testing_guide.md) describes conformance testing and cross-platform parity validation.
+[Formal Verification Reference](119_verification.md) describes Quint model checking and Lean theorem proving integration.
 
-[Formal Verification Reference](119_verification.md) documents Quint specifications and Lean proofs.
+### 3. Developer Guides
 
-### Developer Guides
+[Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to the codebase.
 
-[Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to Aura.
+[Coordination Guide](803_coordination_guide.md) explains choreographic protocol design and implementation patterns.
 
-[Development Patterns and Workflows](805_development_patterns_guide.md) explains core implementation patterns, time domain selection, code location guidance, and typical workflows.
+[Advanced Coordination Guide](804_advanced_coordination_guide.md) covers complex coordination techniques including nested protocols and recovery.
 
-[Coordination Guide](803_coordination_guide.md) covers choreographic protocol design and implementation patterns.
+[Development Patterns Guide](805_development_patterns_guide.md) describes code organization, time domains, and common implementation workflows.
 
-[Advanced Coordination Guide](804_advanced_coordination_guide.md) documents advanced techniques for distributed coordination.
+[Testing Guide](805_testing_guide.md) covers test patterns, fixtures, and effect-based testing strategies.
 
-[Testing Guide](805_testing_guide.md) describes property testing, simulation harnesses, and validation frameworks.
+[Simulation Guide](806_simulation_guide.md) explains deterministic simulation for debugging and property verification.
 
-[Simulation Guide](806_simulation_guide.md) covers deterministic simulation for verification and debugging.
+[Verification Guide](807_verification_guide.md) documents Quint model checking and Lean proof workflows.
 
-[Verification and MBT Guide](807_verification_guide.md) explains model-based testing workflows with Quint and Lean.
+[Maintenance Guide](808_maintenance_guide.md) covers operational concerns including snapshots and system evolution.
 
-[Maintenance Guide](808_maintenance_guide.md) explains distributed maintenance, snapshots, garbage collection, and system evolution.
+[Reactive Signals Guide](810_reactive_signals_guide.md) describes reactive state propagation patterns for UI integration.
 
-[Reactive Signals Guide](810_reactive_signals_guide.md) covers reactive signal patterns for UI state management.
+[Runtime Harness Guide](813_runtime_harness_guide.md) explains multi-instance testing with real Aura processes.
 
-[Runtime Harness Guide](813_runtime_harness_guide.md) covers end-to-end runtime validation with real Aura instances.
+### 4. Project Meta
 
-### Project Meta
+[Verification Coverage Report](998_verification_coverage.md) tracks formal verification status across Quint specs and Lean proofs.
 
-[Verification Coverage Report](998_verification_coverage.md) summarizes formal verification, model checking, and conformance testing coverage.
-
-[Project Structure](999_project_structure.md) provides a comprehensive crate structure overview with the dependency graph.
+[Project Structure](999_project_structure.md) documents the 8-layer crate architecture and dependency relationships.
