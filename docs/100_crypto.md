@@ -266,7 +266,7 @@ The `Threshold` mode is used for multi-device accounts such as 2-of-3 or 3-of-5 
 
 FROST requires at least 2 signers. For 1-of-1 configurations, we use standard Ed25519.
 
-Ed25519 uses the same curve as FROST and produces compatible signatures for verification. It has no protocol overhead such as nonce coordination or aggregation. It is simpler and faster for the single-signer case.
+Ed25519 uses the same curve as FROST and produces compatible signatures for verification, however single signature does not require nonce coordination or aggregation.
 
 ### 6.3 API Usage
 
