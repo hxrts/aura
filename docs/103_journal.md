@@ -201,7 +201,11 @@ impl FlowBudget {
         Self {
             limit: self.limit.min(other.limit),
             spent: self.spent.max(other.spent),
-            epoch: self.epoch.max(other.epoch),
+            epoch: if self.epoch.value() >= other.epoch.value() {
+                self.epoch
+            } else {
+                other.epoch
+            },
         }
     }
 }
@@ -242,13 +246,13 @@ The effect system provides journal operations through `JournalEffects`. This tra
 ```rust
 #[async_trait]
 pub trait JournalEffects: Send + Sync {
-    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError>;
-    async fn refine_caps(&self, target: &Journal, refinement: &Journal) -> Result<Journal, AuraError>;
+    async fn merge_facts(&self, target: Journal, delta: Journal) -> Result<Journal, AuraError>;
+    async fn refine_caps(&self, target: Journal, refinement: Journal) -> Result<Journal, AuraError>;
     async fn get_journal(&self) -> Result<Journal, AuraError>;
     async fn persist_journal(&self, journal: &Journal) -> Result<(), AuraError>;
     async fn get_flow_budget(&self, context: &ContextId, peer: &AuthorityId) -> Result<FlowBudget, AuraError>;
     async fn update_flow_budget(&self, context: &ContextId, peer: &AuthorityId, budget: &FlowBudget) -> Result<FlowBudget, AuraError>;
-    async fn charge_flow_budget(&self, context: &ContextId, peer: &AuthorityId, cost: u32) -> Result<FlowBudget, AuraError>;
+    async fn charge_flow_budget(&self, context: &ContextId, peer: &AuthorityId, cost: FlowCost) -> Result<FlowBudget, AuraError>;
 }
 ```
 
@@ -378,16 +382,10 @@ The base `Fact` structure (section 2) is extended with consistency metadata fiel
 
 For facts with `ack_tracked = true`, acknowledgments are stored in a separate table:
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Ack Table                                                                │
-├─────────────┬─────────────────────────┬─────────────────────────────────┤
-│ fact_id     │ peer_id                 │ acked_at                        │
-├─────────────┼─────────────────────────┼─────────────────────────────────┤
-│ msg-001     │ alice_authority_id      │ 2024-01-15T10:30:00Z            │
-│ msg-001     │ bob_authority_id        │ 2024-01-15T10:30:05Z            │
-└─────────────┴─────────────────────────┴─────────────────────────────────┘
-```
+| fact_id | peer_id | acked_at |
+|---------|---------|----------|
+| msg-001 | alice_authority_id | 2024-01-15T10:30:00Z |
+| msg-001 | bob_authority_id | 2024-01-15T10:30:05Z |
 
 ### 14.3 Journal API for Consistency
 
