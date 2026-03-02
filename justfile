@@ -258,7 +258,7 @@ ci-effects:
 
 # Verify docs links referenced from crates/ resolve to existing files in docs/
 ci-crates-doc-links:
-    scripts/check-crates-doc-links.sh
+    scripts/check-doc-links.sh
 
 # Verify docs/998_verification_coverage.md metrics match actual codebase
 ci-verification-coverage:
@@ -1003,6 +1003,54 @@ harness-replay *ARGS:
 # Run harness crate tests
 harness-test:
     cargo test -p aura-harness
+
+# Run full typed scenario3 end-to-end flow with an isolated ephemeral harness config
+scenario3-e2e:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    runstamp="$(date +%s)"
+    baseport="$((47000 + (runstamp % 1000)))"
+    cfg="$(mktemp -t scenario3-e2e.XXXXXX).toml"
+    cat > "$cfg" <<EOF
+    schema_version = 1
+    
+    [run]
+    name = "scenario3-e2e-${runstamp}"
+    pty_rows = 40
+    pty_cols = 120
+    artifact_dir = "artifacts/harness/scenario3-e2e-${runstamp}"
+    
+    [[instances]]
+    id = "alice"
+    mode = "local"
+    data_dir = ".tmp/harness/scenario3-e2e-${runstamp}-alice"
+    device_id = "alice-dev-01"
+    bind_address = "127.0.0.1:${baseport}"
+    demo_mode = false
+    
+    [instances.lan_discovery]
+    enabled = true
+    bind_addr = "127.0.0.1"
+    broadcast_addr = "127.0.0.1"
+    port = $((baseport + 100))
+    
+    [[instances]]
+    id = "bob"
+    mode = "local"
+    data_dir = ".tmp/harness/scenario3-e2e-${runstamp}-bob"
+    device_id = "bob-dev-01"
+    bind_address = "127.0.0.1:$((baseport + 1))"
+    demo_mode = false
+    
+    [instances.lan_discovery]
+    enabled = true
+    bind_addr = "127.0.0.1"
+    broadcast_addr = "127.0.0.1"
+    port = $((baseport + 101))
+    EOF
+    just harness-lint -- --config "$cfg" --scenario scenarios/harness/scenario3-irc-slash-commands-e2e.toml
+    just harness-run -- --config "$cfg" --scenario scenarios/harness/scenario3-irc-slash-commands-e2e.toml
+    echo "scenario3-e2e complete (config: $cfg)"
 
 # Run lint/tests and generate checkpoint commit message template
 harness-checkpoint scope="phase" summary="describe-change":
