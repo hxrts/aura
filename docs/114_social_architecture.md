@@ -68,20 +68,20 @@ pub struct Home {
     pub home_id: HomeId,
     /// Total storage limit in bytes
     pub storage_limit: u64,
-    /// Maximum number of residents
-    pub max_residents: u8,
+    /// Maximum number of participants
+    pub max_participants: u8,
     /// Maximum number of neighborhoods this home can join
     pub neighborhood_limit: u8,
-    /// Current residents (authority IDs)
-    pub residents: Vec<AuthorityId>,
-    /// Current stewards with their capabilities
-    pub stewards: Vec<(AuthorityId, StewardCapabilities)>,
+    /// Current participants (authority IDs)
+    pub participants: Vec<AuthorityId>,
+    /// Current moderators with their capabilities
+    pub moderators: Vec<(AuthorityId, ModeratorCapabilities)>,
     /// Current storage budget tracking
     pub storage_budget: HomeStorageBudget,
 }
 ```
 
-The home structure contains the identifier, storage limit, configuration limits, resident list, steward designation list with capabilities, and storage budget tracking. Note: The codebase uses "resident" (code) where the theoretical model uses "participant" (spec), and "steward" (code) where the theoretical model uses "moderator" (spec).
+The home structure contains the identifier, storage limit, configuration limits, participant list, moderator designation list with capabilities, and storage budget tracking.
 
 ### 3.2 Membership and Participation
 
@@ -105,12 +105,12 @@ pub struct Neighborhood {
     pub neighborhood_id: NeighborhoodId,
     /// Member homes
     pub member_homes: Vec<HomeId>,
-    /// Adjacency relationships between homes (1-hop links)
-    pub adjacencies: Vec<(HomeId, HomeId)>,
+    /// 1-hop links between homes
+    pub one_hop_links: Vec<(HomeId, HomeId)>,
 }
 ```
 
-The neighborhood structure contains the identifier, member homes, and adjacency edges (1-hop links).
+The neighborhood structure contains the identifier, member homes, and 1-hop link edges.
 
 ### 4.2 Home Membership
 
@@ -135,7 +135,7 @@ pub enum DiscoveryLayer {
 }
 ```
 
-The discovery layer determines routing strategy and flow costs. `Direct` has minimal cost. `Home` relays through co-residents. `Neighborhood` uses multi-hop traversal. `Rendezvous` requires global flooding and has the highest cost.
+The discovery layer determines routing strategy and flow costs. `Direct` has minimal cost. `Home` relays through same-home participants. `Neighborhood` uses multi-hop traversal. `Rendezvous` requires global flooding and has the highest cost.
 
 ### 5.2 Movement Rules
 
@@ -166,20 +166,20 @@ Storage constraints are enforced via the flow budget system.
 pub struct HomeFlowBudget {
     /// Home ID (typed identifier)
     pub home_id: HomeId,
-    /// Current number of residents
-    pub resident_count: u8,
-    /// Storage used by residents (spent counter as fact)
-    pub resident_storage_spent: u64,
+    /// Current number of participants
+    pub participant_count: u8,
+    /// Storage used by participants (spent counter as fact)
+    pub participant_storage_spent: u64,
     /// Number of neighborhoods joined
     pub neighborhood_count: u8,
-    /// Total neighborhood donations
-    pub neighborhood_donations: u64,
+    /// Total neighborhood allocations
+    pub neighborhood_allocations: u64,
     /// Storage used by pinned content (spent counter as fact)
     pub pinned_storage_spent: u64,
 }
 ```
 
-The spent counters are persisted as journal facts. The count fields track current membership. Limits are derived at runtime from home policy and Biscuit capabilities. Resident storage limit is 1.6 MB for 8 residents at 200 KB each.
+The spent counters are persisted as journal facts. The count fields track current membership. Limits are derived at runtime from home policy and Biscuit capabilities. Participant storage limit is 1.6 MB for 8 participants at 200 KB each.
 
 ## 7. Fact Schema
 
@@ -189,13 +189,13 @@ Home facts enable Datalog queries.
 
 ```datalog
 home(home_id, created_at, storage_limit).
-home_config(home_id, max_residents, neighborhood_limit).
-resident(authority_id, home_id, joined_at, storage_allocated).
-steward(authority_id, home_id, designated_by, designated_at, capabilities).
+home_config(home_id, max_participants, neighborhood_limit).
+participant(authority_id, home_id, joined_at, storage_allocated).
+moderator(authority_id, home_id, designated_by, designated_at, capabilities).
 pinned(content_hash, home_id, pinned_by, pinned_at, size_bytes).
 ```
 
-These facts express home existence, configuration, residence, stewardship, and pin state.
+These facts express home existence, configuration, participation, moderator designation, and pin state.
 
 ### 7.2 Neighborhood Facts
 
@@ -204,7 +204,7 @@ Neighborhood facts express neighborhood existence, home membership, 1-hop links,
 ```datalog
 neighborhood(neighborhood_id, created_at).
 home_member(home_id, neighborhood_id, joined_at, allocated_storage).
-adjacency(home_a, home_b, neighborhood_id).
+one_hop_link(home_a, home_b, neighborhood_id).
 access_allowed(from_home, to_home, capability_requirement).
 ```
 
@@ -213,16 +213,16 @@ access_allowed(from_home, to_home, capability_requirement).
 Queries use Biscuit Datalog.
 
 ```datalog
-residents_of(Home) <- resident(Auth, Home, _, _).
+participants_of(Home) <- participant(Auth, Home, _, _).
 
 visitable(Target) <-
-    resident(Me, Current, _, _),
-    adjacency(Current, Target, _),
+    participant(Me, Current, _, _),
+    one_hop_link(Current, Target, _),
     access_allowed(Current, Target, Cap),
     has_capability(Me, Cap).
 ```
 
-The first query finds all residents of a home. The second finds homes a user can visit from their current position via adjacencies.
+The first query finds all participants of a home. The second finds homes a user can visit from their current position via 1-hop links.
 
 ## 8. IRC-Style Commands
 
@@ -342,7 +342,7 @@ let topology = SocialTopology::new(local_authority, home, neighborhoods);
 let candidates = topology.build_relay_candidates(&destination, |peer| is_reachable(peer));
 ```
 
-Candidates are returned in priority order: home peers first, then neighborhood peers, then guardians. Reachability checks filter unreachable peers. Each candidate includes the `RelayRelationship` type indicating whether the peer is a `HomePeer`, `NeighborhoodPeer`, or `Guardian`.
+Candidates are returned in priority order: same-home relays first, then 1-hop and 2-hop neighborhood relays, then guardians. Reachability checks filter unreachable peers. Each candidate includes relay-relationship metadata indicating same-home, neighborhood-hop, or guardian routing.
 
 ## See Also
 

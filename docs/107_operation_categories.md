@@ -94,11 +94,11 @@ Category B operations have local effect pending until agreement is reached. The 
 
 | Operation | Immediate Action | Agreement Required | On Rejection |
 |-----------|-----------------|-------------------|--------------|
-| Change channel permissions | Show "pending" | Admin approval | Revert, notify |
-| Remove channel member | Show "pending removal" | Admin consensus | Keep member |
+| Change channel permissions | Show "pending" | Moderator approval | Revert, notify |
+| Remove channel member | Show "pending removal" | Moderator consensus | Keep member |
 | Transfer ownership | Show "pending transfer" | Recipient acceptance | Cancel transfer |
 | Rename channel | Show "pending rename" | Member acknowledgment | Keep old name |
-| Archive channel | Show "pending archive" | Admin approval | Stay active |
+| Archive channel | Show "pending archive" | Moderator approval | Stay active |
 
 ### 3.2 Implementation Pattern
 
@@ -110,7 +110,7 @@ async fn change_permissions_deferred(
 ) -> ProposalId {
     let proposal = Proposal {
         operation: Operation::ChangePermissions { channel_id, changes },
-        requires_approval_from: vec![CapabilityRequirement::Role("admin")],
+        requires_approval_from: vec![CapabilityRequirement::Role("moderator")],
         threshold: ApprovalThreshold::Any,
         timeout_ms: 24 * 60 * 60 * 1000,
     };
@@ -455,8 +455,8 @@ Effect already applied. Indicators show delivery status (◐ → ✓ → ✓✓ 
 │ Pending: Remove Carol (waiting for Bob to confirm)                  │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Members:                                                            │
-│   Alice (admin)        ✓                                            │
-│   Bob (admin)          ✓                                            │
+│   Alice (moderator)    ✓                                            │
+│   Bob (moderator)      ✓                                            │
 │   Carol                ✓  ← Still has access until confirmed        │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -509,14 +509,14 @@ pub enum EffectTiming {
 Contexts can override default policies:
 
 ```rust
-// Strict security channel: unanimous admin approval for kicks
+// Strict security channel: unanimous moderator approval for kicks
 channel.set_effect_policy(RemoveFromChannel, EffectTiming::Deferred {
-    requires_approval_from: vec![CapabilityRequirement::Role("admin")],
+    requires_approval_from: vec![CapabilityRequirement::Role("moderator")],
     timeout_ms: 48 * 60 * 60 * 1000,
     threshold: ApprovalThreshold::Unanimous,
 });
 
-// Casual channel: any admin can kick immediately
+// Casual channel: any moderator can kick immediately
 channel.set_effect_policy(RemoveFromChannel, EffectTiming::Immediate);
 ```
 

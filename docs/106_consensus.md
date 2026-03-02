@@ -951,10 +951,10 @@ Operations that apply locally but require agreement for finalization. Effect is 
 - Immediate local effect shown as "pending"
 - Background ceremony for agreement
 - Failure triggers rollback with user notification
-- Multi-admin operations use this pattern
+- Multi-moderator operations use this pattern
 
 **Examples:**
-- Change channel permissions (requires admin consensus)
+- Change channel permissions (requires moderator consensus)
 - Remove channel member (may be contested)
 - Transfer channel ownership
 - Rename channel
