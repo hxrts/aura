@@ -118,14 +118,20 @@ Devices discover sync peers through the rendezvous system described in [Rendezvo
 pub struct PeerMetadata {
     pub device_id: DeviceId,
     pub status: PeerStatus,
-    pub trust_level: u8,
+    pub discovered_at: PhysicalTime,
+    pub last_status_change: PhysicalTime,
     pub successful_syncs: u64,
     pub failed_syncs: u64,
+    pub average_latency_ms: u64,
+    pub last_seen: PhysicalTime,
+    pub last_successful_sync: PhysicalTime,
+    pub trust_level: u8,
+    pub has_sync_capability: bool,
     pub active_sessions: usize,
 }
 ```
 
-This structure tracks peer state for selection decisions. The peer manager calculates a score for each peer using weighted factors. Trust level contributes 50 percent. Success rate contributes 30 percent. Load factor contributes 20 percent. Higher scores indicate better candidates for synchronization.
+This structure tracks peer state for selection decisions. All timestamp fields use `PhysicalTime` from the unified time system. The peer manager calculates a score for each peer using weighted factors. Trust level contributes 50 percent. Success rate contributes 30 percent. Load factor contributes 20 percent. Higher scores indicate better candidates for synchronization.
 
 Devices select peers when their score exceeds a threshold. Devices limit concurrent sessions per peer. This prevents resource exhaustion. Devices skip peers that have reached their session limit.
 
@@ -135,12 +141,15 @@ The session manager tracks active synchronization sessions. Each session has a u
 
 ```rust
 pub struct SessionManager<T> {
-    pub active_sessions: HashMap<DeviceId, SessionState<T>>,
-    pub max_concurrent: usize,
+    sessions: HashMap<SessionId, SessionState<T>>,
+    config: SessionConfig,
+    metrics: Option<MetricsCollector>,
+    last_cleanup: PhysicalTime,
+    session_counter: u64,
 }
 ```
 
-This structure maintains session state. Devices close sessions after fact exchange completes. Devices abort sessions when the identity epoch advances. Session cleanup releases resources for new synchronization rounds.
+This structure maintains session state. Sessions are indexed by `SessionId` rather than `DeviceId`. Configuration is provided via `SessionConfig`. All timestamp fields use `PhysicalTime` from the unified time system. Devices close sessions after fact exchange completes. Devices abort sessions when the identity epoch advances. Session cleanup releases resources for new synchronization rounds.
 
 ### 8.3 Rate Limiting and Metrics
 
@@ -168,10 +177,13 @@ pub trait Migration: Send + Sync {
     fn name(&self) -> &str;
     async fn validate(&self, ctx: &MigrationContext) -> Result<(), MigrationError>;
     async fn execute(&self, ctx: &MigrationContext) -> Result<(), MigrationError>;
+    async fn rollback(&self, ctx: &MigrationContext) -> Result<bool, MigrationError> {
+        Ok(false) // Default: rollback not supported
+    }
 }
 ```
 
-Each migration specifies source and target versions, a name for logging, and validate/execute methods.
+Each migration specifies source and target versions, a name for logging, validate/execute methods, and an optional rollback method. The default rollback implementation returns `Ok(false)` to indicate rollback is not supported.
 
 ### 9.2 Coordinator API
 
