@@ -1,6 +1,6 @@
 # System Architecture
 
-This document describes the architecture of Aura. It covers the core abstractions, data flow patterns, and component interactions that define the system. Formal definitions live in [Theoretical Model](002_theoretical_model.md). Safety and liveness guarantees are specified in [Distributed Systems Contract](004_distributed_systems_contract.md). Domain specifications are in the 100-series documents.
+This document gives an intuitive overview of Aura's architecture. It covers the core abstractions, data flow patterns, and component interactions that define the system. Formal definitions live in [Theoretical Model](002_theoretical_model.md), an overview of the implementation can be found in [Project Structure](docs/999_project_structure.md).
 
 ## Overview
 
@@ -8,7 +8,7 @@ Aura is a peer-to-peer identity and communication system built on three pillars.
 
 The system operates without dedicated servers. Discovery, availability, and recovery are provided by the web of trust. Peers relay messages for each other based on social relationships. No single party can observe all communication or deny service.
 
-Aura separates key generation from agreement. Key generation modes (K1/K2/K3) determine how shares are created. Agreement modes (A1/A2/A3) determine when operations become final. Fast paths provide immediate usability. Durable shared state is always consensus-finalized.
+Aura separates key generation from agreement. Fast paths provide immediate usability while durable shared state is always consensus-finalized.
 
 ```mermaid
 flowchart TB
