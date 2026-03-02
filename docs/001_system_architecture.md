@@ -1,6 +1,6 @@
 # Aura System Architecture
 
-This document describes the architecture of Aura. It covers the core abstractions, data flow patterns, and component interactions that define the system. Formal definitions live in [Theoretical Model](002_theoretical_model.md). Domain specifications are in the 100-series documents.
+This document describes the architecture of Aura. It covers the core abstractions, data flow patterns, and component interactions that define the system. Formal definitions live in [Theoretical Model](002_theoretical_model.md). Safety and liveness guarantees are specified in [Distributed Systems Contract](004_distributed_systems_contract.md). Domain specifications are in the 100-series documents.
 
 ## Overview
 
@@ -94,7 +94,7 @@ Account authorities maintain device membership using commitment trees. The journ
 pub struct AuthorityId(Uuid);
 ```
 
-`AuthorityId` is an opaque identifier for the authority namespace. It does not encode membership or reveal device count. Key derivation utilities provide context-scoped keys without exposing internal structure.
+`AuthorityId` is an opaque identifier for the authority namespace. It does not encode membership or reveal device count. Key derivation utilities provide context-scoped keys without exposing internal structure. See [Identifiers and Boundaries](101_identifiers_and_boundaries.md) for identifier semantics.
 
 ### 2.2 Relational contexts
 
@@ -442,9 +442,9 @@ Layer 5 (Feature) contains end-to-end protocol crates. These include `aura-authe
 
 Layer 6 (Runtime) contains `aura-agent` for effect system assembly, `aura-app` for portable application logic, and `aura-simulator` for deterministic simulation.
 
-Layer 7 (Interface) contains `aura-terminal` for CLI and TUI entry points.
+Layer 7 (Interface) contains `aura-terminal` for CLI and TUI entry points. See [CLI and Terminal User Interface](116_cli_tui.md) for command reference.
 
-Layer 8 (Testing) contains `aura-testkit`, `aura-quint`, and `aura-harness` for test infrastructure.
+Layer 8 (Testing) contains `aura-testkit`, `aura-quint`, and `aura-harness` for test infrastructure. See [Testing Guide](805_testing_guide.md) for test patterns.
 
 ### 9.2 Layer invariants
 
@@ -468,7 +468,7 @@ Aura's security model eliminates single points of trust. No central server holds
 
 Account authorities use threshold signatures. Key operations require a threshold of devices to participate. Compromising fewer than the threshold reveals nothing about the key.
 
-FROST provides the threshold signature scheme. DKG distributes key shares without a trusted dealer. Key rotation and resharing maintain security as devices join or leave.
+FROST provides the threshold signature scheme. DKG distributes key shares without a trusted dealer. Key rotation and resharing maintain security as devices join or leave. See [Cryptographic Architecture](100_crypto.md) for implementation details.
 
 The threshold is configurable per authority. A 2-of-3 threshold balances security and availability for typical users. Higher thresholds provide stronger security at the cost of requiring more devices to be online.
 
@@ -547,40 +547,3 @@ Consensus failures have specific handling. Fast path failures fall back to gossi
 The journal provides durability. Uncommitted facts are replayed after restart. Committed facts are immutable. This design simplifies recovery logic.
 
 Device recovery uses guardian protocols. Guardians hold encrypted recovery shares. A threshold of guardians can restore account access. See [Relational Contexts](112_relational_contexts.md) for recovery patterns.
-
-## Related Documents
-
-**Foundation**
-
-- [Project Overview](000_project_overview.md)
-- [Theoretical Model](002_theoretical_model.md)
-- [Privacy and Information Flow](003_information_flow_contract.md)
-- [Distributed Systems Contract](004_distributed_systems_contract.md)
-- [System Invariants](005_system_invariants.md)
-
-**Core Systems**
-
-- [Cryptographic Architecture](100_crypto.md)
-- [Identifiers and Boundaries](101_identifiers_and_boundaries.md)
-- [Authority and Identity](102_authority_and_identity.md)
-- [Journal](103_journal.md)
-- [Authorization](104_authorization.md)
-- [Effect System and Runtime](105_effect_system_and_runtime.md)
-- [Consensus](106_consensus.md)
-- [Operation Categories](107_operation_categories.md)
-- [MPST and Choreography](108_mpst_and_choreography.md)
-- [Transport and Information Flow](109_transport_and_information_flow.md)
-- [Asynchronous Message Patterns](110_amp.md)
-- [Rendezvous Architecture](111_rendezvous.md)
-- [Relational Contexts](112_relational_contexts.md)
-- [Database Architecture](113_database.md)
-- [Social Architecture](114_social_architecture.md)
-- [Maintenance](115_maintenance.md)
-- [CLI and Terminal User Interface](116_cli_tui.md)
-
-**Guides**
-
-- [Coordination Guide](803_coordination_guide.md)
-- [Development Patterns](805_development_patterns_guide.md)
-- [Testing Guide](805_testing_guide.md)
-- [Project Structure](999_project_structure.md)
