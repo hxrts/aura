@@ -21,14 +21,14 @@ The `aura-core` crate provides cryptographic foundations without direct side eff
 Type wrappers live in `crates/aura-core/src/crypto/ed25519.rs`.
 
 ```rust
-pub struct Ed25519SigningKey(pub Vec<u8>);
-pub struct Ed25519VerifyingKey(pub Vec<u8>);
-pub struct Ed25519Signature(pub Vec<u8>);
+pub struct Ed25519SigningKey(pub [u8; 32]);
+pub struct Ed25519VerifyingKey(pub [u8; 32]);
+pub struct Ed25519Signature(pub [u8; 64]);
 ```
 
-These wrappers delegate to `ed25519_dalek` internally. They expose a stable API independent of the underlying library. They enable future algorithm migration without changing application code. They provide type safety across crate boundaries.
+These wrappers use fixed-size arrays for type safety and delegate to `ed25519_dalek` internally. They expose a stable API independent of the underlying library. They enable future algorithm migration without changing application code. They provide type safety across crate boundaries.
 
-Effect trait definitions live in `crates/aura-core/src/effects/`. The `CryptoCoreEffects` trait inherits from `RandomCoreEffects` and provides cryptographic operations.
+Effect trait definitions live in `crates/aura-core/src/effects/`. The `CryptoCoreEffects` trait inherits from `RandomCoreEffects` and provides core cryptographic operations.
 
 ```rust
 #[async_trait]
@@ -42,17 +42,33 @@ pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
     async fn ed25519_sign(&self, message: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError>;
     async fn ed25519_verify(&self, message: &[u8], signature: &[u8], public_key: &[u8]) -> Result<bool, CryptoError>;
 
+    // Utility methods
+    fn is_simulated(&self) -> bool;
+    fn crypto_capabilities(&self) -> Vec<String>;
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool;
+    fn secure_zero(&self, data: &mut [u8]);
+}
+```
+
+The `CryptoExtendedEffects` trait provides additional operations with default implementations that return errors:
+
+```rust
+#[async_trait]
+pub trait CryptoExtendedEffects: CryptoCoreEffects + Send + Sync {
     // Unified signing API
     async fn generate_signing_keys(&self, threshold: u16, max_signers: u16) -> Result<SigningKeyGenResult, CryptoError>;
+    async fn generate_signing_keys_with(&self, method: KeyGenerationMethod, threshold: u16, max_signers: u16) -> Result<SigningKeyGenResult, CryptoError>;
     async fn sign_with_key(&self, message: &[u8], key_package: &[u8], mode: SigningMode) -> Result<Vec<u8>, CryptoError>;
     async fn verify_signature(&self, message: &[u8], signature: &[u8], public_key_package: &[u8], mode: SigningMode) -> Result<bool, CryptoError>;
 
     // FROST threshold signatures
     async fn frost_generate_keys(&self, threshold: u16, max_signers: u16) -> Result<FrostKeyGenResult, CryptoError>;
     async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    async fn frost_create_signing_package(&self, message: &[u8], nonces: &[Vec<u8>], participants: &[u16], public_key_package: &[u8]) -> Result<FrostSigningPackage, CryptoError>;
     async fn frost_sign_share(&self, signing_package: &FrostSigningPackage, key_share: &[u8], nonces: &[u8]) -> Result<Vec<u8>, CryptoError>;
     async fn frost_aggregate_signatures(&self, signing_package: &FrostSigningPackage, signature_shares: &[Vec<u8>]) -> Result<Vec<u8>, CryptoError>;
     async fn frost_verify(&self, message: &[u8], signature: &[u8], group_public_key: &[u8]) -> Result<bool, CryptoError>;
+    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError>;
 
     // Symmetric encryption
     async fn chacha20_encrypt(&self, plaintext: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Vec<u8>, CryptoError>;
@@ -60,14 +76,16 @@ pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
     async fn aes_gcm_encrypt(&self, plaintext: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Vec<u8>, CryptoError>;
     async fn aes_gcm_decrypt(&self, ciphertext: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> Result<Vec<u8>, CryptoError>;
 
-    // Utility methods
-    fn is_simulated(&self) -> bool;
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool;
-    fn secure_zero(&self, data: &mut [u8]);
+    // Key rotation and conversion
+    async fn frost_rotate_keys(&self, old_shares: &[Vec<u8>], old_threshold: u16, new_threshold: u16, new_max_signers: u16) -> Result<FrostKeyGenResult, CryptoError>;
+    async fn convert_ed25519_to_x25519_public(&self, ed25519_public_key: &[u8]) -> Result<[u8; 32], CryptoError>;
+    async fn convert_ed25519_to_x25519_private(&self, ed25519_private_key: &[u8]) -> Result<[u8; 32], CryptoError>;
 }
+
+pub trait CryptoEffects: CryptoCoreEffects + CryptoExtendedEffects {}
 ```
 
-The trait provides key derivation, Ed25519 signatures, unified signing that routes between single-signer and threshold modes, FROST threshold operations, and symmetric encryption. Hashing is not included because it is a pure operation. Use `aura_core::hash::hash()` for synchronous hashing instead.
+The core trait provides key derivation and Ed25519 signatures. The extended trait provides unified signing that routes between single-signer and threshold modes, FROST threshold operations, symmetric encryption, and key conversion. Hashing is not included because it is a pure operation. Use `aura_core::hash::hash()` for synchronous hashing instead.
 
 The `RandomCoreEffects` trait provides cryptographically secure random number generation.
 
@@ -77,12 +95,16 @@ pub trait RandomCoreEffects: Send + Sync {
     async fn random_bytes(&self, len: usize) -> Vec<u8>;
     async fn random_bytes_32(&self) -> [u8; 32];
     async fn random_u64(&self) -> u64;
+}
+
+#[async_trait]
+pub trait RandomExtendedEffects: RandomCoreEffects + Send + Sync {
     async fn random_range(&self, min: u64, max: u64) -> u64;
     async fn random_uuid(&self) -> Uuid;
 }
 ```
 
-The trait provides methods for generating random bytes, fixed-size arrays, integers, ranges, and UUIDs. All randomness flows through this trait for testability and simulation.
+The core trait provides basic random generation. The extended trait adds range and UUID generation with default implementations. All randomness flows through these traits for testability and simulation.
 
 Pure functions in `crates/aura-core/src/crypto/` implement hash functions, signature verification, and other deterministic operations. These require no side effects and can be called directly.
 
@@ -242,7 +264,7 @@ The `Threshold` mode is used for multi-device accounts such as 2-of-3 or 3-of-5 
 
 ### 6.2 Why Two Modes?
 
-FROST mathematically requires at least 2 signers because threshold signatures need multiple parties. For 1-of-1 configurations, we use standard Ed25519.
+FROST requires at least 2 signers. For 1-of-1 configurations, we use standard Ed25519.
 
 Ed25519 uses the same curve as FROST and produces compatible signatures for verification. It has no protocol overhead such as nonce coordination or aggregation. It is simpler and faster for the single-signer case.
 
@@ -289,12 +311,16 @@ pub trait ThresholdSigningEffects: Send + Sync {
     async fn bootstrap_authority(&self, authority: &AuthorityId) -> Result<PublicKeyPackage, ThresholdSigningError>;
     async fn sign(&self, context: SigningContext) -> Result<ThresholdSignature, ThresholdSigningError>;
     async fn threshold_config(&self, authority: &AuthorityId) -> Option<ThresholdConfig>;
+    async fn threshold_state(&self, authority: &AuthorityId) -> Option<ThresholdState>;
     async fn has_signing_capability(&self, authority: &AuthorityId) -> bool;
     async fn public_key_package(&self, authority: &AuthorityId) -> Option<PublicKeyPackage>;
+    async fn rotate_keys(&self, authority: &AuthorityId, new_threshold: u16, new_total_participants: u16, participants: &[ParticipantIdentity]) -> Result<(u64, Vec<Vec<u8>>, PublicKeyPackage), ThresholdSigningError>;
+    async fn commit_key_rotation(&self, authority: &AuthorityId, new_epoch: u64) -> Result<(), ThresholdSigningError>;
+    async fn rollback_key_rotation(&self, authority: &AuthorityId, failed_epoch: u64) -> Result<(), ThresholdSigningError>;
 }
 ```
 
-The trait provides methods for bootstrapping authorities, signing operations, querying configurations, and checking capabilities.
+The trait provides methods for bootstrapping authorities, signing operations, querying configurations and state, checking capabilities, and key rotation lifecycle management.
 
 Context types live in `aura-core/src/threshold/context.rs`.
 
@@ -310,6 +336,7 @@ pub enum SignableOperation {
     RecoveryApproval { target: AuthorityId, new_root: TreeCommitment },
     GroupProposal { group: AuthorityId, action: GroupAction },
     Message { domain: String, payload: Vec<u8> },
+    OTAActivation { ceremony_id: [u8; 32], upgrade_hash: [u8; 32], prestate_hash: [u8; 32], activation_epoch: Epoch, ready: bool },
 }
 
 pub enum ApprovalContext {
