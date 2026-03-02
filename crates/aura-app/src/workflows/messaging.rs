@@ -11,6 +11,7 @@ use crate::workflows::signals::read_signal;
 use crate::workflows::snapshot_policy::{chat_snapshot, contacts_snapshot};
 use crate::workflows::state_helpers::with_chat_state;
 use crate::{
+    core::IntentError,
     runtime_bridge::{InvitationBridgeType, InvitationInfo, RuntimeBridge},
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME},
     thresholds::{default_channel_threshold, normalize_channel_threshold},
@@ -88,6 +89,71 @@ fn parse_channel_ref(channel: &str) -> ChannelRef {
 
 fn channel_id_from_input(channel: &str) -> ChannelId {
     parse_channel_ref(channel).to_channel_id()
+}
+
+async fn resolve_channel_id_from_state_or_input(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_input: &str,
+) -> ChannelId {
+    let raw = channel_input.trim();
+    if raw.is_empty() {
+        return channel_id_from_input(channel_input);
+    }
+
+    let normalized_name = raw.trim_start_matches('#').trim();
+    let normalized_lower = normalized_name.to_ascii_lowercase();
+    let raw_lower = raw.to_ascii_lowercase();
+
+    let chat = chat_snapshot(app_core).await;
+    if let Some(existing) = chat.all_channels().find(|channel| {
+        let id = channel.id.to_string();
+        let id_lower = id.to_ascii_lowercase();
+        id == raw
+            || id_lower == raw_lower
+            || channel.name.eq_ignore_ascii_case(normalized_name)
+            || format!("# {}", channel.name).eq_ignore_ascii_case(raw)
+            || format!("#{}", channel.name).eq_ignore_ascii_case(raw)
+            || format!("home:{}", channel.id).eq_ignore_ascii_case(raw)
+            || channel.name.to_ascii_lowercase() == normalized_lower
+    }) {
+        return existing.id;
+    }
+
+    channel_id_from_input(channel_input)
+}
+
+async fn matching_channel_ids(
+    app_core: &Arc<RwLock<AppCore>>,
+    channel_input: &str,
+) -> Vec<ChannelId> {
+    let raw = channel_input.trim();
+    if raw.is_empty() {
+        return Vec::new();
+    }
+
+    let normalized_name = raw.trim_start_matches('#').trim();
+    let normalized_lower = normalized_name.to_ascii_lowercase();
+    let raw_lower = raw.to_ascii_lowercase();
+
+    let chat = chat_snapshot(app_core).await;
+    let mut matches = Vec::new();
+    for channel in chat.all_channels() {
+        let id = channel.id.to_string();
+        let id_lower = id.to_ascii_lowercase();
+        let is_match = id == raw
+            || id_lower == raw_lower
+            || channel.name.eq_ignore_ascii_case(normalized_name)
+            || format!("# {}", channel.name).eq_ignore_ascii_case(raw)
+            || format!("#{}", channel.name).eq_ignore_ascii_case(raw)
+            || format!("home:{}", channel.id).eq_ignore_ascii_case(raw)
+            || channel.name.to_ascii_lowercase() == normalized_lower;
+
+        if is_match {
+            matches.push(channel.id);
+        }
+    }
+
+    matches
 }
 
 fn hex_prefix(bytes: &[u8], byte_len: usize) -> String {
@@ -311,6 +377,28 @@ fn find_home_for_context(
                 home.resident_count,
             )
         })
+}
+
+fn join_error_is_not_found(error: &AuraError) -> bool {
+    if matches!(error, AuraError::NotFound { .. }) {
+        return true;
+    }
+
+    let lowered = error.to_string().to_ascii_lowercase();
+    lowered.contains("not found")
+        || lowered.contains("unknown channel")
+        || lowered.contains("no such channel")
+}
+
+fn intent_error_is_not_found(error: &IntentError) -> bool {
+    if matches!(error, IntentError::ContextNotFound { .. }) {
+        return true;
+    }
+
+    let lowered = error.to_string().to_ascii_lowercase();
+    lowered.contains("not found")
+        || lowered.contains("unknown channel")
+        || lowered.contains("no such channel")
 }
 
 async fn enforce_home_moderation_for_sender(
@@ -787,7 +875,13 @@ pub async fn join_channel(
             participant: runtime.authority_id(),
         })
         .await
-        .map_err(|e| AuraError::agent(format!("Failed to join channel: {e}")))?;
+        .map_err(|error| {
+            if intent_error_is_not_found(&error) {
+                AuraError::not_found(format!("Failed to join channel: {error}"))
+            } else {
+                AuraError::agent(format!("Failed to join channel: {error}"))
+            }
+        })?;
 
     restore_home_resident_membership(
         app_core,
@@ -837,7 +931,7 @@ pub async fn join_channel_by_name(
         Err(join_error) => {
             // "/join" is "join or create". If the channel is unknown locally,
             // create it in the current context as a fallback.
-            if channel_exists_locally {
+            if channel_exists_locally || !join_error_is_not_found(&join_error) {
                 return Err(join_error);
             }
 
@@ -870,6 +964,14 @@ pub async fn leave_channel(
     app_core: &Arc<RwLock<AppCore>>,
     channel_id: ChannelId,
 ) -> Result<(), AuraError> {
+    if messaging_backend(app_core).await == MessagingBackend::LocalOnly {
+        with_chat_state(app_core, |chat| {
+            let _ = chat.remove_channel(&channel_id);
+        })
+        .await?;
+        return Ok(());
+    }
+
     let runtime = { require_runtime(app_core).await? };
     let context_id =
         context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
@@ -883,6 +985,22 @@ pub async fn leave_channel(
         .await
         .map_err(|e| AuraError::agent(format!("Failed to leave channel: {e}")))?;
 
+    // Keep UI state authoritative immediately after a successful leave so
+    // slash-command behavior is deterministic while reactive updates converge.
+    let removed_channel =
+        with_chat_state(app_core, |chat| chat.remove_channel(&channel_id)).await?;
+    if removed_channel.is_none() {
+        let available_channels = chat_snapshot(app_core)
+            .await
+            .all_channels()
+            .map(|channel| channel.id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(AuraError::not_found(format!(
+            "leave targeted unknown local channel {channel_id}; available=[{available_channels}]"
+        )));
+    }
+
     Ok(())
 }
 
@@ -891,8 +1009,25 @@ pub async fn leave_channel_by_name(
     app_core: &Arc<RwLock<AppCore>>,
     channel_name: &str,
 ) -> Result<(), AuraError> {
-    let channel_id = channel_id_from_input(channel_name);
-    leave_channel(app_core, channel_id).await
+    let mut candidate_ids = matching_channel_ids(app_core, channel_name).await;
+    if candidate_ids.is_empty() {
+        candidate_ids.push(resolve_channel_id_from_state_or_input(app_core, channel_name).await);
+    }
+
+    for channel_id in &candidate_ids {
+        leave_channel(app_core, *channel_id).await?;
+    }
+
+    // Defensive UI convergence: ensure all matched channels are removed from the
+    // local chat view even if runtime reductions lag membership updates.
+    with_chat_state(app_core, |chat| {
+        for channel_id in &candidate_ids {
+            let _ = chat.remove_channel(channel_id);
+        }
+    })
+    .await?;
+
+    Ok(())
 }
 
 /// Close/archive a channel using a typed ChannelId.
@@ -933,7 +1068,7 @@ pub async fn close_channel_by_name(
     channel_name: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let channel_id = channel_id_from_input(channel_name);
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await;
     close_channel(app_core, channel_id, timestamp_ms).await
 }
 
@@ -965,7 +1100,7 @@ pub async fn set_topic_by_name(
     text: &str,
     timestamp_ms: u64,
 ) -> Result<(), AuraError> {
-    let channel_id = channel_id_from_input(channel_name);
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await;
     set_topic(app_core, channel_id, text, timestamp_ms).await
 }
 
@@ -1007,7 +1142,8 @@ pub async fn send_message_by_name(
     content: &str,
     timestamp_ms: u64,
 ) -> Result<String, AuraError> {
-    let channel_ref = parse_channel_ref(channel_name);
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_name).await;
+    let channel_ref = ChannelRef::Id(channel_id);
     send_message_ref(app_core, channel_ref, content, timestamp_ms).await
 }
 
@@ -1377,7 +1513,7 @@ pub async fn invite_user_to_channel(
     // Resolve via contacts first so command targets can use IDs or contact names.
     let receiver = resolve_target_authority_for_invite(app_core, target_user_id).await?;
     let runtime = require_runtime(app_core).await?;
-    let channel_id = channel_id_from_input(channel_id);
+    let channel_id = resolve_channel_id_from_state_or_input(app_core, channel_id).await;
     let context_id =
         context_id_for_channel(app_core, channel_id, Some(runtime.authority_id())).await?;
 
@@ -1542,6 +1678,107 @@ mod tests {
             .filter(|channel| channel.name.eq_ignore_ascii_case("porch"))
             .count();
         assert_eq!(count, 1, "join should not duplicate channels");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_channel_id_from_state_matches_name_variants() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let channel_id = ChannelId::from_bytes(hash(b"resolve-name-variants"));
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: None,
+                name: "slash-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        let by_name = resolve_channel_id_from_state_or_input(&app_core, "slash-lab").await;
+        let by_hash = resolve_channel_id_from_state_or_input(&app_core, "#slash-lab").await;
+        let by_spaced_hash = resolve_channel_id_from_state_or_input(&app_core, "# slash-lab").await;
+
+        assert_eq!(by_name, channel_id);
+        assert_eq!(by_hash, channel_id);
+        assert_eq!(by_spaced_hash, channel_id);
+    }
+
+    #[tokio::test]
+    async fn test_leave_channel_by_name_uses_state_resolution_locally() {
+        let config = AppConfig::default();
+        let core = AppCore::new(config).unwrap();
+        let app_core = Arc::new(RwLock::new(core));
+        AppCore::init_signals_with_hooks(&app_core).await.unwrap();
+
+        let channel_id = ChannelId::from_bytes(hash(b"leave-by-name-local"));
+        with_chat_state(&app_core, |chat| {
+            chat.upsert_channel(Channel {
+                id: channel_id,
+                context_id: None,
+                name: "slash-lab".to_string(),
+                topic: None,
+                channel_type: ChannelType::Home,
+                unread_count: 0,
+                is_dm: false,
+                member_ids: Vec::new(),
+                member_count: 1,
+                last_message: None,
+                last_message_time: None,
+                last_activity: 0,
+                last_finalized_epoch: 0,
+            });
+        })
+        .await
+        .unwrap();
+
+        leave_channel_by_name(&app_core, "#slash-lab")
+            .await
+            .expect("leave should remove channel by name");
+
+        let state = get_chat_state(&app_core).await.unwrap();
+        assert!(state.channel(&channel_id).is_none());
+    }
+
+    #[test]
+    fn test_join_error_is_not_found_detects_variant() {
+        let error = AuraError::not_found("channel missing");
+        assert!(join_error_is_not_found(&error));
+    }
+
+    #[test]
+    fn test_join_error_is_not_found_rejects_permission_denied() {
+        let error = AuraError::permission_denied("no permission to join");
+        assert!(!join_error_is_not_found(&error));
+    }
+
+    #[test]
+    fn test_intent_error_is_not_found_detects_context_not_found() {
+        let error = IntentError::ContextNotFound {
+            context_id: "ctx-123".to_string(),
+        };
+        assert!(intent_error_is_not_found(&error));
+    }
+
+    #[test]
+    fn test_intent_error_is_not_found_rejects_unauthorized() {
+        let error = IntentError::Unauthorized {
+            reason: "no token".to_string(),
+        };
+        assert!(!intent_error_is_not_found(&error));
     }
 
     #[tokio::test]

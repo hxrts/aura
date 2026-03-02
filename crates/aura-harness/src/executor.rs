@@ -210,6 +210,34 @@ fn execute_step(
             )?;
             Ok(())
         }
+        "send_clipboard" => {
+            let target_instance_id = step
+                .instance
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing target instance", step.id))?;
+            let source_instance_id = step
+                .expect
+                .as_deref()
+                .ok_or_else(|| anyhow!("step {} missing source instance in expect", step.id))?;
+            let payload = dispatch_payload(
+                tool_api,
+                ToolRequest::ReadClipboard {
+                    instance_id: source_instance_id.to_string(),
+                },
+            )?;
+            let clipboard_text = payload
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| anyhow!("read_clipboard response missing text"))?;
+            dispatch(
+                tool_api,
+                ToolRequest::SendKeys {
+                    instance_id: target_instance_id.to_string(),
+                    keys: clipboard_text.to_string(),
+                },
+            )?;
+            Ok(())
+        }
         "send_key" => {
             let instance_id = step
                 .instance
@@ -346,8 +374,12 @@ fn parse_tool_key(name: &str) -> Result<ToolKey> {
 }
 
 fn dispatch(tool_api: &mut ToolApi, request: ToolRequest) -> Result<()> {
+    dispatch_payload(tool_api, request).map(|_| ())
+}
+
+fn dispatch_payload(tool_api: &mut ToolApi, request: ToolRequest) -> Result<serde_json::Value> {
     match tool_api.handle_request(request) {
-        ToolResponse::Ok { .. } => Ok(()),
+        ToolResponse::Ok { payload } => Ok(payload),
         ToolResponse::Error { message } => Err(anyhow!(message)),
     }
 }

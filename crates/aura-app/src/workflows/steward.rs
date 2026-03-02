@@ -34,6 +34,16 @@ fn placeholder_resident(
     }
 }
 
+async fn resolve_target_authority(
+    app_core: &Arc<RwLock<AppCore>>,
+    target: &str,
+) -> Result<AuthorityId, AuraError> {
+    if let Ok(contact) = crate::workflows::query::resolve_contact(app_core, target).await {
+        return Ok(contact.id);
+    }
+    parse_authority_id(target)
+}
+
 #[derive(Debug, Clone)]
 struct StewardScope {
     home_id: ChannelId,
@@ -154,7 +164,7 @@ pub async fn grant_steward(
     channel_hint: Option<&str>,
     target: &str,
 ) -> Result<(), AuraError> {
-    let target_id = parse_authority_id(target)?;
+    let target_id = resolve_target_authority(app_core, target).await?;
 
     // Validate current view and collect context/peer fanout.
     let mut scope = resolve_scope(app_core, channel_hint).await?;
@@ -239,7 +249,7 @@ pub async fn revoke_steward(
     channel_hint: Option<&str>,
     target: &str,
 ) -> Result<(), AuraError> {
-    let target_id = parse_authority_id(target)?;
+    let target_id = resolve_target_authority(app_core, target).await?;
 
     let mut scope = resolve_scope(app_core, channel_hint).await?;
 
@@ -344,6 +354,7 @@ mod tests {
     use crate::views::{
         chat::{Channel, ChannelType, ChatState},
         home::HomeState,
+        Contact, ContactsState,
     };
     use crate::AppConfig;
     use aura_core::crypto::hash::hash;
@@ -436,5 +447,40 @@ mod tests {
             scope.home_state.is_admin(),
             "resolve_scope should pick the admin-capable home"
         );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_authority_supports_contact_lookup() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let bob_id = AuthorityId::new_from_entropy([7u8; 32]);
+
+        {
+            let mut core = app_core.write().await;
+            let mut contacts = ContactsState::new();
+            contacts.apply_contact(Contact {
+                id: bob_id,
+                nickname: "Bob".to_string(),
+                nickname_suggestion: Some("Bobby".to_string()),
+                is_guardian: false,
+                is_resident: true,
+                last_interaction: None,
+                is_online: true,
+                read_receipt_policy: Default::default(),
+            });
+            core.views_mut().set_contacts(contacts);
+        }
+
+        let resolved_by_name = resolve_target_authority(&app_core, "bobby")
+            .await
+            .expect("resolve by nickname suggestion");
+        assert_eq!(resolved_by_name, bob_id);
+
+        let id = bob_id.to_string();
+        let prefix = id.chars().take(8).collect::<String>();
+        let resolved_by_prefix = resolve_target_authority(&app_core, &prefix)
+            .await
+            .expect("resolve by authority prefix");
+        assert_eq!(resolved_by_prefix, bob_id);
     }
 }

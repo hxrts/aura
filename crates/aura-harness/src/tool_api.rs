@@ -75,6 +75,9 @@ pub enum ToolRequest {
         instance_id: String,
         lines: u64,
     },
+    ReadClipboard {
+        instance_id: String,
+    },
     Restart {
         instance_id: String,
     },
@@ -209,6 +212,10 @@ impl ToolApi {
                     },
                 )
                 .map(|lines| serde_json::json!({ "lines": lines })),
+            ToolRequest::ReadClipboard { instance_id } => self
+                .coordinator
+                .read_clipboard(&instance_id)
+                .map(|text| serde_json::json!({ "text": text })),
             ToolRequest::Restart { instance_id } => self
                 .coordinator
                 .restart(&instance_id)

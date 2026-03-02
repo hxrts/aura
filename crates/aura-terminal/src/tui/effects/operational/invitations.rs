@@ -49,6 +49,29 @@ fn choose_channel_invitation_home_id(
         .map(|id| id.to_string())
 }
 
+async fn resolve_contact_authority_id(
+    app_core: &Arc<RwLock<AppCore>>,
+    target: &str,
+) -> Result<aura_core::identifiers::AuthorityId, OpError> {
+    let target = target.trim();
+    if target.is_empty() {
+        return Err(OpError::InvalidArgument(
+            "Contact target cannot be empty".to_string(),
+        ));
+    }
+
+    if let Ok(id) = target.parse() {
+        return Ok(id);
+    }
+
+    match aura_app::ui::workflows::query::resolve_contact(app_core, target).await {
+        Ok(contact) => Ok(contact.id),
+        Err(error) => Err(OpError::InvalidArgument(format!(
+            "Invalid contact authority ID: {target} ({error})"
+        ))),
+    }
+}
+
 /// Handle invitation commands
 pub async fn handle_invitations(
     command: &EffectCommand,
@@ -61,13 +84,9 @@ pub async fn handle_invitations(
             message,
             ttl_secs,
         } => {
-            let receiver: aura_core::identifiers::AuthorityId = match receiver_id.parse() {
+            let receiver = match resolve_contact_authority_id(app_core, receiver_id).await {
                 Ok(id) => id,
-                Err(_) => {
-                    return Some(Err(OpError::InvalidArgument(format!(
-                        "Invalid receiver authority ID: {receiver_id}"
-                    ))));
-                }
+                Err(error) => return Some(Err(error)),
             };
 
             let ttl_ms = ttl_secs.map(|s| s.saturating_mul(1000));
@@ -224,13 +243,9 @@ pub async fn handle_invitations(
         }
 
         EffectCommand::SendHomeInvitation { contact_id } => {
-            let receiver: aura_core::identifiers::AuthorityId = match contact_id.parse() {
+            let receiver = match resolve_contact_authority_id(app_core, contact_id).await {
                 Ok(id) => id,
-                Err(_) => {
-                    return Some(Err(OpError::InvalidArgument(format!(
-                        "Invalid contact authority ID: {contact_id}"
-                    ))));
-                }
+                Err(error) => return Some(Err(error)),
             };
 
             // Resolve to a concrete home ID only. Avoid placeholder fallbacks.

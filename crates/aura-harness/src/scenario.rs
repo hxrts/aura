@@ -44,6 +44,7 @@ impl ScenarioRunner {
                 "launch_instances"
                     | "noop"
                     | "send_keys"
+                    | "send_clipboard"
                     | "send_key"
                     | "wait_for"
                     | "restart"

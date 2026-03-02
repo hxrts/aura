@@ -274,45 +274,140 @@ pub fn CodeDisplayModal(props: &CodeDisplayModalProps) -> impl Into<AnyElement<'
     }
 }
 
-/// Copy text to the system clipboard
-///
-/// Returns Ok(()) on success, Err with message on failure.
-/// Silently succeeds if clipboard is unavailable (e.g., headless environment).
-pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
-    use arboard::Clipboard;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ClipboardMode {
+    #[default]
+    System,
+    FileOnly,
+    Disabled,
+}
+
+fn parse_clipboard_mode(value: Option<&str>) -> ClipboardMode {
+    match value.map(str::trim).filter(|v| !v.is_empty()) {
+        None => ClipboardMode::System,
+        Some(raw) => {
+            let normalized = raw.to_ascii_lowercase();
+            match normalized.as_str() {
+                "system" => ClipboardMode::System,
+                "file_only" | "file-only" | "file" => ClipboardMode::FileOnly,
+                "disabled" | "off" => ClipboardMode::Disabled,
+                other => {
+                    tracing::warn!(
+                        mode = other,
+                        "Unknown AURA_CLIPBOARD_MODE; defaulting to system mode"
+                    );
+                    ClipboardMode::System
+                }
+            }
+        }
+    }
+}
+
+fn clipboard_mode_from_env() -> ClipboardMode {
+    let mode = std::env::var("AURA_CLIPBOARD_MODE").ok();
+    parse_clipboard_mode(mode.as_deref())
+}
+
+fn write_clipboard_capture_file(text: &str) -> Result<bool, String> {
     use std::fs;
     use std::path::Path;
 
-    let fallback_written = std::env::var("AURA_CLIPBOARD_FILE")
+    let Some(path) = std::env::var("AURA_CLIPBOARD_FILE")
         .ok()
-        .filter(|path| !path.trim().is_empty())
-        .and_then(|path| {
-            let p = Path::new(path.trim());
-            if let Some(parent) = p.parent() {
-                if let Err(err) = fs::create_dir_all(parent) {
-                    tracing::warn!(error = %err, path = %p.display(), "Failed to create clipboard capture directory");
-                    return None;
-                }
-            }
-            match fs::write(p, text) {
-                Ok(()) => Some(()),
-                Err(err) => {
-                    tracing::warn!(error = %err, path = %p.display(), "Failed to write clipboard capture file");
-                    None
-                }
-            }
-        })
-        .is_some();
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(false);
+    };
 
-    match Clipboard::new() {
-        Ok(mut clipboard) => clipboard
-            .set_text(text)
-            .map_err(|e| format!("Failed to copy: {e}"))
-            .or_else(|err| if fallback_written { Ok(()) } else { Err(err) }),
-        Err(e) => {
-            // Log but don't fail - clipboard may not be available in all environments
-            tracing::debug!("Clipboard unavailable: {}", e);
-            Ok(())
+    let p = Path::new(path.trim());
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "Failed to create clipboard capture directory {}: {err}",
+                parent.display()
+            )
+        })?;
+    }
+    fs::write(p, text).map(|()| true).map_err(|err| {
+        format!(
+            "Failed to write clipboard capture file {}: {err}",
+            p.display()
+        )
+    })
+}
+
+/// Copy text to clipboard targets based on mode.
+///
+/// Returns Ok(()) on success, Err with message on failure.
+/// In `system` mode (default), clipboard-unavailable errors are ignored for headless environments.
+/// In `file_only` mode, writes only to `AURA_CLIPBOARD_FILE` and never touches the system clipboard.
+pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    use arboard::Clipboard;
+    match clipboard_mode_from_env() {
+        ClipboardMode::Disabled => Ok(()),
+        ClipboardMode::FileOnly => {
+            let written = write_clipboard_capture_file(text)?;
+            if written {
+                Ok(())
+            } else {
+                Err(
+                    "AURA_CLIPBOARD_MODE=file_only requires AURA_CLIPBOARD_FILE to be set"
+                        .to_string(),
+                )
+            }
         }
+        ClipboardMode::System => {
+            let fallback_written = match write_clipboard_capture_file(text) {
+                Ok(written) => written,
+                Err(err) => {
+                    tracing::warn!(error = %err, "Clipboard capture file write failed");
+                    false
+                }
+            };
+
+            match Clipboard::new() {
+                Ok(mut clipboard) => clipboard
+                    .set_text(text)
+                    .map_err(|e| format!("Failed to copy: {e}"))
+                    .or_else(|err| if fallback_written { Ok(()) } else { Err(err) }),
+                Err(e) => {
+                    // Log but don't fail - clipboard may not be available in all environments
+                    tracing::debug!("Clipboard unavailable: {}", e);
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_clipboard_mode, ClipboardMode};
+
+    #[test]
+    fn clipboard_mode_defaults_to_system() {
+        assert_eq!(parse_clipboard_mode(None), ClipboardMode::System);
+        assert_eq!(parse_clipboard_mode(Some("")), ClipboardMode::System);
+        assert_eq!(parse_clipboard_mode(Some("   ")), ClipboardMode::System);
+    }
+
+    #[test]
+    fn clipboard_mode_parses_supported_values() {
+        assert_eq!(parse_clipboard_mode(Some("system")), ClipboardMode::System);
+        assert_eq!(
+            parse_clipboard_mode(Some("file_only")),
+            ClipboardMode::FileOnly
+        );
+        assert_eq!(
+            parse_clipboard_mode(Some("file-only")),
+            ClipboardMode::FileOnly
+        );
+        assert_eq!(parse_clipboard_mode(Some("file")), ClipboardMode::FileOnly);
+        assert_eq!(
+            parse_clipboard_mode(Some("disabled")),
+            ClipboardMode::Disabled
+        );
+        assert_eq!(parse_clipboard_mode(Some("off")), ClipboardMode::Disabled);
     }
 }

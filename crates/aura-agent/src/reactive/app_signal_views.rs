@@ -30,7 +30,10 @@ use aura_core::effects::{AmpChannelEffects, ChannelCreateParams, ChannelJoinPara
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
 use aura_journal::fact::{Fact, FactContent, RelationalFact};
 use aura_journal::{DomainFact, ProtocolRelationalFact};
-use aura_protocol::amp::{amp_recv, get_channel_state};
+use aura_protocol::amp::{
+    amp_recv, get_channel_state, ChannelMembershipFact, ChannelParticipantEvent,
+};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -793,6 +796,7 @@ pub struct ChatSignalView {
     own_authority: AuthorityId,
     reactive: ReactiveHandler,
     state: Mutex<ChatState>,
+    hidden_channels_after_leave: Mutex<BTreeSet<ChannelId>>,
     effects: Arc<AuraEffectSystem>,
 }
 
@@ -806,6 +810,7 @@ impl ChatSignalView {
             own_authority,
             reactive,
             state: Mutex::new(ChatState::default()),
+            hidden_channels_after_leave: Mutex::new(BTreeSet::new()),
             effects,
         }
     }
@@ -878,9 +883,34 @@ impl ChatSignalView {
         }
     }
 
+    fn select_moderation_home(
+        homes: &HomesState,
+        context_id: ContextId,
+        channel_id: ChannelId,
+    ) -> Option<HomeState> {
+        if let Some(home) = homes.home_state(&channel_id) {
+            if home.context_id == Some(context_id) {
+                return Some(home.clone());
+            }
+        }
+
+        let mut context_homes = homes
+            .iter()
+            .filter_map(|(_, home)| (home.context_id == Some(context_id)).then_some(home));
+        let first = context_homes.next()?;
+        if context_homes.next().is_some() {
+            // Multiple homes share the context and none are channel-authoritative.
+            // Fail open to avoid dropping messages using non-authoritative moderation state.
+            return None;
+        }
+
+        Some(first.clone())
+    }
+
     async fn sender_allowed_for_context(
         &self,
         context_id: ContextId,
+        channel_id: ChannelId,
         sender_id: AuthorityId,
         sent_at_ms: u64,
     ) -> bool {
@@ -892,10 +922,7 @@ impl ChatSignalView {
             Ok(homes) => homes,
             Err(_) => return true,
         };
-        let Some(home) = homes
-            .iter()
-            .find_map(|(_, home)| (home.context_id == Some(context_id)).then_some(home))
-        else {
+        let Some(home) = Self::select_moderation_home(&homes, context_id, channel_id) else {
             return true;
         };
 
@@ -967,6 +994,16 @@ impl ReactiveView for ChatSignalView {
                             creator_id,
                             ..
                         } => {
+                            let hidden_after_leave = {
+                                self.hidden_channels_after_leave
+                                    .lock()
+                                    .await
+                                    .contains(&channel_id)
+                            };
+                            if hidden_after_leave {
+                                continue;
+                            }
+
                             drop(state);
                             self.ensure_amp_channel_state(context_id, channel_id, creator_id)
                                 .await;
@@ -1050,7 +1087,12 @@ impl ReactiveView for ChatSignalView {
                             let context = context_id;
                             drop(state);
                             if !self
-                                .sender_allowed_for_context(context, sender_id, sent_at.ts_ms)
+                                .sender_allowed_for_context(
+                                    context,
+                                    channel_id,
+                                    sender_id,
+                                    sent_at.ts_ms,
+                                )
                                 .await
                             {
                                 tracing::debug!(
@@ -1194,6 +1236,53 @@ impl ReactiveView for ChatSignalView {
                         }
                     }
                 }
+                FactContent::Relational(RelationalFact::Generic { envelope, .. }) => {
+                    let Some(membership) = ChannelMembershipFact::from_envelope(envelope) else {
+                        continue;
+                    };
+
+                    let channel_id = membership.channel();
+                    let participant = membership.participant();
+                    match membership.event() {
+                        ChannelParticipantEvent::Joined => {
+                            if participant == self.own_authority {
+                                self.hidden_channels_after_leave
+                                    .lock()
+                                    .await
+                                    .remove(&channel_id);
+                            }
+                            if let Some(channel) = state.channel_mut(&channel_id) {
+                                if !channel.member_ids.contains(&participant) {
+                                    channel.member_ids.push(participant);
+                                }
+                                let known_members =
+                                    channel.member_ids.len().saturating_add(1) as u32;
+                                if known_members > channel.member_count {
+                                    channel.member_count = known_members;
+                                }
+                                changed = true;
+                            }
+                        }
+                        ChannelParticipantEvent::Left => {
+                            if participant == self.own_authority {
+                                self.hidden_channels_after_leave
+                                    .lock()
+                                    .await
+                                    .insert(channel_id);
+                                if state.remove_channel(&channel_id).is_some() {
+                                    changed = true;
+                                }
+                            } else if let Some(channel) = state.channel_mut(&channel_id) {
+                                let before = channel.member_ids.len();
+                                channel.member_ids.retain(|member| *member != participant);
+                                if channel.member_ids.len() != before {
+                                    channel.member_count = channel.member_count.saturating_sub(1);
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Ignore other fact types in ChatSignalView
                 _ => {}
@@ -1257,6 +1346,70 @@ mod tests {
             }),
             FactContent::Relational(relational),
         )
+    }
+
+    #[test]
+    fn select_moderation_home_prefers_channel_authoritative_match() {
+        let context_id = ContextId::new_from_entropy([11u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+
+        let channel_home_id = ChannelId::from_bytes([21u8; 32]);
+        let synthetic_home_id = ChannelId::from_bytes([22u8; 32]);
+        let channel_home = HomeState::new(
+            channel_home_id,
+            Some("channel-home".to_string()),
+            owner,
+            0,
+            context_id,
+        );
+        let synthetic_home = HomeState::new(
+            synthetic_home_id,
+            Some("synthetic-home".to_string()),
+            owner,
+            0,
+            context_id,
+        );
+
+        let mut homes = HomesState::new();
+        homes.add_home(channel_home);
+        homes.add_home(synthetic_home);
+
+        let selected = ChatSignalView::select_moderation_home(&homes, context_id, channel_home_id)
+            .expect("channel-authoritative home should be selected");
+        assert_eq!(selected.id, channel_home_id);
+    }
+
+    #[test]
+    fn select_moderation_home_fails_open_for_ambiguous_context() {
+        let context_id = ContextId::new_from_entropy([12u8; 32]);
+        let owner = AuthorityId::new_from_entropy([1u8; 32]);
+
+        let home_a_id = ChannelId::from_bytes([31u8; 32]);
+        let home_b_id = ChannelId::from_bytes([32u8; 32]);
+        let unknown_channel_id = ChannelId::from_bytes([99u8; 32]);
+
+        let mut homes = HomesState::new();
+        homes.add_home(HomeState::new(
+            home_a_id,
+            Some("home-a".to_string()),
+            owner,
+            0,
+            context_id,
+        ));
+        homes.add_home(HomeState::new(
+            home_b_id,
+            Some("home-b".to_string()),
+            owner,
+            0,
+            context_id,
+        ));
+
+        let selected =
+            ChatSignalView::select_moderation_home(&homes, context_id, unknown_channel_id);
+        assert!(
+            selected.is_none(),
+            "ambiguous context without channel-authoritative home should fail open"
+        );
     }
 
     #[tokio::test]

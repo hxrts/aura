@@ -1225,8 +1225,11 @@ impl NeighborhoodCallbacks {
                             "Home added to neighborhood",
                         )));
                     }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    Err(e) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                            "neighborhood",
+                            format!("Failed to add home to neighborhood: {e}"),
+                        )));
                     }
                 }
             });
@@ -1249,8 +1252,11 @@ impl NeighborhoodCallbacks {
                             "Adjacency linked",
                         )));
                     }
-                    Err(_e) => {
-                        // Error already emitted to ERROR_SIGNAL by dispatch layer.
+                    Err(e) => {
+                        let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                            "neighborhood",
+                            format!("Failed to link adjacency: {e}"),
+                        )));
                     }
                 }
             });

@@ -14,7 +14,7 @@ use crate::InvitationServiceApi;
 use aura_app::signal_defs::HOMES_SIGNAL;
 use aura_app::views::home::{HomeState, HomesState, Resident, ResidentRole};
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
-use aura_core::effects::amp::ChannelBootstrapPackage;
+use aura_core::effects::amp::{ChannelBootstrapPackage, ChannelCreateParams};
 use aura_core::effects::storage::StorageCoreEffects;
 use aura_core::effects::RandomExtendedEffects;
 use aura_core::effects::{
@@ -1072,14 +1072,8 @@ impl InvitationHandler {
                     }
                 };
 
-                match &fact {
-                    RelationalFact::Generic { envelope, .. }
-                        if envelope.type_id.as_str() == CHAT_FACT_TYPE_ID => {}
-                    _ => {
-                        tracing::warn!("Received non-chat fact in chat fact envelope");
-                        continue;
-                    }
-                }
+                self.provision_amp_channel_for_inbound_chat_fact(effects.as_ref(), &fact)
+                    .await;
 
                 effects
                     .commit_relational_facts(vec![fact])
@@ -1151,6 +1145,87 @@ impl InvitationHandler {
         }
 
         Ok(processed)
+    }
+
+    async fn provision_amp_channel_for_inbound_chat_fact(
+        &self,
+        effects: &AuraEffectSystem,
+        fact: &RelationalFact,
+    ) {
+        let RelationalFact::Generic {
+            envelope: chat_envelope,
+            ..
+        } = fact
+        else {
+            return;
+        };
+
+        if chat_envelope.type_id.as_str() != CHAT_FACT_TYPE_ID {
+            return;
+        }
+
+        let Some(ChatFact::ChannelCreated {
+            context_id,
+            channel_id,
+            creator_id,
+            ..
+        }) = ChatFact::from_envelope(chat_envelope)
+        else {
+            return;
+        };
+
+        if aura_protocol::amp::get_channel_state(effects, context_id, channel_id)
+            .await
+            .is_ok()
+        {
+            return;
+        }
+
+        if let Err(error) = effects
+            .create_channel(ChannelCreateParams {
+                context: context_id,
+                channel: Some(channel_id),
+                skip_window: None,
+                topic: None,
+            })
+            .await
+        {
+            let lowered = error.to_string().to_ascii_lowercase();
+            if !lowered.contains("already") && !lowered.contains("exists") {
+                tracing::warn!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    error = %error,
+                    "Failed to provision AMP channel checkpoint from inbound chat fact"
+                );
+                return;
+            }
+        }
+
+        let local_authority = self.context.authority.authority_id();
+        let mut participants = vec![local_authority];
+        if creator_id != local_authority {
+            participants.push(creator_id);
+        }
+
+        for participant in participants {
+            if let Err(error) = effects
+                .join_channel(ChannelJoinParams {
+                    context: context_id,
+                    channel: channel_id,
+                    participant,
+                })
+                .await
+            {
+                tracing::debug!(
+                    context_id = %context_id,
+                    channel_id = %channel_id,
+                    participant = %participant,
+                    error = %error,
+                    "AMP join provisioning from inbound chat fact failed"
+                );
+            }
+        }
     }
 
     async fn resolve_contact_invitation(
@@ -2942,6 +3017,7 @@ mod tests {
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_journal::DomainFact;
     use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
+    use aura_social::moderation::facts::HomeGrantStewardFact;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -3620,6 +3696,118 @@ mod tests {
         }
 
         assert!(found, "expected committed chat fact from inbound envelope");
+    }
+
+    #[tokio::test]
+    async fn contact_acceptance_processing_commits_non_chat_relational_fact_envelopes() {
+        let authority = AuthorityId::new_from_entropy([205u8; 32]);
+        let peer = AuthorityId::new_from_entropy([206u8; 32]);
+        let config = AgentConfig::default();
+        let effects =
+            Arc::new(AuraEffectSystem::testing_for_authority(&config, authority).unwrap());
+        let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+
+        let context_id = ContextId::new_from_entropy([207u8; 32]);
+        let grant = HomeGrantStewardFact::new_ms(context_id, authority, peer, 1_700_000_000_001)
+            .to_generic();
+
+        let payload = aura_core::util::serialization::to_vec(&grant).unwrap();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CHAT_FACT_CONTENT_TYPE.to_string(),
+        );
+
+        effects
+            .send_envelope(TransportEnvelope {
+                destination: authority,
+                source: peer,
+                context: context_id,
+                payload,
+                metadata,
+                receipt: None,
+            })
+            .await
+            .unwrap();
+
+        let processed = handler
+            .process_contact_invitation_acceptances(effects.clone())
+            .await
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        let committed = effects.load_committed_facts(authority).await.unwrap();
+        let mut found = false;
+        for fact in committed {
+            let FactContent::Relational(RelationalFact::Generic { envelope, .. }) = fact.content
+            else {
+                continue;
+            };
+            let Some(grant_fact) = HomeGrantStewardFact::from_envelope(&envelope) else {
+                continue;
+            };
+            if grant_fact.target_authority == authority && grant_fact.actor_authority == peer {
+                found = true;
+                break;
+            }
+        }
+
+        assert!(
+            found,
+            "expected committed non-chat relational fact from inbound envelope"
+        );
+    }
+
+    #[tokio::test]
+    async fn contact_acceptance_processing_provisions_amp_state_for_channel_created_facts() {
+        let authority = AuthorityId::new_from_entropy([208u8; 32]);
+        let peer = AuthorityId::new_from_entropy([209u8; 32]);
+        let config = AgentConfig::default();
+        let effects =
+            Arc::new(AuraEffectSystem::testing_for_authority(&config, authority).unwrap());
+        let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
+
+        let context_id = ContextId::new_from_entropy([210u8; 32]);
+        let channel_id = ChannelId::from_bytes([211u8; 32]);
+        let chat_fact = ChatFact::channel_created_ms(
+            context_id,
+            channel_id,
+            "provisioned".to_string(),
+            Some("Provisioned channel".to_string()),
+            false,
+            1_700_000_000_100,
+            peer,
+        )
+        .to_generic();
+
+        let payload = aura_core::util::serialization::to_vec(&chat_fact).unwrap();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "content-type".to_string(),
+            CHAT_FACT_CONTENT_TYPE.to_string(),
+        );
+
+        effects
+            .send_envelope(TransportEnvelope {
+                destination: authority,
+                source: peer,
+                context: context_id,
+                payload,
+                metadata,
+                receipt: None,
+            })
+            .await
+            .unwrap();
+
+        let processed = handler
+            .process_contact_invitation_acceptances(effects.clone())
+            .await
+            .unwrap();
+        assert_eq!(processed, 1);
+
+        aura_protocol::amp::get_channel_state(effects.as_ref(), context_id, channel_id)
+            .await
+            .expect("channel-created chat fact should provision AMP channel state");
     }
 
     #[tokio::test]

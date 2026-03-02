@@ -23,6 +23,10 @@ use aura_social::moderation::facts::{
 };
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use tokio::task::yield_now;
+
+const MODERATION_FACT_SEND_MAX_ATTEMPTS: usize = 4;
+const MODERATION_FACT_SEND_YIELDS_PER_RETRY: usize = 4;
 
 #[derive(Debug, Clone)]
 struct ModerationScope {
@@ -114,52 +118,51 @@ async fn resolve_scope(
         best_home_for_context(&homes, context_id)
     });
 
-    let (context_id, home_id, is_admin, peers) = if let Some((home_id, home_state)) =
-        home_from_channel
-    {
-        let peers = home_state
-            .residents
-            .iter()
-            .map(|resident| resident.id)
-            .collect::<Vec<_>>();
-        (
-            home_state
-                .context_id
-                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
-            home_id,
-            home_state.is_admin(),
-            peers,
-        )
-    } else if let Some(context_id) = context_from_channel {
-        let fallback_home = ChannelRef::parse("home").to_channel_id();
-        let home_id = hinted_channel.unwrap_or(fallback_home);
-        let peers = homes
-            .current_home()
-            .map(|home| home.residents.iter().map(|resident| resident.id).collect())
-            .unwrap_or_default();
-        let is_admin = homes
-            .current_home()
-            .map(|home| home.is_admin())
-            .unwrap_or(true);
-        (context_id, home_id, is_admin, peers)
-    } else if let Some(fallback) = homes.current_home() {
-        (
-            fallback
-                .context_id
-                .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
-            fallback.id,
-            fallback.is_admin(),
-            fallback
+    let (context_id, home_id, is_admin, peers) =
+        if let Some((home_id, home_state)) = home_from_channel {
+            let peers = home_state
                 .residents
                 .iter()
                 .map(|resident| resident.id)
-                .collect(),
-        )
-    } else {
-        return Err(AuraError::permission_denied(
-            "Moderation requires a valid home context and steward privileges",
-        ));
-    };
+                .collect::<Vec<_>>();
+            (
+                home_state
+                    .context_id
+                    .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
+                home_id,
+                home_state.is_admin(),
+                peers,
+            )
+        } else if let Some(context_id) = context_from_channel {
+            let fallback_home = ChannelRef::parse("home").to_channel_id();
+            let home_id = hinted_channel.unwrap_or(fallback_home);
+            let peers = homes
+                .current_home()
+                .map(|home| home.residents.iter().map(|resident| resident.id).collect())
+                .unwrap_or_default();
+            let is_admin = homes
+                .current_home()
+                .map(|home| home.is_admin())
+                .unwrap_or(true);
+            (context_id, home_id, is_admin, peers)
+        } else if let Some(fallback) = homes.current_home() {
+            (
+                fallback
+                    .context_id
+                    .ok_or_else(|| AuraError::not_found("Home has no context ID"))?,
+                fallback.id,
+                fallback.is_admin(),
+                fallback
+                    .residents
+                    .iter()
+                    .map(|resident| resident.id)
+                    .collect(),
+            )
+        } else {
+            return Err(AuraError::permission_denied(
+                "Moderation requires a valid home context and steward privileges",
+            ));
+        };
 
     Ok(ModerationScope {
         context_id,
@@ -194,10 +197,49 @@ async fn commit_and_fanout(
     }
 
     for peer in fanout {
-        let _ = runtime.send_chat_fact(peer, scope.context_id, &fact).await;
+        send_moderation_fact_with_retry(runtime, peer, scope.context_id, &fact).await?;
     }
 
     Ok(())
+}
+
+async fn send_moderation_fact_with_retry(
+    runtime: &Arc<dyn crate::runtime_bridge::RuntimeBridge>,
+    peer: aura_core::identifiers::AuthorityId,
+    context_id: ContextId,
+    fact: &RelationalFact,
+) -> Result<(), AuraError> {
+    let mut last_error: Option<String> = None;
+
+    for attempt in 0..MODERATION_FACT_SEND_MAX_ATTEMPTS {
+        match runtime.send_chat_fact(peer, context_id, fact).await {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error.to_string()),
+        }
+
+        if attempt + 1 < MODERATION_FACT_SEND_MAX_ATTEMPTS {
+            let _ = runtime.trigger_discovery().await;
+            let _ = runtime.trigger_sync().await;
+            for _ in 0..MODERATION_FACT_SEND_YIELDS_PER_RETRY {
+                yield_now().await;
+            }
+        }
+    }
+
+    let message = last_error.unwrap_or_else(|| "unknown transport error".to_string());
+    Err(AuraError::agent(format!(
+        "Failed to deliver moderation fact to {peer} after {MODERATION_FACT_SEND_MAX_ATTEMPTS} attempts: {message}"
+    )))
+}
+
+async fn resolve_target_authority(
+    app_core: &Arc<RwLock<AppCore>>,
+    target: &str,
+) -> Result<aura_core::identifiers::AuthorityId, AuraError> {
+    if let Ok(contact) = crate::workflows::query::resolve_contact(app_core, target).await {
+        return Ok(contact.id);
+    }
+    parse_authority_id(target)
 }
 
 /// Kick a user from the current home.
@@ -217,7 +259,7 @@ pub async fn kick_user(
 
     let runtime = { require_runtime(app_core).await? };
     let channel_id = resolve_channel_id(app_core, channel).await;
-    let target_id = parse_authority_id(target)?;
+    let target_id = resolve_target_authority(app_core, target).await?;
     let fact = HomeKickFact::new_ms(
         scope.context_id,
         channel_id,
@@ -257,7 +299,7 @@ pub async fn ban_user(
     }
 
     let runtime = { require_runtime(app_core).await? };
-    let target_id = parse_authority_id(target)?;
+    let target_id = resolve_target_authority(app_core, target).await?;
     let fact = HomeBanFact::new_ms(
         scope.context_id,
         None,
@@ -288,7 +330,7 @@ pub async fn unban_user(
 
     let runtime = { require_runtime(app_core).await? };
 
-    let target_id = parse_authority_id(target)?;
+    let target_id = resolve_target_authority(app_core, target).await?;
     let now_ms = runtime.current_time_ms().await.map_err(|e| {
         AuraError::agent(format!("Failed to read timestamp for unban operation: {e}"))
     })?;
@@ -321,7 +363,7 @@ pub async fn mute_user(
     }
 
     let runtime = { require_runtime(app_core).await? };
-    let target_id = parse_authority_id(target)?;
+    let target_id = resolve_target_authority(app_core, target).await?;
     let expires_at_ms =
         duration_secs.map(|seconds| muted_at_ms.saturating_add(seconds.saturating_mul(1000)));
     let fact = HomeMuteFact::new_ms(
@@ -354,7 +396,7 @@ pub async fn unmute_user(
 
     let runtime = { require_runtime(app_core).await? };
 
-    let target_id = parse_authority_id(target)?;
+    let target_id = resolve_target_authority(app_core, target).await?;
     let now_ms = runtime.current_time_ms().await.map_err(|e| {
         AuraError::agent(format!(
             "Failed to read timestamp for unmute operation: {e}"
@@ -443,7 +485,9 @@ pub async fn unpin_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::views::{Contact, ContactsState};
     use crate::AppConfig;
+    use aura_core::identifiers::AuthorityId;
 
     #[tokio::test]
     async fn moderation_requires_home() {
@@ -478,5 +522,40 @@ mod tests {
         .await
         .is_err());
         assert!(pin_message(&app_core, "msg-1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn resolve_target_authority_supports_contact_lookup() {
+        let config = AppConfig::default();
+        let app_core = Arc::new(RwLock::new(AppCore::new(config).unwrap()));
+        let bob_id = AuthorityId::new_from_entropy([7u8; 32]);
+
+        {
+            let mut core = app_core.write().await;
+            let mut contacts = ContactsState::new();
+            contacts.apply_contact(Contact {
+                id: bob_id,
+                nickname: "Bob".to_string(),
+                nickname_suggestion: Some("Bobby".to_string()),
+                is_guardian: false,
+                is_resident: false,
+                last_interaction: None,
+                is_online: true,
+                read_receipt_policy: Default::default(),
+            });
+            core.views_mut().set_contacts(contacts);
+        }
+
+        let resolved_by_name = resolve_target_authority(&app_core, "bob")
+            .await
+            .expect("resolve by nickname");
+        assert_eq!(resolved_by_name, bob_id);
+
+        let id = bob_id.to_string();
+        let prefix = id.chars().take(8).collect::<String>();
+        let resolved_by_prefix = resolve_target_authority(&app_core, &prefix)
+            .await
+            .expect("resolve by authority prefix");
+        assert_eq!(resolved_by_prefix, bob_id);
     }
 }

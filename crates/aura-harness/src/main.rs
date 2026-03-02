@@ -4,19 +4,19 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use aura_harness::artifacts::ArtifactBundle;
 use aura_harness::build_startup_summary;
 use aura_harness::config::require_existing_file;
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::determinism::build_seed_bundle;
-use aura_harness::executor::{ExecutionBudgets, ScenarioExecutor};
 use aura_harness::load_and_validate_run_config;
 use aura_harness::preflight::{run_preflight, PreflightReport};
 use aura_harness::replay::{parse_bundle, ReplayBundle, ReplayRunner, REPLAY_SCHEMA_VERSION};
 use aura_harness::resource_guards::ResourceGuard;
 use aura_harness::routing::AddressResolver;
 use aura_harness::scenario::ScenarioRunner;
+use aura_harness::scenario_execution::{execute_with_run_budgets, lint_for_run};
 use aura_harness::screen_normalization::normalize_screen;
 use aura_harness::tool_api::{ToolApi, ToolRequest};
 use aura_harness::{api_version::TOOL_API_DEFAULT_VERSION, artifact_sync::sync_remote_artifacts};
@@ -156,14 +156,7 @@ fn run_with_artifacts(
     }
 
     let scenario_report = if let Some(scenario) = scenario_config {
-        let executor = ScenarioExecutor::from_config(scenario);
-        let budgets = ExecutionBudgets {
-            global_budget_ms: config.run.global_budget_ms,
-            default_step_budget_ms: config.run.step_budget_ms.unwrap_or(2000),
-            scenario_seed: seed_bundle.scenario_seed,
-            fault_seed: seed_bundle.fault_seed,
-        };
-        match executor.execute_with_budgets(scenario, &mut tool_api, budgets) {
+        match execute_with_run_budgets(config, scenario, &mut tool_api) {
             Ok(report) => Some(report),
             Err(error) => {
                 let diagnostics =
@@ -281,13 +274,7 @@ fn lint(args: LintArgs) -> Result<()> {
 
     if let Some(path) = &args.scenario {
         let scenario = ScenarioRunner::load_and_validate(path)?;
-        let lint = ScenarioRunner::lint(&config, &scenario);
-        if !lint.errors.is_empty() {
-            bail!("scenario lint failed: {}", lint.errors.join(" | "));
-        }
-        if !lint.warnings.is_empty() {
-            println!("lint_warnings={}", lint.warnings.join(" | "));
-        }
+        lint_for_run(&config, &scenario)?;
     }
 
     println!(

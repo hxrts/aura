@@ -15,6 +15,7 @@ pub mod replay;
 pub mod resource_guards;
 pub mod routing;
 pub mod scenario;
+pub mod scenario_execution;
 pub mod screen_normalization;
 pub mod tool_api;
 

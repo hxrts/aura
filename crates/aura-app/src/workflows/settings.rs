@@ -199,11 +199,9 @@ pub async fn set_channel_mode(
         )));
     };
 
-    let home = homes
-        .home_mut(&home_id)
-        .ok_or_else(|| {
-            AuraError::permission_denied("Set channel mode requires a valid home context")
-        })?;
+    let home = homes.home_mut(&home_id).ok_or_else(|| {
+        AuraError::permission_denied("Set channel mode requires a valid home context")
+    })?;
     if !home.is_admin() {
         return Err(AuraError::permission_denied(
             "Only stewards can set channel mode",

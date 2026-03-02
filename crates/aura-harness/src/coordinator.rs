@@ -1,17 +1,21 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 
 use crate::backend::BackendHandle;
-use crate::config::RunConfig;
+use crate::config::{InstanceConfig, InstanceMode, RunConfig};
 use crate::events::EventStream;
 use crate::screen_normalization::normalize_screen;
 use crate::tool_api::ToolKey;
 
 pub struct HarnessCoordinator {
     backends: HashMap<String, BackendHandle>,
+    clipboard_files: HashMap<String, PathBuf>,
+    instance_modes: HashMap<String, InstanceMode>,
     events: EventStream,
 }
 
@@ -19,16 +23,22 @@ pub struct HarnessCoordinator {
 impl HarnessCoordinator {
     pub fn from_run_config(config: &RunConfig) -> Result<Self> {
         let mut backends = HashMap::new();
+        let mut clipboard_files = HashMap::new();
+        let mut instance_modes = HashMap::new();
         let pty_rows = config.run.pty_rows;
         let pty_cols = config.run.pty_cols;
         for instance in &config.instances {
             let id = instance.id.clone();
             let backend = BackendHandle::from_config(instance.clone(), pty_rows, pty_cols)?;
+            clipboard_files.insert(id.clone(), clipboard_file_for_instance(instance));
+            instance_modes.insert(id.clone(), instance.mode.clone());
             backends.insert(id, backend);
         }
 
         Ok(Self {
             backends,
+            clipboard_files,
+            instance_modes,
             events: EventStream::new(),
         })
     }
@@ -158,6 +168,41 @@ impl HarnessCoordinator {
         Ok(result)
     }
 
+    pub fn read_clipboard(&mut self, instance_id: &str) -> Result<String> {
+        let mode = self
+            .instance_modes
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("unknown instance_id: {instance_id}"))?;
+        if !matches!(mode, InstanceMode::Local) {
+            bail!("read_clipboard is only supported for local instances");
+        }
+
+        let path = self
+            .clipboard_files
+            .get(instance_id)
+            .ok_or_else(|| anyhow!("missing clipboard path for instance_id: {instance_id}"))?;
+        let mut text = fs::read_to_string(path).map_err(|error| {
+            anyhow!("failed reading clipboard file {}: {error}", path.display())
+        })?;
+        while matches!(text.chars().last(), Some('\n' | '\r')) {
+            text.pop();
+        }
+        if text.is_empty() {
+            bail!("clipboard for instance {instance_id} is empty");
+        }
+
+        self.events.push(
+            "observation",
+            "read_clipboard",
+            Some(instance_id.to_string()),
+            serde_json::json!({
+                "path": path.display().to_string(),
+                "bytes": text.len()
+            }),
+        );
+        Ok(text)
+    }
+
     pub fn restart(&mut self, instance_id: &str) -> Result<()> {
         let backend = self
             .backends
@@ -218,6 +263,24 @@ fn normalize_key_stream(keys: &str) -> Cow<'_, str> {
     }
 }
 
+fn env_value(key: &str, env_entries: &[String]) -> Option<String> {
+    env_entries.iter().find_map(|item| {
+        let (entry_key, entry_value) = item.split_once('=')?;
+        if entry_key.trim() == key {
+            Some(entry_value.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn clipboard_file_for_instance(instance: &InstanceConfig) -> PathBuf {
+    if let Some(path) = env_value("AURA_CLIPBOARD_FILE", &instance.env) {
+        return PathBuf::from(path);
+    }
+    instance.data_dir.join(".harness-clipboard.txt")
+}
+
 impl Drop for HarnessCoordinator {
     fn drop(&mut self) {
         let _ = self.stop_all();
@@ -226,7 +289,37 @@ impl Drop for HarnessCoordinator {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_key_stream;
+    use super::{clipboard_file_for_instance, normalize_key_stream};
+    use crate::config::InstanceConfig;
+    use crate::config::InstanceMode;
+    use crate::config::TunnelConfig;
+    use std::path::PathBuf;
+
+    fn test_instance(env: Vec<String>) -> InstanceConfig {
+        InstanceConfig {
+            id: "alice".to_string(),
+            mode: InstanceMode::Local,
+            data_dir: PathBuf::from(".tmp/test/alice"),
+            device_id: None,
+            bind_address: "127.0.0.1:45001".to_string(),
+            demo_mode: false,
+            command: None,
+            args: vec![],
+            env,
+            log_path: None,
+            ssh_host: None,
+            ssh_user: None,
+            ssh_port: None,
+            ssh_strict_host_key_checking: true,
+            ssh_known_hosts_file: None,
+            ssh_fingerprint: None,
+            ssh_require_fingerprint: false,
+            ssh_dry_run: true,
+            remote_workdir: None,
+            lan_discovery: None,
+            tunnel: None::<TunnelConfig>,
+        }
+    }
 
     #[test]
     fn normalize_key_stream_rewrites_newline_to_carriage_return() {
@@ -239,5 +332,26 @@ mod tests {
     #[test]
     fn normalize_key_stream_keeps_plain_text() {
         assert_eq!(normalize_key_stream("abc123").as_ref(), "abc123");
+    }
+
+    #[test]
+    fn clipboard_file_uses_instance_default_path() {
+        let instance = test_instance(vec![]);
+        assert_eq!(
+            clipboard_file_for_instance(&instance),
+            PathBuf::from(".tmp/test/alice/.harness-clipboard.txt")
+        );
+    }
+
+    #[test]
+    fn clipboard_file_uses_env_override() {
+        let instance = test_instance(vec![
+            "AURA_CLIPBOARD_MODE=file_only".to_string(),
+            "AURA_CLIPBOARD_FILE=/tmp/custom-clip.txt".to_string(),
+        ]);
+        assert_eq!(
+            clipboard_file_for_instance(&instance),
+            PathBuf::from("/tmp/custom-clip.txt")
+        );
     }
 }

@@ -421,9 +421,13 @@ pub type SharedChannels = Arc<RwLock<Vec<Channel>>>;
 
 fn merge_dm_like_channels(incoming: &ChatState, previous: &ChatState) -> ChatState {
     if incoming.channel_count() == 0 && previous.channel_count() > 0 {
-        // Runtime reductions may briefly publish an empty chat snapshot during
-        // convergence. Keep the previous view to avoid dropping active channels/messages.
-        return previous.clone();
+        let had_dm_like = previous.all_channels().any(is_dm_like_channel);
+        if had_dm_like {
+            // Runtime reductions may briefly publish an empty snapshot during convergence.
+            // Preserve DM-like channels in that transient case, but still allow explicit
+            // non-DM channel leaves to converge to an empty channel list.
+            return previous.clone();
+        }
     }
 
     let mut merged = incoming.clone();

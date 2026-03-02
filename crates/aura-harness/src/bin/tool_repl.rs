@@ -12,6 +12,8 @@ use anyhow::{Context, Result};
 use aura_harness::config::require_existing_file;
 use aura_harness::coordinator::HarnessCoordinator;
 use aura_harness::load_and_validate_run_config;
+use aura_harness::scenario::ScenarioRunner;
+use aura_harness::scenario_execution::execute_with_run_budgets;
 use aura_harness::tool_api::{ToolApi, ToolRequest};
 use clap::Parser;
 
@@ -21,6 +23,9 @@ use clap::Parser;
 struct Cli {
     #[arg(long)]
     config: PathBuf,
+    /// Optional scripted scenario TOML to execute before entering interactive mode.
+    #[arg(long)]
+    prelude: Option<PathBuf>,
     /// Auto-shutdown after this many milliseconds without incoming requests.
     /// Set to 0 to disable idle timeout.
     #[arg(long, default_value_t = 600_000)]
@@ -31,10 +36,23 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     require_existing_file(&cli.config, "run config")?;
     let config = load_and_validate_run_config(&cli.config)?;
+    let prelude = if let Some(path) = &cli.prelude {
+        Some(ScenarioRunner::load_and_validate(path)?)
+    } else {
+        None
+    };
 
     let coordinator = HarnessCoordinator::from_run_config(&config)?;
     let mut tool_api = ToolApi::new(coordinator);
     tool_api.start_all()?;
+
+    if let Some(scenario) = &prelude {
+        if let Err(error) = execute_with_run_budgets(&config, scenario, &mut tool_api) {
+            let _ = tool_api.stop_all();
+            return Err(error);
+        }
+        eprintln!("prelude_complete scenario_id={}", scenario.id);
+    }
 
     let mut stdout = io::stdout();
     let idle_timeout = if cli.idle_timeout_ms == 0 {

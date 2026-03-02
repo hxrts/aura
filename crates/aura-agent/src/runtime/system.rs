@@ -747,82 +747,71 @@ impl RuntimeSystem {
                     {
                         match from_slice::<RelationalFact>(&envelope.payload) {
                             Ok(fact) => {
-                                let valid_chat_fact = matches!(
-                                    &fact,
-                                    RelationalFact::Generic { envelope, .. }
-                                        if envelope.type_id.as_str() == CHAT_FACT_TYPE_ID
-                                );
-
-                                if !valid_chat_fact {
-                                    tracing::warn!(
-                                        "Received non-chat fact payload in chat fact envelope"
-                                    );
-                                    return;
-                                }
-
-                                // Provision AMP channel state on recipients when they ingest a
-                                // ChannelCreated chat fact. Without this, recipients can render
-                                // incoming chat payloads as sealed-only and cannot send replies.
+                                // Provision AMP channel state only for ChannelCreated chat facts.
+                                // Other relational fact families can still arrive through this
+                                // transport envelope and must not be dropped.
                                 if let RelationalFact::Generic {
                                     envelope: chat_envelope,
                                     ..
                                 } = &fact
                                 {
-                                    if let Some(ChatFact::ChannelCreated {
-                                        context_id,
-                                        channel_id,
-                                        creator_id,
-                                        ..
-                                    }) = ChatFact::from_envelope(chat_envelope)
-                                    {
-                                        let local_authority = envelope.destination;
-                                        if get_channel_state(effects.as_ref(), context_id, channel_id)
-                                            .await
-                                            .is_err()
+                                    if chat_envelope.type_id.as_str() == CHAT_FACT_TYPE_ID {
+                                        if let Some(ChatFact::ChannelCreated {
+                                            context_id,
+                                            channel_id,
+                                            creator_id,
+                                            ..
+                                        }) = ChatFact::from_envelope(chat_envelope)
                                         {
-                                            if let Err(err) = effects
-                                                .create_channel(ChannelCreateParams {
-                                                    context: context_id,
-                                                    channel: Some(channel_id),
-                                                    skip_window: None,
-                                                    topic: None,
-                                                })
+                                            let local_authority = envelope.destination;
+                                            if get_channel_state(effects.as_ref(), context_id, channel_id)
                                                 .await
+                                                .is_err()
                                             {
-                                                let lowered = err.to_string().to_ascii_lowercase();
-                                                if !lowered.contains("already")
-                                                    && !lowered.contains("exists")
-                                                {
-                                                    tracing::warn!(
-                                                        context_id = %context_id,
-                                                        channel_id = %channel_id,
-                                                        error = %err,
-                                                        "Failed to provision AMP channel checkpoint from inbound chat fact"
-                                                    );
-                                                }
-                                            }
-
-                                            let mut participants = vec![local_authority];
-                                            if creator_id != local_authority {
-                                                participants.push(creator_id);
-                                            }
-
-                                            for participant in participants {
                                                 if let Err(err) = effects
-                                                    .join_channel(ChannelJoinParams {
+                                                    .create_channel(ChannelCreateParams {
                                                         context: context_id,
-                                                        channel: channel_id,
-                                                        participant,
+                                                        channel: Some(channel_id),
+                                                        skip_window: None,
+                                                        topic: None,
                                                     })
                                                     .await
                                                 {
-                                                    tracing::debug!(
-                                                        context_id = %context_id,
-                                                        channel_id = %channel_id,
-                                                        participant = %participant,
-                                                        error = %err,
-                                                        "AMP join provisioning from inbound chat fact failed"
-                                                    );
+                                                    let lowered = err.to_string().to_ascii_lowercase();
+                                                    if !lowered.contains("already")
+                                                        && !lowered.contains("exists")
+                                                    {
+                                                        tracing::warn!(
+                                                            context_id = %context_id,
+                                                            channel_id = %channel_id,
+                                                            error = %err,
+                                                            "Failed to provision AMP channel checkpoint from inbound chat fact"
+                                                        );
+                                                    }
+                                                }
+
+                                                let mut participants = vec![local_authority];
+                                                if creator_id != local_authority {
+                                                    participants.push(creator_id);
+                                                }
+
+                                                for participant in participants {
+                                                    if let Err(err) = effects
+                                                        .join_channel(ChannelJoinParams {
+                                                            context: context_id,
+                                                            channel: channel_id,
+                                                            participant,
+                                                        })
+                                                        .await
+                                                    {
+                                                        tracing::debug!(
+                                                            context_id = %context_id,
+                                                            channel_id = %channel_id,
+                                                            participant = %participant,
+                                                            error = %err,
+                                                            "AMP join provisioning from inbound chat fact failed"
+                                                        );
+                                                    }
                                                 }
                                             }
                                         }

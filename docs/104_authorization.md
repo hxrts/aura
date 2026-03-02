@@ -40,7 +40,7 @@ DKG payloads require special budget handling because dealer packages and transcr
 
 ## Telltale Admission and VM Guards
 
-Aura uses Telltale runtime admission and VM guard checkpoints, but these do not replace Aura authorization semantics:
+Aura uses Telltale runtime admission and VM guard checkpoints, which compliment Aura authorization semantics:
 
 - **Runtime admission** (`runtime_contracts`, capability snapshots) gates whether a runtime profile/bundle may execute.
 - **VM acquire/release guards** gate per-session resource leases inside VM execution.
