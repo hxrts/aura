@@ -185,4 +185,9 @@ pub mod authorization {
     pub use crate::authorization::*;
 }
 
-pub mod prelude;
+pub mod prelude {
+    //! UI prelude — import the approved aura-app surface for frontends.
+
+    pub use crate::ui::signals::*;
+    pub use crate::ui::types::*;
+}
