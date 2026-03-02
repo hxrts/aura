@@ -105,9 +105,10 @@ async fn test_threshold_workflow() -> aura_core::AuraResult<()> {
     let device_ids: Vec<_> = (0..5)
         .map(|i| DeviceId::new_from_entropy([i as u8 + 1; 32]))
         .collect();
-    let effect_systems: Vec<_> = (0..5)
+    let effect_systems: Result<Vec<_>, _> = (0..5)
         .map(|_| AuraEffectSystem::testing(&AgentConfig::default()))
         .collect();
+    let effect_systems = effect_systems?;
 
     // Execute multi-phase protocol
     let result = execute_protocol(&effect_systems, &device_ids).await?;
