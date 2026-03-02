@@ -24,7 +24,7 @@ The layers are as follows:
 
 7. User interface (`aura-terminal`): Terminal-based CLI and TUI entry points.
 
-8. Testing and tools (`aura-testkit`, `aura-quint`): Test fixtures, mock effect handlers, and simulation harnesses.
+8. Testing and tools (`aura-testkit`, `aura-quint`, `aura-harness`): Test fixtures, mock effect handlers, simulation harnesses, and multi-instance runtime harness.
 
 Aura separates key generation (K1/K2/K3) from agreement and finality (A1/A2/A3). Fast paths using provisional or coordinator modes provide immediate usability. Durable shared state is always consensus-finalized.
 

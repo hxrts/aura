@@ -33,6 +33,7 @@ Use these names in prose:
 - `peer authority` means a remote authority in a context
 - `member` means an authority in a home's threshold authority set
 - `participant` means an authority granted home access but not in the threshold set
+- `moderator` means a member with moderation designation for a home
 
 For home access semantics, use:
 
