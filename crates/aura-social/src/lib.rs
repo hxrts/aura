@@ -55,7 +55,7 @@ pub mod neighborhood;
 pub mod relay;
 pub mod storage;
 pub mod topology;
-pub mod traversal;
+pub mod access;
 
 /// Operation category map (A/B/C) for protocol gating and review.
 pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
@@ -91,7 +91,7 @@ pub use neighborhood::Neighborhood;
 pub use relay::{ReachabilityChecker, RelayCandidateBuilder};
 pub use storage::StorageService;
 pub use topology::{DiscoveryLayer, SocialTopology};
-pub use traversal::TraversalService;
+pub use access::TraversalService;
 
 // Re-export fact types for convenience
 pub use crate::facts::{
