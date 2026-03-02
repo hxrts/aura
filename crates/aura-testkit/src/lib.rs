@@ -21,7 +21,7 @@
 //!
 //! **IMPORTANT**: This testkit is designed for testing **Layer 4 and higher** crates only:
 //! - Layer 4: aura-protocol (orchestration)
-//! - Layer 5: aura-frost, aura-invitation, aura-recovery, aura-sync, etc. (protocols)
+//! - Layer 5: aura-authentication, aura-invitation, aura-recovery, aura-sync, etc. (protocols)
 //! - Layer 6: aura-agent, aura-simulator (runtime)
 //! - Layer 7: aura-terminal (UI)
 //!

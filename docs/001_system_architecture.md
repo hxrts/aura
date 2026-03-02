@@ -50,20 +50,20 @@ All transport sends pass through a guard chain before any network effect. Guard 
 
 ```mermaid
 flowchart LR
-    A[Send Request] --> B[CapGuard]
-    B --> C[FlowGuard]
-    C --> D[JournalCoupler]
+    A[Send Request] --> B[CapabilityGuard]
+    B --> C[FlowBudgetGuard]
+    C --> D[JournalCouplingGuard]
     D --> E[LeakageTrackingGuard]
     E --> F[TransportEffects]
 ```
 
-The chain order matches the implementation in `aura-guards`. Each guard must succeed before effects are interpreted. This order enforces charge before send.
+The chain order matches the implementation in `aura-guards::GuardChain::standard()`. Each guard must succeed before effects are interpreted. This order enforces charge before send.
 
 Guard responsibilities are listed below.
 
-- CapGuard evaluates Biscuit capabilities.
-- FlowGuard charges flow budgets and emits receipts.
-- JournalCoupler commits facts alongside budget changes.
+- CapabilityGuard evaluates Biscuit capabilities.
+- FlowBudgetGuard charges flow budgets and emits receipts.
+- JournalCouplingGuard commits facts alongside budget changes.
 - LeakageTrackingGuard records privacy budget usage.
 
 ### 2.2 Flow budget system
@@ -90,14 +90,14 @@ pub struct Receipt {
     pub src: AuthorityId,
     pub dst: AuthorityId,
     pub epoch: Epoch,
-    pub cost: u32,
-    pub nonce: u64,
+    pub cost: FlowCost,
+    pub nonce: FlowNonce,
     pub prev: Hash32,
-    pub sig: Vec<u8>,
+    pub sig: ReceiptSig,
 }
 ```
 
-Receipts allow forwarders to validate that prior hops paid their budget cost. The signature is stored as raw bytes to support multiple algorithms.
+Receipts allow forwarders to validate that prior hops paid their budget cost. `FlowCost`, `FlowNonce`, and `ReceiptSig` are validated newtypes wrapping `u32`, `u64`, and `Vec<u8>` respectively.
 
 ## 3. Async Effect System Architecture
 
@@ -107,13 +107,15 @@ Effect traits live in `aura-core` and define async capabilities with explicit co
 
 ```rust
 #[async_trait]
-pub trait CryptoEffects {
-    async fn hash(&self, data: &[u8]) -> [u8; 32];
-    async fn hmac(&self, key: &[u8], data: &[u8]) -> [u8; 32];
+pub trait CryptoCoreEffects: RandomCoreEffects + Send + Sync {
+    async fn hkdf_derive(&self, ikm: &[u8], salt: &[u8], info: &[u8], output_len: u32) -> Result<Vec<u8>, CryptoError>;
+    async fn derive_key(&self, master_key: &[u8], context: &KeyDerivationContext) -> Result<Vec<u8>, CryptoError>;
+    async fn ed25519_sign(&self, message: &[u8], private_key: &[u8]) -> Result<Vec<u8>, CryptoError>;
+    async fn ed25519_verify(&self, message: &[u8], signature: &[u8], public_key: &[u8]) -> Result<bool, CryptoError>;
 }
 ```
 
-This trait defines hashing and HMAC operations without exposing an implementation. The handler is chosen by the runtime and can be swapped for testing.
+This trait defines key derivation and signing operations. Hashing is a pure operation via `aura_core::hash::hash()`, not an effect. The handler is chosen by the runtime and can be swapped for testing.
 
 ### 3.2 Effect trait classification
 
@@ -214,7 +216,7 @@ Aura uses eight layers with no cyclic dependencies.
 - Layer 5 Feature uses crates such as `aura-authentication`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, and `aura-sync`.
 - Layer 6 Runtime uses `aura-agent`, `aura-app`, and `aura-simulator`.
 - Layer 7 Interface uses `aura-terminal` for CLI and TUI entry points.
-- Layer 8 Testing uses `aura-testkit` and `aura-quint`.
+- Layer 8 Testing uses `aura-testkit`, `aura-quint`, and `aura-harness`.
 
 FROST primitives live in `aura-core::crypto::tree_signing`. The legacy `aura-frost` crate is removed from the workspace.
 
