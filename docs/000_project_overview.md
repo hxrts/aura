@@ -48,7 +48,9 @@ The documents below cover theory, technical components, implementation guidance,
 
 [Authorization](104_authorization.md) covers capability semantics, Biscuit token integration, and guard chain authorization.
 
-[Effect System and Runtime](105_effect_system_and_runtime.md) documents effect traits, handler composition, and runtime assembly.
+[Effect System](105_effect_system.md) documents effect traits, handler design, and context propagation.
+
+[Runtime](120_runtime.md) describes lifecycle management, guard chain execution, and service composition.
 
 [Consensus](106_consensus.md) specifies single-shot agreement for non-monotone operations with witness attestation.
 
@@ -80,25 +82,21 @@ The documents below cover theory, technical components, implementation guidance,
 
 ### 3. Developer Guides
 
-[Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to the codebase.
+[Getting Started Guide](801_hello_world_guide.md) provides a starting point for developers new to the codebase.
 
-[Coordination Systems Guide](803_coordination_guide.md) explains choreographic protocol design and implementation patterns.
+[Effects and Handlers Guide](802_effects_guide.md) covers the algebraic effect system, handler implementation, and platform support.
 
-[Advanced Choreography Guide](804_advanced_coordination_guide.md) covers complex coordination techniques including nested protocols and recovery.
+[Choreography Development Guide](803_choreography_guide.md) explains choreographic protocol design, CRDTs, and distributed coordination.
 
-[Development Patterns and Workflows](805_development_patterns_guide.md) describes code organization, time domains, and common workflows.
+[Testing Guide](804_testing_guide.md) covers test patterns, fixtures, conformance testing, and runtime harness.
 
-[Testing Guide](805_testing_guide.md) covers test patterns, fixtures, and effect-based testing strategies.
+[Simulation Guide](805_simulation_guide.md) explains deterministic simulation for debugging and property verification.
 
-[Simulation Guide](806_simulation_guide.md) explains deterministic simulation for debugging and property verification.
+[Verification Guide](806_verification_guide.md) documents Quint model checking and Lean proof workflows.
 
-[Verification and MBT Guide](807_verification_guide.md) documents Quint model checking and Lean proof workflows.
+[System Internals Guide](807_system_internals_guide.md) covers guard chain internals, service patterns, and reactive scheduling.
 
-[Maintenance and OTA Guide](808_maintenance_guide.md) covers operational concerns including snapshots and system evolution.
-
-[Reactive Signals Guide](810_reactive_signals_guide.md) describes reactive state propagation patterns for UI integration.
-
-[Runtime Harness Guide](813_runtime_harness_guide.md) explains multi-instance testing with real Aura processes.
+[Distributed Maintenance Guide](808_maintenance_guide.md) covers operational concerns including snapshots and system upgrades.
 
 ### 4. Project Meta
 

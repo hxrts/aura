@@ -1,4 +1,4 @@
-# Cryptographic Architecture
+# Cryptography
 
 This document describes the cryptographic architecture in Aura. It defines layer responsibilities, code organization patterns, security invariants, and compliance requirements for cryptographic operations.
 
@@ -425,6 +425,6 @@ Hardware Security Module support would require a new `HsmCryptoHandler` implemen
 
 ## See Also
 
-- [Effect System and Runtime](105_effect_system_and_runtime.md) for effect trait patterns
+- [Effect System](105_effect_system.md) for effect trait patterns
 - [Project Structure](999_project_structure.md) for 8-layer architecture
-- [Development Patterns and Workflows](805_development_patterns_guide.md) for code location guidance
+- [Effects and Handlers Guide](802_effects_guide.md) for handler implementation guidance

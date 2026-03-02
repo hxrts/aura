@@ -339,4 +339,4 @@ aura-testkit/
 
 ## Related Documentation
 
-See [Testing Guide](805_testing_guide.md) for how to write tests using this infrastructure. See [Effect System and Runtime](105_effect_system_and_runtime.md) for effect trait definitions.
+See [Testing Guide](804_testing_guide.md) for how to write tests using this infrastructure. See [Effect System](105_effect_system.md) for effect trait definitions.

@@ -958,7 +958,7 @@ The 8-layer architecture enforces strict placement rules. Violating these rules 
 
 For a quick reference table of layer rules, see `CLAUDE.md` under "Agent Decision Aids".
 
-For practical guidance on classifying code, see [Development Patterns](805_development_patterns_guide.md).
+For practical guidance on effects and handlers, see [Effects Guide](802_effects_guide.md). For choreography development, see [Choreography Guide](803_choreography_guide.md).
 
 ### Pure Mathematical Utilities
 

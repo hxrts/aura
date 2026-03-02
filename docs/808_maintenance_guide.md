@@ -1,6 +1,8 @@
-# Maintenance and OTA Guide
+# Distributed Maintenance Guide
 
-This guide covers the Maintenance and OTA (Over-the-Air) update system in Aura. The system provides coordinated maintenance operations including snapshots, cache invalidation, and distributed upgrades using threshold approval.
+This guide covers practical workflows for the Maintenance and OTA (Over-the-Air) update system in Aura. Use it for snapshots, cache invalidation, and distributed upgrades.
+
+For the maintenance architecture specification, see [Distributed Maintenance Architecture](115_maintenance.md).
 
 ## Core Maintenance Philosophy
 

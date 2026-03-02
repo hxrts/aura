@@ -263,7 +263,7 @@ Default suites are available for consensus, sync, chat, and recovery protocol cl
 
 ## Quint Integration
 
-Quint actions enable model-based testing. See [Verification and MBT Guide](807_verification_guide.md) for complete workflows.
+Quint actions enable model-based testing. See [Verification and MBT Guide](806_verification_guide.md) for complete workflows.
 
 ### When to Use Quint
 
@@ -285,7 +285,7 @@ Trace replay validates implementation against Quint model behavior.
 
 ## Conformance Workflow
 
-Simulation feeds native/WASM conformance testing. See [Testing Guide](805_testing_guide.md) for conformance lanes and corpus policy.
+Simulation feeds native/WASM conformance testing. See [Testing Guide](804_testing_guide.md) for conformance lanes and corpus policy.
 
 ### Generating Corpus
 
@@ -370,4 +370,4 @@ Prefer TOML scenarios for human-readable tests. Prefer Quint actions for specifi
 
 ## Related Documentation
 
-See [Simulation Infrastructure Reference](118_simulator.md) for handler APIs. See [Verification and MBT Guide](807_verification_guide.md) for Quint workflows. See [Testing Guide](805_testing_guide.md) for conformance testing.
+See [Simulation Infrastructure Reference](118_simulator.md) for handler APIs. See [Verification and MBT Guide](806_verification_guide.md) for Quint workflows. See [Testing Guide](804_testing_guide.md) for conformance testing.

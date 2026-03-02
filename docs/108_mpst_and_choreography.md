@@ -1,6 +1,6 @@
-# Multi-party Session Types and Choreography
+# MPST and Choreography
 
-This document describes the architecture of choreographic protocols in Aura. It explains how global protocols are defined, projected, and executed. It defines the structure of local session types, the integration with the [effect system](105_effect_system_and_runtime.md), and the use of [guard chains](104_authorization.md) and journal coupling.
+This document describes the architecture of choreographic protocols in Aura. It explains how global protocols are defined, projected, and executed. It defines the structure of local session types, the integration with the [Effect System](105_effect_system.md), and the use of [guard chains](104_authorization.md) and journal coupling.
 
 ## 1. DSL and Projection
 

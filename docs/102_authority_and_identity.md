@@ -51,7 +51,7 @@ pub trait Authority: Send + Sync {
 
 The `Authority` trait provides the external interface for authority operations. The trait exposes only the public key, root commitment, and signing capabilities. The internal device structure remains hidden from external consumers.
 
-An account authority derives context specific keys using deterministic key derivation. These derived authorities represent application scoped identities. See [Development Patterns and Workflows](805_development_patterns_guide.md) for implementation examples.
+An account authority derives context specific keys using deterministic key derivation. These derived authorities represent application scoped identities. See [Effects and Handlers Guide](802_effects_guide.md) for implementation examples.
 
 ## 3. Account State Machine
 
@@ -457,5 +457,5 @@ Verification code is in `aura-core/src/tree/verification.rs`. Type definitions a
 - [Consensus](106_consensus.md) for threshold signing and agreement
 - [Identifiers and Boundaries](101_identifiers_and_boundaries.md) for context isolation mechanisms
 - [Cryptographic Architecture](100_crypto.md) for FROST and signing modes
-- [Development Patterns and Workflows](805_development_patterns_guide.md) for practical implementation patterns
+- [Effects and Handlers Guide](802_effects_guide.md) for practical implementation patterns
 - [Privacy and Information Flow](003_information_flow_contract.md) for privacy guarantees

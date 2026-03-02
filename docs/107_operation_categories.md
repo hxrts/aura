@@ -583,4 +583,4 @@ Right: Channel creation is optimistic. Show immediately, sync status later.
 - [Relational Contexts](112_relational_contexts.md) for context vs channel distinction
 - [Choreography Guide](108_mpst_and_choreography.md) for session types in Category C
 - [Transport](109_transport_and_information_flow.md) for sync status tracking
-- [Effect System](105_effect_system_and_runtime.md) for effect policies
+- [Effect System](105_effect_system.md) for effect policies

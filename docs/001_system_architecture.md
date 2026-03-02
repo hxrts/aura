@@ -459,7 +459,7 @@ The layer determines where code belongs. Stateless single-party operations go in
 
 Effect traits are defined only in `aura-core`. Infrastructure handlers live in `aura-effects`. Mock handlers live in `aura-testkit`. This separation keeps the dependency graph clean.
 
-For practical guidance on classifying code and choosing the right crate, see [Development Patterns](805_development_patterns_guide.md). For complete crate breakdown and dependency graph, see [Project Structure](999_project_structure.md).
+For practical guidance on effects and handlers, see [Effects Guide](802_effects_guide.md). For choreography development, see [Choreography Guide](803_choreography_guide.md). For complete crate breakdown and dependency graph, see [Project Structure](999_project_structure.md).
 
 ## 10. Security Model
 

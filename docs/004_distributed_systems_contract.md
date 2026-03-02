@@ -358,7 +358,9 @@ See [Verification Coverage Report](998_verification_coverage.md) for metrics and
 
 ## 13. References
 
-[Aura System Architecture](001_system_architecture.md) describes runtime layering. [Authorization](104_authorization.md) describes guard chain ordering.
+[Aura System Architecture](001_system_architecture.md) describes runtime layering.
+
+[Authorization](104_authorization.md) describes guard chain ordering.
 
 [Theoretical Model](002_theoretical_model.md) covers the formal calculus and semilattice laws.
 

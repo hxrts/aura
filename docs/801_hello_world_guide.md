@@ -41,7 +41,7 @@ The CLI preset provides sensible defaults for command-line tools. It uses file-b
 
 For custom environments that need explicit control over effect handlers, use `AgentBuilder::custom()` with typestate enforcement. This requires providing all five core effects (crypto, storage, time, random, console) before `build()` is available.
 
-Platform-specific presets are available for iOS (`AgentBuilder::ios()`), Android (`AgentBuilder::android()`), and Web/WASM (`AgentBuilder::web()`). These require feature flags to enable. See [Development Patterns and Workflows](805_development_patterns_guide.md) for detailed builder examples.
+Platform-specific presets are available for iOS (`AgentBuilder::ios()`), Android (`AgentBuilder::android()`), and Web/WASM (`AgentBuilder::web()`). These require feature flags to enable. See [Effects and Handlers Guide](802_effects_guide.md) for detailed builder examples.
 
 See [Project Structure](999_project_structure.md) for details on the 8-layer architecture and effect handler organization.
 
@@ -207,7 +207,7 @@ async fn test_hello_world_protocol() -> aura_core::AuraResult<()> {
 }
 ```
 
-This test creates stateless effect systems for Alice and Bob using testing configuration. The systems are context-free and provide deterministic behavior for testing protocol logic. For comprehensive testing approaches, see [Testing Guide](805_testing_guide.md).
+This test creates stateless effect systems for Alice and Bob using testing configuration. The systems are context-free and provide deterministic behavior for testing protocol logic. For comprehensive testing approaches, see [Testing Guide](804_testing_guide.md).
 
 Run the test:
 
@@ -232,6 +232,6 @@ See [System Invariants](005_system_invariants.md) for details. When developing, 
 
 You now have a working Aura development environment. The hello world protocol demonstrates basic choreographic programming concepts.
 
-Continue with [Development Patterns and Workflows](805_development_patterns_guide.md) to learn about effect systems, time domain selection, authentication, and capabilities. Learn advanced coordination patterns in [Coordination Systems Guide](803_coordination_guide.md). For detailed protocol development, see [MPST and Choreography](108_mpst_and_choreography.md).
+Continue with [Effects and Handlers Guide](802_effects_guide.md) to learn about effect systems, platform implementation, and handler patterns. Learn choreographic programming in [Choreography Guide](803_choreography_guide.md). For session type theory, see [MPST and Choreography](108_mpst_and_choreography.md).
 
-Explore the simulation system in [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md) for comprehensive protocol testing approaches.
+Explore testing and simulation in [Testing Guide](804_testing_guide.md) and [Simulation Guide](805_simulation_guide.md).

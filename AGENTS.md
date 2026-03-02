@@ -198,11 +198,13 @@ Is this a Layer 2 domain crate?
 | Database & queries | `docs/113_database.md` |
 | Distributed systems | `docs/004_distributed_systems_contract.md` |
 | Theoretical model | `docs/002_theoretical_model.md` |
-| Testing | `docs/805_testing_guide.md` |
-| Simulation | `docs/806_simulation_guide.md` |
-| Verification (Quint/Lean) | `docs/807_verification_guide.md` |
+| Testing | `docs/804_testing_guide.md` |
+| Simulation | `docs/805_simulation_guide.md` |
+| Verification (Quint/Lean) | `docs/806_verification_guide.md` |
 | Maintenance & OTA | `docs/115_maintenance.md`, `docs/808_maintenance_guide.md` |
-| Development patterns | `docs/805_development_patterns_guide.md` |
+| Effects & handlers | `docs/802_effects_guide.md` |
+| Choreography | `docs/803_choreography_guide.md` |
+| System internals | `docs/807_system_internals_guide.md` |
 | Getting started | `docs/801_hello_world_guide.md` |
 
 ## Domain Concepts

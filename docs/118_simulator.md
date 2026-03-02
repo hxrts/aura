@@ -417,4 +417,4 @@ aura-simulator/
 
 ## Related Documentation
 
-See [Simulation Guide](806_simulation_guide.md) for how to write simulations. See [Testing Guide](805_testing_guide.md) for conformance testing. See [Formal Verification Reference](119_verification.md) for Quint integration details.
+See [Simulation Guide](805_simulation_guide.md) for how to write simulations. See [Testing Guide](804_testing_guide.md) for conformance testing. See [Formal Verification Reference](119_verification.md) for Quint integration details.

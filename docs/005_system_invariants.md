@@ -1,4 +1,4 @@
-# Aura System Invariants
+# System Invariants
 
 This document indexes invariants across Aura and maps them to enforcement loci.
 Invariant specifications live in crate `ARCHITECTURE.md` files.
