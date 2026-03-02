@@ -18,38 +18,38 @@ The `stateful_effects` module provides handlers for each effect category.
 
 | Handler | Effect Trait | Purpose |
 |---------|--------------|---------|
-| `StatefulTimeHandler` | `PhysicalTimeEffects` | Controllable simulated time |
-| `StatefulRandomHandler` | `RandomEffects` | Seeded deterministic randomness |
-| `StatefulStorageHandler` | `StorageEffects` | In-memory storage with inspection |
-| `StatefulJournalHandler` | `JournalEffects` | Journal with fact tracking |
-| `StatefulCryptoHandler` | `CryptoEffects` | Crypto with key inspection |
-| `StatefulConsoleHandler` | `ConsoleEffects` | Captured console output |
+| `SimulatedTimeHandler` | `PhysicalTimeEffects` | Controllable simulated time |
+| `MockRandomHandler` | `RandomCoreEffects` | Seeded deterministic randomness |
+| `MemoryStorageHandler` | `StorageEffects` | In-memory storage with inspection |
+| `MockJournalHandler` | `JournalEffects` | Journal with fact tracking |
+| `MockCryptoHandler` | `CryptoCoreEffects` | Crypto with key inspection |
+| `MockConsoleHandler` | `ConsoleEffects` | Captured console output |
 
 ### Time Handler
 
-The `StatefulTimeHandler` provides controllable time for tests.
+The `SimulatedTimeHandler` provides controllable time for tests.
 
 ```rust
-use aura_testkit::stateful_effects::StatefulTimeHandler;
-use aura_core::effects::time::PhysicalTimeEffects;
+use aura_testkit::stateful_effects::SimulatedTimeHandler;
+use aura_core::effects::PhysicalTimeEffects;
 
-let time = StatefulTimeHandler::new();
+let time = SimulatedTimeHandler::new();
 let now = time.physical_time().await?;
-time.advance_ms(5000);
+time.advance_time(5000);
 let later = time.physical_time().await?;
 ```
 
-This handler starts at a fixed epoch and advances only when explicitly requested. Tests can verify time-dependent behavior without wall-clock delays.
+This handler starts at the current system time by default. Use `SimulatedTimeHandler::new_at_epoch()` for tests starting at Unix epoch, or `SimulatedTimeHandler::new_with_time(start_ms)` for a specific start time. Tests can verify time-dependent behavior without wall-clock delays.
 
 ### Random Handler
 
-The `StatefulRandomHandler` provides seeded randomness for reproducible tests.
+The `MockRandomHandler` provides seeded randomness for reproducible tests.
 
 ```rust
-use aura_testkit::stateful_effects::StatefulRandomHandler;
+use aura_testkit::stateful_effects::MockRandomHandler;
 
-let random = StatefulRandomHandler::with_seed(42);
-let bytes = random.random_bytes(32).await?;
+let random = MockRandomHandler::with_seed(42);
+let bytes = random.random_bytes(32).await;
 ```
 
 Given the same seed, this handler produces identical sequences across runs. This enables deterministic property testing and failure reproduction.
@@ -134,20 +134,23 @@ The `verification` module provides utilities for property testing and differenti
 The `strategies` module defines proptest strategies for Aura types.
 
 ```rust
-use aura_testkit::verification::strategies::arbitrary_authority_id;
+use aura_testkit::verification::strategies::{arb_device_id, arb_account_id, arb_key_pair};
 use proptest::prelude::*;
 
 proptest! {
     #[test]
-    fn authority_roundtrip(id in arbitrary_authority_id()) {
-        let bytes = id.to_bytes();
-        let recovered = AuthorityId::from_bytes(&bytes)?;
-        assert_eq!(id, recovered);
+    fn device_id_deterministic(id in arb_device_id()) {
+        assert_ne!(id.to_string(), "");
+    }
+
+    #[test]
+    fn key_pair_valid((sk, vk) in arb_key_pair()) {
+        assert_eq!(sk.verifying_key(), vk);
     }
 }
 ```
 
-These strategies generate valid instances of domain types for property testing.
+Available strategies include `arb_device_id`, `arb_account_id`, `arb_session_id`, and `arb_key_pair`. These generate valid, deterministic instances for property testing.
 
 ### Lean Oracle
 
@@ -164,16 +167,22 @@ The oracle invokes compiled Lean code to verify properties. This enables differe
 
 ### Capability Soundness
 
-The `capability_soundness` module validates authorization logic.
+The `capability_soundness` module provides formal verification for capability system properties.
 
 ```rust
-use aura_testkit::verification::capability_soundness::check_attenuation;
+use aura_testkit::verification::capability_soundness::{
+    CapabilitySoundnessVerifier, SoundnessProperty, CapabilityState
+};
 
-let result = check_attenuation(&parent_cap, &child_cap)?;
-assert!(result.is_valid());
+let mut verifier = CapabilitySoundnessVerifier::with_defaults();
+let result = verifier.verify_property(
+    SoundnessProperty::NonInterference,
+    initial_state
+).await?;
+assert!(result.holds);
 ```
 
-These utilities verify that capability operations preserve security properties.
+The verifier checks five soundness properties: `NonInterference`, `Monotonicity`, `TemporalConsistency`, `ContextIsolation`, and `AuthorizationSoundness`. Use `verify_all_properties` to check all properties at once.
 
 ## Consensus Testing
 
@@ -229,39 +238,50 @@ The `conformance` module provides artifact validation for native/WASM parity tes
 
 ### Artifact Format
 
-The `AuraConformanceArtifactV1` captures execution state for comparison:
+The `AuraConformanceArtifactV1` captures execution state for comparison. The type is defined in `aura_core::conformance`:
 
 ```rust
-use aura_testkit::conformance::AuraConformanceArtifactV1;
+use aura_core::{AuraConformanceArtifactV1, AuraConformanceRunMetadataV1, ConformanceSurfaceName};
 
-let artifact = AuraConformanceArtifactV1 {
-    observable: observable_outputs,
-    scheduler_step: scheduler_state,
-    effect: effect_trace,
-    metadata: execution_metadata,
-};
-artifact.validate()?;
+let mut artifact = AuraConformanceArtifactV1::new(AuraConformanceRunMetadataV1 {
+    target: "native".to_string(),
+    profile: "native_coop".to_string(),
+    scenario: "test_scenario".to_string(),
+    seed: Some(42),
+    commit: None,
+    async_host_transcript_entries: None,
+    async_host_transcript_digest_hex: None,
+});
+
+// Insert required surfaces
+artifact.insert_surface(ConformanceSurfaceName::Observable, observable_surface);
+artifact.insert_surface(ConformanceSurfaceName::SchedulerStep, scheduler_surface);
+artifact.insert_surface(ConformanceSurfaceName::Effect, effect_surface);
+
+artifact.validate_required_surfaces()?;
 ```
 
 Every conformance artifact must capture three surfaces:
 
 | Surface | Purpose | Content |
 |---------|---------|---------|
-| `observable` | Protocol-visible outputs | Normalized message contents |
-| `scheduler_step` | Logical progression | Step index, session state, role progression |
-| `effect` | Effect envelope trace | Sequence of effect calls with arguments |
+| `Observable` | Protocol-visible outputs | Normalized message contents |
+| `SchedulerStep` | Logical progression | Step index, session state, role progression |
+| `Effect` | Effect envelope trace | Sequence of effect calls with arguments |
 
 Missing surfaces cause validation failure.
 
 Metadata aids debugging but does not affect comparison:
 
 ```rust
-pub struct ConformanceMetadata {
-    pub scenario_name: String,
-    pub seed: u64,
-    pub platform: Platform,
-    pub timestamp: u64,
-    pub version: String,
+pub struct AuraConformanceRunMetadataV1 {
+    pub target: String,
+    pub profile: String,
+    pub scenario: String,
+    pub seed: Option<u64>,
+    pub commit: Option<String>,
+    pub async_host_transcript_entries: Option<usize>,
+    pub async_host_transcript_digest_hex: Option<String>,
 }
 ```
 
