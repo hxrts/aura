@@ -9,16 +9,16 @@ Conflict-free Replicated Data Types enable distributed applications to handle co
 Aura provides builder patterns for easy CRDT setup:
 
 ```rust
-use aura_protocol::effects::semilattice::CrdtCoordinator;
+use aura_protocol::effects::crdt::CrdtCoordinator;
 
 // Simple state-based CRDT
-let coordinator = CrdtCoordinator::with_cv_state(device_id, initial_journal);
+let coordinator = CrdtCoordinator::with_cv_state(authority_id, initial_journal);
 
 // Delta CRDT with compaction threshold
-let coordinator = CrdtCoordinator::with_delta_threshold(device_id, 100);
+let coordinator = CrdtCoordinator::with_delta_threshold(authority_id, 100);
 
 // Meet-semilattice for constraints
-let coordinator = CrdtCoordinator::with_mv_state(device_id, capability_set);
+let coordinator = CrdtCoordinator::with_mv_state(authority_id, capability_set);
 ```
 
 The builder pattern eliminates manual handler registration. Each method creates appropriate handler types with sensible defaults. Coordinators integrate directly with choreographic protocols.
@@ -28,18 +28,18 @@ The builder pattern eliminates manual handler registration. Each method creates 
 Join semilattices accumulate knowledge through union operations:
 
 ```rust
-use aura_journal::algebra::{Join, GCounterState};
+use aura_journal::algebra::GCounter;
+use aura_core::semilattice::JoinSemilattice;
 
-impl Join for GCounterState {
+// GCounter implements JoinSemilattice
+impl JoinSemilattice for GCounter {
     fn join(&self, other: &Self) -> Self {
-        let mut merged_counts = self.device_counts.clone();
-
-        for (device_id, count) in &other.device_counts {
-            let current_count = merged_counts.get(device_id).copied().unwrap_or(0);
-            merged_counts.insert(*device_id, current_count.max(*count));
+        let mut result = self.0.clone();
+        for (actor_id, other_count) in &other.0 {
+            let self_count = result.get(actor_id).unwrap_or(&0);
+            result.insert(actor_id.clone(), (*self_count).max(*other_count));
         }
-
-        GCounterState { device_counts: merged_counts }
+        Self(result)
     }
 }
 ```
@@ -71,10 +71,10 @@ Integrate CRDTs with choreographic protocols:
 ```rust
 use aura_sync::choreography::anti_entropy::execute_as_requester;
 
-let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_state);
+let coordinator = CrdtCoordinator::with_cv_state(authority_id, journal_state);
 
 let (result, updated_coordinator) = execute_anti_entropy(
-    device_id,
+    authority_id,
     config,
     is_requester,
     &effect_system,
@@ -92,15 +92,16 @@ Protocols consume and return coordinators with updated state. This enables immut
 
 ### Tree Structure
 
-Commitment trees organize group members in a binary tree:
+Commitment trees organize group members in a binary tree. The following example shows the conceptual pattern (actual implementation uses `TreeState` from `aura_journal::commitment_tree`):
 
 ```rust
-use aura_journal::commitment_tree::{CommitmentTree, TreePosition};
+use aura_journal::commitment_tree::TreeState;
 
+// Conceptual wrapper for group commitment operations
 pub struct GroupCommitmentTree {
-    tree: CommitmentTree,
+    tree: TreeState,
     device_id: aura_core::DeviceId,
-    position: TreePosition,
+    leaf_index: u32,
 }
 
 impl GroupCommitmentTree {
@@ -207,8 +208,9 @@ Use relational contexts plus `InvitationServiceApi` to model trust formation. Cr
 Compute trust levels using direct and transitive relationships:
 
 ```rust
-use aura_authorization::{TrustGraph, TrustLevel};
+use aura_core::types::relationships::TrustLevel;
 
+// Example trust graph structure (application-defined)
 pub struct DeviceTrustGraph {
     relationships: BTreeMap<(aura_core::DeviceId, aura_core::DeviceId), TrustLevel>,
 }
@@ -221,7 +223,7 @@ impl DeviceTrustGraph {
         max_hops: usize,
     ) -> Option<TrustLevel> {
         if source == target {
-            return Some(TrustLevel::Complete);
+            return Some(TrustLevel::Full);
         }
 
         if let Some(direct_trust) = self.relationships.get(&(source, target)) {
@@ -251,7 +253,8 @@ impl DeviceTrustGraph {
                 let onward_trust = self.find_transitive_path(*intermediate, target, remaining_hops - 1, visited);
 
                 if let Some(onward) = onward_trust {
-                    let path_trust = trust_level.attenuate(onward);
+                    // Attenuate trust through transitive path (take minimum)
+                    let path_trust = (*trust_level).min(onward);
 
                     best_trust = match best_trust {
                         Some(current_best) => Some(current_best.max(path_trust)),
@@ -392,7 +395,7 @@ Epoch advancement replenishes budget limits. Devices synchronize epochs through 
 Flow budgets limit privacy leakage through communication patterns:
 
 ```rust
-use aura_mpst::LeakageBudget;
+use aura_guards::LeakageBudget;
 
 pub fn evaluate_privacy_cost(
     message: &ProtocolMessage,
@@ -404,9 +407,9 @@ pub fn evaluate_privacy_cost(
     let metadata_leakage = calculate_metadata_leakage(context, recipient);
 
     LeakageBudget {
-        external_leakage: metadata_leakage,
-        neighbor_leakage: timing_leakage,
-        group_leakage: message_size / 1024, // Size-based group leakage
+        external: metadata_leakage,
+        neighbor: timing_leakage,
+        in_group: (message_size / 1024) as u32, // Size-based group leakage
     }
 }
 ```
