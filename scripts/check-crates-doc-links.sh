@@ -182,6 +182,40 @@ fi
 
 echo "000_project_overview.md links to all docs files"
 
+# Check that docs/SUMMARY.md links to all docs files
+summary="$docs_root/SUMMARY.md"
+if [[ ! -f "$summary" ]]; then
+  echo "error: $summary not found" >&2
+  exit 2
+fi
+
+# Extract all markdown link targets from SUMMARY.md
+summary_links=$(perl -ne 'while (/\[[^\]]+\]\(([^)#]+)/g) { print "$1\n"; }' "$summary" | sort -u)
+
+summary_missing=0
+while IFS= read -r -d '' doc_file; do
+  doc_name="$(basename "$doc_file")"
+
+  # Skip SUMMARY.md itself
+  case "$doc_name" in
+    SUMMARY.md) continue ;;
+  esac
+
+  # Check if this file is linked in SUMMARY.md
+  if ! echo "$summary_links" | grep -qF "$doc_name"; then
+    summary_missing=$((summary_missing + 1))
+    echo "missing from SUMMARY.md: $doc_name"
+  fi
+done < <(find "$docs_root" -maxdepth 1 -name '*.md' -print0 | sort -z)
+
+if [[ "$summary_missing" -gt 0 ]]; then
+  echo ""
+  echo "SUMMARY.md is missing links to $summary_missing doc file(s)"
+  exit 1
+fi
+
+echo "SUMMARY.md links to all docs files"
+
 # Check for links to work/ (scratch directory)
 work_links=0
 
