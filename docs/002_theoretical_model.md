@@ -20,61 +20,41 @@ Use this section when writing [Theoretical Model](002_theoretical_model.md), [Pr
 
 ### Core Entities
 
-#### Formula Symbols
-
-| Symbol | Type | Description |
-|--------|------|-------------|
+| Symbol / Term | Type | Description |
+|---------------|------|-------------|
 | $`a`$, $`b`$ | `AuthorityId` | Authority identifiers |
 | $`\kappa`$ | `ContextId` | Context identifier |
 | $`e`$ | `Epoch` | Epoch number |
+| authority | — | An account authority |
+| context | — | A relational or authority namespace keyed by `ContextId` |
+| peer authority | — | A remote authority in a context |
+| member | — | An authority in a home's threshold authority set |
+| participant | — | An authority granted home access but not in the threshold set |
+| moderator | — | A member with moderation designation for a home |
 
-#### Prose Terms
-
-| Term | Definition |
-|------|------------|
-| authority | An account authority |
-| context | A relational or authority namespace keyed by `ContextId` |
-| peer authority | A remote authority in a context |
-| member | An authority in a home's threshold authority set |
-| participant | An authority granted home access but not in the threshold set |
-| moderator | A member with moderation designation for a home |
-
-#### Home Access Levels
-
-| Level | Hops | Description |
-|-------|------|-------------|
-| `Full` | 0 | Same-home access |
-| `Partial` | 1 | 1-hop neighborhood access |
-| `Limited` | 2+ | 2-hop-or-greater and disconnected access |
-
-#### Topology Terms
+### Access and Topology
 
 | Term | Description |
 |------|-------------|
+| `Full` | Same-home access (0 hops) |
+| `Partial` | 1-hop neighborhood access |
+| `Limited` | 2-hop-or-greater and disconnected access |
 | 1-hop link | Direct home-to-home neighborhood edge |
 | n-hop | Multi-edge path (2-hop, 3-hop, etc.) |
-
-#### Storage Terms
-
-| Term | Description |
-|------|-------------|
 | Shared Storage | Community storage pool |
 | pinned | Fact attribute for retained content |
 
-### Flow Budget Notation
+### Flow Budget and Receipts
 
 Use $`B[\kappa, a]`$ for a flow budget for context $`\kappa`$ and peer authority $`a`$.
 
-| Field | Storage | Description |
-|-------|---------|-------------|
+| Field | Type / Storage | Description |
+|-------|----------------|-------------|
+| **FlowBudget** | | |
 | `spent` | Replicated fact | Monotone counter of consumed budget |
 | `epoch` | Replicated fact | Current epoch identifier |
 | `limit` | Derived at runtime | From capability evaluation and policy |
-
-### Receipt Notation
-
-| Field | Type | Description |
-|-------|------|-------------|
+| **Receipt** | | |
 | `ctx` | `ContextId` | Context scope |
 | `src` | `AuthorityId` | Sending authority |
 | `dst` | `AuthorityId` | Receiving authority |
@@ -84,24 +64,19 @@ Use $`B[\kappa, a]`$ for a flow budget for context $`\kappa`$ and peer authority
 | `prev_hash` | `Hash32` | Links receipts in per-hop chain |
 | `sig` | `Signature` | Cryptographic proof |
 
-### Observer Classes
+### Observers, Time, and Delay
 
-| Class | Symbol | Description |
-|-------|--------|-------------|
-| Relationship | $`\ell_{\text{rel}}`$ | Direct relationship observer |
-| Group | $`\ell_{\text{grp}}`$ | Group member observer |
-| Neighbor | $`\ell_{\text{ngh}}`$ | Neighborhood observer |
-| External | $`\ell_{\text{ext}}`$ | External/network observer |
-
-Leakage tuple order: $`(\ell_{\text{rel}}, \ell_{\text{grp}}, \ell_{\text{ngh}}, \ell_{\text{ext}})`$
-
-### Time and Delay Symbols
-
-| Symbol | Usage | Description |
-|--------|-------|-------------|
+| Symbol | Category | Description |
+|--------|----------|-------------|
+| $`\ell_{\text{rel}}`$ | Observer | Relationship (direct relationship observer) |
+| $`\ell_{\text{grp}}`$ | Observer | Group (group member observer) |
+| $`\ell_{\text{ngh}}`$ | Observer | Neighbor (neighborhood observer) |
+| $`\ell_{\text{ext}}`$ | Observer | External (external/network observer) |
 | $`\delta`$ | CRDT/state | Local state deltas (NOT network delay) |
 | $`\Delta_{\text{net}}`$ | Network | Network delay bounds under partial synchrony |
 | `GST` | Timing | Global Stabilization Time |
+
+Leakage tuple order: $`(\ell_{\text{rel}}, \ell_{\text{grp}}, \ell_{\text{ngh}}, \ell_{\text{ext}})`$
 
 ### Invariant Naming
 
@@ -629,8 +604,9 @@ Aura treats protocol execution as interpretation over an algebraic effect interf
 
 Because the interface is algebraic, there is a single semantics regardless of execution strategy. This enables two interchangeable modes:
 
-- Static compilation: choreographies lower to direct effect calls with zero runtime overhead.
-- Dynamic interpretation: choreographies execute through the runtime interpreter for flexibility and tooling.
+**Static compilation:** choreographies lower to direct effect calls with zero runtime overhead.
+
+**Dynamic interpretation:** choreographies execute through the runtime interpreter for flexibility and tooling.
 
 Both preserve the same program structure and checks. The choice becomes an implementation detail. This also captures the computation/communication symmetry. A choreographic step describes a typed transform. If the sender and receiver are the same role, projection collapses the step to a local effect invocation. If they differ, the interpreter performs a network send/receive with the same surrounding `merge`/`check_caps`/`refine`/`record_leak` sequence. Protocol authors reason about transforms. The interpreter decides locality at projection time.
 

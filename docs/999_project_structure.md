@@ -1,4 +1,4 @@
-# Aura Crate Structure and Dependency Graph
+# Crate Structure and Dependency Graph
 
 This document provides the authoritative reference for Aura's crate organization, dependencies, and development policies.
 

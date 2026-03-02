@@ -1,7 +1,7 @@
 # Summary
 
 - [Project Overview](000_project_overview.md)
-- [Aura System Architecture](001_system_architecture.md)
+- [System Architecture](001_system_architecture.md)
 - [Theoretical Model](002_theoretical_model.md)
 - [Privacy and Information Flow Contract](003_information_flow_contract.md)
 - [Distributed Systems Contract](004_distributed_systems_contract.md)
@@ -37,4 +37,4 @@
 - [Reactive Signals Guide](810_reactive_signals_guide.md)
 - [Runtime Harness Guide](813_runtime_harness_guide.md)
 - [Verification Coverage Report](998_verification_coverage.md)
-- [Aura Crate Structure and Dependency Graph](999_project_structure.md)
+- [Crate Structure and Dependency Graph](999_project_structure.md)

@@ -24,7 +24,7 @@ For the complete architecture, see [System Architecture](001_system_architecture
 
 The documents below cover theory, technical components, implementation guidance, and project organization.
 
-**Foundation**
+### Foundation
 
 [Theoretical Model](002_theoretical_model.md) provides mathematical foundations including formal calculus, algebraic types, and semilattice semantics.
 
@@ -36,7 +36,7 @@ The documents below cover theory, technical components, implementation guidance,
 
 [System Invariants](005_system_invariants.md) documents safety invariants and verification properties across the system.
 
-**Core Systems**
+### Core Systems
 
 [Cryptographic Architecture](100_crypto.md) documents cryptographic primitives, key derivation, and threshold signature schemes.
 
@@ -81,7 +81,7 @@ Canonical role/access terminology lives in [Theoretical Model](002_theoretical_m
 
 [Formal Verification Reference](119_verification.md) documents Quint specifications and Lean proofs.
 
-**Developer Guides**
+### Developer Guides
 
 [Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to Aura.
 
@@ -103,7 +103,7 @@ Canonical role/access terminology lives in [Theoretical Model](002_theoretical_m
 
 [Runtime Harness Guide](813_runtime_harness_guide.md) covers end-to-end runtime validation with real Aura instances.
 
-**Project Meta**
+### Project Meta
 
 [Verification Coverage Report](998_verification_coverage.md) summarizes formal verification, model checking, and conformance testing coverage.
 

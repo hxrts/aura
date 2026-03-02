@@ -1,4 +1,4 @@
-# Aura System Architecture
+# System Architecture
 
 This document describes the architecture of Aura. It covers the core abstractions, data flow patterns, and component interactions that define the system. Formal definitions live in [Theoretical Model](002_theoretical_model.md). Safety and liveness guarantees are specified in [Distributed Systems Contract](004_distributed_systems_contract.md). Domain specifications are in the 100-series documents.
 
