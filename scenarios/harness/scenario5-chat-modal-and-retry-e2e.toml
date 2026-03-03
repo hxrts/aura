@@ -1,0 +1,467 @@
+schema_version = 1
+id = "scenario5-chat-modal-and-retry-e2e"
+goal = "Cover chat key-path modals (create/topic/info) and message retry key flow."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+# Flow:
+# 1) Launch Alice/Bob and complete account setup.
+# 2) Link contacts via invitation exchange and establish shared chat context.
+# 3) Exercise chat create wizard via 'n' (details -> members -> threshold -> submit).
+# 4) Exercise topic modal via 't' and verify updated topic in channel info via 'o'.
+# 5) Exercise retry key path via 'r' from Messages focus and assert retry toast.
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "send_keys"
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-create-account"
+action = "send_keys"
+instance = "bob"
+keys = "Bob\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-map-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-map-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-open-home-create"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-home-create-modal"
+action = "wait_for"
+instance = "alice"
+pattern = "Create New Home"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-home-create-name"
+action = "send_keys"
+instance = "alice"
+keys = "ModalHome"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-home-create-submit"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-home-created"
+action = "expect_toast"
+instance = "alice"
+contains = "Home 'ModalHome' created"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-id"
+action = "get_authority_id"
+instance = "bob"
+var = "bob_id"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-open-contacts"
+action = "send_keys"
+instance = "alice"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-contacts"
+action = "send_keys"
+instance = "bob"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-contacts-visible"
+action = "wait_for"
+instance = "bob"
+pattern = "Contacts"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-open-invite-modal"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-invitation"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-invitation-created-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Invitation Created"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-copy-invitation"
+action = "send_keys"
+instance = "alice"
+keys = "c"
+timeout_ms = 2000
+
+[[steps]]
+id = "copy-propagated"
+action = "fault_delay"
+timeout_ms = 800
+
+[[steps]]
+id = "alice-close-invitation"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-accept-modal"
+action = "send_keys"
+instance = "bob"
+keys = "a"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-import-invitation"
+action = "send_clipboard"
+instance = "bob"
+source_instance = "alice"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-submit-invitation"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-back-to-contacts-after-accept"
+action = "send_keys"
+instance = "bob"
+keys = "3"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-contact-linked"
+action = "wait_for"
+instance = "alice"
+pattern = "Contacts (1)"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-contact-linked"
+action = "wait_for"
+instance = "bob"
+pattern = "Contacts (1)"
+timeout_ms = 16000
+
+[[steps]]
+id = "alice-open-chat"
+action = "send_keys"
+instance = "alice"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-chat"
+action = "send_keys"
+instance = "bob"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-chat-context-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Channels"
+timeout_ms = 5000
+
+[[steps]]
+id = "bob-chat-context-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "Channels"
+timeout_ms = 5000
+
+[[steps]]
+id = "alice-join-modal-lab"
+action = "send_chat_command"
+instance = "alice"
+command = "join modal-lab"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-join-modal-lab-result"
+action = "expect_command_result"
+instance = "alice"
+contains = "membership updated"
+consistency = "replicated"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-invite-bob-modal-lab"
+action = "send_chat_command"
+instance = "alice"
+command = "invite ${bob_id}"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-invite-bob-modal-lab-result"
+action = "expect_command_result"
+instance = "alice"
+contains = "invitation sent"
+consistency = "enforced"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-join-modal-lab"
+action = "send_chat_command"
+instance = "bob"
+command = "join modal-lab"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-join-modal-lab-result"
+action = "expect_command_result"
+instance = "bob"
+contains = "membership updated"
+consistency = "replicated"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-select-modal-lab"
+action = "select_channel"
+instance = "alice"
+channel = "modal-lab"
+timeout_ms = 6000
+
+[[steps]]
+id = "alice-open-chat-create-wizard"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-wizard-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "New Chat Group"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-create-wizard-group-name"
+action = "send_keys"
+instance = "alice"
+keys = "team-room"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-wizard-next-field"
+action = "send_key"
+instance = "alice"
+key = "tab"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-create-wizard-topic"
+action = "send_keys"
+instance = "alice"
+keys = "bootstrap-topic"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-wizard-to-members"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-wizard-members-step"
+action = "wait_for"
+instance = "alice"
+pattern = "Invite Contacts"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-create-wizard-select-bob"
+action = "send_keys"
+instance = "alice"
+keys = " "
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-create-wizard-to-threshold"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-wizard-threshold-step"
+action = "wait_for"
+instance = "alice"
+pattern = "Group Threshold"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-create-wizard-submit"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-channel-created-toast"
+action = "expect_toast"
+instance = "alice"
+contains = "Created 'team-room'."
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-select-team-room"
+action = "select_channel"
+instance = "alice"
+channel = "team-room"
+timeout_ms = 6000
+
+[[steps]]
+id = "alice-team-room-membership"
+action = "expect_membership"
+instance = "alice"
+channel = "team-room"
+selected = true
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-open-topic-modal"
+action = "send_keys"
+instance = "alice"
+keys = "t"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-topic-modal-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Set Channel Topic"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-topic-modal-input"
+action = "send_keys"
+instance = "alice"
+keys = "e2e-topic"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-topic-modal-submit"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-open-channel-info"
+action = "send_keys"
+instance = "alice"
+keys = "o"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-channel-info-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Channel: #team-room"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-channel-info-topic-label"
+action = "wait_for"
+instance = "alice"
+pattern = "Topic:"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-close-channel-info"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-send-message-for-retry-target"
+action = "send_keys"
+instance = "alice"
+keys = "\u001bimsg-retry-target\n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-focus-messages"
+action = "send_key"
+instance = "alice"
+key = "right"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-trigger-retry"
+action = "send_keys"
+instance = "alice"
+keys = "r"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-retry-toast"
+action = "expect_toast"
+instance = "alice"
+contains = "No message selected"
+timeout_ms = 8000

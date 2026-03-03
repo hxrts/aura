@@ -1,0 +1,177 @@
+schema_version = 1
+id = "scenario4-global-nav-and-help-e2e"
+goal = "Validate global navigation hotkeys, help modal behavior, and toast dismissal flow."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+# Flow:
+# 1) Boot two local instances and complete account setup.
+# 2) Validate numeric navigation and Tab/BackTab cycling across core screens.
+# 3) Validate help modal open/close from global '?' hotkey.
+# 4) Trigger slash-help toast and dismiss it with Esc.
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "bob-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "send_keys"
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-create-account"
+action = "send_keys"
+instance = "bob"
+keys = "Bob\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-map-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Map"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-go-chat"
+action = "send_keys"
+instance = "alice"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-chat-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Channels"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-tab-to-contacts"
+action = "send_key"
+instance = "alice"
+key = "tab"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-contacts-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Contacts"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-backtab-to-chat"
+action = "send_key"
+instance = "alice"
+key = "backtab"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-chat-visible-again"
+action = "wait_for"
+instance = "alice"
+pattern = "Channels"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-go-notifications"
+action = "send_keys"
+instance = "alice"
+keys = "4"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-notifications-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Notifications"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-go-settings"
+action = "send_keys"
+instance = "alice"
+keys = "5"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-settings-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Profile"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-open-help-modal"
+action = "send_keys"
+instance = "alice"
+keys = "?"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-help-modal-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Help - Settings"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-close-help-modal"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-settings-visible-after-help"
+action = "wait_for"
+instance = "alice"
+pattern = "Profile"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-go-chat-for-help-toast"
+action = "send_keys"
+instance = "alice"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-send-help-command"
+action = "send_chat_command"
+instance = "alice"
+command = "help"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-help-toast-visible"
+action = "expect_toast"
+instance = "alice"
+contains = "Use ? for TUI help"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-dismiss-help-toast"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 1000

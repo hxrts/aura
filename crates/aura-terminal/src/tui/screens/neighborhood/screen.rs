@@ -53,11 +53,11 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
 
     let (depth_icon, depth_label) = (enter_depth.icon().to_string(), enter_depth.label());
 
-    let can_enter_interior = homes.get(selected).map(|b| b.can_enter).unwrap_or(false);
+    let can_enter_full = homes.get(selected).map(|b| b.can_enter).unwrap_or(false);
 
     let can_enter_line = format!(
         "Can enter: Limited ✔ Partial ✔ Full {}",
-        if can_enter_interior { "✔" } else { "✖" }
+        if can_enter_full { "✔" } else { "✖" }
     );
 
     element! {
@@ -520,9 +520,9 @@ pub fn NeighborhoodScreen(
         .unwrap_or_default();
     // Only expose channel/resident detail when full access is active.
     // This keeps Limited/Partial traversal views from leaking full-only data.
-    let interior_entered =
+    let full_entered =
         is_detail && is_entered && matches!(props.view.enter_depth, AccessLevel::Full);
-    let show_detail_lists = !is_detail || interior_entered;
+    let show_detail_lists = !is_detail || full_entered;
     let display_channels = if show_detail_lists {
         channels
     } else {

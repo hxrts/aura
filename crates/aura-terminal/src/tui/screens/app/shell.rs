@@ -1161,7 +1161,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         UiUpdate::NavigatedHome => {
                             // Navigation/state machine handles this.
                         }
-                        UiUpdate::NavigatedToStreet => {
+                        UiUpdate::NavigatedToLimited => {
                             // Navigation/state machine handles this.
                         }
                         UiUpdate::NavigatedToNeighborhood => {
@@ -2659,8 +2659,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::GoHome => {
                                         (cb.neighborhood.on_go_home)();
                                     }
-                                    DispatchCommand::BackToStreet => {
-                                        (cb.neighborhood.on_back_to_street)();
+                                    DispatchCommand::BackToLimited => {
+                                        (cb.neighborhood.on_back_to_limited)();
                                     }
                                     DispatchCommand::OpenHomeCreate => {
                                         // Open home creation modal

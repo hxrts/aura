@@ -231,7 +231,7 @@ pub enum UiUpdate {
     NavigatedHome,
 
     /// Navigated back to limited level
-    NavigatedToStreet,
+    NavigatedToLimited,
 
     /// Navigated to neighborhood view
     NavigatedToNeighborhood,

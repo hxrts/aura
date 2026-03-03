@@ -56,14 +56,14 @@ timeout_ms = 3000
 id = "alice-map-ready"
 action = "wait_for"
 instance = "alice"
-pattern = "Map → Street"
+pattern = "Map → Limited"
 timeout_ms = 30000
 
 [[steps]]
 id = "bob-map-ready"
 action = "wait_for"
 instance = "bob"
-pattern = "Map → Street"
+pattern = "Map → Limited"
 timeout_ms = 30000
 
 [[steps]]
@@ -189,6 +189,90 @@ action = "wait_for"
 instance = "bob"
 pattern = "Channels"
 timeout_ms = 5000
+
+[[steps]]
+id = "alice-open-neighborhood"
+action = "send_keys"
+instance = "alice"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-home-modal"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-home-title"
+action = "wait_for"
+instance = "alice"
+pattern = "Create New Home"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-create-home-name"
+action = "send_keys"
+instance = "alice"
+keys = "AliceHomeS1\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-home-created"
+action = "expect_toast"
+instance = "alice"
+contains = "Home 'AliceHomeS1' created"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-back-chat"
+action = "send_keys"
+instance = "alice"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-neighborhood"
+action = "send_keys"
+instance = "bob"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-create-home-modal"
+action = "send_keys"
+instance = "bob"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-create-home-title"
+action = "wait_for"
+instance = "bob"
+pattern = "Create New Home"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-create-home-name"
+action = "send_keys"
+instance = "bob"
+keys = "BobHomeS1\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-home-created"
+action = "expect_toast"
+instance = "bob"
+contains = "Home 'BobHomeS1' created"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-back-chat"
+action = "send_keys"
+instance = "bob"
+keys = "2"
+timeout_ms = 2000
 
 [[steps]]
 id = "alice-join"

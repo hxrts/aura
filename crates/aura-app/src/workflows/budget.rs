@@ -2,12 +2,12 @@
 //!
 //! Home storage budget tracking, enforcement, and portable business logic.
 //!
-//! ## Storage Model (v1)
+//! ## Storage Model
 //!
 //! - **Home total**: 10 MB fixed allocation
 //! - **Resident storage**: 200 KB per resident (max 8 = 1.6 MB)
 //! - **Neighborhood allocation**: 1 MB per neighborhood (max 4 = 4 MB)
-//! - **Public-good space**: Remainder after residents + allocations
+//! - **Shared storage space**: Remainder after residents + allocations
 //!
 //! ## Key Principles
 //!
@@ -67,8 +67,8 @@ pub const HOME_TOTAL_SIZE: u64 = 10 * MB;
 pub const RESIDENT_ALLOCATION: u64 = 200 * KB;
 /// Maximum number of residents per home
 pub const MAX_RESIDENTS: u8 = 8;
-/// Storage donated per neighborhood membership (1 MB)
-pub const NEIGHBORHOOD_DONATION: u64 = MB;
+/// Storage contributed per neighborhood membership (1 MB)
+pub const NEIGHBORHOOD_ALLOCATION: u64 = MB;
 /// Maximum number of neighborhoods a home can join
 pub const MAX_NEIGHBORHOODS: u8 = 4;
 
@@ -170,7 +170,7 @@ impl HomeFlowBudget {
     /// Check if home can join another neighborhood
     pub fn can_join_neighborhood(&self) -> bool {
         self.neighborhood_count < MAX_NEIGHBORHOODS
-            && self.pinned_storage_remaining() >= NEIGHBORHOOD_DONATION
+            && self.pinned_storage_remaining() >= NEIGHBORHOOD_ALLOCATION
     }
 
     /// Check if home can pin content of given size
@@ -205,7 +205,7 @@ impl HomeFlowBudget {
         Ok(())
     }
 
-    /// Join a neighborhood (donate storage)
+    /// Join a neighborhood (contribute storage)
     ///
     /// Returns error if capacity exceeded.
     pub fn join_neighborhood(&mut self) -> Result<(), BudgetError> {
@@ -216,11 +216,11 @@ impl HomeFlowBudget {
             });
         }
         self.neighborhood_count += 1;
-        self.neighborhood_allocations += NEIGHBORHOOD_DONATION;
+        self.neighborhood_allocations += NEIGHBORHOOD_ALLOCATION;
         Ok(())
     }
 
-    /// Leave a neighborhood (reclaim donated storage)
+    /// Leave a neighborhood (reclaim contributed storage)
     pub fn leave_neighborhood(&mut self) -> Result<(), BudgetError> {
         if self.neighborhood_count == 0 {
             return Err(BudgetError::NoNeighborhoodsToLeave);
@@ -228,7 +228,7 @@ impl HomeFlowBudget {
         self.neighborhood_count -= 1;
         self.neighborhood_allocations = self
             .neighborhood_allocations
-            .saturating_sub(NEIGHBORHOOD_DONATION);
+            .saturating_sub(NEIGHBORHOOD_ALLOCATION);
         Ok(())
     }
 
@@ -285,7 +285,7 @@ pub struct BudgetBreakdown {
     pub resident_limit: u64,
     /// Resident storage used
     pub resident_used: u64,
-    /// Storage donated to neighborhoods
+    /// Storage contributed to neighborhoods
     pub neighborhood_allocations: u64,
     /// Pinned storage limit
     pub pinned_limit: u64,
@@ -489,7 +489,7 @@ pub async fn update_budget(
 ///
 /// Neighborhood Allocations:
 ///   1 neighborhoods (4 max)
-///   1.0 MB donated
+///   1.0 MB contributed
 ///
 /// Pinned Content:
 ///   1.0 MB / 8.0 MB used
@@ -528,7 +528,7 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
         budget.neighborhood_count, MAX_NEIGHBORHOODS
     ));
     output.push_str(&format!(
-        "  {} donated\n",
+        "  {} contributed\n",
         BudgetBreakdown::format_size(breakdown.neighborhood_allocations)
     ));
 
@@ -672,7 +672,7 @@ mod tests {
         assert_eq!(HOME_TOTAL_SIZE, 10 * MB);
         assert_eq!(RESIDENT_ALLOCATION, 200 * KB);
         assert_eq!(MAX_RESIDENTS, 8);
-        assert_eq!(NEIGHBORHOOD_DONATION, MB);
+        assert_eq!(NEIGHBORHOOD_ALLOCATION, MB);
         assert_eq!(MAX_NEIGHBORHOODS, 4);
 
         // Verify v1 arithmetic
@@ -727,7 +727,7 @@ mod tests {
 
         budget.join_neighborhood().unwrap();
         assert_eq!(budget.neighborhood_count, 1);
-        assert_eq!(budget.neighborhood_allocations, NEIGHBORHOOD_DONATION);
+        assert_eq!(budget.neighborhood_allocations, NEIGHBORHOOD_ALLOCATION);
 
         // Join max neighborhoods
         for _ in 1..MAX_NEIGHBORHOODS {
@@ -758,7 +758,7 @@ mod tests {
         budget.join_neighborhood().unwrap();
         assert_eq!(
             budget.pinned_storage_limit(),
-            initial_limit - NEIGHBORHOOD_DONATION
+            initial_limit - NEIGHBORHOOD_ALLOCATION
         );
 
         // Pin some content
@@ -1114,10 +1114,10 @@ mod tests {
                     budget.join_neighborhood().unwrap();
                     // Monotone: count increased by exactly 1
                     prop_assert_eq!(budget.neighborhood_count, count_before + 1);
-                    // Allocations increased by exactly NEIGHBORHOOD_DONATION
+                    // Allocations increased by exactly NEIGHBORHOOD_ALLOCATION
                     prop_assert_eq!(
                         budget.neighborhood_allocations,
-                        allocations_before + NEIGHBORHOOD_DONATION
+                        allocations_before + NEIGHBORHOOD_ALLOCATION
                     );
                 }
             }
@@ -1140,10 +1140,10 @@ mod tests {
                 budget.leave_neighborhood().unwrap();
                 // Monotone: count decreased by exactly 1
                 prop_assert_eq!(budget.neighborhood_count, count_before - 1);
-                // Allocations decreased by exactly NEIGHBORHOOD_DONATION
+                // Allocations decreased by exactly NEIGHBORHOOD_ALLOCATION
                 prop_assert_eq!(
                     budget.neighborhood_allocations,
-                    allocations_before - NEIGHBORHOOD_DONATION
+                    allocations_before - NEIGHBORHOOD_ALLOCATION
                 );
             }
 

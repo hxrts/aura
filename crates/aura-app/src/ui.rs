@@ -101,7 +101,7 @@ pub mod types {
     pub use crate::workflows::budget::{
         check_can_add_resident, check_can_join_neighborhood, check_can_pin, format_budget_compact,
         format_budget_status, BudgetBreakdown, BudgetError, HomeFlowBudget, HOME_TOTAL_SIZE, KB,
-        MAX_NEIGHBORHOODS, MAX_RESIDENTS, MB, NEIGHBORHOOD_DONATION, RESIDENT_ALLOCATION,
+        MAX_NEIGHBORHOODS, MAX_RESIDENTS, MB, NEIGHBORHOOD_ALLOCATION, RESIDENT_ALLOCATION,
     };
     pub use crate::workflows::chat_commands::{
         all_command_help, command_help, commands_in_category, is_command, normalize_channel_name,

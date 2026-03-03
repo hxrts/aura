@@ -1,0 +1,155 @@
+schema_version = 1
+id = "scenario10-recovery-and-notifications-e2e"
+goal = "Cover recovery start guard path and notifications screen list/detail navigation behavior."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+# Flow:
+# 1) Launch Alice and create account.
+# 2) Open Settings -> Recovery and trigger Start Recovery guard path.
+# 3) Open Notifications and exercise list/detail navigation keys with stable empty-state assertions.
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "send_keys"
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-map-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-open-settings"
+action = "send_keys"
+instance = "alice"
+keys = "5"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-settings-profile-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "➤ Profile"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-nav-threshold"
+action = "send_key"
+instance = "alice"
+key = "down"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-threshold-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "➤ Guardian Threshold"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-nav-recovery"
+action = "send_key"
+instance = "alice"
+key = "down"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-recovery-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "➤ Request Recovery"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-start-recovery"
+action = "send_keys"
+instance = "alice"
+keys = "s"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-recovery-guard-toast"
+action = "expect_toast"
+instance = "alice"
+contains = "guardians for recovery"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-dismiss-toast"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-open-notifications"
+action = "send_keys"
+instance = "alice"
+keys = "4"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-notifications-list-title"
+action = "wait_for"
+instance = "alice"
+pattern = "Notifications"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-notifications-empty-state"
+action = "wait_for"
+instance = "alice"
+pattern = "No notifications"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-notifications-detail-empty-state"
+action = "wait_for"
+instance = "alice"
+pattern = "Select a notification"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-notifications-move-down"
+action = "send_key"
+instance = "alice"
+key = "down"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-notifications-focus-detail"
+action = "send_key"
+instance = "alice"
+key = "right"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-notifications-focus-list"
+action = "send_key"
+instance = "alice"
+key = "left"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-notifications-still-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Notifications"
+timeout_ms = 8000

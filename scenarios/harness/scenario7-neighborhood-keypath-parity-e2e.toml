@@ -1,0 +1,184 @@
+schema_version = 1
+id = "scenario7-neighborhood-keypath-parity-e2e"
+goal = "Exercise neighborhood key-path commands and verify resulting toasts/state transitions."
+execution_mode = "scripted"
+required_capabilities = ["local"]
+
+# Flow:
+# 1) Launch Alice and complete account setup.
+# 2) On Neighborhood map, use key-path commands: m (create/select neighborhood), v (add selected home), L (one-hop link).
+# 3) Use g/H/b key paths and assert stable map visibility.
+# 4) Enter home detail via Enter and send a message via insert mode.
+
+[[steps]]
+id = "launch"
+action = "launch_instances"
+timeout_ms = 15000
+
+[[steps]]
+id = "alice-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Welcome to Aura"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-create-account"
+action = "send_keys"
+instance = "alice"
+keys = "Alice\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-map-ready"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 30000
+
+[[steps]]
+id = "alice-neighborhood-screen-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Map"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-create-neighborhood-keypath"
+action = "send_keys"
+instance = "alice"
+keys = "m"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-neighborhood-created-toast"
+action = "expect_toast"
+instance = "alice"
+contains = "Neighborhood"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-dismiss-neighborhood-toast"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-add-selected-home-keypath"
+action = "send_keys"
+instance = "alice"
+keys = "v"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-home-added-toast"
+action = "expect_toast"
+instance = "alice"
+contains = "Home added to neighborhood"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-dismiss-home-added-toast"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-link-one-hop-keypath"
+action = "send_keys"
+instance = "alice"
+keys = "L"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-one-hop-link-toast"
+action = "expect_toast"
+instance = "alice"
+contains = "link"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-dismiss-link-toast"
+action = "send_key"
+instance = "alice"
+key = "esc"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-go-home-key-g"
+action = "send_keys"
+instance = "alice"
+keys = "g"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-map-stable-after-g"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-go-home-key-H"
+action = "send_keys"
+instance = "alice"
+keys = "H"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-map-stable-after-H"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-back-to-limited-key-b"
+action = "send_keys"
+instance = "alice"
+keys = "b"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-map-stable-after-b"
+action = "wait_for"
+instance = "alice"
+pattern = "Can enter:"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-enter-depth-full"
+action = "send_keys"
+instance = "alice"
+keys = "dd"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-enter-home-detail"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 1000
+
+[[steps]]
+id = "alice-home-detail-visible"
+action = "wait_for"
+instance = "alice"
+pattern = "Access:"
+timeout_ms = 10000
+
+[[steps]]
+id = "alice-send-detail-message"
+action = "send_keys"
+instance = "alice"
+keys = "in7-map-detail-msg\n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-detail-still-visible-after-send"
+action = "wait_for"
+instance = "alice"
+pattern = "Access:"
+timeout_ms = 8000

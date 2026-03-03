@@ -300,7 +300,7 @@ pub fn handle_neighborhood_key(
                 commands.push(TuiCommand::Dispatch(DispatchCommand::GoHome));
             }
             KeyCode::Char('b') | KeyCode::Esc | KeyCode::Backspace => {
-                commands.push(TuiCommand::Dispatch(DispatchCommand::BackToStreet));
+                commands.push(TuiCommand::Dispatch(DispatchCommand::BackToLimited));
             }
             _ => {}
         },

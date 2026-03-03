@@ -761,7 +761,7 @@ mod neighborhood_screen {
     }
 
     #[test]
-    fn test_neighborhood_back_to_street() {
+    fn test_neighborhood_back_to_limited() {
         let mut tui = TestTui::new();
         tui.go_to_screen(Screen::Neighborhood);
 
@@ -769,7 +769,7 @@ mod neighborhood_screen {
 
         // 'b' goes back to limited
         tui.send_char('b');
-        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::BackToStreet)));
+        assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::BackToLimited)));
     }
 
     #[test]

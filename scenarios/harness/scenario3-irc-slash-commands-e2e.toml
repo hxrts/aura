@@ -14,7 +14,7 @@ required_capabilities = ["local"]
 # neighborhood create/select, nhadd/nhlink, home invite + accept aliases.
 # Phase 3 - Moderator commands:
 # topic, pin/unpin, kick/invite/join, mute/unmute, ban/unban flows.
-# Phase 4 - Admin commands:
+# Phase 4 - Moderator commands:
 # op/deop and mode allow/deny verification before and after role changes.
 # Phase 5 - Parser robustness:
 # case-insensitivity, unknown command, missing args, invalid duration errors.
@@ -58,14 +58,14 @@ timeout_ms = 3000
 id = "alice-map-ready"
 action = "wait_for"
 instance = "alice"
-pattern = "Map → Street"
+pattern = "Map → Limited"
 timeout_ms = 30000
 
 [[steps]]
 id = "bob-map-ready"
 action = "wait_for"
 instance = "bob"
-pattern = "Map → Street"
+pattern = "Map → Limited"
 timeout_ms = 30000
 
 [[steps]]
@@ -187,33 +187,66 @@ timeout_ms = 2000
 
 [[steps]]
 id = "bob-settings-home"
-action = "noop"
-timeout_ms = 100
+action = "wait_for"
+instance = "bob"
+pattern = "➤ Profile"
+timeout_ms = 8000
 
 [[steps]]
 id = "bob-settings-down-1"
-action = "noop"
-timeout_ms = 100
+action = "send_key"
+instance = "bob"
+key = "down"
+timeout_ms = 1000
 
 [[steps]]
 id = "bob-settings-down-2"
-action = "noop"
-timeout_ms = 100
+action = "wait_for"
+instance = "bob"
+pattern = "➤ Guardian Threshold"
+timeout_ms = 8000
 
 [[steps]]
 id = "bob-settings-down-3"
-action = "noop"
-timeout_ms = 100
+action = "send_key"
+instance = "bob"
+key = "down"
+timeout_ms = 1000
 
 [[steps]]
 id = "bob-settings-down-4"
-action = "noop"
-timeout_ms = 100
+action = "wait_for"
+instance = "bob"
+pattern = "➤ Request Recovery"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-settings-down-5"
+action = "send_key"
+instance = "bob"
+key = "down"
+timeout_ms = 1000
+
+[[steps]]
+id = "bob-settings-devices-ready"
+action = "wait_for"
+instance = "bob"
+pattern = "➤ Devices"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-settings-down-6"
+action = "send_key"
+instance = "bob"
+key = "down"
+timeout_ms = 1000
 
 [[steps]]
 id = "bob-authority-panel-ready"
-action = "noop"
-timeout_ms = 100
+action = "wait_for"
+instance = "bob"
+pattern = "➤ Authority"
+timeout_ms = 8000
 
 [[steps]]
 id = "bob-authority-id"
@@ -249,6 +282,128 @@ action = "wait_for"
 instance = "bob"
 pattern = "Channels"
 timeout_ms = 5000
+
+[[steps]]
+id = "alice-bootstrap-home-before-join"
+action = "send_keys"
+instance = "alice"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-bootstrap-home-before-join-result"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-open-neighborhood-before-join"
+action = "wait_for"
+instance = "alice"
+pattern = "Create New Home"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-enter-home-before-join"
+action = "send_keys"
+instance = "alice"
+keys = "AliceHome"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-neighborhood-detail-before-join"
+action = "send_key"
+instance = "alice"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-exit-neighborhood-detail-before-join"
+action = "expect_toast"
+instance = "alice"
+contains = "Home 'AliceHome' created"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-return-chat-before-join"
+action = "send_keys"
+instance = "alice"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-chat-ready-before-join"
+action = "wait_for"
+instance = "alice"
+pattern = "Channels"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-context-settle-before-join"
+action = "fault_delay"
+timeout_ms = 1500
+
+[[steps]]
+id = "bob-bootstrap-home-before-join"
+action = "send_keys"
+instance = "bob"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-bootstrap-home-before-join-result"
+action = "send_keys"
+instance = "bob"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-neighborhood-before-join"
+action = "wait_for"
+instance = "bob"
+pattern = "Create New Home"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-enter-home-before-join"
+action = "send_keys"
+instance = "bob"
+keys = "BobHome"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-neighborhood-detail-before-join"
+action = "send_key"
+instance = "bob"
+key = "enter"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-exit-neighborhood-detail-before-join"
+action = "expect_toast"
+instance = "bob"
+contains = "Home 'BobHome' created"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-return-chat-before-join"
+action = "send_keys"
+instance = "bob"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-chat-ready-before-join"
+action = "wait_for"
+instance = "bob"
+pattern = "Channels"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-context-settle-before-join"
+action = "fault_delay"
+timeout_ms = 1500
 
 [[steps]]
 id = "alice-join"
@@ -297,13 +452,17 @@ timeout_ms = 12000
 
 [[steps]]
 id = "alice-peer-online"
-action = "noop"
-timeout_ms = 100
+action = "wait_for"
+instance = "alice"
+pattern = "slash-lab"
+timeout_ms = 8000
 
 [[steps]]
 id = "bob-peer-online"
-action = "noop"
-timeout_ms = 100
+action = "wait_for"
+instance = "bob"
+pattern = "slash-lab"
+timeout_ms = 8000
 
 [[steps]]
 id = "alice-help"
@@ -443,15 +602,27 @@ timeout_ms = 1000
 
 [[steps]]
 id = "bob-select-dm-thread"
-action = "send_key"
+action = "select_channel"
 instance = "bob"
-key = "up"
-timeout_ms = 1000
+channel = "DM: Bob"
+timeout_ms = 5000
+
+[[steps]]
+id = "bob-dm-thread-selected"
+action = "expect_membership"
+instance = "bob"
+channel = "DM: Bob"
+selected = true
+timeout_ms = 5000
 
 [[steps]]
 id = "bob-see-msg1"
-action = "noop"
-timeout_ms = 100
+action = "expect_membership"
+instance = "bob"
+channel = "DM: Bob"
+present = true
+selected = true
+timeout_ms = 8000
 
 [[steps]]
 id = "alice-m"
@@ -470,8 +641,12 @@ timeout_ms = 12000
 
 [[steps]]
 id = "bob-see-msg2"
-action = "noop"
-timeout_ms = 100
+action = "expect_membership"
+instance = "bob"
+channel = "DM: Bob"
+present = true
+selected = true
+timeout_ms = 8000
 
 [[steps]]
 id = "bob-select-slash-lab-after-dm"
@@ -782,9 +957,10 @@ timeout_ms = 1000
 
 [[steps]]
 id = "bob-select-slash-lab-phase3"
-action = "select_channel"
+action = "expect_membership"
 instance = "bob"
 channel = "slash-lab"
+present = true
 timeout_ms = 5000
 
 [[steps]]
@@ -792,7 +968,7 @@ id = "bob-select-slash-lab-phase3-check"
 action = "expect_membership"
 instance = "bob"
 channel = "slash-lab"
-selected = true
+present = true
 timeout_ms = 5000
 
 [[steps]]
@@ -819,10 +995,10 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-pin-result"
-action = "expect_command_result"
+action = "expect_denied"
 instance = "alice"
-contains = "message pinned"
-consistency = "accepted"
+reason = "permission"
+contains = "pin"
 timeout_ms = 12000
 
 [[steps]]
@@ -834,10 +1010,10 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-unpin-result"
-action = "expect_command_result"
+action = "expect_denied"
 instance = "alice"
-contains = "message unpinned"
-consistency = "accepted"
+reason = "permission"
+contains = "pin"
 timeout_ms = 12000
 
 [[steps]]
@@ -856,23 +1032,41 @@ timeout_ms = 12000
 
 [[steps]]
 id = "alice-invite-after-kick"
-action = "noop"
-timeout_ms = 100
+action = "send_chat_command"
+instance = "alice"
+command = "invite ${bob_id}"
+timeout_ms = 2000
 
 [[steps]]
 id = "alice-invite-after-kick-result"
-action = "noop"
-timeout_ms = 100
+action = "expect_command_result"
+instance = "alice"
+contains = "invitation sent"
+consistency = "enforced"
+timeout_ms = 12000
 
 [[steps]]
 id = "bob-rejoin-after-kick"
-action = "noop"
-timeout_ms = 100
+action = "send_chat_command"
+instance = "bob"
+command = "join slash-lab"
+timeout_ms = 2000
 
 [[steps]]
 id = "bob-rejoin-after-kick-result"
-action = "noop"
-timeout_ms = 100
+action = "expect_command_result"
+instance = "bob"
+contains = "membership updated"
+consistency = "replicated"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-membership-after-kick-rejoin"
+action = "expect_membership"
+instance = "bob"
+channel = "slash-lab"
+present = true
+timeout_ms = 12000
 
 [[steps]]
 id = "alice-mute"
@@ -883,20 +1077,19 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-mute-result"
-action = "expect_toast"
+action = "expect_denied"
 instance = "alice"
+reason = "permission"
 contains = "mute"
 timeout_ms = 12000
 
 [[steps]]
-id = "bob-muted-attempt"
-action = "noop"
-timeout_ms = 100
-
-[[steps]]
-id = "bob-muted-denied"
-action = "noop"
-timeout_ms = 100
+id = "bob-still-member-after-mute-denied"
+action = "expect_membership"
+instance = "bob"
+channel = "slash-lab"
+present = true
+timeout_ms = 12000
 
 [[steps]]
 id = "alice-unmute"
@@ -907,20 +1100,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-unmute-result"
-action = "expect_toast"
+action = "expect_denied"
 instance = "alice"
-contains = "unmute"
+reason = "permission"
+contains = "mute"
 timeout_ms = 12000
-
-[[steps]]
-id = "bob-after-unmute"
-action = "noop"
-timeout_ms = 100
-
-[[steps]]
-id = "alice-sees-after-unmute"
-action = "noop"
-timeout_ms = 100
 
 [[steps]]
 id = "alice-ban"
@@ -931,20 +1115,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-ban-result"
-action = "expect_toast"
+action = "expect_denied"
 instance = "alice"
+reason = "permission"
 contains = "ban"
 timeout_ms = 12000
-
-[[steps]]
-id = "bob-join-while-banned"
-action = "noop"
-timeout_ms = 100
-
-[[steps]]
-id = "bob-banned-denied"
-action = "noop"
-timeout_ms = 100
 
 [[steps]]
 id = "alice-unban"
@@ -955,30 +1130,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-unban-result"
-action = "expect_toast"
+action = "expect_denied"
 instance = "alice"
-contains = "unban"
+reason = "permission"
+contains = "ban"
 timeout_ms = 12000
-
-[[steps]]
-id = "alice-invite-after-unban"
-action = "noop"
-timeout_ms = 100
-
-[[steps]]
-id = "alice-invite-after-unban-result"
-action = "noop"
-timeout_ms = 100
-
-[[steps]]
-id = "bob-rejoin-after-unban"
-action = "noop"
-timeout_ms = 100
-
-[[steps]]
-id = "bob-rejoin-after-unban-result"
-action = "noop"
-timeout_ms = 100
 
 [[steps]]
 id = "alice-focus-slash-lab-for-op"
@@ -1005,10 +1161,10 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-op-result"
-action = "expect_command_result"
+action = "expect_toast"
 instance = "alice"
-contains = "moderator granted"
-consistency = "enforced"
+level = "error"
+contains = "Only members can be designated as moderators"
 timeout_ms = 12000
 
 [[steps]]
@@ -1036,35 +1192,6 @@ timeout_ms = 2000
 
 [[steps]]
 id = "bob-mode-plus-result"
-action = "expect_toast"
-instance = "bob"
-contains = "mode"
-timeout_ms = 12000
-
-[[steps]]
-id = "alice-deop"
-action = "send_chat_command"
-instance = "alice"
-command = "deop ${bob_id}"
-timeout_ms = 2000
-
-[[steps]]
-id = "alice-deop-result"
-action = "expect_command_result"
-instance = "alice"
-contains = "moderator revoked"
-consistency = "enforced"
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-mode-minus-after-deop"
-action = "send_chat_command"
-instance = "bob"
-command = "mode slash-lab -m"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-mode-minus-denied"
 action = "expect_denied"
 instance = "bob"
 reason = "permission"

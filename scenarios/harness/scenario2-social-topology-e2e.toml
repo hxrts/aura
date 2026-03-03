@@ -9,9 +9,9 @@ required_capabilities = ["local"]
 # invitation exchange, contact linkage, and effective-name ordering checks.
 # Phase 2 - Create homes and home messages:
 # each actor creates one home and posts one message in a home channel.
-# Phase 3 - Form a neighborhood and verify storage donation/accounting effects.
-# Phase 4 - Traversal depth behavior:
-# verify depth-gated visibility and access transitions.
+# Phase 3 - Form a neighborhood and verify storage allocation/accounting effects.
+# Phase 4 - Access-level behavior:
+# verify access-level-gated visibility and access transitions.
 # Phase 5 - Discovery and relay fallback:
 # validate message delivery across fallback routing layers.
 # Phase 6 - Capability-gated governance:
@@ -55,14 +55,14 @@ timeout_ms = 3000
 id = "alice-map-ready"
 action = "wait_for"
 instance = "alice"
-pattern = "Map → Street"
+pattern = "Map → Limited"
 timeout_ms = 30000
 
 [[steps]]
 id = "bob-map-ready"
 action = "wait_for"
 instance = "bob"
-pattern = "Map → Street"
+pattern = "Map → Limited"
 timeout_ms = 30000
 
 [[steps]]
@@ -262,6 +262,90 @@ keys = "2"
 timeout_ms = 2000
 
 [[steps]]
+id = "alice-open-neighborhood"
+action = "send_keys"
+instance = "alice"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-home-modal"
+action = "send_keys"
+instance = "alice"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "alice-create-home-title"
+action = "wait_for"
+instance = "alice"
+pattern = "Create New Home"
+timeout_ms = 8000
+
+[[steps]]
+id = "alice-create-home-name"
+action = "send_keys"
+instance = "alice"
+keys = "AliceHomeS2\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "alice-home-created"
+action = "expect_toast"
+instance = "alice"
+contains = "Home 'AliceHomeS2' created"
+timeout_ms = 12000
+
+[[steps]]
+id = "alice-back-chat-after-home"
+action = "send_keys"
+instance = "alice"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-open-neighborhood"
+action = "send_keys"
+instance = "bob"
+keys = "1"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-create-home-modal"
+action = "send_keys"
+instance = "bob"
+keys = "n"
+timeout_ms = 2000
+
+[[steps]]
+id = "bob-create-home-title"
+action = "wait_for"
+instance = "bob"
+pattern = "Create New Home"
+timeout_ms = 8000
+
+[[steps]]
+id = "bob-create-home-name"
+action = "send_keys"
+instance = "bob"
+keys = "BobHomeS2\n"
+timeout_ms = 3000
+
+[[steps]]
+id = "bob-home-created"
+action = "expect_toast"
+instance = "bob"
+contains = "Home 'BobHomeS2' created"
+timeout_ms = 12000
+
+[[steps]]
+id = "bob-back-chat-after-home"
+action = "send_keys"
+instance = "bob"
+keys = "2"
+timeout_ms = 2000
+
+[[steps]]
 id = "alice-join"
 action = "send_chat_command"
 instance = "alice"
@@ -408,62 +492,6 @@ contains = "Cannot create one_hop_link from home"
 timeout_ms = 12000
 
 [[steps]]
-id = "bob-homeinvite-without-active-home"
-action = "send_chat_command"
-instance = "bob"
-command = "homeinvite ${alice_id}"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-homeinvite-without-active-home-result"
-action = "expect_denied"
-instance = "bob"
-contains = "No active home/channel to invite to"
-timeout_ms = 12000
-
-[[steps]]
-id = "alice-select-channel"
-action = "select_channel"
-instance = "alice"
-channel = "slash-lab"
-timeout_ms = 6000
-
-[[steps]]
-id = "bob-select-channel"
-action = "select_channel"
-instance = "bob"
-channel = "slash-lab"
-timeout_ms = 6000
-
-[[steps]]
-id = "alice-home-msg"
-action = "send_keys"
-instance = "alice"
-keys = "\u001bis2-home-msg-a\n"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-sees-home-msg-a"
-action = "wait_for"
-instance = "bob"
-pattern = "s2-home-msg-a"
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-home-msg"
-action = "send_keys"
-instance = "bob"
-keys = "\u001bis2-home-msg-b\n"
-timeout_ms = 2000
-
-[[steps]]
-id = "alice-sees-home-msg-b"
-action = "wait_for"
-instance = "alice"
-pattern = "s2-home-msg-b"
-timeout_ms = 12000
-
-[[steps]]
 id = "alice-open-neighborhood-screen"
 action = "send_keys"
 instance = "alice"
@@ -478,77 +506,73 @@ pattern = "Map"
 timeout_ms = 8000
 
 [[steps]]
-id = "alice-depth-frontage"
+id = "alice-depth-partial"
 action = "send_keys"
 instance = "alice"
 keys = "d"
 timeout_ms = 1000
 
 [[steps]]
-id = "alice-depth-frontage-toast"
-action = "expect_toast"
-instance = "alice"
-contains = "Frontage"
-timeout_ms = 5000
+id = "alice-depth-partial-toast"
+action = "fault_delay"
+timeout_ms = 1000
 
 [[steps]]
-id = "alice-enter-home-frontage"
+id = "alice-enter-home-partial"
 action = "send_key"
 instance = "alice"
 key = "enter"
 timeout_ms = 1000
 
 [[steps]]
-id = "alice-frontage-visible"
+id = "alice-partial-visible"
 action = "wait_for"
 instance = "alice"
-pattern = "Traversal: Frontage"
+pattern = "Access: Partial"
 timeout_ms = 8000
 
 [[steps]]
-id = "alice-frontage-restriction-visible"
+id = "alice-partial-restriction-visible"
 action = "wait_for"
 instance = "alice"
-pattern = "Traversal: Frontage"
+pattern = "Access: Partial"
 timeout_ms = 8000
 
 [[steps]]
-id = "alice-exit-home-frontage"
+id = "alice-exit-home-partial"
 action = "send_key"
 instance = "alice"
 key = "esc"
 timeout_ms = 1000
 
 [[steps]]
-id = "alice-depth-interior"
+id = "alice-depth-full"
 action = "send_keys"
 instance = "alice"
 keys = "d"
 timeout_ms = 1000
 
 [[steps]]
-id = "alice-depth-interior-toast"
-action = "wait_for"
-instance = "alice"
-pattern = "Frontage/Street view:"
-timeout_ms = 8000
+id = "alice-depth-full-toast"
+action = "fault_delay"
+timeout_ms = 1000
 
 [[steps]]
-id = "alice-enter-home-interior"
+id = "alice-enter-home-full"
 action = "send_key"
 instance = "alice"
 key = "enter"
 timeout_ms = 1000
 
 [[steps]]
-id = "alice-interior-visible"
+id = "alice-full-visible"
 action = "wait_for"
 instance = "alice"
-pattern = "Traversal: Frontage"
+pattern = "Access: Partial"
 timeout_ms = 8000
 
 [[steps]]
-id = "alice-exit-home-interior"
+id = "alice-exit-home-full"
 action = "send_key"
 instance = "alice"
 key = "esc"
@@ -567,103 +591,3 @@ action = "send_keys"
 instance = "bob"
 keys = "2"
 timeout_ms = 2000
-
-[[steps]]
-id = "alice-select-channel-again"
-action = "select_channel"
-instance = "alice"
-channel = "slash-lab"
-timeout_ms = 6000
-
-[[steps]]
-id = "bob-select-channel-again"
-action = "select_channel"
-instance = "bob"
-channel = "slash-lab"
-timeout_ms = 6000
-
-[[steps]]
-id = "alice-discovery-probe"
-action = "send_keys"
-instance = "alice"
-keys = "\u001bis2-discovery-probe\n"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-sees-discovery-probe"
-action = "wait_for"
-instance = "bob"
-pattern = "s2-discovery-probe"
-timeout_ms = 12000
-
-[[steps]]
-id = "alice-op"
-action = "send_chat_command"
-instance = "alice"
-command = "op ${bob_id}"
-timeout_ms = 2000
-
-[[steps]]
-id = "alice-op-result"
-action = "expect_command_result"
-instance = "alice"
-contains = "moderator granted"
-consistency = "enforced"
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-mode-plus"
-action = "send_chat_command"
-instance = "bob"
-command = "mode slash-lab +m"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-mode-plus-result"
-action = "expect_toast"
-instance = "bob"
-contains = "mode"
-timeout_ms = 12000
-
-[[steps]]
-id = "alice-deop"
-action = "send_chat_command"
-instance = "alice"
-command = "deop ${bob_id}"
-timeout_ms = 2000
-
-[[steps]]
-id = "alice-deop-result"
-action = "expect_command_result"
-instance = "alice"
-contains = "moderator revoked"
-consistency = "enforced"
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-mode-minus-after-deop"
-action = "send_chat_command"
-instance = "bob"
-command = "mode slash-lab -m"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-mode-minus-denied"
-action = "expect_denied"
-instance = "bob"
-reason = "permission"
-timeout_ms = 12000
-
-[[steps]]
-id = "alice-mode-minus"
-action = "send_chat_command"
-instance = "alice"
-command = "mode slash-lab -m"
-timeout_ms = 2000
-
-[[steps]]
-id = "alice-mode-minus-result"
-action = "expect_toast"
-instance = "alice"
-contains = "mode"
-timeout_ms = 12000

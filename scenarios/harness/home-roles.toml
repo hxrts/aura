@@ -1,6 +1,6 @@
 schema_version = 1
 id = "home-roles-flow"
-goal = "Verify home role labels use Member terminology and not legacy owner semantics."
+goal = "Verify home role labels use Member terminology and not legacy creator-tier semantics."
 execution_mode = "scripted"
 required_capabilities = ["local"]
 

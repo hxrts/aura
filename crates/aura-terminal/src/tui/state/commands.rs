@@ -174,7 +174,7 @@ pub enum DispatchCommand {
     // Neighborhood screen
     EnterHome,
     GoHome,
-    BackToStreet,
+    BackToLimited,
     /// Open home creation flow
     OpenHomeCreate,
     /// Open moderator assignment/revocation modal
