@@ -4,6 +4,20 @@ goal = "Complete work/scenario2.md social topology flow with stable harness asse
 execution_mode = "scripted"
 required_capabilities = ["local"]
 
+# User flow reference (from work/scenario2.md):
+# Phase 1 - Bootstrap relationship and naming precedence:
+# invitation exchange, contact linkage, and effective-name ordering checks.
+# Phase 2 - Create homes and home messages:
+# each actor creates one home and posts one message in a home channel.
+# Phase 3 - Form a neighborhood and verify storage donation/accounting effects.
+# Phase 4 - Traversal depth behavior:
+# verify depth-gated visibility and access transitions.
+# Phase 5 - Discovery and relay fallback:
+# validate message delivery across fallback routing layers.
+# Phase 6 - Capability-gated governance:
+# denied action without capability, then allowed action after grant.
+# Success criteria: topology and access behavior are policy-consistent end-to-end.
+
 [[steps]]
 id = "launch"
 action = "launch_instances"

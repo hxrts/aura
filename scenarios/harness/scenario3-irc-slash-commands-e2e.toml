@@ -4,6 +4,23 @@ goal = "Run the full scenario3 IRC slash-command validation with typed harness a
 execution_mode = "scripted"
 required_capabilities = ["local"]
 
+# User flow reference (from work/scenario3.md):
+# Phase 0 - Setup for full command coverage:
+# establish channel state, capture Bob ID, home IDs, neighborhood ID,
+# and capture one message ID for pin/unpin validation.
+# Phase 1 - User command validation:
+# help/aliases, nick, who/whois, direct messages, emote, leave/join aliases.
+# Phase 2 - Social/neighborhood commands:
+# neighborhood create/select, nhadd/nhlink, home invite + accept aliases.
+# Phase 3 - Moderator commands:
+# topic, pin/unpin, kick/invite/join, mute/unmute, ban/unban flows.
+# Phase 4 - Admin commands:
+# op/deop and mode allow/deny verification before and after role changes.
+# Phase 5 - Parser robustness:
+# case-insensitivity, unknown command, missing args, invalid duration errors.
+# Success criteria: canonical commands and aliases behave deterministically with
+# explicit success or explicit policy-consistent denial.
+
 [[steps]]
 id = "launch"
 action = "launch_instances"

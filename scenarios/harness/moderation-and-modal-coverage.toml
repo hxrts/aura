@@ -4,6 +4,20 @@ goal = "Cover moderator success paths and neighborhood modal submit flows for te
 execution_mode = "scripted"
 required_capabilities = ["local"]
 
+# User flow reference (from work/runtime_harness_gap_coverage_flow.md):
+# 1) Launch Alice/Bob/Carol and create accounts.
+# 2) Establish Alice<->Bob contact via invitation exchange.
+# 3) In chat, Alice and Bob join channel; Alice invites Bob as needed.
+# 4) Alice runs /op <alice_id> and verifies moderator-granted result.
+# 5) Alice runs /kick <bob_id> and verifies moderation success.
+# 6) Re-invite and rejoin Bob to preserve neighborhood contact coverage.
+# 7) Alice enters Neighborhood home detail view at Full depth.
+# 8) Open Access Override modal, toggle level, submit, verify preview toast.
+# 9) Open Capability Config modal, set Full/Partial/Limited fields, submit,
+#    and verify saved toast.
+# 10) Open Assign Moderator modal, submit on Bob target, verify policy denial
+#     for non-member designation.
+
 [[steps]]
 id = "launch"
 action = "launch_instances"
