@@ -8,8 +8,6 @@ Relational identity • Identity emerges bottom-up between parties that share an
 
 Bounded autonomy • Coordination becomes intuitive when capabilities are explicit and composable, and the system enforces consent by design.
 
-[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square)](https://hxrts.github.io/aura/)
-[![CI](https://img.shields.io/github/actions/workflow/status/hxrts/aura/ci.yml?branch=main&style=flat-square)](https://github.com/hxrts/aura/actions/workflows/ci.yml)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hxrts/aura)
 
 ## Architecture
