@@ -3,9 +3,12 @@
 //! Provides traversal rules and capability checks for moving through
 //! the social topology.
 
-use crate::facts::{HomeId, TraversalAllowedFact, TraversalDepth, TraversalPosition};
+use crate::facts::{
+    AccessLevel, AccessOverrideFact, HomeId, TraversalAllowedFact, TraversalPosition,
+};
 use crate::{error::SocialError, Home, Neighborhood};
-use std::collections::HashMap;
+use aura_core::identifiers::AuthorityId;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Service for checking traversal permissions.
 pub struct TraversalService {
@@ -99,35 +102,126 @@ impl Default for TraversalService {
     }
 }
 
-/// Determines the traversal depth for an authority visiting a home.
-pub fn determine_depth(
+/// Determines the default access-level mapping for an authority visiting a home.
+///
+/// This computes the default level from graph topology. Higher-level policy
+/// may override this mapping for specific users or contexts.
+pub fn determine_default_access_level(
     home: &Home,
     authority_home: Option<HomeId>,
     neighborhoods: &[Neighborhood],
-) -> TraversalDepth {
-    // If authority is a resident, they have interior access
-    if Some(home.home_id) == authority_home {
-        return TraversalDepth::Interior;
+) -> AccessLevel {
+    let source_home = match authority_home {
+        Some(home_id) => home_id,
+        None => return AccessLevel::Limited,
+    };
+    let hops = minimum_hop_distance(source_home, home.home_id, neighborhoods);
+    default_access_level_for_hops(hops)
+}
+
+/// Determine effective access level after applying per-authority overrides.
+///
+/// Override precedence is deterministic:
+/// 1. Compute default level from the committed-fact graph and minimum hop distance.
+/// 2. Apply the newest matching override for (authority_id, target_home).
+pub fn determine_access_level(
+    home: &Home,
+    authority_id: AuthorityId,
+    authority_home: Option<HomeId>,
+    neighborhoods: &[Neighborhood],
+    overrides: &[AccessOverrideFact],
+) -> AccessLevel {
+    if let Some(level) = latest_override_level(home.home_id, authority_id, overrides) {
+        return level;
+    }
+    determine_default_access_level(home, authority_home, neighborhoods)
+}
+
+/// Compute the minimum hop distance between two homes in the committed graph.
+///
+/// Returns `None` when homes are disconnected.
+pub fn minimum_hop_distance(
+    source_home: HomeId,
+    target_home: HomeId,
+    neighborhoods: &[Neighborhood],
+) -> Option<u32> {
+    if source_home == target_home {
+        return Some(0);
     }
 
-    // If authority.s home shares a neighborhood, they have frontage access
-    if let Some(auth_block) = authority_home {
-        for neighborhood in neighborhoods {
-            if neighborhood.is_member(home.home_id) && neighborhood.is_member(auth_block) {
-                return TraversalDepth::Frontage;
+    let graph = build_home_graph(neighborhoods);
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    queue.push_back((source_home, 0u32));
+    visited.insert(source_home);
+
+    while let Some((current, distance)) = queue.pop_front() {
+        let neighbors = match graph.get(&current) {
+            Some(neighbors) => neighbors,
+            None => continue,
+        };
+
+        for neighbor in neighbors {
+            if *neighbor == target_home {
+                return Some(distance + 1);
+            }
+            if visited.insert(*neighbor) {
+                queue.push_back((*neighbor, distance + 1));
             }
         }
     }
 
-    // Otherwise, only street-level access
-    TraversalDepth::Street
+    None
+}
+
+fn build_home_graph(neighborhoods: &[Neighborhood]) -> HashMap<HomeId, HashSet<HomeId>> {
+    let mut graph: HashMap<HomeId, HashSet<HomeId>> = HashMap::new();
+
+    for neighborhood in neighborhoods {
+        for (index, home_a) in neighborhood.member_homes.iter().enumerate() {
+            graph.entry(*home_a).or_default();
+            for home_b in neighborhood.member_homes.iter().skip(index + 1) {
+                graph.entry(*home_a).or_default().insert(*home_b);
+                graph.entry(*home_b).or_default().insert(*home_a);
+            }
+        }
+
+        for (home_a, home_b) in &neighborhood.adjacencies {
+            graph.entry(*home_a).or_default().insert(*home_b);
+            graph.entry(*home_b).or_default().insert(*home_a);
+        }
+    }
+
+    graph
+}
+
+fn latest_override_level(
+    target_home: HomeId,
+    authority_id: AuthorityId,
+    overrides: &[AccessOverrideFact],
+) -> Option<AccessLevel> {
+    overrides
+        .iter()
+        .filter(|override_fact| {
+            override_fact.home_id == target_home && override_fact.authority_id == authority_id
+        })
+        .max_by_key(|override_fact| override_fact.set_at.to_index_ms().value())
+        .map(|override_fact| override_fact.access_level)
+}
+
+fn default_access_level_for_hops(hops: Option<u32>) -> AccessLevel {
+    match hops {
+        Some(0) => AccessLevel::Full,
+        Some(1) => AccessLevel::Partial,
+        Some(_) | None => AccessLevel::Limited,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_core::{
-        identifiers::ContextId,
+        identifiers::{AuthorityId, ContextId},
         time::{PhysicalTime, TimeStamp},
     };
 
@@ -142,7 +236,7 @@ mod tests {
         TraversalPosition {
             neighborhood: None,
             current_home: Some(home_id),
-            depth: TraversalDepth::Interior,
+            depth: AccessLevel::Full,
             context_id: ContextId::new_from_entropy([0u8; 32]),
             entered_at: test_timestamp(),
         }
@@ -192,16 +286,16 @@ mod tests {
     }
 
     #[test]
-    fn test_determine_depth_resident() {
+    fn test_determine_default_access_level_resident() {
         let home_id = HomeId::from_bytes([1u8; 32]);
         let home_instance = Home::new_empty(home_id);
 
-        let depth = determine_depth(&home_instance, Some(home_id), &[]);
-        assert_eq!(depth, TraversalDepth::Interior);
+        let depth = determine_default_access_level(&home_instance, Some(home_id), &[]);
+        assert_eq!(depth, AccessLevel::Full);
     }
 
     #[test]
-    fn test_determine_depth_neighbor() {
+    fn test_determine_default_access_level_neighbor() {
         let home_a = HomeId::from_bytes([1u8; 32]);
         let home_b = HomeId::from_bytes([2u8; 32]);
         let neighborhood_id = crate::facts::NeighborhoodId::from_bytes([1u8; 32]);
@@ -210,18 +304,58 @@ mod tests {
         let mut neighborhood = Neighborhood::new_empty(neighborhood_id);
         neighborhood.member_homes = vec![home_a, home_b];
 
-        let depth = determine_depth(&home_instance, Some(home_b), &[neighborhood]);
-        assert_eq!(depth, TraversalDepth::Frontage);
+        let depth = determine_default_access_level(&home_instance, Some(home_b), &[neighborhood]);
+        assert_eq!(depth, AccessLevel::Partial);
     }
 
     #[test]
-    fn test_determine_depth_stranger() {
+    fn test_determine_default_access_level_stranger() {
         let home_a = HomeId::from_bytes([1u8; 32]);
         let home_b = HomeId::from_bytes([2u8; 32]);
 
         let home_instance = Home::new_empty(home_a);
 
-        let depth = determine_depth(&home_instance, Some(home_b), &[]);
-        assert_eq!(depth, TraversalDepth::Street);
+        let depth = determine_default_access_level(&home_instance, Some(home_b), &[]);
+        assert_eq!(depth, AccessLevel::Limited);
+    }
+
+    #[test]
+    fn test_minimum_hop_distance_multi_hop() {
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let home_b = HomeId::from_bytes([2u8; 32]);
+        let home_c = HomeId::from_bytes([3u8; 32]);
+
+        let mut n1 = Neighborhood::new_empty(crate::facts::NeighborhoodId::from_bytes([1u8; 32]));
+        n1.member_homes = vec![home_a, home_b];
+
+        let mut n2 = Neighborhood::new_empty(crate::facts::NeighborhoodId::from_bytes([2u8; 32]));
+        n2.member_homes = vec![home_b, home_c];
+
+        let hops = minimum_hop_distance(home_a, home_c, &[n1, n2]);
+        assert_eq!(hops, Some(2));
+    }
+
+    #[test]
+    fn test_determine_access_level_with_override() {
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let home_b = HomeId::from_bytes([2u8; 32]);
+        let authority = AuthorityId::new_from_entropy([9u8; 32]);
+
+        let home_instance = Home::new_empty(home_a);
+        let override_fact = AccessOverrideFact {
+            authority_id: authority,
+            home_id: home_a,
+            access_level: AccessLevel::Limited,
+            set_at: test_timestamp(),
+        };
+
+        let level = determine_access_level(
+            &home_instance,
+            authority,
+            Some(home_b),
+            &[],
+            &[override_fact],
+        );
+        assert_eq!(level, AccessLevel::Limited);
     }
 }

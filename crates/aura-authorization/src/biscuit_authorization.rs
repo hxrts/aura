@@ -173,10 +173,10 @@ impl BiscuitAuthorizationBridge {
                     .add_policy(policy!("allow if capability(\"admin\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
                 authorizer
-                    .add_policy(policy!("allow if role(\"owner\")"))
+                    .add_policy(policy!("allow if role(\"member\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
                 authorizer
-                    .add_policy(policy!("allow if role(\"admin\")"))
+                    .add_policy(policy!("allow if role(\"moderator\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
             AuthorizationOp::Delegate => {

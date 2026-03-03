@@ -1263,7 +1263,7 @@ impl Contact {
 pub struct Resident {
     pub id: String,
     pub name: String,
-    pub is_steward: bool,
+    pub is_moderator: bool,
     pub is_self: bool,
 }
 
@@ -1276,8 +1276,8 @@ impl Resident {
         }
     }
 
-    pub fn steward(mut self) -> Self {
-        self.is_steward = true;
+    pub fn moderator(mut self) -> Self {
+        self.is_moderator = true;
         self
     }
 
@@ -1292,7 +1292,7 @@ impl From<&aura_app::ui::types::home::Resident> for Resident {
         Self {
             id: r.id.to_string(),
             name: r.name.clone(),
-            is_steward: r.is_steward(),
+            is_moderator: r.is_moderator(),
             is_self: false, // Cannot determine from aura-app Resident alone
         }
     }
@@ -1334,35 +1334,35 @@ impl From<&aura_app::ui::types::HomeFlowBudget> for HomeBudget {
 
 /// Home visibility/access level
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum TraversalDepth {
+pub enum AccessLevel {
     #[default]
-    Street,
-    Frontage,
-    Interior,
+    Limited,
+    Partial,
+    Full,
 }
 
-impl TraversalDepth {
+impl AccessLevel {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Street => "Street",
-            Self::Frontage => "Frontage",
-            Self::Interior => "Interior",
+            Self::Limited => "Limited",
+            Self::Partial => "Partial",
+            Self::Full => "Full",
         }
     }
 
     pub fn icon(self) -> &'static str {
         match self {
-            Self::Street => "→",
-            Self::Frontage => "◇",
-            Self::Interior => "⌂",
+            Self::Limited => "→",
+            Self::Partial => "◇",
+            Self::Full => "⌂",
         }
     }
 
     pub fn next(self) -> Self {
         match self {
-            Self::Street => Self::Frontage,
-            Self::Frontage => Self::Interior,
-            Self::Interior => Self::Street,
+            Self::Limited => Self::Partial,
+            Self::Partial => Self::Full,
+            Self::Full => Self::Limited,
         }
     }
 }

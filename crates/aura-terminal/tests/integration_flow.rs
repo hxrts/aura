@@ -23,7 +23,7 @@
 //! ## Core Flows Tested
 //!
 //! - Guardian Recovery: Bob → request → Alice/Carol approve → restore
-//! - Home Lifecycle: create → invite → join → promote steward
+//! - Home Lifecycle: create → invite → join → promote moderator
 //! - Neighborhood Formation: create homes → link → traverse
 //! - Chat & Messaging: contact → DM/channel → message exchange
 //! - Invitation Lifecycle: create → export → import → accept → contact

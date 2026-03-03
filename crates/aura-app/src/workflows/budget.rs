@@ -6,8 +6,8 @@
 //!
 //! - **Home total**: 10 MB fixed allocation
 //! - **Resident storage**: 200 KB per resident (max 8 = 1.6 MB)
-//! - **Neighborhood donation**: 1 MB per neighborhood (max 4 = 4 MB)
-//! - **Public-good space**: Remainder after residents + donations
+//! - **Neighborhood allocation**: 1 MB per neighborhood (max 4 = 4 MB)
+//! - **Public-good space**: Remainder after residents + allocations
 //!
 //! ## Key Principles
 //!
@@ -91,8 +91,8 @@ pub struct HomeFlowBudget {
     pub resident_storage_spent: u64,
     /// Number of neighborhoods joined
     pub neighborhood_count: u8,
-    /// Total neighborhood donations
-    pub neighborhood_donations: u64,
+    /// Total neighborhood allocations
+    pub neighborhood_allocations: u64,
     /// Storage used by pinned content (spent counter as fact)
     pub pinned_storage_spent: u64,
 }
@@ -105,7 +105,7 @@ impl HomeFlowBudget {
             resident_count: 0,
             resident_storage_spent: 0,
             neighborhood_count: 0,
-            neighborhood_donations: 0,
+            neighborhood_allocations: 0,
             pinned_storage_spent: 0,
         }
     }
@@ -133,10 +133,10 @@ impl HomeFlowBudget {
 
     /// Calculate public-good space limit based on current configuration
     ///
-    /// Formula: 10 MB - neighborhood_donations - resident_limit
+    /// Formula: 10 MB - neighborhood_allocations - resident_limit
     pub fn pinned_storage_limit(&self) -> u64 {
         HOME_TOTAL_SIZE
-            .saturating_sub(self.neighborhood_donations)
+            .saturating_sub(self.neighborhood_allocations)
             .saturating_sub(self.resident_storage_limit())
     }
 
@@ -148,7 +148,7 @@ impl HomeFlowBudget {
 
     /// Total storage used
     pub fn total_used(&self) -> u64 {
-        self.resident_storage_spent + self.neighborhood_donations + self.pinned_storage_spent
+        self.resident_storage_spent + self.neighborhood_allocations + self.pinned_storage_spent
     }
 
     /// Total storage remaining
@@ -216,7 +216,7 @@ impl HomeFlowBudget {
             });
         }
         self.neighborhood_count += 1;
-        self.neighborhood_donations += NEIGHBORHOOD_DONATION;
+        self.neighborhood_allocations += NEIGHBORHOOD_DONATION;
         Ok(())
     }
 
@@ -226,8 +226,8 @@ impl HomeFlowBudget {
             return Err(BudgetError::NoNeighborhoodsToLeave);
         }
         self.neighborhood_count -= 1;
-        self.neighborhood_donations = self
-            .neighborhood_donations
+        self.neighborhood_allocations = self
+            .neighborhood_allocations
             .saturating_sub(NEIGHBORHOOD_DONATION);
         Ok(())
     }
@@ -257,7 +257,7 @@ impl HomeFlowBudget {
             total: HOME_TOTAL_SIZE,
             resident_limit: self.resident_storage_limit(),
             resident_used: self.resident_storage_spent,
-            neighborhood_donations: self.neighborhood_donations,
+            neighborhood_allocations: self.neighborhood_allocations,
             pinned_limit: self.pinned_storage_limit(),
             pinned_used: self.pinned_storage_spent,
             remaining: self.total_remaining(),
@@ -286,7 +286,7 @@ pub struct BudgetBreakdown {
     /// Resident storage used
     pub resident_used: u64,
     /// Storage donated to neighborhoods
-    pub neighborhood_donations: u64,
+    pub neighborhood_allocations: u64,
     /// Pinned storage limit
     pub pinned_limit: u64,
     /// Pinned storage used
@@ -487,7 +487,7 @@ pub async fn update_budget(
 ///   2 residents (8 max)
 ///   400.0 KB / 1.6 MB used
 ///
-/// Neighborhood Donations:
+/// Neighborhood Allocations:
 ///   1 neighborhoods (4 max)
 ///   1.0 MB donated
 ///
@@ -522,14 +522,14 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
         BudgetBreakdown::format_size(breakdown.resident_limit)
     ));
 
-    output.push_str("\nNeighborhood Donations:\n");
+    output.push_str("\nNeighborhood Allocations:\n");
     output.push_str(&format!(
         "  {} neighborhoods ({} max)\n",
         budget.neighborhood_count, MAX_NEIGHBORHOODS
     ));
     output.push_str(&format!(
         "  {} donated\n",
-        BudgetBreakdown::format_size(breakdown.neighborhood_donations)
+        BudgetBreakdown::format_size(breakdown.neighborhood_allocations)
     ));
 
     output.push_str("\nPinned Content:\n");
@@ -727,7 +727,7 @@ mod tests {
 
         budget.join_neighborhood().unwrap();
         assert_eq!(budget.neighborhood_count, 1);
-        assert_eq!(budget.neighborhood_donations, NEIGHBORHOOD_DONATION);
+        assert_eq!(budget.neighborhood_allocations, NEIGHBORHOOD_DONATION);
 
         // Join max neighborhoods
         for _ in 1..MAX_NEIGHBORHOODS {
@@ -783,7 +783,7 @@ mod tests {
         }
 
         // Verify arithmetic
-        assert_eq!(budget.neighborhood_donations, 4 * MB); // 4 MB
+        assert_eq!(budget.neighborhood_allocations, 4 * MB); // 4 MB
         assert_eq!(budget.resident_storage_limit(), 1_638_400); // 1.6 MB (8 × 200 KB)
 
         // Public-good space = 10 MB - 4 MB - 1.6 MB = 4.4 MB
@@ -1108,16 +1108,16 @@ mod tests {
                 }
 
                 let count_before = budget.neighborhood_count;
-                let donations_before = budget.neighborhood_donations;
+                let allocations_before = budget.neighborhood_allocations;
 
                 if budget.can_join_neighborhood() {
                     budget.join_neighborhood().unwrap();
                     // Monotone: count increased by exactly 1
                     prop_assert_eq!(budget.neighborhood_count, count_before + 1);
-                    // Donations increased by exactly NEIGHBORHOOD_DONATION
+                    // Allocations increased by exactly NEIGHBORHOOD_DONATION
                     prop_assert_eq!(
-                        budget.neighborhood_donations,
-                        donations_before + NEIGHBORHOOD_DONATION
+                        budget.neighborhood_allocations,
+                        allocations_before + NEIGHBORHOOD_DONATION
                     );
                 }
             }
@@ -1135,15 +1135,15 @@ mod tests {
                 }
 
                 let count_before = budget.neighborhood_count;
-                let donations_before = budget.neighborhood_donations;
+                let allocations_before = budget.neighborhood_allocations;
 
                 budget.leave_neighborhood().unwrap();
                 // Monotone: count decreased by exactly 1
                 prop_assert_eq!(budget.neighborhood_count, count_before - 1);
-                // Donations decreased by exactly NEIGHBORHOOD_DONATION
+                // Allocations decreased by exactly NEIGHBORHOOD_DONATION
                 prop_assert_eq!(
-                    budget.neighborhood_donations,
-                    donations_before - NEIGHBORHOOD_DONATION
+                    budget.neighborhood_allocations,
+                    allocations_before - NEIGHBORHOOD_DONATION
                 );
             }
 

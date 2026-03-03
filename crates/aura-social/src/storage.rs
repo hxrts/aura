@@ -14,7 +14,7 @@ impl StorageService {
         budget: &HomeStorageBudget,
         requested: u64,
     ) -> Result<(), SocialError> {
-        let available = budget.remaining_public_good_space();
+        let available = budget.remaining_shared_storage();
         if requested > available {
             return Err(SocialError::storage_exceeded(available, requested));
         }
@@ -23,7 +23,7 @@ impl StorageService {
 
     /// Calculate available space in a home.
     pub fn available_space(budget: &HomeStorageBudget) -> u64 {
-        budget.remaining_public_good_space()
+        budget.remaining_shared_storage()
     }
 
     /// Check if content can be pinned.
@@ -38,9 +38,9 @@ impl StorageService {
         residents.iter().map(|r| r.storage_allocated).sum()
     }
 
-    /// Calculate neighborhood donation obligations.
-    pub fn neighborhood_donations(memberships: &[HomeMemberFact]) -> u64 {
-        memberships.iter().map(|m| m.donated_storage).sum()
+    /// Calculate neighborhood allocation obligations.
+    pub fn neighborhood_allocations(memberships: &[HomeMemberFact]) -> u64 {
+        memberships.iter().map(|m| m.allocated_storage).sum()
     }
 
     /// Build a storage budget from component facts.
@@ -54,7 +54,7 @@ impl StorageService {
             home_id: home_fact.home_id,
             resident_storage_spent: Self::resident_storage_used(residents),
             pinned_storage_spent: pinned_storage,
-            neighborhood_donations: Self::neighborhood_donations(memberships),
+            neighborhood_allocations: Self::neighborhood_allocations(memberships),
         }
     }
 
@@ -81,11 +81,11 @@ impl StorageService {
     ///
     /// Joining requires donating storage to the neighborhood.
     pub fn validate_neighborhood_join(budget: &HomeStorageBudget) -> Result<(), SocialError> {
-        let donation = HomeMemberFact::DEFAULT_DONATION;
-        let available = budget.remaining_public_good_space();
+        let allocation = HomeMemberFact::DEFAULT_ALLOCATION;
+        let available = budget.remaining_shared_storage();
 
-        if donation > available {
-            return Err(SocialError::storage_exceeded(available, donation));
+        if allocation > available {
+            return Err(SocialError::storage_exceeded(available, allocation));
         }
         Ok(())
     }
@@ -196,8 +196,8 @@ mod tests {
             2 * ResidentFact::DEFAULT_STORAGE_ALLOCATION
         );
         assert_eq!(
-            budget.neighborhood_donations,
-            HomeMemberFact::DEFAULT_DONATION
+            budget.neighborhood_allocations,
+            HomeMemberFact::DEFAULT_ALLOCATION
         );
     }
 }

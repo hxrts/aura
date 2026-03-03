@@ -38,9 +38,7 @@ pub fn execute_with_run_budgets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioStep,
-    };
+    use crate::config::{InstanceConfig, InstanceMode, RunSection, ScenarioAction, ScenarioStep};
     use crate::coordinator::HarnessCoordinator;
     use std::path::PathBuf;
 
@@ -106,9 +104,10 @@ mod tests {
             }],
         };
 
-        let error = lint_for_run(&run_config, &scenario)
-            .expect_err("unknown instance should fail lint")
-            .to_string();
+        let error = match lint_for_run(&run_config, &scenario) {
+            Ok(()) => panic!("unknown instance should fail lint"),
+            Err(error) => error.to_string(),
+        };
         assert!(
             error.contains("unknown instance"),
             "unexpected error: {error}"

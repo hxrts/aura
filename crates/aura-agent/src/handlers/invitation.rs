@@ -12,7 +12,7 @@ use crate::runtime::services::InvitationManager;
 use crate::runtime::AuraEffectSystem;
 use crate::InvitationServiceApi;
 use aura_app::signal_defs::HOMES_SIGNAL;
-use aura_app::views::home::{HomeState, HomesState, Resident, ResidentRole};
+use aura_app::views::home::{HomeState, HomesState, Resident, HomeRole};
 use aura_chat::{ChatFact, CHAT_FACT_TYPE_ID};
 use aura_core::effects::amp::{ChannelBootstrapPackage, ChannelCreateParams};
 use aura_core::effects::storage::StorageCoreEffects;
@@ -1617,14 +1617,14 @@ impl InvitationHandler {
                     owner.is_online = false;
                     owner.last_seen = Some(now_ms);
                 }
-                home.my_role = ResidentRole::Resident;
+                home.my_role = HomeRole::Participant;
             }
 
             if home.resident(&own_id).is_none() {
                 home.add_resident(Resident {
                     id: own_id,
                     name: "You".to_string(),
-                    role: ResidentRole::Resident,
+                    role: HomeRole::Participant,
                     is_online: true,
                     joined_at: now_ms,
                     last_seen: Some(now_ms),
@@ -1644,7 +1644,7 @@ impl InvitationHandler {
                 home.add_resident(Resident {
                     id: own_id,
                     name: "You".to_string(),
-                    role: ResidentRole::Resident,
+                    role: HomeRole::Participant,
                     is_online: true,
                     joined_at: now_ms,
                     last_seen: Some(now_ms),
@@ -1653,8 +1653,8 @@ impl InvitationHandler {
                 changed = true;
             }
 
-            if invite.sender_id != own_id && matches!(home.my_role, ResidentRole::Owner) {
-                home.my_role = ResidentRole::Resident;
+            if invite.sender_id != own_id && matches!(home.my_role, HomeRole::Member) {
+                home.my_role = HomeRole::Participant;
                 changed = true;
             }
         }
@@ -3017,7 +3017,7 @@ mod tests {
     use aura_journal::fact::{FactContent, RelationalFact};
     use aura_journal::DomainFact;
     use aura_relational::{ContactFact, CONTACT_FACT_TYPE_ID};
-    use aura_social::moderation::facts::HomeGrantStewardFact;
+    use aura_social::moderation::facts::HomeGrantModeratorFact;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -3708,7 +3708,7 @@ mod tests {
         let handler = InvitationHandler::new(AuthorityContext::new(authority)).unwrap();
 
         let context_id = ContextId::new_from_entropy([207u8; 32]);
-        let grant = HomeGrantStewardFact::new_ms(context_id, authority, peer, 1_700_000_000_001)
+        let grant = HomeGrantModeratorFact::new_ms(context_id, authority, peer, 1_700_000_000_001)
             .to_generic();
 
         let payload = aura_core::util::serialization::to_vec(&grant).unwrap();
@@ -3743,7 +3743,7 @@ mod tests {
             else {
                 continue;
             };
-            let Some(grant_fact) = HomeGrantStewardFact::from_envelope(&envelope) else {
+            let Some(grant_fact) = HomeGrantModeratorFact::from_envelope(&envelope) else {
                 continue;
             };
             if grant_fact.target_authority == authority && grant_fact.actor_authority == peer {
@@ -3952,7 +3952,7 @@ mod tests {
             .expect("accepted invitation should materialize home state");
         assert_eq!(home.context_id, Some(expected_context));
         assert!(home.resident(&receiver_id).is_some());
-        assert_eq!(home.my_role, ResidentRole::Resident);
+        assert_eq!(home.my_role, HomeRole::Participant);
     }
 
     #[tokio::test]

@@ -17,7 +17,7 @@ use crate::workflows::parse::parse_authority_id;
 #[cfg(feature = "signals")]
 use crate::workflows::runtime::{cooperative_yield, require_runtime};
 #[cfg(feature = "signals")]
-use crate::workflows::{context, invitation, messaging, moderation, query, settings, steward};
+use crate::workflows::{context, invitation, messaging, moderation, moderator, query, settings};
 use crate::AppCore;
 use async_lock::RwLock;
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
@@ -318,9 +318,9 @@ pub struct ModerationPlan {
     pub command: ResolvedCommand,
 }
 
-/// Steward operation plan family (`/op`, `/deop`, `/mode`).
+/// Moderator operation plan family (`/op`, `/deop`, `/mode`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StewardPlan {
+pub struct ModeratorPlan {
     pub command: ResolvedCommand,
 }
 
@@ -331,8 +331,8 @@ pub enum CommandPlanError {
     NotMembershipCommand,
     #[error("command is not a moderation command")]
     NotModerationCommand,
-    #[error("command is not a steward command")]
-    NotStewardCommand,
+    #[error("command is not a moderator command")]
+    NotModeratorCommand,
 }
 
 impl MembershipPlan {
@@ -364,7 +364,7 @@ impl ModerationPlan {
     }
 }
 
-impl StewardPlan {
+impl ModeratorPlan {
     pub fn from_resolved(command: ResolvedCommand) -> Result<Self, CommandPlanError> {
         if matches!(
             command,
@@ -374,7 +374,7 @@ impl StewardPlan {
         ) {
             return Ok(Self { command });
         }
-        Err(CommandPlanError::NotStewardCommand)
+        Err(CommandPlanError::NotModeratorCommand)
     }
 }
 
@@ -414,7 +414,7 @@ pub enum PlannedCommand {
     General(CommandPlan<ResolvedCommand>),
     Membership(CommandPlan<MembershipPlan>),
     Moderation(CommandPlan<ModerationPlan>),
-    Steward(CommandPlan<StewardPlan>),
+    Moderator(CommandPlan<ModeratorPlan>),
 }
 
 impl PlannedCommand {
@@ -423,7 +423,7 @@ impl PlannedCommand {
         match self {
             Self::General(plan) => consistency_for_resolved(&plan.operation),
             Self::Membership(_) => ConsistencyRequirement::Replicated,
-            Self::Moderation(_) | Self::Steward(_) => ConsistencyRequirement::Enforced,
+            Self::Moderation(_) | Self::Moderator(_) => ConsistencyRequirement::Enforced,
         }
     }
 }
@@ -823,11 +823,11 @@ impl CommandResolver {
                     CommandScope::Global
                 };
 
-                Ok(PlannedCommand::Steward(CommandPlan {
+                Ok(PlannedCommand::Moderator(CommandPlan {
                     actor,
                     scope,
                     preconditions: vec![PlanPrecondition::TargetExists(target)],
-                    operation: StewardPlan {
+                    operation: ModeratorPlan {
                         command: ResolvedCommand::Op { target },
                     },
                 }))
@@ -844,11 +844,11 @@ impl CommandResolver {
                     CommandScope::Global
                 };
 
-                Ok(PlannedCommand::Steward(CommandPlan {
+                Ok(PlannedCommand::Moderator(CommandPlan {
                     actor,
                     scope,
                     preconditions: vec![PlanPrecondition::TargetExists(target)],
-                    operation: StewardPlan {
+                    operation: ModeratorPlan {
                         command: ResolvedCommand::Deop { target },
                     },
                 }))
@@ -858,14 +858,14 @@ impl CommandResolver {
                 channel_name,
                 context_id,
                 flags,
-            } => Ok(PlannedCommand::Steward(CommandPlan {
+            } => Ok(PlannedCommand::Moderator(CommandPlan {
                 actor,
                 scope: CommandScope::Channel {
                     channel_id,
                     context_id,
                 },
                 preconditions: vec![PlanPrecondition::ChannelExists(channel_id)],
-                operation: StewardPlan {
+                operation: ModeratorPlan {
                     command: ResolvedCommand::Mode {
                         channel_id,
                         channel_name,
@@ -993,8 +993,9 @@ impl CommandResolver {
         }
 
         if canonical.len() == 1 {
-            let authority_id = *canonical.values().next().expect("single canonical entry");
-            return Ok(ResolvedAuthorityId(authority_id));
+            if let Some(authority_id) = canonical.values().next().copied() {
+                return Ok(ResolvedAuthorityId(authority_id));
+            }
         }
 
         Err(CommandResolverError::AmbiguousTarget {
@@ -1052,12 +1053,13 @@ impl CommandResolver {
         }
 
         if by_id.len() == 1 {
-            let (channel_id, (_, context_id)) = by_id
+            if let Some((channel_id, (_, context_id))) = by_id
                 .iter()
                 .next()
                 .map(|(id, (name, context))| (*id, (name, *context)))
-                .expect("single canonical channel");
-            return Ok((ResolvedChannelId(channel_id), context_id));
+            {
+                return Ok((ResolvedChannelId(channel_id), context_id));
+            }
         }
 
         if by_id.len() > 1 {
@@ -1123,7 +1125,7 @@ pub async fn execute_planned(
     let details = match &plan {
         PlannedCommand::Membership(plan) => execute_membership(app_core, plan).await?,
         PlannedCommand::Moderation(plan) => execute_moderation(app_core, plan).await?,
-        PlannedCommand::Steward(plan) => execute_steward(app_core, plan).await?,
+        PlannedCommand::Moderator(plan) => execute_moderator(app_core, plan).await?,
         PlannedCommand::General(plan) => execute_general(app_core, plan).await?,
     };
 
@@ -1218,7 +1220,7 @@ async fn consistency_invariant_holds(
                 _ => false,
             }
         }
-        PlannedCommand::Steward(plan) => {
+        PlannedCommand::Moderator(plan) => {
             let home = match home_for_scope(&snapshot, &plan.scope) {
                 Some(value) => value,
                 None => return false,
@@ -1226,12 +1228,12 @@ async fn consistency_invariant_holds(
             match &plan.operation.command {
                 ResolvedCommand::Op { target } => {
                     home.resident(&target.0).is_some_and(|resident| {
-                        matches!(resident.role, crate::views::home::ResidentRole::Admin)
+                        matches!(resident.role, crate::views::home::HomeRole::Moderator)
                     })
                 }
                 ResolvedCommand::Deop { target } => {
                     home.resident(&target.0).is_some_and(|resident| {
-                        matches!(resident.role, crate::views::home::ResidentRole::Resident)
+                        matches!(resident.role, crate::views::home::HomeRole::Participant)
                     })
                 }
                 ResolvedCommand::Mode { flags, .. } => home.mode_flags.as_ref() == Some(flags),
@@ -1401,33 +1403,33 @@ async fn execute_moderation(
 }
 
 #[cfg(feature = "signals")]
-async fn execute_steward(
+async fn execute_moderator(
     app_core: &Arc<RwLock<AppCore>>,
-    plan: &CommandPlan<StewardPlan>,
+    plan: &CommandPlan<ModeratorPlan>,
 ) -> Result<Option<String>, AuraError> {
     match &plan.operation.command {
         ResolvedCommand::Op { target } => {
-            steward::grant_steward_resolved(
+            moderator::grant_moderator_resolved(
                 app_core,
                 optional_scope_channel_id(&plan.scope),
                 target.0,
             )
             .await?;
-            Ok(Some("steward granted".to_string()))
+            Ok(Some("moderator granted".to_string()))
         }
-        ResolvedCommand::Deop { target } => steward::revoke_steward_resolved(
+        ResolvedCommand::Deop { target } => moderator::revoke_moderator_resolved(
             app_core,
             optional_scope_channel_id(&plan.scope),
             target.0,
         )
         .await
-        .map(|_| Some("steward revoked".to_string())),
+        .map(|_| Some("moderator revoked".to_string())),
         ResolvedCommand::Mode {
             channel_id, flags, ..
         } => settings::set_channel_mode_resolved(app_core, channel_id.0, flags.clone())
             .await
             .map(|_| Some("channel mode updated".to_string())),
-        _ => Err(AuraError::invalid("invalid steward command")),
+        _ => Err(AuraError::invalid("invalid moderator command")),
     }
 }
 
@@ -1485,9 +1487,9 @@ async fn execute_general(
         ResolvedCommand::NhAdd { home_id } => context::add_home_to_neighborhood(app_core, home_id)
             .await
             .map(|_| Some("home added to neighborhood".to_string())),
-        ResolvedCommand::NhLink { home_id } => context::link_home_adjacency(app_core, home_id)
+        ResolvedCommand::NhLink { home_id } => context::link_home_one_hop_link(app_core, home_id)
             .await
-            .map(|_| Some("home adjacency linked".to_string())),
+            .map(|_| Some("home one_hop_link linked".to_string())),
         ResolvedCommand::HomeInvite { target } => {
             let home_id = current_home_id_string(app_core).await?;
             let _info = invitation::create_channel_invitation(
@@ -1624,6 +1626,7 @@ macro_rules! strong_command_executor {
 }
 
 #[cfg(test)]
+#[allow(clippy::default_trait_access, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::views::{Channel, ChannelType, ChatState, Contact, ContactsState};
@@ -1857,15 +1860,15 @@ mod tests {
     }
 
     #[test]
-    fn steward_plan_accepts_only_steward_commands() {
+    fn moderator_plan_accepts_only_moderator_commands() {
         let target = ResolvedAuthorityId(AuthorityId::new_from_entropy([12u8; 32]));
         let valid = ResolvedCommand::Op { target };
         let invalid = ResolvedCommand::Leave;
 
-        assert!(StewardPlan::from_resolved(valid).is_ok());
+        assert!(ModeratorPlan::from_resolved(valid).is_ok());
         assert_eq!(
-            StewardPlan::from_resolved(invalid),
-            Err(CommandPlanError::NotStewardCommand)
+            ModeratorPlan::from_resolved(invalid),
+            Err(CommandPlanError::NotModeratorCommand)
         );
     }
 
@@ -2009,11 +2012,11 @@ mod tests {
     async fn consistency_barrier_reports_partial_timeout() {
         let app_core = Arc::new(RwLock::new(AppCore::new(AppConfig::default()).unwrap()));
         let target = ResolvedAuthorityId(AuthorityId::new_from_entropy([31u8; 32]));
-        let plan = PlannedCommand::Steward(CommandPlan {
+        let plan = PlannedCommand::Moderator(CommandPlan {
             actor: None,
             scope: CommandScope::Global,
             preconditions: vec![PlanPrecondition::TargetExists(target)],
-            operation: StewardPlan {
+            operation: ModeratorPlan {
                 command: ResolvedCommand::Op { target },
             },
         });

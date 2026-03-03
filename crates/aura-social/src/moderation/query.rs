@@ -293,13 +293,13 @@ mod tests {
     fn test_query_current_bans_basic() {
         let context = test_context();
         let user1 = test_authority(1);
-        let steward = test_authority(2);
+        let moderator = test_authority(2);
 
         let ban_fact = HomeBanFact {
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             reason: "test ban".to_string(),
             banned_at: pt(1000),
             expires_at: None,
@@ -317,13 +317,13 @@ mod tests {
     fn test_query_current_bans_with_unban() {
         let context = test_context();
         let user1 = test_authority(1);
-        let steward = test_authority(2);
+        let moderator = test_authority(2);
 
         let ban_fact = HomeBanFact {
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             reason: "test ban".to_string(),
             banned_at: pt(1000),
             expires_at: None,
@@ -332,7 +332,7 @@ mod tests {
             context_id: context.clone(),
             channel_id: None,
             unbanned_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             unbanned_at: pt(2000),
         };
 
@@ -349,13 +349,13 @@ mod tests {
     fn test_query_current_bans_expired() {
         let context = test_context();
         let user1 = test_authority(1);
-        let steward = test_authority(2);
+        let moderator = test_authority(2);
 
         let ban_fact = HomeBanFact {
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             reason: "test ban".to_string(),
             banned_at: pt(1000),
             expires_at: Some(pt(2000)), // Expires at 2000ms
@@ -376,13 +376,13 @@ mod tests {
     fn test_query_current_mutes_with_expiration() {
         let context = test_context();
         let user1 = test_authority(1);
-        let steward = test_authority(2);
+        let moderator = test_authority(2);
 
         let mute_fact = HomeMuteFact {
             context_id: context.clone(),
             channel_id: None,
             muted_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             duration_secs: Some(60),
             muted_at: pt(1000),
             expires_at: Some(pt(61000)), // 1000ms + 60s = 61000ms
@@ -403,13 +403,13 @@ mod tests {
     fn test_query_current_mutes_with_unmute() {
         let context = test_context();
         let user1 = test_authority(1);
-        let steward = test_authority(2);
+        let moderator = test_authority(2);
 
         let mute_fact = HomeMuteFact {
             context_id: context.clone(),
             channel_id: None,
             muted_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             duration_secs: None,
             muted_at: pt(1000),
             expires_at: None,
@@ -418,7 +418,7 @@ mod tests {
             context_id: context.clone(),
             channel_id: None,
             unmuted_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             unmuted_at: pt(2000),
         };
 
@@ -436,14 +436,14 @@ mod tests {
         let context = test_context();
         let user1 = test_authority(1);
         let user2 = test_authority(3);
-        let steward = test_authority(2);
+        let moderator = test_authority(2);
         let channel = test_channel(1);
 
         let kick_fact1 = HomeKickFact {
             context_id: context.clone(),
             channel_id: channel.clone(),
             kicked_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             reason: "first kick".to_string(),
             kicked_at: pt(1000),
         };
@@ -451,7 +451,7 @@ mod tests {
             context_id: context.clone(),
             channel_id: channel.clone(),
             kicked_authority: user2.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             reason: "second kick".to_string(),
             kicked_at: pt(2000),
         };
@@ -473,13 +473,13 @@ mod tests {
     fn test_is_user_banned() {
         let context = test_context();
         let user1 = test_authority(1);
-        let steward = test_authority(2);
+        let moderator = test_authority(2);
 
         let ban_fact = HomeBanFact {
             context_id: context.clone(),
             channel_id: None,
             banned_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             reason: "test ban".to_string(),
             banned_at: pt(1000),
             expires_at: None,
@@ -497,13 +497,13 @@ mod tests {
     fn test_is_user_muted() {
         let context = test_context();
         let user1 = test_authority(1);
-        let steward = test_authority(2);
+        let moderator = test_authority(2);
 
         let mute_fact = HomeMuteFact {
             context_id: context.clone(),
             channel_id: None,
             muted_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             duration_secs: None,
             muted_at: pt(1000),
             expires_at: None,
@@ -521,7 +521,7 @@ mod tests {
     fn test_channel_specific_ban() {
         let context = test_context();
         let user1 = test_authority(1);
-        let steward = test_authority(2);
+        let moderator = test_authority(2);
         let channel1 = test_channel(1);
         let channel2 = test_channel(2);
 
@@ -529,7 +529,7 @@ mod tests {
             context_id: context.clone(),
             channel_id: Some(channel1.clone()),
             banned_authority: user1.clone(),
-            actor_authority: steward.clone(),
+            actor_authority: moderator.clone(),
             reason: "channel-specific ban".to_string(),
             banned_at: pt(1000),
             expires_at: None,

@@ -990,7 +990,7 @@ timeout_ms = 2000
 id = "alice-op-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "steward granted"
+contains = "moderator granted"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -1035,7 +1035,7 @@ timeout_ms = 2000
 id = "alice-deop-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "steward revoked"
+contains = "moderator revoked"
 consistency = "enforced"
 timeout_ms = 12000
 

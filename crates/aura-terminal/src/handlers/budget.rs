@@ -74,7 +74,7 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
         BudgetBreakdown::format_size(breakdown.resident_limit)
     ));
 
-    output.push_str("\nNeighborhood Donations:\n");
+    output.push_str("\nNeighborhood Allocations:\n");
     output.push_str(&format!(
         "  {} neighborhoods ({} max)\n",
         budget.neighborhood_count,
@@ -82,7 +82,7 @@ pub fn format_budget_status(budget: &HomeFlowBudget) -> String {
     ));
     output.push_str(&format!(
         "  {} donated\n",
-        BudgetBreakdown::format_size(breakdown.neighborhood_donations)
+        BudgetBreakdown::format_size(breakdown.neighborhood_allocations)
     ));
 
     output.push_str("\nPinned Content:\n");

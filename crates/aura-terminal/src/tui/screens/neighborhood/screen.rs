@@ -11,7 +11,7 @@ use crate::tui::layout::dim;
 use crate::tui::props::NeighborhoodViewProps;
 use crate::tui::state_machine::NeighborhoodMode;
 use crate::tui::theme::Theme;
-use crate::tui::types::{short_id, Contact, HomeBudget, HomeSummary, Resident, TraversalDepth};
+use crate::tui::types::{short_id, AccessLevel, Contact, HomeBudget, HomeSummary, Resident};
 
 pub async fn run_neighborhood_screen() -> std::io::Result<()> {
     element! {
@@ -42,7 +42,7 @@ struct ChannelSummary {
 struct HomeMapProps {
     homes: Vec<HomeSummary>,
     selected_index: usize,
-    enter_depth: TraversalDepth,
+    enter_depth: AccessLevel,
 }
 
 #[component]
@@ -56,7 +56,7 @@ fn HomeMap(props: &HomeMapProps) -> impl Into<AnyElement<'static>> {
     let can_enter_interior = homes.get(selected).map(|b| b.can_enter).unwrap_or(false);
 
     let can_enter_line = format!(
-        "Can enter: Street ✔ Frontage ✔ Interior {}",
+        "Can enter: Limited ✔ Partial ✔ Full {}",
         if can_enter_interior { "✔" } else { "✖" }
     );
 
@@ -140,14 +140,14 @@ struct HomeHeaderProps {
     home_name: String,
     resident_count: usize,
     storage_text: String,
-    steward_label: String,
+    moderator_label: String,
 }
 
 #[component]
 fn HomeHeader(props: &HomeHeaderProps) -> impl Into<AnyElement<'static>> {
     let status_line = format!(
         "Residents: {} • {} • {}",
-        props.resident_count, props.storage_text, props.steward_label
+        props.resident_count, props.storage_text, props.moderator_label
     );
     let name_line = format!("Name: {}", props.home_name);
 
@@ -215,7 +215,7 @@ fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
 struct ResidentListProps {
     residents: Vec<Resident>,
     selected_index: usize,
-    steward_actions_enabled: bool,
+    moderator_actions_enabled: bool,
 }
 
 #[component]
@@ -234,8 +234,8 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
         ) {
             View(flex_direction: FlexDirection::Row, gap: 1) {
                 Text(content: "Residents", weight: Weight::Bold, color: Theme::PRIMARY)
-                #(if props.steward_actions_enabled {
-                    Some(element! { Text(content: "⚖︎ Steward", color: Theme::WARNING) })
+                #(if props.moderator_actions_enabled {
+                    Some(element! { Text(content: "⚖︎ Moderator", color: Theme::WARNING) })
                 } else {
                     None
                 })
@@ -250,7 +250,7 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
                         let is_selected = idx == selected;
                         let id_hint = short_id(&r.id, 4);
                         let name = format!("{} · #{}", r.name, id_hint);
-                        let steward_badge = if r.is_steward { " ⚖︎" } else { "" };
+                        let moderator_badge = if r.is_moderator { " ⚖︎" } else { "" };
                         let self_badge = if r.is_self { " (you)" } else { "" };
                         element! {
                             View(
@@ -260,7 +260,7 @@ fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>> {
                                 padding_left: 1,
                             ) {
                                 Text(content: name, color: if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL })
-                                Text(content: steward_badge, color: Theme::WARNING)
+                                Text(content: moderator_badge, color: Theme::WARNING)
                                 Text(content: self_badge, color: if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_MUTED })
                             }
                         }
@@ -276,13 +276,13 @@ struct SocialStatusProps {
     neighborhood_name: String,
     selected_home_name: String,
     selected_home_id: String,
-    enter_depth: TraversalDepth,
+    enter_depth: AccessLevel,
     entered_home: bool,
     homes_count: usize,
     channel_count: usize,
     selected_channel_name: String,
     resident_count: usize,
-    steward_actions_enabled: bool,
+    moderator_actions_enabled: bool,
 }
 
 #[component]
@@ -292,7 +292,7 @@ fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>
     } else {
         "Browsing"
     };
-    let steward_text = if props.steward_actions_enabled {
+    let moderator_text = if props.moderator_actions_enabled {
         "Enabled"
     } else {
         "Disabled"
@@ -316,16 +316,16 @@ fn SocialStatusPanel(props: &SocialStatusProps) -> impl Into<AnyElement<'static>
             Text(content: format!("Known homes: {}", props.homes_count), color: Theme::TEXT_MUTED)
             Text(content: format!("Channels: {} • Focus: #{}", props.channel_count, props.selected_channel_name), color: Theme::TEXT_MUTED)
             Text(content: format!("Residents in view: {}", props.resident_count), color: Theme::TEXT_MUTED)
-            Text(content: format!("Steward actions: {}", steward_text), color: Theme::TEXT_MUTED)
+            Text(content: format!("Moderator actions: {}", moderator_text), color: Theme::TEXT_MUTED)
         }
     }
 }
 
-fn is_steward_role(role: aura_app::ui::types::home::ResidentRole) -> bool {
+fn is_moderator_role(role: aura_app::ui::types::home::HomeRole) -> bool {
     matches!(
         role,
-        aura_app::ui::types::home::ResidentRole::Admin
-            | aura_app::ui::types::home::ResidentRole::Owner
+        aura_app::ui::types::home::HomeRole::Moderator
+            | aura_app::ui::types::home::HomeRole::Member
     )
 }
 
@@ -333,7 +333,7 @@ fn convert_resident(r: &aura_app::ui::types::home::Resident) -> Resident {
     Resident {
         id: r.id.to_string(),
         name: r.name.clone(),
-        is_steward: is_steward_role(r.role),
+        is_moderator: is_moderator_role(r.role),
         is_self: false,
     }
 }
@@ -365,11 +365,11 @@ fn convert_neighbor_home(
     }
 }
 
-fn convert_traversal_depth(depth: u32) -> TraversalDepth {
+fn convert_access_level_value(depth: u32) -> AccessLevel {
     match depth {
-        0 => TraversalDepth::Street,
-        1 => TraversalDepth::Frontage,
-        _ => TraversalDepth::Interior,
+        0 => AccessLevel::Limited,
+        1 => AccessLevel::Partial,
+        _ => AccessLevel::Full,
     }
 }
 
@@ -382,7 +382,7 @@ pub fn NeighborhoodScreen(
 
     let reactive_neighborhood_name = hooks.use_state(String::new);
     let reactive_homes = hooks.use_state(Vec::new);
-    let reactive_depth = hooks.use_state(TraversalDepth::default);
+    let reactive_depth = hooks.use_state(AccessLevel::default);
     let active_scope_ref = hooks.use_ref(|| Arc::new(std::sync::RwLock::new(String::new())));
     let active_scope: Arc<std::sync::RwLock<String>> = active_scope_ref.read().clone();
 
@@ -417,8 +417,8 @@ pub fn NeighborhoodScreen(
                 let depth = n
                     .position
                     .as_ref()
-                    .map(|p| convert_traversal_depth(p.depth))
-                    .unwrap_or(TraversalDepth::Interior);
+                    .map(|p| convert_access_level_value(p.depth))
+                    .unwrap_or(AccessLevel::Full);
                 if let Ok(mut guard) = active_scope.write() {
                     *guard = active_home_scope_id(&n);
                 }
@@ -513,10 +513,10 @@ pub fn NeighborhoodScreen(
         .get(props.view.selected_home)
         .map(|b| b.id.clone())
         .unwrap_or_default();
-    // Only expose channel/resident detail when interior access is active.
-    // This keeps Street/Frontage traversal views from leaking interior-only data.
+    // Only expose channel/resident detail when full access is active.
+    // This keeps Limited/Partial traversal views from leaking full-only data.
     let interior_entered =
-        is_detail && is_entered && matches!(props.view.enter_depth, TraversalDepth::Interior);
+        is_detail && is_entered && matches!(props.view.enter_depth, AccessLevel::Full);
     let show_detail_lists = !is_detail || interior_entered;
     let display_channels = if show_detail_lists {
         channels
@@ -536,7 +536,8 @@ pub fn NeighborhoodScreen(
     let homes_count = homes.len();
     let channel_count = display_channels.len();
     let resident_count = display_residents.len();
-    let display_steward_actions_enabled = props.view.steward_actions_enabled && show_detail_lists;
+    let display_moderator_actions_enabled =
+        props.view.moderator_actions_enabled && show_detail_lists;
 
     let storage_text = if budget.total > 0 {
         format!(
@@ -548,10 +549,10 @@ pub fn NeighborhoodScreen(
         "Storage: --/--MB".to_string()
     };
 
-    let steward_label = if display_steward_actions_enabled {
-        "Steward: Yes".to_string()
+    let moderator_label = if display_moderator_actions_enabled {
+        "Moderator: Yes".to_string()
     } else {
-        "Steward: No".to_string()
+        "Moderator: No".to_string()
     };
 
     element! {
@@ -575,7 +576,7 @@ pub fn NeighborhoodScreen(
                                     home_name: current_home_name.clone(),
                                     resident_count: resident_count,
                                     storage_text: storage_text,
-                                    steward_label: steward_label,
+                                    moderator_label: moderator_label,
                                 )
                                 #(if show_detail_lists {
                                     vec![element! {
@@ -584,7 +585,7 @@ pub fn NeighborhoodScreen(
                                             ResidentList(
                                                 residents: display_residents.clone(),
                                                 selected_index: props.view.selected_resident,
-                                                steward_actions_enabled: display_steward_actions_enabled,
+                                                moderator_actions_enabled: display_moderator_actions_enabled,
                                             )
                                         }
                                     }]
@@ -600,7 +601,7 @@ pub fn NeighborhoodScreen(
                                                 padding_bottom: 1,
                                             ) {
                                                 Text(
-                                                    content: "Frontage/Street view: interior channel and resident details are hidden",
+                                                    content: "Partial/Limited view: full channel and resident details are hidden",
                                                     color: Theme::TEXT_MUTED,
                                                 )
                                             }
@@ -628,7 +629,7 @@ pub fn NeighborhoodScreen(
                         channel_count: channel_count,
                         selected_channel_name: selected_channel_name,
                         resident_count: resident_count,
-                        steward_actions_enabled: display_steward_actions_enabled,
+                        moderator_actions_enabled: display_moderator_actions_enabled,
                     )
                 }
             }

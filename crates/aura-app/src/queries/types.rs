@@ -1078,7 +1078,7 @@ impl Query for HomesQuery {
     }
 
     fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        use crate::views::home::{HomeState, HomesState, ResidentRole};
+        use crate::views::home::{HomeRole, HomeState, HomesState};
         use crate::workflows::budget::HomeFlowBudget;
         use std::collections::HashMap;
 
@@ -1087,9 +1087,9 @@ impl Query for HomesQuery {
             .into_iter()
             .map(|row| {
                 let my_role = match get_string(&row, "my_role").as_str() {
-                    "owner" => ResidentRole::Owner,
-                    "admin" => ResidentRole::Admin,
-                    _ => ResidentRole::Resident,
+                    "owner" => HomeRole::Member,
+                    "admin" => HomeRole::Moderator,
+                    _ => HomeRole::Participant,
                 };
 
                 Ok(HomeState {
@@ -1155,7 +1155,7 @@ impl Query for NeighborhoodQuery {
                 vec![
                     DatalogValue::var("id"),
                     DatalogValue::var("name"),
-                    DatalogValue::var("adjacency"),
+                    DatalogValue::var("one_hop_link"),
                     DatalogValue::var("shared_contacts"),
                     DatalogValue::var("can_traverse"),
                 ],
@@ -1165,7 +1165,7 @@ impl Query for NeighborhoodQuery {
                 vec![
                     DatalogValue::var("id"),
                     DatalogValue::var("name"),
-                    DatalogValue::var("adjacency"),
+                    DatalogValue::var("one_hop_link"),
                     DatalogValue::var("shared_contacts"),
                     DatalogValue::var("can_traverse"),
                 ],
@@ -1180,28 +1180,28 @@ impl Query for NeighborhoodQuery {
     fn dependencies(&self) -> Vec<FactPredicate> {
         vec![
             FactPredicate::new("neighbor_home"),
-            FactPredicate::new("home_adjacency"),
+            FactPredicate::new("home_one_hop_link"),
             FactPredicate::new("shared_contact"),
         ]
     }
 
     fn parse(bindings: DatalogBindings) -> Result<Self::Result, QueryParseError> {
-        use crate::views::neighborhood::{AdjacencyType, NeighborHome, NeighborhoodState};
+        use crate::views::neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType};
 
         let neighbors = bindings
             .rows
             .into_iter()
             .map(|row| {
-                let adjacency = match get_string(&row, "adjacency").as_str() {
-                    "direct" => AdjacencyType::Direct,
-                    "two_hop" => AdjacencyType::TwoHop,
-                    _ => AdjacencyType::Distant,
+                let one_hop_link = match get_string(&row, "one_hop_link").as_str() {
+                    "direct" => OneHopLinkType::Direct,
+                    "two_hop" => OneHopLinkType::TwoHop,
+                    _ => OneHopLinkType::Distant,
                 };
 
                 Ok(NeighborHome {
                     id: get_channel_id(&row, "id")?,
                     name: get_string(&row, "name"),
-                    adjacency,
+                    one_hop_link,
                     shared_contacts: get_int(&row, "shared_contacts") as u32,
                     resident_count: {
                         let count = get_int(&row, "resident_count");

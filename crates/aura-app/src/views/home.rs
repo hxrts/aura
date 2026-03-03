@@ -8,17 +8,17 @@ use aura_core::identifiers::{AuthorityId, ChannelId, ContextId, HomeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Resident role in the home
+/// Role designation in a home.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
-pub enum ResidentRole {
-    /// Regular resident
+pub enum HomeRole {
+    /// Non-threshold user with granted access.
     #[default]
-    Resident,
-    /// Home admin
-    Admin,
-    /// Home owner/creator
-    Owner,
+    Participant,
+    /// Threshold member role.
+    Member,
+    /// Moderator designation.
+    Moderator,
 }
 
 /// A home resident
@@ -30,7 +30,7 @@ pub struct Resident {
     /// Display name
     pub name: String,
     /// Role in the home
-    pub role: ResidentRole,
+    pub role: HomeRole,
     /// Whether resident is online
     pub is_online: bool,
     /// When resident joined (ms since epoch)
@@ -42,9 +42,9 @@ pub struct Resident {
 }
 
 impl Resident {
-    /// Check if this resident is a steward (admin or owner)
-    pub fn is_steward(&self) -> bool {
-        matches!(self.role, ResidentRole::Admin | ResidentRole::Owner)
+    /// Check if this resident has moderator designation.
+    pub fn is_moderator(&self) -> bool {
+        matches!(self.role, HomeRole::Moderator)
     }
 }
 
@@ -135,7 +135,7 @@ pub struct HomeState {
     /// All residents
     pub residents: Vec<Resident>,
     /// Current user's role
-    pub my_role: ResidentRole,
+    pub my_role: HomeRole,
     /// Storage budget (uses comprehensive HomeFlowBudget from budget module)
     pub storage: HomeFlowBudget,
     /// Number of online residents
@@ -177,7 +177,7 @@ impl HomeState {
     /// Maximum number of kick records retained in memory.
     const MAX_KICK_LOG: usize = 200;
 
-    /// Create a new home with the creator as steward
+    /// Create a new home with the creator as moderator
     pub fn new(
         id: ChannelId,
         name: Option<String>,
@@ -185,10 +185,10 @@ impl HomeState {
         created_at: u64,
         context_id: ContextId,
     ) -> Self {
-        let steward = Resident {
+        let moderator = Resident {
             id: creator_id,
             name: "You".to_string(),
-            role: ResidentRole::Owner,
+            role: HomeRole::Member,
             is_online: true,
             joined_at: created_at,
             last_seen: Some(created_at),
@@ -204,8 +204,8 @@ impl HomeState {
         Self {
             id,
             name: name.unwrap_or_default(),
-            residents: vec![steward],
-            my_role: ResidentRole::Owner,
+            residents: vec![moderator],
+            my_role: HomeRole::Member,
             storage: budget,
             online_count: 1,
             resident_count: 1,
@@ -264,9 +264,9 @@ impl HomeState {
         self.residents.iter().filter(|r| r.is_online).collect()
     }
 
-    /// Check if current user is admin or owner
+    /// Check if current user has elevated home privileges.
     pub fn is_admin(&self) -> bool {
-        matches!(self.my_role, ResidentRole::Admin | ResidentRole::Owner)
+        matches!(self.my_role, HomeRole::Moderator | HomeRole::Member)
     }
 
     /// Set home name

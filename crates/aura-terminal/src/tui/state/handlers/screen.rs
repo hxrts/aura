@@ -291,9 +291,9 @@ pub fn handle_neighborhood_key(
                 ));
             }
             KeyCode::Char('L') => {
-                // Force direct adjacency for selected home.
+                // Force direct one_hop_link for selected home.
                 commands.push(TuiCommand::Dispatch(
-                    DispatchCommand::LinkSelectedHomeAdjacency,
+                    DispatchCommand::LinkSelectedHomeOneHopLink,
                 ));
             }
             KeyCode::Char('g') | KeyCode::Char('H') => {

@@ -107,10 +107,11 @@ pub struct ScenarioConfig {
     pub steps: Vec<ScenarioStep>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ScenarioAction {
     LaunchInstances,
+    #[default]
     Noop,
     SetVar,
     ExtractVar,
@@ -163,12 +164,6 @@ impl fmt::Display for ScenarioAction {
             Self::FaultTunnelDrop => "fault_tunnel_drop",
         };
         f.write_str(value)
-    }
-}
-
-impl Default for ScenarioAction {
-    fn default() -> Self {
-        Self::Noop
     }
 }
 

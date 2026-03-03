@@ -7,8 +7,8 @@ use aura_core::effects::relay::RelayRelationship;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_social::facts::{
-    AdjacencyFact, HomeConfigFact, HomeFact, HomeId, HomeMemberFact, NeighborhoodFact,
-    NeighborhoodId, ResidentFact, StewardFact,
+    HomeConfigFact, HomeFact, HomeId, HomeMemberFact, ModeratorFact, NeighborhoodFact,
+    NeighborhoodId, OneHopLinkFact, ResidentFact,
 };
 use aura_social::{Home, Neighborhood, SocialTopology};
 
@@ -39,10 +39,10 @@ pub fn test_neighborhood_id(seed: u8) -> NeighborhoodId {
 ///
 /// # Arguments
 /// * `home_seed` - Seed for the home ID
-/// * `resident_count` - Number of residents to create (first resident is the steward)
+/// * `resident_count` - Number of residents to create (first resident is the moderator)
 ///
 /// # Returns
-/// A tuple of (Home, steward_authority, resident_authorities)
+/// A tuple of (Home, moderator_authority, resident_authorities)
 pub fn create_test_home(
     home_seed: u8,
     resident_count: usize,
@@ -53,7 +53,7 @@ pub fn create_test_home(
     // Create home fact
     let home_fact = HomeFact::new(home_id, timestamp.clone());
 
-    // Create residents (first one is the steward)
+    // Create residents (first one is the moderator)
     let mut residents = Vec::with_capacity(resident_count);
     let mut resident_facts = Vec::with_capacity(resident_count);
 
@@ -63,12 +63,12 @@ pub fn create_test_home(
         resident_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
     }
 
-    let steward = residents[0];
-    let steward_facts = vec![StewardFact::new(steward, home_id, timestamp)];
+    let moderator = residents[0];
+    let moderator_facts = vec![ModeratorFact::new(moderator, home_id, timestamp)];
 
-    let home = Home::from_facts(&home_fact, None, &resident_facts, &steward_facts);
+    let home = Home::from_facts(&home_fact, None, &resident_facts, &moderator_facts);
 
-    (home, steward, residents)
+    (home, moderator, residents)
 }
 
 /// Create a test home with custom configuration.
@@ -97,17 +97,17 @@ pub fn create_test_home_with_config(
         resident_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
     }
 
-    let steward = residents[0];
-    let steward_facts = vec![StewardFact::new(steward, home_id, timestamp)];
+    let moderator = residents[0];
+    let moderator_facts = vec![ModeratorFact::new(moderator, home_id, timestamp)];
 
     let home = Home::from_facts(
         &home_fact,
         Some(&config_fact),
         &resident_facts,
-        &steward_facts,
+        &moderator_facts,
     );
 
-    (home, steward, residents)
+    (home, moderator, residents)
 }
 
 /// Create a test neighborhood with a given number of member homes.
@@ -141,9 +141,9 @@ pub fn create_test_neighborhood(
     }
 
     // Create adjacencies between consecutive homes (linear chain)
-    let mut adjacency_facts = Vec::new();
+    let mut one_hop_link_facts = Vec::new();
     for i in 0..home_count.saturating_sub(1) {
-        adjacency_facts.push(AdjacencyFact::new(
+        one_hop_link_facts.push(OneHopLinkFact::new(
             home_ids[i],
             home_ids[i + 1],
             neighborhood_id,
@@ -151,7 +151,7 @@ pub fn create_test_neighborhood(
     }
 
     let neighborhood =
-        Neighborhood::from_facts(&neighborhood_fact, &member_facts, &adjacency_facts);
+        Neighborhood::from_facts(&neighborhood_fact, &member_facts, &one_hop_link_facts);
 
     (neighborhood, home_ids)
 }
@@ -180,10 +180,10 @@ pub fn create_fully_connected_neighborhood(
     }
 
     // Create adjacencies between all pairs of homes
-    let mut adjacency_facts = Vec::new();
+    let mut one_hop_link_facts = Vec::new();
     for i in 0..home_count {
         for j in (i + 1)..home_count {
-            adjacency_facts.push(AdjacencyFact::new(
+            one_hop_link_facts.push(OneHopLinkFact::new(
                 home_ids[i],
                 home_ids[j],
                 neighborhood_id,
@@ -192,7 +192,7 @@ pub fn create_fully_connected_neighborhood(
     }
 
     let neighborhood =
-        Neighborhood::from_facts(&neighborhood_fact, &member_facts, &adjacency_facts);
+        Neighborhood::from_facts(&neighborhood_fact, &member_facts, &one_hop_link_facts);
 
     (neighborhood, home_ids)
 }
@@ -216,9 +216,9 @@ pub fn create_single_home_topology(
     home_seed: u8,
     resident_count: usize,
 ) -> (SocialTopology, Home, AuthorityId, Vec<AuthorityId>) {
-    let (home, steward, residents) = create_test_home(home_seed, resident_count);
-    let topology = SocialTopology::new(steward, Some(home.clone()), vec![]);
-    (topology, home, steward, residents)
+    let (home, moderator, residents) = create_test_home(home_seed, resident_count);
+    let topology = SocialTopology::new(moderator, Some(home.clone()), vec![]);
+    (topology, home, moderator, residents)
 }
 
 /// Create a social topology with a home in a neighborhood.
@@ -228,7 +228,7 @@ pub fn create_neighborhood_topology(
     neighborhood_seed: u8,
     neighbor_home_count: usize,
 ) -> (SocialTopology, Home, Neighborhood, AuthorityId) {
-    let (home, steward, _residents) = create_test_home(home_seed, resident_count);
+    let (home, moderator, _residents) = create_test_home(home_seed, resident_count);
     let (mut neighborhood, _home_ids) =
         create_test_neighborhood(neighborhood_seed, neighbor_home_count);
 
@@ -238,9 +238,9 @@ pub fn create_neighborhood_topology(
     let member_fact = HomeMemberFact::new(home.home_id, neighborhood.neighborhood_id, timestamp);
     let _ = member_fact; // Use fact in production code
 
-    let topology = SocialTopology::new(steward, Some(home.clone()), vec![neighborhood.clone()]);
+    let topology = SocialTopology::new(moderator, Some(home.clone()), vec![neighborhood.clone()]);
 
-    (topology, home, neighborhood, steward)
+    (topology, home, neighborhood, moderator)
 }
 
 /// Builder for complex social topology test scenarios.
@@ -270,7 +270,7 @@ impl SocialTopologyBuilder {
 
     /// Add a home with the given number of residents.
     pub fn with_new_home(mut self, home_seed: u8, resident_count: usize) -> Self {
-        let (home, _steward, _residents) = create_test_home(home_seed, resident_count);
+        let (home, _moderator, _residents) = create_test_home(home_seed, resident_count);
         self.home = Some(home);
         self
     }
@@ -366,12 +366,12 @@ mod tests {
 
     #[test]
     fn test_create_test_home() {
-        let (home, steward, residents) = create_test_home(1, 3);
+        let (home, moderator, residents) = create_test_home(1, 3);
 
         assert_eq!(residents.len(), 3);
-        assert_eq!(steward, residents[0]);
-        assert!(home.is_resident(&steward));
-        assert!(home.is_steward(&steward));
+        assert_eq!(moderator, residents[0]);
+        assert!(home.is_resident(&moderator));
+        assert!(home.is_moderator(&moderator));
         assert_eq!(home.residents.len(), 3);
     }
 
@@ -400,17 +400,17 @@ mod tests {
 
     #[test]
     fn test_single_home_topology() {
-        let (topology, _home, steward, residents) = create_single_home_topology(1, 3);
+        let (topology, _home, moderator, residents) = create_single_home_topology(1, 3);
 
         assert!(topology.has_social_presence());
-        let home_peers = topology.home_peers();
-        assert_eq!(home_peers.len(), 2); // 3 residents - 1 self = 2 peers
+        let same_home_members = topology.same_home_members();
+        assert_eq!(same_home_members.len(), 2); // 3 residents - 1 self = 2 peers
 
         // All other residents should be home peers
         for resident in &residents[1..] {
-            assert!(home_peers.contains(resident));
+            assert!(same_home_members.contains(resident));
         }
-        assert!(!home_peers.contains(&steward));
+        assert!(!same_home_members.contains(&moderator));
     }
 
     #[test]
@@ -441,10 +441,10 @@ mod tests {
 
     #[test]
     fn test_discovery_layer_with_fixtures() {
-        let (topology, _home, steward, residents) = create_single_home_topology(1, 3);
+        let (topology, _home, moderator, residents) = create_single_home_topology(1, 3);
 
-        // Local authority (steward) should be direct to self
-        assert_eq!(topology.discovery_layer(&steward), DiscoveryLayer::Direct);
+        // Local authority (moderator) should be direct to self
+        assert_eq!(topology.discovery_layer(&moderator), DiscoveryLayer::Direct);
 
         // Home peers are Direct because we have a relationship with them
         assert_eq!(
@@ -457,7 +457,7 @@ mod tests {
         assert_eq!(topology.discovery_layer(&unknown), DiscoveryLayer::Home);
 
         // Test topology without social presence
-        let empty_topology = SocialTopologyBuilder::new(steward).build();
+        let empty_topology = SocialTopologyBuilder::new(moderator).build();
         assert_eq!(
             empty_topology.discovery_layer(&unknown),
             DiscoveryLayer::Rendezvous

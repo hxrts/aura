@@ -51,8 +51,8 @@ pub enum CommandCapability {
     ManageChannel,
     /// Pin/unpin content
     PinContent,
-    /// Grant/revoke steward status
-    GrantSteward,
+    /// Grant/revoke moderator status
+    GrantModerator,
 }
 
 impl CommandCapability {
@@ -73,7 +73,7 @@ impl CommandCapability {
             Self::Invite => "invite",
             Self::ManageChannel => "manage_channel",
             Self::PinContent => "pin_content",
-            Self::GrantSteward => "grant_steward",
+            Self::GrantModerator => "grant_moderator",
         }
     }
 
@@ -94,7 +94,7 @@ impl CommandCapability {
     /// Check if this capability requires admin privileges
     #[must_use]
     pub fn requires_admin(&self) -> bool {
-        matches!(self, Self::GrantSteward)
+        matches!(self, Self::GrantModerator)
     }
 }
 
@@ -164,7 +164,7 @@ pub enum ChatCommand {
         home_id: String,
     },
 
-    /// `/nhlink <home_id>` - Link direct adjacency to a home
+    /// `/nhlink <home_id>` - Link direct one_hop_link to a home
     NhLink {
         /// Home ID to link directly
         home_id: String,
@@ -241,13 +241,13 @@ pub enum ChatCommand {
     },
 
     // === Admin Commands ===
-    /// `/op <user>` - Grant steward capabilities
+    /// `/op <user>` - Grant moderator capabilities
     Op {
         /// User to promote
         target: String,
     },
 
-    /// `/deop <user>` - Revoke steward capabilities
+    /// `/deop <user>` - Revoke moderator capabilities
     Deop {
         /// User to demote
         target: String,
@@ -286,7 +286,7 @@ impl ChatCommand {
             Self::Invite { .. } => CommandCapability::Invite,
             Self::Topic { .. } => CommandCapability::ManageChannel,
             Self::Pin { .. } | Self::Unpin { .. } => CommandCapability::PinContent,
-            Self::Op { .. } | Self::Deop { .. } => CommandCapability::GrantSteward,
+            Self::Op { .. } | Self::Deop { .. } => CommandCapability::GrantModerator,
             Self::Mode { .. } => CommandCapability::ManageChannel,
         }
     }
@@ -835,9 +835,9 @@ pub struct CommandHelp {
 pub enum CommandCategory {
     /// User commands available to everyone
     User,
-    /// Moderator commands for stewards
+    /// Moderator commands for moderators
     Moderator,
-    /// Admin commands for home stewards
+    /// Admin commands for home moderators
     Admin,
 }
 
@@ -943,7 +943,7 @@ pub fn all_command_help() -> Vec<CommandHelp> {
         CommandHelp {
             name: "nhlink",
             syntax: "/nhlink <home_id>",
-            description: "Create direct adjacency to a home",
+            description: "Create direct one_hop_link to a home",
             capability: CommandCapability::None,
             category: CommandCategory::User,
         },
@@ -1029,15 +1029,15 @@ pub fn all_command_help() -> Vec<CommandHelp> {
         CommandHelp {
             name: "op",
             syntax: "/op <user>",
-            description: "Grant steward capabilities to a user",
-            capability: CommandCapability::GrantSteward,
+            description: "Grant moderator capabilities to a user",
+            capability: CommandCapability::GrantModerator,
             category: CommandCategory::Admin,
         },
         CommandHelp {
             name: "deop",
             syntax: "/deop <user>",
-            description: "Revoke steward capabilities from a user",
-            capability: CommandCapability::GrantSteward,
+            description: "Revoke moderator capabilities from a user",
+            capability: CommandCapability::GrantModerator,
             category: CommandCategory::Admin,
         },
         CommandHelp {
@@ -1068,6 +1068,7 @@ pub fn commands_in_category(category: CommandCategory) -> Vec<CommandHelp> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -1421,7 +1422,7 @@ mod tests {
         assert_eq!(cmd.required_capability(), CommandCapability::None);
 
         let cmd = parse_chat_command("/op alice").unwrap();
-        assert_eq!(cmd.required_capability(), CommandCapability::GrantSteward);
+        assert_eq!(cmd.required_capability(), CommandCapability::GrantModerator);
     }
 
     #[test]
@@ -1520,7 +1521,7 @@ mod tests {
         assert!(CommandCapability::ModerateKick.requires_moderator());
         assert!(!CommandCapability::ModerateKick.requires_admin());
 
-        assert!(CommandCapability::GrantSteward.requires_admin());
+        assert!(CommandCapability::GrantModerator.requires_admin());
     }
 
     #[test]

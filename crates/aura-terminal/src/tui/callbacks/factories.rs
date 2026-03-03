@@ -12,7 +12,7 @@ use std::sync::Arc;
 use crate::tui::components::ToastMessage;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
-use crate::tui::types::{MfaPolicy, TraversalDepth};
+use crate::tui::types::{AccessLevel, MfaPolicy};
 use crate::tui::updates::{UiUpdate, UiUpdateSender};
 
 use super::types::*;
@@ -1063,13 +1063,13 @@ impl SettingsCallbacks {
 /// All callbacks for the neighborhood screen
 #[derive(Clone)]
 pub struct NeighborhoodCallbacks {
-    pub on_enter_home: Arc<dyn Fn(String, TraversalDepth) + Send + Sync>,
+    pub on_enter_home: Arc<dyn Fn(String, AccessLevel) + Send + Sync>,
     pub on_go_home: GoHomeCallback,
     pub on_back_to_street: GoHomeCallback,
     pub on_create_home: CreateHomeCallback,
     pub on_create_neighborhood: CreateNeighborhoodCallback,
     pub on_add_home_to_neighborhood: NeighborhoodHomeCallback,
-    pub on_link_home_adjacency: NeighborhoodHomeCallback,
+    pub on_link_home_one_hop_link: NeighborhoodHomeCallback,
 }
 
 impl NeighborhoodCallbacks {
@@ -1085,22 +1085,22 @@ impl NeighborhoodCallbacks {
                 ctx.clone(),
                 tx.clone(),
             ),
-            on_link_home_adjacency: Self::make_link_home_adjacency(ctx, tx),
+            on_link_home_one_hop_link: Self::make_link_home_one_hop_link(ctx, tx),
         }
     }
 
     fn make_enter_home(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
-    ) -> Arc<dyn Fn(String, TraversalDepth) + Send + Sync> {
-        Arc::new(move |home_id: String, depth: TraversalDepth| {
+    ) -> Arc<dyn Fn(String, AccessLevel) + Send + Sync> {
+        Arc::new(move |home_id: String, depth: AccessLevel| {
             let ctx = ctx.clone();
             let tx = tx.clone();
             let home_id_clone = home_id.clone();
             let depth_str = match depth {
-                TraversalDepth::Street => "Street",
-                TraversalDepth::Frontage => "Frontage",
-                TraversalDepth::Interior => "Interior",
+                AccessLevel::Limited => "Limited",
+                AccessLevel::Partial => "Partial",
+                AccessLevel::Full => "Full",
             }
             .to_string();
             let cmd = EffectCommand::MovePosition {
@@ -1130,7 +1130,7 @@ impl NeighborhoodCallbacks {
             let cmd = EffectCommand::MovePosition {
                 neighborhood_id: "current".to_string(),
                 home_id: "home".to_string(),
-                depth: "Interior".to_string(),
+                depth: "Full".to_string(),
             };
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
@@ -1152,7 +1152,7 @@ impl NeighborhoodCallbacks {
             let cmd = EffectCommand::MovePosition {
                 neighborhood_id: "current".to_string(),
                 home_id: "current".to_string(),
-                depth: "Street".to_string(),
+                depth: "Limited".to_string(),
             };
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
@@ -1249,26 +1249,26 @@ impl NeighborhoodCallbacks {
         })
     }
 
-    fn make_link_home_adjacency(
+    fn make_link_home_one_hop_link(
         ctx: Arc<IoContext>,
         tx: UiUpdateSender,
     ) -> NeighborhoodHomeCallback {
         Arc::new(move |home_id: String| {
             let ctx = ctx.clone();
             let tx = tx.clone();
-            let cmd = EffectCommand::LinkHomeAdjacency { home_id };
+            let cmd = EffectCommand::LinkHomeOneHopLink { home_id };
             spawn_ctx(ctx.clone(), async move {
                 match ctx.dispatch(cmd).await {
                     Ok(_) => {
                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::success(
                             "neighborhood",
-                            "Adjacency linked",
+                            "OneHopLink linked",
                         )));
                     }
                     Err(e) => {
                         let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
                             "neighborhood",
-                            format!("Failed to link adjacency: {e}"),
+                            format!("Failed to link one_hop_link: {e}"),
                         )));
                     }
                 }

@@ -124,13 +124,13 @@ pub fn run_telltale_parity_file_lane(
     validate_telltale_mapping_surfaces(&baseline).map_err(|missing| {
         TelltaleParityError::LoadArtifact {
             path: input.baseline_path.display().to_string(),
-            message: format!("missing required surface: {:?}", missing),
+            message: format!("missing required surface: {missing:?}"),
         }
     })?;
     validate_telltale_mapping_surfaces(&candidate).map_err(|missing| {
         TelltaleParityError::LoadArtifact {
             path: input.telltale_candidate_path.display().to_string(),
-            message: format!("missing required surface: {:?}", missing),
+            message: format!("missing required surface: {missing:?}"),
         }
     })?;
 
@@ -148,10 +148,7 @@ pub fn run_telltale_parity_file_lane(
             DifferentialProfile::Strict => "strict".to_string(),
             DifferentialProfile::EnvelopeBounded => "envelope_bounded".to_string(),
         },
-        first_mismatch_surface: differential
-            .mismatch
-            .as_ref()
-            .and_then(|m| m.surface.clone()),
+        first_mismatch_surface: differential.mismatch.as_ref().and_then(|m| m.surface),
         first_mismatch_step_index: differential.mismatch.as_ref().and_then(|m| m.step_index),
         differential,
     };

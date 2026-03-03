@@ -143,17 +143,17 @@ pub fn get_help_commands() -> Vec<HelpCommand> {
         HelpCommand::new("g", "g", "Go to primary home", "Neighborhood"),
         HelpCommand::new("m", "m", "Create/select neighborhood", "Neighborhood"),
         HelpCommand::new("v", "v", "Add selected home as member", "Neighborhood"),
-        HelpCommand::new("L", "Shift+l", "Link direct adjacency", "Neighborhood"),
+        HelpCommand::new("L", "Shift+l", "Link direct one_hop_link", "Neighborhood"),
         // Traversal depth descriptions
-        HelpCommand::new("Street", "", "View blocks, no interaction", "Neighborhood"),
+        HelpCommand::new("Limited", "", "View blocks, no interaction", "Neighborhood"),
         HelpCommand::new(
-            "Frontage",
+            "Partial",
             "",
             "Limited interaction, request entry",
             "Neighborhood",
         ),
         HelpCommand::new(
-            "Interior",
+            "Full",
             "",
             "Full access to resident/channel views",
             "Neighborhood",

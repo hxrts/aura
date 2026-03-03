@@ -1095,12 +1095,12 @@ impl AuraEffectSystem {
         let token = biscuit!(
             r#"
             authority({authority});
-            role("owner");
+            role("member");
             capability("read");
             capability("write");
             capability("execute");
             capability("delegate");
-            capability("admin");
+            capability("moderator");
             capability("flow_charge");
         "#
         )

@@ -56,7 +56,7 @@ module protocol_consensus_liveness {
 
     var byzantineCount: int                             // Count of Byzantine witnesses
 
-    // Gossip graph: adjacency list representation
+    // Gossip graph: one_hop_link list representation
     var gossipGraph: core::AuthorityId -> Set[core::AuthorityId]
 
     // Note: globalEvidenceTracker is owned by core module, not liveness

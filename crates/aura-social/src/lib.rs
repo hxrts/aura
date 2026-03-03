@@ -17,8 +17,8 @@
 //!
 //! Facts (data structures) live in `aura-social::facts`:
 //! - `HomeId`, `NeighborhoodId` - Identifiers
-//! - `HomeFact`, `ResidentFact`, `StewardFact` - Home facts
-//! - `NeighborhoodFact`, `HomeMemberFact`, `AdjacencyFact` - Neighborhood facts
+//! - `HomeFact`, `ResidentFact`, `ModeratorFact` - Home facts
+//! - `NeighborhoodFact`, `HomeMemberFact`, `OneHopLinkFact` - Neighborhood facts
 //!
 //! Services (business logic) live in this crate:
 //! - Membership validation
@@ -33,7 +33,7 @@
 //! use aura_social::facts::{HomeFact, ResidentFact};
 //!
 //! // Build a Home view from journal facts
-//! let home = Home::from_facts(&home_fact, &residents, &stewards);
+//! let home = Home::from_facts(&home_fact, &residents, &moderators);
 //!
 //! // Check membership
 //! if home.is_resident(&authority_id) {
@@ -42,7 +42,7 @@
 //!
 //! // Build social topology for relay selection
 //! let topology = SocialTopology::from_journal(&journal, local_authority);
-//! let home_peers = topology.home_peers();
+//! let same_home_members = topology.same_home_members();
 //! ```
 
 pub mod access;
@@ -59,14 +59,33 @@ pub mod topology;
 
 /// Operation category map (A/B/C) for protocol gating and review.
 pub const OPERATION_CATEGORIES: &[(&str, &str)] = &[
+    // Category A: read-only social queries
+    ("social:neighborhood-list-members", "A"),
+    ("social:neighborhood-compute-access-level", "A"),
+    ("social:neighborhood-view-routes", "A"),
+    // Category B: monotone additions
     ("social:home-create", "B"),
     ("social:home-delete", "B"),
     ("social:resident-join", "B"),
     ("social:resident-leave", "B"),
-    ("social:steward-grant", "B"),
-    ("social:steward-revoke", "B"),
+    ("social:moderator-grant", "B"),
+    ("social:moderator-revoke", "B"),
     ("social:neighborhood-create", "B"),
     ("social:neighborhood-join", "B"),
+    ("social:neighborhood-propose-join", "B"),
+    ("social:neighborhood-accept-join", "B"),
+    // Category C: non-monotone neighborhood mutations
+    ("social:neighborhood-remove-member", "C"),
+    ("social:neighborhood-policy-change", "C"),
+    ("social:neighborhood-override-change", "C"),
+];
+
+/// Neighborhood authority invariants.
+pub const NEIGHBORHOOD_INVARIANTS: &[&str] = &[
+    "InvariantNeighborhoodMemberType",
+    "InvariantNeighborhoodMembershipUnique",
+    "InvariantNeighborhoodMembershipFactBacked",
+    "InvariantNeighborhoodViewDeterministic",
 ];
 
 /// Lookup the operation category (A/B/C) for a given operation.
@@ -78,15 +97,17 @@ pub fn operation_category(operation: &str) -> Option<&'static str> {
 }
 
 // Re-export primary types
-pub use access::TraversalService;
+pub use access::{
+    determine_access_level, determine_default_access_level, minimum_hop_distance, TraversalService,
+};
 pub use availability::{HomeAvailability, NeighborhoodAvailability};
 pub use error::SocialError;
 pub use facts::{SocialFact, SocialFactReducer, SOCIAL_FACT_TYPE_ID};
 pub use home::Home;
 pub use moderation::{
     is_user_banned, is_user_muted, query_current_bans, query_current_mutes, query_kick_history,
-    register_moderation_facts, BanStatus, HomeBanFact, HomeGrantStewardFact, HomeKickFact,
-    HomeMuteFact, HomeRevokeStewardFact, HomeUnbanFact, HomeUnmuteFact, KickRecord, MuteStatus,
+    register_moderation_facts, BanStatus, HomeBanFact, HomeGrantModeratorFact, HomeKickFact,
+    HomeMuteFact, HomeRevokeModeratorFact, HomeUnbanFact, HomeUnmuteFact, KickRecord, MuteStatus,
 };
 pub use neighborhood::Neighborhood;
 pub use relay::{ReachabilityChecker, RelayCandidateBuilder};
@@ -95,8 +116,8 @@ pub use topology::{DiscoveryLayer, SocialTopology};
 
 // Re-export fact types for convenience
 pub use crate::facts::{
-    AdjacencyFact, HomeConfigFact, HomeFact, HomeId, HomeMemberFact, HomeMessageMemberFact,
-    HomeStorageBudget, NeighborhoodFact, NeighborhoodId, PinnedContentFact, ResidentFact,
-    SocialFactError, StewardCapabilities, StewardFact, TraversalAllowedFact, TraversalDepth,
-    TraversalPosition,
+    AccessLevel, AccessOverrideFact, HomeConfigFact, HomeFact, HomeId, HomeMemberFact,
+    HomeMessageMemberFact, HomeStorageBudget, ModeratorCapabilities, ModeratorFact,
+    NeighborhoodFact, NeighborhoodId, OneHopLinkFact, PinnedFact, ResidentFact, SocialFactError,
+    TraversalAllowedFact, TraversalPosition,
 };

@@ -51,7 +51,7 @@ async fn test_ctx(
 }
 
 #[tokio::test]
-async fn capability_denied_emits_error_signal() {
+async fn invalid_moderation_request_emits_error_signal() {
     let (app_core, ctx, _dir) = test_ctx(true).await;
 
     let _ = ctx
@@ -62,7 +62,7 @@ async fn capability_denied_emits_error_signal() {
         })
         .await;
     let err = wait_for_error(&app_core).await;
-    assert_eq!(err.code(), "AUTH_CAPABILITY");
+    assert_eq!(err.code(), "USER_ACTION");
 }
 
 #[tokio::test]

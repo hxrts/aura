@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct BanStatus {
     /// Authority ID of the banned user
     pub banned_authority: AuthorityId,
-    /// Authority ID of the steward who issued the ban
+    /// Authority ID of the moderator who issued the ban
     pub actor_authority: AuthorityId,
     /// Reason for the ban
     pub reason: String,
@@ -25,7 +25,7 @@ pub struct BanStatus {
 pub struct MuteStatus {
     /// Authority ID of the muted user
     pub muted_authority: AuthorityId,
-    /// Authority ID of the steward who issued the mute
+    /// Authority ID of the moderator who issued the mute
     pub actor_authority: AuthorityId,
     /// Duration in seconds (if specified)
     pub duration_secs: Option<u64>,
@@ -42,7 +42,7 @@ pub struct MuteStatus {
 pub struct KickRecord {
     /// Authority ID of the kicked user
     pub kicked_authority: AuthorityId,
-    /// Authority ID of the steward who issued the kick
+    /// Authority ID of the moderator who issued the kick
     pub actor_authority: AuthorityId,
     /// Channel where kick occurred
     pub channel_id: ChannelId,

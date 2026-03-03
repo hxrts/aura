@@ -7,7 +7,7 @@ use crate::{
     signal_defs::{HOMES_SIGNAL, HOMES_SIGNAL_NAME, NEIGHBORHOOD_SIGNAL, NEIGHBORHOOD_SIGNAL_NAME},
     views::{
         home::{HomeState, HomesState},
-        neighborhood::{AdjacencyType, NeighborHome, NeighborhoodState, TraversalPosition},
+        neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition},
     },
     AppCore,
 };
@@ -52,20 +52,20 @@ pub async fn set_context(
 /// 4. Updates neighborhood view state
 ///
 /// Depth values:
-/// - 0: Street level
-/// - 1: Frontage level (default)
-/// - 2: Interior level
+/// - 0: Limited access
+/// - 1: Partial access (default)
+/// - 2: Full access
 pub async fn move_position(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
     depth: &str,
 ) -> Result<(), AuraError> {
-    // Parse the depth string to determine traversal depth
+    // Parse the access-level string to determine traversal depth
     let depth_value = match depth.to_lowercase().as_str() {
-        "street" => 0,
-        "frontage" => 1,
-        "interior" => 2,
-        _ => 1, // Default to frontage
+        "limited" => 0,
+        "partial" => 1,
+        "full" => 2,
+        _ => 1, // Default to partial
     };
 
     let mut core = app_core.write().await;
@@ -215,7 +215,7 @@ pub async fn create_neighborhood(
     Ok(neighborhood_id)
 }
 
-/// Add a home as a member of the active neighborhood and apply donation budget.
+/// Add a home as a member of the active neighborhood and apply allocation budget.
 ///
 /// The workflow is idempotent per home ID for the currently active neighborhood.
 pub async fn add_home_to_neighborhood(
@@ -239,7 +239,7 @@ pub async fn add_home_to_neighborhood(
             neighborhood.add_neighbor(NeighborHome {
                 id: target_home_id,
                 name: target_home_name,
-                adjacency: AdjacencyType::Direct,
+                one_hop_link: OneHopLinkType::Direct,
                 shared_contacts: 0,
                 resident_count: target_resident_count,
                 can_traverse: true,
@@ -272,8 +272,8 @@ pub async fn add_home_to_neighborhood(
     Ok(())
 }
 
-/// Force direct adjacency between local home and the target home in the active neighborhood.
-pub async fn link_home_adjacency(
+/// Force direct one_hop_link between local home and the target home in the active neighborhood.
+pub async fn link_home_one_hop_link(
     app_core: &Arc<RwLock<AppCore>>,
     home_id: &str,
 ) -> Result<(), AuraError> {
@@ -285,7 +285,7 @@ pub async fn link_home_adjacency(
         let target_home_id = resolve_target_home_id(&neighborhood, home_id)?;
         if target_home_id == neighborhood.home_home_id {
             return Err(AuraError::invalid(
-                "Cannot create adjacency from home to itself",
+                "Cannot create one_hop_link from home to itself",
             ));
         }
 
@@ -297,7 +297,7 @@ pub async fn link_home_adjacency(
         let updated_neighbor = NeighborHome {
             id: target_home_id,
             name: target_home_name,
-            adjacency: AdjacencyType::Direct,
+            one_hop_link: OneHopLinkType::Direct,
             shared_contacts: 0,
             resident_count: target_resident_count,
             can_traverse: true,
@@ -374,7 +374,7 @@ pub async fn create_home(
             neighborhood.position = Some(TraversalPosition {
                 current_home_id: home_id,
                 current_home_name: home_name.clone(),
-                depth: 2, // Interior
+                depth: 2, // Full
                 path: vec![home_id],
             });
         } else if neighborhood.home_home_id != home_id && neighborhood.neighbor(&home_id).is_none()
@@ -382,7 +382,7 @@ pub async fn create_home(
             neighborhood.add_neighbor(NeighborHome {
                 id: home_id,
                 name: home_name.clone(),
-                adjacency: AdjacencyType::Direct,
+                one_hop_link: OneHopLinkType::Direct,
                 shared_contacts: 0,
                 resident_count: Some(1),
                 can_traverse: true,
@@ -568,7 +568,7 @@ mod tests {
             neighborhood.add_neighbor(NeighborHome {
                 id: home_b,
                 name: "Beta".to_string(),
-                adjacency: AdjacencyType::Direct,
+                one_hop_link: OneHopLinkType::Direct,
                 shared_contacts: 0,
                 resident_count: Some(1),
                 can_traverse: true,
@@ -576,7 +576,7 @@ mod tests {
             core.views_mut().set_neighborhood(neighborhood);
         }
 
-        move_position(&app_core, &home_b.to_string(), "interior")
+        move_position(&app_core, &home_b.to_string(), "full")
             .await
             .unwrap();
 

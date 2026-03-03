@@ -227,7 +227,7 @@ async fn test_home_resident_operations() {
             println!("  Initial residents: {resident_count}");
             println!("  My role: {role:?}", role = home_state.my_role);
 
-            // User should be owner/steward of their own home
+            // User should be owner/moderator of their own home
             for resident in &home_state.residents {
                 println!(
                     "    Resident: {name} ({role:?})",
@@ -240,44 +240,44 @@ async fn test_home_resident_operations() {
         }
     }
 
-    // Phase 2: Test GrantSteward command
-    println!("\nPhase 2: Test GrantSteward command");
+    // Phase 2: Test GrantModerator command
+    println!("\nPhase 2: Test GrantModerator command");
     let result = ctx
-        .dispatch(EffectCommand::GrantSteward {
+        .dispatch(EffectCommand::GrantModerator {
             channel: None,
             target: "test-user-id".to_string(),
         })
         .await;
 
     match &result {
-        Ok(response) => println!("  GrantSteward response: {response:?}"),
+        Ok(response) => println!("  GrantModerator response: {response:?}"),
         Err(e) => {
             let err_msg = format!("{e:?}");
             if err_msg.contains("Admin") || err_msg.contains("authorization") {
-                println!("  GrantSteward requires Admin privileges (expected)");
+                println!("  GrantModerator requires Admin privileges (expected)");
             } else {
-                println!("  GrantSteward error: {e:?}");
+                println!("  GrantModerator error: {e:?}");
             }
         }
     }
 
-    // Phase 3: Test RevokeSteward command
-    println!("\nPhase 3: Test RevokeSteward command");
+    // Phase 3: Test RevokeModerator command
+    println!("\nPhase 3: Test RevokeModerator command");
     let result = ctx
-        .dispatch(EffectCommand::RevokeSteward {
+        .dispatch(EffectCommand::RevokeModerator {
             channel: None,
             target: "test-user-id".to_string(),
         })
         .await;
 
     match &result {
-        Ok(response) => println!("  RevokeSteward response: {response:?}"),
+        Ok(response) => println!("  RevokeModerator response: {response:?}"),
         Err(e) => {
             let err_msg = format!("{e:?}");
             if err_msg.contains("Admin") || err_msg.contains("authorization") {
-                println!("  RevokeSteward requires Admin privileges (expected)");
+                println!("  RevokeModerator requires Admin privileges (expected)");
             } else {
-                println!("  RevokeSteward error: {e:?}");
+                println!("  RevokeModerator error: {e:?}");
             }
         }
     }

@@ -23,7 +23,7 @@ use crate::tui::state::{
     ChatFocus, ContactsListFocus, CreateInvitationField, DetailFocus, GuardianCeremonyResponse,
     GuardianSetupStep, NeighborhoodMode, QueuedModal, TuiState,
 };
-use crate::tui::types::{Device, TraversalDepth};
+use crate::tui::types::{AccessLevel, Device};
 use aura_core::threshold::AgreementMode;
 use tracing::warn;
 
@@ -717,7 +717,7 @@ pub struct NeighborhoodViewProps {
     pub selected_index: usize,
     pub grid_row: usize,
     pub grid_col: usize,
-    pub enter_depth: TraversalDepth,
+    pub enter_depth: AccessLevel,
     pub selected_neighborhood: usize,
     pub neighborhood_count: usize,
     pub selected_home: usize,
@@ -731,7 +731,7 @@ pub struct NeighborhoodViewProps {
     pub input_buffer: String,
     pub message_scroll: usize,
     pub message_count: usize,
-    pub steward_actions_enabled: bool,
+    pub moderator_actions_enabled: bool,
     // Home create modal
     pub home_create_modal_visible: bool,
     pub home_create_modal_name: String,
@@ -783,7 +783,7 @@ pub fn extract_neighborhood_view_props(state: &TuiState) -> NeighborhoodViewProp
         input_buffer: state.neighborhood.input_buffer.clone(),
         message_scroll: state.neighborhood.message_scroll,
         message_count: state.neighborhood.message_count,
-        steward_actions_enabled: state.neighborhood.steward_actions_enabled,
+        moderator_actions_enabled: state.neighborhood.moderator_actions_enabled,
         // Home create modal
         home_create_modal_visible: home_create_visible,
         home_create_modal_name: home_create_name,

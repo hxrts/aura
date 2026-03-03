@@ -767,7 +767,7 @@ mod neighborhood_screen {
 
         tui.clear_commands();
 
-        // 'b' goes back to street
+        // 'b' goes back to limited
         tui.send_char('b');
         assert!(tui.has_dispatch(|d| matches!(d, DispatchCommand::BackToStreet)));
     }

@@ -18,7 +18,7 @@ use crate::{
     thresholds::{default_channel_threshold, normalize_channel_threshold},
     views::{
         chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
-        home::{HomeState, Resident, ResidentRole},
+        home::{HomeRole, HomeState, Resident},
     },
     AppCore,
 };
@@ -130,8 +130,8 @@ async fn resolve_channel_id_from_state_or_input(
             let is_match = home_id.to_string().eq_ignore_ascii_case(raw)
                 || format!("home:{home_id}").eq_ignore_ascii_case(raw)
                 || (!home_name.is_empty() && home_name.eq_ignore_ascii_case(normalized_name))
-                || (!home_name.is_empty() && format!("#{}", home_name).eq_ignore_ascii_case(raw))
-                || (!home_name.is_empty() && format!("# {}", home_name).eq_ignore_ascii_case(raw));
+                || (!home_name.is_empty() && format!("#{home_name}").eq_ignore_ascii_case(raw))
+                || (!home_name.is_empty() && format!("# {home_name}").eq_ignore_ascii_case(raw));
             is_match.then_some((*home_id, home.is_admin(), home.resident_count))
         })
         .max_by_key(|(_, is_admin, resident_count)| (u8::from(*is_admin), *resident_count))
@@ -183,8 +183,8 @@ async fn matching_channel_ids(
         let is_match = home_id.to_string().eq_ignore_ascii_case(raw)
             || format!("home:{home_id}").eq_ignore_ascii_case(raw)
             || (!home_name.is_empty() && home_name.eq_ignore_ascii_case(normalized_name))
-            || (!home_name.is_empty() && format!("#{}", home_name).eq_ignore_ascii_case(raw))
-            || (!home_name.is_empty() && format!("# {}", home_name).eq_ignore_ascii_case(raw));
+            || (!home_name.is_empty() && format!("#{home_name}").eq_ignore_ascii_case(raw))
+            || (!home_name.is_empty() && format!("# {home_name}").eq_ignore_ascii_case(raw));
         if is_match && !matches.contains(home_id) {
             matches.push(*home_id);
         }
@@ -647,7 +647,7 @@ async fn restore_home_resident_membership(
                 home.add_resident(Resident {
                     id: authority_id,
                     name: authority_id.to_string(),
-                    role: ResidentRole::Resident,
+                    role: HomeRole::Participant,
                     is_online: true,
                     joined_at: joined_at_ms,
                     last_seen: Some(joined_at_ms),
@@ -677,13 +677,13 @@ async fn ensure_home_state_for_channel(
         if home.context_id.is_none() {
             home.context_id = Some(context_id);
         }
-        if let Some(owner) = home.resident_mut(&owner_id) {
-            owner.role = ResidentRole::Owner;
+        if let Some(member) = home.resident_mut(&owner_id) {
+            member.role = HomeRole::Member;
         } else {
             home.add_resident(Resident {
                 id: owner_id,
                 name: owner_id.to_string(),
-                role: ResidentRole::Owner,
+                role: HomeRole::Member,
                 is_online: true,
                 joined_at: now_ms,
                 last_seen: Some(now_ms),
@@ -698,7 +698,7 @@ async fn ensure_home_state_for_channel(
             home.add_resident(Resident {
                 id: *member,
                 name: member.to_string(),
-                role: ResidentRole::Resident,
+                role: HomeRole::Participant,
                 is_online: true,
                 joined_at: now_ms,
                 last_seen: Some(now_ms),
@@ -720,7 +720,7 @@ async fn ensure_home_state_for_channel(
             home.add_resident(Resident {
                 id: *member,
                 name: member.to_string(),
-                role: ResidentRole::Resident,
+                role: HomeRole::Participant,
                 is_online: true,
                 joined_at: now_ms,
                 last_seen: Some(now_ms),
@@ -1764,13 +1764,13 @@ pub async fn invite_authority_to_channel(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::default_trait_access, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::runtime_bridge::InvitationBridgeStatus;
     use crate::signal_defs::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};
     use crate::views::contacts::{Contact, ContactsState};
-    use crate::views::home::{BanRecord, HomeState, HomesState, MuteRecord, ResidentRole};
+    use crate::views::home::{BanRecord, HomeRole, HomeState, HomesState, MuteRecord};
     use crate::workflows::signals::emit_signal;
     use crate::AppConfig;
 
@@ -2192,7 +2192,7 @@ mod tests {
         let home_id = ChannelId::from_bytes(hash(b"messaging-empty-residents-home"));
 
         let mut home = HomeState::new(home_id, Some("shared".to_string()), owner, 0, context_id);
-        home.my_role = ResidentRole::Resident;
+        home.my_role = HomeRole::Participant;
         home.residents.clear();
         home.resident_count = 0;
         home.online_count = 0;
@@ -2226,7 +2226,7 @@ mod tests {
         let home_id = ChannelId::from_bytes(hash(b"messaging-muted-home"));
 
         let mut home = HomeState::new(home_id, Some("shared".to_string()), owner, 0, context_id);
-        home.my_role = ResidentRole::Resident;
+        home.my_role = HomeRole::Participant;
         home.residents.clear();
         home.resident_count = 0;
         home.online_count = 0;
@@ -2325,7 +2325,7 @@ mod tests {
             0,
             context_id,
         );
-        moderation_home.my_role = ResidentRole::Resident;
+        moderation_home.my_role = HomeRole::Participant;
         moderation_home.residents.clear();
         moderation_home.resident_count = 0;
         moderation_home.online_count = 0;

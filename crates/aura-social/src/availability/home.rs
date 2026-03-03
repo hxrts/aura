@@ -82,7 +82,7 @@ where
 
     /// Get replication peers (other residents).
     fn replication_peers_internal(&self) -> Vec<AuthorityId> {
-        self.home_instance.home_peers(&self.local_authority)
+        self.home_instance.same_home_members(&self.local_authority)
     }
 
     /// Check storage capacity for a store operation.
@@ -90,7 +90,7 @@ where
         let budget = &self.home_instance.storage_budget;
         if !StorageService::can_pin(budget, size) {
             let used = budget.resident_storage_spent
-                + budget.neighborhood_donations
+                + budget.neighborhood_allocations
                 + budget.pinned_storage_spent;
             return Err(AvailabilityError::CapacityExceeded {
                 used,
@@ -223,7 +223,7 @@ struct RetrieveResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facts::{HomeFact, ResidentFact, StewardFact};
+    use crate::facts::{HomeFact, ModeratorFact, ResidentFact};
     use aura_core::effects::{
         network::NetworkError, storage::StorageError, NetworkCoreEffects, NetworkExtendedEffects,
         StorageCoreEffects, StorageExtendedEffects,
@@ -240,12 +240,12 @@ mod tests {
 
     fn test_home() -> Home {
         let home_id = HomeId::from_bytes([1u8; 32]);
-        let steward = AuthorityId::new_from_entropy([1u8; 32]);
+        let moderator = AuthorityId::new_from_entropy([1u8; 32]);
 
         let home_fact = HomeFact::new(home_id, test_timestamp());
 
         let residents = vec![
-            ResidentFact::new(steward, home_id, test_timestamp()),
+            ResidentFact::new(moderator, home_id, test_timestamp()),
             ResidentFact::new(
                 AuthorityId::new_from_entropy([2u8; 32]),
                 home_id,
@@ -258,9 +258,9 @@ mod tests {
             ),
         ];
 
-        let stewards = vec![StewardFact::new(steward, home_id, test_timestamp())];
+        let moderators = vec![ModeratorFact::new(moderator, home_id, test_timestamp())];
 
-        Home::from_facts(&home_fact, None, &residents, &stewards)
+        Home::from_facts(&home_fact, None, &residents, &moderators)
     }
 
     struct DummyStorage;

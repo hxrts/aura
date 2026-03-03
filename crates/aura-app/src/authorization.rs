@@ -6,9 +6,7 @@
 //! - `CommandCapability` helpers: Role-based capability checking
 //! - `require_*` helpers: Pre-check functions for authorization
 
-use crate::{
-    views::home::ResidentRole, workflows::chat_commands::CommandCapability, StateSnapshot,
-};
+use crate::{views::home::HomeRole, workflows::chat_commands::CommandCapability, StateSnapshot};
 use aura_core::AuraError;
 
 // ============================================================================
@@ -22,7 +20,7 @@ use aura_core::AuraError;
 /// - **Public**: No authorization required (read-only, status queries)
 /// - **Basic**: User token required (normal user operations)
 /// - **Sensitive**: Elevated authorization (account modifications)
-/// - **Admin**: Steward/admin capabilities (privileged operations)
+/// - **Admin**: Moderator/admin capabilities (privileged operations)
 ///
 /// Levels are ordered: Public < Basic < Sensitive < Admin
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -33,7 +31,7 @@ pub enum CommandAuthorizationLevel {
     Basic,
     /// Elevated authorization - account/device modifications
     Sensitive,
-    /// Admin/steward capabilities - moderation and privileged ops
+    /// Admin/moderator capabilities - moderation and privileged ops
     Admin,
 }
 
@@ -87,12 +85,12 @@ impl std::fmt::Display for CommandAuthorizationLevel {
 // Role-Based Authorization Checks
 // ============================================================================
 
-/// Require admin or owner role in the current home.
+/// Require elevated home role in the current home.
 pub fn require_admin(snapshot: Option<&StateSnapshot>, operation: &str) -> Result<(), AuraError> {
     let role = snapshot.and_then(|s| s.homes.current_home().map(|h| h.my_role));
     match role {
-        Some(ResidentRole::Admin | ResidentRole::Owner) => Ok(()),
-        Some(ResidentRole::Resident) => Err(AuraError::agent(format!(
+        Some(HomeRole::Moderator | HomeRole::Member) => Ok(()),
+        Some(HomeRole::Participant) => Err(AuraError::agent(format!(
             "Permission denied: {operation} requires administrator privileges",
         ))),
         None => Err(AuraError::agent(format!(
@@ -104,8 +102,8 @@ pub fn require_admin(snapshot: Option<&StateSnapshot>, operation: &str) -> Resul
 /// Check if the given role can use a command capability.
 ///
 /// This is a pure function that checks role-to-capability mapping.
-/// All users can use basic capabilities; admin capabilities require Admin/Owner role.
-pub fn role_has_capability(role: Option<ResidentRole>, capability: &CommandCapability) -> bool {
+/// All users can use basic capabilities; elevated capabilities require Member/Moderator role.
+pub fn role_has_capability(role: Option<HomeRole>, capability: &CommandCapability) -> bool {
     // None capability requires no permission
     if matches!(capability, CommandCapability::None) {
         return true;
@@ -135,8 +133,8 @@ pub fn role_has_capability(role: Option<ResidentRole>, capability: &CommandCapab
         | CommandCapability::Invite
         | CommandCapability::ManageChannel
         | CommandCapability::PinContent
-        | CommandCapability::GrantSteward => {
-            matches!(role, ResidentRole::Admin | ResidentRole::Owner)
+        | CommandCapability::GrantModerator => {
+            matches!(role, HomeRole::Moderator | HomeRole::Member)
         }
     }
 }
@@ -146,7 +144,7 @@ pub fn role_has_capability(role: Option<ResidentRole>, capability: &CommandCapab
 /// Returns an error message if the authorization check fails.
 pub fn check_authorization_level(
     level: CommandAuthorizationLevel,
-    role: Option<ResidentRole>,
+    role: Option<HomeRole>,
     operation_name: &str,
 ) -> Result<(), String> {
     match level {
@@ -154,8 +152,8 @@ pub fn check_authorization_level(
         | CommandAuthorizationLevel::Basic
         | CommandAuthorizationLevel::Sensitive => Ok(()),
         CommandAuthorizationLevel::Admin => match role {
-            Some(ResidentRole::Admin | ResidentRole::Owner) => Ok(()),
-            Some(ResidentRole::Resident) => Err(format!(
+            Some(HomeRole::Moderator | HomeRole::Member) => Ok(()),
+            Some(HomeRole::Participant) => Err(format!(
                 "Permission denied: {operation_name} requires administrator privileges"
             )),
             None => Err(format!(
@@ -166,11 +164,11 @@ pub fn check_authorization_level(
 }
 
 /// Get the minimum role required for a command authorization level.
-pub fn minimum_role_for_level(level: CommandAuthorizationLevel) -> Option<ResidentRole> {
+pub fn minimum_role_for_level(level: CommandAuthorizationLevel) -> Option<HomeRole> {
     match level {
         CommandAuthorizationLevel::Public | CommandAuthorizationLevel::Basic => None,
-        CommandAuthorizationLevel::Sensitive => Some(ResidentRole::Resident),
-        CommandAuthorizationLevel::Admin => Some(ResidentRole::Admin),
+        CommandAuthorizationLevel::Sensitive => Some(HomeRole::Participant),
+        CommandAuthorizationLevel::Admin => Some(HomeRole::Moderator),
     }
 }
 
@@ -226,7 +224,7 @@ mod tests {
     fn test_role_has_capability_none() {
         assert!(role_has_capability(None, &CommandCapability::None));
         assert!(role_has_capability(
-            Some(ResidentRole::Resident),
+            Some(HomeRole::Participant),
             &CommandCapability::None
         ));
     }
@@ -235,15 +233,15 @@ mod tests {
     fn test_role_has_capability_basic() {
         // All roles can send messages
         assert!(role_has_capability(
-            Some(ResidentRole::Resident),
+            Some(HomeRole::Participant),
             &CommandCapability::SendMessage
         ));
         assert!(role_has_capability(
-            Some(ResidentRole::Admin),
+            Some(HomeRole::Moderator),
             &CommandCapability::SendMessage
         ));
         assert!(role_has_capability(
-            Some(ResidentRole::Owner),
+            Some(HomeRole::Member),
             &CommandCapability::SendMessage
         ));
     }
@@ -261,25 +259,25 @@ mod tests {
     fn test_role_has_capability_moderation() {
         // Moderation requires Admin or Owner
         assert!(!role_has_capability(
-            Some(ResidentRole::Resident),
+            Some(HomeRole::Participant),
             &CommandCapability::ModerateKick
         ));
         assert!(role_has_capability(
-            Some(ResidentRole::Admin),
+            Some(HomeRole::Moderator),
             &CommandCapability::ModerateKick
         ));
         assert!(role_has_capability(
-            Some(ResidentRole::Owner),
+            Some(HomeRole::Member),
             &CommandCapability::ModerateKick
         ));
 
         assert!(!role_has_capability(
-            Some(ResidentRole::Resident),
-            &CommandCapability::GrantSteward
+            Some(HomeRole::Participant),
+            &CommandCapability::GrantModerator
         ));
         assert!(role_has_capability(
-            Some(ResidentRole::Admin),
-            &CommandCapability::GrantSteward
+            Some(HomeRole::Moderator),
+            &CommandCapability::GrantModerator
         ));
     }
 
@@ -293,7 +291,7 @@ mod tests {
         // Admin level fails without admin role
         assert!(check_authorization_level(
             CommandAuthorizationLevel::Admin,
-            Some(ResidentRole::Resident),
+            Some(HomeRole::Participant),
             "Kick"
         )
         .is_err());
@@ -301,15 +299,15 @@ mod tests {
         // Admin level succeeds with admin role
         assert!(check_authorization_level(
             CommandAuthorizationLevel::Admin,
-            Some(ResidentRole::Admin),
+            Some(HomeRole::Moderator),
             "Kick"
         )
         .is_ok());
 
-        // Admin level succeeds with owner role
+        // Admin level succeeds with member role
         assert!(check_authorization_level(
             CommandAuthorizationLevel::Admin,
-            Some(ResidentRole::Owner),
+            Some(HomeRole::Member),
             "Kick"
         )
         .is_ok());
@@ -327,11 +325,11 @@ mod tests {
         );
         assert_eq!(
             minimum_role_for_level(CommandAuthorizationLevel::Sensitive),
-            Some(ResidentRole::Resident)
+            Some(HomeRole::Participant)
         );
         assert_eq!(
             minimum_role_for_level(CommandAuthorizationLevel::Admin),
-            Some(ResidentRole::Admin)
+            Some(HomeRole::Moderator)
         );
     }
 }

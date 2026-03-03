@@ -192,10 +192,10 @@ pub enum DispatchCommand {
     AddHomeToNeighborhood {
         home_id: String,
     },
-    /// Link selected home adjacency as direct
-    LinkSelectedHomeAdjacency,
-    /// Link explicit home adjacency as direct
-    LinkHomeAdjacency {
+    /// Link selected home one_hop_link as direct
+    LinkSelectedHomeOneHopLink,
+    /// Link explicit home one_hop_link as direct
+    LinkHomeOneHopLink {
         home_id: String,
     },
 

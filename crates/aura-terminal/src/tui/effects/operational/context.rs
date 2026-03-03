@@ -15,8 +15,8 @@ use super::EffectCommand;
 
 // Re-export workflows for convenience
 pub use aura_app::ui::workflows::context::{
-    add_home_to_neighborhood, create_home, create_neighborhood, link_home_adjacency, move_position,
-    set_context,
+    add_home_to_neighborhood, create_home, create_neighborhood, link_home_one_hop_link,
+    move_position, set_context,
 };
 pub use aura_app::ui::workflows::invitation::accept_pending_home_invitation;
 
@@ -103,11 +103,11 @@ pub async fn handle_context(
             }
         }
 
-        EffectCommand::LinkHomeAdjacency { home_id } => {
-            match link_home_adjacency(app_core, home_id).await {
+        EffectCommand::LinkHomeOneHopLink { home_id } => {
+            match link_home_one_hop_link(app_core, home_id).await {
                 Ok(()) => Some(Ok(OpResponse::Ok)),
                 Err(e) => Some(Err(super::types::OpError::Failed(format!(
-                    "Failed to link home adjacency: {e}"
+                    "Failed to link home one_hop_link: {e}"
                 )))),
             }
         }

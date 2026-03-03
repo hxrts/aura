@@ -60,6 +60,7 @@ pub mod workflows {
     pub use crate::workflows::ids;
     pub use crate::workflows::invitation;
     pub use crate::workflows::moderation;
+    pub use crate::workflows::moderator;
     pub use crate::workflows::network;
     pub use crate::workflows::privacy;
     pub use crate::workflows::query;
@@ -67,7 +68,6 @@ pub mod workflows {
     pub use crate::workflows::settings;
     pub use crate::workflows::signals;
     pub use crate::workflows::snapshot;
-    pub use crate::workflows::steward;
     pub use crate::workflows::strong_command;
     pub use crate::workflows::sync;
     pub use crate::workflows::system;
@@ -132,12 +132,12 @@ pub mod types {
     pub use crate::views::naming::EffectiveName;
     pub use crate::views::{
         classify_threshold_security, format_recovery_status, security_level_hint, AccountBackup,
-        AccountConfig, AdjacencyType, BanRecord, CeremonyProgress, Channel, ChannelType, ChatState,
-        Contact, ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeState, HomesState,
+        AccountConfig, BanRecord, CeremonyProgress, Channel, ChannelType, ChatState, Contact,
+        ContactsState, Guardian, GuardianBinding, GuardianStatus, HomeRole, HomeState, HomesState,
         Invitation, InvitationDirection, InvitationStatus, InvitationsState, KickRecord, Message,
         MessageDeliveryStatus, MuteRecord, MySuggestion, NeighborHome, NeighborhoodState,
-        RecoveryApproval, RecoveryProcess, RecoveryProcessStatus, RecoveryState, Resident,
-        ResidentRole, SecurityLevel, SuggestionPolicy, TraversalPosition, BACKUP_PREFIX,
+        OneHopLinkType, RecoveryApproval, RecoveryProcess, RecoveryProcessStatus, RecoveryState,
+        Resident, SecurityLevel, SuggestionPolicy, TraversalPosition, BACKUP_PREFIX,
         BACKUP_VERSION,
     };
     pub use crate::workflows::account::{

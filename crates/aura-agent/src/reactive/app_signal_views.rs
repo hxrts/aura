@@ -15,10 +15,7 @@ use aura_app::signal_defs::{
 use aura_app::views::{
     chat::{Channel, ChannelType, ChatState, Message, MessageDeliveryStatus},
     contacts::{Contact, ContactError, ContactsState},
-    home::{
-        BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta, Resident,
-        ResidentRole,
-    },
+    home::{BanRecord, HomeRole, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta},
     invitations::{
         Invitation, InvitationDirection, InvitationStatus, InvitationType, InvitationsState,
     },
@@ -50,9 +47,9 @@ use aura_social::moderation::facts::{
     HomePinFact, HomeUnpinFact, HOME_PIN_FACT_TYPE_ID, HOME_UNPIN_FACT_TYPE_ID,
 };
 use aura_social::moderation::{
-    HomeBanFact, HomeGrantStewardFact, HomeKickFact, HomeMuteFact, HomeRevokeStewardFact,
-    HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID, HOME_GRANT_STEWARD_FACT_TYPE_ID,
-    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_REVOKE_STEWARD_FACT_TYPE_ID,
+    HomeBanFact, HomeGrantModeratorFact, HomeKickFact, HomeMuteFact, HomeRevokeModeratorFact,
+    HomeUnbanFact, HomeUnmuteFact, HOME_BAN_FACT_TYPE_ID, HOME_GRANT_MODERATOR_FACT_TYPE_ID,
+    HOME_KICK_FACT_TYPE_ID, HOME_MUTE_FACT_TYPE_ID, HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
     HOME_UNBAN_FACT_TYPE_ID, HOME_UNMUTE_FACT_TYPE_ID,
 };
 
@@ -615,7 +612,7 @@ impl HomeSignalView {
         );
         // Placeholder state exists to host moderation facts for shared contexts
         // that have not been materialized as local homes yet.
-        placeholder.my_role = ResidentRole::Resident;
+        placeholder.my_role = HomeRole::Participant;
         placeholder.residents.clear();
         placeholder.online_count = 0;
         placeholder.resident_count = 0;
@@ -723,48 +720,36 @@ impl ReactiveView for HomeSignalView {
                         }
                     }
                 }
-                HOME_GRANT_STEWARD_FACT_TYPE_ID => {
-                    if let Some(grant) = HomeGrantStewardFact::from_envelope(envelope) {
+                HOME_GRANT_MODERATOR_FACT_TYPE_ID => {
+                    if let Some(grant) = HomeGrantModeratorFact::from_envelope(envelope) {
                         if let Some(resident) = home_state.resident_mut(&grant.target_authority) {
-                            resident.role = ResidentRole::Admin;
-                        } else {
-                            home_state.add_resident(Resident {
-                                id: grant.target_authority,
-                                name: grant.target_authority.to_string(),
-                                role: ResidentRole::Admin,
-                                is_online: true,
-                                joined_at: grant.granted_at.ts_ms,
-                                last_seen: Some(grant.granted_at.ts_ms),
-                                storage_allocated: HomeState::RESIDENT_ALLOCATION,
-                            });
+                            if matches!(resident.role, HomeRole::Member | HomeRole::Moderator) {
+                                resident.role = HomeRole::Moderator;
+                                changed = true;
+                            }
                         }
-                        if grant.target_authority == self.own_authority {
-                            home_state.my_role = ResidentRole::Admin;
+                        if grant.target_authority == self.own_authority
+                            && matches!(home_state.my_role, HomeRole::Member | HomeRole::Moderator)
+                        {
+                            home_state.my_role = HomeRole::Moderator;
+                            changed = true;
                         }
-                        changed = true;
                     }
                 }
-                HOME_REVOKE_STEWARD_FACT_TYPE_ID => {
-                    if let Some(revoke) = HomeRevokeStewardFact::from_envelope(envelope) {
+                HOME_REVOKE_MODERATOR_FACT_TYPE_ID => {
+                    if let Some(revoke) = HomeRevokeModeratorFact::from_envelope(envelope) {
                         if let Some(resident) = home_state.resident_mut(&revoke.target_authority) {
-                            if !matches!(resident.role, ResidentRole::Owner) {
-                                resident.role = ResidentRole::Resident;
+                            if matches!(resident.role, HomeRole::Moderator) {
+                                resident.role = HomeRole::Member;
+                                changed = true;
                             }
-                        } else {
-                            home_state.add_resident(Resident {
-                                id: revoke.target_authority,
-                                name: revoke.target_authority.to_string(),
-                                role: ResidentRole::Resident,
-                                is_online: true,
-                                joined_at: revoke.revoked_at.ts_ms,
-                                last_seen: Some(revoke.revoked_at.ts_ms),
-                                storage_allocated: HomeState::RESIDENT_ALLOCATION,
-                            });
                         }
-                        if revoke.target_authority == self.own_authority {
-                            home_state.my_role = ResidentRole::Resident;
+                        if revoke.target_authority == self.own_authority
+                            && matches!(home_state.my_role, HomeRole::Moderator)
+                        {
+                            home_state.my_role = HomeRole::Member;
+                            changed = true;
                         }
-                        changed = true;
                     }
                 }
                 _ => {}
@@ -916,6 +901,26 @@ impl ChatSignalView {
         }
 
         candidates
+    }
+
+    #[cfg(test)]
+    fn select_moderation_home(
+        homes: &HomesState,
+        context_id: ContextId,
+        channel_id: ChannelId,
+    ) -> Option<HomeState> {
+        if let Some(home) = homes.home_state(&channel_id) {
+            if home.context_id == Some(context_id) {
+                return Some(home.clone());
+            }
+        }
+
+        let candidates = Self::collect_moderation_homes(homes, context_id, channel_id);
+        if candidates.len() == 1 {
+            return candidates.first().cloned();
+        }
+
+        None
     }
 
     async fn sender_allowed_for_context(
@@ -1334,7 +1339,7 @@ mod tests {
     use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
     use aura_social::moderation::facts::{
-        HomeGrantStewardFact, HomePinFact, HomeRevokeStewardFact, HomeUnpinFact,
+        HomeGrantModeratorFact, HomePinFact, HomeRevokeModeratorFact, HomeUnpinFact,
     };
     use aura_social::moderation::HomeBanFact;
 
@@ -1499,7 +1504,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn home_signal_view_updates_steward_roles() {
+    async fn home_signal_view_updates_moderator_roles() {
         let reactive = ReactiveHandler::new();
         let context_id = ContextId::new_from_entropy([3u8; 32]);
         let owner = AuthorityId::new_from_entropy([1u8; 32]);
@@ -1511,7 +1516,7 @@ mod tests {
             home.add_resident(aura_app::views::home::Resident {
                 id: target,
                 name: "target".to_string(),
-                role: aura_app::views::home::ResidentRole::Resident,
+                role: aura_app::views::home::HomeRole::Member,
                 is_online: true,
                 joined_at: 1,
                 last_seen: Some(1),
@@ -1522,7 +1527,7 @@ mod tests {
 
         let view = HomeSignalView::new(target, reactive.clone());
 
-        let grant = HomeGrantStewardFact::new_ms(context_id, target, owner, 100).to_generic();
+        let grant = HomeGrantModeratorFact::new_ms(context_id, target, owner, 100).to_generic();
         view.update(&[fact_from_relational(grant)]).await;
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
@@ -1532,14 +1537,14 @@ mod tests {
             .expect("target resident exists");
         assert!(matches!(
             resident.role,
-            aura_app::views::home::ResidentRole::Admin
+            aura_app::views::home::HomeRole::Moderator
         ));
         assert!(matches!(
             home_state.my_role,
-            aura_app::views::home::ResidentRole::Admin
+            aura_app::views::home::HomeRole::Moderator
         ));
 
-        let revoke = HomeRevokeStewardFact::new_ms(context_id, target, owner, 101).to_generic();
+        let revoke = HomeRevokeModeratorFact::new_ms(context_id, target, owner, 101).to_generic();
         view.update(&[fact_from_relational(revoke)]).await;
 
         let updated = reactive.read(&*HOMES_SIGNAL).await.unwrap();
@@ -1549,11 +1554,11 @@ mod tests {
             .expect("target resident exists");
         assert!(matches!(
             resident.role,
-            aura_app::views::home::ResidentRole::Resident
+            aura_app::views::home::HomeRole::Member
         ));
         assert!(matches!(
             home_state.my_role,
-            aura_app::views::home::ResidentRole::Resident
+            aura_app::views::home::HomeRole::Member
         ));
     }
 
@@ -1587,7 +1592,7 @@ mod tests {
             .expect("unknown context home should be materialized");
         assert!(home_state.mute_list.contains_key(&target));
         assert!(home_state.residents.is_empty());
-        assert!(matches!(home_state.my_role, ResidentRole::Resident));
+        assert!(matches!(home_state.my_role, HomeRole::Participant));
 
         let unmute = HomeUnmuteFact::new_ms(unknown_context, None, target, actor, 200).to_generic();
         view.update(&[fact_from_relational(unmute)]).await;

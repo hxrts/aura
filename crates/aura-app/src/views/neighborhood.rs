@@ -4,10 +4,10 @@ use aura_core::identifiers::ChannelId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// Adjacency type between homes
+/// OneHopLink type between homes
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
-pub enum AdjacencyType {
+pub enum OneHopLinkType {
     /// Direct neighbor (one hop)
     #[default]
     Direct,
@@ -25,8 +25,8 @@ pub struct NeighborHome {
     pub id: ChannelId,
     /// Home name
     pub name: String,
-    /// Type of adjacency
-    pub adjacency: AdjacencyType,
+    /// Type of one_hop_link
+    pub one_hop_link: OneHopLinkType,
     /// Number of shared contacts
     pub shared_contacts: u32,
     /// Resident count (if known)
@@ -137,7 +137,7 @@ impl NeighborhoodState {
     pub fn direct_neighbors(&self) -> impl Iterator<Item = &NeighborHome> {
         self.neighbors
             .iter()
-            .filter(|n| n.adjacency == AdjacencyType::Direct)
+            .filter(|n| n.one_hop_link == OneHopLinkType::Direct)
     }
 
     /// Add a neighbor

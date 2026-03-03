@@ -173,7 +173,7 @@ pub async fn resolve_contact(
     } else if matching.is_empty() {
         Err(AuraError::not_found(format!("User '{target}' not found")))
     } else {
-        let names: Vec<_> = matching.iter().map(|c| effective_name(c)).collect();
+        let names: Vec<_> = matching.iter().map(effective_name).collect();
         Err(AuraError::invalid(format!(
             "Multiple matches for '{}': {}",
             target,
@@ -213,6 +213,7 @@ fn effective_name(contact: &Contact) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::default_trait_access)]
 mod tests {
     use super::*;
     use crate::signal_defs::{CONTACTS_SIGNAL, CONTACTS_SIGNAL_NAME};

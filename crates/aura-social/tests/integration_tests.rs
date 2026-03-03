@@ -10,8 +10,8 @@ use aura_core::effects::relay::{RelayContext, RelayRelationship};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_social::facts::{
-    AdjacencyFact, HomeConfigFact, HomeFact, HomeId, HomeMemberFact, NeighborhoodFact,
-    NeighborhoodId, ResidentFact, StewardFact,
+    HomeConfigFact, HomeFact, HomeId, HomeMemberFact, ModeratorFact, NeighborhoodFact,
+    NeighborhoodId, OneHopLinkFact, ResidentFact,
 };
 use aura_social::{
     DiscoveryLayer, Home, Neighborhood, ReachabilityChecker, RelayCandidateBuilder, SocialTopology,
@@ -66,12 +66,12 @@ fn create_home(home_seed: u8, resident_count: usize) -> (Home, AuthorityId, Vec<
         resident_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
     }
 
-    let steward = residents[0];
-    let steward_facts = vec![StewardFact::new(steward, home_id, timestamp)];
+    let moderator = residents[0];
+    let moderator_facts = vec![ModeratorFact::new(moderator, home_id, timestamp)];
 
-    let home = Home::from_facts(&home_fact, None, &resident_facts, &steward_facts);
+    let home = Home::from_facts(&home_fact, None, &resident_facts, &moderator_facts);
 
-    (home, steward, residents)
+    (home, moderator, residents)
 }
 
 /// Create a neighborhood with the specified homes
@@ -91,16 +91,16 @@ fn create_neighborhood(neighborhood_seed: u8, home_ids: Vec<HomeId>) -> Neighbor
     }
 
     // Create linear adjacencies
-    let mut adjacency_facts = Vec::new();
+    let mut one_hop_link_facts = Vec::new();
     for i in 0..home_ids.len().saturating_sub(1) {
-        adjacency_facts.push(AdjacencyFact::new(
+        one_hop_link_facts.push(OneHopLinkFact::new(
             home_ids[i],
             home_ids[i + 1],
             neighborhood_id,
         ));
     }
 
-    Neighborhood::from_facts(&neighborhood_fact, &member_facts, &adjacency_facts)
+    Neighborhood::from_facts(&neighborhood_fact, &member_facts, &one_hop_link_facts)
 }
 
 // ============================================================================
@@ -127,17 +127,17 @@ impl ReachabilityChecker for NeverReachable {
 
 #[test]
 fn test_discovery_layer_direct_for_self() {
-    let (home, steward, _residents) = create_home(1, 3);
-    let topology = SocialTopology::new(steward, Some(home), vec![]);
+    let (home, moderator, _residents) = create_home(1, 3);
+    let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     // Self is always Direct
-    assert_eq!(topology.discovery_layer(&steward), DiscoveryLayer::Direct);
+    assert_eq!(topology.discovery_layer(&moderator), DiscoveryLayer::Direct);
 }
 
 #[test]
-fn test_discovery_layer_direct_for_home_peers() {
-    let (home, steward, residents) = create_home(1, 5);
-    let topology = SocialTopology::new(steward, Some(home), vec![]);
+fn test_discovery_layer_direct_for_same_home_members() {
+    let (home, moderator, residents) = create_home(1, 5);
+    let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     // All home peers should be Direct (we have a relationship with them)
     for resident in &residents[1..] {
@@ -147,8 +147,8 @@ fn test_discovery_layer_direct_for_home_peers() {
 
 #[test]
 fn test_discovery_layer_home_for_unknown_with_social_presence() {
-    let (home, steward, _residents) = create_home(1, 3);
-    let topology = SocialTopology::new(steward, Some(home), vec![]);
+    let (home, moderator, _residents) = create_home(1, 3);
+    let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     // Unknown peer with home presence should be Home layer
     let unknown = test_authority(99);
@@ -169,13 +169,13 @@ fn test_discovery_layer_rendezvous_without_social_presence() {
 }
 
 #[test]
-fn test_discovery_layer_with_neighborhoods_but_has_home_peers() {
-    let (home1, steward, _residents1) = create_home(1, 3);
+fn test_discovery_layer_with_neighborhoods_but_has_same_home_members() {
+    let (home1, moderator, _residents1) = create_home(1, 3);
     let (home2, _, _residents2) = create_home(2, 3);
 
     let neighborhood = create_neighborhood(1, vec![home1.home_id, home2.home_id]);
 
-    let topology = SocialTopology::new(steward, Some(home1), vec![neighborhood]);
+    let topology = SocialTopology::new(moderator, Some(home1), vec![neighborhood]);
 
     // With home peers available, discovery layer is Home (faster path)
     // Neighborhood layer is only used when we don't have home peers
@@ -184,21 +184,21 @@ fn test_discovery_layer_with_neighborhoods_but_has_home_peers() {
 }
 
 #[test]
-fn test_discovery_layer_neighborhood_without_home_peers() {
+fn test_discovery_layer_neighborhood_without_same_home_members() {
     // Create a single-resident home (no home peers)
-    let (home1, steward, _) = create_home(1, 1);
+    let (home1, moderator, _) = create_home(1, 1);
     let (home2, peer_from_home2, _) = create_home(2, 3);
 
     let neighborhood = create_neighborhood(1, vec![home1.home_id, home2.home_id]);
 
-    let mut topology = SocialTopology::new(steward, Some(home1), vec![neighborhood]);
+    let mut topology = SocialTopology::new(moderator, Some(home1), vec![neighborhood]);
 
     // No home peers, so would fall through to check neighborhoods
     // But we need to add neighborhood peers explicitly
     let neighborhood_id_bytes = *test_neighborhood_id(1).as_bytes();
     topology.add_peer(
         peer_from_home2,
-        RelayRelationship::NeighborhoodPeer {
+        RelayRelationship::NeighborhoodHop {
             neighborhood_id: neighborhood_id_bytes,
         },
     );
@@ -230,18 +230,18 @@ fn test_discovery_layer_priority() {
 // ============================================================================
 
 #[test]
-fn test_relay_candidates_from_home_peers() {
-    let (home, steward, _residents) = create_home(1, 5);
-    let topology = SocialTopology::new(steward, Some(home), vec![]);
+fn test_relay_candidates_from_same_home_members() {
+    let (home, moderator, _residents) = create_home(1, 5);
+    let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     // Get home peers
-    let home_peers = topology.home_peers();
-    assert_eq!(home_peers.len(), 4); // 5 residents - 1 self
+    let same_home_members = topology.same_home_members();
+    assert_eq!(same_home_members.len(), 4); // 5 residents - 1 self
 
     // Generate relay candidates using the builder
     let builder = RelayCandidateBuilder::from_topology(topology);
     let destination = test_authority(99);
-    let context = test_context(steward, destination);
+    let context = test_context(moderator, destination);
     let candidates = builder.build_candidates(&context, &AlwaysReachable);
 
     // Should have candidates from home peers
@@ -265,12 +265,12 @@ fn test_relay_candidate_builder_with_empty_topology() {
 
 #[test]
 fn test_relay_candidate_builder_with_reachability_filter() {
-    let (home, steward, _residents) = create_home(1, 3);
-    let topology = SocialTopology::new(steward, Some(home), vec![]);
+    let (home, moderator, _residents) = create_home(1, 3);
+    let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     let builder = RelayCandidateBuilder::from_topology(topology);
     let destination = test_authority(99);
-    let context = test_context(steward, destination);
+    let context = test_context(moderator, destination);
 
     // With NeverReachable, reachable candidates should be empty
     let reachable_candidates = builder.build_reachable_candidates(&context, &NeverReachable);
@@ -287,10 +287,10 @@ fn test_relay_candidate_builder_with_reachability_filter() {
 
 #[test]
 fn test_home_resident_query() {
-    let (home, steward, residents) = create_home(1, 5);
+    let (home, moderator, residents) = create_home(1, 5);
 
-    // Steward should be a resident
-    assert!(home.is_resident(&steward));
+    // Moderator should be a resident
+    assert!(home.is_resident(&moderator));
 
     // All residents should be residents
     for resident in &residents {
@@ -303,15 +303,15 @@ fn test_home_resident_query() {
 }
 
 #[test]
-fn test_home_steward_query() {
-    let (home, steward, residents) = create_home(1, 3);
+fn test_home_moderator_query() {
+    let (home, moderator, residents) = create_home(1, 3);
 
-    // Steward should be a steward
-    assert!(home.is_steward(&steward));
+    // Moderator should be a moderator
+    assert!(home.is_moderator(&moderator));
 
-    // Other residents are not stewards
+    // Other residents are not moderators
     for resident in &residents[1..] {
-        assert!(!home.is_steward(resident));
+        assert!(!home.is_moderator(resident));
     }
 }
 
@@ -332,7 +332,7 @@ fn test_home_available_slots() {
 // ============================================================================
 
 #[test]
-fn test_neighborhood_adjacency() {
+fn test_neighborhood_one_hop_link() {
     let home_ids: Vec<HomeId> = (1..=4).map(test_home_id).collect();
     let neighborhood = create_neighborhood(1, home_ids.clone());
 
@@ -384,21 +384,21 @@ fn test_neighborhood_adjacent_homes() {
 
 #[test]
 fn test_topology_has_social_presence() {
-    let (home, steward, _) = create_home(1, 3);
+    let (home, moderator, _) = create_home(1, 3);
 
     // With home
-    let topology_with_home = SocialTopology::new(steward, Some(home), vec![]);
+    let topology_with_home = SocialTopology::new(moderator, Some(home), vec![]);
     assert!(topology_with_home.has_social_presence());
 
     // Without home
-    let topology_empty = SocialTopology::empty(steward);
+    let topology_empty = SocialTopology::empty(moderator);
     assert!(!topology_empty.has_social_presence());
 }
 
 #[test]
 fn test_topology_knows_peer() {
-    let (home, steward, residents) = create_home(1, 3);
-    let topology = SocialTopology::new(steward, Some(home), vec![]);
+    let (home, moderator, residents) = create_home(1, 3);
+    let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     // Should know home peers
     for resident in &residents[1..] {
@@ -412,8 +412,8 @@ fn test_topology_knows_peer() {
 
 #[test]
 fn test_topology_add_guardian() {
-    let (home, steward, _) = create_home(1, 3);
-    let mut topology = SocialTopology::new(steward, Some(home), vec![]);
+    let (home, moderator, _) = create_home(1, 3);
+    let mut topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     let guardian = test_authority(99);
 
@@ -432,8 +432,8 @@ fn test_topology_add_guardian() {
 
 #[test]
 fn test_topology_discovery_context() {
-    let (home, steward, residents) = create_home(1, 5);
-    let topology = SocialTopology::new(steward, Some(home), vec![]);
+    let (home, moderator, residents) = create_home(1, 5);
+    let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     // Check discovery context for unknown peer
     let unknown = test_authority(99);
@@ -492,21 +492,21 @@ fn test_discovery_layer_implies_budget() {
 #[test]
 fn test_multi_home_neighborhood_topology() {
     // Create multiple homes
-    let (home1, steward1, _) = create_home(1, 3);
+    let (home1, moderator1, _) = create_home(1, 3);
     let (home2, _, _) = create_home(2, 3);
     let (home3, _, _) = create_home(3, 3);
 
     // Create neighborhood with all homes
     let neighborhood = create_neighborhood(1, vec![home1.home_id, home2.home_id, home3.home_id]);
 
-    // Create topology for steward1 in home1
-    let topology = SocialTopology::new(steward1, Some(home1), vec![neighborhood.clone()]);
+    // Create topology for moderator1 in home1
+    let topology = SocialTopology::new(moderator1, Some(home1), vec![neighborhood.clone()]);
 
     // Should have home presence
     assert!(topology.has_social_presence());
 
     // Should have 2 home peers
-    assert_eq!(topology.home_peers().len(), 2);
+    assert_eq!(topology.same_home_members().len(), 2);
 
     // Neighborhood should have 3 members
     assert_eq!(neighborhood.member_homes.len(), 3);
@@ -523,14 +523,14 @@ fn test_multi_home_neighborhood_topology() {
 
 #[test]
 fn test_single_resident_home() {
-    let (home, steward, _residents) = create_home(1, 1);
-    let topology = SocialTopology::new(steward, Some(home), vec![]);
+    let (home, moderator, _residents) = create_home(1, 1);
+    let topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     // Should have social presence even with single resident
     assert!(topology.has_social_presence());
 
     // No home peers (only self)
-    assert!(topology.home_peers().is_empty());
+    assert!(topology.same_home_members().is_empty());
 
     // Discovery layer for unknown is Home (have home but no peers to relay)
     let unknown = test_authority(99);
@@ -570,13 +570,13 @@ fn test_home_with_config() {
         .iter()
         .map(|r| ResidentFact::new(*r, home_id, timestamp.clone()))
         .collect();
-    let steward_facts = vec![StewardFact::new(residents[0], home_id, timestamp)];
+    let moderator_facts = vec![ModeratorFact::new(residents[0], home_id, timestamp)];
 
     let home = Home::from_facts(
         &home_fact,
         Some(&config_fact),
         &resident_facts,
-        &steward_facts,
+        &moderator_facts,
     );
 
     // Should have custom max residents
@@ -592,8 +592,8 @@ fn test_home_with_config() {
 
 #[test]
 fn test_guardian_in_relay_candidates() {
-    let (home, steward, _) = create_home(1, 3);
-    let mut topology = SocialTopology::new(steward, Some(home), vec![]);
+    let (home, moderator, _) = create_home(1, 3);
+    let mut topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     let guardian = test_authority(88);
     topology.add_peer(guardian, RelayRelationship::Guardian);
@@ -601,7 +601,7 @@ fn test_guardian_in_relay_candidates() {
     // Build relay candidates
     let builder = RelayCandidateBuilder::from_topology(topology);
     let destination = test_authority(99);
-    let context = test_context(steward, destination);
+    let context = test_context(moderator, destination);
     let candidates = builder.build_candidates(&context, &AlwaysReachable);
 
     // Should include both home peers and guardian
@@ -614,15 +614,15 @@ fn test_guardian_in_relay_candidates() {
 
 #[test]
 fn test_relay_candidate_relationship_types() {
-    let (home, steward, _) = create_home(1, 3);
-    let mut topology = SocialTopology::new(steward, Some(home), vec![]);
+    let (home, moderator, _) = create_home(1, 3);
+    let mut topology = SocialTopology::new(moderator, Some(home), vec![]);
 
     let guardian = test_authority(88);
     topology.add_peer(guardian, RelayRelationship::Guardian);
 
     let builder = RelayCandidateBuilder::from_topology(topology);
     let destination = test_authority(99);
-    let context = test_context(steward, destination);
+    let context = test_context(moderator, destination);
     let candidates = builder.build_candidates(&context, &AlwaysReachable);
 
     // Check relationships
@@ -635,7 +635,7 @@ fn test_relay_candidate_relationship_types() {
         } else {
             assert!(matches!(
                 candidate.relationship,
-                RelayRelationship::HomePeer { .. }
+                RelayRelationship::SameHome { .. }
             ));
         }
     }

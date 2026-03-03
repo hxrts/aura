@@ -337,8 +337,8 @@ fn command_name(command: &EffectCommand) -> &'static str {
         EffectCommand::KickUser { .. } => "Kick user",
         EffectCommand::BanUser { .. } => "Ban user",
         EffectCommand::UnbanUser { .. } => "Unban user",
-        EffectCommand::GrantSteward { .. } => "Grant steward",
-        EffectCommand::RevokeSteward { .. } => "Revoke steward",
+        EffectCommand::GrantModerator { .. } => "Grant moderator",
+        EffectCommand::RevokeModerator { .. } => "Revoke moderator",
         EffectCommand::SetChannelMode { .. } => "Set channel mode",
         EffectCommand::Shutdown => "Shutdown",
         _ => "This operation",
@@ -354,10 +354,10 @@ fn has_explicit_admin_scope(command: &EffectCommand) -> bool {
         EffectCommand::UnbanUser { channel, .. } => channel
             .as_deref()
             .is_some_and(|channel| !channel.trim().is_empty()),
-        EffectCommand::GrantSteward { channel, .. } => channel
+        EffectCommand::GrantModerator { channel, .. } => channel
             .as_deref()
             .is_some_and(|channel| !channel.trim().is_empty()),
-        EffectCommand::RevokeSteward { channel, .. } => channel
+        EffectCommand::RevokeModerator { channel, .. } => channel
             .as_deref()
             .is_some_and(|channel| !channel.trim().is_empty()),
         EffectCommand::SetChannelMode { channel, .. } => !channel.trim().is_empty(),

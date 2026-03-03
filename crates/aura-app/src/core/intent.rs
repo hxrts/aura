@@ -333,19 +333,19 @@ pub enum Intent {
         message_id: String,
     },
 
-    /// Grant steward (admin) privileges to a resident
-    GrantSteward {
+    /// Grant moderator (admin) privileges to a resident
+    GrantModerator {
         /// Home ID
         home_id: ContextId,
-        /// Target authority ID to grant steward status
+        /// Target authority ID to grant moderator status
         target_id: String,
     },
 
-    /// Revoke steward (admin) privileges from a resident
-    RevokeSteward {
+    /// Revoke moderator (admin) privileges from a resident
+    RevokeModerator {
         /// Home ID
         home_id: ContextId,
-        /// Target authority ID to revoke steward status
+        /// Target authority ID to revoke moderator status
         target_id: String,
     },
 
@@ -596,8 +596,8 @@ impl Intent {
             Self::KickUser { home_id, .. } => Some(*home_id),
             Self::PinMessage { home_id, .. } => Some(*home_id),
             Self::UnpinMessage { home_id, .. } => Some(*home_id),
-            Self::GrantSteward { home_id, .. } => Some(*home_id),
-            Self::RevokeSteward { home_id, .. } => Some(*home_id),
+            Self::GrantModerator { home_id, .. } => Some(*home_id),
+            Self::RevokeModerator { home_id, .. } => Some(*home_id),
             _ => None,
         }
     }
@@ -639,8 +639,8 @@ impl Intent {
             Self::KickUser { .. } => "kick user",
             Self::PinMessage { .. } => "pin message",
             Self::UnpinMessage { .. } => "unpin message",
-            Self::GrantSteward { .. } => "grant steward",
-            Self::RevokeSteward { .. } => "revoke steward",
+            Self::GrantModerator { .. } => "grant moderator",
+            Self::RevokeModerator { .. } => "revoke moderator",
             Self::NavigateTo { .. } => "navigate",
             Self::GoBack => "go back",
             // Admin/Maintenance
@@ -947,11 +947,17 @@ impl Intent {
                     home_id, message_id
                 )
             }
-            Self::GrantSteward { home_id, target_id } => {
-                format!("GrantSteward::home_id={}&target_id={}", home_id, target_id)
+            Self::GrantModerator { home_id, target_id } => {
+                format!(
+                    "GrantModerator::home_id={}&target_id={}",
+                    home_id, target_id
+                )
             }
-            Self::RevokeSteward { home_id, target_id } => {
-                format!("RevokeSteward::home_id={}&target_id={}", home_id, target_id)
+            Self::RevokeModerator { home_id, target_id } => {
+                format!(
+                    "RevokeModerator::home_id={}&target_id={}",
+                    home_id, target_id
+                )
             }
 
             // Navigation intents (typically not journaled, but included for completeness)
@@ -1199,8 +1205,8 @@ impl Intent {
             | Self::StartNode { .. }
             | Self::RunThreshold { .. }
             | Self::InitAccount { .. }
-            | Self::GrantSteward { .. }
-            | Self::RevokeSteward { .. } => AuthorizationLevel::Admin,
+            | Self::GrantModerator { .. }
+            | Self::RevokeModerator { .. } => AuthorizationLevel::Admin,
         }
     }
 }

@@ -168,10 +168,10 @@ module harness_flows {
     harnessUnchanged
   }
 
-  // Bob promotes alice to steward
+  // Bob promotes alice to moderator
   action bobPromotesAlice(homeId: HomeId): bool = all {
-    tui_flows::promoteSteward("bob", homeId, "alice"),
-    markScenario("home_steward_promotion", true)
+    tui_flows::promoteModerator("bob", homeId, "alice"),
+    markScenario("home_moderator_promotion", true)
   }
 
   // ============ SCENARIO: NEIGHBORHOOD FLOW ============
@@ -310,7 +310,7 @@ module harness_flows {
     .then(bobCreatesNeighborhood("neighborhood-harness", "Downtown"))
     .then(bobLinksHome("home-harness", "neighborhood-harness"))
     .then(all {
-      assert(executedScenarios.contains("home_steward_promotion")),
+      assert(executedScenarios.contains("home_moderator_promotion")),
       assert(executedScenarios.contains("neighborhood_link")),
       tui_flows::allAgents' = tui_flows::allAgents,
       tui_flows::agents' = tui_flows::agents,

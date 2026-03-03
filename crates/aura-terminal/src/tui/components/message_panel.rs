@@ -30,7 +30,7 @@ const DEFAULT_VISIBLE_ROWS: usize = 18;
 pub struct MessagePanelProps {
     /// Messages to display
     pub messages: Vec<Message>,
-    /// Title or breadcrumb path (e.g., "Home › Interior › # general")
+    /// Title or breadcrumb path (e.g., "Home › Full › # general")
     pub title: Option<String>,
     /// Message to show when there are no messages
     pub empty_message: Option<String>,

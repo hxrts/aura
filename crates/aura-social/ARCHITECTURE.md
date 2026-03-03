@@ -20,13 +20,13 @@ discovery, relay selection, and content moderation for the social graph.
 
 ## Invariants
 - Facts must be reduced under their matching `ContextId`.
-- Membership and stewardship changes should follow approved workflows.
+- Membership and moderatorship changes should follow approved workflows.
 - Home relationships define trust boundaries.
 
 ### Detailed Specifications
 
 ### InvariantSocialBoundaryScopedMembership
-Social topology membership and stewardship updates remain scoped to explicit trust boundaries.
+Social topology membership and moderatorship updates remain scoped to explicit trust boundaries.
 
 Enforcement locus:
 - src social fact reducers validate boundary and membership transitions.

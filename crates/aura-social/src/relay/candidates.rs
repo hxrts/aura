@@ -175,13 +175,13 @@ mod tests {
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer1,
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
             peer2,
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );
@@ -205,7 +205,7 @@ mod tests {
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer1,
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );
@@ -234,13 +234,13 @@ mod tests {
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer1,
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
             peer2,
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );

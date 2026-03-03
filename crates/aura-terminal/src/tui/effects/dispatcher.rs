@@ -327,7 +327,7 @@ impl CommandDispatcher {
 
             IrcCommand::NhAdd { home_id } => Ok(EffectCommand::AddHomeToNeighborhood { home_id }),
 
-            IrcCommand::NhLink { home_id } => Ok(EffectCommand::LinkHomeAdjacency { home_id }),
+            IrcCommand::NhLink { home_id } => Ok(EffectCommand::LinkHomeOneHopLink { home_id }),
 
             IrcCommand::HomeInvite { target } => {
                 Ok(EffectCommand::SendHomeInvitation { contact_id: target })
@@ -399,12 +399,12 @@ impl CommandDispatcher {
 
             IrcCommand::Unpin { message_id } => Ok(EffectCommand::UnpinMessage { message_id }),
 
-            IrcCommand::Op { target } => Ok(EffectCommand::GrantSteward {
+            IrcCommand::Op { target } => Ok(EffectCommand::GrantModerator {
                 channel: self.current_channel.clone(),
                 target,
             }),
 
-            IrcCommand::Deop { target } => Ok(EffectCommand::RevokeSteward {
+            IrcCommand::Deop { target } => Ok(EffectCommand::RevokeModerator {
                 channel: self.current_channel.clone(),
                 target,
             }),
@@ -592,11 +592,12 @@ mod tests {
         let cmd = IrcCommand::Op {
             target: "alice".to_string(),
         };
-        let result = dispatcher
-            .dispatch_unchecked(cmd)
-            .expect("dispatch must succeed");
+        let result = match dispatcher.dispatch_unchecked(cmd) {
+            Ok(result) => result,
+            Err(error) => panic!("dispatch failed: {error}"),
+        };
         match result {
-            EffectCommand::GrantSteward { channel, target } => {
+            EffectCommand::GrantModerator { channel, target } => {
                 assert_eq!(channel.as_deref(), Some("general"));
                 assert_eq!(target, "alice");
             }

@@ -59,7 +59,7 @@ fn best_home_for_context(
 fn parse_channel_id_from_message_id(message_id: &str) -> Option<ChannelId> {
     let encoded_channel = message_id
         .strip_prefix("msg-")
-        .and_then(|value| value.splitn(3, '-').next())?;
+        .and_then(|value| value.split('-').next())?;
     encoded_channel.parse::<ChannelId>().ok()
 }
 
@@ -159,7 +159,7 @@ async fn resolve_scope(
             )
         } else {
             return Err(AuraError::permission_denied(
-                "Moderation requires a valid home context and steward privileges",
+                "Moderation requires a valid home context and moderator privileges",
             ));
         };
 
@@ -218,7 +218,7 @@ async fn resolve_scope_by_channel_id(
         }
 
         return Err(AuraError::permission_denied(format!(
-            "Moderation requires a steward home for context {context_id}"
+            "Moderation requires a moderator home for context {context_id}"
         )));
     }
 
@@ -227,7 +227,7 @@ async fn resolve_scope_by_channel_id(
     }
 
     Err(AuraError::permission_denied(
-        "Moderation requires a valid home context and steward privileges",
+        "Moderation requires a valid home context and moderator privileges",
     ))
 }
 
@@ -358,7 +358,7 @@ pub async fn kick_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, Some(channel_id)).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
-            "Only stewards can kick residents",
+            "Only moderators can kick residents",
         ));
     }
 
@@ -410,7 +410,7 @@ pub async fn ban_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
-            "Only stewards can ban residents",
+            "Only moderators can ban residents",
         ));
     }
 
@@ -465,7 +465,7 @@ pub async fn unban_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
-            "Only stewards can unban residents",
+            "Only moderators can unban residents",
         ));
     }
 
@@ -514,7 +514,7 @@ pub async fn mute_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
-            "Only stewards can mute residents",
+            "Only moderators can mute residents",
         ));
     }
 
@@ -572,7 +572,7 @@ pub async fn unmute_user_resolved(
     let scope = resolve_scope_by_channel_id(app_core, channel_hint).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
-            "Only stewards can unmute residents",
+            "Only moderators can unmute residents",
         ));
     }
 
@@ -617,7 +617,7 @@ pub async fn pin_message(
     let scope = scope_for_message(app_core, message_id).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
-            "Only stewards can pin messages",
+            "Only moderators can pin messages",
         ));
     }
 
@@ -645,7 +645,7 @@ pub async fn unpin_message(
     let scope = scope_for_message(app_core, message_id).await?;
     if !scope.is_admin {
         return Err(AuraError::permission_denied(
-            "Only stewards can unpin messages",
+            "Only moderators can unpin messages",
         ));
     }
 
@@ -666,6 +666,7 @@ pub async fn unpin_message(
 }
 
 #[cfg(test)]
+#[allow(clippy::default_trait_access, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::views::{

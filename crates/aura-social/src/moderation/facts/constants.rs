@@ -14,10 +14,10 @@ pub const HOME_BAN_FACT_TYPE_ID: &str = "moderation:home-ban";
 pub const HOME_UNBAN_FACT_TYPE_ID: &str = "moderation:home-unban";
 /// Fact type ID for kicking a user from a channel
 pub const HOME_KICK_FACT_TYPE_ID: &str = "moderation:home-kick";
-/// Fact type ID for granting steward privileges
-pub const HOME_GRANT_STEWARD_FACT_TYPE_ID: &str = "moderation:home-grant-steward";
-/// Fact type ID for revoking steward privileges
-pub const HOME_REVOKE_STEWARD_FACT_TYPE_ID: &str = "moderation:home-revoke-steward";
+/// Fact type ID for granting moderator privileges
+pub const HOME_GRANT_MODERATOR_FACT_TYPE_ID: &str = "moderation:home-grant-moderator";
+/// Fact type ID for revoking moderator privileges
+pub const HOME_REVOKE_MODERATOR_FACT_TYPE_ID: &str = "moderation:home-revoke-moderator";
 /// Fact type ID for pinning a message
 pub const HOME_PIN_FACT_TYPE_ID: &str = "moderation:home-pin";
 /// Fact type ID for unpinning a message

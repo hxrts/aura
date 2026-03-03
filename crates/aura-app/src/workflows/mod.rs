@@ -81,6 +81,7 @@ pub(crate) mod journal;
 #[cfg(feature = "signals")]
 pub mod messaging;
 pub mod moderation;
+pub mod moderator;
 pub mod network;
 pub(crate) mod parse;
 pub mod privacy;
@@ -94,7 +95,6 @@ pub mod signals;
 pub mod snapshot;
 pub(crate) mod snapshot_policy;
 pub(crate) mod state_helpers;
-pub mod steward;
 pub mod strong_command;
 pub mod sync;
 pub mod system;

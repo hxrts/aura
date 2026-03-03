@@ -470,8 +470,8 @@ pub struct HomeSnapshot {
     pub home_state: Option<aura_app::ui::types::home::HomeState>,
     /// Whether user is a resident
     pub is_resident: bool,
-    /// Whether user is a steward
-    pub is_steward: bool,
+    /// Whether user is a moderator
+    pub is_moderator: bool,
 }
 
 impl Default for HomeSnapshot {
@@ -479,7 +479,7 @@ impl Default for HomeSnapshot {
         Self {
             home_state: None,
             is_resident: false,
-            is_steward: false,
+            is_moderator: false,
         }
     }
 }

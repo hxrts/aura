@@ -171,7 +171,7 @@ impl BiscuitAuthorizationBridge {
                     .add_check(check!("check if capability(\"admin\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
                 authorizer
-                    .add_check(check!("check if role(\"owner\") or role(\"admin\")"))
+                    .add_check(check!("check if role(\"member\") or role(\"moderator\")"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
             "delegate" => {

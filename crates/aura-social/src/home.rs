@@ -5,8 +5,8 @@
 
 use crate::error::SocialError;
 use crate::facts::{
-    HomeConfigFact, HomeFact, HomeId, HomeStorageBudget, ResidentFact, StewardCapabilities,
-    StewardFact,
+    HomeConfigFact, HomeFact, HomeId, HomeStorageBudget, ModeratorCapabilities, ModeratorFact,
+    ResidentFact,
 };
 use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
@@ -27,8 +27,8 @@ pub struct Home {
     pub neighborhood_limit: u8,
     /// Current residents (authority IDs)
     pub residents: Vec<AuthorityId>,
-    /// Current stewards with their capabilities
-    pub stewards: Vec<(AuthorityId, StewardCapabilities)>,
+    /// Current moderators with their capabilities
+    pub moderators: Vec<(AuthorityId, ModeratorCapabilities)>,
     /// Current storage budget tracking
     pub storage_budget: HomeStorageBudget,
 }
@@ -40,12 +40,12 @@ impl Home {
     /// * `home_fact` - The home existence/configuration fact
     /// * `config` - The home configuration fact (optional, uses v1 defaults if None)
     /// * `residents` - All resident facts for this home
-    /// * `stewards` - All steward facts for this home
+    /// * `moderators` - All moderator facts for this home
     pub fn from_facts(
         home_fact: &HomeFact,
         config: Option<&HomeConfigFact>,
         residents: &[ResidentFact],
-        stewards: &[StewardFact],
+        moderators: &[ModeratorFact],
     ) -> Self {
         let config = config
             .cloned()
@@ -63,7 +63,7 @@ impl Home {
             max_residents: config.max_residents,
             neighborhood_limit: config.neighborhood_limit,
             residents: residents.iter().map(|r| r.authority_id).collect(),
-            stewards: stewards
+            moderators: moderators
                 .iter()
                 .map(|s| (s.authority_id, s.capabilities.clone()))
                 .collect(),
@@ -79,7 +79,7 @@ impl Home {
             max_residents: HomeConfigFact::V1_MAX_RESIDENTS,
             neighborhood_limit: HomeConfigFact::V1_NEIGHBORHOOD_LIMIT,
             residents: Vec::new(),
-            stewards: Vec::new(),
+            moderators: Vec::new(),
             storage_budget: HomeStorageBudget::new(home_id),
         }
     }
@@ -94,14 +94,17 @@ impl Home {
         self.residents.contains(authority)
     }
 
-    /// Check if an authority is a steward of this home.
-    pub fn is_steward(&self, authority: &AuthorityId) -> bool {
-        self.stewards.iter().any(|(a, _)| a == authority)
+    /// Check if an authority is a moderator of this home.
+    pub fn is_moderator(&self, authority: &AuthorityId) -> bool {
+        self.moderators.iter().any(|(a, _)| a == authority)
     }
 
-    /// Get steward capabilities for an authority, if they are a steward.
-    pub fn steward_capabilities(&self, authority: &AuthorityId) -> Option<&StewardCapabilities> {
-        self.stewards
+    /// Get moderator capabilities for an authority, if they are a moderator.
+    pub fn moderator_capabilities(
+        &self,
+        authority: &AuthorityId,
+    ) -> Option<&ModeratorCapabilities> {
+        self.moderators
             .iter()
             .find(|(a, _)| a == authority)
             .map(|(_, caps)| caps)
@@ -134,7 +137,7 @@ impl Home {
 
     /// Validate storage allocation request.
     pub fn validate_storage(&self, requested: u64) -> Result<(), SocialError> {
-        let available = self.storage_budget.remaining_public_good_space();
+        let available = self.storage_budget.remaining_shared_storage();
         if requested > available {
             return Err(SocialError::storage_exceeded(available, requested));
         }
@@ -142,7 +145,7 @@ impl Home {
     }
 
     /// Get all home peers (residents excluding self).
-    pub fn home_peers(&self, self_authority: &AuthorityId) -> Vec<AuthorityId> {
+    pub fn same_home_members(&self, self_authority: &AuthorityId) -> Vec<AuthorityId> {
         self.residents
             .iter()
             .filter(|a| *a != self_authority)
@@ -177,21 +180,21 @@ mod tests {
             ResidentFact::new(test_authority(2), home_id, test_timestamp()),
         ];
 
-        let stewards = vec![StewardFact::new(
+        let moderators = vec![ModeratorFact::new(
             test_authority(1),
             home_id,
             test_timestamp(),
         )];
 
-        let home_instance = Home::from_facts(&home_fact, None, &residents, &stewards);
+        let home_instance = Home::from_facts(&home_fact, None, &residents, &moderators);
 
         assert_eq!(home_instance.home_id, home_id);
         assert_eq!(home_instance.resident_count(), 2);
         assert!(home_instance.is_resident(&test_authority(1)));
         assert!(home_instance.is_resident(&test_authority(2)));
         assert!(!home_instance.is_resident(&test_authority(3)));
-        assert!(home_instance.is_steward(&test_authority(1)));
-        assert!(!home_instance.is_steward(&test_authority(2)));
+        assert!(home_instance.is_moderator(&test_authority(1)));
+        assert!(!home_instance.is_moderator(&test_authority(2)));
     }
 
     #[test]
@@ -236,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn test_home_peers() {
+    fn test_same_home_members() {
         let home_id = HomeId::from_bytes([4u8; 32]);
         let mut home_instance = Home::new_empty(home_id);
 
@@ -246,7 +249,7 @@ mod tests {
 
         home_instance.residents = vec![self_auth, peer1, peer2];
 
-        let peers = home_instance.home_peers(&self_auth);
+        let peers = home_instance.same_home_members(&self_auth);
         assert_eq!(peers.len(), 2);
         assert!(peers.contains(&peer1));
         assert!(peers.contains(&peer2));

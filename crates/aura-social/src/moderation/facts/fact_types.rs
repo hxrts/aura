@@ -360,25 +360,25 @@ impl HomeUnpinFact {
     }
 }
 
-/// Fact representing granting steward (admin) privileges to a user.
+/// Fact representing granting moderator (admin) privileges to a user.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:home-grant-steward",
+    type_id = "moderation:home-grant-moderator",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct HomeGrantStewardFact {
-    /// Home context where steward is being granted
+pub struct HomeGrantModeratorFact {
+    /// Home context where moderator is being granted
     pub context_id: ContextId,
-    /// Authority being granted steward status
+    /// Authority being granted moderator status
     pub target_authority: AuthorityId,
-    /// Authority performing the grant (must be existing steward or owner)
+    /// Authority performing the grant (must be existing moderator or owner)
     pub actor_authority: AuthorityId,
-    /// When steward was granted
+    /// When moderator was granted
     pub granted_at: PhysicalTime,
 }
 
-impl HomeGrantStewardFact {
+impl HomeGrantModeratorFact {
     /// Accessor for granted_at timestamp in milliseconds.
     pub fn granted_at_ms(&self) -> u64 {
         self.granted_at.ts_ms
@@ -403,25 +403,25 @@ impl HomeGrantStewardFact {
     }
 }
 
-/// Fact representing revoking steward (admin) privileges from a user.
+/// Fact representing revoking moderator (admin) privileges from a user.
 #[derive(Debug, Clone, Serialize, Deserialize, DomainFact)]
 #[domain_fact(
-    type_id = "moderation:home-revoke-steward",
+    type_id = "moderation:home-revoke-moderator",
     schema_version = 1,
     context = "context_id"
 )]
-pub struct HomeRevokeStewardFact {
-    /// Home context where steward is being revoked
+pub struct HomeRevokeModeratorFact {
+    /// Home context where moderator is being revoked
     pub context_id: ContextId,
-    /// Authority having steward status revoked
+    /// Authority having moderator status revoked
     pub target_authority: AuthorityId,
-    /// Authority performing the revocation (must be existing steward or owner)
+    /// Authority performing the revocation (must be existing moderator or owner)
     pub actor_authority: AuthorityId,
-    /// When steward was revoked
+    /// When moderator was revoked
     pub revoked_at: PhysicalTime,
 }
 
-impl HomeRevokeStewardFact {
+impl HomeRevokeModeratorFact {
     /// Accessor for revoked_at timestamp in milliseconds.
     pub fn revoked_at_ms(&self) -> u64 {
         self.revoked_at.ts_ms

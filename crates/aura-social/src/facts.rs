@@ -179,40 +179,40 @@ impl ResidentFact {
     }
 }
 
-/// Steward capability bundle
+/// Moderator capability bundle
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct StewardCapabilities {
+pub struct ModeratorCapabilities {
     /// Can moderate content and users
     pub moderation: bool,
     /// Can pin/unpin content
     pub pin_content: bool,
-    /// Can grant steward capabilities to others
-    pub grant_steward: bool,
+    /// Can grant moderator capabilities to others
+    pub grant_moderator: bool,
     /// Can manage channels
     pub manage_channel: bool,
     /// Custom capability strings
     pub custom: BTreeSet<String>,
 }
 
-impl Default for StewardCapabilities {
+impl Default for ModeratorCapabilities {
     fn default() -> Self {
         Self {
             moderation: true,
             pin_content: true,
-            grant_steward: false,
+            grant_moderator: false,
             manage_channel: true,
             custom: BTreeSet::new(),
         }
     }
 }
 
-impl StewardCapabilities {
-    /// Create full steward capabilities
+impl ModeratorCapabilities {
+    /// Create full moderator capabilities
     pub fn full() -> Self {
         Self {
             moderation: true,
             pin_content: true,
-            grant_steward: true,
+            grant_moderator: true,
             manage_channel: true,
             custom: BTreeSet::new(),
         }
@@ -227,8 +227,8 @@ impl StewardCapabilities {
         if self.pin_content {
             caps.insert("pin_content".to_string());
         }
-        if self.grant_steward {
-            caps.insert("grant_steward".to_string());
+        if self.grant_moderator {
+            caps.insert("grant_moderator".to_string());
         }
         if self.manage_channel {
             caps.insert("manage_channel".to_string());
@@ -238,29 +238,29 @@ impl StewardCapabilities {
     }
 }
 
-/// Steward fact - authority with elevated capabilities in a home
+/// Moderator fact - authority with elevated capabilities in a home
 ///
-/// Corresponds to: `steward(authority_id, home_id, granted_at, capabilities)`
+/// Corresponds to: `moderator(authority_id, home_id, granted_at, capabilities)`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StewardFact {
-    /// Authority with steward role
+pub struct ModeratorFact {
+    /// Authority with moderator role
     pub authority_id: AuthorityId,
-    /// Home where the steward operates
+    /// Home where the moderator operates
     pub home_id: HomeId,
-    /// When steward capabilities were granted
+    /// When moderator capabilities were granted
     pub granted_at: TimeStamp,
-    /// Capability bundle for this steward
-    pub capabilities: StewardCapabilities,
+    /// Capability bundle for this moderator
+    pub capabilities: ModeratorCapabilities,
 }
 
-impl StewardFact {
-    /// Create a new steward with default capabilities
+impl ModeratorFact {
+    /// Create a new moderator with default capabilities
     pub fn new(authority_id: AuthorityId, home_id: HomeId, granted_at: TimeStamp) -> Self {
         Self {
             authority_id,
             home_id,
             granted_at,
-            capabilities: StewardCapabilities::default(),
+            capabilities: ModeratorCapabilities::default(),
         }
     }
 
@@ -269,7 +269,7 @@ impl StewardFact {
         let caps = self.capabilities.to_capability_set();
         let caps_str: Vec<_> = caps.iter().map(|s| format!("\"{s}\"")).collect();
         format!(
-            "steward(\"{}\", \"{}\", \"{}\", [{}]);",
+            "moderator(\"{}\", \"{}\", \"{}\", [{}]);",
             self.authority_id,
             self.home_id,
             self.granted_at.to_index_ms(),
@@ -301,11 +301,11 @@ impl HomeMessageMemberFact {
     }
 }
 
-/// Pinned content fact
+/// Pinned fact
 ///
-/// Corresponds to: `pinned_content(content_hash, home_id, pinned_by, pinned_at, size_bytes)`
+/// Corresponds to: `pinned(content_hash, home_id, pinned_by, pinned_at, size_bytes)`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PinnedContentFact {
+pub struct PinnedFact {
     /// Hash of the pinned content
     pub content_hash: Hash32,
     /// Home where content is pinned
@@ -318,11 +318,11 @@ pub struct PinnedContentFact {
     pub size_bytes: u64,
 }
 
-impl PinnedContentFact {
+impl PinnedFact {
     /// Convert to Datalog fact string
     pub fn to_datalog(&self) -> String {
         format!(
-            "pinned_content(hex:{:?}, \"{}\", \"{}\", \"{}\", {});",
+            "pinned(hex:{:?}, \"{}\", \"{}\", \"{}\", {});",
             self.content_hash.0,
             self.home_id,
             self.pinned_by,
@@ -368,7 +368,7 @@ impl NeighborhoodFact {
 
 /// Home membership in a neighborhood
 ///
-/// Corresponds to: `home_member(home_id, neighborhood_id, joined_at, donated_storage)`
+/// Corresponds to: `home_member(home_id, neighborhood_id, joined_at, allocated_storage)`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HomeMemberFact {
     /// Home joining the neighborhood
@@ -377,21 +377,22 @@ pub struct HomeMemberFact {
     pub neighborhood_id: NeighborhoodId,
     /// When the home joined
     pub joined_at: TimeStamp,
-    /// Storage donated to neighborhood infrastructure (default: 1 MB)
-    pub donated_storage: u64,
+    /// Storage allocated to neighborhood infrastructure (default: 1 MB)
+    #[serde(alias = "donated_storage")]
+    pub allocated_storage: u64,
 }
 
 impl HomeMemberFact {
-    /// Default storage donation per neighborhood: 1 MB
-    pub const DEFAULT_DONATION: u64 = 1024 * 1024;
+    /// Default storage allocation per neighborhood: 1 MB
+    pub const DEFAULT_ALLOCATION: u64 = 1024 * 1024;
 
-    /// Create a new home membership with default donation
+    /// Create a new home membership with default allocation
     pub fn new(home_id: HomeId, neighborhood_id: NeighborhoodId, joined_at: TimeStamp) -> Self {
         Self {
             home_id,
             neighborhood_id,
             joined_at,
-            donated_storage: Self::DEFAULT_DONATION,
+            allocated_storage: Self::DEFAULT_ALLOCATION,
         }
     }
 
@@ -402,26 +403,26 @@ impl HomeMemberFact {
             self.home_id,
             self.neighborhood_id,
             self.joined_at.to_index_ms(),
-            self.donated_storage
+            self.allocated_storage
         )
     }
 }
 
-/// Adjacency relationship between homes
+/// OneHopLink relationship between homes
 ///
 /// Corresponds to: `adjacent(home_a, home_b, neighborhood_id)`
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct AdjacencyFact {
-    /// First home in the adjacency relationship
+pub struct OneHopLinkFact {
+    /// First home in the one_hop_link relationship
     pub home_a: HomeId,
-    /// Second home in the adjacency relationship
+    /// Second home in the one_hop_link relationship
     pub home_b: HomeId,
-    /// Neighborhood where this adjacency exists
+    /// Neighborhood where this one_hop_link exists
     pub neighborhood_id: NeighborhoodId,
 }
 
-impl AdjacencyFact {
-    /// Create a new adjacency (ordered by home IDs for consistency)
+impl OneHopLinkFact {
+    /// Create a new one_hop_link (ordered by home IDs for consistency)
     pub fn new(home_a: HomeId, home_b: HomeId, neighborhood_id: NeighborhoodId) -> Self {
         // Ensure consistent ordering
         let (a, b) = if home_a <= home_b {
@@ -485,26 +486,54 @@ impl TraversalAllowedFact {
 // Traversal Position
 // ============================================================================
 
-/// Traversal depth in a home
+/// Access level within a home
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum TraversalDepth {
-    /// Can see frontage, no interior access
-    Street,
-    /// Can see public home info, limited interaction
-    Frontage,
-    /// Full resident-level access
-    Interior,
+pub enum AccessLevel {
+    /// Limited capability set (default mapping: 2-hop-or-greater or disconnected)
+    Limited,
+    /// Partial capability set (default mapping: 1-hop neighborhood)
+    Partial,
+    /// Full capability set (default mapping: same-home)
+    Full,
+}
+
+/// Per-authority access-level override for a specific home.
+///
+/// Overrides are applied after deterministic default mapping.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccessOverrideFact {
+    /// Authority receiving the override.
+    pub authority_id: AuthorityId,
+    /// Home where this override applies.
+    pub home_id: HomeId,
+    /// Override level to apply for this authority+home pair.
+    pub access_level: AccessLevel,
+    /// When this override was set.
+    pub set_at: TimeStamp,
+}
+
+impl AccessOverrideFact {
+    /// Convert to Datalog fact string.
+    pub fn to_datalog(&self) -> String {
+        format!(
+            "access_override(\"{}\", \"{}\", \"{:?}\", \"{}\");",
+            self.authority_id,
+            self.home_id,
+            self.access_level,
+            self.set_at.to_index_ms()
+        )
+    }
 }
 
 /// Current position in neighborhood traversal
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraversalPosition {
-    /// Current neighborhood (None = "on the street")
+    /// Current neighborhood (None = outside a neighborhood context)
     pub neighborhood: Option<NeighborhoodId>,
     /// Current home (None = between homes)
     pub current_home: Option<HomeId>,
     /// Depth of access
-    pub depth: TraversalDepth,
+    pub depth: AccessLevel,
     /// Relational context containing capabilities
     pub context_id: ContextId,
     /// When this position was entered (for expiration tracking)
@@ -526,8 +555,8 @@ pub struct HomeStorageBudget {
     pub resident_storage_spent: u64,
     /// Current pinned storage spent
     pub pinned_storage_spent: u64,
-    /// Current neighborhood donations (n * 1 MB)
-    pub neighborhood_donations: u64,
+    /// Current neighborhood allocations (n * 1 MB)
+    pub neighborhood_allocations: u64,
 }
 
 impl HomeStorageBudget {
@@ -537,17 +566,17 @@ impl HomeStorageBudget {
             home_id,
             resident_storage_spent: 0,
             pinned_storage_spent: 0,
-            neighborhood_donations: 0,
+            neighborhood_allocations: 0,
         }
     }
 
-    /// Calculate remaining public-good space
+    /// Calculate remaining shared storage
     ///
-    /// Formula: Total (10 MB) - Resident - Neighborhood Donations - Pinned
-    pub fn remaining_public_good_space(&self) -> u64 {
+    /// Formula: Total (10 MB) - Resident - Neighborhood Allocations - Pinned
+    pub fn remaining_shared_storage(&self) -> u64 {
         let total = HomeFact::DEFAULT_STORAGE_LIMIT;
         let spent =
-            self.resident_storage_spent + self.neighborhood_donations + self.pinned_storage_spent;
+            self.resident_storage_spent + self.neighborhood_allocations + self.pinned_storage_spent;
         total.saturating_sub(spent)
     }
 
@@ -560,7 +589,7 @@ impl HomeStorageBudget {
     pub fn pinned_storage_limit(&self) -> u64 {
         let total = HomeFact::DEFAULT_STORAGE_LIMIT;
         let resident_limit = self.resident_storage_limit();
-        total.saturating_sub(resident_limit + self.neighborhood_donations)
+        total.saturating_sub(resident_limit + self.neighborhood_allocations)
     }
 }
 
@@ -626,7 +655,7 @@ pub struct SocialFactKey {
 /// Social domain fact types
 ///
 /// These facts represent social-related state changes in the journal,
-/// including blocks, residents, stewards, and neighborhoods.
+/// including blocks, residents, moderators, and neighborhoods.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, DomainFact)]
 #[domain_fact(type_id = "social", schema_version = 1, context = "context_id")]
 pub enum SocialFact {
@@ -682,32 +711,32 @@ pub enum SocialFact {
         /// When the resident left
         left_at: PhysicalTime,
     },
-    /// Steward granted capabilities in a home
-    StewardGranted {
-        /// Authority being granted steward role
+    /// Moderator granted capabilities in a home
+    ModeratorGranted {
+        /// Authority being granted moderator role
         authority_id: AuthorityId,
-        /// Home where steward operates
+        /// Home where moderator operates
         home_id: HomeId,
         /// Relational context
         context_id: ContextId,
-        /// When steward was granted
+        /// When moderator was granted
         granted_at: PhysicalTime,
-        /// Authority granting the steward role
+        /// Authority granting the moderator role
         grantor_id: AuthorityId,
         /// Capability strings granted
         capabilities: Vec<String>,
     },
-    /// Steward revoked from a home
-    StewardRevoked {
-        /// Authority losing steward role
+    /// Moderator revoked from a home
+    ModeratorRevoked {
+        /// Authority losing moderator role
         authority_id: AuthorityId,
-        /// Home where steward was revoked
+        /// Home where moderator was revoked
         home_id: HomeId,
         /// Relational context
         context_id: ContextId,
-        /// When steward was revoked
+        /// When moderator was revoked
         revoked_at: PhysicalTime,
-        /// Authority revoking the steward role
+        /// Authority revoking the moderator role
         revoker_id: AuthorityId,
     },
     /// Home storage updated
@@ -772,8 +801,8 @@ impl SocialFact {
             SocialFact::HomeDeleted { deleted_at, .. } => deleted_at.ts_ms,
             SocialFact::ResidentJoined { joined_at, .. } => joined_at.ts_ms,
             SocialFact::ResidentLeft { left_at, .. } => left_at.ts_ms,
-            SocialFact::StewardGranted { granted_at, .. } => granted_at.ts_ms,
-            SocialFact::StewardRevoked { revoked_at, .. } => revoked_at.ts_ms,
+            SocialFact::ModeratorGranted { granted_at, .. } => granted_at.ts_ms,
+            SocialFact::ModeratorRevoked { revoked_at, .. } => revoked_at.ts_ms,
             SocialFact::StorageUpdated { updated_at, .. } => updated_at.ts_ms,
             SocialFact::NeighborhoodCreated { created_at, .. } => created_at.ts_ms,
             SocialFact::HomeJoinedNeighborhood { joined_at, .. } => joined_at.ts_ms,
@@ -805,12 +834,12 @@ impl SocialFact {
                 sub_type: "resident-left",
                 data: authority_id.to_string().into_bytes(),
             },
-            SocialFact::StewardGranted { authority_id, .. } => SocialFactKey {
-                sub_type: "steward-granted",
+            SocialFact::ModeratorGranted { authority_id, .. } => SocialFactKey {
+                sub_type: "moderator-granted",
                 data: authority_id.to_string().into_bytes(),
             },
-            SocialFact::StewardRevoked { authority_id, .. } => SocialFactKey {
-                sub_type: "steward-revoked",
+            SocialFact::ModeratorRevoked { authority_id, .. } => SocialFactKey {
+                sub_type: "moderator-revoked",
                 data: authority_id.to_string().into_bytes(),
             },
             SocialFact::StorageUpdated { home_id, .. } => SocialFactKey {
@@ -1158,11 +1187,11 @@ mod tests {
     }
 
     #[test]
-    fn test_steward_capabilities() {
-        let caps = StewardCapabilities::full();
+    fn test_moderator_capabilities() {
+        let caps = ModeratorCapabilities::full();
         let cap_set = caps.to_capability_set();
         assert!(cap_set.contains("moderation"));
-        assert!(cap_set.contains("grant_steward"));
+        assert!(cap_set.contains("grant_moderator"));
     }
 
     #[test]
@@ -1182,18 +1211,18 @@ mod tests {
         );
         let datalog = member.to_datalog();
         assert!(datalog.starts_with("home_member("));
-        assert!(datalog.contains("1048576")); // 1 MB donation
+        assert!(datalog.contains("1048576")); // 1 MB allocation
     }
 
     #[test]
-    fn test_adjacency_ordering() {
+    fn test_one_hop_link_ordering() {
         let home_a = HomeId::from_bytes([1u8; 32]);
         let home_b = HomeId::from_bytes([2u8; 32]);
         let neighborhood = NeighborhoodId::from_bytes([8u8; 32]);
 
         // Should order consistently regardless of input order
-        let adj1 = AdjacencyFact::new(home_a, home_b, neighborhood);
-        let adj2 = AdjacencyFact::new(home_b, home_a, neighborhood);
+        let adj1 = OneHopLinkFact::new(home_a, home_b, neighborhood);
+        let adj2 = OneHopLinkFact::new(home_b, home_a, neighborhood);
 
         assert_eq!(adj1.home_a, adj2.home_a);
         assert_eq!(adj1.home_b, adj2.home_b);
@@ -1205,27 +1234,27 @@ mod tests {
 
         // Initial state
         assert_eq!(
-            budget.remaining_public_good_space(),
+            budget.remaining_shared_storage(),
             HomeFact::DEFAULT_STORAGE_LIMIT
         );
 
         // Add 8 residents
         budget.resident_storage_spent = 8 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
         // Join 4 neighborhoods
-        budget.neighborhood_donations = 4 * HomeMemberFact::DEFAULT_DONATION;
+        budget.neighborhood_allocations = 4 * HomeMemberFact::DEFAULT_ALLOCATION;
 
-        // Remaining should be 10 MB - 1.6 MB (residents) - 4 MB (donations) = ~4.4 MB
+        // Remaining should be 10 MB - 1.6 MB (residents) - 4 MB (allocations) = ~4.4 MB
         // 10,485,760 - 1,638,400 (8 * 204,800) - 4,194,304 (4 * 1,048,576) = 4,653,056
         let expected = HomeFact::DEFAULT_STORAGE_LIMIT
             - (8 * ResidentFact::DEFAULT_STORAGE_ALLOCATION)
-            - (4 * HomeMemberFact::DEFAULT_DONATION);
-        assert_eq!(budget.remaining_public_good_space(), expected);
+            - (4 * HomeMemberFact::DEFAULT_ALLOCATION);
+        assert_eq!(budget.remaining_shared_storage(), expected);
         assert_eq!(expected, 4_653_056); // ~4.4 MB
     }
 
     #[test]
-    fn test_traversal_depth_ordering() {
-        assert!(TraversalDepth::Street < TraversalDepth::Frontage);
-        assert!(TraversalDepth::Frontage < TraversalDepth::Interior);
+    fn test_access_level_ordering() {
+        assert!(AccessLevel::Limited < AccessLevel::Partial);
+        assert!(AccessLevel::Partial < AccessLevel::Full);
     }
 }

@@ -14,7 +14,7 @@
 //! 2. **Direct Messaging** - StartDirectChat, DM channel creation
 //! 3. **Channel Mode** - SetChannelMode, mode persistence
 //! 4. **Peer Management** - AddPeer, RemovePeer, ListPeers
-//! 5. **Home Operations** - Steward grant/revoke, resident management
+//! 5. **Home Operations** - Moderator grant/revoke, resident management
 //! 6. **Sync Operations** - ForceSync, sync status
 //! 7. **Connection Status** - Connection state tracking
 //! 8. **Toast Notifications** - Success/error toast display
@@ -412,7 +412,7 @@ async fn test_set_channel_mode_requires_admin() {
         .await;
 
     // SetChannelMode requires Admin authorization level
-    // In a fresh test account without steward status, this should fail
+    // In a fresh test account without moderator status, this should fail
     println!("  SetChannelMode result: {result:?}");
     // We accept either success (if somehow admin) or permission denied error
     match &result {
@@ -651,42 +651,42 @@ async fn test_connection_status_tracking() {
 // HOME OPERATIONS TESTS
 // ============================================================================
 
-/// Test steward grant and revoke operations
+/// Test moderator grant and revoke operations
 ///
 /// Validates:
-/// 1. GrantSteward command behavior (with/without authorization)
-/// 2. RevokeSteward command behavior
+/// 1. GrantModerator command behavior (with/without authorization)
+/// 2. RevokeModerator command behavior
 /// 3. Authorization checks work
 #[tokio::test]
-async fn test_steward_grant_revoke_operations() {
-    println!("\n=== Steward Grant/Revoke Operations Test ===\n");
+async fn test_moderator_grant_revoke_operations() {
+    println!("\n=== Moderator Grant/Revoke Operations Test ===\n");
 
-    let (ctx, _app_core) = setup_test_env("steward-ops").await;
+    let (ctx, _app_core) = setup_test_env("moderator-ops").await;
 
-    // Phase 1: Try to grant steward (may fail due to authorization)
-    println!("Phase 1: Try to grant steward role");
+    // Phase 1: Try to grant moderator (may fail due to authorization)
+    println!("Phase 1: Try to grant moderator role");
     let result = ctx
-        .dispatch(EffectCommand::GrantSteward {
+        .dispatch(EffectCommand::GrantModerator {
             channel: None,
             target: "user-to-promote".to_string(),
         })
         .await;
-    println!("  GrantSteward result: {result:?}");
+    println!("  GrantModerator result: {result:?}");
     // This may fail due to authorization - that's expected behavior
 
-    // Phase 2: Try to revoke steward
-    println!("\nPhase 2: Try to revoke steward role");
+    // Phase 2: Try to revoke moderator
+    println!("\nPhase 2: Try to revoke moderator role");
     let result = ctx
-        .dispatch(EffectCommand::RevokeSteward {
+        .dispatch(EffectCommand::RevokeModerator {
             channel: None,
             target: "user-to-demote".to_string(),
         })
         .await;
-    println!("  RevokeSteward result: {result:?}");
+    println!("  RevokeModerator result: {result:?}");
     // This may also fail due to authorization
 
-    cleanup_test_dir("steward-ops");
-    println!("\n=== Steward Grant/Revoke Operations Test PASSED ===\n");
+    cleanup_test_dir("moderator-ops");
+    println!("\n=== Moderator Grant/Revoke Operations Test PASSED ===\n");
 }
 
 // ============================================================================

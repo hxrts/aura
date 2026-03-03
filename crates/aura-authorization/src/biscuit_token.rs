@@ -26,7 +26,7 @@ impl TokenAuthority {
     /// Create a token for a subordinate authority or derived identity.
     ///
     /// The token includes the issuing authority and recipient authority facts,
-    /// along with default owner capabilities.
+    /// along with default member/moderator capabilities.
     pub fn create_token(&self, recipient: AuthorityId) -> Result<Biscuit, BiscuitError> {
         let issuer = self.authority_id.to_string();
         let recipient_str = recipient.to_string();
@@ -35,12 +35,12 @@ impl TokenAuthority {
             r#"
             issuer({issuer});
             authority({recipient_str});
-            role("owner");
+            role("member");
             capability("read");
             capability("write");
             capability("execute");
             capability("delegate");
-            capability("admin");
+            capability("moderator");
         "#
         )
         .build(&self.root_keypair)?;

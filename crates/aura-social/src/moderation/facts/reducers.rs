@@ -184,11 +184,11 @@ impl FactReducer for HomeUnpinFactReducer {
     }
 }
 
-struct HomeGrantStewardFactReducer;
+struct HomeGrantModeratorFactReducer;
 
-impl FactReducer for HomeGrantStewardFactReducer {
+impl FactReducer for HomeGrantModeratorFactReducer {
     fn handles_type(&self) -> &'static str {
-        HOME_GRANT_STEWARD_FACT_TYPE_ID
+        HOME_GRANT_MODERATOR_FACT_TYPE_ID
     }
 
     fn reduce_envelope(
@@ -196,14 +196,14 @@ impl FactReducer for HomeGrantStewardFactReducer {
         context_id: ContextId,
         envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != HOME_GRANT_STEWARD_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != HOME_GRANT_MODERATOR_FACT_TYPE_ID {
             return None;
         }
 
-        let _fact = HomeGrantStewardFact::from_envelope(envelope)?;
+        let _fact = HomeGrantModeratorFact::from_envelope(envelope)?;
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(
-                HOME_GRANT_STEWARD_FACT_TYPE_ID.to_string(),
+                HOME_GRANT_MODERATOR_FACT_TYPE_ID.to_string(),
             ),
             context_id,
             data: envelope.payload.clone(),
@@ -211,11 +211,11 @@ impl FactReducer for HomeGrantStewardFactReducer {
     }
 }
 
-struct HomeRevokeStewardFactReducer;
+struct HomeRevokeModeratorFactReducer;
 
-impl FactReducer for HomeRevokeStewardFactReducer {
+impl FactReducer for HomeRevokeModeratorFactReducer {
     fn handles_type(&self) -> &'static str {
-        HOME_REVOKE_STEWARD_FACT_TYPE_ID
+        HOME_REVOKE_MODERATOR_FACT_TYPE_ID
     }
 
     fn reduce_envelope(
@@ -223,14 +223,14 @@ impl FactReducer for HomeRevokeStewardFactReducer {
         context_id: ContextId,
         envelope: &FactEnvelope,
     ) -> Option<RelationalBinding> {
-        if envelope.type_id.as_str() != HOME_REVOKE_STEWARD_FACT_TYPE_ID {
+        if envelope.type_id.as_str() != HOME_REVOKE_MODERATOR_FACT_TYPE_ID {
             return None;
         }
 
-        let _fact = HomeRevokeStewardFact::from_envelope(envelope)?;
+        let _fact = HomeRevokeModeratorFact::from_envelope(envelope)?;
         Some(RelationalBinding {
             binding_type: RelationalBindingType::Generic(
-                HOME_REVOKE_STEWARD_FACT_TYPE_ID.to_string(),
+                HOME_REVOKE_MODERATOR_FACT_TYPE_ID.to_string(),
             ),
             context_id,
             data: envelope.payload.clone(),
@@ -247,12 +247,12 @@ pub fn register_moderation_facts(registry: &mut FactRegistry) {
     registry.register::<HomeKickFact>(HOME_KICK_FACT_TYPE_ID, Box::new(HomeKickFactReducer));
     registry.register::<HomePinFact>(HOME_PIN_FACT_TYPE_ID, Box::new(HomePinFactReducer));
     registry.register::<HomeUnpinFact>(HOME_UNPIN_FACT_TYPE_ID, Box::new(HomeUnpinFactReducer));
-    registry.register::<HomeGrantStewardFact>(
-        HOME_GRANT_STEWARD_FACT_TYPE_ID,
-        Box::new(HomeGrantStewardFactReducer),
+    registry.register::<HomeGrantModeratorFact>(
+        HOME_GRANT_MODERATOR_FACT_TYPE_ID,
+        Box::new(HomeGrantModeratorFactReducer),
     );
-    registry.register::<HomeRevokeStewardFact>(
-        HOME_REVOKE_STEWARD_FACT_TYPE_ID,
-        Box::new(HomeRevokeStewardFactReducer),
+    registry.register::<HomeRevokeModeratorFact>(
+        HOME_REVOKE_MODERATOR_FACT_TYPE_ID,
+        Box::new(HomeRevokeModeratorFactReducer),
     );
 }

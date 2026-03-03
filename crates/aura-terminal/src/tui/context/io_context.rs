@@ -1044,7 +1044,7 @@ impl IoContext {
     // =========================================================================
 
     #[must_use]
-    pub fn get_current_role(&self) -> Option<aura_app::ui::types::home::ResidentRole> {
+    pub fn get_current_role(&self) -> Option<aura_app::ui::types::home::HomeRole> {
         let snapshot = self.snapshots.try_state_snapshot()?;
         let home_state = snapshot.homes.current_home()?;
         Some(home_state.my_role)
@@ -1081,8 +1081,8 @@ fn command_name(command: &EffectCommand) -> &'static str {
         EffectCommand::KickUser { .. } => "Kick user",
         EffectCommand::BanUser { .. } => "Ban user",
         EffectCommand::UnbanUser { .. } => "Unban user",
-        EffectCommand::GrantSteward { .. } => "Grant steward",
-        EffectCommand::RevokeSteward { .. } => "Revoke steward",
+        EffectCommand::GrantModerator { .. } => "Grant moderator",
+        EffectCommand::RevokeModerator { .. } => "Revoke moderator",
         EffectCommand::SetChannelMode { .. } => "Set channel mode",
         EffectCommand::Shutdown => "Shutdown",
         _ => "This operation",
@@ -1098,10 +1098,10 @@ fn has_explicit_admin_scope(command: &EffectCommand) -> bool {
         EffectCommand::UnbanUser { channel, .. } => channel
             .as_deref()
             .is_some_and(|channel| !channel.trim().is_empty()),
-        EffectCommand::GrantSteward { channel, .. } => channel
+        EffectCommand::GrantModerator { channel, .. } => channel
             .as_deref()
             .is_some_and(|channel| !channel.trim().is_empty()),
-        EffectCommand::RevokeSteward { channel, .. } => channel
+        EffectCommand::RevokeModerator { channel, .. } => channel
             .as_deref()
             .is_some_and(|channel| !channel.trim().is_empty()),
         EffectCommand::SetChannelMode { channel, .. } => !channel.trim().is_empty(),

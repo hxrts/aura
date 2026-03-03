@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tokio::time::Instant;
 
 use crate::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
 use crate::introspection::{extract_command_consistency, extract_toast, ToastLevel};
@@ -292,7 +293,7 @@ fn execute_step(
             let payload = dispatch_payload(
                 tool_api,
                 ToolRequest::Screen {
-                    instance_id: instance_id.clone(),
+                    instance_id,
                 },
             )?;
             let source = screen_field_value(&payload, field);
@@ -313,23 +314,17 @@ fn execute_step(
                     group
                 )
             })?;
-            context.vars.insert(var.to_string(), capture.as_str().to_string());
+            context
+                .vars
+                .insert(var.to_string(), capture.as_str().to_string());
             Ok(())
         }
         ScenarioAction::SendKeys => {
             let instance_id = resolve_required_instance(step, context)?;
-            let keys = resolve_optional_field(
-                step.keys.as_deref().or(step.expect.as_deref()),
-                context,
-            )?
-            .unwrap_or_else(|| "\n".to_string());
-            dispatch(
-                tool_api,
-                ToolRequest::SendKeys {
-                    instance_id,
-                    keys,
-                },
-            )?;
+            let keys =
+                resolve_optional_field(step.keys.as_deref().or(step.expect.as_deref()), context)?
+                    .unwrap_or_else(|| "\n".to_string());
+            dispatch(tool_api, ToolRequest::SendKeys { instance_id, keys })?;
             Ok(())
         }
         ScenarioAction::SendChatCommand => {
@@ -414,11 +409,7 @@ fn execute_step(
 
                 if Instant::now() >= deadline {
                     bail!(
-                        "send_clipboard timed out for source={} target={} timeout_ms={} last_error={}",
-                        source_instance_id,
-                        target_instance_id,
-                        timeout_ms,
-                        attempt_error
+                        "send_clipboard timed out for source={source_instance_id} target={target_instance_id} timeout_ms={timeout_ms} last_error={attempt_error}"
                     );
                 }
                 std::thread::sleep(Duration::from_millis(100));
@@ -477,19 +468,21 @@ fn execute_step(
                 step.contains.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let expected_level = step
-                .level
-                .as_deref()
-                .map(parse_toast_level)
-                .transpose()?;
-            assert_toast(step, tool_api, &instance_id, step.timeout_ms.unwrap_or(step_budget_ms), |toast| {
-                if let Some(level) = expected_level {
-                    if toast.level != level {
-                        return false;
+            let expected_level = step.level.as_deref().map(parse_toast_level).transpose()?;
+            assert_toast(
+                step,
+                tool_api,
+                &instance_id,
+                step.timeout_ms.unwrap_or(step_budget_ms),
+                |toast| {
+                    if let Some(level) = expected_level {
+                        if toast.level != level {
+                            return false;
+                        }
                     }
-                }
-                toast.message.contains(&expected_contains)
-            })
+                    toast.message.contains(&expected_contains)
+                },
+            )
         }
         ScenarioAction::ExpectCommandResult => {
             let instance_id = resolve_required_instance(step, context)?;
@@ -497,40 +490,42 @@ fn execute_step(
                 step.contains.as_deref().or(step.expect.as_deref()),
                 context,
             )?;
-            let expected_level = step
-                .level
-                .as_deref()
-                .map(parse_toast_level)
-                .transpose()?;
+            let expected_level = step.level.as_deref().map(parse_toast_level).transpose()?;
             let expected_consistency = step
                 .consistency
                 .as_deref()
                 .map(ExpectedConsistency::parse)
                 .transpose()?;
-            assert_toast(step, tool_api, &instance_id, step.timeout_ms.unwrap_or(step_budget_ms), |toast| {
-                if let Some(level) = expected_level {
-                    if toast.level != level {
-                        return false;
+            assert_toast(
+                step,
+                tool_api,
+                &instance_id,
+                step.timeout_ms.unwrap_or(step_budget_ms),
+                |toast| {
+                    if let Some(level) = expected_level {
+                        if toast.level != level {
+                            return false;
+                        }
                     }
-                }
-                if let Some(ref contains) = expected_contains {
-                    if !toast.message.contains(contains) {
-                        return false;
+                    if let Some(ref contains) = expected_contains {
+                        if !toast.message.contains(contains) {
+                            return false;
+                        }
                     }
-                }
-                if let Some(consistency) = expected_consistency {
-                    let Some(found) = extract_command_consistency(&toast.message) else {
-                        return false;
-                    };
-                    let Ok(found) = ExpectedConsistency::parse(&found) else {
-                        return false;
-                    };
-                    if found != consistency {
-                        return false;
+                    if let Some(consistency) = expected_consistency {
+                        let Some(found) = extract_command_consistency(&toast.message) else {
+                            return false;
+                        };
+                        let Ok(found) = ExpectedConsistency::parse(&found) else {
+                            return false;
+                        };
+                        if found != consistency {
+                            return false;
+                        }
                     }
-                }
-                true
-            })
+                    true
+                },
+            )
         }
         ScenarioAction::ExpectMembership => {
             let instance_id = resolve_required_instance(step, context)?;
@@ -563,23 +558,33 @@ fn execute_step(
             if let Some(value) = resolve_optional_field(step.contains.as_deref(), context)? {
                 contains_any.push(value);
             }
-            assert_toast(step, tool_api, &instance_id, step.timeout_ms.unwrap_or(step_budget_ms), |toast| {
-                if toast.level != ToastLevel::Error {
-                    return false;
-                }
-                let lowered = toast.message.to_ascii_lowercase();
-                if let Some(reason) = reason {
-                    if !reason.patterns().iter().any(|pattern| lowered.contains(pattern)) {
+            assert_toast(
+                step,
+                tool_api,
+                &instance_id,
+                step.timeout_ms.unwrap_or(step_budget_ms),
+                |toast| {
+                    if toast.level != ToastLevel::Error {
                         return false;
                     }
-                }
-                if contains_any.is_empty() {
-                    return true;
-                }
-                contains_any
-                    .iter()
-                    .any(|pattern| lowered.contains(&pattern.to_ascii_lowercase()))
-            })
+                    let lowered = toast.message.to_ascii_lowercase();
+                    if let Some(reason) = reason {
+                        if !reason
+                            .patterns()
+                            .iter()
+                            .any(|pattern| lowered.contains(pattern))
+                        {
+                            return false;
+                        }
+                    }
+                    if contains_any.is_empty() {
+                        return true;
+                    }
+                    contains_any
+                        .iter()
+                        .any(|pattern| lowered.contains(&pattern.to_ascii_lowercase()))
+                },
+            )
         }
         ScenarioAction::GetAuthorityId => {
             let instance_id = resolve_required_instance(step, context)?;
@@ -590,14 +595,16 @@ fn execute_step(
             let payload = dispatch_payload(
                 tool_api,
                 ToolRequest::GetAuthorityId {
-                    instance_id: instance_id.clone(),
+                    instance_id,
                 },
             )?;
             let authority_id = payload
                 .get("authority_id")
                 .and_then(serde_json::Value::as_str)
                 .ok_or_else(|| anyhow!("step {} get_authority_id missing authority_id", step.id))?;
-            context.vars.insert(var.to_string(), authority_id.to_string());
+            context
+                .vars
+                .insert(var.to_string(), authority_id.to_string());
             Ok(())
         }
         ScenarioAction::ListChannels => {
@@ -605,7 +612,7 @@ fn execute_step(
             let payload = dispatch_payload(
                 tool_api,
                 ToolRequest::ListChannels {
-                    instance_id: instance_id.clone(),
+                    instance_id,
                 },
             )?;
             if let Some(var) = step.var.as_deref() {
@@ -616,7 +623,12 @@ fn execute_step(
                     .unwrap_or_default();
                 let names = channels
                     .into_iter()
-                    .filter_map(|entry| entry.get("name").and_then(serde_json::Value::as_str).map(str::to_string))
+                    .filter_map(|entry| {
+                        entry
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
+                    })
                     .collect::<Vec<_>>()
                     .join(",");
                 context.vars.insert(var.to_string(), names);
@@ -628,7 +640,7 @@ fn execute_step(
             let payload = dispatch_payload(
                 tool_api,
                 ToolRequest::CurrentSelection {
-                    instance_id: instance_id.clone(),
+                    instance_id,
                 },
             )?;
             if let Some(var) = step.var.as_deref() {
@@ -648,7 +660,7 @@ fn execute_step(
             let payload = dispatch_payload(
                 tool_api,
                 ToolRequest::ListContacts {
-                    instance_id: instance_id.clone(),
+                    instance_id,
                 },
             )?;
             if let Some(var) = step.var.as_deref() {
@@ -659,7 +671,12 @@ fn execute_step(
                     .unwrap_or_default();
                 let names = contacts
                     .into_iter()
-                    .filter_map(|entry| entry.get("name").and_then(serde_json::Value::as_str).map(str::to_string))
+                    .filter_map(|entry| {
+                        entry
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string)
+                    })
                     .collect::<Vec<_>>()
                     .join(",");
                 context.vars.insert(var.to_string(), names);
@@ -684,22 +701,12 @@ fn execute_step(
         }
         ScenarioAction::Restart => {
             let instance_id = resolve_required_instance(step, context)?;
-            dispatch(
-                tool_api,
-                ToolRequest::Restart {
-                    instance_id,
-                },
-            )?;
+            dispatch(tool_api, ToolRequest::Restart { instance_id })?;
             Ok(())
         }
         ScenarioAction::Kill => {
             let instance_id = resolve_required_instance(step, context)?;
-            dispatch(
-                tool_api,
-                ToolRequest::Kill {
-                    instance_id,
-                },
-            )?;
+            dispatch(tool_api, ToolRequest::Kill { instance_id })?;
             Ok(())
         }
         ScenarioAction::FaultDelay => {
@@ -753,7 +760,10 @@ fn resolve_required_field(
     resolve_template(raw_value, context)
 }
 
-fn resolve_optional_field(raw_value: Option<&str>, context: &ScenarioContext) -> Result<Option<String>> {
+fn resolve_optional_field(
+    raw_value: Option<&str>,
+    context: &ScenarioContext,
+) -> Result<Option<String>> {
     raw_value
         .map(|value| resolve_template(value, context))
         .transpose()
@@ -816,7 +826,7 @@ fn screen_field_label(value: ScreenField) -> &'static str {
     }
 }
 
-fn screen_field_value<'a>(payload: &'a serde_json::Value, field: ScreenField) -> &'a str {
+fn screen_field_value(payload: &serde_json::Value, field: ScreenField) -> &str {
     let fallback = payload
         .get("screen")
         .and_then(serde_json::Value::as_str)
@@ -916,7 +926,10 @@ fn assert_membership(
             .as_ref()
             .and_then(|entry| entry.get("selected"))
             .and_then(serde_json::Value::as_bool);
-        let selected_ok = expected_selected.is_none_or(|want| selected == Some(want));
+        let selected_ok = match expected_selected {
+            None => true,
+            Some(want) => selected == Some(want),
+        };
         if present == expected_present && selected_ok {
             return Ok(());
         }

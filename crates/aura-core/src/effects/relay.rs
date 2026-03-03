@@ -74,7 +74,7 @@ pub enum RelayRelationship {
     ///
     /// Home peers share home context and have high mutual trust.
     /// They can relay for any member of shared neighborhoods.
-    HomePeer {
+    SameHome {
         /// The home ID (opaque 32-byte identifier)
         home_id: [u8; 32],
     },
@@ -84,7 +84,7 @@ pub enum RelayRelationship {
     /// Neighborhood peers share neighborhood context and have
     /// established traversal rights. They can relay for any
     /// member of the neighborhood.
-    NeighborhoodPeer {
+    NeighborhoodHop {
         /// The neighborhood ID (opaque 32-byte identifier)
         neighborhood_id: [u8; 32],
     },
@@ -103,20 +103,20 @@ impl RelayRelationship {
     /// Lower values are higher priority (selected first).
     pub fn priority(&self) -> u8 {
         match self {
-            Self::HomePeer { .. } => 0,         // Highest priority
-            Self::NeighborhoodPeer { .. } => 1, // Medium priority
-            Self::Guardian => 2,                // Fallback
+            Self::SameHome { .. } => 0,        // Highest priority
+            Self::NeighborhoodHop { .. } => 1, // Medium priority
+            Self::Guardian => 2,               // Fallback
         }
     }
 
     /// Check if this is a home peer relationship.
-    pub fn is_home_peer(&self) -> bool {
-        matches!(self, Self::HomePeer { .. })
+    pub fn is_same_home_member(&self) -> bool {
+        matches!(self, Self::SameHome { .. })
     }
 
     /// Check if this is a neighborhood peer relationship.
-    pub fn is_neighborhood_peer(&self) -> bool {
-        matches!(self, Self::NeighborhoodPeer { .. })
+    pub fn is_neighborhood_hop_member(&self) -> bool {
+        matches!(self, Self::NeighborhoodHop { .. })
     }
 
     /// Check if this is a guardian relationship.
@@ -158,14 +158,14 @@ impl RelayCandidate {
 
     /// Create a reachable home peer candidate.
     pub fn block_peer(authority_id: AuthorityId, home_id: [u8; 32]) -> Self {
-        Self::new(authority_id, RelayRelationship::HomePeer { home_id }, true)
+        Self::new(authority_id, RelayRelationship::SameHome { home_id }, true)
     }
 
     /// Create a reachable neighborhood peer candidate.
-    pub fn neighborhood_peer(authority_id: AuthorityId, neighborhood_id: [u8; 32]) -> Self {
+    pub fn neighborhood_hop_member(authority_id: AuthorityId, neighborhood_id: [u8; 32]) -> Self {
         Self::new(
             authority_id,
-            RelayRelationship::NeighborhoodPeer { neighborhood_id },
+            RelayRelationship::NeighborhoodHop { neighborhood_id },
             true,
         )
     }
@@ -299,8 +299,8 @@ mod tests {
 
     #[test]
     fn test_relay_relationship_priority() {
-        let home_rel = RelayRelationship::HomePeer { home_id: [1u8; 32] };
-        let neighborhood = RelayRelationship::NeighborhoodPeer {
+        let home_rel = RelayRelationship::SameHome { home_id: [1u8; 32] };
+        let neighborhood = RelayRelationship::NeighborhoodHop {
             neighborhood_id: [2u8; 32],
         };
         let guardian = RelayRelationship::Guardian;
@@ -311,21 +311,21 @@ mod tests {
 
     #[test]
     fn test_relay_relationship_checks() {
-        let home_rel = RelayRelationship::HomePeer { home_id: [1u8; 32] };
-        assert!(home_rel.is_home_peer());
-        assert!(!home_rel.is_neighborhood_peer());
+        let home_rel = RelayRelationship::SameHome { home_id: [1u8; 32] };
+        assert!(home_rel.is_same_home_member());
+        assert!(!home_rel.is_neighborhood_hop_member());
         assert!(!home_rel.is_guardian());
 
-        let neighborhood = RelayRelationship::NeighborhoodPeer {
+        let neighborhood = RelayRelationship::NeighborhoodHop {
             neighborhood_id: [2u8; 32],
         };
-        assert!(!neighborhood.is_home_peer());
-        assert!(neighborhood.is_neighborhood_peer());
+        assert!(!neighborhood.is_same_home_member());
+        assert!(neighborhood.is_neighborhood_hop_member());
         assert!(!neighborhood.is_guardian());
 
         let guardian = RelayRelationship::Guardian;
-        assert!(!guardian.is_home_peer());
-        assert!(!guardian.is_neighborhood_peer());
+        assert!(!guardian.is_same_home_member());
+        assert!(!guardian.is_neighborhood_hop_member());
         assert!(guardian.is_guardian());
     }
 
@@ -335,11 +335,13 @@ mod tests {
 
         let block_peer = RelayCandidate::block_peer(auth, [1u8; 32]);
         assert!(block_peer.reachable);
-        assert!(block_peer.relationship.is_home_peer());
+        assert!(block_peer.relationship.is_same_home_member());
 
-        let neighborhood_peer = RelayCandidate::neighborhood_peer(auth, [2u8; 32]);
-        assert!(neighborhood_peer.reachable);
-        assert!(neighborhood_peer.relationship.is_neighborhood_peer());
+        let neighborhood_hop_member = RelayCandidate::neighborhood_hop_member(auth, [2u8; 32]);
+        assert!(neighborhood_hop_member.reachable);
+        assert!(neighborhood_hop_member
+            .relationship
+            .is_neighborhood_hop_member());
 
         let guardian = RelayCandidate::guardian(auth);
         assert!(guardian.reachable);

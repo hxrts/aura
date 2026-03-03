@@ -46,7 +46,7 @@ pub fn hash_relay_seed(context: &RelayContext) -> [u8; 32] {
 /// * `candidates` - All relay candidates to partition
 ///
 /// # Returns
-/// Tuple of (home_peers, neighborhood_peers, guardians)
+/// Tuple of (same_home_members, neighborhood_hop_members, guardians)
 pub fn partition_by_relationship(
     candidates: &[RelayCandidate],
 ) -> (
@@ -54,8 +54,8 @@ pub fn partition_by_relationship(
     Vec<&RelayCandidate>,
     Vec<&RelayCandidate>,
 ) {
-    let mut home_peers = Vec::new();
-    let mut neighborhood_peers = Vec::new();
+    let mut same_home_members = Vec::new();
+    let mut neighborhood_hop_members = Vec::new();
     let mut guardians = Vec::new();
 
     for candidate in candidates {
@@ -64,13 +64,13 @@ pub fn partition_by_relationship(
         }
 
         match &candidate.relationship {
-            RelayRelationship::HomePeer { .. } => home_peers.push(candidate),
-            RelayRelationship::NeighborhoodPeer { .. } => neighborhood_peers.push(candidate),
+            RelayRelationship::SameHome { .. } => same_home_members.push(candidate),
+            RelayRelationship::NeighborhoodHop { .. } => neighborhood_hop_members.push(candidate),
             RelayRelationship::Guardian => guardians.push(candidate),
         }
     }
 
-    (home_peers, neighborhood_peers, guardians)
+    (same_home_members, neighborhood_hop_members, guardians)
 }
 
 /// Select one candidate from a tier using deterministic randomness.
@@ -134,13 +134,14 @@ pub fn select_by_tiers(
     seed: &[u8; 32],
     max_per_tier: usize,
 ) -> Vec<AuthorityId> {
-    let (home_peers, neighborhood_peers, guardians) = partition_by_relationship(candidates);
+    let (same_home_members, neighborhood_hop_members, guardians) =
+        partition_by_relationship(candidates);
 
     let mut result = Vec::new();
 
     // Select from home peers first
     result.extend(select_multiple_from_tier(
-        &home_peers,
+        &same_home_members,
         seed,
         0,
         max_per_tier,
@@ -148,7 +149,7 @@ pub fn select_by_tiers(
 
     // Then neighborhood peers
     result.extend(select_multiple_from_tier(
-        &neighborhood_peers,
+        &neighborhood_hop_members,
         seed,
         1,
         max_per_tier,
@@ -231,7 +232,7 @@ mod tests {
     }
 
     fn neighborhood_candidate(seed: u8) -> RelayCandidate {
-        RelayCandidate::neighborhood_peer(test_authority(seed), [seed; 32])
+        RelayCandidate::neighborhood_hop_member(test_authority(seed), [seed; 32])
     }
 
     fn guardian_candidate(seed: u8) -> RelayCandidate {

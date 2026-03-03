@@ -194,10 +194,10 @@ where
         let mut targets = Vec::new();
 
         // First add home peers (highest priority)
-        targets.extend(topology.home_peers());
+        targets.extend(topology.same_home_members());
 
         // Then neighborhood peers
-        targets.extend(topology.neighborhood_peers());
+        targets.extend(topology.neighborhood_hop_members());
 
         // Remove self if present
         targets.retain(|a| *a != self.local_authority);

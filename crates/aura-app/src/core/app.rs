@@ -483,7 +483,7 @@ impl AppCore {
                     return Err(IntentError::validation_failed("Home name is empty"));
                 }
             }
-            Intent::GrantSteward { home_id, target_id } => {
+            Intent::GrantModerator { home_id, target_id } => {
                 use aura_core::identifiers::AuthorityId;
 
                 let snapshot = self.snapshot();
@@ -499,7 +499,7 @@ impl AppCore {
 
                 if !home.is_admin() {
                     return Err(IntentError::unauthorized(
-                        "Only stewards can grant steward role",
+                        "Only moderators can grant moderator role",
                     ));
                 }
 
@@ -509,11 +509,11 @@ impl AppCore {
                     )));
                 };
 
-                if matches!(resident.role, crate::views::ResidentRole::Owner) {
+                if matches!(resident.role, crate::views::HomeRole::Member) {
                     return Err(IntentError::validation_failed("Cannot modify Owner role"));
                 }
             }
-            Intent::RevokeSteward { home_id, target_id } => {
+            Intent::RevokeModerator { home_id, target_id } => {
                 use aura_core::identifiers::AuthorityId;
 
                 let snapshot = self.snapshot();
@@ -529,7 +529,7 @@ impl AppCore {
 
                 if !home.is_admin() {
                     return Err(IntentError::unauthorized(
-                        "Only stewards can revoke steward role",
+                        "Only moderators can revoke moderator role",
                     ));
                 }
 
@@ -539,7 +539,7 @@ impl AppCore {
                     )));
                 };
 
-                if !matches!(resident.role, crate::views::ResidentRole::Admin) {
+                if !matches!(resident.role, crate::views::HomeRole::Moderator) {
                     return Err(IntentError::validation_failed(
                         "Can only revoke Admin role, not Owner or Resident",
                     ));

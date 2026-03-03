@@ -230,7 +230,7 @@ pub enum UiUpdate {
     /// Navigated to home/default view
     NavigatedHome,
 
-    /// Navigated back to street level
+    /// Navigated back to limited level
     NavigatedToStreet,
 
     /// Navigated to neighborhood view
@@ -333,14 +333,14 @@ pub enum UiUpdate {
         contact_id: String,
     },
 
-    /// Steward role was granted
-    StewardGranted {
+    /// Moderator role was granted
+    ModeratorGranted {
         /// The contact ID
         contact_id: String,
     },
 
-    /// Steward role was revoked
-    StewardRevoked {
+    /// Moderator role was revoked
+    ModeratorRevoked {
         /// The contact ID
         contact_id: String,
     },

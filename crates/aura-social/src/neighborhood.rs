@@ -3,7 +3,7 @@
 //! Provides a materialized view of a neighborhood aggregated from journal facts.
 
 use crate::error::SocialError;
-use crate::facts::{AdjacencyFact, HomeId, HomeMemberFact, NeighborhoodFact, NeighborhoodId};
+use crate::facts::{HomeId, HomeMemberFact, NeighborhoodFact, NeighborhoodId, OneHopLinkFact};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -17,7 +17,7 @@ pub struct Neighborhood {
     pub neighborhood_id: NeighborhoodId,
     /// Member blocks
     pub member_homes: Vec<HomeId>,
-    /// Adjacency relationships between blocks
+    /// OneHopLink relationships between blocks
     pub adjacencies: Vec<(HomeId, HomeId)>,
 }
 
@@ -27,16 +27,34 @@ impl Neighborhood {
     /// # Arguments
     /// * `fact` - The neighborhood existence fact
     /// * `members` - All home membership facts for this neighborhood
-    /// * `adjacencies` - All adjacency facts for this neighborhood
+    /// * `adjacencies` - All one_hop_link facts for this neighborhood
     pub fn from_facts(
         fact: &NeighborhoodFact,
         members: &[HomeMemberFact],
-        adjacencies: &[AdjacencyFact],
+        adjacencies: &[OneHopLinkFact],
     ) -> Self {
+        // Canonicalize fact-derived vectors for deterministic views.
+        let mut member_homes: Vec<HomeId> = members.iter().map(|m| m.home_id).collect();
+        member_homes.sort_unstable();
+        member_homes.dedup();
+
+        let mut one_hop_links: Vec<(HomeId, HomeId)> = adjacencies
+            .iter()
+            .map(|a| {
+                if a.home_a <= a.home_b {
+                    (a.home_a, a.home_b)
+                } else {
+                    (a.home_b, a.home_a)
+                }
+            })
+            .collect();
+        one_hop_links.sort_unstable();
+        one_hop_links.dedup();
+
         Self {
             neighborhood_id: fact.neighborhood_id,
-            member_homes: members.iter().map(|m| m.home_id).collect(),
-            adjacencies: adjacencies.iter().map(|a| (a.home_a, a.home_b)).collect(),
+            member_homes,
+            adjacencies: one_hop_links,
         }
     }
 
@@ -85,7 +103,7 @@ impl Neighborhood {
 
     /// Get all unique authorities that are neighbors through this neighborhood.
     ///
-    /// Given a home, returns all blocks that share adjacency with it.
+    /// Given a home, returns all blocks that share one_hop_link with it.
     /// This includes direct adjacencies only (1-hop).
     pub fn adjacent_homes(&self, from_home: HomeId) -> Vec<HomeId> {
         self.neighbors_of(from_home)
@@ -102,17 +120,24 @@ impl Neighborhood {
         Ok(())
     }
 
-    /// Validate that an adjacency can be created.
+    /// InvariantNeighborhoodMembershipUnique:
+    /// each `(neighborhood_id, home_id)` appears at most once in the reduced view.
+    pub fn invariant_membership_unique(&self) -> bool {
+        let unique: HashSet<_> = self.member_homes.iter().copied().collect();
+        unique.len() == self.member_homes.len()
+    }
+
+    /// Validate that an one_hop_link can be created.
     ///
     /// Both blocks must be members and not already adjacent.
-    pub fn validate_adjacency(&self, home_a: HomeId, home_b: HomeId) -> Result<(), SocialError> {
+    pub fn validate_one_hop_link(&self, home_a: HomeId, home_b: HomeId) -> Result<(), SocialError> {
         if !self.is_member(home_a) {
             return Err(SocialError::HomeNotFound(home_a));
         }
         if !self.is_member(home_b) {
             return Err(SocialError::HomeNotFound(home_b));
         }
-        // Adjacency already exists is not an error for idempotency
+        // OneHopLink already exists is not an error for idempotency
         Ok(())
     }
 
@@ -174,8 +199,8 @@ mod tests {
         ];
 
         let adjacencies = vec![
-            AdjacencyFact::new(home_a, home_b, neighborhood_id),
-            AdjacencyFact::new(home_b, home_c, neighborhood_id),
+            OneHopLinkFact::new(home_a, home_b, neighborhood_id),
+            OneHopLinkFact::new(home_b, home_c, neighborhood_id),
         ];
 
         let neighborhood = Neighborhood::from_facts(&neighborhood_fact, &members, &adjacencies);
@@ -187,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn test_adjacency_queries() {
+    fn test_one_hop_link_queries() {
         let neighborhood_id = NeighborhoodId::from_bytes([2u8; 32]);
         let home_a = HomeId::from_bytes([1u8; 32]);
         let home_b = HomeId::from_bytes([2u8; 32]);
@@ -252,6 +277,49 @@ mod tests {
         let reachable_from_d = neighborhood.reachable_from(home_d);
         assert_eq!(reachable_from_d.len(), 1);
         assert!(reachable_from_d.contains(&home_d));
+    }
+
+    #[test]
+    fn test_from_facts_is_deterministic() {
+        let neighborhood_id = NeighborhoodId::from_bytes([5u8; 32]);
+        let neighborhood_fact = NeighborhoodFact::new(neighborhood_id, test_timestamp());
+
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let home_b = HomeId::from_bytes([2u8; 32]);
+
+        let members_order_a = vec![
+            HomeMemberFact::new(home_a, neighborhood_id, test_timestamp()),
+            HomeMemberFact::new(home_b, neighborhood_id, test_timestamp()),
+            HomeMemberFact::new(home_a, neighborhood_id, test_timestamp()),
+        ];
+        let members_order_b = vec![
+            HomeMemberFact::new(home_b, neighborhood_id, test_timestamp()),
+            HomeMemberFact::new(home_a, neighborhood_id, test_timestamp()),
+        ];
+
+        let links_order_a = vec![OneHopLinkFact::new(home_b, home_a, neighborhood_id)];
+        let links_order_b = vec![OneHopLinkFact::new(home_a, home_b, neighborhood_id)];
+
+        let view_a = Neighborhood::from_facts(&neighborhood_fact, &members_order_a, &links_order_a);
+        let view_b = Neighborhood::from_facts(&neighborhood_fact, &members_order_b, &links_order_b);
+
+        assert_eq!(view_a.member_homes, view_b.member_homes);
+        assert_eq!(view_a.adjacencies, view_b.adjacencies);
+    }
+
+    #[test]
+    fn test_invariant_membership_unique() {
+        let neighborhood_id = NeighborhoodId::from_bytes([6u8; 32]);
+        let home_a = HomeId::from_bytes([1u8; 32]);
+        let home_b = HomeId::from_bytes([2u8; 32]);
+
+        let mut neighborhood = Neighborhood::new_empty(neighborhood_id);
+        neighborhood.member_homes = vec![home_a, home_b, home_a];
+
+        assert!(!neighborhood.invariant_membership_unique());
+
+        neighborhood.member_homes = vec![home_a, home_b];
+        assert!(neighborhood.invariant_membership_unique());
     }
 
     #[test]

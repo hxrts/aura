@@ -38,14 +38,14 @@ pub use display::{
     UNSELECTED_INDICATOR,
 };
 pub use home::{
-    AddHomeResult, BanRecord, HomeState, HomesState, KickRecord, MuteRecord, PinnedMessageMeta,
-    RemoveHomeResult, Resident, ResidentRole,
+    AddHomeResult, BanRecord, HomeRole, HomeState, HomesState, KickRecord, MuteRecord,
+    PinnedMessageMeta, RemoveHomeResult, Resident,
 };
 pub use invitations::{
     Invitation, InvitationDirection, InvitationError, InvitationStatus, InvitationType,
     InvitationsState,
 };
-pub use neighborhood::{AdjacencyType, NeighborHome, NeighborhoodState, TraversalPosition};
+pub use neighborhood::{NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition};
 pub use notifications::{
     duration_ticks, modal_can_user_dismiss, ms_to_ticks, should_auto_dismiss,
     should_interrupt_modal, ticks_to_ms, will_auto_dismiss, ModalPriority, ToastLevel,

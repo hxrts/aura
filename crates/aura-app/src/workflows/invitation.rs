@@ -624,25 +624,22 @@ pub async fn accept_pending_home_invitation(
             && inv.sender_id != our_authority
     });
 
-    match home_invitation {
-        Some(inv) => {
-            match runtime.accept_invitation(inv.invitation_id.as_str()).await {
-                Ok(()) => return Ok(inv.invitation_id.clone()),
-                Err(e) => {
-                    let message = e.to_string();
-                    let lowered = message.to_lowercase();
-                    // Channel invites may be auto-accepted by the inbound envelope pipeline.
-                    // Treat these races as idempotent success for `/homeaccept`.
-                    if lowered.contains("already accepted") || lowered.contains("not pending") {
-                        return Ok(inv.invitation_id.clone());
-                    }
-                    return Err(AuraError::agent(format!(
-                        "Failed to accept invitation: {message}"
-                    )));
+    if let Some(inv) = home_invitation {
+        match runtime.accept_invitation(inv.invitation_id.as_str()).await {
+            Ok(()) => return Ok(inv.invitation_id.clone()),
+            Err(e) => {
+                let message = e.to_string();
+                let lowered = message.to_lowercase();
+                // Channel invites may be auto-accepted by the inbound envelope pipeline.
+                // Treat these races as idempotent success for `/homeaccept`.
+                if lowered.contains("already accepted") || lowered.contains("not pending") {
+                    return Ok(inv.invitation_id.clone());
                 }
+                return Err(AuraError::agent(format!(
+                    "Failed to accept invitation: {message}"
+                )));
             }
         }
-        None => {}
     }
 
     #[cfg(feature = "signals")]

@@ -73,7 +73,7 @@ impl SocialTopology {
                 if resident != &self.local_authority {
                     self.peer_relationships.insert(
                         *resident,
-                        RelayRelationship::HomePeer {
+                        RelayRelationship::SameHome {
                             home_id: home_id_bytes,
                         },
                     );
@@ -120,19 +120,19 @@ impl SocialTopology {
     }
 
     /// Get all home peers (co-residents in our home).
-    pub fn home_peers(&self) -> Vec<AuthorityId> {
+    pub fn same_home_members(&self) -> Vec<AuthorityId> {
         self.peer_relationships
             .iter()
-            .filter(|(_, rel)| rel.is_home_peer())
+            .filter(|(_, rel)| rel.is_same_home_member())
             .map(|(auth, _)| *auth)
             .collect()
     }
 
     /// Get all neighborhood peers (members of adjacent homes in shared neighborhoods).
-    pub fn neighborhood_peers(&self) -> Vec<AuthorityId> {
+    pub fn neighborhood_hop_members(&self) -> Vec<AuthorityId> {
         self.peer_relationships
             .iter()
-            .filter(|(_, rel)| rel.is_neighborhood_peer())
+            .filter(|(_, rel)| rel.is_neighborhood_hop_member())
             .map(|(auth, _)| *auth)
             .collect()
     }
@@ -206,8 +206,8 @@ impl SocialTopology {
         let mut counts = PeerCounts::default();
         for rel in self.peer_relationships.values() {
             match rel {
-                RelayRelationship::HomePeer { .. } => counts.home_peers += 1,
-                RelayRelationship::NeighborhoodPeer { .. } => counts.neighborhood_peers += 1,
+                RelayRelationship::SameHome { .. } => counts.same_home_members += 1,
+                RelayRelationship::NeighborhoodHop { .. } => counts.neighborhood_hop_members += 1,
                 RelayRelationship::Guardian => counts.guardians += 1,
             }
         }
@@ -248,7 +248,7 @@ impl SocialTopology {
     /// let layer = topology.discovery_layer(&target);
     /// match layer {
     ///     DiscoveryLayer::Direct => connect_directly(&target),
-    ///     DiscoveryLayer::Home => relay_through_home_peers(&target),
+    ///     DiscoveryLayer::Home => relay_through_same_home_members(&target),
     ///     DiscoveryLayer::Neighborhood => relay_through_neighborhood(&target),
     ///     DiscoveryLayer::Rendezvous => use_rendezvous_discovery(&target),
     /// }
@@ -263,8 +263,8 @@ impl SocialTopology {
         if let Some(relationship) = self.peer_relationships.get(target) {
             // Known peer - determine layer based on relationship type
             match relationship {
-                RelayRelationship::HomePeer { .. } => return DiscoveryLayer::Direct,
-                RelayRelationship::NeighborhoodPeer { .. } => return DiscoveryLayer::Direct,
+                RelayRelationship::SameHome { .. } => return DiscoveryLayer::Direct,
+                RelayRelationship::NeighborhoodHop { .. } => return DiscoveryLayer::Direct,
                 RelayRelationship::Guardian => return DiscoveryLayer::Direct,
             }
         }
@@ -272,12 +272,12 @@ impl SocialTopology {
         // Target unknown - what resources do we have?
 
         // Check if we have home presence (can relay through home peers)
-        if self.home.is_some() && !self.home_peers().is_empty() {
+        if self.home.is_some() && !self.same_home_members().is_empty() {
             return DiscoveryLayer::Home;
         }
 
         // Check if we have neighborhood presence (can relay through neighborhood)
-        if !self.neighborhoods.is_empty() && !self.neighborhood_peers().is_empty() {
+        if !self.neighborhoods.is_empty() && !self.neighborhood_hop_members().is_empty() {
             return DiscoveryLayer::Neighborhood;
         }
 
@@ -306,11 +306,11 @@ impl SocialTopology {
                     vec![]
                 }
             }
-            DiscoveryLayer::Home => self.home_peers(),
+            DiscoveryLayer::Home => self.same_home_members(),
             DiscoveryLayer::Neighborhood => {
                 // Include both home and neighborhood peers for neighborhood-level relay
-                let mut peers = self.home_peers();
-                peers.extend(self.neighborhood_peers());
+                let mut peers = self.same_home_members();
+                peers.extend(self.neighborhood_hop_members());
                 peers
             }
             DiscoveryLayer::Rendezvous => {
@@ -374,9 +374,9 @@ impl DiscoveryLayer {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PeerCounts {
     /// Number of home peers
-    pub home_peers: u32,
+    pub same_home_members: u32,
     /// Number of neighborhood peers
-    pub neighborhood_peers: u32,
+    pub neighborhood_hop_members: u32,
     /// Number of guardians
     pub guardians: u32,
 }
@@ -384,7 +384,7 @@ pub struct PeerCounts {
 impl PeerCounts {
     /// Get total peer count.
     pub fn total(&self) -> u32 {
-        self.home_peers + self.neighborhood_peers + self.guardians
+        self.same_home_members + self.neighborhood_hop_members + self.guardians
     }
 }
 
@@ -403,8 +403,8 @@ mod tests {
         let topology = SocialTopology::empty(authority);
 
         assert!(!topology.has_social_presence());
-        assert!(topology.home_peers().is_empty());
-        assert!(topology.neighborhood_peers().is_empty());
+        assert!(topology.same_home_members().is_empty());
+        assert!(topology.neighborhood_hop_members().is_empty());
     }
 
     #[test]
@@ -420,11 +420,11 @@ mod tests {
         let topology = SocialTopology::new(local, Some(home_state), vec![]);
 
         assert!(topology.has_social_presence());
-        let home_peers = topology.home_peers();
-        assert_eq!(home_peers.len(), 2);
-        assert!(home_peers.contains(&peer1));
-        assert!(home_peers.contains(&peer2));
-        assert!(!home_peers.contains(&local)); // Self excluded
+        let same_home_members = topology.same_home_members();
+        assert_eq!(same_home_members.len(), 2);
+        assert!(same_home_members.contains(&peer1));
+        assert!(same_home_members.contains(&peer2));
+        assert!(!same_home_members.contains(&local)); // Self excluded
     }
 
     #[test]
@@ -440,39 +440,45 @@ mod tests {
         // Add as neighborhood peer first
         topology.add_peer(
             peer,
-            RelayRelationship::NeighborhoodPeer {
+            RelayRelationship::NeighborhoodHop {
                 neighborhood_id: *neighborhood_id.as_bytes(),
             },
         );
         assert!(topology
             .relationship_with(&peer)
             .unwrap()
-            .is_neighborhood_peer());
+            .is_neighborhood_hop_member());
 
         // Try to "upgrade" to home peer - should succeed
         topology.add_peer(
             peer,
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );
-        assert!(topology.relationship_with(&peer).unwrap().is_home_peer());
+        assert!(topology
+            .relationship_with(&peer)
+            .unwrap()
+            .is_same_home_member());
 
         // Try to "downgrade" back to neighborhood peer - should be ignored
         topology.add_peer(
             peer,
-            RelayRelationship::NeighborhoodPeer {
+            RelayRelationship::NeighborhoodHop {
                 neighborhood_id: *neighborhood_id.as_bytes(),
             },
         );
-        assert!(topology.relationship_with(&peer).unwrap().is_home_peer());
+        assert!(topology
+            .relationship_with(&peer)
+            .unwrap()
+            .is_same_home_member());
     }
 
     #[test]
     fn test_build_relay_candidates() {
         let local = test_authority(1);
-        let home_peer = test_authority(2);
-        let neighborhood_peer = test_authority(3);
+        let same_home_member = test_authority(2);
+        let neighborhood_hop_member = test_authority(3);
         let target = test_authority(4);
 
         let home_id = HomeId::from_bytes([1u8; 32]);
@@ -480,14 +486,14 @@ mod tests {
 
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
-            home_peer,
-            RelayRelationship::HomePeer {
+            same_home_member,
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
-            neighborhood_peer,
-            RelayRelationship::NeighborhoodPeer {
+            neighborhood_hop_member,
+            RelayRelationship::NeighborhoodHop {
                 neighborhood_id: *neighborhood_id.as_bytes(),
             },
         );
@@ -497,8 +503,8 @@ mod tests {
 
         assert_eq!(candidates.len(), 2);
         // Home peer should be first (higher priority)
-        assert!(candidates[0].relationship.is_home_peer());
-        assert!(candidates[1].relationship.is_neighborhood_peer());
+        assert!(candidates[0].relationship.is_same_home_member());
+        assert!(candidates[1].relationship.is_neighborhood_hop_member());
     }
 
     #[test]
@@ -510,27 +516,27 @@ mod tests {
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             test_authority(2),
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
             test_authority(3),
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );
         topology.add_peer(
             test_authority(4),
-            RelayRelationship::NeighborhoodPeer {
+            RelayRelationship::NeighborhoodHop {
                 neighborhood_id: *neighborhood_id.as_bytes(),
             },
         );
         topology.add_peer(test_authority(5), RelayRelationship::Guardian);
 
         let counts = topology.peer_counts();
-        assert_eq!(counts.home_peers, 2);
-        assert_eq!(counts.neighborhood_peers, 1);
+        assert_eq!(counts.same_home_members, 2);
+        assert_eq!(counts.neighborhood_hop_members, 1);
         assert_eq!(counts.guardians, 1);
         assert_eq!(counts.total(), 4);
     }
@@ -553,7 +559,7 @@ mod tests {
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer,
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );

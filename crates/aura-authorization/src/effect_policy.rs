@@ -126,8 +126,8 @@ pub enum OperationType {
     // === Social Home Operations ===
     /// Join a social home
     JoinSocialBlock,
-    /// Propose home adjacency
-    ProposeBlockAdjacency,
+    /// Propose home one_hop_link
+    ProposeBlockOneHopLink,
 }
 
 impl OperationType {
@@ -164,7 +164,7 @@ impl OperationType {
             OperationType::ProposeOTAUpdate => "propose_ota_update",
             OperationType::ActivateOTA => "activate_ota",
             OperationType::JoinSocialBlock => "join_social_block",
-            OperationType::ProposeBlockAdjacency => "propose_block_adjacency",
+            OperationType::ProposeBlockOneHopLink => "propose_block_one_hop_link",
         }
     }
 
@@ -191,7 +191,7 @@ impl OperationType {
             | OperationType::RemoveChannelMember
             | OperationType::ChangeChannelPermissions
             | OperationType::JoinSocialBlock
-            | OperationType::ProposeBlockAdjacency => SecurityLevel::Medium,
+            | OperationType::ProposeBlockOneHopLink => SecurityLevel::Medium,
 
             // High risk - irreversible or security-critical
             OperationType::DeleteChannel
@@ -248,7 +248,7 @@ impl FromStr for OperationType {
             "propose_ota_update" => Ok(OperationType::ProposeOTAUpdate),
             "activate_ota" => Ok(OperationType::ActivateOTA),
             "join_social_block" => Ok(OperationType::JoinSocialBlock),
-            "propose_block_adjacency" => Ok(OperationType::ProposeBlockAdjacency),
+            "propose_block_one_hop_link" => Ok(OperationType::ProposeBlockOneHopLink),
             _ => Err(format!("Unknown operation type: {}", s)),
         }
     }
@@ -347,7 +347,7 @@ impl EffectTiming {
 /// Requirement for approval capability
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CapabilityRequirement {
-    /// Must hold a specific role (e.g., "admin", "owner")
+    /// Must hold a specific role (e.g., "moderator", "member")
     Role(String),
     /// Must be a specific authority
     Authority(String),
@@ -617,7 +617,7 @@ impl Default for EffectPolicyRegistry {
             EffectTiming::deferred_single_admin(48),
         );
         registry.set_default(
-            OperationType::ProposeBlockAdjacency,
+            OperationType::ProposeBlockOneHopLink,
             EffectTiming::deferred_single_admin(48),
         );
 

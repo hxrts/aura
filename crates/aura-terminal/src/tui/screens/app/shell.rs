@@ -57,8 +57,8 @@ use crate::tui::screens::{
     ChatScreen, ContactsScreen, NeighborhoodScreen, NotificationsScreen, SettingsScreen,
 };
 use crate::tui::types::{
-    Channel, Contact, Device, Guardian, HomeSummary, Invitation, KeyHint, Message, MfaPolicy,
-    TraversalDepth,
+    AccessLevel, Channel, Contact, Device, Guardian, HomeSummary, Invitation, KeyHint, Message,
+    MfaPolicy,
 };
 
 // State machine integration
@@ -94,7 +94,7 @@ pub struct IoAppProps {
     // Neighborhood screen data
     pub neighborhood_name: String,
     pub homes: Vec<HomeSummary>,
-    pub traversal_depth: TraversalDepth,
+    pub access_level: AccessLevel,
     // Account setup
     /// Whether to show account setup modal on start
     pub show_account_setup: bool,
@@ -284,7 +284,7 @@ fn sync_neighborhood_navigation_state(
     );
     let expose_remote_home_details = is_selected_home_entered
         && is_detail_mode
-        && matches!(state.neighborhood.enter_depth, TraversalDepth::Interior);
+        && matches!(state.neighborhood.enter_depth, AccessLevel::Full);
     let expose_home_details = is_local_home_selected || expose_remote_home_details;
 
     let channel_count = if expose_home_details {
@@ -309,8 +309,8 @@ fn sync_neighborhood_navigation_state(
         0
     };
     state.neighborhood.resident_count = resident_count;
-    state.neighborhood.steward_actions_enabled = if expose_home_details {
-        home_meta.steward_actions_enabled
+    state.neighborhood.moderator_actions_enabled = if expose_home_details {
+        home_meta.moderator_actions_enabled
     } else {
         false
     };
@@ -1354,15 +1354,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                 crate::tui::state_machine::ToastLevel::Success
                             );
                         }
-                        UiUpdate::StewardGranted { contact_id: _ } => {
+                        UiUpdate::ModeratorGranted { contact_id: _ } => {
                             enqueue_toast!(
-                                "Steward granted".to_string(),
+                                "Moderator granted".to_string(),
                                 crate::tui::state_machine::ToastLevel::Success
                             );
                         }
-                        UiUpdate::StewardRevoked { contact_id: _ } => {
+                        UiUpdate::ModeratorRevoked { contact_id: _ } => {
                             enqueue_toast!(
-                                "Steward revoked".to_string(),
+                                "Moderator revoked".to_string(),
                                 crate::tui::state_machine::ToastLevel::Info
                             );
                         }
@@ -2626,7 +2626,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                                 // Keep entered_home_id authoritative as a real home ID.
                                                 // The state-machine layer sets an index sentinel first.
                                                 new_state.neighborhood.entered_home_id = Some(home_id.clone());
-                                                // Default to Street-level traversal depth
+                                                // Default to Limited-level traversal depth
                                                 (cb.neighborhood.on_enter_home)(
                                                     home_id.clone(),
                                                     new_state.neighborhood.enter_depth,
@@ -2676,11 +2676,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     DispatchCommand::AddHomeToNeighborhood { home_id } => {
                                         (cb.neighborhood.on_add_home_to_neighborhood)(home_id);
                                     }
-                                    DispatchCommand::LinkSelectedHomeAdjacency => {
+                                    DispatchCommand::LinkSelectedHomeOneHopLink => {
                                         let idx = new_state.neighborhood.grid.current();
                                         if let Ok(guard) = shared_neighborhood_homes_for_dispatch.read() {
                                             if let Some(home_id) = guard.get(idx) {
-                                                (cb.neighborhood.on_link_home_adjacency)(
+                                                (cb.neighborhood.on_link_home_one_hop_link)(
                                                     home_id.clone(),
                                                 );
                                             } else {
@@ -2690,8 +2690,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                             new_state.toast_error("Failed to read neighborhood homes");
                                         }
                                     }
-                                    DispatchCommand::LinkHomeAdjacency { home_id } => {
-                                        (cb.neighborhood.on_link_home_adjacency)(home_id);
+                                    DispatchCommand::LinkHomeOneHopLink { home_id } => {
+                                        (cb.neighborhood.on_link_home_one_hop_link)(home_id);
                                     }
 
                                     // === Navigation Commands ===
@@ -3000,7 +3000,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Neighborhood screen data
                         neighborhood_name: neighborhood_name,
                         homes: homes,
-                        traversal_depth: TraversalDepth::Street,
+                        access_level: AccessLevel::Limited,
                         // Account setup
                         show_account_setup: show_account_setup,
                         // Network status
@@ -3046,7 +3046,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                         // Neighborhood screen data
                         neighborhood_name: neighborhood_name,
                         homes: homes,
-                        traversal_depth: TraversalDepth::Street,
+                        access_level: AccessLevel::Limited,
                         // Account setup
                         show_account_setup: show_account_setup,
                         // Network status

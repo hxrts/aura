@@ -45,21 +45,16 @@ pub fn extract_authority_id(screen: &str) -> Option<String> {
     let compact = right_panel
         .chars()
         .filter(|ch| {
-            ch.is_ascii_alphanumeric()
-                || *ch == '-'
-                || *ch == ':'
-                || *ch == '('
-                || *ch == ')'
+            ch.is_ascii_alphanumeric() || *ch == '-' || *ch == ':' || *ch == '(' || *ch == ')'
         })
         .collect::<String>()
         .to_ascii_lowercase();
     let authority_pattern =
         r"authority-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
-    if let Some(captures) =
-        Regex::new(&format!(r"authority:?({authority_pattern})\(local\)"))
-            .ok()?
-            .captures(&compact)
+    if let Some(captures) = Regex::new(&format!(r"authority:?({authority_pattern})\(local\)"))
+        .ok()?
+        .captures(&compact)
     {
         return captures.get(1).map(|value| value.as_str().to_string());
     }
@@ -78,8 +73,9 @@ pub fn extract_authority_id(screen: &str) -> Option<String> {
 
 pub fn extract_channels(screen: &str) -> Vec<ChannelSnapshot> {
     let mut channels = Vec::new();
-    let channel_regex = Regex::new(r"^(?P<selected>➤\s*)?#\s*(?P<name>.+)$")
-        .expect("channel regex must compile");
+    let Ok(channel_regex) = Regex::new(r"^(?P<selected>➤\s*)?#\s*(?P<name>.+)$") else {
+        return channels;
+    };
     for line in screen.lines() {
         let Some(left) = left_panel_text(line) else {
             continue;
@@ -104,8 +100,9 @@ pub fn extract_channels(screen: &str) -> Vec<ChannelSnapshot> {
 
 pub fn extract_contacts(screen: &str) -> Vec<ContactSnapshot> {
     let mut contacts = Vec::new();
-    let contact_regex = Regex::new(r"^(?P<selected>➤\s*)?(?:○|●)\s+(?P<name>.+)$")
-        .expect("contact regex must compile");
+    let Ok(contact_regex) = Regex::new(r"^(?P<selected>➤\s*)?(?:○|●)\s+(?P<name>.+)$") else {
+        return contacts;
+    };
     for line in screen.lines() {
         let Some(left) = left_panel_text(line) else {
             continue;
@@ -246,7 +243,10 @@ mod tests {
         assert_eq!(channels[1].name, "slash-lab");
         assert!(channels[1].selected);
 
-        let selection = extract_current_selection(screen).expect("selection should exist");
+        let selection = match extract_current_selection(screen) {
+            Some(selection) => selection,
+            None => panic!("selection should exist"),
+        };
         assert_eq!(selection.value, "# slash-lab");
     }
 
@@ -267,7 +267,10 @@ mod tests {
     fn extracts_toast_and_consistency() {
         let screen = "\
 │ ℹ kick applied (enforced)                                   [Esc] dismiss │\n";
-        let toast = extract_toast(screen).expect("toast should parse");
+        let toast = match extract_toast(screen) {
+            Some(toast) => toast,
+            None => panic!("toast should parse"),
+        };
         assert_eq!(toast.level, ToastLevel::Info);
         assert_eq!(toast.message, "kick applied (enforced)");
         assert_eq!(

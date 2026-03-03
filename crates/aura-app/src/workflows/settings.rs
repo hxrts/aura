@@ -199,7 +199,7 @@ pub async fn set_channel_mode_resolved(
                 0,
                 context_id,
             );
-            placeholder.my_role = crate::views::home::ResidentRole::Resident;
+            placeholder.my_role = crate::views::home::HomeRole::Participant;
             placeholder.residents.clear();
             placeholder.resident_count = 0;
             placeholder.online_count = 0;
@@ -219,7 +219,7 @@ pub async fn set_channel_mode_resolved(
     })?;
     if !home.is_admin() {
         return Err(AuraError::permission_denied(
-            "Only stewards can set channel mode",
+            "Only moderators can set channel mode",
         ));
     }
 
@@ -285,6 +285,7 @@ pub async fn get_settings(app_core: &Arc<RwLock<AppCore>>) -> Result<SettingsSta
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::views::{

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use aura_harness::config::require_existing_file;
@@ -17,6 +17,7 @@ use aura_harness::scenario_execution::execute_with_run_budgets;
 use aura_harness::tool_api::{ToolApi, ToolRequest, ToolResponse};
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use tokio::time::Instant;
 
 #[derive(Debug, Parser)]
 #[command(name = "aura-harness-tool-repl")]
@@ -173,9 +174,8 @@ fn main() -> Result<()> {
                             None => (
                                 envelope.id,
                                 ToolResponse::Error {
-                                    message:
-                                        "strict request id order requires numeric u64 ids"
-                                            .to_string(),
+                                    message: "strict request id order requires numeric u64 ids"
+                                        .to_string(),
                                 },
                             ),
                         }

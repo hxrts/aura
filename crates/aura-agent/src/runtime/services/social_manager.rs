@@ -206,13 +206,13 @@ impl SocialManager {
     // ========================================================================
 
     /// Get all home peers
-    pub async fn home_peers(&self) -> Vec<AuthorityId> {
-        self.topology.read().await.home_peers()
+    pub async fn same_home_members(&self) -> Vec<AuthorityId> {
+        self.topology.read().await.same_home_members()
     }
 
     /// Get all neighborhood peers
-    pub async fn neighborhood_peers(&self) -> Vec<AuthorityId> {
-        self.topology.read().await.neighborhood_peers()
+    pub async fn neighborhood_hop_members(&self) -> Vec<AuthorityId> {
+        self.topology.read().await.neighborhood_hop_members()
     }
 
     /// Get all known peers
@@ -330,7 +330,7 @@ mod tests {
         assert!(manager.is_ready().await);
         assert!(manager.has_social_presence().await);
 
-        let peers = manager.home_peers().await;
+        let peers = manager.same_home_members().await;
         assert_eq!(peers.len(), 1);
         assert!(peers.contains(&peer));
     }
@@ -347,7 +347,7 @@ mod tests {
         let mut topology = SocialTopology::empty(local);
         topology.add_peer(
             peer,
-            RelayRelationship::HomePeer {
+            RelayRelationship::SameHome {
                 home_id: *home_id.as_bytes(),
             },
         );
@@ -378,7 +378,7 @@ mod tests {
         manager
             .add_peer(
                 peer,
-                RelayRelationship::HomePeer {
+                RelayRelationship::SameHome {
                     home_id: *home_id.as_bytes(),
                 },
             )

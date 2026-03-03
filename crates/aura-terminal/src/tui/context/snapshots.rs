@@ -131,7 +131,7 @@ impl SnapshotHelper {
 
     #[must_use]
     pub fn snapshot_home(&self) -> HomeSnapshot {
-        use aura_app::ui::types::home::ResidentRole;
+        use aura_app::ui::types::home::HomeRole;
 
         if let Some(snapshot) = self.try_state_snapshot() {
             let home_state = snapshot.homes.current_home().cloned();
@@ -139,7 +139,7 @@ impl SnapshotHelper {
             HomeSnapshot {
                 home_state,
                 is_resident: my_role.is_some(),
-                is_steward: matches!(my_role, Some(ResidentRole::Admin | ResidentRole::Owner)),
+                is_moderator: matches!(my_role, Some(HomeRole::Moderator | HomeRole::Member)),
             }
         } else {
             HomeSnapshot::default()

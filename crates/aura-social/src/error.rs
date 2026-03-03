@@ -49,9 +49,9 @@ pub enum SocialError {
         home_id: HomeId,
     },
 
-    /// Authority is not a steward of the home.
-    #[error("authority is not a steward of home {home_id}")]
-    NotSteward {
+    /// Authority is not a moderator of the home.
+    #[error("authority is not a moderator of home {home_id}")]
+    NotModerator {
         /// The home in question
         home_id: HomeId,
     },
@@ -115,9 +115,9 @@ impl SocialError {
         Self::NotResident { home_id }
     }
 
-    /// Create a not steward error.
-    pub fn not_steward(home_id: HomeId) -> Self {
-        Self::NotSteward { home_id }
+    /// Create a not moderator error.
+    pub fn not_moderator(home_id: HomeId) -> Self {
+        Self::NotModerator { home_id }
     }
 }
 

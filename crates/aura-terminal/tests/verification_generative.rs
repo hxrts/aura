@@ -118,7 +118,7 @@ pub struct RecoverySessionState {
 pub struct HomeState {
     pub owner: String,
     pub residents: Vec<String>,
-    pub stewards: Vec<String>,
+    pub moderators: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -413,7 +413,7 @@ impl FlowTraceReplayer {
                 .to_string();
 
             home.residents = Self::extract_string_set(obj.get("residents"));
-            home.stewards = Self::extract_string_set(obj.get("stewards"));
+            home.moderators = Self::extract_string_set(obj.get("moderators"));
         }
 
         Ok(home)
@@ -561,19 +561,19 @@ impl FlowTraceReplayer {
             }
         }
 
-        // Invariant 3: Stewards must be residents
+        // Invariant 3: Moderators must be residents
         for (home_id, home_state) in &state.homes {
-            let all_stewards_are_residents = home_state
-                .stewards
+            let all_moderators_are_residents = home_state
+                .moderators
                 .iter()
                 .all(|s| home_state.residents.contains(s));
 
-            if all_stewards_are_residents {
+            if all_moderators_are_residents {
                 results.passed_count += 1;
             } else {
-                results
-                    .failures
-                    .push(format!("Home {home_id} has stewards who are not residents"));
+                results.failures.push(format!(
+                    "Home {home_id} has moderators who are not residents"
+                ));
             }
         }
 
@@ -736,7 +736,7 @@ fn test_home_capacity_invariant() {
         HomeState {
             owner: "bob".to_string(),
             residents: (0..8).map(|i| format!("user{i}")).collect(),
-            stewards: vec!["user0".to_string()],
+            moderators: vec!["user0".to_string()],
         },
     );
 
@@ -758,9 +758,9 @@ fn test_home_capacity_invariant() {
     assert!(!results.all_passed, "9 residents should fail");
 }
 
-/// Test stewards-are-residents invariant
+/// Test moderators-are-residents invariant
 #[test]
-fn test_stewards_are_residents_invariant() {
+fn test_moderators_are_residents_invariant() {
     let mut state = FlowState::default();
 
     // Add agents for participants
@@ -774,22 +774,22 @@ fn test_stewards_are_residents_invariant() {
         );
     }
 
-    // Invalid: steward not a resident
+    // Invalid: moderator not a resident
     state.homes.insert(
         "home1".to_string(),
         HomeState {
             owner: "bob".to_string(),
             residents: vec!["alice".to_string()],
-            stewards: vec!["carol".to_string()], // carol is not a resident
+            moderators: vec!["carol".to_string()], // carol is not a resident
         },
     );
 
     let results = FlowTraceReplayer::validate_flow_invariants(&state);
-    assert!(!results.all_passed, "Non-resident steward should fail");
+    assert!(!results.all_passed, "Non-resident moderator should fail");
     assert!(results
         .failures
         .iter()
-        .any(|f| f.contains("stewards who are not residents")));
+        .any(|f| f.contains("moderators who are not residents")));
 }
 
 /// Test nicknames-for-contacts invariant (Social Graph)
@@ -859,7 +859,7 @@ fn test_home_residents_are_agents_invariant() {
         HomeState {
             owner: "bob".to_string(),
             residents: vec!["bob".to_string(), "alice".to_string()],
-            stewards: vec!["bob".to_string()],
+            moderators: vec!["bob".to_string()],
         },
     );
 
@@ -928,7 +928,7 @@ fn test_social_graph_flow_state_extraction() {
             ["home1", {
               "owner": "bob",
               "residents": {"#set": ["bob", "alice"]},
-              "stewards": {"#set": ["bob"]}
+              "moderators": {"#set": ["bob"]}
             }]
           ]},
           "socialGraphFlowPhase": {"tag": "ContactHomeFiltering", "value": {"#tup": []}}
@@ -953,7 +953,7 @@ fn test_social_graph_flow_state_extraction() {
         result.invariants_verified
     );
 
-    // Should have checked: agent validity, home capacity, stewards-are-residents,
+    // Should have checked: agent validity, home capacity, moderators-are-residents,
     // nicknames-for-contacts, and home-residents-are-agents
     assert!(
         result.invariants_verified >= 5,

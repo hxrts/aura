@@ -768,12 +768,12 @@ async fn test_neighborhood_position_tracking() {
     let (ctx, app_core) = setup_test_env("neighborhood-pos").await;
 
     // Phase 1: Navigate to a specific position
-    println!("Phase 1: Navigate to downtown/library/Interior");
+    println!("Phase 1: Navigate to downtown/library/Full");
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "downtown".to_string(),
             home_id: "library".to_string(),
-            depth: "Interior".to_string(),
+            depth: "Full".to_string(),
         })
         .await;
 
@@ -796,17 +796,17 @@ async fn test_neighborhood_position_tracking() {
     }
 
     // Phase 3: Navigate to different position
-    println!("\nPhase 3: Navigate to Street view");
+    println!("\nPhase 3: Navigate to Limited view");
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
             home_id: "current".to_string(),
-            depth: "Street".to_string(),
+            depth: "Limited".to_string(),
         })
         .await;
 
-    assert!(result.is_ok(), "MovePosition to Street should succeed");
-    println!("  Navigation to Street succeeded");
+    assert!(result.is_ok(), "MovePosition to Limited should succeed");
+    println!("  Navigation to Limited succeeded");
 
     // Phase 4: Navigate back (go to home home)
     println!("\nPhase 4: Navigate back to home");
@@ -815,7 +815,7 @@ async fn test_neighborhood_position_tracking() {
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "home".to_string(),
             home_id: "home".to_string(),
-            depth: "Interior".to_string(),
+            depth: "Full".to_string(),
         })
         .await;
     assert!(

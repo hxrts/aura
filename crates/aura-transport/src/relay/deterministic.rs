@@ -174,7 +174,7 @@ mod tests {
     }
 
     fn neighborhood_candidate(seed: u8) -> RelayCandidate {
-        RelayCandidate::neighborhood_peer(test_authority(seed), [seed; 32])
+        RelayCandidate::neighborhood_hop_member(test_authority(seed), [seed; 32])
     }
 
     fn guardian_candidate(seed: u8) -> RelayCandidate {
@@ -219,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn test_proximity_prefers_home_peers() {
+    fn test_proximity_prefers_same_home_members() {
         let selector = DeterministicRandomSelector::proximity().with_max_per_tier(1);
         let context = test_context();
         let candidates = vec![

@@ -227,7 +227,6 @@ pub fn use_discovered_peers_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let peers = shared.clone();
-        let last_lan_count = last_lan_count.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*DISCOVERED_PEERS_SIGNAL, move |peers_state| {
                 let lan_peers: Vec<_> = peers_state
@@ -280,7 +279,6 @@ pub fn use_contacts_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let contacts = shared_contacts.clone();
-        let last_contact_count = last_contact_count.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*CONTACTS_SIGNAL, move |contacts_state| {
                 let contact_list: Vec<Contact> =
@@ -584,8 +582,6 @@ pub fn use_channels_subscription(
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
         let channels = shared_channels.clone();
-        let last_channel_count = last_channel_count.clone();
-        let last_message_count = last_message_count.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*NEIGHBORHOOD_SIGNAL, move |neighborhood| {
                 let scope = active_home_scope_id(&neighborhood);
@@ -691,7 +687,7 @@ pub fn use_neighborhood_homes_subscription(
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NeighborhoodHomeMeta {
     pub resident_count: usize,
-    pub steward_actions_enabled: bool,
+    pub moderator_actions_enabled: bool,
 }
 
 pub type SharedNeighborhoodHomeMeta = Arc<RwLock<NeighborhoodHomeMeta>>;
@@ -713,7 +709,7 @@ pub fn use_neighborhood_home_meta_subscription(
                     .current_home()
                     .map(|home| NeighborhoodHomeMeta {
                         resident_count: home.residents.len(),
-                        steward_actions_enabled: home.is_admin(),
+                        moderator_actions_enabled: home.is_admin(),
                     })
                     .unwrap_or_default();
                 if let Ok(mut guard) = meta.write() {
@@ -803,10 +799,6 @@ pub fn use_notifications_subscription(
     // Recovery requests
     hooks.use_future({
         let app_core = app_ctx.app_core.clone();
-        let invite_count = invite_count.clone();
-        let recovery_count = recovery_count.clone();
-        let last_total = last_total.clone();
-        let update_tx = update_tx.clone();
         async move {
             subscribe_signal_with_retry(app_core, &*RECOVERY_SIGNAL, move |state| {
                 recovery_count.store(state.pending_requests().len(), Ordering::Relaxed);

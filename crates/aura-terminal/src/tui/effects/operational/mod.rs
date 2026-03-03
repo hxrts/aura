@@ -31,18 +31,18 @@
 //! - `invitations`: Invitation export/import commands
 //! - `recovery`: Recovery commands (StartRecovery, SubmitGuardianApproval, etc.)
 //! - `messaging`: Direct messaging commands
-//! - `steward`: Steward role management commands
+//! - `moderator`: Moderator role management commands
 
 mod contacts;
 mod context;
 mod invitations;
 mod messaging;
 mod moderation;
+mod moderator;
 mod network;
 mod query;
 mod recovery;
 mod settings;
-mod steward;
 mod sync;
 mod system;
 mod time;
@@ -120,7 +120,7 @@ impl OperationalHandler {
             | EffectCommand::CreateHome { .. }
             | EffectCommand::CreateNeighborhood { .. }
             | EffectCommand::AddHomeToNeighborhood { .. }
-            | EffectCommand::LinkHomeAdjacency { .. } => {
+            | EffectCommand::LinkHomeOneHopLink { .. } => {
                 context::handle_context(command, &self.app_core).await
             }
 
@@ -189,9 +189,9 @@ impl OperationalHandler {
                 moderation::handle_moderation(command, &self.app_core).await
             }
 
-            // Steward
-            EffectCommand::GrantSteward { .. } | EffectCommand::RevokeSteward { .. } => {
-                steward::handle_steward(command, &self.app_core).await
+            // Moderator
+            EffectCommand::GrantModerator { .. } | EffectCommand::RevokeModerator { .. } => {
+                moderator::handle_moderator(command, &self.app_core).await
             }
 
             // Backup commands — handled by DispatchHelper before reaching here.

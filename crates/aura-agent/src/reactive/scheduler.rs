@@ -715,7 +715,7 @@ where
         .map(|(i, n)| (n.dag_id(), i))
         .collect();
 
-    // Build adjacency list: for each node, which nodes depend on it (outgoing edges)
+    // Build one_hop_link list: for each node, which nodes depend on it (outgoing edges)
     // If A depends on B, then B -> A (B must come before A)
     let mut in_degree: Vec<usize> = vec![0; nodes.len()];
     let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];

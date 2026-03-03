@@ -1421,7 +1421,7 @@ async fn test_home_messaging_flow() {
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
             home_id: "home".to_string(),
-            depth: "Interior".to_string(),
+            depth: "Full".to_string(),
         })
         .await;
 
@@ -1430,21 +1430,21 @@ async fn test_home_messaging_flow() {
         result.as_ref().map(|_| "ok")
     );
     assert!(result.is_ok(), "MovePosition should succeed");
-    println!("  ✓ MovePosition to home/Interior dispatched successfully");
+    println!("  ✓ MovePosition to home/Full dispatched successfully");
 
-    // Phase 4: Test navigation to Street view
-    println!("\nPhase 4: Testing navigation to Street view");
+    // Phase 4: Test navigation to Limited view
+    println!("\nPhase 4: Testing navigation to Limited view");
 
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
             home_id: "current".to_string(),
-            depth: "Street".to_string(),
+            depth: "Limited".to_string(),
         })
         .await;
 
-    assert!(result.is_ok(), "MovePosition to Street should succeed");
-    println!("  ✓ MovePosition to Street view dispatched successfully");
+    assert!(result.is_ok(), "MovePosition to Limited should succeed");
+    println!("  ✓ MovePosition to Limited view dispatched successfully");
 
     // Phase 5: Test home channel naming convention
     println!("\nPhase 5: Testing home channel naming conventions");
@@ -1616,17 +1616,17 @@ async fn test_set_context_flow() {
     println!("\n=== SetContext Flow Test PASSED ===\n");
 }
 
-/// Test steward role grant/revoke flow
+/// Test moderator role grant/revoke flow
 ///
 /// This test validates:
-/// 1. GrantSteward changes resident role to Admin
-/// 2. RevokeSteward changes Admin role back to Resident
-/// 3. Authorization checks (only stewards can grant/revoke)
+/// 1. GrantModerator changes resident role to Admin
+/// 2. RevokeModerator changes Admin role back to Resident
+/// 3. Authorization checks (only moderators can grant/revoke)
 /// 4. Role validation (can't modify Owner, can only revoke Admin)
 #[tokio::test]
-async fn test_steward_role_flow() {
+async fn test_moderator_role_flow() {
     use async_lock::RwLock;
-    use aura_app::views::home::{HomeState, Resident, ResidentRole};
+    use aura_app::views::home::{HomeRole, HomeState, Resident};
     use aura_app::AppCore;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use aura_terminal::handlers::tui::TuiMode;
@@ -1634,9 +1634,9 @@ async fn test_steward_role_flow() {
     use aura_terminal::tui::effects::EffectCommand;
     use std::sync::Arc;
 
-    println!("\n=== Steward Role Flow Test ===\n");
+    println!("\n=== Moderator Role Flow Test ===\n");
 
-    let test_dir = std::env::temp_dir().join(format!("aura-steward-test-{}", std::process::id()));
+    let test_dir = std::env::temp_dir().join(format!("aura-moderator-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&test_dir);
     std::fs::create_dir_all(&test_dir).expect("Failed to create test dir");
 
@@ -1653,12 +1653,12 @@ async fn test_steward_role_flow() {
         initialized_app_core.clone(),
         false,
         test_dir.clone(),
-        "test-device-steward".to_string(),
+        "test-device-moderator".to_string(),
         TuiMode::Production,
     );
 
     // Create account
-    ctx.create_account("StewardTester")
+    ctx.create_account("ModeratorTester")
         .await
         .expect("Failed to create account");
     println!("  ✓ Account created");
@@ -1689,7 +1689,7 @@ async fn test_steward_role_flow() {
         let resident1 = Resident {
             id: resident1_id.clone(),
             name: "Alice".to_string(),
-            role: ResidentRole::Resident,
+            role: HomeRole::Participant,
             is_online: true,
             joined_at: 0,
             last_seen: None,
@@ -1699,7 +1699,7 @@ async fn test_steward_role_flow() {
         let resident2 = Resident {
             id: resident2_id.clone(),
             name: "Bob".to_string(),
-            role: ResidentRole::Resident,
+            role: HomeRole::Participant,
             is_online: true,
             joined_at: 0,
             last_seen: None,
@@ -1710,7 +1710,7 @@ async fn test_steward_role_flow() {
         home.add_resident(resident2);
 
         // Set as owner so we have permission to grant/revoke
-        home.my_role = ResidentRole::Owner;
+        home.my_role = HomeRole::Member;
 
         // Add home and select it
         core.views().add_home(home);
@@ -1719,18 +1719,22 @@ async fn test_steward_role_flow() {
 
     println!("  ✓ Home created with 3 residents (1 owner, 2 residents)");
 
-    // Phase 3: Test GrantSteward command
-    println!("\nPhase 3: Testing GrantSteward command");
+    // Phase 3: Test GrantModerator command
+    println!("\nPhase 3: Testing GrantModerator command");
 
     let result = ctx
-        .dispatch(EffectCommand::GrantSteward {
+        .dispatch(EffectCommand::GrantModerator {
             channel: None,
             target: resident1_id.to_string(),
         })
         .await;
 
-    assert!(result.is_ok(), "GrantSteward should succeed: {:?}", result);
-    println!("  ✓ GrantSteward command dispatched successfully");
+    assert!(
+        result.is_ok(),
+        "GrantModerator should succeed: {:?}",
+        result
+    );
+    println!("  ✓ GrantModerator command dispatched successfully");
 
     // Verify role changed
     {
@@ -1739,24 +1743,28 @@ async fn test_steward_role_flow() {
         let home = homes.current_home().expect("Home should exist");
         let resident = home.resident(&resident1_id).expect("Resident should exist");
         assert!(
-            matches!(resident.role, ResidentRole::Admin),
+            matches!(resident.role, HomeRole::Moderator),
             "Resident should now be Admin"
         );
         println!("  ✓ Resident role changed to Admin");
     }
 
-    // Phase 4: Test RevokeSteward command
-    println!("\nPhase 4: Testing RevokeSteward command");
+    // Phase 4: Test RevokeModerator command
+    println!("\nPhase 4: Testing RevokeModerator command");
 
     let result = ctx
-        .dispatch(EffectCommand::RevokeSteward {
+        .dispatch(EffectCommand::RevokeModerator {
             channel: None,
             target: resident1_id.to_string(),
         })
         .await;
 
-    assert!(result.is_ok(), "RevokeSteward should succeed: {:?}", result);
-    println!("  ✓ RevokeSteward command dispatched successfully");
+    assert!(
+        result.is_ok(),
+        "RevokeModerator should succeed: {:?}",
+        result
+    );
+    println!("  ✓ RevokeModerator command dispatched successfully");
 
     // Verify role changed back
     {
@@ -1765,7 +1773,7 @@ async fn test_steward_role_flow() {
         let home = homes.current_home().expect("Home should exist");
         let resident = home.resident(&resident1_id).expect("Resident should exist");
         assert!(
-            matches!(resident.role, ResidentRole::Resident),
+            matches!(resident.role, HomeRole::Participant),
             "Resident should now be back to Resident role"
         );
         println!("  ✓ Resident role changed back to Resident");
@@ -1776,59 +1784,59 @@ async fn test_steward_role_flow() {
 
     // Can't modify Owner
     let result = ctx
-        .dispatch(EffectCommand::GrantSteward {
+        .dispatch(EffectCommand::GrantModerator {
             channel: None,
             target: owner_id.to_string(),
         })
         .await;
 
     let Err(e) = result else {
-        panic!("Expected error when granting steward to Owner");
+        panic!("Expected error when granting moderator to Owner");
     };
     assert!(
         e.contains("Owner") || e.contains("modify"),
         "Should fail for Owner"
     );
-    println!("  ✓ Cannot grant steward to Owner (expected error)");
+    println!("  ✓ Cannot grant moderator to Owner (expected error)");
 
     // Can't revoke non-Admin
     let result = ctx
-        .dispatch(EffectCommand::RevokeSteward {
+        .dispatch(EffectCommand::RevokeModerator {
             channel: None,
             target: resident2_id.to_string(), // Still a Resident, not Admin
         })
         .await;
 
     let Err(e) = result else {
-        panic!("Expected error when revoking steward from non-Admin");
+        panic!("Expected error when revoking moderator from non-Admin");
     };
     assert!(
         e.contains("Admin") || e.contains("revoke"),
         "Should fail for non-Admin"
     );
-    println!("  ✓ Cannot revoke steward from non-Admin (expected error)");
+    println!("  ✓ Cannot revoke moderator from non-Admin (expected error)");
 
     // Can't find non-existent resident
     let result = ctx
-        .dispatch(EffectCommand::GrantSteward {
+        .dispatch(EffectCommand::GrantModerator {
             channel: None,
             target: missing_id.to_string(),
         })
         .await;
 
     let Err(e) = result else {
-        panic!("Expected error when granting steward to non-existent resident");
+        panic!("Expected error when granting moderator to non-existent resident");
     };
     assert!(
         e.contains("not found") || e.contains("Resident"),
         "Should fail for non-existent resident"
     );
-    println!("  ✓ Cannot grant steward to non-existent resident (expected error)");
+    println!("  ✓ Cannot grant moderator to non-existent resident (expected error)");
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&test_dir);
 
-    println!("\n=== Steward Role Flow Test PASSED ===\n");
+    println!("\n=== Moderator Role Flow Test PASSED ===\n");
 }
 
 /// Test neighborhood navigation flow
@@ -1838,13 +1846,13 @@ async fn test_steward_role_flow() {
 /// 2. MovePosition command updates traversal position
 /// 3. Navigate to specific home (enter home)
 /// 4. Go home navigation
-/// 5. Back to street navigation (depth change)
+/// 5. Back to limited navigation (depth change)
 /// 6. Position persistence across navigation
 #[tokio::test]
 async fn test_neighborhood_navigation_flow() {
     use async_lock::RwLock;
     use aura_app::views::neighborhood::{
-        AdjacencyType, NeighborHome, NeighborhoodState, TraversalPosition,
+        NeighborHome, NeighborhoodState, OneHopLinkType, TraversalPosition,
     };
     use aura_app::AppCore;
     use aura_core::identifiers::ChannelId;
@@ -1902,7 +1910,7 @@ async fn test_neighborhood_navigation_flow() {
                 NeighborHome {
                     id: alice_home_id.clone(),
                     name: "Alice's Home".to_string(),
-                    adjacency: AdjacencyType::Direct,
+                    one_hop_link: OneHopLinkType::Direct,
                     shared_contacts: 3,
                     resident_count: Some(5),
                     can_traverse: true,
@@ -1910,7 +1918,7 @@ async fn test_neighborhood_navigation_flow() {
                 NeighborHome {
                     id: bob_home_id.clone(),
                     name: "Bob's Home".to_string(),
-                    adjacency: AdjacencyType::Direct,
+                    one_hop_link: OneHopLinkType::Direct,
                     shared_contacts: 2,
                     resident_count: Some(4),
                     can_traverse: true,
@@ -1918,7 +1926,7 @@ async fn test_neighborhood_navigation_flow() {
                 NeighborHome {
                     id: locked_home_id.clone(),
                     name: "Private Home".to_string(),
-                    adjacency: AdjacencyType::TwoHop,
+                    one_hop_link: OneHopLinkType::TwoHop,
                     shared_contacts: 0,
                     resident_count: Some(8),
                     can_traverse: false,
@@ -1928,7 +1936,7 @@ async fn test_neighborhood_navigation_flow() {
         neighborhood.position = Some(TraversalPosition {
             current_home_id: home_home_id.clone(),
             current_home_name: "My Home".to_string(),
-            depth: 2, // Interior depth
+            depth: 2, // Full depth
             path: vec![home_home_id.clone()],
         });
         neighborhood.max_depth = 3;
@@ -1946,7 +1954,7 @@ async fn test_neighborhood_navigation_flow() {
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
             home_id: "alice-home".to_string(),
-            depth: "Interior".to_string(),
+            depth: "Full".to_string(),
         })
         .await;
 
@@ -1969,8 +1977,8 @@ async fn test_neighborhood_navigation_flow() {
             position.current_home_name, "Alice's Home",
             "Home name should match"
         );
-        assert_eq!(position.depth, 2, "Interior depth should be 2");
-        println!("  ✓ Position updated to Alice's home at Interior depth");
+        assert_eq!(position.depth, 2, "Full depth should be 2");
+        println!("  ✓ Position updated to Alice's home at Full depth");
     }
 
     // Phase 4: Test Go Home navigation
@@ -1980,7 +1988,7 @@ async fn test_neighborhood_navigation_flow() {
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
             home_id: "home".to_string(),
-            depth: "Interior".to_string(),
+            depth: "Full".to_string(),
         })
         .await;
 
@@ -2004,29 +2012,29 @@ async fn test_neighborhood_navigation_flow() {
         println!("  ✓ Returned to home home");
     }
 
-    // Phase 5: Test Back to Street (depth change)
-    println!("\nPhase 5: Testing Back to Street navigation");
+    // Phase 5: Test Back to Limited (depth change)
+    println!("\nPhase 5: Testing Back to Limited navigation");
 
     // First enter a home
     ctx.dispatch(EffectCommand::MovePosition {
         neighborhood_id: "current".to_string(),
         home_id: "bob-home".to_string(),
-        depth: "Interior".to_string(),
+        depth: "Full".to_string(),
     })
     .await
     .expect("Should enter Bob's home");
 
-    // Now back to street view
+    // Now back to limited view
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
             home_id: "current".to_string(), // Stay on current home
-            depth: "Street".to_string(),    // But change to street depth
+            depth: "Limited".to_string(),   // But change to limited depth
         })
         .await;
 
-    assert!(result.is_ok(), "Back to Street should succeed");
-    println!("  ✓ Back to Street command dispatched successfully");
+    assert!(result.is_ok(), "Back to Limited should succeed");
+    println!("  ✓ Back to Limited command dispatched successfully");
 
     // Verify depth changed
     {
@@ -2038,30 +2046,30 @@ async fn test_neighborhood_navigation_flow() {
             position.current_home_id, bob_home_id,
             "Should still be at Bob's home"
         );
-        assert_eq!(position.depth, 0, "Street depth should be 0");
-        println!("  ✓ Depth changed to Street (0) while staying at Bob's home");
+        assert_eq!(position.depth, 0, "Limited depth should be 0");
+        println!("  ✓ Depth changed to Limited (0) while staying at Bob's home");
     }
 
-    // Phase 6: Test Frontage depth navigation
-    println!("\nPhase 6: Testing Frontage depth navigation");
+    // Phase 6: Test Partial depth navigation
+    println!("\nPhase 6: Testing Partial depth navigation");
 
     let result = ctx
         .dispatch(EffectCommand::MovePosition {
             neighborhood_id: "current".to_string(),
             home_id: "current".to_string(),
-            depth: "Frontage".to_string(),
+            depth: "Partial".to_string(),
         })
         .await;
 
-    assert!(result.is_ok(), "Frontage depth change should succeed");
+    assert!(result.is_ok(), "Partial depth change should succeed");
 
     {
         let core = app_core.read().await;
         let neighborhood = core.views().get_neighborhood();
 
         let position = neighborhood.position.expect("Should have position");
-        assert_eq!(position.depth, 1, "Frontage depth should be 1");
-        println!("  ✓ Depth changed to Frontage (1)");
+        assert_eq!(position.depth, 1, "Partial depth should be 1");
+        println!("  ✓ Depth changed to Partial (1)");
     }
 
     // Cleanup
@@ -2299,7 +2307,7 @@ async fn test_channel_mode_operations() {
     println!("\nPhase 5: Testing IoContext channel mode storage");
 
     use async_lock::RwLock;
-    use aura_app::views::home::{HomeState, ResidentRole};
+    use aura_app::views::home::{HomeRole, HomeState};
     use aura_app::AppCore;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
     use std::sync::Arc;
@@ -2342,7 +2350,7 @@ async fn test_channel_mode_operations() {
             0,
             home_context_id,
         );
-        home.my_role = ResidentRole::Owner;
+        home.my_role = HomeRole::Member;
         core.views().add_home(home);
         core.views().select_home(Some(home_id.clone()));
     }
@@ -2739,7 +2747,7 @@ async fn test_error_toast_display() {
 ///
 /// This test validates:
 /// 1. check_authorization method exists and works
-/// 2. Admin commands (BanUser, KickUser, GrantSteward) require Steward role
+/// 2. Admin commands (BanUser, KickUser, GrantModerator) require Moderator role
 /// 3. Public/Basic commands are allowed for all users
 /// 4. Permission denied errors have appropriate messages
 #[tokio::test]
@@ -2815,16 +2823,16 @@ async fn test_authorization_checking() {
     );
     println!("  ✓ KickUser is Admin level");
 
-    let grant_cmd = EffectCommand::GrantSteward {
+    let grant_cmd = EffectCommand::GrantModerator {
         channel: None,
         target: "user".to_string(),
     };
     assert_eq!(
         grant_cmd.authorization_level(),
         CommandAuthorizationLevel::Admin,
-        "GrantSteward should be Admin"
+        "GrantModerator should be Admin"
     );
-    println!("  ✓ GrantSteward is Admin level");
+    println!("  ✓ GrantModerator is Admin level");
 
     // Phase 2: Test authorization checking with IoContext
     println!("\nPhase 2: Testing authorization checking with IoContext");
@@ -2870,8 +2878,8 @@ async fn test_authorization_checking() {
     );
     println!("  ✓ Sensitive commands pass authorization");
 
-    // Test that Admin commands are denied for non-Steward users
-    // Default role is Resident (not Steward), so Admin commands should fail
+    // Test that Admin commands are denied for non-Moderator users
+    // Default role is Resident (not Moderator), so Admin commands should fail
     let ban_result = ctx.check_authorization(&EffectCommand::BanUser {
         channel: None,
         target: "spammer".to_string(),
@@ -2879,7 +2887,7 @@ async fn test_authorization_checking() {
     });
     assert!(
         ban_result.is_err(),
-        "Admin commands should be denied for non-Steward"
+        "Admin commands should be denied for non-Moderator"
     );
     let ban_err = ban_result.unwrap_err();
     assert!(
@@ -2890,7 +2898,7 @@ async fn test_authorization_checking() {
         ban_err.contains("Ban user") || ban_err.contains("administrator"),
         "Error should mention the command or required privileges"
     );
-    println!("  ✓ BanUser denied for non-Steward: {}", ban_err);
+    println!("  ✓ BanUser denied for non-Moderator: {}", ban_err);
 
     let kick_result = ctx.check_authorization(&EffectCommand::KickUser {
         channel: "test".to_string(),
@@ -2899,23 +2907,23 @@ async fn test_authorization_checking() {
     });
     assert!(
         kick_result.is_err(),
-        "KickUser should be denied for non-Steward"
+        "KickUser should be denied for non-Moderator"
     );
     println!(
-        "  ✓ KickUser denied for non-Steward: {}",
+        "  ✓ KickUser denied for non-Moderator: {}",
         kick_result.unwrap_err()
     );
 
-    let grant_result = ctx.check_authorization(&EffectCommand::GrantSteward {
+    let grant_result = ctx.check_authorization(&EffectCommand::GrantModerator {
         channel: None,
         target: "user".to_string(),
     });
     assert!(
         grant_result.is_err(),
-        "GrantSteward should be denied for non-Steward"
+        "GrantModerator should be denied for non-Moderator"
     );
     println!(
-        "  ✓ GrantSteward denied for non-Steward: {}",
+        "  ✓ GrantModerator denied for non-Moderator: {}",
         grant_result.unwrap_err()
     );
 
@@ -2933,7 +2941,7 @@ async fn test_authorization_checking() {
 
     assert!(
         dispatch_result.is_err(),
-        "Dispatch of Admin command should fail for non-Steward"
+        "Dispatch of Admin command should fail for non-Moderator"
     );
     let dispatch_err = dispatch_result.unwrap_err();
     assert!(

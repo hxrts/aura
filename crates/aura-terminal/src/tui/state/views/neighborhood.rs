@@ -2,7 +2,7 @@
 
 use crate::tui::navigation::GridNav;
 use crate::tui::state::form::{Validatable, ValidationError};
-use crate::tui::types::TraversalDepth;
+use crate::tui::types::AccessLevel;
 
 /// Neighborhood screen mode
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -41,7 +41,7 @@ pub struct NeighborhoodViewState {
     pub grid: GridNav,
 
     /// Desired traversal depth when entering a selected home.
-    pub enter_depth: TraversalDepth,
+    pub enter_depth: AccessLevel,
 
     /// Selected neighborhood tab index
     pub selected_neighborhood: usize,
@@ -71,8 +71,8 @@ pub struct NeighborhoodViewState {
     pub message_scroll: usize,
     pub message_count: usize,
 
-    /// Whether steward actions are enabled for current user in this home
-    pub steward_actions_enabled: bool,
+    /// Whether moderator actions are enabled for current user in this home
+    pub moderator_actions_enabled: bool,
 }
 
 /// State for home creation modal

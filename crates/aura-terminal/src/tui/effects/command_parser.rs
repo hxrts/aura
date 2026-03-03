@@ -99,8 +99,8 @@ pub enum EffectCommand {
         /// Home ID ("home", "current", or explicit ID)
         home_id: String,
     },
-    /// Force direct adjacency between home and selected target home
-    LinkHomeAdjacency {
+    /// Force direct one_hop_link between home and selected target home
+    LinkHomeOneHopLink {
         /// Target home ID ("current" or explicit ID)
         home_id: String,
     },
@@ -332,16 +332,16 @@ pub enum EffectCommand {
         /// Message ID
         message_id: String,
     },
-    /// Grant steward capabilities
-    GrantSteward {
+    /// Grant moderator capabilities
+    GrantModerator {
         /// Optional channel hint for scope resolution
         channel: Option<String>,
 
         /// Target user
         target: String,
     },
-    /// Revoke steward capabilities
-    RevokeSteward {
+    /// Revoke moderator capabilities
+    RevokeModerator {
         /// Optional channel hint for scope resolution
         channel: Option<String>,
 
@@ -387,7 +387,7 @@ pub enum EffectCommand {
         neighborhood_id: String,
         /// Target home ID
         home_id: String,
-        /// Traversal depth (Street, Frontage, Interior)
+        /// Traversal depth (Limited, Partial, Full)
         depth: String,
     },
 
@@ -422,7 +422,7 @@ impl EffectCommand {
     /// - **Public**: No auth needed (RefreshAccount, ForceSync, Ping, etc.)
     /// - **Basic**: User token (SendMessage, CreateChannel, etc.)
     /// - **Sensitive**: Elevated auth (UpdateThreshold, AddDevice, StartRecovery, etc.)
-    /// - **Admin**: Steward privileges (KickUser, BanUser, GrantSteward, etc.)
+    /// - **Admin**: Moderator privileges (KickUser, BanUser, GrantModerator, etc.)
     pub fn authorization_level(&self) -> CommandAuthorizationLevel {
         match self {
             // Public - no authorization required
@@ -468,7 +468,7 @@ impl EffectCommand {
             | Self::SendHomeInvitation { .. }
             | Self::CreateNeighborhood { .. }
             | Self::AddHomeToNeighborhood { .. }
-            | Self::LinkHomeAdjacency { .. }
+            | Self::LinkHomeOneHopLink { .. }
             | Self::InviteLanPeer { .. }
             | Self::SetContext { .. }
             | Self::RemoveContact { .. } => CommandAuthorizationLevel::Basic,
@@ -494,12 +494,12 @@ impl EffectCommand {
             | Self::ExportAccountBackup
             | Self::ImportAccountBackup { .. } => CommandAuthorizationLevel::Sensitive,
 
-            // Admin - steward/admin capabilities
+            // Admin - moderator/admin capabilities
             Self::KickUser { .. }
             | Self::BanUser { .. }
             | Self::UnbanUser { .. }
-            | Self::GrantSteward { .. }
-            | Self::RevokeSteward { .. }
+            | Self::GrantModerator { .. }
+            | Self::RevokeModerator { .. }
             | Self::SetChannelMode { .. }
             | Self::Shutdown => CommandAuthorizationLevel::Admin,
         }
@@ -783,8 +783,8 @@ pub enum AuraEvent {
         user_id: String,
         /// Display name
         name: String,
-        /// Whether user is a steward
-        is_steward: bool,
+        /// Whether user is a moderator
+        is_moderator: bool,
         /// When user joined (ms since epoch)
         joined_at: u64,
         /// Storage allocated to user
@@ -840,8 +840,8 @@ pub enum AuraEvent {
         /// Actor who sent the invitation
         actor: String,
     },
-    /// Steward role granted
-    StewardGranted {
+    /// Moderator role granted
+    ModeratorGranted {
         /// Target user ID
         target: String,
         /// Actor who granted the role
@@ -849,8 +849,8 @@ pub enum AuraEvent {
         /// Home ID where role was granted
         home_id: String,
     },
-    /// Steward role revoked
-    StewardRevoked {
+    /// Moderator role revoked
+    ModeratorRevoked {
         /// Target user ID
         target: String,
         /// Actor who revoked the role
@@ -1093,8 +1093,8 @@ impl EventFilter {
             | AuraEvent::UserMuted { .. }
             | AuraEvent::UserUnmuted { .. }
             | AuraEvent::UserInvited { .. }
-            | AuraEvent::StewardGranted { .. }
-            | AuraEvent::StewardRevoked { .. }
+            | AuraEvent::ModeratorGranted { .. }
+            | AuraEvent::ModeratorRevoked { .. }
             | AuraEvent::TopicSet { .. }
             | AuraEvent::MessagePinned { .. }
             | AuraEvent::MessageUnpinned { .. }

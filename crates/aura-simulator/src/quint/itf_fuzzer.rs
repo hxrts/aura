@@ -1333,10 +1333,7 @@ impl ITFBasedFuzzer {
     ) -> Result<FuzzingCampaignResult, ITFFuzzError> {
         let mut performance_monitor = PerformanceMonitor::new();
 
-        println!(
-            "Starting ITF fuzzing campaign for {}",
-            spec_file.display()
-        );
+        println!("Starting ITF fuzzing campaign for {}", spec_file.display());
 
         // Phase 1: Model Checking (optional)
         let model_checking_result = if campaign_config.enable_model_checking {

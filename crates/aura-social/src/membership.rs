@@ -35,13 +35,13 @@ impl MembershipValidator {
         Ok(())
     }
 
-    /// Validate that an adjacency can be created between two blocks.
-    pub fn validate_adjacency(
+    /// Validate that an one_hop_link can be created between two blocks.
+    pub fn validate_one_hop_link(
         neighborhood: &Neighborhood,
         home_a: HomeId,
         home_b: HomeId,
     ) -> Result<(), SocialError> {
-        neighborhood.validate_adjacency(home_a, home_b)
+        neighborhood.validate_one_hop_link(home_a, home_b)
     }
 
     /// Check if an authority has the minimum required relationship

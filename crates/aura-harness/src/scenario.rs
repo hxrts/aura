@@ -38,7 +38,6 @@ impl ScenarioRunner {
                     ));
                 }
             }
-
         }
 
         let mut previous_request_id: Option<u64> = None;

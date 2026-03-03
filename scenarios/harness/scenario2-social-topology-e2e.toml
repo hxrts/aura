@@ -333,7 +333,7 @@ timeout_ms = 2000
 id = "alice-nhlink-result"
 action = "expect_denied"
 instance = "alice"
-contains = "Cannot create adjacency from home"
+contains = "Cannot create one_hop_link from home"
 timeout_ms = 12000
 
 [[steps]]
@@ -380,17 +380,17 @@ consistency = "accepted"
 timeout_ms = 12000
 
 [[steps]]
-id = "alice-link-home-adjacency"
+id = "alice-link-home-one_hop_link"
 action = "send_chat_command"
 instance = "alice"
 command = "nhlink home"
 timeout_ms = 2000
 
 [[steps]]
-id = "alice-link-home-adjacency-result"
+id = "alice-link-home-one_hop_link-result"
 action = "expect_denied"
 instance = "alice"
-contains = "Cannot create adjacency from home"
+contains = "Cannot create one_hop_link from home"
 timeout_ms = 12000
 
 [[steps]]
@@ -593,7 +593,7 @@ timeout_ms = 2000
 id = "alice-op-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "steward granted"
+contains = "moderator granted"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -622,7 +622,7 @@ timeout_ms = 2000
 id = "alice-deop-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "steward revoked"
+contains = "moderator revoked"
 consistency = "enforced"
 timeout_ms = 12000
 
