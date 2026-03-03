@@ -1,0 +1,60 @@
+# Role Transition Simulation Scenario
+
+[metadata]
+name = "role_transitions"
+description = "Role and access transition scenario for Member/Moderator/Participant semantics"
+version = "1.0.0"
+author = "Aura"
+tags = ["roles", "moderation", "access", "simulation"]
+
+[setup]
+participants = 4
+threshold = 2
+seed = 5555
+
+[network]
+latency_range = [20, 80]
+drop_rate = 0.01
+
+[[phases]]
+name = "role_transitions"
+description = "Create home, assign moderator, and execute moderation action"
+timeout_seconds = 10
+actions = [
+    { type = "create_home", creator = "alice", home = "home1" },
+    { type = "add_member", home = "home1", user = "bob" },
+    { type = "assign_moderator", home = "home1", user = "bob" },
+    { type = "add_participant", home = "home1", user = "participant1" },
+    { type = "moderator_kick", home = "home1", moderator = "bob", target = "participant1" },
+    { type = "verify_property", property = "moderator_can_kick", expected = true },
+    { type = "verify_property", property = "creator_is_member_not_owner", expected = true },
+]
+
+[[phases]]
+name = "access_transitions"
+description = "Validate hop-based access mapping and override behaviors"
+timeout_seconds = 10
+actions = [
+    { type = "compute_access", source = "alice_home", target = "alice_home", expected = "Full" },
+    { type = "compute_access", source = "alice_home", target = "bob_home", expected = "Partial" },
+    { type = "compute_access", source = "alice_home", target = "carol_home", expected = "Limited" },
+    { type = "set_access_override", actor = "alice", target = "bob", level = "Limited" },
+    { type = "set_access_override", actor = "alice", target = "carol", level = "Partial" },
+    { type = "verify_property", property = "access_overrides_apply", expected = true },
+]
+
+[[properties]]
+name = "moderator_can_kick"
+property_type = "safety"
+
+[[properties]]
+name = "creator_is_member_not_owner"
+property_type = "safety"
+
+[[properties]]
+name = "access_overrides_apply"
+property_type = "safety"
+
+[[properties]]
+name = "deterministic_access_computation"
+property_type = "safety"
