@@ -35,5 +35,3 @@ just build
 # Start the production release with TUI
 ./bin/aura tui
 ```
-
-*Note: This is alpha software that is subject to frequent breaking changes. When stabilized, this notice will be removed.*
