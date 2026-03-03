@@ -455,6 +455,18 @@ Harness writes backend resolution details to:
 artifacts/harness/<run>/network_backend_preflight.json
 ```
 
+Patchbay is the authoritative NAT-realism backend for holepunch validation:
+
+- Use native `patchbay` on Linux CI and Linux developer machines when capabilities are available.
+- Use `patchbay-vm` on macOS (and as Linux fallback) to run the same scenarios in a Linux VM.
+- Keep deterministic non-network logic in `mock` backend tests to preserve fast feedback.
+
+Recommended implementation tiers:
+
+1. Tier 1: deterministic/property tests in `aura-testkit` for retry/path-selection invariants.
+2. Tier 2: Patchbay integration scenarios in `aura-harness` for PR gating.
+3. Tier 3: Patchbay stress/flake detection suites on scheduled CI.
+
 When a scenario fails, triage in this order:
 
 1. `network_backend_preflight.json` to confirm selected backend and fallback reason.
