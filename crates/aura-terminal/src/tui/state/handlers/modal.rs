@@ -50,6 +50,28 @@ fn warn_no_selection(state: &mut TuiState, entity: &str) {
     state.toast_warning(format!("No {entity} selected"));
 }
 
+fn handle_ceremony_escape(
+    state: &mut TuiState,
+    commands: &mut Vec<TuiCommand>,
+    ceremony_id: Option<String>,
+    pending_message: &str,
+) {
+    if let Some(ceremony_id) = ceremony_id {
+        commands.push(TuiCommand::Dispatch(
+            DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
+        ));
+        state.modal_queue.dismiss();
+    } else {
+        state.modal_queue.dismiss();
+        state.next_toast_id += 1;
+        state.toast_queue.enqueue(QueuedToast::new(
+            state.next_toast_id,
+            pending_message,
+            ToastLevel::Info,
+        ));
+    }
+}
+
 /// Handle queue-based modal key events (unified dispatcher)
 ///
 /// This routes key events to the appropriate handler based on the QueuedModal variant.
@@ -1194,20 +1216,12 @@ fn handle_guardian_setup_key_queue(
         | GuardianSetupStep::Error => {
             // During ceremony, allow escape to cancel once the ceremony has started.
             if key.code == KeyCode::Esc {
-                if let Some(ceremony_id) = modal_state.ceremony_id().cloned() {
-                    commands.push(TuiCommand::Dispatch(
-                        DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
-                    ));
-                    state.modal_queue.dismiss();
-                } else {
-                    state.modal_queue.dismiss();
-                    state.next_toast_id += 1;
-                    state.toast_queue.enqueue(QueuedToast::new(
-                        state.next_toast_id,
-                        "Guardian ceremony is still starting.",
-                        ToastLevel::Info,
-                    ));
-                }
+                handle_ceremony_escape(
+                    state,
+                    commands,
+                    modal_state.ceremony_id().cloned(),
+                    "Guardian ceremony is still starting.",
+                );
             }
         }
     }
@@ -1328,20 +1342,12 @@ fn handle_mfa_setup_key_queue(
         | GuardianSetupStep::Complete
         | GuardianSetupStep::Error => {
             if key.code == KeyCode::Esc {
-                if let Some(ceremony_id) = modal_state.ceremony_id().cloned() {
-                    commands.push(TuiCommand::Dispatch(
-                        DispatchCommand::CancelKeyRotationCeremony { ceremony_id },
-                    ));
-                    state.modal_queue.dismiss();
-                } else {
-                    state.modal_queue.dismiss();
-                    state.next_toast_id += 1;
-                    state.toast_queue.enqueue(QueuedToast::new(
-                        state.next_toast_id,
-                        "Multifactor ceremony is still starting.",
-                        ToastLevel::Info,
-                    ));
-                }
+                handle_ceremony_escape(
+                    state,
+                    commands,
+                    modal_state.ceremony_id().cloned(),
+                    "Multifactor ceremony is still starting.",
+                );
             }
         }
     }
