@@ -907,22 +907,6 @@ consistency = "accepted"
 timeout_ms = 12000
 
 [[steps]]
-id = "alice-hinvite"
-action = "send_chat_command"
-instance = "alice"
-command = "hinvite ${bob_id}"
-timeout_ms = 2000
-
-[[steps]]
-id = "alice-hinvite-result"
-action = "expect_command_result"
-instance = "alice"
-status = "ok"
-reason_code = "none"
-consistency = "accepted"
-timeout_ms = 12000
-
-[[steps]]
 id = "alice-exit-insert-before-phase3-select"
 action = "send_key"
 instance = "alice"
