@@ -6,7 +6,7 @@
 use crate::error::SocialError;
 use crate::facts::{
     HomeConfigFact, HomeFact, HomeId, HomeStorageBudget, ModeratorCapabilities,
-    ModeratorCapability, ModeratorDesignation, ModeratorFact, ResidentFact,
+    ModeratorCapability, ModeratorDesignation, ModeratorFact, HomeMemberFact,
 };
 use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
@@ -45,7 +45,7 @@ impl Home {
     pub fn from_facts(
         home_fact: &HomeFact,
         config: Option<&HomeConfigFact>,
-        members: &[ResidentFact],
+        members: &[HomeMemberFact],
         moderators: &[ModeratorFact],
     ) -> Self {
         let config = config
@@ -256,8 +256,8 @@ mod tests {
         let home_fact = HomeFact::new(home_id, test_timestamp());
 
         let members = vec![
-            ResidentFact::new(test_authority(1), home_id, test_timestamp()),
-            ResidentFact::new(test_authority(2), home_id, test_timestamp()),
+            HomeMemberFact::new(test_authority(1), home_id, test_timestamp()),
+            HomeMemberFact::new(test_authority(2), home_id, test_timestamp()),
         ];
 
         let moderators = vec![ModeratorFact::new(

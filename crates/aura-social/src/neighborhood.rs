@@ -3,7 +3,7 @@
 //! Provides a materialized view of a neighborhood aggregated from journal facts.
 
 use crate::error::SocialError;
-use crate::facts::{HomeId, HomeMemberFact, NeighborhoodFact, NeighborhoodId, OneHopLinkFact};
+use crate::facts::{HomeId, NeighborhoodMemberFact, NeighborhoodFact, NeighborhoodId, OneHopLinkFact};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -30,7 +30,7 @@ impl Neighborhood {
     /// * `adjacencies` - All one_hop_link facts for this neighborhood
     pub fn from_facts(
         fact: &NeighborhoodFact,
-        members: &[HomeMemberFact],
+        members: &[NeighborhoodMemberFact],
         adjacencies: &[OneHopLinkFact],
     ) -> Self {
         // Canonicalize fact-derived vectors for deterministic views.
@@ -193,9 +193,9 @@ mod tests {
         let home_c = HomeId::from_bytes([3u8; 32]);
 
         let members = vec![
-            HomeMemberFact::new(home_a, neighborhood_id, test_timestamp()),
-            HomeMemberFact::new(home_b, neighborhood_id, test_timestamp()),
-            HomeMemberFact::new(home_c, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(home_a, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(home_b, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(home_c, neighborhood_id, test_timestamp()),
         ];
 
         let adjacencies = vec![
@@ -288,13 +288,13 @@ mod tests {
         let home_b = HomeId::from_bytes([2u8; 32]);
 
         let members_order_a = vec![
-            HomeMemberFact::new(home_a, neighborhood_id, test_timestamp()),
-            HomeMemberFact::new(home_b, neighborhood_id, test_timestamp()),
-            HomeMemberFact::new(home_a, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(home_a, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(home_b, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(home_a, neighborhood_id, test_timestamp()),
         ];
         let members_order_b = vec![
-            HomeMemberFact::new(home_b, neighborhood_id, test_timestamp()),
-            HomeMemberFact::new(home_a, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(home_b, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(home_a, neighborhood_id, test_timestamp()),
         ];
 
         let links_order_a = vec![OneHopLinkFact::new(home_b, home_a, neighborhood_id)];

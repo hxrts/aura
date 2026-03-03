@@ -17,8 +17,8 @@
 //!
 //! Facts (data structures) live in `aura-social::facts`:
 //! - `HomeId`, `NeighborhoodId` - Identifiers
-//! - `HomeFact`, `ResidentFact`, `ModeratorFact` - Home facts
-//! - `NeighborhoodFact`, `HomeMemberFact`, `OneHopLinkFact` - Neighborhood facts
+//! - `HomeFact`, `HomeMemberFact`, `ModeratorFact` - Home facts
+//! - `NeighborhoodFact`, `NeighborhoodMemberFact`, `OneHopLinkFact` - Neighborhood facts
 //!
 //! Services (business logic) live in this crate:
 //! - Membership validation
@@ -30,7 +30,7 @@
 //!
 //! ```ignore
 //! use aura_social::{Home, Neighborhood, SocialTopology};
-//! use aura_social::facts::{HomeFact, ResidentFact};
+//! use aura_social::facts::{HomeFact, HomeMemberFact};
 //!
 //! // Build a Home view from journal facts
 //! let home = Home::from_facts(&home_fact, &members, &moderators);
@@ -121,6 +121,6 @@ pub use crate::facts::{
     AccessLevel, AccessLevelCapabilityConfig, AccessLevelCapabilityConfigFact, AccessOverrideFact,
     HomeConfigFact, HomeFact, HomeId, HomeMemberFact, HomeMessageMemberFact, HomeStorageBudget,
     ModeratorCapabilities, ModeratorCapability, ModeratorDesignation, ModeratorFact,
-    NeighborhoodFact, NeighborhoodId, OneHopLinkFact, PinnedFact, ResidentFact, SocialFactError,
-    TraversalAllowedFact, TraversalPosition,
+    NeighborhoodFact, NeighborhoodId, NeighborhoodMemberFact, OneHopLinkFact, PinnedFact,
+    SocialFactError, TraversalAllowedFact, TraversalPosition,
 };

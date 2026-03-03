@@ -138,14 +138,14 @@ impl HomeConfigFact {
     }
 }
 
-/// Resident fact - user residing in a home
+/// Home member fact - user membership in a home
 ///
 /// Corresponds to: `member(authority_id, home_id, joined_at, storage_allocated)`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResidentFact {
+pub struct HomeMemberFact {
     /// Authority of the member
     pub authority_id: AuthorityId,
-    /// Home where the authority resides
+    /// Home where the authority is a member
     pub home_id: HomeId,
     /// When the authority joined the home
     pub joined_at: TimeStamp,
@@ -153,7 +153,7 @@ pub struct ResidentFact {
     pub storage_allocated: u64,
 }
 
-impl ResidentFact {
+impl HomeMemberFact {
     /// Default storage allocation per member: 200 KB
     pub const DEFAULT_STORAGE_ALLOCATION: u64 = 200 * 1024;
 
@@ -456,7 +456,7 @@ impl NeighborhoodFact {
 ///
 /// Corresponds to: `home_member(home_id, neighborhood_id, joined_at, allocated_storage)`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HomeMemberFact {
+pub struct NeighborhoodMemberFact {
     /// Home joining the neighborhood
     pub home_id: HomeId,
     /// Neighborhood being joined
@@ -468,7 +468,7 @@ pub struct HomeMemberFact {
     pub allocated_storage: u64,
 }
 
-impl HomeMemberFact {
+impl NeighborhoodMemberFact {
     /// Default storage allocation per neighborhood: 1 MB
     pub const DEFAULT_ALLOCATION: u64 = 1024 * 1024;
 
@@ -822,7 +822,7 @@ impl HomeStorageBudget {
 
     /// Derive member storage limit (8 * 200 KB = 1.6 MB)
     pub fn member_storage_limit(&self) -> u64 {
-        HomeConfigFact::V1_MAX_MEMBERS as u64 * ResidentFact::DEFAULT_STORAGE_ALLOCATION
+        HomeConfigFact::V1_MAX_MEMBERS as u64 * HomeMemberFact::DEFAULT_STORAGE_ALLOCATION
     }
 
     /// Derive pinned storage limit based on neighborhood count
@@ -925,8 +925,8 @@ pub enum SocialFact {
         /// Authority that deleted the home
         actor_id: AuthorityId,
     },
-    /// Resident joined a home
-    ResidentJoined {
+    /// Member joined a home
+    MemberJoined {
         /// Authority joining the home
         authority_id: AuthorityId,
         /// Home being joined
@@ -940,8 +940,8 @@ pub enum SocialFact {
         /// Storage allocated in bytes (default: 200 KB)
         storage_allocated: u64,
     },
-    /// Resident left a home
-    ResidentLeft {
+    /// Member left a home
+    MemberLeft {
         /// Authority leaving the home
         authority_id: AuthorityId,
         /// Home being left
@@ -1039,8 +1039,8 @@ impl SocialFact {
         match self {
             SocialFact::HomeCreated { created_at, .. } => created_at.ts_ms,
             SocialFact::HomeDeleted { deleted_at, .. } => deleted_at.ts_ms,
-            SocialFact::ResidentJoined { joined_at, .. } => joined_at.ts_ms,
-            SocialFact::ResidentLeft { left_at, .. } => left_at.ts_ms,
+            SocialFact::MemberJoined { joined_at, .. } => joined_at.ts_ms,
+            SocialFact::MemberLeft { left_at, .. } => left_at.ts_ms,
             SocialFact::ModeratorGranted { granted_at, .. } => granted_at.ts_ms,
             SocialFact::ModeratorRevoked { revoked_at, .. } => revoked_at.ts_ms,
             SocialFact::StorageUpdated { updated_at, .. } => updated_at.ts_ms,
@@ -1066,11 +1066,11 @@ impl SocialFact {
                 sub_type: "home-deleted",
                 data: home_id.as_bytes().to_vec(),
             },
-            SocialFact::ResidentJoined { authority_id, .. } => SocialFactKey {
+            SocialFact::MemberJoined { authority_id, .. } => SocialFactKey {
                 sub_type: "member-joined",
                 data: authority_id.to_string().into_bytes(),
             },
-            SocialFact::ResidentLeft { authority_id, .. } => SocialFactKey {
+            SocialFact::MemberLeft { authority_id, .. } => SocialFactKey {
                 sub_type: "member-left",
                 data: authority_id.to_string().into_bytes(),
             },
@@ -1140,7 +1140,7 @@ impl SocialFact {
         }
     }
 
-    /// Create a ResidentJoined fact with millisecond timestamp
+    /// Create a MemberJoined fact with millisecond timestamp
     pub fn member_joined_ms(
         authority_id: AuthorityId,
         home_id: HomeId,
@@ -1148,7 +1148,7 @@ impl SocialFact {
         joined_at_ms: u64,
         name: String,
     ) -> Self {
-        Self::ResidentJoined {
+        Self::MemberJoined {
             authority_id,
             home_id,
             context_id,
@@ -1161,14 +1161,14 @@ impl SocialFact {
         }
     }
 
-    /// Create a ResidentLeft fact with millisecond timestamp
+    /// Create a MemberLeft fact with millisecond timestamp
     pub fn member_left_ms(
         authority_id: AuthorityId,
         home_id: HomeId,
         context_id: ContextId,
         left_at_ms: u64,
     ) -> Self {
-        Self::ResidentLeft {
+        Self::MemberLeft {
             authority_id,
             home_id,
             context_id,
@@ -1416,7 +1416,7 @@ mod tests {
 
     #[test]
     fn test_member_fact_to_datalog() {
-        let member = ResidentFact::new(
+        let member = HomeMemberFact::new(
             AuthorityId::new_from_entropy([3u8; 32]),
             HomeId::from_bytes([4u8; 32]),
             test_timestamp(),
@@ -1446,7 +1446,7 @@ mod tests {
 
     #[test]
     fn test_home_member_fact_to_datalog() {
-        let member = HomeMemberFact::new(
+        let member = NeighborhoodMemberFact::new(
             HomeId::from_bytes([6u8; 32]),
             NeighborhoodId::from_bytes([7u8; 32]),
             test_timestamp(),
@@ -1481,15 +1481,15 @@ mod tests {
         );
 
         // Add 8 members
-        budget.member_storage_spent = 8 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
+        budget.member_storage_spent = 8 * HomeMemberFact::DEFAULT_STORAGE_ALLOCATION;
         // Join 4 neighborhoods
-        budget.neighborhood_allocations = 4 * HomeMemberFact::DEFAULT_ALLOCATION;
+        budget.neighborhood_allocations = 4 * NeighborhoodMemberFact::DEFAULT_ALLOCATION;
 
         // Remaining should be 10 MB - 1.6 MB (members) - 4 MB (allocations) = ~4.4 MB
         // 10,485,760 - 1,638,400 (8 * 204,800) - 4,194,304 (4 * 1,048,576) = 4,653,056
         let expected = HomeFact::DEFAULT_STORAGE_LIMIT
-            - (8 * ResidentFact::DEFAULT_STORAGE_ALLOCATION)
-            - (4 * HomeMemberFact::DEFAULT_ALLOCATION);
+            - (8 * HomeMemberFact::DEFAULT_STORAGE_ALLOCATION)
+            - (4 * NeighborhoodMemberFact::DEFAULT_ALLOCATION);
         assert_eq!(budget.remaining_shared_storage(), expected);
         assert_eq!(expected, 4_653_056); // ~4.4 MB
     }

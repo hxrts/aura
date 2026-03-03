@@ -223,7 +223,7 @@ struct RetrieveResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facts::{HomeFact, ModeratorFact, ResidentFact};
+    use crate::facts::{HomeFact, ModeratorFact, HomeMemberFact};
     use aura_core::effects::{
         network::NetworkError, storage::StorageError, NetworkCoreEffects, NetworkExtendedEffects,
         StorageCoreEffects, StorageExtendedEffects,
@@ -245,13 +245,13 @@ mod tests {
         let home_fact = HomeFact::new(home_id, test_timestamp());
 
         let members = vec![
-            ResidentFact::new(moderator, home_id, test_timestamp()),
-            ResidentFact::new(
+            HomeMemberFact::new(moderator, home_id, test_timestamp()),
+            HomeMemberFact::new(
                 AuthorityId::new_from_entropy([2u8; 32]),
                 home_id,
                 test_timestamp(),
             ),
-            ResidentFact::new(
+            HomeMemberFact::new(
                 AuthorityId::new_from_entropy([3u8; 32]),
                 home_id,
                 test_timestamp(),

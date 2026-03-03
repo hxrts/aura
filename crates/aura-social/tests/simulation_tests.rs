@@ -10,8 +10,8 @@ use aura_core::effects::relay::RelayRelationship;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_social::facts::{
-    HomeFact, HomeId, HomeMemberFact, ModeratorFact, NeighborhoodFact, NeighborhoodId,
-    OneHopLinkFact, ResidentFact,
+    HomeFact, HomeId, NeighborhoodMemberFact, ModeratorFact, NeighborhoodFact, NeighborhoodId,
+    OneHopLinkFact, HomeMemberFact,
 };
 use aura_social::{
     DiscoveryLayer, Home, Neighborhood, ReachabilityChecker, RelayCandidateBuilder, SocialTopology,
@@ -53,7 +53,7 @@ fn create_home(home_seed: u8, member_count: usize) -> (Home, AuthorityId, Vec<Au
     for i in 0..member_count {
         let authority = test_authority((home_seed * 10) + i as u8 + 1);
         members.push(authority);
-        member_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
+        member_facts.push(HomeMemberFact::new(authority, home_id, timestamp.clone()));
     }
 
     let moderator = members[0];
@@ -73,7 +73,7 @@ fn create_neighborhood(neighborhood_seed: u8, home_ids: Vec<HomeId>) -> Neighbor
 
     let mut member_facts = Vec::with_capacity(home_ids.len());
     for home_id in &home_ids {
-        member_facts.push(HomeMemberFact::new(
+        member_facts.push(NeighborhoodMemberFact::new(
             *home_id,
             neighborhood_id,
             timestamp.clone(),
@@ -105,7 +105,7 @@ fn create_fully_connected_neighborhood(
 
     let mut member_facts = Vec::with_capacity(home_ids.len());
     for home_id in &home_ids {
-        member_facts.push(HomeMemberFact::new(
+        member_facts.push(NeighborhoodMemberFact::new(
             *home_id,
             neighborhood_id,
             timestamp.clone(),

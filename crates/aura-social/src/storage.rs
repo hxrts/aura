@@ -3,7 +3,7 @@
 //! Provides storage budget enforcement and allocation policies.
 
 use crate::error::SocialError;
-use crate::facts::{HomeFact, HomeMemberFact, HomeStorageBudget, ResidentFact};
+use crate::facts::{HomeFact, HomeMemberFact, NeighborhoodMemberFact, HomeStorageBudget};
 
 /// Service for storage budget calculations and validation.
 pub struct StorageService;
@@ -34,20 +34,20 @@ impl StorageService {
     }
 
     /// Calculate the total storage used by members.
-    pub fn member_storage_used(members: &[ResidentFact]) -> u64 {
+    pub fn member_storage_used(members: &[HomeMemberFact]) -> u64 {
         members.iter().map(|r| r.storage_allocated).sum()
     }
 
     /// Calculate neighborhood allocation obligations.
-    pub fn neighborhood_allocations(memberships: &[HomeMemberFact]) -> u64 {
+    pub fn neighborhood_allocations(memberships: &[NeighborhoodMemberFact]) -> u64 {
         memberships.iter().map(|m| m.allocated_storage).sum()
     }
 
     /// Build a storage budget from component facts.
     pub fn build_budget(
         home_fact: &HomeFact,
-        members: &[ResidentFact],
-        memberships: &[HomeMemberFact],
+        members: &[HomeMemberFact],
+        memberships: &[NeighborhoodMemberFact],
         pinned_storage: u64,
     ) -> HomeStorageBudget {
         HomeStorageBudget {
@@ -68,7 +68,7 @@ impl StorageService {
 
     /// Validate that a new member can be added with default allocation.
     pub fn validate_new_member(budget: &HomeStorageBudget) -> Result<(), SocialError> {
-        let default_allocation = ResidentFact::DEFAULT_STORAGE_ALLOCATION;
+        let default_allocation = HomeMemberFact::DEFAULT_STORAGE_ALLOCATION;
         let remaining = Self::remaining_member_capacity(budget);
 
         if default_allocation > remaining {
@@ -81,7 +81,7 @@ impl StorageService {
     ///
     /// Joining requires donating storage to the neighborhood.
     pub fn validate_neighborhood_join(budget: &HomeStorageBudget) -> Result<(), SocialError> {
-        let allocation = HomeMemberFact::DEFAULT_ALLOCATION;
+        let allocation = NeighborhoodMemberFact::DEFAULT_ALLOCATION;
         let available = budget.remaining_shared_storage();
 
         if allocation > available {
@@ -120,11 +120,11 @@ mod tests {
         let mut budget = HomeStorageBudget::new(home_id);
 
         // Add storage for 4 members
-        budget.member_storage_spent = 4 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
+        budget.member_storage_spent = 4 * HomeMemberFact::DEFAULT_STORAGE_ALLOCATION;
 
         let available = StorageService::available_space(&budget);
         let expected =
-            HomeFact::DEFAULT_STORAGE_LIMIT - (4 * ResidentFact::DEFAULT_STORAGE_ALLOCATION);
+            HomeFact::DEFAULT_STORAGE_LIMIT - (4 * HomeMemberFact::DEFAULT_STORAGE_ALLOCATION);
         assert_eq!(available, expected);
     }
 
@@ -172,18 +172,18 @@ mod tests {
 
         let home_fact = HomeFact::new(home_id, test_timestamp());
         let members = vec![
-            ResidentFact::new(
+            HomeMemberFact::new(
                 aura_core::identifiers::AuthorityId::new_from_entropy([1u8; 32]),
                 home_id,
                 test_timestamp(),
             ),
-            ResidentFact::new(
+            HomeMemberFact::new(
                 aura_core::identifiers::AuthorityId::new_from_entropy([2u8; 32]),
                 home_id,
                 test_timestamp(),
             ),
         ];
-        let memberships = vec![HomeMemberFact::new(
+        let memberships = vec![NeighborhoodMemberFact::new(
             home_id,
             neighborhood_id,
             test_timestamp(),
@@ -193,11 +193,11 @@ mod tests {
 
         assert_eq!(
             budget.member_storage_spent,
-            2 * ResidentFact::DEFAULT_STORAGE_ALLOCATION
+            2 * HomeMemberFact::DEFAULT_STORAGE_ALLOCATION
         );
         assert_eq!(
             budget.neighborhood_allocations,
-            HomeMemberFact::DEFAULT_ALLOCATION
+            NeighborhoodMemberFact::DEFAULT_ALLOCATION
         );
     }
 }

@@ -250,7 +250,7 @@ struct RetrieveResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::facts::{HomeMemberFact, NeighborhoodFact};
+    use crate::facts::{NeighborhoodMemberFact, NeighborhoodFact};
     use aura_core::effects::{
         network::NetworkError, storage::StorageError, NetworkCoreEffects, NetworkExtendedEffects,
         StorageCoreEffects, StorageExtendedEffects,
@@ -273,9 +273,9 @@ mod tests {
         let neighborhood_fact = NeighborhoodFact::new(neighborhood_id, test_timestamp());
 
         let members = vec![
-            HomeMemberFact::new(block1, neighborhood_id, test_timestamp()),
-            HomeMemberFact::new(block2, neighborhood_id, test_timestamp()),
-            HomeMemberFact::new(block3, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(block1, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(block2, neighborhood_id, test_timestamp()),
+            NeighborhoodMemberFact::new(block3, neighborhood_id, test_timestamp()),
         ];
 
         let neighborhood = Neighborhood::from_facts(&neighborhood_fact, &members, &[]);

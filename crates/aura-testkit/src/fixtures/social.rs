@@ -7,8 +7,8 @@ use aura_core::effects::relay::RelayRelationship;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_social::facts::{
-    HomeConfigFact, HomeFact, HomeId, HomeMemberFact, ModeratorFact, NeighborhoodFact,
-    NeighborhoodId, OneHopLinkFact, ResidentFact,
+    HomeConfigFact, HomeFact, HomeId, NeighborhoodMemberFact, ModeratorFact, NeighborhoodFact,
+    NeighborhoodId, OneHopLinkFact, HomeMemberFact,
 };
 use aura_social::{Home, Neighborhood, SocialTopology};
 
@@ -60,7 +60,7 @@ pub fn create_test_home(
     for i in 0..member_count {
         let authority = test_authority((home_seed * 10) + i as u8 + 1);
         members.push(authority);
-        member_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
+        member_facts.push(HomeMemberFact::new(authority, home_id, timestamp.clone()));
     }
 
     let moderator = members[0];
@@ -94,7 +94,7 @@ pub fn create_test_home_with_config(
     for i in 0..member_count {
         let authority = test_authority((home_seed * 10) + i as u8 + 1);
         members.push(authority);
-        member_facts.push(ResidentFact::new(authority, home_id, timestamp.clone()));
+        member_facts.push(HomeMemberFact::new(authority, home_id, timestamp.clone()));
     }
 
     let moderator = members[0];
@@ -133,7 +133,7 @@ pub fn create_test_neighborhood(
     for i in 0..home_count {
         let home_id = test_home_id((neighborhood_seed * 10) + i as u8 + 1);
         home_ids.push(home_id);
-        member_facts.push(HomeMemberFact::new(
+        member_facts.push(NeighborhoodMemberFact::new(
             home_id,
             neighborhood_id,
             timestamp.clone(),
@@ -172,7 +172,7 @@ pub fn create_fully_connected_neighborhood(
     for i in 0..home_count {
         let home_id = test_home_id((neighborhood_seed * 10) + i as u8 + 1);
         home_ids.push(home_id);
-        member_facts.push(HomeMemberFact::new(
+        member_facts.push(NeighborhoodMemberFact::new(
             home_id,
             neighborhood_id,
             timestamp.clone(),
@@ -235,7 +235,7 @@ pub fn create_neighborhood_topology(
     // Add our home to the neighborhood
     let timestamp = test_timestamp();
     neighborhood.member_homes.push(home.home_id);
-    let member_fact = HomeMemberFact::new(home.home_id, neighborhood.neighborhood_id, timestamp);
+    let member_fact = NeighborhoodMemberFact::new(home.home_id, neighborhood.neighborhood_id, timestamp);
     let _ = member_fact; // Use fact in production code
 
     let topology = SocialTopology::new(moderator, Some(home.clone()), vec![neighborhood.clone()]);

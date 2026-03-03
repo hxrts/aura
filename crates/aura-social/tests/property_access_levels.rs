@@ -4,7 +4,7 @@ use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_social::{
     determine_default_access_level, AccessLevel, AccessOverrideFact, Home, HomeFact, HomeId,
-    HomeMemberFact, HomeStorageBudget, Neighborhood, NeighborhoodId, ResidentFact,
+    NeighborhoodMemberFact, HomeStorageBudget, Neighborhood, NeighborhoodId, HomeMemberFact,
 };
 use proptest::prelude::*;
 
@@ -43,8 +43,8 @@ fn access_level_strategy() -> impl Strategy<Value = AccessLevel> {
 
 fn allocation_strategy() -> impl Strategy<Value = (u8, u8, u64)> {
     (0u8..=8u8, 0u8..=4u8).prop_flat_map(|(member_count, neighborhood_count)| {
-        let member_spent = member_count as u64 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
-        let neighborhood_spent = neighborhood_count as u64 * HomeMemberFact::DEFAULT_ALLOCATION;
+        let member_spent = member_count as u64 * HomeMemberFact::DEFAULT_STORAGE_ALLOCATION;
+        let neighborhood_spent = neighborhood_count as u64 * NeighborhoodMemberFact::DEFAULT_ALLOCATION;
         let max_pinned =
             HomeFact::DEFAULT_STORAGE_LIMIT.saturating_sub(member_spent + neighborhood_spent);
         (
@@ -141,8 +141,8 @@ proptest! {
     fn property_allocations_sum_to_total(
         (member_count, neighborhood_count, pinned) in allocation_strategy(),
     ) {
-        let member_spent = member_count as u64 * ResidentFact::DEFAULT_STORAGE_ALLOCATION;
-        let neighborhood_spent = neighborhood_count as u64 * HomeMemberFact::DEFAULT_ALLOCATION;
+        let member_spent = member_count as u64 * HomeMemberFact::DEFAULT_STORAGE_ALLOCATION;
+        let neighborhood_spent = neighborhood_count as u64 * NeighborhoodMemberFact::DEFAULT_ALLOCATION;
 
         let mut budget = HomeStorageBudget::new(home_id(7));
         budget.member_storage_spent = member_spent;
