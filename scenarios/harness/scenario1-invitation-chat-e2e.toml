@@ -285,7 +285,8 @@ timeout_ms = 2000
 id = "alice-join-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -300,7 +301,8 @@ timeout_ms = 2000
 id = "alice-invite-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "invitation sent"
+status = "ok"
+reason_code = "none"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -315,7 +317,8 @@ timeout_ms = 2000
 id = "bob-join-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 

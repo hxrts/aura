@@ -193,7 +193,8 @@ timeout_ms = 2000
 id = "alice-set-suggestion-nick-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "nickname updated"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -208,7 +209,8 @@ timeout_ms = 2000
 id = "bob-set-suggestion-nick-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "nickname updated"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -356,7 +358,8 @@ timeout_ms = 2000
 id = "alice-join-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -371,7 +374,8 @@ timeout_ms = 2000
 id = "alice-invite-bob-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "invitation sent"
+status = "ok"
+reason_code = "none"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -386,7 +390,8 @@ timeout_ms = 2000
 id = "bob-join-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -401,7 +406,8 @@ timeout_ms = 2000
 id = "alice-neighborhood-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "neighborhood updated"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -416,7 +422,8 @@ timeout_ms = 2000
 id = "alice-nhadd-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "home added to neighborhood"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -431,7 +438,9 @@ timeout_ms = 2000
 id = "alice-nhlink-result"
 action = "expect_denied"
 instance = "alice"
-contains = "Cannot create one_hop_link from home"
+reason = "permission"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -443,9 +452,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-homeinvite-result"
-action = "expect_toast"
+action = "expect_command_result"
 instance = "alice"
-contains = "home invitation"
+status = "ok"
+reason_code = "none"
+consistency = "accepted"
 timeout_ms = 12000
 
 [[steps]]
@@ -457,9 +468,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "bob-homeaccept-result"
-action = "expect_toast"
+action = "expect_command_result"
 instance = "bob"
-contains = "home invitation"
+status = "ok"
+reason_code = "none"
+consistency = "accepted"
 timeout_ms = 12000
 
 [[steps]]
@@ -473,7 +486,8 @@ timeout_ms = 2000
 id = "bob-add-home-to-neighborhood-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "home added to neighborhood"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -488,7 +502,9 @@ timeout_ms = 2000
 id = "alice-link-home-one_hop_link-result"
 action = "expect_denied"
 instance = "alice"
-contains = "Cannot create one_hop_link from home"
+reason = "permission"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]

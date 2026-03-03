@@ -24,6 +24,142 @@ where
     ctx.tasks().spawn(fut);
 }
 
+#[derive(Clone, Copy)]
+enum CommandOutcomeStatus {
+    Ok,
+    Denied,
+    Invalid,
+    Failed,
+}
+
+impl CommandOutcomeStatus {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Denied => "denied",
+            Self::Invalid => "invalid",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CommandReasonCode {
+    None,
+    MissingActiveContext,
+    PermissionDenied,
+    NotMember,
+    NotFound,
+    InvalidArgument,
+    InvalidState,
+    Muted,
+    Banned,
+    Internal,
+}
+
+impl CommandReasonCode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::MissingActiveContext => "missing_active_context",
+            Self::PermissionDenied => "permission_denied",
+            Self::NotMember => "not_member",
+            Self::NotFound => "not_found",
+            Self::InvalidArgument => "invalid_argument",
+            Self::InvalidState => "invalid_state",
+            Self::Muted => "muted",
+            Self::Banned => "banned",
+            Self::Internal => "internal",
+        }
+    }
+}
+
+fn classify_command_error(message: &str) -> (CommandOutcomeStatus, CommandReasonCode) {
+    let lower = message.to_ascii_lowercase();
+
+    if lower.contains("no active home selected")
+        || lower.contains("missing current channel")
+        || lower.contains("missing channel scope")
+    {
+        return (
+            CommandOutcomeStatus::Invalid,
+            CommandReasonCode::MissingActiveContext,
+        );
+    }
+    if lower.contains("permission denied")
+        || (lower.contains("requires") && lower.contains("capability"))
+    {
+        return (
+            CommandOutcomeStatus::Denied,
+            CommandReasonCode::PermissionDenied,
+        );
+    }
+    if lower.contains("cannot create one_hop_link from home")
+        || lower.contains("only members can be designated as moderators")
+        || lower.contains("only moderators")
+        || lower.contains("requires a moderator home")
+    {
+        return (
+            CommandOutcomeStatus::Denied,
+            CommandReasonCode::PermissionDenied,
+        );
+    }
+    if lower.contains("not a member") {
+        return (CommandOutcomeStatus::Denied, CommandReasonCode::NotMember);
+    }
+    if lower.contains("muted") {
+        return (CommandOutcomeStatus::Denied, CommandReasonCode::Muted);
+    }
+    if lower.contains("banned") || lower.contains("ban ") {
+        return (CommandOutcomeStatus::Denied, CommandReasonCode::Banned);
+    }
+    if lower.contains("unknown")
+        || lower.contains("not found")
+        || lower.contains("missing target")
+        || lower.contains("unknown channel scope")
+    {
+        return (CommandOutcomeStatus::Invalid, CommandReasonCode::NotFound);
+    }
+    if lower.contains("parse error")
+        || lower.contains("invalid argument")
+        || lower.contains("missing required argument")
+        || lower.contains("invalid ")
+    {
+        return (
+            CommandOutcomeStatus::Invalid,
+            CommandReasonCode::InvalidArgument,
+        );
+    }
+    if lower.contains("stale snapshot") || lower.contains("invalid state") {
+        return (
+            CommandOutcomeStatus::Failed,
+            CommandReasonCode::InvalidState,
+        );
+    }
+
+    (CommandOutcomeStatus::Failed, CommandReasonCode::Internal)
+}
+
+fn command_outcome_message(
+    message: impl Into<String>,
+    status: CommandOutcomeStatus,
+    reason: CommandReasonCode,
+    consistency: Option<&str>,
+) -> String {
+    let metadata = format!(
+        "[s={} r={} c={}]",
+        status.as_str(),
+        reason.as_str(),
+        consistency.unwrap_or("none")
+    );
+    let message = message.into();
+    if message.is_empty() {
+        metadata
+    } else {
+        format!("{metadata} {message}")
+    }
+}
+
 // =============================================================================
 // Chat Callbacks
 // =============================================================================
@@ -79,9 +215,15 @@ impl ChatCallbacks {
                     ) {
                         Ok(command) => command,
                         Err(e) => {
-                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                "command",
+                            let (status, reason) = classify_command_error(&e.to_string());
+                            let message = command_outcome_message(
                                 e.to_string(),
+                                status,
+                                reason,
+                                None,
+                            );
+                            let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                "command", message,
                             )));
                             return;
                         }
@@ -139,9 +281,15 @@ impl ChatCallbacks {
                             let resolved = match strong_resolver.resolve(parsed, &snapshot) {
                                 Ok(value) => value,
                                 Err(e) => {
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                        "command",
+                                    let (status, reason) = classify_command_error(&e.to_string());
+                                    let message = command_outcome_message(
                                         e.to_string(),
+                                        status,
+                                        reason,
+                                        None,
+                                    );
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                        "command", message,
                                     )));
                                     return;
                                 }
@@ -154,9 +302,15 @@ impl ChatCallbacks {
                             ) {
                                 Ok(value) => value,
                                 Err(e) => {
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                        "command",
+                                    let (status, reason) = classify_command_error(&e.to_string());
+                                    let message = command_outcome_message(
                                         e.to_string(),
+                                        status,
+                                        reason,
+                                        None,
+                                    );
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                        "command", message,
                                     )));
                                     return;
                                 }
@@ -183,32 +337,56 @@ impl ChatCallbacks {
                                         let details = result
                                             .details
                                             .unwrap_or_else(|| "consistency barrier timed out".to_string());
+                                        let message = command_outcome_message(
+                                            format!("/{irc_name}: {details} ({state_label})"),
+                                            CommandOutcomeStatus::Failed,
+                                            CommandReasonCode::Internal,
+                                            Some(state_label),
+                                        );
                                         let _ = tx.try_send(UiUpdate::ToastAdded(
                                             ToastMessage::error(
                                                 "command",
-                                                format!("/{irc_name}: {details} ({state_label})"),
+                                                message,
                                             ),
                                         ));
                                     } else if let Some(details) = result.details {
+                                        let message = command_outcome_message(
+                                            format!("{details} ({state_label})"),
+                                            CommandOutcomeStatus::Ok,
+                                            CommandReasonCode::None,
+                                            Some(state_label),
+                                        );
                                         let _ = tx.try_send(UiUpdate::ToastAdded(
                                             ToastMessage::info(
                                                 "command",
-                                                format!("{details} ({state_label})"),
+                                                message,
                                             ),
                                         ));
                                     } else {
+                                        let message = command_outcome_message(
+                                            format!("/{irc_name} ({state_label})"),
+                                            CommandOutcomeStatus::Ok,
+                                            CommandReasonCode::None,
+                                            Some(state_label),
+                                        );
                                         let _ = tx.try_send(UiUpdate::ToastAdded(
                                             ToastMessage::success(
                                                 "command",
-                                                format!("/{irc_name} {state_label}"),
+                                                message,
                                             ),
                                         ));
                                     }
                                 }
                                 Err(e) => {
-                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
-                                        "command",
+                                    let (status, reason) = classify_command_error(&e.to_string());
+                                    let message = command_outcome_message(
                                         format!("/{irc_name}: {e}"),
+                                        status,
+                                        reason,
+                                        None,
+                                    );
+                                    let _ = tx.try_send(UiUpdate::ToastAdded(ToastMessage::error(
+                                        "command", message,
                                     )));
                                 }
                             }

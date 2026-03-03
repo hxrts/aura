@@ -206,8 +206,12 @@ pub struct ScenarioStep {
     pub contains: Option<String>,
     /// Toast/assertion level (`success`, `info`, `error`) for typed assertions.
     pub level: Option<String>,
+    /// Command outcome status (`ok`, `denied`, `invalid`, `failed`) for command assertions.
+    pub status: Option<String>,
     /// Consistency label (`accepted`, `replicated`, `enforced`, `partial-timeout`) for command-result assertions.
     pub consistency: Option<String>,
+    /// Stable command reason code (for normalized command outcomes).
+    pub reason_code: Option<String>,
     /// Channel display name for membership assertions.
     pub channel: Option<String>,
     /// Expected selected state for membership assertions.

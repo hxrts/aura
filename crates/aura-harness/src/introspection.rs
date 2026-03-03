@@ -172,11 +172,87 @@ pub fn extract_toast(screen: &str) -> Option<ToastSnapshot> {
 }
 
 pub fn extract_command_consistency(message: &str) -> Option<String> {
+    if let Some(consistency) = extract_command_field(message, "consistency") {
+        if let Some(normalized) = normalize_consistency(&consistency) {
+            return Some(normalized);
+        }
+    }
     Regex::new(r"\((accepted|replicated|enforced|partial-timeout)\)\s*$")
         .ok()?
         .captures(message)?
         .get(1)
         .map(|m| m.as_str().to_string())
+}
+
+pub fn extract_command_status(message: &str) -> Option<String> {
+    extract_command_field(message, "status").and_then(|status| normalize_status(&status))
+}
+
+pub fn extract_command_reason(message: &str) -> Option<String> {
+    extract_command_field(message, "reason").and_then(|reason| normalize_reason(&reason))
+}
+
+fn extract_command_field(message: &str, field: &str) -> Option<String> {
+    let alias = match field {
+        "status" => Some("s"),
+        "reason" => Some("r"),
+        "consistency" => Some("c"),
+        _ => None,
+    };
+
+    for key in [Some(field), alias].into_iter().flatten() {
+        let pattern = format!(r"(?:^|\s|\[){}\s*=\s*([a-z0-9_-]+)", regex::escape(key));
+        if let Some(value) = Regex::new(&pattern)
+            .ok()
+            .and_then(|regex| regex.captures(message))
+            .and_then(|captures| captures.get(1))
+            .map(|value| value.as_str().to_string())
+        {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn normalize_status(value: &str) -> Option<String> {
+    let value = value.trim().to_ascii_lowercase();
+    for status in ["ok", "denied", "invalid", "failed"] {
+        if status.starts_with(value.as_str()) {
+            return Some(status.to_string());
+        }
+    }
+    None
+}
+
+fn normalize_consistency(value: &str) -> Option<String> {
+    let value = value.trim().to_ascii_lowercase();
+    for consistency in ["accepted", "replicated", "enforced", "partial-timeout"] {
+        if consistency.starts_with(value.as_str()) {
+            return Some(consistency.to_string());
+        }
+    }
+    None
+}
+
+fn normalize_reason(value: &str) -> Option<String> {
+    let value = value.trim().to_ascii_lowercase();
+    for reason in [
+        "none",
+        "missing_active_context",
+        "permission_denied",
+        "not_member",
+        "not_found",
+        "invalid_argument",
+        "invalid_state",
+        "muted",
+        "banned",
+        "internal",
+    ] {
+        if reason.starts_with(value.as_str()) {
+            return Some(reason.to_string());
+        }
+    }
+    None
 }
 
 fn left_panel_text(line: &str) -> Option<&str> {
@@ -276,6 +352,31 @@ mod tests {
         assert_eq!(
             extract_command_consistency(&toast.message).as_deref(),
             Some("enforced")
+        );
+    }
+
+    #[test]
+    fn extracts_command_metadata_fields() {
+        let message = "updated [s=ok r=none c=replicated]";
+        assert_eq!(extract_command_status(message).as_deref(), Some("ok"));
+        assert_eq!(extract_command_reason(message).as_deref(), Some("none"));
+        assert_eq!(
+            extract_command_consistency(message).as_deref(),
+            Some("replicated")
+        );
+    }
+
+    #[test]
+    fn normalizes_truncated_command_metadata_fields() {
+        let message = "updated [s=den r=permission_de c=acce]";
+        assert_eq!(extract_command_status(message).as_deref(), Some("denied"));
+        assert_eq!(
+            extract_command_reason(message).as_deref(),
+            Some("permission_denied")
+        );
+        assert_eq!(
+            extract_command_consistency(message).as_deref(),
+            Some("accepted")
         );
     }
 }

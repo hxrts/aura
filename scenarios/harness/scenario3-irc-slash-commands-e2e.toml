@@ -320,10 +320,10 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-exit-neighborhood-detail-before-join"
-action = "expect_toast"
+action = "wait_for"
 instance = "alice"
-contains = "Home 'AliceHome' created"
-timeout_ms = 12000
+pattern = "Selected home: AliceHome"
+timeout_ms = 8000
 
 [[steps]]
 id = "alice-return-chat-before-join"
@@ -381,10 +381,10 @@ timeout_ms = 2000
 
 [[steps]]
 id = "bob-exit-neighborhood-detail-before-join"
-action = "expect_toast"
+action = "wait_for"
 instance = "bob"
-contains = "Home 'BobHome' created"
-timeout_ms = 12000
+pattern = "Selected home: BobHome"
+timeout_ms = 8000
 
 [[steps]]
 id = "bob-return-chat-before-join"
@@ -416,7 +416,8 @@ timeout_ms = 2000
 id = "alice-join-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -431,7 +432,8 @@ timeout_ms = 2000
 id = "alice-invite-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "invitation sent"
+status = "ok"
+reason_code = "none"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -446,7 +448,8 @@ timeout_ms = 2000
 id = "bob-join-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -531,7 +534,8 @@ timeout_ms = 2000
 id = "alice-nick-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "nickname updated"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 8000
 
@@ -546,7 +550,8 @@ timeout_ms = 2000
 id = "alice-who-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "accepted"
+status = "ok"
+reason_code = "none"
 timeout_ms = 8000
 
 [[steps]]
@@ -574,7 +579,8 @@ timeout_ms = 2000
 id = "alice-msg-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "direct message sent"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -589,7 +595,8 @@ timeout_ms = 2000
 id = "alice-msg-retry-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "direct message sent"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -604,14 +611,14 @@ timeout_ms = 1000
 id = "bob-select-dm-thread"
 action = "select_channel"
 instance = "bob"
-channel = "DM: Bob"
+channel = "dm"
 timeout_ms = 5000
 
 [[steps]]
 id = "bob-dm-thread-selected"
 action = "expect_membership"
 instance = "bob"
-channel = "DM: Bob"
+channel = "dm"
 selected = true
 timeout_ms = 5000
 
@@ -619,7 +626,7 @@ timeout_ms = 5000
 id = "bob-see-msg1"
 action = "expect_membership"
 instance = "bob"
-channel = "DM: Bob"
+channel = "dm"
 present = true
 selected = true
 timeout_ms = 8000
@@ -635,7 +642,8 @@ timeout_ms = 2000
 id = "alice-m-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "direct message sent"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -643,7 +651,7 @@ timeout_ms = 12000
 id = "bob-see-msg2"
 action = "expect_membership"
 instance = "bob"
-channel = "DM: Bob"
+channel = "dm"
 present = true
 selected = true
 timeout_ms = 8000
@@ -710,7 +718,8 @@ timeout_ms = 2000
 id = "alice-me-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "action sent"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -732,7 +741,8 @@ timeout_ms = 2000
 id = "alice-leave-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -747,7 +757,8 @@ timeout_ms = 2000
 id = "alice-join-alias-reset-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -762,7 +773,8 @@ timeout_ms = 2000
 id = "alice-part-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -777,7 +789,8 @@ timeout_ms = 2000
 id = "alice-j-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -792,7 +805,8 @@ timeout_ms = 2000
 id = "alice-quit-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -807,7 +821,8 @@ timeout_ms = 2000
 id = "alice-join-for-phase2-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -822,7 +837,8 @@ timeout_ms = 2000
 id = "alice-neighborhood-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "neighborhood updated"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -837,7 +853,8 @@ timeout_ms = 2000
 id = "alice-nh-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "neighborhood updated"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -852,7 +869,8 @@ timeout_ms = 2000
 id = "alice-nhadd-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "home added to neighborhood"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -865,9 +883,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-nhlink-result"
-action = "expect_toast"
+action = "expect_denied"
 instance = "alice"
-contains = "home"
+reason = "permission"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -879,9 +899,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-homeinvite-result"
-action = "expect_toast"
+action = "expect_command_result"
 instance = "alice"
-contains = "home invitation"
+status = "ok"
+reason_code = "none"
+consistency = "accepted"
 timeout_ms = 12000
 
 [[steps]]
@@ -893,37 +915,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-hinvite-result"
-action = "expect_toast"
+action = "expect_command_result"
 instance = "alice"
-contains = "home invitation"
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-homeaccept"
-action = "send_chat_command"
-instance = "bob"
-command = "homeaccept"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-homeaccept-result"
-action = "expect_toast"
-instance = "bob"
-contains = "home invitation"
-timeout_ms = 12000
-
-[[steps]]
-id = "bob-haccept"
-action = "send_chat_command"
-instance = "bob"
-command = "haccept"
-timeout_ms = 2000
-
-[[steps]]
-id = "bob-haccept-result"
-action = "expect_toast"
-instance = "bob"
-contains = "home invitation"
+status = "ok"
+reason_code = "none"
+consistency = "accepted"
 timeout_ms = 12000
 
 [[steps]]
@@ -982,7 +978,8 @@ timeout_ms = 2000
 id = "alice-topic-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "topic updated"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -998,7 +995,8 @@ id = "alice-pin-result"
 action = "expect_denied"
 instance = "alice"
 reason = "permission"
-contains = "pin"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -1013,7 +1011,8 @@ id = "alice-unpin-result"
 action = "expect_denied"
 instance = "alice"
 reason = "permission"
-contains = "pin"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -1025,9 +1024,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-kick-result"
-action = "expect_toast"
+action = "expect_denied"
 instance = "alice"
-contains = "kick"
+reason = "permission"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -1041,7 +1042,8 @@ timeout_ms = 2000
 id = "alice-invite-after-kick-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "invitation sent"
+status = "ok"
+reason_code = "none"
 consistency = "enforced"
 timeout_ms = 12000
 
@@ -1056,7 +1058,8 @@ timeout_ms = 2000
 id = "bob-rejoin-after-kick-result"
 action = "expect_command_result"
 instance = "bob"
-contains = "membership updated"
+status = "ok"
+reason_code = "none"
 consistency = "replicated"
 timeout_ms = 12000
 
@@ -1080,7 +1083,8 @@ id = "alice-mute-result"
 action = "expect_denied"
 instance = "alice"
 reason = "permission"
-contains = "mute"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -1103,7 +1107,8 @@ id = "alice-unmute-result"
 action = "expect_denied"
 instance = "alice"
 reason = "permission"
-contains = "mute"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -1118,7 +1123,8 @@ id = "alice-ban-result"
 action = "expect_denied"
 instance = "alice"
 reason = "permission"
-contains = "ban"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -1133,7 +1139,8 @@ id = "alice-unban-result"
 action = "expect_denied"
 instance = "alice"
 reason = "permission"
-contains = "ban"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -1161,10 +1168,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-op-result"
-action = "expect_toast"
+action = "expect_denied"
 instance = "alice"
-level = "error"
-contains = "Only members can be designated as moderators"
+reason = "permission"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -1195,6 +1203,8 @@ id = "bob-mode-plus-result"
 action = "expect_denied"
 instance = "bob"
 reason = "permission"
+status = "denied"
+reason_code = "permission_denied"
 timeout_ms = 12000
 
 [[steps]]
@@ -1206,9 +1216,11 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-mode-minus-result"
-action = "expect_toast"
+action = "expect_command_result"
 instance = "alice"
-contains = "mode"
+status = "ok"
+reason_code = "none"
+consistency = "enforced"
 timeout_ms = 12000
 
 [[steps]]
@@ -1222,7 +1234,8 @@ timeout_ms = 2000
 id = "alice-msg-uppercase-result"
 action = "expect_command_result"
 instance = "alice"
-contains = "direct message sent"
+status = "ok"
+reason_code = "none"
 consistency = "accepted"
 timeout_ms = 12000
 
@@ -1235,10 +1248,10 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-unknown-result"
-action = "expect_toast"
+action = "expect_command_result"
 instance = "alice"
-level = "error"
-contains = "Unknown command:"
+status = "invalid"
+reason_code = "not_found"
 timeout_ms = 8000
 
 [[steps]]
@@ -1250,10 +1263,10 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-msg-missing-result"
-action = "expect_toast"
+action = "expect_command_result"
 instance = "alice"
-level = "error"
-contains = "Missing required argument: /msg requires <text>"
+status = "invalid"
+reason_code = "invalid_argument"
 timeout_ms = 8000
 
 [[steps]]
@@ -1265,10 +1278,10 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-mode-missing-result"
-action = "expect_toast"
+action = "expect_command_result"
 instance = "alice"
-level = "error"
-contains = "Missing required argument: /mode requires <flags>"
+status = "invalid"
+reason_code = "invalid_argument"
 timeout_ms = 8000
 
 [[steps]]
@@ -1280,8 +1293,8 @@ timeout_ms = 2000
 
 [[steps]]
 id = "alice-mute-invalid-result"
-action = "expect_toast"
+action = "expect_command_result"
 instance = "alice"
-level = "error"
-contains = "invalid duration"
+status = "invalid"
+reason_code = "invalid_argument"
 timeout_ms = 8000

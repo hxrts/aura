@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use crate::config::{ScenarioAction, ScenarioConfig, ScenarioStep};
-use crate::introspection::{extract_command_consistency, extract_toast, ToastLevel};
+use crate::introspection::{
+    extract_command_consistency, extract_command_reason, extract_command_status, extract_toast,
+    ToastLevel,
+};
 use crate::tool_api::{ToolApi, ToolKey, ToolRequest, ToolResponse};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
@@ -76,6 +79,35 @@ impl ExpectedConsistency {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExpectedCommandStatus {
+    Ok,
+    Denied,
+    Invalid,
+    Failed,
+}
+
+impl ExpectedCommandStatus {
+    fn parse(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ok" => Ok(Self::Ok),
+            "denied" => Ok(Self::Denied),
+            "invalid" => Ok(Self::Invalid),
+            "failed" => Ok(Self::Failed),
+            other => bail!("unsupported command status value: {other}"),
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Denied => "denied",
+            Self::Invalid => "invalid",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeniedReason {
     Permission,
     Banned,
@@ -97,6 +129,14 @@ impl DeniedReason {
             Self::Permission => &["permission", "denied", "auth"],
             Self::Banned => &["ban", "banned", "denied"],
             Self::Muted => &["mute", "muted", "denied"],
+        }
+    }
+
+    const fn reason_code(self) -> &'static str {
+        match self {
+            Self::Permission => "permission_denied",
+            Self::Banned => "banned",
+            Self::Muted => "muted",
         }
     }
 }
@@ -486,11 +526,17 @@ fn execute_step(
                 context,
             )?;
             let expected_level = step.level.as_deref().map(parse_toast_level).transpose()?;
+            let expected_status = step
+                .status
+                .as_deref()
+                .map(ExpectedCommandStatus::parse)
+                .transpose()?;
             let expected_consistency = step
                 .consistency
                 .as_deref()
                 .map(ExpectedConsistency::parse)
                 .transpose()?;
+            let expected_reason_code = step.reason_code.as_deref().map(str::to_ascii_lowercase);
             assert_toast(
                 step,
                 tool_api,
@@ -507,6 +553,14 @@ fn execute_step(
                             return false;
                         }
                     }
+                    if let Some(status) = expected_status {
+                        let Some(found) = extract_command_status(&toast.message) else {
+                            return false;
+                        };
+                        if !found.eq_ignore_ascii_case(status.as_str()) {
+                            return false;
+                        }
+                    }
                     if let Some(consistency) = expected_consistency {
                         let Some(found) = extract_command_consistency(&toast.message) else {
                             return false;
@@ -515,6 +569,14 @@ fn execute_step(
                             return false;
                         };
                         if found != consistency {
+                            return false;
+                        }
+                    }
+                    if let Some(ref reason_code) = expected_reason_code {
+                        let Some(found) = extract_command_reason(&toast.message) else {
+                            return false;
+                        };
+                        if !found.eq_ignore_ascii_case(reason_code) {
                             return false;
                         }
                     }
@@ -549,6 +611,12 @@ fn execute_step(
                 .as_deref()
                 .map(DeniedReason::parse)
                 .transpose()?;
+            let expected_status = step
+                .status
+                .as_deref()
+                .map(ExpectedCommandStatus::parse)
+                .transpose()?;
+            let expected_reason_code = step.reason_code.as_deref().map(str::to_ascii_lowercase);
             let mut contains_any = step.contains_any.clone().unwrap_or_default();
             if let Some(value) = resolve_optional_field(step.contains.as_deref(), context)? {
                 contains_any.push(value);
@@ -563,12 +631,36 @@ fn execute_step(
                         return false;
                     }
                     let lowered = toast.message.to_ascii_lowercase();
+                    if let Some(expected_status) = expected_status {
+                        let Some(found_status) = extract_command_status(&toast.message) else {
+                            return false;
+                        };
+                        if !found_status.eq_ignore_ascii_case(expected_status.as_str()) {
+                            return false;
+                        }
+                    } else if let Some(status) = extract_command_status(&toast.message) {
+                        if !status.eq_ignore_ascii_case("denied") {
+                            return false;
+                        }
+                    }
                     if let Some(reason) = reason {
-                        if !reason
+                        if let Some(found_code) = extract_command_reason(&toast.message) {
+                            if !found_code.eq_ignore_ascii_case(reason.reason_code()) {
+                                return false;
+                            }
+                        } else if !reason
                             .patterns()
                             .iter()
                             .any(|pattern| lowered.contains(pattern))
                         {
+                            return false;
+                        }
+                    }
+                    if let Some(ref reason_code) = expected_reason_code {
+                        let Some(found_code) = extract_command_reason(&toast.message) else {
+                            return false;
+                        };
+                        if !found_code.eq_ignore_ascii_case(reason_code) {
                             return false;
                         }
                     }
@@ -894,7 +986,7 @@ fn assert_membership(
             entry
                 .get("name")
                 .and_then(serde_json::Value::as_str)
-                .is_some_and(|name| name.eq_ignore_ascii_case(channel))
+                .is_some_and(|name| channel_name_matches(name, channel))
         });
 
         let present = channel_entry.is_some();
@@ -966,7 +1058,7 @@ fn select_channel(
         last_channels.extend(parsed.iter().map(|(name, _)| name.clone()));
         let target_idx = parsed
             .iter()
-            .position(|(name, _)| name.eq_ignore_ascii_case(&target));
+            .position(|(name, _)| channel_name_matches(name, &target));
         let selected_idx = parsed.iter().position(|(_, selected)| *selected);
         if let (Some(target_idx), Some(selected_idx)) = (target_idx, selected_idx) {
             if target_idx == selected_idx {
@@ -1007,6 +1099,25 @@ fn select_channel(
         channel,
         last_channels
     )
+}
+
+fn channel_name_matches(candidate: &str, target: &str) -> bool {
+    let normalize = |value: &str| {
+        value
+            .trim()
+            .trim_start_matches('#')
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .collect::<String>()
+            .to_ascii_lowercase()
+    };
+
+    let candidate = normalize(candidate);
+    let target = normalize(target);
+    if candidate.is_empty() || target.is_empty() {
+        return false;
+    }
+    candidate == target || candidate.contains(&target) || target.contains(&candidate)
 }
 
 #[derive(Debug, Clone, Copy)]
